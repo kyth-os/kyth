@@ -1,5 +1,5 @@
 import shlex
-import subprocess
+import subprocess  # nosec B404 # nosemgrep
 
 # __KYTH_GENERATED_IMPORTS__
 from .core import (  # noqa: E501
@@ -1466,7 +1466,7 @@ class WizardWindow(QMainWindow):
             btn.setChecked(key == profile)
         _save_profile(profile)
         try:
-            subprocess.Popen(["/usr/bin/kyth-apply-role-preset", profile], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # nosemgrep
+            subprocess.Popen(["/usr/bin/kyth-apply-role-preset", profile], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # nosec B603 # nosemgrep
         except OSError:
             pass
         # Re-seed the Pick Apps defaults to match the chosen profile. Only

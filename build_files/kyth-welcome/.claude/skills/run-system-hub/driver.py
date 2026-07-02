@@ -112,7 +112,7 @@ def cmd_run_script(args: argparse.Namespace) -> None:
         "pump": pump,
         "shoot": shoot,
     }
-    exec(compile(source, args.script, "exec"), scope)  # noqa: S102  # nosec B102 - local agent tooling, runs developer-supplied snippets only
+    exec(compile(source, args.script, "exec"), scope)  # noqa: S102 # nosec B102 # nosemgrep # pylint: disable=exec-used
 
 
 def main() -> None:

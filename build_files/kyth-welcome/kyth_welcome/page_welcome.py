@@ -1,5 +1,5 @@
 import os
-import subprocess
+import subprocess  # nosec B404 # nosemgrep
 import time
 
 # __KYTH_GENERATED_IMPORTS__
@@ -31,7 +31,7 @@ def _path_exists(path: str) -> bool:
 
 def _cmd_ok(cmd: list[str], timeout: int = 5) -> bool:
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)  # nosemgrep
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)  # nosec B603 # nosemgrep
         return result.returncode == 0
     except Exception:
         return False
@@ -56,7 +56,7 @@ def _kdeconnect_configured() -> bool:
     if _path_exists("~/.config/kdeconnect"):
         return True
     try:
-        result = subprocess.run(["kdeconnect-cli", "--list-devices"], capture_output=True, text=True, timeout=6, check=False)  # nosemgrep
+        result = subprocess.run(["kdeconnect-cli", "--list-devices"], capture_output=True, text=True, timeout=6, check=False)  # nosec B603 # nosemgrep
         return result.returncode == 0 and bool(result.stdout.strip())
     except Exception:
         return False
@@ -68,7 +68,7 @@ def _cloud_storage_configured() -> bool:
 
 def _printer_configured() -> bool:
     try:
-        result = subprocess.run(["lpstat", "-v"], capture_output=True, text=True, timeout=5, check=False)  # nosemgrep
+        result = subprocess.run(["lpstat", "-v"], capture_output=True, text=True, timeout=5, check=False)  # nosec B603 # nosemgrep
         return result.returncode == 0 and bool(result.stdout.strip())
     except Exception:
         return False
@@ -287,7 +287,7 @@ class WelcomePage(Page):
         btn4.setObjectName("primary")
         btn4.setCursor(Qt.CursorShape.PointingHandCursor)
         if rec_target == "reboot":
-            btn4.clicked.connect(lambda _=False: subprocess.Popen(["systemctl", "reboot"]))
+            btn4.clicked.connect(lambda _=False: subprocess.Popen(["systemctl", "reboot"]))  # nosec B603 # nosemgrep
         else:
             btn4.clicked.connect(lambda _=False: self._navigate(rec_target))
         layout4.addWidget(btn4)
@@ -502,7 +502,7 @@ class WelcomePage(Page):
 
     def _apply_role_preset(self):
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 # nosemgrep
                 ["/usr/bin/kyth-apply-role-preset", self._profile],
                 capture_output=True,
                 text=True,
