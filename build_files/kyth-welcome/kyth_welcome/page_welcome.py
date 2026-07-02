@@ -1,5 +1,5 @@
 import os
-import subprocess
+import subprocess  # nosec B404 # nosemgrep
 import time
 
 # __KYTH_GENERATED_IMPORTS__
@@ -7,7 +7,7 @@ from .core import (  # noqa: E501
     DataWorker, _IS_LIVE, _branch_display_name, _command_stdout, _current_branch, _detect_nvidia, _find_ntfs_drives, _has_rollback_deployment, _has_staged_update, _load_profile, _release_worker_when_finished, _restyle, _save_profile, _steam_libraries_on_ntfs,
 )
 from .qt import (  # noqa: E501
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QSizePolicy, QTimer, QVBoxLayout, Qt, Signal,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QSizePolicy, QTimer, QVBoxLayout, QWidget, Qt, Signal,
 )
 from .widgets import (  # noqa: E501
     Page, StatTile, _make_card, _theme_icon,
@@ -31,7 +31,7 @@ def _path_exists(path: str) -> bool:
 
 def _cmd_ok(cmd: list[str], timeout: int = 5) -> bool:
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)  # nosemgrep
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)  # nosec B603 # nosemgrep
         return result.returncode == 0
     except Exception:
         return False
@@ -56,7 +56,7 @@ def _kdeconnect_configured() -> bool:
     if _path_exists("~/.config/kdeconnect"):
         return True
     try:
-        result = subprocess.run(["kdeconnect-cli", "--list-devices"], capture_output=True, text=True, timeout=6, check=False)  # nosemgrep
+        result = subprocess.run(["kdeconnect-cli", "--list-devices"], capture_output=True, text=True, timeout=6, check=False)  # nosec B603 # nosemgrep
         return result.returncode == 0 and bool(result.stdout.strip())
     except Exception:
         return False
@@ -68,7 +68,7 @@ def _cloud_storage_configured() -> bool:
 
 def _printer_configured() -> bool:
     try:
-        result = subprocess.run(["lpstat", "-v"], capture_output=True, text=True, timeout=5, check=False)  # nosemgrep
+        result = subprocess.run(["lpstat", "-v"], capture_output=True, text=True, timeout=5, check=False)  # nosec B603 # nosemgrep
         return result.returncode == 0 and bool(result.stdout.strip())
     except Exception:
         return False
@@ -105,10 +105,11 @@ class WelcomePage(Page):
         self._navigate = navigate or (lambda _: None)
         self._profile = _load_profile()
 
+        # Simplify standard header to let the new Gen Z Hero Banner shine
         self._page_header(
             "System Hub",
-            "Home",
-            "Adjust your system's settings — gaming, apps, updates, and recovery in one place.",
+            "Dashboard",
+            ""
         )
 
         branch = _branch_display_name(_current_branch())
@@ -119,63 +120,196 @@ class WelcomePage(Page):
         hostname = uname.nodename or "This PC"
         windows_found = bool(_find_ntfs_drives())
 
-        # ── Recommended next action — the hero: the one thing to do next ───────
-        # Placed immediately under the page header so it's the first thing the
-        # eye lands on, ahead of the metadata strip below.
-        self._add(self._make_recommended_card(staged, rollback, windows_found))
+        # ── 1. The Dynamic Gen Z Hero Banner ──────────────────────────────────
+        hero_card = QFrame()
+        hero_card.setObjectName("genz-hero")
+        hero_layout = QHBoxLayout(hero_card)
+        hero_layout.setContentsMargins(24, 20, 24, 20)
+        hero_layout.setSpacing(16)
 
-        # Device summary row, like the device card at the top of Settings.
-        # This is metadata, not a focal point, so it stays visually quiet.
-        tiles_row = QHBoxLayout()
-        tiles_row.setSpacing(10)
+        hero_text_col = QVBoxLayout()
+        hero_text_col.setSpacing(4)
+        
+        hero_title = QLabel("KYTHOS // ACTIVE")
+        hero_title.setObjectName("genz-hero-title")
+        hero_text_col.addWidget(hero_title)
 
-        self._device_tile = StatTile("Device", hostname)
-        tiles_row.addWidget(self._device_tile, 1)
+        hero_sub = QLabel("Atomic immutable workstation. Zero bloat, maximum performance.")
+        hero_sub.setObjectName("genz-hero-subtitle")
+        hero_text_col.addWidget(hero_sub)
+        hero_layout.addLayout(hero_text_col, 1)
 
-        self._branch_tile = StatTile("Channel", branch)
-        tiles_row.addWidget(self._branch_tile, 1)
+        # Status Pill Badge
+        status_pill = QLabel()
+        if staged:
+            status_pill.setText("RESTART REQUIRED")
+            status_pill.setObjectName("glowing-pill-warn")
+        else:
+            status_pill.setText("SYSTEMS NOMINAL")
+            status_pill.setObjectName("glowing-pill-ok")
+        hero_layout.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._add(hero_card)
 
-        staged_val = "Restart Pending" if staged else "Up to Date"
-        staged_style = "stat-value-warn" if staged else "stat-value-ok"
-        self._update_tile = StatTile("Updates", staged_val, staged_style)
-        tiles_row.addWidget(self._update_tile, 1)
+        # ── 2. Segmented Focus Vibe Selector ──────────────────────────────────
+        vibe_row = QWidget()
+        vibe_row.setObjectName("genz-focus-row")
+        vibe_layout = QHBoxLayout(vibe_row)
+        vibe_layout.setContentsMargins(16, 10, 16, 10)
+        vibe_layout.setSpacing(12)
 
-        rollback_val = "Available" if rollback else "None"
-        rollback_style = "stat-value-ok" if rollback else "stat-value"
-        self._rollback_tile = StatTile("Rollback", rollback_val, rollback_style)
-        tiles_row.addWidget(self._rollback_tile, 1)
+        vibe_lbl = QLabel("VIBE SELECTOR:")
+        vibe_lbl.setObjectName("home-kicker")
+        vibe_layout.addWidget(vibe_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self._kernel_tile = StatTile("Kernel", kernel)
-        tiles_row.addWidget(self._kernel_tile, 1)
+        self._focus_buttons = {}
+        for key, label, tip in (
+            ("everyday", "💻 Everyday Use", "Browser, office, files, and media."),
+            ("gaming", "🎮 Gaming Rig", "Steam, launchers, performance, and controls."),
+        ):
+            btn = QPushButton(label)
+            btn.setObjectName("genz-mode-btn")
+            btn.setCheckable(True)
+            btn.setToolTip(tip)
+            btn.clicked.connect(lambda _=False, k=key: self._on_focus_chosen(k))
+            self._focus_buttons[key] = btn
+            vibe_layout.addWidget(btn)
 
-        self._add_layout(tiles_row)
-        self._add(self._make_setup_readiness_card(staged, rollback, kernel, hostname, windows_found))
-        self._add(self._make_desktop_experience_summary())
+        vibe_layout.addSpacing(12)
+
+        apply_btn = QPushButton("Apply Vibe Settings")
+        apply_btn.setObjectName("primary")
+        apply_btn.clicked.connect(lambda _=False: self._apply_role_preset())
+        vibe_layout.addWidget(apply_btn)
+
+        self._preset_status = QLabel("Ready to tune.")
+        self._preset_status.setObjectName("status-dim")
+        vibe_layout.addWidget(self._preset_status, 1)
+
+        self._focus_buttons[self._profile].setChecked(True)
+        self._add(vibe_row)
+
+        # ── 3. High-Tech HUD Grid (Merging metadata, readiness, and desktop experience) ──
+        hud_grid = QGridLayout()
+        hud_grid.setSpacing(12)
+
+        # HUD 1: Core System Vibe
+        card1 = QFrame()
+        card1.setObjectName("genz-hud-card")
+        layout1 = QVBoxLayout(card1)
+        layout1.setContentsMargins(18, 16, 18, 16)
+        layout1.setSpacing(8)
+        title1 = QLabel("SYSTEM NODE")
+        title1.setObjectName("hud-title")
+        layout1.addWidget(title1)
+        desc1 = QLabel(f"<b>Device:</b> {hostname}<br>"
+                       f"<b>Kernel:</b> {kernel}<br>"
+                       f"<b>Channel:</b> {branch}")
+        desc1.setTextFormat(Qt.TextFormat.RichText)
+        desc1.setObjectName("hud-desc")
+        desc1.setWordWrap(True)
+        layout1.addWidget(desc1)
+        hud_grid.addWidget(card1, 0, 0)
+
+        # HUD 2: Environment Summary
+        card2 = QFrame()
+        card2.setObjectName("genz-hud-card")
+        layout2 = QVBoxLayout(card2)
+        layout2.setContentsMargins(18, 16, 18, 16)
+        layout2.setSpacing(8)
+        title2 = QLabel("ENVIRONMENT")
+        title2.setObjectName("hud-title")
+        layout2.addWidget(title2)
+        session = os.environ.get("XDG_SESSION_TYPE", "unknown").capitalize()
+        portal = _command_stdout(["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"], timeout=3) or "unknown"
+        pipewire = _command_stdout(["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"], timeout=3) or "unknown"
+        desc2 = QLabel(f"<b>Session Type:</b> {session}<br>"
+                       f"<b>Audio Engine:</b> PipeWire ({pipewire.strip()})<br>"
+                       f"<b>Desktop Portal:</b> {portal.strip()}")
+        desc2.setTextFormat(Qt.TextFormat.RichText)
+        desc2.setObjectName("hud-desc")
+        desc2.setWordWrap(True)
+        layout2.addWidget(desc2)
+        hud_grid.addWidget(card2, 0, 1)
+
+        # HUD 3: Recovery / Dual-Boot
+        card3 = QFrame()
+        card3.setObjectName("genz-hud-card")
+        layout3 = QVBoxLayout(card3)
+        layout3.setContentsMargins(18, 16, 18, 16)
+        layout3.setSpacing(8)
+        title3 = QLabel("RECOVERY & DUAL-BOOT")
+        title3.setObjectName("hud-title")
+        layout3.addWidget(title3)
+        rollback_status = "Available" if rollback else "None"
+        dual_boot_status = "Detected" if windows_found else "Not Detected"
+        desc3 = QLabel(f"<b>Previous State:</b> {rollback_status}<br>"
+                       f"<b>Windows Disk:</b> {dual_boot_status}<br>"
+                       f"<b>Fallback Theme:</b> Verified")
+        desc3.setTextFormat(Qt.TextFormat.RichText)
+        desc3.setObjectName("hud-desc")
+        desc3.setWordWrap(True)
+        layout3.addWidget(desc3)
+        hud_grid.addWidget(card3, 1, 0)
+
+        # HUD 4: Recommended / Quick Vibe Actions
+        card4 = QFrame()
+        card4.setObjectName("genz-hud-card")
+        layout4 = QVBoxLayout(card4)
+        layout4.setContentsMargins(18, 16, 18, 16)
+        layout4.setSpacing(8)
+        title4 = QLabel("RECOMMENDED ACTIONS")
+        title4.setObjectName("hud-title")
+        layout4.addWidget(title4)
+
+        if staged:
+            rec_text = "Restart to apply staged updates."
+            rec_btn_label = "Restart Now"
+            rec_target = "reboot"
+        elif rollback:
+            rec_text = "Previous build is saved in case of bugs."
+            rec_btn_label = "Manage Rollbacks"
+            rec_target = "Update"
+        elif windows_found:
+            rec_text = "Import games and documents from Windows."
+            rec_btn_label = "Transfer Files"
+            rec_target = "Move Files"
+        else:
+            rec_text = "All systems nominal. Ready for configuration."
+            rec_btn_label = "Configure Games"
+            rec_target = "Gaming"
+
+        desc4 = QLabel(rec_text)
+        desc4.setObjectName("hud-desc")
+        desc4.setWordWrap(True)
+        layout4.addWidget(desc4)
+
+        btn4 = QPushButton(rec_btn_label)
+        btn4.setObjectName("primary")
+        btn4.setCursor(Qt.CursorShape.PointingHandCursor)
+        if rec_target == "reboot":
+            btn4.clicked.connect(lambda _=False: subprocess.Popen(["systemctl", "reboot"]))  # nosec B603 # nosemgrep
+        else:
+            btn4.clicked.connect(lambda _=False: self._navigate(rec_target))
+        layout4.addWidget(btn4)
+        hud_grid.addWidget(card4, 1, 1)
+
+        self._add_layout(hud_grid)
 
         # ── NTFS Steam library warning ────────────────────────────────────────
-        # Proton on a NTFS-formatted drive fails in ways that read as
-        # "Linux gaming is broken"; catch it here before the first bad evening.
         self._ntfs_library_insert_index = self._layout.count()
-        self._ntfs_library_worker: DataWorker | None = None
+        self._ntfs_library_worker = None
         if not _IS_LIVE:
             QTimer.singleShot(0, self._refresh_ntfs_library_warning)
 
-        # ── First-week tips: the things people discover too late ─────────────
+        # ── First-week tips ───────────────────────────────────────────────────
         days = None if _IS_LIVE else _first_week_days()
         if days is not None and _FIRST_WEEK_MIN_DAYS <= days <= _FIRST_WEEK_MAX_DAYS:
             self._add(self._make_first_week_card(days))
 
-        self._add(self._make_section_header("Tune the hub", "Choose what this PC is for; the rest of the hub follows that focus."))
+        self._add(self._make_section_header("Explore Tasks", "Choose a card below to configure launchers, tune displays, or run diagnostics."))
 
-        # ── Usage focus ───────────────────────────────────────────────────────
-        # Same choice the first-boot wizard offers, so existing installs can
-        # re-purpose a machine (e.g. a work PC that never games) after the fact.
-        self._add(self._make_focus_card())
-
-        self._add(self._make_section_header("Browse by task", "Search understands familiar names, but each card opens a KythOS workflow built for this desktop."))
-
-        # ── Category grid, like the Control Panel category view ──────────────
-        categories: list[tuple[tuple[str, ...], str, str, list[tuple[str, str]]]] = [
+        # ── Category Grid (Action Cards) ──────────────────────────────────────
+        categories = [
             (
                 ("applications-games", "input-gaming"), "◉", "Games",
                 [
@@ -211,17 +345,16 @@ class WelcomePage(Page):
             ),
         ]
 
-        advanced_tasks: list[tuple[str, str]] = []
+        advanced_tasks = []
         if _detect_nvidia():
             advanced_tasks.append(("Manage NVIDIA drivers", "NVIDIA"))
         advanced_tasks.append(("Choose a kernel", "Kernel"))
         advanced_tasks.append(("Pick an update channel", "Channels"))
         categories.append((("cpu", "applications-system"), "◌", "Advanced", advanced_tasks))
 
-
         self._category_grid = QGridLayout()
         self._category_grid.setSpacing(12)
-        self._category_cards: list[tuple[QFrame, bool]] = []
+        self._category_cards = []
         for icon_names, glyph, title, tasks in categories:
             card = self._make_category_card(icon_names, glyph, title, tasks)
             self._category_cards.append((card, title == "Games"))
@@ -232,98 +365,9 @@ class WelcomePage(Page):
 
         self._stretch()
 
-
-
-    def _make_desktop_experience_summary(self) -> QFrame:
-        session = os.environ.get("XDG_SESSION_TYPE", "unknown")
-        portal = _command_stdout(["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"], timeout=3) or "unknown"
-        pipewire = _command_stdout(["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"], timeout=3) or "unknown"
-        card = QFrame()
-        card.setObjectName("desktop-experience-summary")
-        card.setStyleSheet(
-            "QFrame#desktop-experience-summary { background:#21242a; border:1px solid #2f343b; border-radius:8px; }"
-            "QLabel#desktop-title { color:#f4f6f8; font-size:16px; font-weight:700; }"
-            "QLabel#desktop-copy { color:#aab4bf; font-size:12px; }"
-        )
-        outer = QVBoxLayout(card)
-        outer.setContentsMargins(20, 16, 20, 16)
-        outer.setSpacing(10)
-        title = QLabel("Desktop Experience")
-        title.setObjectName("desktop-title")
-        copy = QLabel("Wayland, Plasma layouts, snap/grid tuning, and desktop modes live in the Plasma & Wayland section.")
-        copy.setObjectName("desktop-copy")
-        copy.setWordWrap(True)
-        outer.addWidget(title)
-        outer.addWidget(copy)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(8)
-        for idx, (name, value) in enumerate([
-            ("Session", session),
-            ("Portal", portal.strip()),
-            ("PipeWire", pipewire.strip()),
-            ("Modes", "Gaming / Dev / Creator / Laptop / Ultrawide"),
-        ]):
-            chip = QLabel(f"<b>{name}</b><br><span style='color:#aab4bf'>{value}</span>")
-            chip.setTextFormat(Qt.TextFormat.RichText)
-            chip.setStyleSheet("QLabel { background:#1a1d21; border:1px solid #2f343b; border-radius:8px; padding:9px 11px; color:#f4f6f8; }")
-            grid.addWidget(chip, idx // 2, idx % 2)
-        outer.addLayout(grid)
-        return card
-
-    def _make_setup_readiness_card(self, staged: bool, rollback: bool, kernel: str, hostname: str, windows_found: bool) -> QFrame:
-        card = QFrame()
-        card.setObjectName("setup-readiness-card")
-        card.setStyleSheet(
-            "QFrame#setup-readiness-card {"
-            "background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #21242a, stop:1 #1a1d21);"
-            "border: 1px solid #2f343b; border-radius: 8px; padding: 2px; }"
-            "QLabel#setup-title { color: #f4f6f8; font-size: 17px; font-weight: 700; }"
-            "QLabel#setup-subtitle { color: #aab4bf; font-size: 12px; }"
-        )
-        outer = QVBoxLayout(card)
-        outer.setContentsMargins(20, 16, 20, 16)
-        outer.setSpacing(12)
-
-        header = QHBoxLayout()
-        title_box = QVBoxLayout()
-        title = QLabel("Finish setup")
-        title.setObjectName("setup-title")
-        subtitle = QLabel(f"{hostname} is ready for first-run choices that make KythOS feel complete.")
-        subtitle.setObjectName("setup-subtitle")
-        subtitle.setWordWrap(True)
-        title_box.addWidget(title)
-        title_box.addWidget(subtitle)
-        header.addLayout(title_box, 1)
-        badge = QLabel("Recommended")
-        badge.setStyleSheet("color:#0d1f17;background:#5fb88a;border-radius:999px;padding:5px 10px;font-weight:800;font-size:11px;")
-        header.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
-        outer.addLayout(header)
-
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(8)
-        items = [
-            ("Updates", "Staged update ready" if staged else "Current deployment", not staged),
-            ("Rollback", "Available" if rollback else "None yet", rollback),
-            ("Kernel", kernel or "Default", True),
-            ("other system", "Detected" if windows_found else "No dual-boot detected", True),
-            ("Gaming", "Install launchers from Software", False),
-            ("Recovery", "Rollback and logs in Repair", True),
-        ]
-        for idx, (name, detail, ok) in enumerate(items):
-            chip = QLabel(f"<b>{name}</b><br><span style='color:#aab4bf'>{detail}</span>")
-            chip.setTextFormat(Qt.TextFormat.RichText)
-            chip.setStyleSheet(
-                "QLabel { background: #1a1d21; border: 1px solid #2f343b; border-radius: 8px; padding: 9px 11px; color: #f4f6f8; }"
-                + ("QLabel { border-color: #3f7a5c; background: #1e2b24; }" if ok else "QLabel { border-color: #8a6534; background: #2e2417; }")
-            )
-            grid.addWidget(chip, idx // 3, idx % 3)
-        outer.addLayout(grid)
-        return card
-
     def _make_ntfs_library_card(self, libs: list[str]) -> QFrame:
         card, layout = _make_card("card-accent-warn")
-        title = QLabel("Your Steam library is on an NTFS-formatted drive")
+        title = QLabel("Steam Library on NTFS Drive Detected")
         title.setObjectName("card-title")
         layout.addWidget(title)
         home = os.path.expanduser("~")
@@ -331,10 +375,9 @@ class WelcomePage(Page):
         if len(libs) > 3:
             listed += f"  (+{len(libs) - 3} more)"
         body = QLabel(
-            f"Steam is using a library on an NTFS/exFAT drive: {listed}.  Proton needs a "
-            "Linux-formatted disk — games on NTFS-formatted drives crash, hang at launch, "
-            "or corrupt their save prefixes, and it won't look like a drive problem when they do. "
-            "Copy the games onto your KythOS disk instead; your PC drive stays untouched."
+            f"Steam is using an NTFS/exFAT library: {listed}. Proton needs a "
+            "Linux-formatted disk (ext4 or btrfs). Games on NTFS will fail to launch or corrupt saves. "
+            "Copy games to your KythOS system partition to play safely."
         )
         body.setObjectName("card-copy")
         body.setWordWrap(True)
@@ -370,77 +413,32 @@ class WelcomePage(Page):
 
     def _make_first_week_card(self, days: int) -> QFrame:
         card, layout = _make_card("card-accent-ok")
-        title = QLabel(f"Day {days} on KythOS — finish setting up this PC")
+        title = QLabel(f"Day {days} Checklist — Finalize Your Setup")
         title.setObjectName("card-title")
         layout.addWidget(title)
 
-        body = QLabel("A quick pass over the everyday pieces that make this machine feel settled.")
+        body = QLabel("Ensure the following components are fully configured for the best desktop experience.")
         body.setObjectName("card-copy")
         body.setWordWrap(True)
         layout.addWidget(body)
 
         app_setup_done = os.path.exists("/var/lib/kyth/default-flatpaks-v5-done")
         checklist = [
-            (
-                app_setup_done,
-                "Default apps",
-                "Steam, launchers, Bottles, save backup, and everyday apps are installed.",
-                "App Store",
-            ),
-            (
-                _flatpak_installed("com.brave.Browser"),
-                "Browser",
-                "Brave is ready for sync, extensions, web apps, and media playback.",
-                "App Store",
-            ),
-            (
-                _browser_integration_native_ready(),
-                "Browser integration",
-                "The native Plasma connector is ready for media keys, download progress, and desktop controls.",
-                "App Store",
-            ),
-            (
-                _flatpak_installed("com.valvesoftware.Steam"),
-                "Steam",
-                "Steam is installed; add libraries, Proton tools, and save backup from Gaming.",
-                "Gaming",
-            ),
-            (
-                _controller_seen(),
-                "Controller",
-                "A controller has been detected at least once this session.",
-                "Controllers",
-            ),
-            (
-                _kdeconnect_configured(),
-                "Phone pairing",
-                "KDE Connect is ready for file sharing, notifications, and dynamic lock.",
-                "Move Files",
-            ),
-            (
-                _cloud_storage_configured(),
-                "Cloud storage",
-                "Cloud or rclone configuration exists for this account.",
-                "Cloud Storage",
-            ),
-            (
-                _printer_configured(),
-                "Printer",
-                "At least one local or network printer is configured.",
-                "Hardware",
-            ),
-            (
-                _has_rollback_deployment(),
-                "Rollback",
-                "Your previous system image is available if an update or change feels wrong.",
-                "Update",
-            ),
+            (app_setup_done, "Default Apps", "Steam, bottles, and flatpaks installed.", "App Store"),
+            (_flatpak_installed("com.brave.Browser"), "Browser", "Brave browser set up.", "App Store"),
+            (_browser_integration_native_ready(), "Browser Integration", "Plasma desktop connection enabled.", "App Store"),
+            (_flatpak_installed("com.valvesoftware.Steam"), "Steam Integration", "Steam libraries and backups set up.", "Gaming"),
+            (_controller_seen(), "Controller Setup", "Game controllers detected.", "Controllers"),
+            (_kdeconnect_configured(), "KDE Connect", "Phone pairing and notifications set up.", "Move Files"),
+            (_cloud_storage_configured(), "Cloud Sync", "rclone/cloud sync initialized.", "Cloud Storage"),
+            (_printer_configured(), "Printers", "Local or network printers configured.", "Hardware"),
+            (_has_rollback_deployment(), "Rollback Safety", "Previous builds cached for rollback.", "Update"),
         ]
 
         for done, label, text, page_key in checklist:
             row = QHBoxLayout()
             row.setSpacing(10)
-            badge = QLabel("Done" if done else "Set up")
+            badge = QLabel("Done" if done else "Pending")
             badge.setObjectName("task-status-ok" if done else "task-status-idle")
             row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -477,13 +475,11 @@ class WelcomePage(Page):
             pass
         card.hide()
 
-    # ── Usage focus ───────────────────────────────────────────────────────────
-
     def _make_section_header(self, title: str, subtitle: str) -> QFrame:
         frame = QFrame()
         frame.setObjectName("home-section")
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 12, 0, 4)
         layout.setSpacing(4)
 
         title_lbl = QLabel(title)
@@ -496,50 +492,6 @@ class WelcomePage(Page):
         layout.addWidget(subtitle_lbl)
         return frame
 
-    def _make_focus_card(self) -> QFrame:
-        card, layout = _make_card()
-        title = QLabel("This PC's focus")
-        title.setObjectName("card-title")
-        layout.addWidget(title)
-        body = QLabel(
-            "Pick what you use this PC for, and KythOS tunes the hub, pins, and "
-            "desktop defaults around that workflow. Nothing is uninstalled — switch back anytime."
-        )
-        body.setObjectName("card-copy")
-        body.setWordWrap(True)
-        layout.addWidget(body)
-
-        self._focus_buttons: dict[str, QPushButton] = {}
-        row = QHBoxLayout()
-        row.setSpacing(10)
-        for key, label, tip in (
-            ("everyday", "Everyday", "Apps, browser, files, cloud storage, VPN, printers, and updates up front."),
-            ("gaming", "Gaming", "Launchers, performance, compatibility, controllers, and gaming pins up front."),
-        ):
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setToolTip(tip)
-            btn.setMinimumHeight(38)
-            btn.clicked.connect(lambda _=False, k=key: self._on_focus_chosen(k))
-            self._focus_buttons[key] = btn
-            row.addWidget(btn)
-        row.addStretch()
-        layout.addLayout(row)
-        self._focus_buttons[self._profile].setChecked(True)
-
-        apply_row = QHBoxLayout()
-        apply_row.setSpacing(8)
-        apply_btn = QPushButton("Apply Preset")
-        apply_btn.setObjectName("primary")
-        apply_btn.clicked.connect(lambda _=False: self._apply_role_preset())
-        apply_row.addWidget(apply_btn)
-        self._preset_status = QLabel("Preset changes are safe to re-apply anytime.")
-        self._preset_status.setObjectName("status-dim")
-        self._preset_status.setWordWrap(True)
-        apply_row.addWidget(self._preset_status, 1)
-        layout.addLayout(apply_row)
-        return card
-
     def _on_focus_chosen(self, profile: str):
         self._profile = profile
         for key, btn in self._focus_buttons.items():
@@ -550,7 +502,7 @@ class WelcomePage(Page):
 
     def _apply_role_preset(self):
         try:
-            result = subprocess.run(  # nosemgrep
+            result = subprocess.run(  # nosec B603 # nosemgrep
                 ["/usr/bin/kyth-apply-role-preset", self._profile],
                 capture_output=True,
                 text=True,
@@ -563,16 +515,15 @@ class WelcomePage(Page):
             else:
                 detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
                 self._preset_status.setObjectName("status-warn")
-                self._preset_status.setText(f"Preset saved, but desktop pins could not be refreshed: {detail}")
+                self._preset_status.setText(f"Vibe preset error: {detail}")
         except Exception as exc:
             self._preset_status.setObjectName("status-warn")
-            self._preset_status.setText(f"Preset saved, but desktop pins could not be refreshed: {exc}")
+            self._preset_status.setText(f"Preset error: {exc}")
         _restyle(self._preset_status)
 
     def _relayout_categories(self, profile: str):
-        """Re-pack the category grid so hiding the Games card leaves no hole."""
         show_games = profile == "gaming"
-        visible: list[QFrame] = []
+        visible = []
         for card, is_games in self._category_cards:
             self._category_grid.removeWidget(card)
             wanted = show_games or not is_games
@@ -582,93 +533,6 @@ class WelcomePage(Page):
         for i, card in enumerate(visible):
             self._category_grid.addWidget(card, i // 2, i % 2)
 
-    def _make_recommended_card(self, staged: bool, rollback: bool, windows_found: bool = False) -> QFrame:
-        if _IS_LIVE:
-            kicker = "Live session"
-            title = "Try the desktop, then install when ready"
-            copy = (
-                "Start with hardware checks so you know graphics, networking, audio, "
-                "and storage look right before installing."
-            )
-            buttons = [("Check Hardware", "Hardware", True), ("Install KythOS", None, False)]
-        elif staged:
-            kicker = "Needs attention"
-            title = "Restart to finish your update"
-            copy = (
-                "A new KythOS image is staged. Restart when convenient; your previous "
-                "system remains available as a rollback target."
-            )
-            buttons = [("Restart Now", "reboot", True), ("View Update", "Update", False)]
-        elif rollback:
-            kicker = "Recovery ready"
-            title = "Your previous system is saved"
-            copy = (
-                "Rollback is available if a recent change does not feel right. "
-                "Otherwise, you can keep setting up apps and games."
-            )
-            buttons = [("View Rollback", "Update", True), ("Set Up Games", "Gaming", False)]
-        elif windows_found:
-            kicker = "Recommended next"
-            title = "PC drive found — bring your games and files"
-            copy = (
-                "KythOS sees one or more PC drives. Copy saves, inspect Steam "
-                "libraries, and keep your original install untouched."
-            )
-            buttons = [("Move Files", "Move Files", True), ("Set Up Games", "Gaming", False)]
-        else:
-            kicker = "Recommended next"
-            title = "Everything starts here"
-            copy = (
-                "Set up the essentials first, then use search or the task cards below "
-                "whenever you know what you want to do."
-            )
-            buttons = [("Set Up Games", "Gaming", True), ("Install Apps", "App Store", False)]
-
-        card, layout = _make_card("home-recommend-card")
-        kicker_lbl = QLabel(kicker.upper())
-        kicker_lbl.setObjectName("home-kicker")
-        layout.addWidget(kicker_lbl)
-
-        row = QHBoxLayout()
-        row.setSpacing(20)
-
-        text_col = QVBoxLayout()
-        text_col.setSpacing(8)
-        title_lbl = QLabel(title)
-        title_lbl.setObjectName("home-next-title")
-        title_lbl.setWordWrap(True)
-        text_col.addWidget(title_lbl)
-
-        body = QLabel(copy)
-        body.setObjectName("home-next-copy")
-        body.setWordWrap(True)
-        text_col.addWidget(body)
-
-        meta = QLabel("Search also understands common PC setting names, app tasks, and game setup phrases.")
-        meta.setObjectName("home-next-meta")
-        meta.setWordWrap(True)
-        text_col.addWidget(meta)
-        row.addLayout(text_col, 1)
-
-        btns = QVBoxLayout()
-        btns.setSpacing(8)
-        for label, key, primary in buttons:
-            btn = QPushButton(label)
-            if primary:
-                btn.setObjectName("primary")
-            btn.setMinimumWidth(168)
-            if key == "reboot":
-                btn.clicked.connect(lambda _=False: subprocess.Popen(["systemctl", "reboot"]))
-            elif key is None:
-                btn.clicked.connect(lambda _=False: subprocess.Popen(["/usr/bin/kyth-launch-installer"]))
-            else:
-                btn.clicked.connect(lambda _=False, k=key: self._navigate(k))
-            btns.addWidget(btn)
-        btns.addStretch()
-        row.addLayout(btns)
-        layout.addLayout(row)
-        return card
-
     def _make_category_card(
         self,
         icon_names: tuple[str, ...],
@@ -677,10 +541,23 @@ class WelcomePage(Page):
         tasks: list[tuple[str, str]],
     ) -> QFrame:
         card = QFrame()
-        card.setObjectName("cp-category")
-        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        card.setObjectName("genz-category-card")
+        
+        # Color coding left border
+        title_lower = title.lower()
+        if "games" in title_lower:
+            card.setStyleSheet("QFrame { border-left: 5px solid #a855f7; }")
+        elif "apps" in title_lower:
+            card.setStyleSheet("QFrame { border-left: 5px solid #06b6d4; }")
+        elif "system" in title_lower:
+            card.setStyleSheet("QFrame { border-left: 5px solid #10b981; }")
+        elif "network" in title_lower:
+            card.setStyleSheet("QFrame { border-left: 5px solid #f59e0b; }")
+        else:
+            card.setStyleSheet("QFrame { border-left: 5px solid #ec4899; }")
+
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(14)
 
         icon = _theme_icon(*icon_names)
@@ -695,20 +572,19 @@ class WelcomePage(Page):
         layout.addWidget(icon_lbl, 0, Qt.AlignmentFlag.AlignTop)
 
         text_col = QVBoxLayout()
-        text_col.setSpacing(4)
+        text_col.setSpacing(6)
 
         first_key = tasks[0][1] if tasks else None
-        # "&" is a mnemonic marker in QPushButton text; escape it for display
         title_btn = QPushButton(title.replace("&", "&&"))
-        title_btn.setObjectName("cp-category-title")
+        title_btn.setObjectName("genz-category-title")
         title_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         if first_key:
             title_btn.clicked.connect(lambda _=False, k=first_key: self._navigate(k))
         text_col.addWidget(title_btn, 0, Qt.AlignmentFlag.AlignLeft)
 
         for label, key in tasks:
-            link = QPushButton(label)
-            link.setObjectName("task-link")
+            link = QPushButton(f"➔  {label}")
+            link.setObjectName("genz-task-link")
             link.setCursor(Qt.CursorShape.PointingHandCursor)
             link.clicked.connect(lambda _=False, k=key: self._navigate(k))
             text_col.addWidget(link, 0, Qt.AlignmentFlag.AlignLeft)

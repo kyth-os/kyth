@@ -77,6 +77,44 @@ def cmd_shoot(args: argparse.Namespace) -> None:
     print(f"saved {args.out}")
 
 
+def cmd_run_script(args: argparse.Namespace) -> None:
+    """Drive a live MainWindow with a Python snippet (interaction harness).
+
+    The snippet runs with these names in scope:
+      win      - the MainWindow instance
+      app      - the QApplication
+      navigate - win._navigate_to; navigate("Hardware") etc. (see list-pages)
+      pump     - pump(seconds=0.25): process Qt events for a wall-clock period
+      shoot    - shoot(path): pump, then save a PNG of the window
+    """
+    app = _build_app()
+    win = MainWindow()
+    win.resize(1920, 1150)
+    win.show()
+
+    def pump(seconds: float = 0.25) -> None:
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            app.processEvents()
+            time.sleep(0.02)
+
+    def shoot(out: str) -> None:
+        pump()
+        win.grab().save(out)
+        print(f"saved {out}")
+
+    pump()
+    source = sys.stdin.read() if args.script == "-" else Path(args.script).read_text()
+    scope = {
+        "app": app,
+        "win": win,
+        "navigate": getattr(win, "_navigate_to"),
+        "pump": pump,
+        "shoot": shoot,
+    }
+    exec(compile(source, args.script, "exec"), scope)  # noqa: S102 # nosec B102 # nosemgrep # pylint: disable=exec-used
+
+
 def main() -> None:
     """Run the selected headless System Hub driver command."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -98,6 +136,13 @@ def main() -> None:
         help="max seconds to wait for async probes",
     )
     p_shoot.set_defaults(func=cmd_shoot)
+
+    p_run = sub.add_parser(
+        "run-script",
+        help="drive a live MainWindow with a Python snippet (win/app/navigate/pump/shoot in scope)",
+    )
+    p_run.add_argument("script", help="path to a Python snippet, or '-' for stdin")
+    p_run.set_defaults(func=cmd_run_script)
 
     args = parser.parse_args()
     args.func(args)

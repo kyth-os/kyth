@@ -346,7 +346,7 @@ class RcloneSetupWizard(QDialog):
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("background: #3c3c3c; max-height: 1px; border: none;")
+        sep.setStyleSheet("background: #26293a; max-height: 1px; border: none;")
         form_layout.addWidget(sep)
 
         folder_lbl = QLabel("Local sync folder")
@@ -442,7 +442,7 @@ class RcloneSetupWizard(QDialog):
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("background: #3c3c3c; max-height: 1px; border: none;")
+        sep.setStyleSheet("background: #26293a; max-height: 1px; border: none;")
         done_card_layout.addWidget(sep)
 
         cmds_lbl = QLabel("Useful commands:")
@@ -522,14 +522,14 @@ class RcloneSetupWizard(QDialog):
             if sid == svc_id:
                 btn.setChecked(True)
                 btn.setStyleSheet(
-                    "QPushButton { background: rgba(47, 155, 143, 0.18); "
-                    "border: 2px solid #2f9b8f; "
+                    "QPushButton { background: rgba(79, 140, 255, 0.18); "
+                    "border: 2px solid #4f8cff; "
                     "border-radius: 6px; text-align: left; }"
                 )
             else:
                 btn.setChecked(False)
                 btn.setStyleSheet(
-                    "QPushButton { background: #252526; border: 1px solid #3c3c3c; "
+                    "QPushButton { background: #151722; border: 1px solid #26293a; "
                     "border-radius: 8px; text-align: left; }"
                 )
 

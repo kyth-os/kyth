@@ -24,6 +24,7 @@ ARG ENABLE_MESA_GIT=0
 # Stable — only re-run when packages.sh changes or the base image is updated.
 RUN --mount=type=bind,source=build_files/scripts/packages.sh,target=/ctx/packages.sh \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-microsoft,target=/ctx/RPM-GPG-KEY-microsoft \
+    --mount=type=bind,source=build_files/RPM-GPG-KEY-google-antigravity,target=/ctx/RPM-GPG-KEY-google-antigravity \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \

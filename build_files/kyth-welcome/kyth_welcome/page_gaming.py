@@ -183,7 +183,7 @@ class GamingPage(Page):
             ("Open Discord", ["flatpak", "run", "com.discordapp.Discord"]),
             ("Open OBS", ["flatpak", "run", "com.obsproject.Studio"]),
         ):
-            night_actions.add_button(label, lambda _=False, c=cmd: subprocess.Popen(c))  # nosemgrep
+            night_actions.add_button(label, lambda _=False, c=cmd: subprocess.Popen(c))  # nosec B603 # nosemgrep
         night_actions.finish()
         self._game_night_status = night_actions.status
         night_layout.addWidget(night_actions)

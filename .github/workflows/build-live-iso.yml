@@ -68,6 +68,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
+      actions: read
       contents: read
       packages: read
     outputs:
@@ -153,11 +154,38 @@ jobs:
           sudo mount -o compress-force=zstd:2 /mnt/podman-storage.img /var/lib/containers/storage
           sudo systemctl start podman.service
 
+      # When called from build.yml, this run already carries the immutable
+      # build metadata artifact — use its digest so the ISO is built from the
+      # exact image this run published, not whatever the moving tag points to.
+      # Standalone workflow_dispatch runs have no such artifact and fall back
+      # to resolving the tag.
+      - name: Load build metadata from this run
+        id: build_metadata
+        if: inputs.source_digest == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          exec 3>>"${GITHUB_OUTPUT}"
+          if ! gh run download "${GITHUB_RUN_ID}" \
+            -n "image-build-metadata-${SOURCE_TAG}" \
+            -D "${RUNNER_TEMP}/build-metadata" 2>/dev/null; then
+            echo "::notice::No image-build-metadata-${SOURCE_TAG} artifact in this run; the moving ${SOURCE_TAG} tag will be resolved instead"
+            exit 0
+          fi
+          METADATA="${RUNNER_TEMP}/build-metadata/image.json"
+          jq -e . "${METADATA}" >/dev/null
+          DIGEST="$(jq -r .digest "${METADATA}")"
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "Pinned source digest from build metadata: ${DIGEST}"
+          echo "digest=${DIGEST}" >&3
+
       - name: Resolve source image digest
         id: source_image
         env:
           SOURCE_TAG: ${{ inputs.source_tag }}
-          EXPECTED_DIGEST: ${{ inputs.source_digest }}
+          EXPECTED_DIGEST: ${{ inputs.source_digest || steps.build_metadata.outputs.digest }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
@@ -431,11 +459,21 @@ jobs:
           PY
           echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
 
+      - name: Free disk space
+        run: |
+          df -h
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+          df -h
+
       - name: Download built ISO
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.build.outputs.artifact_name }}
-          path: output/live-iso
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download "${{ github.run_id }}" -n "${{ needs.build.outputs.artifact_name }}" -D output/live-iso
+          if [ -d "output/live-iso/${{ needs.build.outputs.artifact_name }}" ]; then
+            mv "output/live-iso/${{ needs.build.outputs.artifact_name }}"/* output/live-iso/
+            rmdir "output/live-iso/${{ needs.build.outputs.artifact_name }}"
+          fi
 
       - name: Verify transferred artifact
         run: |
