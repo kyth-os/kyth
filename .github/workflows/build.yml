@@ -73,7 +73,6 @@ jobs:
         kernel_flavor: [fedora]
 
     permissions:
-      actions: write
       contents: read
       packages: write
 
@@ -238,7 +237,7 @@ jobs:
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
           IMAGE_FULL="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
-          BASE_CACHE_REF="${IMAGE_FULL}:buildcache-base-${MATRIX_BRANCH}"
+          BASE_CACHE_REF="${IMAGE_FULL}:buildcache-base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}"
           BASE_IMAGE_REF="${IMAGE_FULL}:base-${STEPS_PREP_OUTPUTS_DEFAULT_TAG}"
 
           docker buildx build \
@@ -542,7 +541,6 @@ jobs:
         kernel_flavor: [cachy]
 
     permissions:
-      actions: write
       contents: read
       packages: write
 
@@ -707,7 +705,7 @@ jobs:
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
           IMAGE_FULL="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
-          BASE_CACHE_REF="${IMAGE_FULL}:buildcache-base-${MATRIX_BRANCH}"
+          BASE_CACHE_REF="${IMAGE_FULL}:buildcache-base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}"
           BASE_IMAGE_REF="${IMAGE_FULL}:base-${STEPS_PREP_OUTPUTS_DEFAULT_TAG}"
 
           docker buildx build \
@@ -994,7 +992,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        branch: ${{ fromJSON(format('["{0}"]', github.event_name == 'schedule' && 'latest' || github.ref_name)) }}
+        branch: ${{ github.event_name == 'schedule' && fromJSON('["main","testing"]') || fromJSON(format('["{0}"]', github.ref_name)) }}
     uses: ./.github/workflows/build-live-iso.yml
     with:
       # The live ISO is built from the Fedora variant only — it must boot the
@@ -1093,3 +1091,25 @@ jobs:
           subject-name: ${{ steps.image.outputs.image }}
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
+
+      # Supply-chain metadata (SBOM attach, image release, CVE scan dispatch)
+      # runs only against the Fedora-flavor image and needs the immutable
+      # digest, so it is dispatched explicitly instead of using a workflow_run
+      # trigger — workflow_run events carry no inputs and cannot pin the digest.
+      - name: Dispatch supply chain metadata
+        if: matrix.kernel_flavor == 'fedora'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          MATRIX_BRANCH: ${{ matrix.branch }}
+          SOURCE_TAG: ${{ steps.prep.outputs.tag }}
+          SOURCE_DIGEST: ${{ steps.image.outputs.digest }}
+          SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
+          SOURCE_GITHUB_SHA: ${{ steps.image.outputs.github_sha }}
+        run: |
+          gh workflow run supply-chain.yml \
+            --ref "${MATRIX_BRANCH}" \
+            --field "source_tag=${SOURCE_TAG}" \
+            --field "source_digest=${SOURCE_DIGEST}" \
+            --field "source_sha=${SOURCE_SHA}" \
+            --field "source_github_sha=${SOURCE_GITHUB_SHA}"

@@ -264,7 +264,7 @@ set -U fish_greeting ""
 FISHCONFIGEOF
 
 # ── KythDark color scheme ─────────────────────────────────────────────────────
-# Tokyo Night-derived palette: #0c0e16 dark slate base, #2f9b8f Kyth teal accent.
+# Tokyo Night-derived palette: #0c0e16 dark slate base, #4f8cff Kyth blue accent.
 # All nine Color:* sections share the same palette so colors are consistent
 # across button, view, window, selection, tooltip, and header contexts.
 mkdir -p /usr/share/color-schemes
@@ -292,100 +292,100 @@ IntensityEffect=0
 [Colors:Button]
 BackgroundAlternate=22,24,36
 BackgroundNormal=18,20,31
-DecorationFocus=47,155,143
-DecorationHover=125,211,199
+DecorationFocus=79,140,255
+DecorationHover=143,184,255
 ForegroundActive=192,202,245
 ForegroundInactive=86,95,137
-ForegroundLink=125,211,199
+ForegroundLink=143,184,255
 ForegroundNegative=247,118,142
 ForegroundNeutral=224,175,104
 ForegroundNormal=192,202,245
 ForegroundPositive=158,206,106
-ForegroundVisited=125,211,199
+ForegroundVisited=143,184,255
 
 [Colors:Complementary]
 BackgroundAlternate=22,24,36
 BackgroundNormal=12,14,22
-DecorationFocus=47,155,143
-DecorationHover=125,211,199
+DecorationFocus=79,140,255
+DecorationHover=143,184,255
 ForegroundActive=192,202,245
 ForegroundInactive=86,95,137
-ForegroundLink=125,211,199
+ForegroundLink=143,184,255
 ForegroundNegative=247,118,142
 ForegroundNeutral=224,175,104
 ForegroundNormal=192,202,245
 ForegroundPositive=158,206,106
-ForegroundVisited=125,211,199
+ForegroundVisited=143,184,255
 
 [Colors:Header]
 BackgroundAlternate=18,20,31
 BackgroundNormal=12,14,22
-DecorationFocus=47,155,143
-DecorationHover=125,211,199
+DecorationFocus=79,140,255
+DecorationHover=143,184,255
 ForegroundActive=192,202,245
 ForegroundInactive=86,95,137
-ForegroundLink=125,211,199
+ForegroundLink=143,184,255
 ForegroundNegative=247,118,142
 ForegroundNeutral=224,175,104
 ForegroundNormal=192,202,245
 ForegroundPositive=158,206,106
-ForegroundVisited=125,211,199
+ForegroundVisited=143,184,255
 
 [Colors:Selection]
-BackgroundAlternate=47,155,143
-BackgroundNormal=47,155,143
-DecorationFocus=47,155,143
-DecorationHover=125,211,199
+BackgroundAlternate=79,140,255
+BackgroundNormal=79,140,255
+DecorationFocus=79,140,255
+DecorationHover=143,184,255
 ForegroundActive=255,255,255
 ForegroundInactive=204,204,204
-ForegroundLink=125,211,199
+ForegroundLink=143,184,255
 ForegroundNegative=247,118,142
 ForegroundNeutral=224,175,104
 ForegroundNormal=255,255,255
 ForegroundPositive=158,206,106
-ForegroundVisited=166,240,229
+ForegroundVisited=143,184,255
 
 [Colors:Tooltip]
 BackgroundAlternate=18,20,31
 BackgroundNormal=12,14,22
-DecorationFocus=47,155,143
-DecorationHover=125,211,199
+DecorationFocus=79,140,255
+DecorationHover=143,184,255
 ForegroundActive=192,202,245
 ForegroundInactive=86,95,137
-ForegroundLink=125,211,199
+ForegroundLink=143,184,255
 ForegroundNegative=247,118,142
 ForegroundNeutral=224,175,104
 ForegroundNormal=192,202,245
 ForegroundPositive=158,206,106
-ForegroundVisited=125,211,199
+ForegroundVisited=143,184,255
 
 [Colors:View]
 BackgroundAlternate=18,20,31
 BackgroundNormal=12,14,22
-DecorationFocus=47,155,143
-DecorationHover=125,211,199
+DecorationFocus=79,140,255
+DecorationHover=143,184,255
 ForegroundActive=192,202,245
 ForegroundInactive=86,95,137
-ForegroundLink=125,211,199
+ForegroundLink=143,184,255
 ForegroundNegative=247,118,142
 ForegroundNeutral=224,175,104
 ForegroundNormal=192,202,245
 ForegroundPositive=158,206,106
-ForegroundVisited=125,211,199
+ForegroundVisited=143,184,255
 
 [Colors:Window]
 BackgroundAlternate=18,20,31
 BackgroundNormal=12,14,22
-DecorationFocus=47,155,143
-DecorationHover=125,211,199
+DecorationFocus=79,140,255
+DecorationHover=143,184,255
 ForegroundActive=192,202,245
 ForegroundInactive=86,95,137
-ForegroundLink=125,211,199
+ForegroundLink=143,184,255
 ForegroundNegative=247,118,142
 ForegroundNeutral=224,175,104
 ForegroundNormal=192,202,245
 ForegroundPositive=158,206,106
-ForegroundVisited=125,211,199
+ForegroundVisited=143,184,255
 
 [General]
 ColorScheme=KythDark
@@ -433,7 +433,7 @@ cat >/usr/share/plasma/desktoptheme/kyth-dark/widgets/panel-background.svg <<'KY
   <rect id="hint-top-margin"    x="49" y="0"  width="1"  height="5" fill="none"/>
   <rect id="hint-bottom-margin" x="49" y="96" width="1"  height="4" fill="none"/>
   <!-- Teal top accent line (1px, spans the full width across the top border) -->
-  <rect id="top"         x="4"  y="0"  width="92" height="1"  fill="#2f9b8f" fill-opacity="0.70"/>
+  <rect id="top"         x="4"  y="0"  width="92" height="1"  fill="#4f8cff" fill-opacity="0.70"/>
   <!-- 9-patch fill regions: semi-transparent dark slate -->
   <rect id="topleft"     x="0"  y="0"  width="4"  height="5"  fill="#0c0e16" fill-opacity="0.9"/>
   <rect id="topright"    x="96" y="0"  width="4"  height="5"  fill="#0c0e16" fill-opacity="0.9"/>

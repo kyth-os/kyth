@@ -24,8 +24,11 @@ isn't needed for screenshots.)
 
 ```bash
 python3 -m venv /tmp/system-hub-venv
-/tmp/system-hub-venv/bin/pip install --quiet PySide6-Essentials Pillow
+/tmp/system-hub-venv/bin/pip install --quiet PySide6-Essentials defusedxml Pillow
 ```
+
+(`defusedxml` is a hard import in `page_software.py` — without it the app
+fails at import time.)
 
 (`Pillow` is only needed if you want to pixel-sample a screenshot,
 e.g. to verify an exact theme color — not required just to render.)
@@ -67,6 +70,43 @@ immediately. Default timeout is 25s (`--timeout` to change it).
 Then view the PNG with the Read tool (or any image viewer) to actually
 look at it — don't just check that the file was written.
 
+### Interact (click buttons, inspect state)
+
+`run-script` executes a Python snippet against a live `MainWindow` with
+`win`, `app`, `navigate(key)`, `pump(seconds)`, and `shoot(path)` in
+scope. Example that selects the "Gaming Rig" vibe on the dashboard and
+verifies the toggle took effect (ran and verified):
+
+```bash
+cat > /tmp/vibe.py <<'EOF'
+from kyth_welcome.qt import QPushButton
+
+navigate("Welcome")
+pump(0.5)
+page = getattr(win, "_stack").currentWidget()
+gaming = [b for b in page.findChildren(QPushButton) if "Gaming Rig" in b.text()][0]
+gaming.click()
+pump(0.5)
+assert gaming.isChecked()
+shoot("/tmp/vibe-gaming.png")
+EOF
+/tmp/system-hub-venv/bin/python .claude/skills/run-system-hub/driver.py run-script /tmp/vibe.py
+```
+
+Don't click **Apply Vibe Settings** (or other buttons that run
+`pkexec`/`systemctl`/`rpm-ostree` actions) when driving the app on a
+real KythOS host — the pages shell out to the live system. Selecting
+toggles and navigating is safe; applying is not.
+
+## Test
+
+The repo's unit tests cover `kyth_welcome` helpers and run with plain
+system Python (no PySide6 needed), from the **repo root**:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
 ## Run (human path)
 
 ```bash
@@ -102,6 +142,16 @@ needs a real or Xwayland display. Ctrl-C or close the window to stop.
 - **No `xvfb` needed.** `PySide6-Essentials` bundles its own offscreen
   Qt platform plugin (`QT_QPA_PLATFORM=offscreen`); installing/running
   a virtual X server is unnecessary overhead for this app.
+- **Button texts carry emoji prefixes** (`"🎮 Gaming Rig"`, not
+  `"Gaming Rig"`), and the offscreen render may not draw the glyph even
+  though it's in `.text()`. Match with `in`, never `==`. The dashboard's
+  vibe buttons are plain `QPushButton`s but only exist on the Welcome
+  page widget — search `getattr(win, "_stack").currentWidget()`, not
+  the whole window, and note `MainWindow`'s attributes are private
+  (`_stack`, `_navigate_to`; pages keep state like `_preset_status`).
+- **Clicking a vibe reshapes the whole UI** (sidebar sections and task
+  cards change per profile) — a screenshot after the click is the way
+  to see the full effect, not just the button's checked state.
 
 ## Troubleshooting
 

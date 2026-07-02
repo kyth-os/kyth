@@ -1,6 +1,6 @@
 import importlib.util
 from importlib.machinery import SourceFileLoader
-import subprocess  # nosemgrep
+import subprocess  # nosec B404 # nosemgrep
 import unittest
 from pathlib import Path
 from unittest.mock import patch
