@@ -690,16 +690,12 @@ jobs:
           } > "${CHANNEL_NOTES}"
 
           if gh release view "${CHANNEL_TAG}" >/dev/null 2>&1; then
-            gh release edit "${CHANNEL_TAG}" \
-              --title "${CHANNEL_TITLE}" \
-              --notes-file "${CHANNEL_NOTES}" \
-              ${PRERELEASE} ${LATEST}
-          else
-            gh release create "${CHANNEL_TAG}" \
-              --target "${SOURCE_SHA}" \
-              --title "${CHANNEL_TITLE}" \
-              --notes-file "${CHANNEL_NOTES}" \
-              ${PRERELEASE} ${LATEST}
+            gh release delete "${CHANNEL_TAG}" --yes
           fi
+          gh release create "${CHANNEL_TAG}" \
+            --target "${SOURCE_SHA}" \
+            --title "${CHANNEL_TITLE}" \
+            --notes-file "${CHANNEL_NOTES}" \
+            ${PRERELEASE} ${LATEST}
           gh release upload "${CHANNEL_TAG}" --clobber \
             "${CHANNEL}-CHECKSUM" "${CHANNEL}.sig" "${CHANNEL}.bundle" "${CHANNEL}.intoto.jsonl" "${CHANNEL}.json"
