@@ -18,7 +18,7 @@ from .widgets import (  # noqa: E501
 # and the welcome wizard), so installs older than the window never see the card.
 _FIRST_WEEK_DISMISS = os.path.expanduser("~/.config/kyth-first-week-done")
 _FIRST_BOOT_MARKERS = (
-    "/var/lib/kyth/default-flatpaks-v5-done",
+    "/var/lib/kyth/default-flatpaks-v8-done",
     os.path.expanduser("~/.config/kyth-welcome-done"),
 )
 _FIRST_WEEK_MIN_DAYS = 2   # let the first-boot banner have the spotlight first
@@ -130,7 +130,7 @@ class WelcomePage(Page):
         hero_text_col = QVBoxLayout()
         hero_text_col.setSpacing(4)
         
-        hero_title = QLabel("KYTHOS // ACTIVE")
+        hero_title = QLabel("KYTHOS WORKSTATION")
         hero_title.setObjectName("genz-hero-title")
         hero_text_col.addWidget(hero_title)
 
@@ -145,7 +145,7 @@ class WelcomePage(Page):
             status_pill.setText("RESTART REQUIRED")
             status_pill.setObjectName("glowing-pill-warn")
         else:
-            status_pill.setText("SYSTEMS NOMINAL")
+            status_pill.setText("SYSTEM UP-TO-DATE")
             status_pill.setObjectName("glowing-pill-ok")
         hero_layout.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
         self._add(hero_card)
@@ -157,7 +157,7 @@ class WelcomePage(Page):
         vibe_layout.setContentsMargins(16, 10, 16, 10)
         vibe_layout.setSpacing(12)
 
-        vibe_lbl = QLabel("VIBE SELECTOR:")
+        vibe_lbl = QLabel("WORKSTATION MODE:")
         vibe_lbl.setObjectName("home-kicker")
         vibe_layout.addWidget(vibe_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -176,7 +176,7 @@ class WelcomePage(Page):
 
         vibe_layout.addSpacing(12)
 
-        apply_btn = QPushButton("Apply Vibe Settings")
+        apply_btn = QPushButton("Apply Settings")
         apply_btn.setObjectName("primary")
         apply_btn.clicked.connect(lambda _=False: self._apply_role_preset())
         vibe_layout.addWidget(apply_btn)
@@ -274,7 +274,7 @@ class WelcomePage(Page):
             rec_btn_label = "Transfer Files"
             rec_target = "Move Files"
         else:
-            rec_text = "All systems nominal. Ready for configuration."
+            rec_text = "System is up-to-date. Ready for configuration."
             rec_btn_label = "Configure Games"
             rec_target = "Gaming"
 
@@ -422,7 +422,7 @@ class WelcomePage(Page):
         body.setWordWrap(True)
         layout.addWidget(body)
 
-        app_setup_done = os.path.exists("/var/lib/kyth/default-flatpaks-v5-done")
+        app_setup_done = os.path.exists("/var/lib/kyth/default-flatpaks-v8-done")
         checklist = [
             (app_setup_done, "Default Apps", "Steam, bottles, and flatpaks installed.", "App Store"),
             (_flatpak_installed("com.brave.Browser"), "Browser", "Brave browser set up.", "App Store"),
@@ -515,7 +515,7 @@ class WelcomePage(Page):
             else:
                 detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
                 self._preset_status.setObjectName("status-warn")
-                self._preset_status.setText(f"Vibe preset error: {detail}")
+                self._preset_status.setText(f"Preset error: {detail}")
         except Exception as exc:
             self._preset_status.setObjectName("status-warn")
             self._preset_status.setText(f"Preset error: {exc}")

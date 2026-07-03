@@ -64,9 +64,11 @@ kernel.nmi_watchdog = 0
 # Scheduler
 kernel.sched_autogroup_enabled = 1
 
-# Keep split-lock mitigation enabled system-wide. GameMode temporarily disables
-# it while a game is running for compatibility with older ports that need it.
-kernel.split_lock_mitigate = 1
+# Disable split-lock mitigation system-wide. Some Windows games running via Proton
+# trigger split locks, and the kernel's default 10 ms throttling penalty causes
+# severe stutters/fps drops. Safe to disable on gaming desktops as modern CPUs
+# handle split locks gracefully without hardware lockup risks.
+kernel.split_lock_mitigate = 0
 
 # MTU probing — detect and recover from MTU black holes that can cause online
 # game connections to stall silently on some ISPs and VPN paths with BBR.
@@ -364,16 +366,15 @@ echo 'ntsync' >/usr/lib/modules-load.d/kyth-ntsync.conf
 echo 'KERNEL=="ntsync", GROUP="users", MODE="0660"' \
 	>/usr/lib/udev/rules.d/99-ntsync.rules
 
-# zram-size = min(ram, 8192): logical size equals physical RAM up to 8 GB.
-# The old ram/2 formula gave only 7 GB on this 14 GB machine, which fills
-# quickly under gaming load (VRAM pressure, shader caches, browser).
-# The logical size is not physical cost — zram grows lazily; compressed pages
-# at ~3:1 zstd ratio mean 14 GB of logical space costs ~4–5 GB of real RAM
-# at peak, still cheaper than OOM-killing apps. swap-priority=100 ensures
-# zram is always chosen over any disk swap that might exist.
+# zram-size = ram: logical size equals physical RAM.
+# With zram present, the logical size is not static physical overhead; it grows
+# lazily. Compressed pages at ~3:1 zstd ratio mean a full zram swap uses only
+# ~1/3 of its capacity in physical RAM, offering a massive buffer that prevents
+# lockups/OOM-kills during heavy compilation or AAA gaming.
+# swap-priority=100 ensures zram is always chosen over any disk swap.
 cat >/etc/systemd/zram-generator.conf <<'ZRAMEOF'
 [zram0]
-zram-size = min(ram, 8192)
+zram-size = ram
 compression-algorithm = zstd
 swap-priority = 100
 ZRAMEOF
@@ -639,6 +640,9 @@ MANGOHUD_DLSYM=1
 # Prevent Steam from spawning a renderer subprocess for the built-in browser
 # when it is not in use — saves ~100 MB of resident memory.
 STEAM_DISABLE_BROWSER_SUBPROCESS=1
+# Mesa Shader Cache size limit: raise to 10 GB to prevent shader eviction and
+# stuttering on subsequent launches of shader-heavy games.
+MESA_SHADER_CACHE_MAX_SIZE=10G
 PROTONEOF
 
 
@@ -915,3 +919,36 @@ for grp in users video audio gamemode docker disk kvm tty clock kmem input rende
 		fi
 	fi
 done
+
+# ── Homebrew Environment Auto-Bootstrapping ──────────────────────────────────
+# Automate adding Homebrew to PATH and environment for bash, zsh, and fish shells.
+mkdir -p /etc/profile.d /etc/fish/conf.d
+
+cat >/etc/profile.d/brew.sh <<'BREWSHEOF'
+# Add Homebrew to PATH and configure environment for sh/bash/zsh if it exists
+for _brew_path in "/home/linuxbrew/.linuxbrew/bin/brew" "${HOME}/.linuxbrew/bin/brew"; do
+    if [ -x "${_brew_path}" ]; then
+        eval "$("${_brew_path}" shellenv)"
+        break
+    fi
+done
+BREWSHEOF
+
+cat >/etc/fish/conf.d/brew.fish <<'BREWFISHEOF'
+# Add Homebrew to PATH and configure environment for fish shell if it exists
+for _brew_path in "/home/linuxbrew/.linuxbrew/bin/brew" "$HOME/.linuxbrew/bin/brew"
+    if test -x $_brew_path
+        eval ($_brew_path shellenv)
+        break
+    end
+end
+BREWFISHEOF
+
+# ── OBS Studio VKCapture Override ────────────────────────────────────────────
+# Pre-configure OBS Studio Flatpak to enable the Vulkan/OpenGL capture plugin
+# system-wide by default.
+mkdir -p /etc/flatpak/overrides
+cat >/etc/flatpak/overrides/com.obsproject.Studio <<'OBSEOF'
+[Environment]
+OBS_VKCAPTURE=1
+OBSEOF

@@ -131,9 +131,9 @@ jobs:
           android: true
           dotnet: true
           haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
 
       - name: Prepare Docker auth config
         run: |
@@ -599,9 +599,9 @@ jobs:
           android: true
           dotnet: true
           haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
 
       - name: Prepare Docker auth config
         run: |
@@ -1000,7 +1000,7 @@ jobs:
       # on the installed system, not in the live environment.
       source_tag: ${{ matrix.branch == 'main' && 'latest' || matrix.branch }}
       source_digest: ""
-      source_sha: ${{ github.event_name == 'schedule' && '' || github.sha }}
+      source_sha: ${{ github.event_name != 'schedule' && github.sha || '' }}
     secrets:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

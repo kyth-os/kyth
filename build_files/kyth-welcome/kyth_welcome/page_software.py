@@ -1095,7 +1095,7 @@ class SoftwarePage(Page):
                 row_layout.addWidget(self._make_store_app_card(self._store_entry_for_app(app_id)), 1)
             self._fp_results_layout.addLayout(row_layout)
 
-        categories_label = QLabel("Browse by vibe")
+        categories_label = QLabel("Browse by category")
         categories_label.setObjectName("section-heading")
         self._fp_results_layout.addWidget(categories_label)
 

@@ -622,7 +622,7 @@ pip --version
 
 optional_desktop_packages=(
 	jetbrains-mono-fonts
-	cascadia-code-fonts
+	cascadia-code-nf-fonts
 	liberation-fonts-all
 	inter-fonts
 	papirus-icon-theme
@@ -644,6 +644,11 @@ optional_desktop_packages=(
 	git-delta
 	starship
 	helix
+	gh
+	docker-compose
+	direnv
+	jq
+	yq
 	# zsh enhancements — sourced automatically by the /etc/skel/.zshrc below.
 	zsh-autosuggestions
 	zsh-syntax-highlighting

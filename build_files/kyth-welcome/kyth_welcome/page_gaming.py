@@ -536,7 +536,7 @@ class GamingPage(Page):
         )
         opti_desc.setObjectName("card-copy")
         opti_desc.setWordWrap(True)
-        opti_desc.setTextFormat(Qt.RichText)
+        opti_desc.setTextFormat(Qt.TextFormat.RichText)
         opti_layout.addWidget(opti_desc)
         opti_btns = QHBoxLayout()
         opti_btns.setSpacing(8)
