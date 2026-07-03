@@ -64,9 +64,11 @@ kernel.nmi_watchdog = 0
 # Scheduler
 kernel.sched_autogroup_enabled = 1
 
-# Keep split-lock mitigation enabled system-wide. GameMode temporarily disables
-# it while a game is running for compatibility with older ports that need it.
-kernel.split_lock_mitigate = 1
+# Disable split-lock mitigation system-wide. Some Windows games running via Proton
+# trigger split locks, and the kernel's default 10 ms throttling penalty causes
+# severe stutters/fps drops. Safe to disable on gaming desktops as modern CPUs
+# handle split locks gracefully without hardware lockup risks.
+kernel.split_lock_mitigate = 0
 
 # MTU probing — detect and recover from MTU black holes that can cause online
 # game connections to stall silently on some ISPs and VPN paths with BBR.

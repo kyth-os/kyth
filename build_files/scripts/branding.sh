@@ -2760,7 +2760,7 @@ systemctl enable kyth-boot-splash-initramfs.service 2>/dev/null || true
 cat >/usr/lib/systemd/system/kyth-firstboot-notice.service <<'FBOOTEOF'
 [Unit]
 Description=KythOS first-boot Plymouth notice
-After=plymouth-start.service
+After=plymouth-start.service local-fs.target
 Before=plymouth-quit.service
 DefaultDependencies=no
 ConditionPathExists=!/var/lib/kyth/first-boot-done
@@ -2770,7 +2770,7 @@ Type=oneshot
 ExecStart=/usr/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/first-boot-done && plymouth message --text="After login, open the KythOS System Hub to finish installing your preferred software."'
 
 [Install]
-WantedBy=sysinit.target
+WantedBy=basic.target
 FBOOTEOF
 systemctl enable kyth-firstboot-notice.service 2>/dev/null || true
 
