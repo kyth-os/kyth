@@ -10,7 +10,7 @@
 #   input       #181b28      log/console      #1a1a1a
 #   text        #ffffff      secondary text   #a6a6a6
 #   accent      #4f8cff      accent (light)   #8fb8ff
-#   ok #5fb88a   warn #d6a35c   error #ff99a4   danger button #c42b1c
+#   ok #10b981   warn #f59e0b   error #ff99a4   danger button #c42b1c
 QSS = """
 * {
     font-family: "Noto Sans", "Segoe UI", sans-serif;
@@ -244,12 +244,12 @@ QLabel#section-heading {
 
 /* ── Status labels ───────────────────────────────────────────────────────── */
 QLabel#status-ok {
-    color: #5fb88a;
+    color: #10b981;
     font-weight: 600;
 }
 
 QLabel#status-warn {
-    color: #d6a35c;
+    color: #f59e0b;
     font-weight: 600;
 }
 
@@ -285,15 +285,15 @@ QLabel#task-status-running {
 }
 
 QLabel#task-status-ok {
-    background: #1e2b24;
-    color: #8fd1ab;
-    border: 1px solid #3f7a5c;
+    background: #122e22;
+    color: #34d399;
+    border: 1px solid #10b981;
 }
 
 QLabel#task-status-warn {
-    background: #2e2417;
-    color: #d6a35c;
-    border: 1px solid #8a6534;
+    background: #2a1f10;
+    color: #fbbf24;
+    border: 1px solid #f59e0b;
 }
 
 QLabel#task-status-err {
@@ -787,24 +787,24 @@ QLabel#stat-value {
 QLabel#stat-value-ok {
     font-size: 16px;
     font-weight: 600;
-    color: #5fb88a;
+    color: #10b981;
 }
 
 QLabel#stat-value-warn {
     font-size: 16px;
     font-weight: 600;
-    color: #d6a35c;
+    color: #f59e0b;
 }
 
 /* ── Gaming readiness panel ──────────────────────────────────────────────── */
 QLabel#ready-score {
-    color: #5fb88a;
+    color: #10b981;
     font-size: 28px;
     font-weight: 700;
 }
 
 QLabel#ready-score-warn {
-    color: #d6a35c;
+    color: #f59e0b;
     font-size: 28px;
     font-weight: 700;
 }
@@ -825,15 +825,15 @@ QLabel#ready-row-dim {
 }
 
 QLabel#ready-row-ok {
-    background: #1e2b24;
-    color: #8fd1ab;
-    border: 1px solid #3f7a5c;
+    background: #122e22;
+    color: #34d399;
+    border: 1px solid #10b981;
 }
 
 QLabel#ready-row-warn {
-    background: #2e2417;
-    color: #d6a35c;
-    border: 1px solid #8a6534;
+    background: #2a1f10;
+    color: #fbbf24;
+    border: 1px solid #f59e0b;
 }
 
 QLabel#ready-row-err {
@@ -850,30 +850,30 @@ QLabel#ready-row-dim {
 
 /* ── Hardware cards ──────────────────────────────────────────────────────── */
 QFrame#hw-card-ok {
-    background: #1e2b24;
-    border: 1px solid #3f7a5c;
-    border-left: 4px solid #5fb88a;
+    background: #122e22;
+    border: 1px solid #10b981;
+    border-left: 4px solid #10b981;
     border-radius: 8px;
 }
 
 QFrame#hw-card-ok:hover {
-    background: #303a30;
-    border: 1px solid #3f7a5c;
-    border-left: 4px solid #5fb88a;
+    background: #172a20;
+    border: 1px solid #10b981;
+    border-left: 4px solid #10b981;
     border-radius: 8px;
 }
 
 QFrame#hw-card-warn {
-    background: #2e2417;
-    border: 1px solid #8a6534;
-    border-left: 4px solid #d6a35c;
+    background: #2a1f10;
+    border: 1px solid #f59e0b;
+    border-left: 4px solid #f59e0b;
     border-radius: 8px;
 }
 
 QFrame#hw-card-warn:hover {
-    background: #3a3525;
-    border: 1px solid #8a6534;
-    border-left: 4px solid #d6a35c;
+    background: #342610;
+    border: 1px solid #f59e0b;
+    border-left: 4px solid #f59e0b;
     border-radius: 8px;
 }
 
@@ -1051,14 +1051,14 @@ QComboBox QAbstractItemView {
 
 /* ── Live session banner ─────────────────────────────────────────────────── */
 QWidget#live-banner {
-    background: #2e2417;
-    border-bottom: 1px solid #8a6534;
+    background: #2a1f10;
+    border-bottom: 1px solid #f59e0b;
 }
 
 QLabel#live-banner-badge {
     background: #151722;
-    color: #d6a35c;
-    border: 1px solid #8a6534;
+    color: #f59e0b;
+    border: 1px solid #f59e0b;
     border-radius: 10px;
     padding: 3px 8px;
     font-size: 10px;
@@ -1184,11 +1184,11 @@ QFrame#hw-card-dim {
 }
 
 QFrame#card-accent-ok {
-    border-left: 4px solid #5fb88a;
+    border-left: 4px solid #10b981;
 }
 
 QFrame#card-accent-warn {
-    border-left: 4px solid #d6a35c;
+    border-left: 4px solid #f59e0b;
 }
 
 QFrame#card-accent-err {
