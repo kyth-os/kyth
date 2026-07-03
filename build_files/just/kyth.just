@@ -1233,6 +1233,39 @@ setup-sunshine:
     echo "  sudo firewall-cmd --permanent --add-port=47998-48010/udp"
     echo "  sudo firewall-cmd --reload"
 
+# Setup WiVRn VR streaming — opens firewall ports and ensures Avahi/mDNS discovery is active.
+[group('KythOS')]
+setup-vr:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Configuring host system for WiVRn VR streaming..."
+
+    # 1. Enable and start Avahi daemon (for headset mDNS discovery)
+    echo "→ Enabling mDNS discovery (avahi-daemon)..."
+    sudo systemctl enable --now avahi-daemon.service
+
+    # 2. Open firewall ports (WiVRn: 9757 UDP/TCP, mDNS: 5353 UDP)
+    if systemctl is-active --quiet firewalld; then
+        echo "→ Opening firewall ports for WiVRn (9757) and mDNS (5353)..."
+        sudo firewall-cmd --permanent --add-port=9757/udp --add-port=9757/tcp
+        sudo firewall-cmd --permanent --add-port=5353/udp
+        sudo firewall-cmd --reload
+    else
+        echo "→ firewalld is not active; skipping firewall port rules."
+    fi
+
+    # 3. Apply user-level Flatpak overrides for Steam as a fallback
+    echo "→ Ensuring Steam Flatpak has OpenXR filesystem overrides..."
+    flatpak override --user \
+        --filesystem=xdg-run/wivrn:ro \
+        --filesystem=xdg-config/openxr:ro \
+        --filesystem=xdg-config/openvr:ro \
+        com.valvesoftware.Steam || true
+
+    echo
+    echo "WiVRn VR configuration setup completed successfully!"
+    echo "Start the WiVRn app, connect your standalone headset, and launch Steam!"
+
 # Install CoolerControl — GUI fan curve and thermal management.
 # More flexible than CoreCtrl: supports PWM fan curves per temperature source,
 # lighting, and per-profile automation.

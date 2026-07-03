@@ -580,6 +580,7 @@ BTENABLEUNITEOF
 systemctl enable bluetooth.service 2>/dev/null || true
 systemctl enable kyth-bluetooth-enable.service 2>/dev/null || true
 systemctl enable cups-browsed.service 2>/dev/null || true
+systemctl enable avahi-daemon.service 2>/dev/null || true
 # input-remapper.service is enabled later in this script alongside rtkit-daemon
 
 # ── WiFi — disable power management ──────────────────────────────────────────
@@ -838,6 +839,13 @@ mkdir -p /etc/environment.d
 cat >/etc/environment.d/obs-vkcapture.conf <<'OBSVKCAPTUREEOF'
 # OBS_VKCAPTURE intentionally left unset globally.
 OBSVKCAPTUREEOF
+
+# ── Flatpak overrides: Steam OpenXR/OpenVR sockets for WiVRn ───────────────
+mkdir -p /etc/flatpak/overrides
+cat >/etc/flatpak/overrides/com.valvesoftware.Steam <<'FLATPAKONEOF'
+[Context]
+filesystems=xdg-run/wivrn:ro;xdg-config/openxr:ro;xdg-config/openvr:ro;
+FLATPAKONEOF
 
 # ── NVIDIA NVAPI: detect at login, not at build time ─────────────────────────
 # PROTON_ENABLE_NVAPI tells Proton to emulate NVIDIA's API layer.  It is only
