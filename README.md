@@ -99,10 +99,10 @@ KythOS keeps that reality visible instead of burying it under hype. The [gaming 
 
 Gaming-first doesn't mean gaming-only.
 
-- **Video & streaming:** OBS Studio with Vulkan/OpenGL capture, Kdenlive, DaVinci Resolve helper
+- **Video & streaming:** OBS Studio (pre-installed Flatpak with Vulkan/OpenGL `OBS_VKCAPTURE=1` capture enabled), Kdenlive, DaVinci Resolve helper
 - **Audio:** Audacity, PipeWire tuned for low latency
 - **Graphics:** GIMP, full media codec stack including thumbnails
-- **Dev tools:** VS Code, Headroom, GitHub CLI, GitKraken, Docker, Homebrew, Distrobox, QEMU/libvirt, Incus/LXC
+- **Dev tools:** Google Antigravity IDE (native RPM with full host filesystem access), VS Code, docker-compose, direnv, jq, yq, GitHub CLI, GitKraken, Docker, Homebrew, Distrobox, QEMU/libvirt, Incus/LXC
 - **Productivity:** Brave, KDE Connect, OpenDeck, rclone cloud storage mounts, Mission Center (Task Manager)
 - **Security:** Optional Kali Linux toolbox container, Wireshark, Burp Suite Community
 - **VPN:** Standalone VPN Connect app with GlobalProtect SAML flow
@@ -142,7 +142,7 @@ KythOS is tuned for developers and creators who use it as a daily driver alongsi
 
 | Feature | Detail |
 |---|---|
-| **Font compatibility** | Carlito (metric-compatible Calibri) + MS Core Fonts baked in — Office documents render correctly without reflow |
+| **Font compatibility** | Cascadia Code Nerd Font (`cascadia-code-nf-fonts`), Carlito (metric-compatible Calibri) + MS Core Fonts baked in — Office documents and developer terminals render correctly |
 | **Emoji** | Noto Emoji fonts installed — no missing-character boxes in browsers, terminals, or chat apps |
 | **Fingerprint login** | fprintd pre-installed and enabled; enrol at System Settings → Users |
 | **VPN** | GlobalProtect SAML (kyth-vpn-connect), openconnect, vpnc — covers most corporate networks |
@@ -153,13 +153,14 @@ KythOS is tuned for developers and creators who use it as a daily driver alongsi
 | **Email** | Betterbird (Thunderbird-based) via the Software page |
 | **Cloud storage** | rclone wizard in System Hub → Network covers Google Drive, OneDrive, Dropbox, S3 |
 | **Android phone** | KDE Connect — notifications, clipboard sync, file transfer, remote input |
+| **Homebrew integration** | Environment auto-bootstrapping for `bash`, `zsh`, and `fish` — configures `brew` in your PATH automatically if installed |
 
 ---
 
 ## System Hub
 
 <div align="center">
-<img src="build_files/branding/kyth-logo-transparent.svg" alt="KythOS mark" width="90">
+<img src="docs/system-hub-home.png" alt="KythOS System Hub Dashboard" width="100%">
 </div>
 
 **System Hub** is the KythOS control room. First login walks you through setup. After that, it's where you stage updates, check hardware, install tools, and run repairs — all in one place, no terminal required.
@@ -262,7 +263,7 @@ If you switch to the **CachyOS kernel variant**, enroll the KythOS Machine Owner
 <details>
 <summary>System tuning highlights</summary>
 
-- zram with zstd compression, swappiness tuned for zram, THP set to `madvise`, high `vm.max_map_count`, fast OOM recovery, capped dirty pages
+- zram size matched 1:1 with physical RAM (zstd compressed), swappiness tuned for zram, THP set to `madvise`, high `vm.max_map_count`, fast OOM recovery, capped dirty pages
 - TCP BBRv3, larger socket buffers, TCP Fast Open, MTU probing, raised inotify limits
 - Storage scheduler by device type, weekly `fstrim.timer`, optional weekly `duperemove`, journald caps
 - KDE Baloo disabled by default to avoid I/O spikes after large game downloads
