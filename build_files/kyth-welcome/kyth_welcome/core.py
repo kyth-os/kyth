@@ -937,7 +937,7 @@ def _first_run_app_setup_state() -> tuple[str, str, list[str]]:
             [],
         )
     missing = [name for app_id, name in _DEFAULT_FIRST_RUN_APPS if not _is_flatpak_installed(app_id)]
-    done = os.path.exists("/var/lib/kyth/default-flatpaks-v5-done")
+    done = os.path.exists("/var/lib/kyth/default-flatpaks-v8-done")
     if not missing:
         return "ready", "Steam, game launchers, Bottles, save backup, and gaming tools are ready.", []
 

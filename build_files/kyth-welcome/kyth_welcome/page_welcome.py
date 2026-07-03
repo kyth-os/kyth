@@ -18,7 +18,7 @@ from .widgets import (  # noqa: E501
 # and the welcome wizard), so installs older than the window never see the card.
 _FIRST_WEEK_DISMISS = os.path.expanduser("~/.config/kyth-first-week-done")
 _FIRST_BOOT_MARKERS = (
-    "/var/lib/kyth/default-flatpaks-v5-done",
+    "/var/lib/kyth/default-flatpaks-v8-done",
     os.path.expanduser("~/.config/kyth-welcome-done"),
 )
 _FIRST_WEEK_MIN_DAYS = 2   # let the first-boot banner have the spotlight first
@@ -422,7 +422,7 @@ class WelcomePage(Page):
         body.setWordWrap(True)
         layout.addWidget(body)
 
-        app_setup_done = os.path.exists("/var/lib/kyth/default-flatpaks-v5-done")
+        app_setup_done = os.path.exists("/var/lib/kyth/default-flatpaks-v8-done")
         checklist = [
             (app_setup_done, "Default Apps", "Steam, bottles, and flatpaks installed.", "App Store"),
             (_flatpak_installed("com.brave.Browser"), "Browser", "Brave browser set up.", "App Store"),

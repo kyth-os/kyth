@@ -366,16 +366,15 @@ echo 'ntsync' >/usr/lib/modules-load.d/kyth-ntsync.conf
 echo 'KERNEL=="ntsync", GROUP="users", MODE="0660"' \
 	>/usr/lib/udev/rules.d/99-ntsync.rules
 
-# zram-size = min(ram, 8192): logical size equals physical RAM up to 8 GB.
-# The old ram/2 formula gave only 7 GB on this 14 GB machine, which fills
-# quickly under gaming load (VRAM pressure, shader caches, browser).
-# The logical size is not physical cost — zram grows lazily; compressed pages
-# at ~3:1 zstd ratio mean 14 GB of logical space costs ~4–5 GB of real RAM
-# at peak, still cheaper than OOM-killing apps. swap-priority=100 ensures
-# zram is always chosen over any disk swap that might exist.
+# zram-size = ram: logical size equals physical RAM.
+# With zram present, the logical size is not static physical overhead; it grows
+# lazily. Compressed pages at ~3:1 zstd ratio mean a full zram swap uses only
+# ~1/3 of its capacity in physical RAM, offering a massive buffer that prevents
+# lockups/OOM-kills during heavy compilation or AAA gaming.
+# swap-priority=100 ensures zram is always chosen over any disk swap.
 cat >/etc/systemd/zram-generator.conf <<'ZRAMEOF'
 [zram0]
-zram-size = min(ram, 8192)
+zram-size = ram
 compression-algorithm = zstd
 swap-priority = 100
 ZRAMEOF
@@ -944,3 +943,12 @@ for _brew_path in "/home/linuxbrew/.linuxbrew/bin/brew" "$HOME/.linuxbrew/bin/br
     end
 end
 BREWFISHEOF
+
+# ── OBS Studio VKCapture Override ────────────────────────────────────────────
+# Pre-configure OBS Studio Flatpak to enable the Vulkan/OpenGL capture plugin
+# system-wide by default.
+mkdir -p /etc/flatpak/overrides
+cat >/etc/flatpak/overrides/com.obsproject.Studio <<'OBSEOF'
+[Environment]
+OBS_VKCAPTURE=1
+OBSEOF
