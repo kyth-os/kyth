@@ -119,7 +119,6 @@ if _WEBENGINE_AVAILABLE:
 
         def __init__(self, profile, parent=None):
             super().__init__(profile, parent)
-            self.navigationRequested.connect(self._on_nav)
 
         def javaScriptConsoleMessage(self, level, message, line, source):
             print(f"[JS console] {message} ({source}:{line})")
@@ -134,12 +133,6 @@ if _WEBENGINE_AVAILABLE:
                 self.callback_received.emit(url_str)
                 return False
             return True
-
-        def _on_nav(self, request):
-            url = request.url().toString()
-            if url.startswith("globalprotectcallback:") or url.startswith("gc:"):
-                self.callback_received.emit(url)
-                request.reject()
 
     _GP_AUTH_COOKIES = _GP_SAML_FIELDS
 
