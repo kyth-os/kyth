@@ -146,7 +146,7 @@ class CompatibilityPage(Page):
         # status → (badge_text, badge_css, row_left_border_color)
         "native":  ("Native",       "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
         "proton":  ("Works",        "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
-        "tweaks":  ("Tweaks",       "background:#2a1f10; color:#fbbf24; border:1px solid #f59e0b;",  "#f59e0b"),
+        "tweaks":  ("Tweaks",       "background:#241808; color:#fbbf24; border:1px solid #f59e0b;",  "#f59e0b"),
         "blocked": ("Blocked",      "background:#3a1010; color:#f48771; border:1px solid #5a1a1a;",  "#f48771"),
     }
     _AC_BADGE_CSS = (

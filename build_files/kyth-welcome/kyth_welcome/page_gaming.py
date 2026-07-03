@@ -1825,7 +1825,7 @@ class GamingPage(Page):
         badge = QLabel(f"  {status_text}  ")
         badge_bg, badge_fg = {
             "ok": ("#121e2d", "#4fc1ff"),
-            "warn": ("#2a1f10", "#fbbf24"),
+            "warn": ("#241808", "#fbbf24"),
             "err": ("#3a1010", "#f48771"),
             "dim": ("#252526", "#858585"),
         }.get(status, ("#252526", "#858585"))

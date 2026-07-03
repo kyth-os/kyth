@@ -2696,7 +2696,7 @@ class SoftwarePage(Page):
             "and a very long install time. Only choose this if you need every available tool."
         )
         self._sec_everything_warn.setObjectName("card-copy")
-        self._sec_everything_warn.setStyleSheet("color: #fbbf24; background: #2a1f10; "
+        self._sec_everything_warn.setStyleSheet("color: #fbbf24; background: #241808; "
                                                 "border: 1px solid #f59e0b; border-radius: 6px; "
                                                 "padding: 6px 10px;")
         self._sec_everything_warn.setWordWrap(True)

@@ -285,19 +285,19 @@ QLabel#task-status-running {
 }
 
 QLabel#task-status-ok {
-    background: #122e22;
+    background: #0f2018;
     color: #34d399;
     border: 1px solid #10b981;
 }
 
 QLabel#task-status-warn {
-    background: #2a1f10;
+    background: #22160a;
     color: #fbbf24;
     border: 1px solid #f59e0b;
 }
 
 QLabel#task-status-err {
-    background: #35262a;
+    background: #271416;
     color: #ff99a4;
     border: 1px solid #5e3338;
 }
@@ -619,19 +619,19 @@ QLabel#home-section-copy {
 }
 
 QFrame#card-accent-ok {
-    background: #122e22;
+    background: #0f2018;
     border: 1px solid #10b981;
     border-radius: 10px;
 }
 
 QFrame#card-accent-warn {
-    background: #2a1f10;
+    background: #22160a;
     border: 1px solid #f59e0b;
     border-radius: 10px;
 }
 
 QFrame#card-accent-err {
-    background: #35262a;
+    background: #271416;
     border: 1px solid #5e3338;
     border-radius: 10px;
 }
@@ -825,19 +825,19 @@ QLabel#ready-row-dim {
 }
 
 QLabel#ready-row-ok {
-    background: #122e22;
+    background: #0f2018;
     color: #34d399;
     border: 1px solid #10b981;
 }
 
 QLabel#ready-row-warn {
-    background: #2a1f10;
+    background: #22160a;
     color: #fbbf24;
     border: 1px solid #f59e0b;
 }
 
 QLabel#ready-row-err {
-    background: #35262a;
+    background: #271416;
     color: #ff99a4;
     border: 1px solid #5e3338;
 }
@@ -850,58 +850,58 @@ QLabel#ready-row-dim {
 
 /* ── Hardware cards ──────────────────────────────────────────────────────── */
 QFrame#hw-card-ok {
-    background: #122e22;
-    border: 1px solid #10b981;
+    background: #151722;
+    border: 1px solid #26293a;
     border-left: 4px solid #10b981;
     border-radius: 8px;
 }
 
 QFrame#hw-card-ok:hover {
-    background: #172a20;
-    border: 1px solid #10b981;
+    background: #1f2335;
+    border: 1px solid #2e324c;
     border-left: 4px solid #10b981;
     border-radius: 8px;
 }
 
 QFrame#hw-card-warn {
-    background: #2a1f10;
-    border: 1px solid #f59e0b;
+    background: #151722;
+    border: 1px solid #26293a;
     border-left: 4px solid #f59e0b;
     border-radius: 8px;
 }
 
 QFrame#hw-card-warn:hover {
-    background: #342610;
-    border: 1px solid #f59e0b;
+    background: #1f2335;
+    border: 1px solid #2e324c;
     border-left: 4px solid #f59e0b;
     border-radius: 8px;
 }
 
 QFrame#hw-card-err {
-    background: #35262a;
-    border: 1px solid #5e3338;
-    border-left: 4px solid #ff99a4;
+    background: #151722;
+    border: 1px solid #26293a;
+    border-left: 4px solid #e05f67;
     border-radius: 8px;
 }
 
 QFrame#hw-card-err:hover {
-    background: #3b2d2f;
-    border: 1px solid #6e3d42;
-    border-left: 4px solid #ff99a4;
+    background: #1f2335;
+    border: 1px solid #2e324c;
+    border-left: 4px solid #e05f67;
     border-radius: 8px;
 }
 
 QFrame#hw-card-dim {
     background: #151722;
     border: 1px solid #26293a;
-    border-left: 4px solid #5c5c5c;
+    border-left: 4px solid #66717f;
     border-radius: 8px;
 }
 
 QFrame#hw-card-dim:hover {
-    background: #333333;
-    border: 1px solid #484848;
-    border-left: 4px solid #6b6b6b;
+    background: #1f2335;
+    border: 1px solid #2e324c;
+    border-left: 4px solid #66717f;
     border-radius: 8px;
 }
 
@@ -1051,7 +1051,7 @@ QComboBox QAbstractItemView {
 
 /* ── Live session banner ─────────────────────────────────────────────────── */
 QWidget#live-banner {
-    background: #2a1f10;
+    background: #22160a;
     border-bottom: 1px solid #f59e0b;
 }
 
@@ -1320,7 +1320,7 @@ QListView::item:selected {
 
 QLabel#status-ok,
 QLabel#task-status-ok {
-    background-color: #122e22;
+    background-color: #0f2018;
     border: 1px solid #10b981;
     border-radius: 6px;
     color: #34d399;
@@ -1329,7 +1329,7 @@ QLabel#task-status-ok {
 
 QLabel#status-warn,
 QLabel#task-status-warn {
-    background-color: #2a1f10;
+    background-color: #22160a;
     border: 1px solid #f59e0b;
     border-radius: 6px;
     color: #fbbf24;
@@ -1338,7 +1338,7 @@ QLabel#task-status-warn {
 
 QLabel#status-err,
 QLabel#task-status-err {
-    background-color: #3b1d22;
+    background-color: #271416;
     border: 1px solid #9f464f;
     border-radius: 6px;
     color: #ffb0b6;
@@ -1385,15 +1385,6 @@ QFrame#home-section-header {
     padding: 0;
 }
 
-QFrame#card-accent-ok {
-    background: #122e22;
-    border-color: #10b981;
-}
-
-QFrame#card-accent-warn {
-    background: #2a1f10;
-    border-color: #f59e0b;
-}
 
 QFrame#stat-tile {
     background: #151722;
@@ -1463,7 +1454,7 @@ QLabel#genz-hero-subtitle {
 }
 
 QLabel#glowing-pill-ok {
-    background-color: #122e22;
+    background-color: #0f2018;
     border: 1px solid #10b981;
     color: #34d399;
     border-radius: 12px;
@@ -1473,7 +1464,7 @@ QLabel#glowing-pill-ok {
 }
 
 QLabel#glowing-pill-warn {
-    background-color: #2a1f10;
+    background-color: #22160a;
     border: 1px solid #f59e0b;
     color: #fbbf24;
     border-radius: 12px;

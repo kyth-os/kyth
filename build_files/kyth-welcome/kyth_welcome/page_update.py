@@ -704,6 +704,7 @@ class UpdatePage(Page):
         self._restart_now_btn.hide()
         self._check_worker = UpdateCheckWorker()
         self._check_worker.result.connect(self._on_check_result)
+        _release_worker_when_finished(self, "_check_worker", self._check_worker)
         self._check_worker.start()
 
     def _on_check_result(self, state: str, remote_ts: str):
@@ -840,11 +841,10 @@ class UpdatePage(Page):
         self._fw_btn.hide()
         self._fw_check_worker = FirmwareCheckWorker()
         self._fw_check_worker.result.connect(self._on_firmware_check_result)
-        self._fw_check_worker.finished.connect(self._fw_check_worker.deleteLater)
+        _release_worker_when_finished(self, "_fw_check_worker", self._fw_check_worker)
         self._fw_check_worker.start()
 
     def _on_firmware_check_result(self, count: int, summary: str) -> None:
-        self._fw_check_worker = None
         if count < 0:
             self._fw_icon.setText("—")
             self._fw_icon.setStyleSheet("font-size: 22px; color: #555555;")

@@ -1,0 +1,12 @@
+{
+  "servers": [
+    {
+      "extensions": ["py", "pyi"],
+      "command": ["/usr/bin/npx", "--yes", "--package=pyright", "pyright-langserver", "--stdio"]
+    },
+    {
+      "extensions": ["sh", "bash"],
+      "command": ["/usr/bin/npx", "--yes", "--package=bash-language-server", "bash-language-server", "start"]
+    }
+  ]
+}
