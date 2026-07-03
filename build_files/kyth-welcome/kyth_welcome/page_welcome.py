@@ -157,7 +157,7 @@ class WelcomePage(Page):
         vibe_layout.setContentsMargins(16, 10, 16, 10)
         vibe_layout.setSpacing(12)
 
-        vibe_lbl = QLabel("VIBE SELECTOR:")
+        vibe_lbl = QLabel("WORKSTATION MODE:")
         vibe_lbl.setObjectName("home-kicker")
         vibe_layout.addWidget(vibe_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -176,7 +176,7 @@ class WelcomePage(Page):
 
         vibe_layout.addSpacing(12)
 
-        apply_btn = QPushButton("Apply Vibe Settings")
+        apply_btn = QPushButton("Apply Settings")
         apply_btn.setObjectName("primary")
         apply_btn.clicked.connect(lambda _=False: self._apply_role_preset())
         vibe_layout.addWidget(apply_btn)
@@ -515,7 +515,7 @@ class WelcomePage(Page):
             else:
                 detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
                 self._preset_status.setObjectName("status-warn")
-                self._preset_status.setText(f"Vibe preset error: {detail}")
+                self._preset_status.setText(f"Preset error: {detail}")
         except Exception as exc:
             self._preset_status.setObjectName("status-warn")
             self._preset_status.setText(f"Preset error: {exc}")
