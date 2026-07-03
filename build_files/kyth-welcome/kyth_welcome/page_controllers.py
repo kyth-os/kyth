@@ -3,7 +3,7 @@ import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
 from .core import (  # noqa: E501
-    Worker, _detect_controllers, _release_worker_when_finished,
+    TrackedThread, Worker, _detect_controllers, _release_worker_when_finished,
 )
 from .qt import (  # noqa: E501
     QHBoxLayout, QLabel, QMessageBox, QPushButton, QThread, Signal,
@@ -12,7 +12,7 @@ from .widgets import (  # noqa: E501
     Page, _make_card,
 )
 
-class ControllerProbeWorker(QThread):
+class ControllerProbeWorker(TrackedThread):
     result = Signal(dict)
 
     def run(self) -> None:

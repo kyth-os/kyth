@@ -114,12 +114,12 @@ choose_disk_with_unallocated_space() {
 	fi
 }
 
-find_new_partition() {
+list_disk_partitions() {
 	local disk="$1"
 
-	lsblk -lnpo NAME,PARTLABEL "$disk" |
-		awk '$2 == "kyth-root" { print $1 }' |
-		tail -n1
+	lsblk -lnpo NAME,TYPE "$disk" |
+		awk '$2 == "part" { print $1 }' |
+		sort
 }
 
 find_existing_kyth_partition() {
@@ -391,12 +391,17 @@ echo
 if [[ -z "${TARGET_PART:-}" ]]; then
 	echo
 	echo "Creating Kyth partition..."
+	PARTS_BEFORE="$(list_disk_partitions "$DISK")"
 	parted -s "$DISK" mkpart kyth-root btrfs "${FREE_START}MiB" "${FREE_END}MiB"
 	partprobe "$DISK"
 	udevadm settle
 
-	TARGET_PART="$(find_new_partition "$DISK")"
-	[[ -n "$TARGET_PART" && -b "$TARGET_PART" ]] || die "Could not find the newly-created kyth-root partition."
+	# Identify the new partition by diffing the partition list around mkpart.
+	# Looking it up by PARTLABEL could match a stale kyth-root partition from
+	# an earlier install and format the wrong device.
+	TARGET_PART="$(comm -13 <(printf '%s\n' "$PARTS_BEFORE") <(list_disk_partitions "$DISK"))"
+	[[ -n "$TARGET_PART" && "$TARGET_PART" != *$'\n'* && -b "$TARGET_PART" ]] ||
+		die "Could not identify the newly-created kyth-root partition (found: '${TARGET_PART:-none}')."
 else
 	echo
 	echo "Reusing existing $TARGET_PART."

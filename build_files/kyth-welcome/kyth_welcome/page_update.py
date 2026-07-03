@@ -199,6 +199,9 @@ class UpdatePage(Page):
         self._add(self._log_toggle)
 
         self._log = QTextEdit()
+        # A chatty bootc pull can emit tens of thousands of lines; unbounded
+        # QTextEdit appends get slower and eat memory as the document grows.
+        self._log.document().setMaximumBlockCount(5000)
         self._log.setReadOnly(True)
         self._log.setMinimumHeight(200)
         self._log.hide()

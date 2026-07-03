@@ -3,7 +3,7 @@ import subprocess  # nosec B404 # nosemgrep
 
 # __KYTH_GENERATED_IMPORTS__
 from .core import (  # noqa: E501
-    Worker, _IS_LIVE, _cancel_worker, _command_stdout, _current_branch, _detect_nvidia, _find_ntfs_drives, _finish_worker, _ge_proton_version, _has_rollback_deployment, _is_flatpak_installed, _load_profile, _mark_wizard_done, _restyle, _save_profile,
+    Worker, _IS_LIVE, _cancel_worker, _command_stdout, _current_branch, _detect_nvidia, _find_ntfs_drives, _finish_worker, _ge_proton_version, _has_rollback_deployment, _is_flatpak_installed, _load_profile, _mark_wizard_done, _restyle, _running_threads, _save_profile,
 )
 from .page_branches import (  # noqa: E501
     BranchesPage,
@@ -611,11 +611,14 @@ class MainWindow(QMainWindow):
             self._crumb_lbl.setText(f"›  {label}")
 
     def closeEvent(self, event):
-        active = [
-            child for child in self.findChildren(QWidget)
-            if (w := getattr(child, "_worker", None)) is not None and w.isRunning()
-        ]
-        if active:
+        # Registry catches workers regardless of which attribute a page keeps
+        # them in; the findChildren scan keeps covering page-local QThreads
+        # that follow the `_worker` convention without subclassing Worker.
+        busy = any(t.BLOCKS_CLOSE for t in _running_threads()) or any(
+            (w := getattr(child, "_worker", None)) is not None and w.isRunning()
+            for child in self.findChildren(QWidget)
+        )
+        if busy:
             QMessageBox.warning(
                 self,
                 "KythOS Is Busy",
@@ -1490,12 +1493,7 @@ class WizardWindow(QMainWindow):
     # ── Navigation ────────────────────────────────────────────────────────────
 
     def _has_running_operation(self) -> bool:
-        workers = (
-            self._wizard_extra_worker,
-            self._update_page._worker,
-            self._gaming_page._tool_worker,
-        )
-        return any(worker is not None and worker.isRunning() for worker in workers)
+        return any(t.BLOCKS_CLOSE for t in _running_threads())
 
     def _update_nav(self):
         idx = self._current

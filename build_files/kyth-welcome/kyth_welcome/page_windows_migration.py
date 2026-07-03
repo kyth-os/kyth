@@ -11,7 +11,7 @@ import tempfile
 
 # __KYTH_GENERATED_IMPORTS__
 from .core import (  # noqa: E501
-    DataWorker, Worker, _command_stdout, _finish_worker, _human_bytes, _install_flatpak_inline, _is_flatpak_installed, _release_worker_when_finished, _restyle, _run_command,
+    DataWorker, TrackedThread, Worker, _command_stdout, _finish_worker, _human_bytes, _install_flatpak_inline, _is_flatpak_installed, _release_worker_when_finished, _restyle, _run_command,
 )
 from .page_feedback import (  # noqa: E501
     _probe_windows_partitions,
@@ -54,7 +54,7 @@ def _unlock_bitlocker_drive(dev: str, key: str) -> tuple[bool, str]:
     return True, rm.stdout.strip()
 
 
-class WindowsLibraryWorker(QThread):
+class WindowsLibraryWorker(TrackedThread):
     result = Signal(list)
 
     def run(self) -> None:
@@ -109,8 +109,9 @@ def _folder_sizes_calc(paths: dict[str, str]):
     return _calc
 
 
-class UserFilesCopyWorker(QThread):
+class UserFilesCopyWorker(TrackedThread):
     """Copies selected profile folders into the home directory via rsync."""
+    BLOCKS_CLOSE = True
     status = Signal(str)
     overall = Signal(int)          # 0–100 across all folders
     done = Signal(int, int, bool)  # (ok, failed, cancelled)

@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
 from .core import (  # noqa: E501
-    _restyle,
+    TrackedThread, _restyle,
 )
 from .qt import (  # noqa: E501
     QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QTextEdit, QThread, QTimer, QUrl, QVBoxLayout, QWebEnginePage, QWebEngineProfile, QWebEngineUrlRequestJob, QWebEngineUrlSchemeHandler, QWebEngineView, Signal, _WEBENGINE_AVAILABLE,
@@ -594,7 +594,7 @@ QPushButton#saml-cancel:pressed {
             self.accept()
 
 
-class _VpnConnectWorker(QThread):
+class _VpnConnectWorker(TrackedThread):
     line = Signal(str)
     done = Signal(int)
     saml_required = Signal(str)

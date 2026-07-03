@@ -1,3 +1,4 @@
+import atexit
 import glob
 import hashlib
 import os
@@ -7,6 +8,7 @@ import signal
 import shlex
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -98,7 +100,58 @@ def _apply_install_badge(lbl: QLabel, ok: bool, ok_text: str = "Installed",
     )
 
 # ── Worker thread ──────────────────────────────────────────────────────────────
-class Worker(QThread):
+_ACTIVE_THREADS: set = set()
+
+
+class TrackedThread(QThread):
+    """QThread that stays registered (and referenced) while alive.
+
+    Every worker in the app must subclass this: the registry both prevents a
+    fire-and-forget thread from being garbage-collected mid-run and lets window
+    close / app quit wait for stragglers instead of letting Python destroy a
+    running QThread, which aborts the whole process.
+
+    Subclasses that run user tasks (installs, copies, updates) set BLOCKS_CLOSE
+    so the main window refuses to close mid-task; probes leave it False and are
+    joined at quit by _shutdown_threads.
+    """
+
+    BLOCKS_CLOSE = False
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _ACTIVE_THREADS.add(self)
+        self.finished.connect(lambda: _ACTIVE_THREADS.discard(self))
+
+
+def _running_threads() -> list[TrackedThread]:
+    return [t for t in _ACTIVE_THREADS if t.isRunning()]
+
+
+def _shutdown_threads(timeout_ms: int = 15000) -> None:
+    """Cancel and join every tracked thread. Connected to aboutToQuit so the
+    interpreter never tears down a still-running QThread."""
+    for t in list(_ACTIVE_THREADS):
+        stop = getattr(t, "cancel", None) or getattr(t, "stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:
+                pass
+    deadline = time.monotonic() + timeout_ms / 1000
+    for t in list(_ACTIVE_THREADS):
+        remaining_ms = max(100, int((deadline - time.monotonic()) * 1000))
+        t.wait(remaining_ms)
+
+
+# aboutToQuit only fires when an event loop exits, so also join at interpreter
+# exit — atexit runs before module teardown destroys the QThread wrappers.
+# Covers embedders (tests, screenshot driver) that never call app.exec().
+atexit.register(_shutdown_threads)
+
+
+class Worker(TrackedThread):
+    BLOCKS_CLOSE = True
     CANCELLED = 130
 
     line = Signal(str)
@@ -141,6 +194,7 @@ class Worker(QThread):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                errors="replace",
                 bufsize=1,
                 env=env,
                 cwd="/tmp",
@@ -159,9 +213,11 @@ class Worker(QThread):
             self.done.emit(1)
         finally:
             self._proc = None
+            # The command may have installed apps or staged a deployment.
+            _invalidate_probe_caches()
 
 
-class DownloadMonitor(QThread):
+class DownloadMonitor(TrackedThread):
     """Polls /proc/net/dev every second to track download speed and progress."""
     # downloaded, total, speed_bps, eta_sec  (object keeps Python int — avoids 32-bit overflow)
     stats = Signal(object, object, object, object)
@@ -200,7 +256,7 @@ class DownloadMonitor(QThread):
             self.stats.emit(downloaded, self._total, avg_speed, eta_sec)
 
 
-class UpdateCheckWorker(QThread):
+class UpdateCheckWorker(TrackedThread):
     """Checks if a newer image is available in the registry without downloading anything.
     Compares the local booted digest against the remote manifest via skopeo inspect.
     Emits result(state, remote_ts) where state is 'available', 'uptodate', or 'error'."""
@@ -279,7 +335,7 @@ class UpdateCheckWorker(QThread):
 
 
 # ── Firmware check worker ──────────────────────────────────────────────────────
-class FirmwareCheckWorker(QThread):
+class FirmwareCheckWorker(TrackedThread):
     """Query fwupd for pending firmware updates (non-blocking background check).
 
     Emits result(count, summary) where count is:
@@ -307,7 +363,7 @@ class FirmwareCheckWorker(QThread):
 
 
 # ── Changelog worker ───────────────────────────────────────────────────────────
-class ChangelogWorker(QThread):
+class ChangelogWorker(TrackedThread):
     """Fetches OCI revision annotations for the booted and latest remote images so the
     Update page can show a precise GitHub compare link instead of a generic commits URL."""
     result = Signal(str, str)  # (booted_rev, remote_rev) — short git SHAs, may be empty
@@ -357,7 +413,7 @@ class HardwareProbe:
     action_cmd: list[str] | None = None
 
 
-class HardwareProbeWorker(QThread):
+class HardwareProbeWorker(TrackedThread):
     done = Signal(object)
     failed = Signal(str)
 
@@ -368,7 +424,7 @@ class HardwareProbeWorker(QThread):
             self.failed.emit(str(exc))
 
 
-class DataWorker(QThread):
+class DataWorker(TrackedThread):
     result = Signal(str, object)
     failed = Signal(str, str)
 
@@ -490,7 +546,32 @@ def _with_idle_inhibit(cmd: list[str], reason: str) -> list[str]:
     return [inhibit, "--what=idle:sleep", f"--why={reason}", "--mode=block", *cmd]
 
 
-def _bootc_status_text() -> str:
+# Short-lived cache for expensive read-only probes (bootc status, flatpak list).
+# Helpers like _current_branch/_has_staged_update each spawn `bootc status`
+# otherwise, and a single page refresh fans out into a dozen identical spawns.
+# Worker invalidates on completion, so post-operation refreshes stay accurate.
+_PROBE_CACHE_LOCK = threading.Lock()
+_PROBE_CACHE: dict[str, tuple[float, object]] = {}
+_BOOTC_CACHE_TTL = 5.0
+_FLATPAK_CACHE_TTL = 10.0
+
+
+def _invalidate_probe_caches() -> None:
+    with _PROBE_CACHE_LOCK:
+        _PROBE_CACHE.clear()
+
+
+def _probe_cached(key: str, ttl: float, fetch):
+    with _PROBE_CACHE_LOCK:
+        hit = _PROBE_CACHE.get(key)
+        if hit is not None and time.monotonic() - hit[0] < ttl:
+            return hit[1]
+        value = fetch()
+        _PROBE_CACHE[key] = (time.monotonic(), value)
+        return value
+
+
+def _fetch_bootc_status_text() -> str:
     for cmd in (["sudo", "-n", "bootc", "status"], ["bootc", "status"]):
         result = _run_command(cmd, timeout=10)
         if result is None or result.returncode != 0 or not result.stdout.strip():
@@ -499,7 +580,11 @@ def _bootc_status_text() -> str:
     return ""
 
 
-def _bootc_status_data() -> dict | None:
+def _bootc_status_text() -> str:
+    return _probe_cached("bootc-status-text", _BOOTC_CACHE_TTL, _fetch_bootc_status_text)
+
+
+def _fetch_bootc_status_data() -> dict | None:
     for cmd in (["sudo", "-n", "bootc", "status", "--json"], ["bootc", "status", "--json"]):
         result = _run_command(cmd, timeout=10)
         if result is None or result.returncode != 0 or not result.stdout.strip():
@@ -509,6 +594,10 @@ def _bootc_status_data() -> dict | None:
         except json.JSONDecodeError:
             continue
     return None
+
+
+def _bootc_status_data() -> dict | None:
+    return _probe_cached("bootc-status-data", _BOOTC_CACHE_TTL, _fetch_bootc_status_data)
 
 
 def _nested_get(data: object, path: tuple[str, ...]) -> object | None:
@@ -826,7 +915,22 @@ def _bootc_image_digest(section: str) -> tuple[str, str] | None:
     return None
 
 
+def _installed_flatpak_ids() -> frozenset | None:
+    """One `flatpak list` snapshot instead of a `flatpak info` spawn per app.
+    Returns None when the listing itself fails (flatpak missing/broken)."""
+    def fetch() -> frozenset | None:
+        result = _run_command(["flatpak", "list", "--app", "--columns=application"], timeout=10)
+        if result is None or result.returncode != 0:
+            return None
+        return frozenset(ln.strip() for ln in result.stdout.splitlines() if ln.strip())
+
+    return _probe_cached("flatpak-apps", _FLATPAK_CACHE_TTL, fetch)
+
+
 def _is_flatpak_installed(app_id: str) -> bool:
+    ids = _installed_flatpak_ids()
+    if ids is not None:
+        return app_id in ids
     result = _run_command(["flatpak", "info", app_id], timeout=8)
     return result is not None and result.returncode == 0
 
@@ -1308,8 +1412,13 @@ def _vulkan_state() -> tuple[str, str]:
     return "err", "No Vulkan render device detected."
 
 
-def _gaming_health_items() -> list[tuple[str, str, str]]:
-    """Small, fast checks aimed at PC gamers before they launch a title."""
+def _gaming_health_items(*, controllers: dict | None = None,
+                         windows_drives: list | None = None) -> list[tuple[str, str, str]]:
+    """Small, fast checks aimed at PC gamers before they launch a title.
+
+    controllers/windows_drives accept precomputed probe results so callers that
+    build several sections (the gaming dashboard) don't repeat the hardware scans.
+    """
     ge_ver = _ge_proton_version()
     cachy_ver = _compat_tool_version("proton-cachyos")
     vulkan_status, vulkan_summary = _vulkan_state()
@@ -1317,9 +1426,11 @@ def _gaming_health_items() -> list[tuple[str, str, str]]:
     steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
     heroic_ok = _is_flatpak_installed("com.heroicgameslauncher.hgl")
     lutris_ok = _is_flatpak_installed("net.lutris.Lutris")
-    controllers = _detect_controllers()
+    if controllers is None:
+        controllers = _detect_controllers()
     controller_count = len(controllers.get("usb_controllers", [])) + len(controllers.get("input_nodes", []))
-    windows_drives = _find_ntfs_drives()
+    if windows_drives is None:
+        windows_drives = _find_ntfs_drives()
     ntfs_count = sum(not d.get("is_bitlocker") for d in windows_drives)
     bitlocker_count = sum(bool(d.get("is_bitlocker")) for d in windows_drives)
     if bitlocker_count:
@@ -1346,16 +1457,19 @@ def _gaming_health_items() -> list[tuple[str, str, str]]:
     ]
 
 
-def _gaming_migration_checklist_items() -> list[tuple[str, str, str]]:
+def _gaming_migration_checklist_items(*, controllers: dict | None = None,
+                                      windows_drives: list | None = None,
+                                      saves: tuple | None = None) -> list[tuple[str, str, str]]:
     steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
     heroic_ok = _is_flatpak_installed("com.heroicgameslauncher.hgl")
     lutris_ok = _is_flatpak_installed("net.lutris.Lutris")
     discord_ok = _is_flatpak_installed("com.discordapp.Discord")
     obs_ok = _is_flatpak_installed("com.obsproject.Studio")
-    ludusavi_status, _, ludusavi_summary = _ludusavi_backup_summary()
-    controller_info = _detect_controllers()
+    ludusavi_status, _, ludusavi_summary = saves if saves is not None else _ludusavi_backup_summary()
+    controller_info = controllers if controllers is not None else _detect_controllers()
     controller_count = len(controller_info.get("usb_controllers", [])) + len(controller_info.get("input_nodes", []))
-    windows_drives = _find_ntfs_drives()
+    if windows_drives is None:
+        windows_drives = _find_ntfs_drives()
     ntfs_count = sum(not d.get("is_bitlocker") for d in windows_drives)
     bitlocker_count = sum(bool(d.get("is_bitlocker")) for d in windows_drives)
     if bitlocker_count:
@@ -1379,11 +1493,16 @@ def _gaming_migration_checklist_items() -> list[tuple[str, str, str]]:
 
 
 def _collect_gaming_dashboard() -> dict:
+    # Probe hardware and saves once; health and checklist share the results.
+    controllers = _detect_controllers()
+    windows_drives = _find_ntfs_drives()
+    saves = _ludusavi_backup_summary()
     return {
-        "health": _gaming_health_items(),
-        "checklist": _gaming_migration_checklist_items(),
+        "health": _gaming_health_items(controllers=controllers, windows_drives=windows_drives),
+        "checklist": _gaming_migration_checklist_items(
+            controllers=controllers, windows_drives=windows_drives, saves=saves),
         "streaming": _streaming_health_items(),
-        "saves": _ludusavi_backup_summary(),
+        "saves": saves,
         "games": _detect_installed_games(),
     }
 
@@ -1657,7 +1776,7 @@ def _save_protondb_cache(cache: dict[str, str]) -> None:
         pass
 
 
-class _ProtonDbBatchWorker(QThread):
+class _ProtonDbBatchWorker(TrackedThread):
     """Fetches ProtonDB tiers for a list of Steam appids, skipping already-cached ones."""
     tier_fetched = Signal(str, str)   # (appid, tier)
     finished_all = Signal(dict)       # full {appid: tier} map
@@ -1701,10 +1820,12 @@ def _streaming_health_items() -> list[tuple[str, str, str]]:
     v4l2_probe = _run_command(["modprobe", "-n", "v4l2loopback"], timeout=4)
     v4l2_ok = v4l2_probe is not None and v4l2_probe.returncode == 0
     mic_hint = "PipeWire ready; test mic in Discord/OBS." if pipewire_ok else "PipeWire tools not found."
+    obs_ok = _is_flatpak_installed("com.obsproject.Studio")
+    discord_ok = _is_flatpak_installed("com.discordapp.Discord")
 
     return [
-        ("ok" if _is_flatpak_installed("com.obsproject.Studio") else "warn", "OBS Studio", "Installed." if _is_flatpak_installed("com.obsproject.Studio") else "Install OBS for capture and streaming."),
-        ("ok" if _is_flatpak_installed("com.discordapp.Discord") else "warn", "Discord", "Installed." if _is_flatpak_installed("com.discordapp.Discord") else "Install Discord for voice and screen share testing."),
+        ("ok" if obs_ok else "warn", "OBS Studio", "Installed." if obs_ok else "Install OBS for capture and streaming."),
+        ("ok" if discord_ok else "warn", "Discord", "Installed." if discord_ok else "Install Discord for voice and screen share testing."),
         ("ok" if pipewire_ok else "warn", "PipeWire", mic_hint),
         ("ok" if obs_capture_ok else "warn", "Game capture", "obs-vkcapture runtime present." if obs_capture_ok else "obs-vkcapture runtime not detected."),
         ("ok" if v4l2_ok else "dim", "Virtual camera", "v4l2loopback available." if v4l2_ok else "Optional: v4l2loopback not available."),

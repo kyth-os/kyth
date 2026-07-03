@@ -7,7 +7,7 @@ from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
 from .core import (  # noqa: E501
-    Worker, _finish_worker, _is_flatpak_installed, _load_sync_config, _rclone_available, _rclone_list_remotes, _restyle, _save_sync_config,
+    TrackedThread, Worker, _finish_worker, _is_flatpak_installed, _load_sync_config, _rclone_available, _rclone_list_remotes, _restyle, _save_sync_config,
 )
 from .qt import (  # noqa: E501
     QApplication, QComboBox, QDesktopServices, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QTextEdit, QThread, QTimer, QUrl, QVBoxLayout, QWidget, Qt, Signal,
@@ -16,8 +16,9 @@ from .widgets import (  # noqa: E501
     Page, _make_card,
 )
 
-class SteamCopyWorker(QThread):
+class SteamCopyWorker(TrackedThread):
     """Copies a steamapps directory using rsync, streaming output line-by-line."""
+    BLOCKS_CLOSE = True
     line = Signal(str)
     done = Signal(int)
 
@@ -81,7 +82,7 @@ def _copy_text(text: str):
 
 
 # ── rclone OAuth authorization worker ────────────────────────────────────────
-class RcloneAuthorizeWorker(QThread):
+class RcloneAuthorizeWorker(TrackedThread):
     """Runs `rclone authorize <type>` in the background; emits the token JSON on success."""
     token_ready = Signal(str)
     failed = Signal(str)
@@ -144,8 +145,9 @@ class RcloneAuthorizeWorker(QThread):
 
 
 # ── rclone background sync worker ─────────────────────────────────────────────
-class RcloneSyncWorker(QThread):
+class RcloneSyncWorker(TrackedThread):
     """Runs `rclone sync remote: folder --progress` and streams output lines."""
+    BLOCKS_CLOSE = True
     line = Signal(str)
     done = Signal(int)
 

@@ -5,6 +5,9 @@ from datetime import datetime
 from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
+from .core import (  # noqa: E501
+    TrackedThread,
+)
 from .qt import (  # noqa: E501
     QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QThread, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )
@@ -93,7 +96,7 @@ def _compat_data_age_days() -> int | None:
         return None
 
 
-class _CompatRefreshWorker(QThread):
+class _CompatRefreshWorker(TrackedThread):
     """Fetch newer compatibility data from the repo and cache it per-user."""
     refreshed = Signal(str, list)   # (updated, list[CompatGame])
     unchanged = Signal()

@@ -142,6 +142,7 @@ class BranchesPage(Page):
         self._add(self._log_toggle)
 
         self._log = QTextEdit()
+        self._log.document().setMaximumBlockCount(5000)
         self._log.setReadOnly(True)
         self._log.setMinimumHeight(120)
         self._log.hide()

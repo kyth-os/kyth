@@ -5,7 +5,7 @@ from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
 from .core import (  # noqa: E501
-    _IS_LIVE, _bootc_image_digest, _command_stdout, _current_branch, _release_worker_when_finished, _restyle,
+    TrackedThread, _IS_LIVE, _bootc_image_digest, _command_stdout, _current_branch, _release_worker_when_finished, _restyle,
 )
 from .qt import (  # noqa: E501
     QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QThread, QUrl, Signal,
@@ -175,7 +175,7 @@ def _collect_system_info() -> str:
     return "\n".join(lines)
 
 
-class _GitHubIssueWorker(QThread):
+class _GitHubIssueWorker(TrackedThread):
     success = Signal(str)
     failed = Signal(str)
 
