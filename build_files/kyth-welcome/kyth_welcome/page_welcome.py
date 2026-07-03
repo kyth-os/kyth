@@ -130,7 +130,7 @@ class WelcomePage(Page):
         hero_text_col = QVBoxLayout()
         hero_text_col.setSpacing(4)
         
-        hero_title = QLabel("KYTHOS // ACTIVE")
+        hero_title = QLabel("KYTHOS WORKSTATION")
         hero_title.setObjectName("genz-hero-title")
         hero_text_col.addWidget(hero_title)
 
@@ -145,7 +145,7 @@ class WelcomePage(Page):
             status_pill.setText("RESTART REQUIRED")
             status_pill.setObjectName("glowing-pill-warn")
         else:
-            status_pill.setText("SYSTEMS NOMINAL")
+            status_pill.setText("SYSTEM UP-TO-DATE")
             status_pill.setObjectName("glowing-pill-ok")
         hero_layout.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
         self._add(hero_card)
@@ -274,7 +274,7 @@ class WelcomePage(Page):
             rec_btn_label = "Transfer Files"
             rec_target = "Move Files"
         else:
-            rec_text = "All systems nominal. Ready for configuration."
+            rec_text = "System is up-to-date. Ready for configuration."
             rec_btn_label = "Configure Games"
             rec_target = "Gaming"
 
