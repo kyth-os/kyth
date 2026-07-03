@@ -277,10 +277,10 @@ class HardwareCard(QFrame):
         "dim":  "hw-card-dim",
     }
     _BADGE_STYLE = {
-        "ok":   ("background: #1e2b24; color: #5fb88a; border: 1px solid #3f7a5c;",  "OK"),
-        "warn": ("background: #2e2417; color: #d6a35c; border: 1px solid #8a6534;",  "Warning"),
+        "ok":   ("background: #122e22; color: #34d399; border: 1px solid #10b981;",  "OK"),
+        "warn": ("background: #2a1f10; color: #fbbf24; border: 1px solid #f59e0b;",  "Warning"),
         "err":  ("background: #35262a; color: #ff99a4; border: 1px solid #5e3338;",  "Issue"),
-        "dim":  ("background: #2b2b2b; color: #a6a6a6; border: 1px solid #3a3a3a;",  "Info"),
+        "dim":  ("background: #1c2230; color: #8a8a8a; border: 1px solid #2e324c;",  "Info"),
     }
 
     def __init__(self, probe: HardwareProbe):

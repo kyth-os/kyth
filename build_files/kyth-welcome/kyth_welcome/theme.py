@@ -619,14 +619,14 @@ QLabel#home-section-copy {
 }
 
 QFrame#card-accent-ok {
-    background: #1e2b24;
-    border: 1px solid #3f7a5c;
+    background: #122e22;
+    border: 1px solid #10b981;
     border-radius: 10px;
 }
 
 QFrame#card-accent-warn {
-    background: #2e2417;
-    border: 1px solid #8a6534;
+    background: #2a1f10;
+    border: 1px solid #f59e0b;
     border-radius: 10px;
 }
 
@@ -1320,19 +1320,19 @@ QListView::item:selected {
 
 QLabel#status-ok,
 QLabel#task-status-ok {
-    background-color: #1e2b24;
-    border: 1px solid #3f7a5c;
+    background-color: #122e22;
+    border: 1px solid #10b981;
     border-radius: 6px;
-    color: #8fd1ab;
+    color: #34d399;
     padding: 4px 8px;
 }
 
 QLabel#status-warn,
 QLabel#task-status-warn {
-    background-color: #2e2417;
-    border: 1px solid #8a6534;
+    background-color: #2a1f10;
+    border: 1px solid #f59e0b;
     border-radius: 6px;
-    color: #e8c08a;
+    color: #fbbf24;
     padding: 4px 8px;
 }
 
@@ -1386,13 +1386,13 @@ QFrame#home-section-header {
 }
 
 QFrame#card-accent-ok {
-    background: #1e2b24;
-    border-color: #3f7a5c;
+    background: #122e22;
+    border-color: #10b981;
 }
 
 QFrame#card-accent-warn {
-    background: #2e2417;
-    border-color: #8a6534;
+    background: #2a1f10;
+    border-color: #f59e0b;
 }
 
 QFrame#stat-tile {
