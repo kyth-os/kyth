@@ -128,76 +128,390 @@ def _get_live_usb_disk() -> Optional[str]:
     return None
 
 
-def list_disks() -> list[dict]:
+def _safe_int(value, default: int = 0) -> int:
     try:
-        running_disk = _running_system_disk()
-        live_usb = _get_live_usb_disk()
-        out = subprocess.check_output(
-            ["lsblk", "--json", "--bytes", "--nodeps",
-             "--output", "NAME,SIZE,MODEL,TYPE,TRAN,ROTA,RM"],
-            text=True, stderr=subprocess.DEVNULL,
-        )
-        result = []
-        for d in json.loads(out).get("blockdevices", []):
-            size = int(d.get("size", 0))
-            name = d.get("name") or ""
-            tran = (d.get("tran") or "").lower()
-            disk_path = f"/dev/{name}"
-            if disk_path == live_usb:
-                continue
-            if (
-                d.get("type") == "disk"
-                and size > 0
-                and not name.startswith("zram")
-                and not bool(d.get("rm"))
-            ):
-                result.append({
-                    "name":  disk_path,
-                    "model": (d.get("model") or "Unknown Disk").strip(),
-                    "size":  _human_size(size),
-                    "bytes": size,
-                    "rota":  bool(d.get("rota")),
-                    "tran":  tran,
-                    "usb":   tran == "usb",
-                    "current": disk_path == running_disk,
-                })
-        return result
+        return int(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normal_device_path(name: str | None) -> str | None:
+    if not name:
+        return None
+    name = str(name).strip()
+    if not name:
+        return None
+    if not name.startswith("/dev/"):
+        name = f"/dev/{name}"
+    return os.path.realpath(name)
+
+
+def _lsblk_text(args: list[str], timeout: int = 5) -> str:
+    try:
+        return subprocess.check_output(["lsblk", *args], text=True, stderr=subprocess.DEVNULL, timeout=timeout).strip()
     except Exception:
-        return []
+        return ""
+
+
+def _device_type(dev: str | None) -> str:
+    dev = _normal_device_path(dev)
+    if not dev:
+        return ""
+    out = _lsblk_text(["-n", "-o", "TYPE", dev])
+    return out.splitlines()[0].strip() if out else ""
+
+
+def _parent_disk(dev: str | None) -> str | None:
+    dev = _normal_device_path(dev)
+    if not dev:
+        return None
+    dtype = _device_type(dev)
+    if dtype == "disk":
+        return dev
+    parent = _lsblk_text(["-n", "-o", "PKNAME", dev])
+    if parent:
+        return _normal_device_path(parent.splitlines()[0])
+    return None
+
+
+def _mount_sources(path: str, recursive: bool = False) -> set[str]:
+    sources: set[str] = set()
+    try:
+        cmd = ["findmnt"]
+        if recursive:
+            cmd.append("-R")
+        cmd.extend(["-n", "-o", "SOURCE", path])
+        out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL, timeout=5)
+    except Exception:
+        out = ""
+    for line in out.splitlines():
+        source = line.strip()
+        if source.startswith("/dev/"):
+            sources.add(os.path.realpath(source))
+    return sources
+
+
+def _protected_install_disks() -> set[str]:
+    protected: set[str] = set()
+    for dev in {_running_system_disk()}:
+        disk = _parent_disk(dev)
+        if disk:
+            protected.add(disk)
+    for mount in ("/", "/boot", "/boot/efi", "/sysroot", "/run/initramfs/live", "/run/initramfs/iso"):
+        for source in _mount_sources(mount):
+            disk = _parent_disk(source)
+            if disk:
+                protected.add(disk)
+    for source in _mount_sources("/run/initramfs", recursive=True):
+        disk = _parent_disk(source)
+        if disk:
+            protected.add(disk)
+    for source in _mount_sources("/run/media", recursive=True):
+        if _IS_LIVE_SESSION:
+            disk = _parent_disk(source)
+            if disk:
+                protected.add(disk)
+    return protected
+
+
+def _disk_path_is_safe(path: str) -> bool:
+    base = os.path.basename(path)
+    if base.startswith(("loop", "ram", "zram")):
+        return False
+    return path.startswith("/dev/")
+
+
+def list_disks():
+    protected = _protected_install_disks()
+    disks = []
+    try:
+        out = subprocess.check_output(
+            ["lsblk", "--json", "--bytes", "--paths", "--nodeps", "--output", "NAME,SIZE,MODEL,TYPE,TRAN,ROTA,RM"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        for d in json.loads(out).get("blockdevices", []):
+            if d.get("type") != "disk":
+                continue
+            name = _normal_device_path(d.get("name"))
+            if not name or not _disk_path_is_safe(name):
+                continue
+            size = _safe_int(d.get("size"))
+            if size <= 0:
+                continue
+            if name in protected:
+                continue
+            disks.append({
+                "name": name,
+                "size": _human_size(size),
+                "size_bytes": size,
+                "model": (d.get("model") or "Unknown drive").strip(),
+                "ssd": not bool(d.get("rota")),
+                "transport": d.get("tran") or "",
+                "removable": bool(d.get("rm")),
+                "current": False,
+            })
+    except Exception as exc:
+        print(f"disk scan failed: {exc}", file=sys.stderr)
+    return disks
+
 
 
 EFI_PART_GUID = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
 
 
-def list_partitions(disk: str) -> list[dict]:
-    """Return partitions on disk with metadata for alongside-install picker."""
+def _partition_mountpoints(child: dict) -> list[str]:
+    mounts = child.get("mountpoints")
+    if isinstance(mounts, list):
+        return [str(m) for m in mounts if m]
+    mount = child.get("mountpoint")
+    return [str(mount)] if mount else []
+
+
+def _is_active_mount(mounts: list[str]) -> bool:
+    return bool(mounts)
+
+
+def list_partitions(disk: str):
+    disk = _normal_device_path(disk)
+    if not disk:
+        return []
+    parts = []
     try:
         out = subprocess.check_output(
-            ["lsblk", "--json", "--bytes", "--paths",
-             "--output", "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT",
-             disk],
-            text=True, stderr=subprocess.DEVNULL,
+            ["lsblk", "--json", "--bytes", "--paths", "--output", "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS", disk],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
         )
-        result = []
-        for d in json.loads(out).get("blockdevices", []):
-            for child in d.get("children", []):
+        devices = json.loads(out).get("blockdevices", [])
+
+        def walk(items):
+            for child in items or []:
                 if child.get("type") == "part":
-                    size = int(child.get("size", 0))
+                    name = _normal_device_path(child.get("name"))
+                    size = _safe_int(child.get("size"))
+                    fstype = (child.get("fstype") or "").lower()
                     parttype = (child.get("parttype") or "").lower()
-                    fstype = child.get("fstype") or ""
-                    result.append({
-                        "name":       child["name"],
-                        "size":       _human_size(size),
-                        "bytes":      size,
-                        "fstype":     fstype,
-                        "parttype":   parttype,
-                        "label":      child.get("label") or "",
-                        "mountpoint": child.get("mountpoint") or "",
-                        "is_efi":     parttype == EFI_PART_GUID,
+                    mounts = _partition_mountpoints(child)
+                    is_efi = parttype == EFI_PART_GUID or (fstype == "vfat" and "/boot/efi" in mounts)
+                    current = _is_active_mount(mounts)
+                    alongside_candidate = bool(name and size > 0 and fstype == "btrfs" and not is_efi and not current)
+                    parts.append({
+                        "name": name,
+                        "size": _human_size(size),
+                        "size_bytes": size,
+                        "fstype": fstype,
+                        "label": child.get("label") or "",
+                        "parttype": parttype,
+                        "mountpoints": mounts,
+                        "efi": is_efi,
+                        "current": current,
+                        "alongside_candidate": alongside_candidate,
                     })
-        return result
+                walk(child.get("children"))
+
+        walk(devices)
+    except Exception as exc:
+        print(f"partition scan failed for {disk}: {exc}", file=sys.stderr)
+    return parts
+
+
+def _validate_install_target(config: dict) -> tuple[str, str | None]:
+    mode = str(config.get("install_mode") or "wipe").strip().lower()
+    disk = _normal_device_path(config.get("disk"))
+    if not disk:
+        raise RuntimeError("No target disk was selected.")
+
+    safe_disks = {d["name"]: d for d in list_disks()}
+    if disk not in safe_disks:
+        raise RuntimeError("The selected disk is not a safe install target. Re-scan disks and choose a non-live, non-mounted disk.")
+
+    if mode == "wipe":
+        return disk, None
+
+    if mode == "alongside":
+        target = _normal_device_path(config.get("target_partition"))
+        if not target:
+            raise RuntimeError("No target partition was selected for alongside installation.")
+        if _parent_disk(target) != disk:
+            raise RuntimeError("The selected partition does not belong to the selected disk.")
+        partitions = {p["name"]: p for p in list_partitions(disk)}
+        part = partitions.get(target)
+        if not part:
+            raise RuntimeError("The selected partition was not found during the final disk scan.")
+        if part.get("efi"):
+            raise RuntimeError("The EFI system partition cannot be used as the KythOS target partition.")
+        if part.get("current"):
+            raise RuntimeError("The selected partition is currently mounted by the live or running system.")
+        if (part.get("fstype") or "").lower() != "btrfs":
+            raise RuntimeError("Alongside installation requires an existing Btrfs target partition.")
+        if not find_efi_partition(disk):
+            raise RuntimeError("Alongside installation requires an EFI system partition on the selected disk.")
+        return disk, target
+
+    raise RuntimeError(f"Unsupported install mode: {mode}")
+
+
+def _partition_number(partition: str) -> int:
+    out = _lsblk_text(["-n", "-o", "PARTN", partition])
+    if not out:
+        raise RuntimeError(f"Could not determine partition number for {partition}.")
+    return _safe_int(out.splitlines()[0], 0)
+
+
+def _partition_size_bytes(partition: str) -> int:
+    out = _lsblk_text(["-b", "-n", "-o", "SIZE", partition])
+    size = _safe_int(out.splitlines()[0] if out else 0)
+    if size <= 0:
+        raise RuntimeError(f"Could not determine partition size for {partition}.")
+    return size
+
+
+def _partition_start_bytes(partition: str) -> int:
+    out = _lsblk_text(["-b", "-n", "-o", "START", partition])
+    start = _safe_int(out.splitlines()[0] if out else 0, -1)
+    if start < 0:
+        raise RuntimeError(f"Could not determine partition start for {partition}.")
+    return start
+
+
+def _block_size_bytes(device: str) -> int:
+    try:
+        out = subprocess.check_output(["blockdev", "--getss", device], text=True, stderr=subprocess.DEVNULL, timeout=5).strip()
+        return max(512, _safe_int(out, 512))
+    except Exception:
+        return 512
+
+
+def _partitions_after(disk: str, partition: str) -> list[dict]:
+    part_start = _partition_start_bytes(partition)
+    found = []
+    try:
+        out = subprocess.check_output(
+            ["lsblk", "--json", "--bytes", "--paths", "--output", "NAME,TYPE,START,SIZE", disk],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        stack = list(json.loads(out).get("blockdevices", []))
+        while stack:
+            item = stack.pop()
+            if item.get("type") == "part":
+                name = _normal_device_path(item.get("name"))
+                if name and name != partition and _safe_int(item.get("start"), -1) > part_start:
+                    found.append(item)
+            stack.extend(item.get("children") or [])
     except Exception:
         return []
+    return found
+
+
+def _settle_block_devices():
+    subprocess.run(_as_root(["partprobe"]), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+    subprocess.run(["udevadm", "settle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+
+
+def _latest_partition_on_disk(disk: str, before: set[str]) -> str | None:
+    after = {p["name"] for p in list_partitions(disk) if p.get("name")}
+    created = sorted(after - before)
+    return created[-1] if created else None
+
+
+def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
+    disk = _normal_device_path(config.get("disk"))
+    partition = _normal_device_path(config.get("resize_partition") or config.get("target_partition"))
+    shrink_gib = _safe_int(config.get("resize_gib") or config.get("shrink_gib") or 0)
+
+    if not disk:
+        raise RuntimeError("No target disk was selected.")
+    if not partition:
+        raise RuntimeError("No NTFS partition was selected to shrink.")
+    if shrink_gib < 32:
+        raise RuntimeError("NTFS shrink install requires at least 32 GiB for KythOS.")
+
+    safe_disks = {d["name"]: d for d in list_disks()}
+    if disk not in safe_disks:
+        raise RuntimeError("The selected disk is not a safe install target.")
+    if _parent_disk(partition) != disk:
+        raise RuntimeError("The selected NTFS partition does not belong to the selected disk.")
+    if _partitions_after(disk, partition):
+        raise RuntimeError("This NTFS partition is not the last partition on the disk. Shrinking it would not create contiguous space for KythOS.")
+
+    parts = {p["name"]: p for p in list_partitions(disk)}
+    part = parts.get(partition)
+    if not part:
+        raise RuntimeError("The selected NTFS partition was not found during the final disk scan.")
+    if part.get("efi") or part.get("current"):
+        raise RuntimeError("The selected partition is currently mounted or reserved and cannot be resized.")
+    if (part.get("fstype") or "").lower() not in ("ntfs", "ntfs3"):
+        raise RuntimeError("Only NTFS partitions can be resized by this installer path.")
+    if not find_efi_partition(disk):
+        raise RuntimeError("NTFS resize installation requires an EFI system partition on the selected disk.")
+
+    shrink_bytes = shrink_gib * 1024**3
+    current_size = _safe_int(part.get("size_bytes")) or _partition_size_bytes(partition)
+    remaining_size = current_size - shrink_bytes
+    if remaining_size < 64 * 1024**3:
+        raise RuntimeError("Refusing to leave the NTFS partition smaller than 64 GiB.")
+    return disk, partition, shrink_bytes
+
+
+def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
+    disk, partition, shrink_bytes = _validate_resize_ntfs_target(config)
+    missing = [cmd for cmd in ("ntfsresize", "parted", "partprobe", "udevadm", "mkfs.btrfs") if shutil.which(cmd) is None]
+    if missing:
+        raise RuntimeError(f"Required NTFS resize tools are missing from the live environment: {', '.join(missing)}")
+    current_size = _partition_size_bytes(partition)
+    new_ntfs_size = current_size - shrink_bytes
+    part_num = _partition_number(partition)
+    sector = _block_size_bytes(disk)
+    new_end = _partition_start_bytes(partition) + new_ntfs_size - sector
+    before = {p["name"] for p in list_partitions(disk) if p.get("name")}
+
+    log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
+    log("Checking NTFS resize safety...")
+    info = subprocess.run(["ntfsresize", "--info", partition], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+    if info.returncode != 0:
+        raise RuntimeError("NTFS partition is not clean enough to resize. Boot Windows, disable Fast Startup/hibernation, run chkdsk, and try again.")
+
+    size_arg = str(new_ntfs_size)
+    dry = subprocess.run(
+        ["ntfsresize", "--no-action", "--size", size_arg, partition],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=240,
+    )
+    if dry.returncode != 0:
+        raise RuntimeError("NTFS resize dry-run failed. Boot Windows, shrink the volume there, then return to the installer.")
+
+    log("Shrinking NTFS filesystem...")
+    subprocess.run(
+        _as_root(["ntfsresize", "--force", "--size", size_arg, partition]),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
+        timeout=1800,
+    )
+
+    log("Shrinking partition boundary...")
+    subprocess.run(_as_root(["parted", "-s", disk, "unit", "B", "resizepart", str(part_num), f"{new_end}B"]), check=True, timeout=120)
+    _settle_block_devices()
+
+    log("Creating KythOS Btrfs partition in freed space...")
+    subprocess.run(_as_root(["parted", "-s", disk, "mkpart", "KythOS", "btrfs", f"{new_end + sector}B", "100%"]), check=True, timeout=120)
+    _settle_block_devices()
+
+    created = _latest_partition_on_disk(disk, before)
+    if not created:
+        raise RuntimeError("The installer could not find the new KythOS partition after resizing.")
+    subprocess.run(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
+    log(f"Created target partition {created}")
+    return disk, created
+
 
 
 def find_efi_partition(disk: str) -> str:
@@ -805,6 +1119,22 @@ def _run_install() -> None:
         progress(pct_end)
 
     try:
+        if str(_state.get("install_mode") or "").strip().lower() == "resize_ntfs":
+            disk, target_partition = _prepare_ntfs_resize_target(_state, log)
+            _state["disk"] = disk
+            _state["target_partition"] = target_partition
+            _state["install_mode"] = "alongside"
+            config["disk"] = disk
+            config["target_partition"] = target_partition
+            config["install_mode"] = "alongside"
+        disk, target_partition = _validate_install_target(config)
+        config["disk"] = disk
+        _state["disk"] = disk
+        if target_partition:
+            config["target_partition"] = target_partition
+            _state["target_partition"] = target_partition
+        else:
+            _state.pop("target_partition", None)
         disk = _state["disk"]
         kernel = _state.get("kernel", "fedora")
         install_mode = _state.get("install_mode", "wipe")
@@ -1180,19 +1510,66 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
-    def do_POST(self) -> None:
-        if not self._require_same_origin_context():
-            return
+    def do_POST(self):
         if not self._require_auth():
             return
-        path = urlparse(self.path).path
-        if path == "/api/start":
-            length = int(self.headers.get("Content-Length", 0))
-            try:
-                body = json.loads(self.rfile.read(length)) if length else {}
-            except json.JSONDecodeError:
-                self.send_error(400, "Invalid JSON")
+        if not self._require_same_origin_context():
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length).decode() or "{}")
+        except Exception:
+            self.send_error(400, "Invalid JSON")
+            return
+
+        if self.path == "/api/start":
+            disk = body.get("disk", "")
+            disks = {d["name"]: d for d in list_disks()}
+            if disk not in disks:
+                self.send_error(400, "Invalid disk")
                 return
+
+            install_mode = body.get("install_mode", "wipe")
+            if install_mode not in ("wipe", "alongside", "resize_ntfs"):
+                install_mode = "wipe"
+
+            target_partition = ""
+            resize_partition = ""
+            resize_gib = 0
+            efi_partition = ""
+            if install_mode == "alongside":
+                target_partition = body.get("target_partition", "")
+                partitions = {p.get("name"): p for p in list_partitions(disk)}
+                if target_partition not in partitions:
+                    self.send_error(400, "Invalid target partition")
+                    return
+                efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
+            elif install_mode == "resize_ntfs":
+                resize_partition = body.get("resize_partition") or body.get("target_partition", "")
+                resize_gib = _safe_int(body.get("resize_gib") or body.get("shrink_gib") or 0)
+                partitions = {p.get("name"): p for p in list_partitions(disk)}
+                if resize_partition not in partitions or resize_gib < 32:
+                    self._json({"started": False, "message": "Invalid NTFS resize target."}, status=400)
+                    return
+                efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
+            elif disks[disk].get("current") and not _IS_LIVE_SESSION:
+                self._json({
+                    "started": False,
+                    "message": (
+                        "This is the disk running the current KythOS session.\n\n"
+                        "The running root filesystem cannot be unmounted, so reinstalling "
+                        "to this disk is only supported from the live ISO."
+                    ),
+                }, status=409)
+                return
+
+            password = body.get("password", "")
+            try:
+                password_hash = _hash_password(password)
+            except Exception as exc:
+                self._json({"started": False, "message": f"Could not hash password: {exc}"}, status=500)
+                return
+
             timezone = body.get("timezone", "UTC") or "UTC"
             if timezone not in set(list_timezones()):
                 timezone = "UTC"
@@ -1204,107 +1581,43 @@ class Handler(BaseHTTPRequestHandler):
             if not re.fullmatch(r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?", hostname):
                 self.send_error(400, "Invalid hostname")
                 return
-            disk = body.get("disk", "")
-            disks = {d["name"]: d for d in list_disks()}
-            if disk not in disks:
-                self.send_error(400, "Invalid disk")
-                return
-            if not body.get("confirm_backup") or not body.get("confirm_erase"):
-                self._json({
-                    "started": False,
-                    "message": "Please confirm that your files are backed up and that the selected target will be erased.",
-                }, status=409)
-                return
-            install_mode = body.get("install_mode", "wipe")
-            if install_mode not in ("wipe", "alongside"):
-                install_mode = "wipe"
+            kernel = body.get("kernel", "fedora") or "fedora"
+            mok_password = body.get("mok_password", "") or ""
 
-            target_partition = ""
-            efi_partition = ""
-            if install_mode == "alongside":
-                target_partition = body.get("target_partition", "")
-                partitions = {p["name"]: p for p in list_partitions(disk)}
-                if target_partition not in partitions:
-                    self.send_error(400, "Invalid target partition")
-                    return
-                if partitions[target_partition].get("is_efi"):
-                    self._json({"started": False, "message": "Cannot install to an EFI partition."}, status=409)
-                    return
-                if partitions[target_partition].get("mountpoint"):
-                    self._json({
-                        "started": False,
-                        "message": f"Target partition {target_partition} is currently mounted at "
-                                   f"{partitions[target_partition]['mountpoint']}. Unmount it first.",
-                    }, status=409)
-                    return
-                efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
-            else:
-                if disks[disk].get("current") and not _IS_LIVE_SESSION:
-                    self._json({
-                        "started": False,
-                        "message": (
-                            "This is the disk running the current KythOS session.\n\n"
-                            "The running root filesystem cannot be unmounted, so reinstalling "
-                            "onto this disk requires the KythOS live ISO.\n\n"
-                            "Boot from the live ISO to reinstall onto this disk. "
-                            "You can download it from the Repair page in kyth-welcome."
-                        ),
-                    }, status=409)
-                    return
-                if disks[disk].get("current") and not body.get("confirm_current"):
-                    self._json({
-                        "started": False,
-                        "message": "This appears to be the currently running system disk. Confirm reinstalling the current KythOS disk before continuing.",
-                    }, status=409)
-                    return
-
-            kernel = body.get("kernel", "fedora")
-            if kernel not in ("fedora", "cachy"):
-                kernel = "fedora"
-            password = body.pop("password", "")
-            if not password:
-                self.send_error(400, "Password is required")
-                return
-            try:
-                password_hash = _hash_password(password)
-            except (OSError, subprocess.SubprocessError, RuntimeError):
-                self.send_error(500, "Could not securely hash password")
-                return
-            finally:
-                del password
-            src_ref, _ = _install_images(kernel)
-            network_error = _network_preflight(src_ref)
-            if network_error:
-                self._json({"started": False, "message": network_error}, status=409)
-                return
             if not _install_lock.acquire(blocking=False):
-                self._json({"started": False, "message": "Install already in progress"}, status=409)
+                self._json({"started": False, "message": "An installation is already running."}, status=409)
                 return
             _state.update({
-                "disk":              disk,
-                "install_mode":      install_mode,
-                "target_partition":  target_partition,
-                "efi_partition":     efi_partition,
-                "hostname":          hostname,
-                "timezone":          timezone,
-                "username":          username,
-                "password_hash":     password_hash,
-                "kernel":            kernel,
+                "disk": disk,
+                "install_mode": install_mode,
+                "target_partition": target_partition,
+                "resize_partition": resize_partition,
+                "resize_gib": resize_gib,
+                "efi_partition": efi_partition,
+                "hostname": hostname,
+                "timezone": timezone,
+                "username": username,
+                "password_hash": password_hash,
+                "kernel": kernel,
+                "mok_password": mok_password,
             })
-            _state["mok_password"] = secrets.token_urlsafe(8)
-            with _events_lock:
-                _events.clear()
-            threading.Thread(target=_run_install, daemon=True).start()
-            self._json({"started": True})
-        elif path == "/api/reboot":
-            for cmd in (["plymouth", "--show-splash"], ["systemctl", "--no-block", "reboot"]):
+
+            def _worker():
                 try:
-                    subprocess.Popen(_as_root(cmd), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception:
-                    pass
+                    _run_install()
+                finally:
+                    _install_lock.release()
+
+            threading.Thread(target=_worker, daemon=True).start()
+            self._json({"started": True})
+            return
+
+        if self.path == "/api/reboot":
+            subprocess.Popen(_as_root(["systemctl", "reboot"]))
             self._json({"ok": True})
-        else:
-            self.send_error(404)
+            return
+
+        self.send_error(404)
 
     def _json(self, data: object, status: int = 200) -> None:
         body = json.dumps(data).encode()
@@ -1708,7 +2021,9 @@ label{display:block;color:var(--muted);font-size:12px;font-weight:750;text-trans
 </div><!-- #main -->
 
 <script>
-const S = { disk: null, install_mode: 'wipe', target_partition: null, hostname: 'kyth', timezone: 'UTC', username: '', password: '', kernel: 'fedora', isLive: true };
+const S = { disk: null, install_mode: 'wipe', target_partition: null,
+  resize_partition: null,
+  resize_gib: 64, hostname: 'kyth', timezone: 'UTC', username: '', password: '', kernel: 'fedora', isLive: true };
 let SESSION_TOKEN = 'SESSION_TOKEN_PLACEHOLDER';
 const STEPS = ['welcome','disk','kernel','config','review','install'];
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1808,68 +2123,98 @@ function selectMode(id) {
 let _partitions = [];
 function loadPartitions() {
   if (!S.disk) return;
-  document.getElementById('part-grid').innerHTML = '<div class="status-box status-info">Loading partitions…</div>';
+  document.getElementById('part-grid').innerHTML = '<div class="status-box status-info">Loading partitions...</div>';
   document.getElementById('part-warn').style.display = 'none';
   document.getElementById('efi-info').style.display = 'none';
-  S.target_partition = null;
-  apiFetch('/api/partitions?disk=' + encodeURIComponent(S.disk.name))
-    .then(r => r.json())
-    .then(parts => {
-      _partitions = parts;
-      const efi = parts.find(p => p.is_efi);
-      const grid = document.getElementById('part-grid');
-      if (!parts.length) {
-        grid.innerHTML = '<div class="status-box status-err">No partitions found. This disk may be unpartitioned — use Erase Full Disk mode instead.</div>';
-        return;
-      }
-      grid.innerHTML = parts.map((p, i) => {
-        const locked = p.is_efi || !!p.mountpoint;
-        const classes = ['part-card', locked ? 'part-locked' : ''].filter(Boolean).join(' ');
-        const badge = p.is_efi ? '<span class="efi-badge">EFI</span>' : '';
-        const reason = p.is_efi ? ' · EFI System' : p.mountpoint ? ` · mounted at ${esc(p.mountpoint)}` : '';
-        const detail = [p.fstype && esc(p.fstype), p.label && esc(p.label), reason].filter(Boolean).join(' · ') || 'unformatted';
-        const icon = p.is_efi ? '🔒' : p.fstype ? '📁' : '📄';
-        const onclick = locked ? '' : `onclick="selectPartition(${i})"`;
-        return `<div class="${classes}" id="pcard-${i}" ${onclick}>
-          <div class="disk-icon">${icon}</div>
-          <div class="part-info">
-            <div class="part-name">${esc(p.name)}${badge}</div>
-            <div class="part-detail">${detail}</div>
-          </div>
-          <div class="part-size">${esc(p.size)}</div>
+  apiFetch('/api/partitions?disk=' + encodeURIComponent(S.disk.name)).then(r=>r.json()).then(parts=>{
+    _partitions = parts;
+    const box = document.getElementById('part-grid');
+    if (!parts.length) {
+      box.innerHTML = '<div class="warn-box">No partitions were found on this disk.</div>';
+      updateDiskNext();
+      return;
+    }
+    const hasEfi = parts.some(p => p.efi);
+    document.getElementById('efi-info').style.display = hasEfi ? 'none' : 'block';
+    box.innerHTML = parts.map((p,i)=>{
+      const fs = (p.fstype || '').toLowerCase();
+      const isBtrfs = fs === 'btrfs' && !p.efi && !p.current;
+      const isNtfs = (fs === 'ntfs' || fs === 'ntfs3') && !p.efi && !p.current;
+      const selectedBtrfs = S.install_mode === 'alongside' && S.target_partition === p.name;
+      const selectedNtfs = S.install_mode === 'resize_ntfs' && S.resize_partition === p.name;
+      const badge = p.efi ? ' <span class="badge warn">EFI</span>' : (p.current ? ' <span class="badge warn">Mounted</span>' : '');
+      let action = '';
+      let klass = selectedBtrfs || selectedNtfs ? ' selected' : '';
+      if (isBtrfs) {
+        action = `<button class="secondary" type="button" onclick="selectPartition(${i})">Use partition</button>`;
+      } else if (isNtfs) {
+        const val = selectedNtfs ? S.resize_gib : 64;
+        action = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+          <input id="resize-size-${i}" type="number" min="32" step="1" value="${val}" oninput="setResizeSize(${i}, this.value)" style="width:92px">
+          <span style="font-size:12px;color:var(--muted)">GiB</span>
+          <button class="secondary" type="button" onclick="selectResizePartition(${i})">Shrink NTFS</button>
         </div>`;
-      }).join('');
-      if (efi) {
-        const el = document.getElementById('efi-info');
-        el.style.display = '';
-        el.textContent = `EFI partition detected: ${efi.name} — KythOS will add a boot entry here for dual-boot.`;
+      } else {
+        klass += ' locked';
+        action = '<span style="font-size:12px;color:var(--muted)">Not eligible</span>';
       }
-    })
-    .catch(() => {
-      document.getElementById('part-grid').innerHTML = '<div class="status-box status-err">Failed to load partitions.</div>';
-    });
+      return `<div class="part-card${klass}">
+        <div class="part-info">
+          <div class="part-name">${esc(p.name)}${badge}</div>
+          <div class="part-meta">${esc(p.size)} · ${esc(p.fstype || 'unknown')}${p.label ? ' · ' + esc(p.label) : ''}</div>
+        </div>
+        ${action}
+      </div>`;
+    }).join('');
+    updateDiskNext();
+  });
 }
 
-function selectPartition(idx) {
+function setResizeSize(idx, value) {
   const p = _partitions[idx];
-  if (!p || p.is_efi || p.mountpoint) return;
-  document.querySelectorAll('.part-card').forEach(c => c.classList.remove('selected'));
-  document.getElementById('pcard-' + idx).classList.add('selected');
-  S.target_partition = p;
-  const warn = document.getElementById('part-warn');
-  if (p.fstype && p.fstype !== 'swap') {
-    warn.style.display = 'block';
-    warn.textContent = `⚠ ${p.name} contains a ${p.fstype} filesystem${p.label ? ' ("' + p.label + '")' : ''}. It will be erased and replaced with KythOS.`;
-  } else {
-    warn.style.display = 'none';
-  }
+  if (!p) return;
+  const n = Math.max(0, parseInt(value || '0', 10));
+  if (S.resize_partition === p.name) S.resize_gib = n;
   updateDiskNext();
 }
 
-function updateDiskNext() {
-  const ok = !!S.disk && (S.install_mode === 'wipe' || (S.install_mode === 'alongside' && !!S.target_partition));
-  document.getElementById('disk-next').disabled = !ok;
+
+function selectPartition(idx) {
+  const p = _partitions[idx];
+  if (!p || p.efi || p.current || (p.fstype || '').toLowerCase() !== 'btrfs') return;
+  S.install_mode = 'alongside';
+  S.target_partition = p.name;
+  S.resize_partition = null;
+  document.getElementById('part-warn').style.display = 'none';
+  loadPartitions();
+  updateDiskNext();
 }
+
+function selectResizePartition(idx) {
+  const p = _partitions[idx];
+  const fs = (p && p.fstype || '').toLowerCase();
+  if (!p || p.efi || p.current || (fs !== 'ntfs' && fs !== 'ntfs3')) return;
+  const input = document.getElementById(`resize-size-${idx}`);
+  S.install_mode = 'resize_ntfs';
+  S.target_partition = null;
+  S.resize_partition = p.name;
+  S.resize_gib = Math.max(32, parseInt((input && input.value) || S.resize_gib || 64, 10));
+  const warn = document.getElementById('part-warn');
+  warn.textContent = 'The installer will shrink this NTFS partition, create a new Btrfs partition in the freed space, and install KythOS there. Back up important Windows files first.';
+  warn.style.display = 'block';
+  loadPartitions();
+  updateDiskNext();
+}
+
+
+function updateDiskNext() {
+  let ok = !!S.disk;
+  if (S.install_mode === 'alongside') ok = ok && !!S.target_partition;
+  if (S.install_mode === 'resize_ntfs') ok = ok && !!S.resize_partition && Number(S.resize_gib || 0) >= 32;
+  const btn = document.getElementById('next-disk');
+  if (btn) btn.disabled = !ok;
+}
+
 
 // ── Kernel ────────────────────────────────────────────────────────────────────
 const KERNELS = [
@@ -1967,9 +2312,10 @@ function buildReview() {
     ['Disk',          S.disk ? `${S.disk.name}  (${S.disk.size})` : '—'],
     ['Model',         S.disk ? S.disk.model : '—'],
     ['Install Mode',  modeLabels[S.install_mode] || S.install_mode],
+    ...(S.install_mode === 'resize_ntfs' ? [['Shrink NTFS', `${S.resize_partition} by ${S.resize_gib} GiB`]] : []),
   ];
   if (S.install_mode === 'alongside' && S.target_partition) {
-    rows.push(['Target Partition', `${S.target_partition.name}  (${S.target_partition.size})`]);
+    rows.push(['Target Partition', S.target_partition]);
     if (S.target_partition.fstype) rows.push(['Partition FS', S.target_partition.fstype]);
   }
   rows.push(
@@ -2039,7 +2385,7 @@ function startInstall() {
       timezone: S.timezone, username: S.username, password: S.password,
       kernel: S.kernel,
       install_mode:      S.install_mode,
-      target_partition:  S.target_partition ? S.target_partition.name : '',
+      target_partition:  S.target_partition || '',
       confirm_backup:    document.getElementById('confirm-backup').checked,
       confirm_erase:     document.getElementById('confirm-erase').checked,
       confirm_current:   document.getElementById('confirm-current').checked,

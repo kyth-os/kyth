@@ -4,6 +4,16 @@
 
 set -exo pipefail
 
+# Tools required by the live installer's NTFS shrink-and-install path.
+if command -v dnf5 >/dev/null 2>&1; then
+	dnf5 install -y ntfs-3g parted btrfs-progs
+	dnf5 clean all
+else
+	dnf install -y ntfs-3g parted btrfs-progs
+	dnf clean all
+fi
+
+
 SOURCE_TAG=${SOURCE_TAG:?}
 
 # bwrap tries to write /proc/sys/user/max_user_namespaces which is mounted as ro
