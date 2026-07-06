@@ -350,6 +350,15 @@ jobs:
         run: |
           docker buildx prune -f
           docker system prune -f
+          sudo mkdir -p /mnt/containers-storage /mnt/containers-runroot
+          sudo tee /etc/containers/storage.conf >/dev/null <<'EOF'
+          [storage]
+          driver = "overlay"
+          graphroot = "/mnt/containers-storage"
+          runroot = "/mnt/containers-runroot"
+          EOF
+          sudo podman system prune --all --force || true
+          df -h / /mnt
 
       - name: Rechunk final image
         id: rechunk
