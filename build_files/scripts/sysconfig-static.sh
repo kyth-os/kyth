@@ -647,9 +647,17 @@ cat >/etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'NMEOF'
 wifi.powersave = 2
 NMEOF
 
-# Prefer the last Wi-Fi profile that connected successfully. NetworkManager
-# already honors connection.autoconnect-priority; this dispatcher just keeps the
-# most recently proven Wi-Fi profile at the front of the autoconnect list.
+# Reconnect only to the last Wi-Fi network that connected successfully. Merely
+# raising autoconnect-priority is not enough: when the last network is out of
+# range NetworkManager silently activates the next known profile, and when
+# several known networks overlap it may still pick the wrong one — the user
+# then has to disconnect and reconnect by hand after every reboot. So on each
+# successful Wi-Fi activation this dispatcher makes that profile the *only*
+# autoconnect candidate and disables autoconnect on every other Wi-Fi profile.
+# Boot therefore either restores the last network or connects to nothing, in
+# which case kyth-network-fallback (below) shows the network picker at login.
+# Manually connecting to any network makes it the new remembered one — that is
+# also why the connected profile gets autoconnect forced back to "yes" here.
 mkdir -p /etc/NetworkManager/dispatcher.d
 cat >/etc/NetworkManager/dispatcher.d/90-kyth-prefer-last-wifi <<'NMDISPEOF'
 #!/usr/bin/env bash
@@ -672,10 +680,9 @@ case "${type}" in
     *) exit 0 ;;
 esac
 
-autoconnect="$(nmcli -g connection.autoconnect connection show "${uuid}" 2>/dev/null || true)"
-[[ "${autoconnect}" != "no" ]] || exit 0
-
-nmcli connection modify "${uuid}" connection.autoconnect-priority 100 >/dev/null 2>&1 || exit 0
+nmcli connection modify "${uuid}" \
+    connection.autoconnect yes \
+    connection.autoconnect-priority 100 >/dev/null 2>&1 || exit 0
 
 while IFS=: read -r other_uuid other_type; do
     [[ -n "${other_uuid}" && "${other_uuid}" != "${uuid}" ]] || continue
@@ -684,14 +691,75 @@ while IFS=: read -r other_uuid other_type; do
         *) continue ;;
     esac
 
-    priority="$(nmcli -g connection.autoconnect-priority connection show "${other_uuid}" 2>/dev/null || echo 0)"
-    [[ "${priority}" =~ ^-?[0-9]+$ ]] || priority=0
-    if (( priority >= 100 )); then
-        nmcli connection modify "${other_uuid}" connection.autoconnect-priority 90 >/dev/null 2>&1 || true
-    fi
+    autoconnect="$(nmcli -g connection.autoconnect connection show "${other_uuid}" 2>/dev/null || true)"
+    [[ "${autoconnect}" == "yes" ]] || continue
+    nmcli connection modify "${other_uuid}" connection.autoconnect no >/dev/null 2>&1 || true
 done < <(nmcli -t -f UUID,TYPE connection show 2>/dev/null || true)
 NMDISPEOF
 chmod 0755 /etc/NetworkManager/dispatcher.d/90-kyth-prefer-last-wifi
+
+# Login-time fallback for the dispatcher above: if the remembered network is
+# not in range the machine boots with no connection at all (other profiles
+# have autoconnect disabled on purpose). Rather than leave the user staring at
+# an offline desktop, wait for NetworkManager to settle and, if a Wi-Fi
+# adapter is present with the radio on but nothing connected, open the Plasma
+# network applet as a window so a network can be picked in one click.
+install -d -m 0755 /usr/libexec
+cat >/usr/libexec/kyth-network-fallback <<'NETFALLBACKEOF'
+#!/usr/bin/env bash
+set -u
+
+command -v nmcli >/dev/null 2>&1 || exit 0
+
+# Only meaningful on machines with a Wi-Fi adapter.
+nmcli -t -f TYPE device status 2>/dev/null | grep -qx wifi || exit 0
+
+# Give NetworkManager up to ~45 s to autoconnect; leave quietly the moment a
+# real (wired or wireless) connection is up. Loopback reports "connected
+# (externally)" so only exact ethernet/wifi "connected" states count.
+connected() {
+    nmcli -t -f TYPE,STATE device status 2>/dev/null |
+        awk -F: '($1 == "ethernet" || $1 == "wifi") && $2 == "connected" { found = 1 } END { exit !found }'
+}
+connecting() {
+    nmcli -t -f TYPE,STATE device status 2>/dev/null |
+        awk -F: '$2 ~ /^connecting/ { found = 1 } END { exit !found }'
+}
+
+for ((i = 0; i < 22; i++)); do
+    connected && exit 0
+    sleep 2
+done
+
+# An activation still in flight means NetworkManager has a candidate; do not
+# pop a picker over an attempt that is about to succeed.
+connecting && exit 0
+
+# Radio deliberately off (rfkill / user toggle / wired-wins dispatcher) — do
+# not nag.
+[[ "$(nmcli -g WIFI radio 2>/dev/null)" == "enabled" ]] || exit 0
+
+if command -v plasmawindowed >/dev/null 2>&1; then
+    exec plasmawindowed org.kde.plasma.networkmanagement
+elif command -v kcmshell6 >/dev/null 2>&1; then
+    exec kcmshell6 kcm_networkmanagement
+fi
+exit 0
+NETFALLBACKEOF
+chmod 0755 /usr/libexec/kyth-network-fallback
+
+mkdir -p /etc/xdg/autostart
+cat >/etc/xdg/autostart/kyth-network-fallback.desktop <<'NETFALLBACKDESKTOPEOF'
+[Desktop Entry]
+Type=Application
+Name=Kyth Network Fallback
+Comment=Opens the network picker when no remembered network is available
+Exec=/usr/libexec/kyth-network-fallback
+Icon=network-wireless
+OnlyShowIn=KDE;
+X-KDE-autostart-after=panel
+NoDisplay=true
+NETFALLBACKDESKTOPEOF
 
 # Wired wins: turn the Wi-Fi radio off while any wired connection is active,
 # and back on when the last one goes away. Without this NetworkManager
