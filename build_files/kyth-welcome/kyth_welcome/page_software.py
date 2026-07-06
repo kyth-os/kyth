@@ -2732,7 +2732,7 @@ class SoftwarePage(Page):
         self._ai_status_lbl.setObjectName("status-muted")
         self._ai_status_lbl.setText(f"Running {action}...")
         self._ai_log.clear()
-        command = ["kyth-ai-dev", action]
+        command = ["/usr/bin/kyth-ai-dev", action]
         self._ai_worker = Worker(command)
         self._ai_worker.line.connect(self._ai_on_line)
         self._ai_worker.done.connect(lambda code: self._ai_on_done(action, code))
@@ -2760,7 +2760,7 @@ class SoftwarePage(Page):
 
     def _ai_enter_box(self):
         try:
-            subprocess.Popen(["konsole", "-e", "kyth-ai-dev", "enter"])
+            subprocess.Popen(["konsole", "-e", "/usr/bin/kyth-ai-dev", "enter"])
         except Exception as exc:
             QMessageBox.warning(self, "AI Dev Environment", f"Could not open the AI dev shell:\n{exc}")
 

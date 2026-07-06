@@ -1282,6 +1282,10 @@ systemctl enable kyth-first-boot-message.service 2>/dev/null || true
 # On amd_pstate=active systems, EPP is the primary
 # frequency/voltage scaling knob — more direct than powerprofilesctl alone.
 # Valid values: performance, balance_performance, balance_power, power, default
+if [[ -f /ctx/kyth-ai-dev ]]; then
+  install -Dm0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
+fi
+
 install -m 0755 /dev/stdin /usr/bin/kyth-set-epp <<'EPPEOF'
 #!/bin/bash
 EPP="${1:-balance_performance}"

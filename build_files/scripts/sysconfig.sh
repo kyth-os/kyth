@@ -649,6 +649,10 @@ PROTONEOF
 # ── NVIDIA NVAPI: detect at login, not at build time ─────────────────────────
 # PROTON_ENABLE_NVAPI tells Proton to emulate NVIDIA's API layer.  It is only
 # meaningful on systems with NVIDIA hardware; setting it on AMD/Intel causes
+if [[ -f /ctx/kyth-ai-dev ]]; then
+  install -Dm0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
+fi
+
 # games that check for NVAPI to try NVIDIA-specific paths and silently fail.
 # A systemd user-environment generator runs at each login and outputs the
 # variable only when an NVIDIA GPU is detected via lspci.
