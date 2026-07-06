@@ -8,7 +8,7 @@ Requires=network-online.target kyth-flathub-setup.service
 # Sentinel is VERSIONED — bump the filename (v2 → v3, etc.) any time the app
 # list changes. The old sentinel survives OS upgrades (it lives in /var which
 # bootc never touches), so without versioning existing users never see new apps.
-# Current version: v6 (added Mission Center — Task Manager equivalent)
+# Current version: v9 (added WiVRn VR streaming)
 ConditionPathExists=!/var/lib/kyth/default-flatpaks-v9-done
 
 [Service]

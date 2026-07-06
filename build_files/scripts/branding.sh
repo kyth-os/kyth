@@ -2931,6 +2931,10 @@ systemctl enable kyth-local-bin-migrate.service 2>/dev/null || true
 systemctl enable kyth-topgrade-migrate.service 2>/dev/null || true
 systemctl enable kyth-duperemove.timer 2>/dev/null || true
 systemctl --global enable kyth-ge-proton-update.timer 2>/dev/null || true
+# Without wait-online, network-online.target is reached instantly and the
+# flatpak units below race DNS at boot and fail. Enabling it only delays
+# units ordered After=network-online.target, not the rest of boot.
+systemctl enable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl enable kyth-flathub-setup.service 2>/dev/null || true
 systemctl enable kyth-default-flatpaks.service 2>/dev/null || true
 systemctl enable kyth-hw-setup.service 2>/dev/null || true

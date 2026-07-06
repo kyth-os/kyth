@@ -272,6 +272,27 @@ cat >/etc/tmpfiles.d/kyth-dbus.conf <<'DBUSTMPFILEEOF'
 d /run/dbus 0755 root root -
 DBUSTMPFILEEOF
 
+# plocate ships /var/lib/plocate in its RPM, but bootc only materializes image
+# /var content on the initial install — systems that gained plocate via an
+# upgrade never get the directory and plocate-updatedb.service fails daily
+# with "/var/lib/plocate/: No such file or directory".
+cat >/etc/tmpfiles.d/kyth-plocate.conf <<'PLOCATETMPFILEEOF'
+d /var/lib/plocate 0755 root root -
+PLOCATETMPFILEEOF
+
+# ostree symlinks /home→var/home, /srv→var/srv, /root→var/roothome. systemd's
+# stock tmpfiles entries declare them as directories, so every boot logs
+# '"/home" already exists and is not a directory' (and the same for /srv and
+# /root) at error level. Replace those entries with symlink-creating ones
+# that match the ostree layout; L is a no-op when the symlink already exists.
+cat >/usr/lib/tmpfiles.d/home.conf <<'HOMETMPFILEEOF'
+# KythOS override — /home and /srv are ostree symlinks into /var.
+L /home - - - - var/home
+L /srv - - - - var/srv
+HOMETMPFILEEOF
+sed -i 's|^d- /root .*|L /root - - - - var/roothome|' /usr/lib/tmpfiles.d/provision.conf
+grep -q '^L /root ' /usr/lib/tmpfiles.d/provision.conf
+
 # bootc/ostree images keep several package-owned system accounts in
 # /usr/lib/passwd and /usr/lib/group, while booted installations and useradd
 # operate against the mutable /etc databases. If the installed /etc lacks those
