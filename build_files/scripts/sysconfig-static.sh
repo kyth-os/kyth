@@ -293,6 +293,39 @@ HOMETMPFILEEOF
 sed -i 's|^d- /root .*|L /root - - - - var/roothome|' /usr/lib/tmpfiles.d/provision.conf
 grep -q '^L /root ' /usr/lib/tmpfiles.d/provision.conf
 
+# ── Autostart log-noise guards ────────────────────────────────────────────────
+# nvidia-settings ships an unconditional autostart entry that fails every
+# login on AMD-only systems with "ERROR: NVIDIA driver is not loaded".
+# Run it only when the NVIDIA kernel module is actually loaded.
+install -d -m 0755 /usr/libexec
+cat >/usr/libexec/kyth-nvidia-settings-autostart <<'NVAUTOSTARTEOF'
+#!/usr/bin/bash
+[ -e /sys/module/nvidia ] || exit 0
+exec nvidia-settings -l
+NVAUTOSTARTEOF
+chmod 0755 /usr/libexec/kyth-nvidia-settings-autostart
+if [ -f /etc/xdg/autostart/nvidia-settings-user.desktop ]; then
+	sed -i 's|^Exec=.*|Exec=/usr/libexec/kyth-nvidia-settings-autostart|' /etc/xdg/autostart/nvidia-settings-user.desktop
+fi
+
+# input-remapper-control shells out to `systemd-analyze` without capturing
+# stderr, which logs "Bootup is not yet finished" at error priority on every
+# login that beats bootup completion. Wait for bootup quietly, then hand off
+# to the original autoload command.
+cat >/usr/libexec/kyth-input-remapper-autoload <<'IRAUTOSTARTEOF'
+#!/usr/bin/bash
+# Give up after ~10 min and hand off anyway — autoload has its own wait loop.
+for _ in $(seq 1 120); do
+	systemd-analyze time >/dev/null 2>&1 && break
+	sleep 5
+done
+input-remapper-control --command stop-all && exec input-remapper-control --command autoload
+IRAUTOSTARTEOF
+chmod 0755 /usr/libexec/kyth-input-remapper-autoload
+if [ -f /etc/xdg/autostart/input-remapper-autoload.desktop ]; then
+	sed -i 's|^Exec=.*|Exec=/usr/libexec/kyth-input-remapper-autoload|' /etc/xdg/autostart/input-remapper-autoload.desktop
+fi
+
 # bootc/ostree images keep several package-owned system accounts in
 # /usr/lib/passwd and /usr/lib/group, while booted installations and useradd
 # operate against the mutable /etc databases. If the installed /etc lacks those
