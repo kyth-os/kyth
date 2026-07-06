@@ -1,7 +1,5 @@
 name: Build container image
 on:
-  schedule:
-    - cron: '05 10 * * *'  # 10:05am UTC daily — rebuilds both :latest and :testing with fresh upstream packages
   push:
     branches:
       - main
