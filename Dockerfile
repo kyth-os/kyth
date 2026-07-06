@@ -94,6 +94,7 @@ RUN bash /tmp/plymouth-setup.sh && \
 # short and avoids users pulling a new sysconfig layer when only packages changed.
 RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx/sysconfig-static.sh \
     --mount=type=bind,source=build_files/kyth-vscode-wallet,target=/ctx/kyth-vscode-wallet \
+    --mount=type=bind,source=build_files/kyth-ai-dev,target=/ctx/kyth-ai-dev \
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig-static.sh
 
@@ -186,6 +187,7 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
 # disables runtime services after the upgrade has settled the unit file set.
 RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/sysconfig.sh \
     --mount=type=bind,source=build_files/kyth-vscode-wallet,target=/ctx/kyth-vscode-wallet \
+    --mount=type=bind,source=build_files/kyth-ai-dev,target=/ctx/kyth-ai-dev \
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig.sh
 

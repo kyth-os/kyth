@@ -2423,68 +2423,122 @@ class SoftwarePage(Page):
     # ── Tab 5: Developer ──────────────────────────────────────────────────────
 
     def _build_developer_tab(self) -> QWidget:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        page = QWidget()
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
 
-        card, card_layout = _make_card()
-        title = QLabel("KythOS Dev Environment")
-        title.setObjectName("card-title")
-        card_layout.addWidget(title)
-        body = QLabel(
-            "Sets up everything you need to work on KythOS:\n"
-            "  •  Uses the built-in VS Code and Headroom developer tools\n"
-            "  •  Creates a Fedora 44 distrobox named kyth-dev with the full\n"
-            "     build toolchain: git, just, podman, ShellCheck, ripgrep, and more\n\n"
-            "Your home directory is shared with the container — no files are moved."
+        title = QLabel("Developer Workstations")
+        title.setObjectName("section-title")
+        layout.addWidget(title)
+
+        dev_card, dev_layout = _make_card()
+        dev_title = QLabel("Kyth Dev Box")
+        dev_title.setObjectName("card-title")
+        dev_layout.addWidget(dev_title)
+
+        dev_desc = QLabel(
+            "Create a Fedora Toolbox-based Distrobox for mutable language tools while keeping the base OS atomic."
         )
-        body.setObjectName("card-copy")
-        body.setWordWrap(True)
-        card_layout.addWidget(body)
+        dev_desc.setWordWrap(True)
+        dev_layout.addWidget(dev_desc)
+
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
-        self._dev_setup_btn = QPushButton("Set Up Dev Environment")
+        self._dev_setup_btn = QPushButton("Setup")
         self._dev_setup_btn.setObjectName("primary")
-        self._dev_setup_btn.clicked.connect(self._dev_run_setup)
-        btn_row.addWidget(self._dev_setup_btn)
-        self._dev_enter_btn = QPushButton("Enter Dev Box")
-        self._dev_enter_btn.clicked.connect(self._dev_enter_dev_box)
-        btn_row.addWidget(self._dev_enter_btn)
-        btn_row.addStretch()
-        self._dev_delete_btn = QPushButton("Delete Dev Environment")
+        self._dev_enter_btn = QPushButton("Enter")
+        self._dev_delete_btn = QPushButton("Delete")
         self._dev_delete_btn.setObjectName("danger")
+        self._dev_log_toggle = QPushButton("Show Log")
+        self._dev_log_toggle.setCheckable(True)
+        self._dev_enter_btn.clicked.connect(self._dev_enter_dev_box)
+        self._dev_setup_btn.clicked.connect(self._dev_run_setup)
         self._dev_delete_btn.clicked.connect(self._dev_confirm_delete)
-        btn_row.addWidget(self._dev_delete_btn)
-        card_layout.addLayout(btn_row)
-        layout.addWidget(card)
+        for btn in (self._dev_setup_btn, self._dev_enter_btn, self._dev_delete_btn, self._dev_log_toggle):
+            btn_row.addWidget(btn)
+        btn_row.addStretch(1)
+        dev_layout.addLayout(btn_row)
 
-        self._dev_status_lbl = QLabel()
-        self._dev_status_lbl.setObjectName("subheading")
-        self._dev_status_lbl.hide()
-        layout.addWidget(self._dev_status_lbl)
+        self._dev_status_lbl = QLabel("Ready.")
+        self._dev_status_lbl.setObjectName("status-muted")
+        dev_layout.addWidget(self._dev_status_lbl)
 
         self._dev_progress = QProgressBar()
         self._dev_progress.setRange(0, 0)
         self._dev_progress.hide()
-        layout.addWidget(self._dev_progress)
-
-        self._dev_log_toggle = QPushButton("Show details")
-        self._dev_log_toggle.setCheckable(True)
-        self._dev_log_toggle.clicked.connect(
-            lambda checked: _set_log_panel(self._dev_log_toggle, self._dev_log, checked)
-        )
-        self._dev_log_toggle.hide()
-        layout.addWidget(self._dev_log_toggle)
+        dev_layout.addWidget(self._dev_progress)
 
         self._dev_log = QTextEdit()
         self._dev_log.setReadOnly(True)
-        self._dev_log.setMinimumHeight(160)
         self._dev_log.hide()
-        layout.addWidget(self._dev_log)
+        dev_layout.addWidget(self._dev_log)
+        self._dev_log_toggle.clicked.connect(
+            lambda checked: _set_log_panel(self._dev_log_toggle, self._dev_log, checked)
+        )
+        layout.addWidget(dev_card)
 
-        layout.addStretch()
-        return tab
+        ai_card, ai_layout = _make_card()
+        ai_title = QLabel("AI Dev Environment")
+        ai_title.setObjectName("card-title")
+        ai_layout.addWidget(ai_title)
+
+        ai_desc = QLabel(
+            "Create an opt-in local AI developer Distrobox with Ollama, llama.cpp, Python, Node, Rust, and GPU diagnostics. Models are never downloaded automatically."
+        )
+        ai_desc.setWordWrap(True)
+        ai_layout.addWidget(ai_desc)
+
+        ai_btn_row = QHBoxLayout()
+        ai_btn_row.setSpacing(10)
+        self._ai_setup_btn = QPushButton("Setup")
+        self._ai_setup_btn.setObjectName("primary")
+        self._ai_status_btn = QPushButton("Status")
+        self._ai_enter_btn = QPushButton("Enter")
+        self._ai_start_btn = QPushButton("Start")
+        self._ai_stop_btn = QPushButton("Stop")
+        self._ai_delete_btn = QPushButton("Delete")
+        self._ai_delete_btn.setObjectName("danger")
+        self._ai_log_toggle = QPushButton("Show Log")
+        self._ai_log_toggle.setCheckable(True)
+        self._ai_setup_btn.clicked.connect(lambda _=False: self._ai_run("setup"))
+        self._ai_status_btn.clicked.connect(lambda _=False: self._ai_run("status"))
+        self._ai_enter_btn.clicked.connect(self._ai_enter_box)
+        self._ai_start_btn.clicked.connect(lambda _=False: self._ai_run("start"))
+        self._ai_stop_btn.clicked.connect(lambda _=False: self._ai_run("stop"))
+        self._ai_delete_btn.clicked.connect(lambda _=False: self._ai_run("remove"))
+        for btn in (
+            self._ai_setup_btn,
+            self._ai_status_btn,
+            self._ai_enter_btn,
+            self._ai_start_btn,
+            self._ai_stop_btn,
+            self._ai_delete_btn,
+            self._ai_log_toggle,
+        ):
+            ai_btn_row.addWidget(btn)
+        ai_btn_row.addStretch(1)
+        ai_layout.addLayout(ai_btn_row)
+
+        self._ai_status_lbl = QLabel("Ready.")
+        self._ai_status_lbl.setObjectName("status-muted")
+        ai_layout.addWidget(self._ai_status_lbl)
+
+        self._ai_progress = QProgressBar()
+        self._ai_progress.setRange(0, 0)
+        self._ai_progress.hide()
+        ai_layout.addWidget(self._ai_progress)
+
+        self._ai_log = QTextEdit()
+        self._ai_log.setReadOnly(True)
+        self._ai_log.hide()
+        ai_layout.addWidget(self._ai_log)
+        self._ai_log_toggle.clicked.connect(
+            lambda checked: _set_log_panel(self._ai_log_toggle, self._ai_log, checked)
+        )
+        layout.addWidget(ai_card)
+        layout.addStretch(1)
+        return page
 
     def _dev_run_setup(self):
         if self._dev_worker and self._dev_worker.isRunning():
@@ -2644,6 +2698,71 @@ class SoftwarePage(Page):
             subprocess.Popen(["konsole", "-e", "distrobox", "enter", "kyth-dev"])
         else:
             subprocess.Popen([terminal, "--", "distrobox", "enter", "kyth-dev"])
+
+    def _ai_buttons(self):
+        return tuple(
+            btn for btn in (
+                getattr(self, "_ai_setup_btn", None),
+                getattr(self, "_ai_status_btn", None),
+                getattr(self, "_ai_enter_btn", None),
+                getattr(self, "_ai_start_btn", None),
+                getattr(self, "_ai_stop_btn", None),
+                getattr(self, "_ai_delete_btn", None),
+            ) if btn is not None
+        )
+
+    def _ai_set_running(self, running: bool):
+        for btn in self._ai_buttons():
+            btn.setEnabled(not running)
+        if hasattr(self, "_ai_progress"):
+            self._ai_progress.setVisible(running)
+
+    def _ai_run(self, action: str):
+        if getattr(self, "_ai_worker", None) and self._ai_worker.isRunning():
+            return
+        if action == "remove":
+            answer = QMessageBox.question(
+                self,
+                "Remove AI Dev Environment",
+                "Remove the kyth-ai-dev Distrobox? Downloaded models in your home directory will be kept.",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self._ai_set_running(True)
+        self._ai_status_lbl.setObjectName("status-muted")
+        self._ai_status_lbl.setText(f"Running {action}...")
+        self._ai_log.clear()
+        command = ["kyth-ai-dev", action]
+        self._ai_worker = Worker(command)
+        self._ai_worker.line.connect(self._ai_on_line)
+        self._ai_worker.done.connect(lambda code: self._ai_on_done(action, code))
+        self._ai_worker.start()
+
+    def _ai_on_line(self, line: str):
+        self._ai_log.append(line)
+
+    def _ai_on_done(self, action: str, code: int):
+        self._ai_set_running(False)
+        ok = code == 0
+        self._ai_status_lbl.setObjectName("status-ok" if ok else "status-err")
+        if ok:
+            labels = {
+                "setup": "AI developer environment is ready.",
+                "status": "Status check finished.",
+                "start": "Local model service started.",
+                "stop": "Local model service stopped.",
+                "remove": "AI developer environment removed; models were left in your home directory.",
+            }
+            self._ai_status_lbl.setText(labels.get(action, "Finished."))
+        else:
+            self._ai_status_lbl.setText(f"{action.capitalize()} failed (exit code {code}).")
+        _restyle(self._ai_status_lbl)
+
+    def _ai_enter_box(self):
+        try:
+            subprocess.Popen(["konsole", "-e", "kyth-ai-dev", "enter"])
+        except Exception as exc:
+            QMessageBox.warning(self, "AI Dev Environment", f"Could not open the AI dev shell:\n{exc}")
 
     # ── Tab 6: Security ───────────────────────────────────────────────────────
 

@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+if [[ -f /ctx/kyth-ai-dev ]]; then
+	install -Dm 0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
+fi
+
 # ── Locale filtering ──────────────────────────────────────────────────────────
 # Strip non-English locale data from every subsequent RPM install.
 # Saves 100–300 MB across the full package set with no functional loss

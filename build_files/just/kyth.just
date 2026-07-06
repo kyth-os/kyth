@@ -867,6 +867,42 @@ install-vscode:
 
 # ujust setup-waydroid microg     # with MicroG (open-source Play Services substitute)
 [group('KythOS')]
+ai-dev-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kyth-ai-dev status
+
+[group('KythOS')]
+ai-dev-setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kyth-ai-dev setup
+
+[group('KythOS')]
+ai-dev-enter:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kyth-ai-dev enter
+
+[group('KythOS')]
+ai-dev-start:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kyth-ai-dev start
+
+[group('KythOS')]
+ai-dev-stop:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kyth-ai-dev stop
+
+[group('KythOS')]
+ai-dev-remove:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kyth-ai-dev remove
+
+[group('KythOS')]
 setup-waydroid image="vanilla":
     #!/usr/bin/env bash
     set -euo pipefail
