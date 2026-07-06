@@ -27,6 +27,14 @@ on:
         description: Triggering GITHUB_SHA from the build workflow. May differ from source_sha for schedule-triggered builds of non-default branches.
         required: false
         type: string
+      original_event:
+        description: Event that triggered the build workflow. Schedule-triggered stable publishes keep the manual approval gate.
+        required: false
+        type: string
+      original_actor:
+        description: Actor who triggered the build workflow. Repository-owner pushes skip the stable approval gate.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -52,10 +60,14 @@ jobs:
           SOURCE_DIGEST: ${{ inputs.source_digest }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_GITHUB_SHA: ${{ inputs.source_github_sha }}
+          ORIGINAL_EVENT: ${{ inputs.original_event }}
+          ORIGINAL_ACTOR: ${{ inputs.original_actor }}
         run: |
           [[ "${SOURCE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ -z "${SOURCE_GITHUB_SHA}" || "${SOURCE_GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${ORIGINAL_EVENT}" =~ ^[a-z_]*$ ]]
+          [[ "${ORIGINAL_ACTOR}" =~ ^[A-Za-z0-9-]*$ ]]
 
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -407,7 +419,12 @@ jobs:
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || 'stable-release' }}
+    # Stable publishes from scheduled rebuilds or the repository owner (push
+    # or manual dispatch) go through the reviewer-free stable-release-auto
+    # environment; only builds triggered by anyone else keep the manual
+    # approval gate on stable-release. Manual dispatches carry no original_*
+    # inputs, so fall back to the actor who dispatched this run.
+    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || (inputs.original_event == 'schedule' || (inputs.original_actor || github.actor) == github.repository_owner) && 'stable-release-auto' || 'stable-release' }}
     permissions:
       actions: write
       contents: write

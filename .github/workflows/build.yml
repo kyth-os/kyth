@@ -1106,10 +1106,14 @@ jobs:
           SOURCE_DIGEST: ${{ steps.image.outputs.digest }}
           SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
           SOURCE_GITHUB_SHA: ${{ steps.image.outputs.github_sha }}
+          ORIGINAL_EVENT: ${{ github.event_name }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
         run: |
           gh workflow run supply-chain.yml \
             --ref "${MATRIX_BRANCH}" \
             --field "source_tag=${SOURCE_TAG}" \
             --field "source_digest=${SOURCE_DIGEST}" \
             --field "source_sha=${SOURCE_SHA}" \
-            --field "source_github_sha=${SOURCE_GITHUB_SHA}"
+            --field "source_github_sha=${SOURCE_GITHUB_SHA}" \
+            --field "original_event=${ORIGINAL_EVENT}" \
+            --field "original_actor=${ORIGINAL_ACTOR}"

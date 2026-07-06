@@ -273,7 +273,11 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || 'stable-release' }}
+    # As a reusable workflow this sees the caller's github context: stable
+    # publishes from scheduled rebuilds or the repository owner (push or
+    # manual dispatch) skip the approval gate via stable-release-auto; only
+    # builds triggered by anyone else keep the manual gate on stable-release.
+    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || (github.event_name == 'schedule' || github.actor == github.repository_owner) && 'stable-release-auto' || 'stable-release' }}
     permissions:
       actions: read
       contents: write
