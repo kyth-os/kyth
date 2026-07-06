@@ -400,6 +400,13 @@ sed -i 's/^livesys_session=.*/livesys_session="kde"/' /etc/sysconfig/livesys
 systemctl enable livesys.service livesys-late.service
 
 # ── Log straight into the live desktop ────────────────────────────────────────
+# Unlike the installed system (kyth-configure-session picks Wayland on bare
+# metal, X11 only inside VMs), the live session always forces X11 + llvmpipe
+# software rendering (see the plasma-workspace/env/live.sh skel above). Live
+# media boots on hardware that has never run this OS and whose GPU/DRM/KMS
+# support is unverified, so we trade rendering performance/theme fidelity for
+# a login that is guaranteed to come up everywhere. This is intentional, not
+# an oversight.
 mkdir -p /etc/sddm.conf.d
 cat >/etc/sddm.conf.d/20-kyth-live-autologin.conf <<'EOF'
 [Autologin]
