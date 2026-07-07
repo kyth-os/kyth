@@ -6,6 +6,38 @@ Serves a local web UI, launches Chromium in kiosk mode, and runs either:
   bootc install to-disk --wipe          (erase full disk)
   bootc install to-filesystem           (install alongside / dual-boot)
 then configures hostname / timezone / user.
+
+install_mode invariants:
+  "wipe"        — bootc install to-disk. Requires disk in list_disks() (safe-scan
+                  passed). Refused against the running system's disk unless
+                  _IS_LIVE_SESSION (booting the live ISO), since to-disk wipes
+                  whatever partition table is there, live root included.
+  "alongside"   — bootc install to-filesystem against an existing empty(-ish)
+                  Btrfs partition (list_partitions() alongside_candidate). Needs
+                  --acknowledge-destructive alongside --skip-fetch-check because
+                  the target mountpoint already has other partitions (e.g. a
+                  populated /boot/efi) mounted under it; kyth-partition-install.sh
+                  passes the same flag for the same reason. Verified in a
+                  container repro (loop-mounted GPT disk, foreign-OS ESP content,
+                  real bootc) that this flag does not change behavior on a clean
+                  target — it exists for parity with the shell fallback, not
+                  because it gates a real rejection in current bootc.
+  "resize_ntfs" — _validate_resize_ntfs_target() shrinks a trailing NTFS
+                  partition (must be the last partition on disk, see
+                  _partitions_after()), then _prepare_ntfs_resize_target()
+                  creates a Btrfs partition in the freed space and REWRITES
+                  install_mode to "alongside" (target_partition = new partition)
+                  before falling through to the alongside path above.
+  "free_space"  — _validate_free_space_target() re-scans list_free_space() right
+                  before committing (a stale UI selection must not partition
+                  space that's no longer free), then _prepare_free_space_target()
+                  creates a Btrfs partition in the chosen gap and likewise
+                  rewrites install_mode to "alongside" before falling through.
+                  Gaps below MIN_KYTHOS_BYTES (32 GiB) are never surfaced by
+                  list_free_space().
+
+Both resize_ntfs and free_space are thin front-ends onto the alongside path:
+whatever protections/flags apply to "alongside" (see above) apply to them too.
 """
 
 import glob
@@ -259,6 +291,8 @@ def list_disks():
 
 
 EFI_PART_GUID = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+MIN_KYTHOS_GIB = 32
+MIN_KYTHOS_BYTES = MIN_KYTHOS_GIB * 1024**3
 
 
 def _partition_mountpoints(child: dict) -> list[str]:
@@ -316,6 +350,60 @@ def list_partitions(disk: str):
     except Exception as exc:
         print(f"partition scan failed for {disk}: {exc}", file=sys.stderr)
     return parts
+
+
+def list_free_space(disk: str) -> list[dict]:
+    """Return unallocated gaps on disk (>= MIN_KYTHOS_BYTES) as start/end/size in bytes."""
+    disk = _normal_device_path(disk)
+    if not disk:
+        return []
+    try:
+        disk_size = _partition_size_bytes(disk)
+        sector = _block_size_bytes(disk)
+    except Exception as exc:
+        print(f"free space scan failed for {disk}: {exc}", file=sys.stderr)
+        return []
+
+    spans = []
+    for part in list_partitions(disk):
+        name = part.get("name")
+        size = _safe_int(part.get("size_bytes"))
+        if not name or size <= 0:
+            continue
+        try:
+            start = _partition_start_bytes(name)
+        except Exception:
+            continue
+        spans.append((start, start + size))
+    spans.sort()
+
+    # Leave the first MiB (GPT header + alignment) and the last MiB (GPT backup
+    # header/table) alone, matching the alignment parted itself uses.
+    reserve = 1024 * 1024
+    cursor = reserve
+    usable_end = disk_size - reserve
+
+    gaps = []
+    for start, end in spans:
+        if start > cursor:
+            gaps.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < usable_end:
+        gaps.append((cursor, usable_end))
+
+    regions = []
+    for start, end in gaps:
+        aligned_start = ((start + sector - 1) // sector) * sector
+        aligned_end = (end // sector) * sector
+        size_bytes = aligned_end - aligned_start
+        if size_bytes >= MIN_KYTHOS_BYTES:
+            regions.append({
+                "start_bytes": aligned_start,
+                "end_bytes": aligned_end,
+                "size_bytes": size_bytes,
+                "size": _human_size(size_bytes),
+            })
+    return regions
 
 
 def _validate_install_target(config: dict) -> tuple[str, str | None]:
@@ -428,8 +516,8 @@ def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
         raise RuntimeError("No target disk was selected.")
     if not partition:
         raise RuntimeError("No NTFS partition was selected to shrink.")
-    if shrink_gib < 32:
-        raise RuntimeError("NTFS shrink install requires at least 32 GiB for KythOS.")
+    if shrink_gib < MIN_KYTHOS_GIB:
+        raise RuntimeError(f"NTFS shrink install requires at least {MIN_KYTHOS_GIB} GiB for KythOS.")
 
     safe_disks = {d["name"]: d for d in list_disks()}
     if disk not in safe_disks:
@@ -513,11 +601,58 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     return disk, created
 
 
+def _validate_free_space_target(config: dict) -> tuple[str, int, int]:
+    disk = _normal_device_path(config.get("disk"))
+    start = _safe_int(config.get("free_region_start"), -1)
+    end = _safe_int(config.get("free_region_end"), -1)
+
+    if not disk:
+        raise RuntimeError("No target disk was selected.")
+    if start < 0 or end <= start:
+        raise RuntimeError("No free space region was selected for installation.")
+    if end - start < MIN_KYTHOS_BYTES:
+        raise RuntimeError(f"Free space install requires at least {MIN_KYTHOS_GIB} GiB for KythOS.")
+
+    safe_disks = {d["name"]: d for d in list_disks()}
+    if disk not in safe_disks:
+        raise RuntimeError("The selected disk is not a safe install target.")
+    if not find_efi_partition(disk):
+        raise RuntimeError("Free space installation requires an EFI system partition on the selected disk.")
+
+    # Re-scan right before committing so a stale UI selection can't partition
+    # space that's no longer actually free.
+    current_regions = list_free_space(disk)
+    if not any(r["start_bytes"] <= start and r["end_bytes"] >= end for r in current_regions):
+        raise RuntimeError("The selected free space is no longer available. Re-scan the disk and try again.")
+
+    return disk, start, end
+
+
+def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
+    disk, start, end = _validate_free_space_target(config)
+    missing = [cmd for cmd in ("parted", "partprobe", "udevadm", "mkfs.btrfs") if shutil.which(cmd) is None]
+    if missing:
+        raise RuntimeError(f"Required partitioning tools are missing from the live environment: {', '.join(missing)}")
+
+    before = {p["name"] for p in list_partitions(disk) if p.get("name")}
+
+    log(f"Creating KythOS Btrfs partition in {_human_size(end - start)} of free space...")
+    subprocess.run(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{start}B", f"{end}B"]), check=True, timeout=120)
+    _settle_block_devices()
+
+    created = _latest_partition_on_disk(disk, before)
+    if not created:
+        raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
+    subprocess.run(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
+    log(f"Created target partition {created}")
+    return disk, created
+
+
 
 def find_efi_partition(disk: str) -> str:
     """Return the EFI partition path on disk, or '' if not found."""
     for part in list_partitions(disk):
-        if part["is_efi"]:
+        if part["efi"]:
             return part["name"]
     for mount in ("/boot/efi", "/efi"):
         try:
@@ -1127,6 +1262,14 @@ def _run_install() -> None:
             config["disk"] = disk
             config["target_partition"] = target_partition
             config["install_mode"] = "alongside"
+        elif str(_state.get("install_mode") or "").strip().lower() == "free_space":
+            disk, target_partition = _prepare_free_space_target(_state, log)
+            _state["disk"] = disk
+            _state["target_partition"] = target_partition
+            _state["install_mode"] = "alongside"
+            config["disk"] = disk
+            config["target_partition"] = target_partition
+            config["install_mode"] = "alongside"
         disk, target_partition = _validate_install_target(config)
         config["disk"] = disk
         _state["disk"] = disk
@@ -1208,10 +1351,11 @@ def _run_install() -> None:
                 "--source-imgref", src_ref,
                 "--target-imgref", tgt_ref,
                 "--generic-image",
-                alongside_mount,
+                "--acknowledge-destructive",
             ]
             if SKIP_FETCH_CHECK:
-                install_cmd.insert(-1, "--skip-fetch-check")
+                install_cmd.append("--skip-fetch-check")
+            install_cmd.append(alongside_mount)
             run_cmd(install_cmd, 12, 90)
 
             root_part = target_part
@@ -1225,10 +1369,10 @@ def _run_install() -> None:
                 "--filesystem", "btrfs",
                 "--generic-image",
                 "--wipe",
-                disk,
             ]
             if SKIP_FETCH_CHECK:
-                install_cmd.insert(-2, "--skip-fetch-check")
+                install_cmd.append("--skip-fetch-check")
+            install_cmd.append(disk)
             run_cmd(install_cmd, 5, 90)
             root_part = get_root_partition(disk)
 
@@ -1494,6 +1638,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/partitions":
             disk = (qs.get("disk") or [""])[0]
             self._json(list_partitions(disk) if disk else [])
+        elif path == "/api/free-space":
+            disk = (qs.get("disk") or [""])[0]
+            self._json(list_free_space(disk) if disk else [])
         elif path == "/api/stream":
             self._sse()
         elif path == "/api/log":
@@ -1530,13 +1677,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             install_mode = body.get("install_mode", "wipe")
-            if install_mode not in ("wipe", "alongside", "resize_ntfs"):
+            if install_mode not in ("wipe", "alongside", "resize_ntfs", "free_space"):
                 install_mode = "wipe"
 
             target_partition = ""
             resize_partition = ""
             resize_gib = 0
             efi_partition = ""
+            free_region_start = 0
+            free_region_end = 0
             if install_mode == "alongside":
                 target_partition = body.get("target_partition", "")
                 partitions = {p.get("name"): p for p in list_partitions(disk)}
@@ -1550,6 +1699,16 @@ class Handler(BaseHTTPRequestHandler):
                 partitions = {p.get("name"): p for p in list_partitions(disk)}
                 if resize_partition not in partitions or resize_gib < 32:
                     self._json({"started": False, "message": "Invalid NTFS resize target."}, status=400)
+                    return
+                efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
+            elif install_mode == "free_space":
+                free_region_start = _safe_int(body.get("free_region_start"), -1)
+                free_region_end = _safe_int(body.get("free_region_end"), -1)
+                regions = list_free_space(disk)
+                if free_region_start < 0 or free_region_end <= free_region_start or not any(
+                    r["start_bytes"] <= free_region_start and r["end_bytes"] >= free_region_end for r in regions
+                ):
+                    self._json({"started": False, "message": "Invalid free space region."}, status=400)
                     return
                 efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
             elif disks[disk].get("current") and not _IS_LIVE_SESSION:
@@ -1593,6 +1752,8 @@ class Handler(BaseHTTPRequestHandler):
                 "target_partition": target_partition,
                 "resize_partition": resize_partition,
                 "resize_gib": resize_gib,
+                "free_region_start": free_region_start,
+                "free_region_end": free_region_end,
                 "efi_partition": efi_partition,
                 "hostname": hostname,
                 "timezone": timezone,
@@ -2023,7 +2184,9 @@ label{display:block;color:var(--muted);font-size:12px;font-weight:750;text-trans
 <script>
 const S = { disk: null, install_mode: 'wipe', target_partition: null,
   resize_partition: null,
-  resize_gib: 64, hostname: 'kyth', timezone: 'UTC', username: '', password: '', kernel: 'fedora', isLive: true };
+  resize_gib: 64,
+  free_region_start: 0, free_region_end: 0,
+  hostname: 'kyth', timezone: 'UTC', username: '', password: '', kernel: 'fedora', isLive: true };
 let SESSION_TOKEN = 'SESSION_TOKEN_PLACEHOLDER';
 const STEPS = ['welcome','disk','kernel','config','review','install'];
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -2094,6 +2257,7 @@ function selectDisk(idx) {
   document.getElementById('dcard-' + idx).classList.add('selected');
   S.disk = _disks[idx];
   S.install_mode = 'wipe'; S.target_partition = null;
+  S.resize_partition = null; S.free_region_start = 0; S.free_region_end = 0;
   document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
   document.getElementById('mcard-wipe').classList.add('selected');
   document.getElementById('partition-section').style.display = 'none';
@@ -2112,6 +2276,7 @@ function selectDisk(idx) {
 
 function selectMode(id) {
   S.install_mode = id; S.target_partition = null;
+  S.resize_partition = null; S.free_region_start = 0; S.free_region_end = 0;
   document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
   document.getElementById('mcard-' + id).classList.add('selected');
   const ps = document.getElementById('partition-section');
@@ -2121,22 +2286,27 @@ function selectMode(id) {
 }
 
 let _partitions = [];
+let _freeRegions = [];
 function loadPartitions() {
   if (!S.disk) return;
   document.getElementById('part-grid').innerHTML = '<div class="status-box status-info">Loading partitions...</div>';
   document.getElementById('part-warn').style.display = 'none';
   document.getElementById('efi-info').style.display = 'none';
-  apiFetch('/api/partitions?disk=' + encodeURIComponent(S.disk.name)).then(r=>r.json()).then(parts=>{
+  Promise.all([
+    apiFetch('/api/partitions?disk=' + encodeURIComponent(S.disk.name)).then(r=>r.json()),
+    apiFetch('/api/free-space?disk=' + encodeURIComponent(S.disk.name)).then(r=>r.json()),
+  ]).then(([parts, regions])=>{
     _partitions = parts;
+    _freeRegions = regions;
     const box = document.getElementById('part-grid');
-    if (!parts.length) {
+    if (!parts.length && !regions.length) {
       box.innerHTML = '<div class="warn-box">No partitions were found on this disk.</div>';
       updateDiskNext();
       return;
     }
     const hasEfi = parts.some(p => p.efi);
     document.getElementById('efi-info').style.display = hasEfi ? 'none' : 'block';
-    box.innerHTML = parts.map((p,i)=>{
+    const partCards = parts.map((p,i)=>{
       const fs = (p.fstype || '').toLowerCase();
       const isBtrfs = fs === 'btrfs' && !p.efi && !p.current;
       const isNtfs = (fs === 'ntfs' || fs === 'ntfs3') && !p.efi && !p.current;
@@ -2166,6 +2336,17 @@ function loadPartitions() {
         ${action}
       </div>`;
     }).join('');
+    const freeCards = regions.map((r,i)=>{
+      const selected = S.install_mode === 'free_space' && S.free_region_start === r.start_bytes && S.free_region_end === r.end_bytes;
+      return `<div class="part-card${selected ? ' selected' : ''}">
+        <div class="part-info">
+          <div class="part-name">Unallocated space <span class="badge">free</span></div>
+          <div class="part-meta">${esc(r.size)} available</div>
+        </div>
+        <button class="secondary" type="button" onclick="selectFreeRegion(${i})">Use free space</button>
+      </div>`;
+    }).join('');
+    box.innerHTML = partCards + freeCards;
     updateDiskNext();
   });
 }
@@ -2185,6 +2366,7 @@ function selectPartition(idx) {
   S.install_mode = 'alongside';
   S.target_partition = p.name;
   S.resize_partition = null;
+  S.free_region_start = 0; S.free_region_end = 0;
   document.getElementById('part-warn').style.display = 'none';
   loadPartitions();
   updateDiskNext();
@@ -2199,8 +2381,24 @@ function selectResizePartition(idx) {
   S.target_partition = null;
   S.resize_partition = p.name;
   S.resize_gib = Math.max(32, parseInt((input && input.value) || S.resize_gib || 64, 10));
+  S.free_region_start = 0; S.free_region_end = 0;
   const warn = document.getElementById('part-warn');
   warn.textContent = 'The installer will shrink this NTFS partition, create a new Btrfs partition in the freed space, and install KythOS there. Back up important Windows files first.';
+  warn.style.display = 'block';
+  loadPartitions();
+  updateDiskNext();
+}
+
+function selectFreeRegion(idx) {
+  const r = _freeRegions[idx];
+  if (!r) return;
+  S.install_mode = 'free_space';
+  S.target_partition = null;
+  S.resize_partition = null;
+  S.free_region_start = r.start_bytes;
+  S.free_region_end = r.end_bytes;
+  const warn = document.getElementById('part-warn');
+  warn.textContent = `The installer will create a new ${esc(r.size)} Btrfs partition in this unallocated space and install KythOS there.`;
   warn.style.display = 'block';
   loadPartitions();
   updateDiskNext();
@@ -2211,6 +2409,7 @@ function updateDiskNext() {
   let ok = !!S.disk;
   if (S.install_mode === 'alongside') ok = ok && !!S.target_partition;
   if (S.install_mode === 'resize_ntfs') ok = ok && !!S.resize_partition && Number(S.resize_gib || 0) >= 32;
+  if (S.install_mode === 'free_space') ok = ok && Number(S.free_region_end || 0) > Number(S.free_region_start || 0);
   const btn = document.getElementById('next-disk');
   if (btn) btn.disabled = !ok;
 }
@@ -2298,7 +2497,7 @@ function saveConfig() {
 // ── Review ────────────────────────────────────────────────────────────────────
 function buildReview() {
   const kernelLabels = { fedora: 'KythOS Standard', cachy: 'KythOS Performance' };
-  const modeLabels   = { wipe: 'Erase Full Disk', alongside: 'Install Alongside' };
+  const modeLabels   = { wipe: 'Erase Full Disk', alongside: 'Install Alongside', resize_ntfs: 'Shrink NTFS & Install', free_space: 'Use Free Space' };
   const targetImage = (() => {
     const base = S._sourceImage || '';
     if (!base || S.kernel === 'fedora') return base || '—';
@@ -2313,6 +2512,7 @@ function buildReview() {
     ['Model',         S.disk ? S.disk.model : '—'],
     ['Install Mode',  modeLabels[S.install_mode] || S.install_mode],
     ...(S.install_mode === 'resize_ntfs' ? [['Shrink NTFS', `${S.resize_partition} by ${S.resize_gib} GiB`]] : []),
+    ...(S.install_mode === 'free_space' ? [['Free Space Region', (_freeRegions.find(r => r.start_bytes === S.free_region_start && r.end_bytes === S.free_region_end) || {}).size || '—']] : []),
   ];
   if (S.install_mode === 'alongside' && S.target_partition) {
     rows.push(['Target Partition', S.target_partition]);
@@ -2340,17 +2540,22 @@ function buildReview() {
   document.getElementById('live-iso-required').style.display    = isCurrentNonLive ? 'block' : 'none';
 
   const partName = isAlongside && S.target_partition ? S.target_partition.name : '';
+  const isFreeSpace = S.install_mode === 'free_space';
   document.getElementById('review-wipe').textContent = isCurrentNonLive
     ? '⚠ This is the running system disk — see notice below.'
     : isAlongside
         ? `⚠ Partition ${partName || '?'} will be erased and replaced with KythOS.`
-        : (S.disk && S.disk.current
-            ? '⚠ Reinstall target: this appears to be the disk currently running KythOS. The selected disk will be erased and replaced.'
-            : '⚠ Everything on the selected disk will be permanently erased.');
+        : isFreeSpace
+            ? '⚠ A new partition will be created in the unallocated space and used for KythOS. Existing partitions are left untouched.'
+            : (S.disk && S.disk.current
+                ? '⚠ Reinstall target: this appears to be the disk currently running KythOS. The selected disk will be erased and replaced.'
+                : '⚠ Everything on the selected disk will be permanently erased.');
 
   document.getElementById('confirm-erase-label').textContent = isAlongside
     ? `I understand partition ${partName || '?'} will be erased and replaced with KythOS.`
-    : 'I understand KythOS will erase the selected disk and install a fresh system.';
+    : isFreeSpace
+        ? 'I understand KythOS will be installed into the selected unallocated space.'
+        : 'I understand KythOS will erase the selected disk and install a fresh system.';
 
   updateInstallReady();
 }
@@ -2386,6 +2591,10 @@ function startInstall() {
       kernel: S.kernel,
       install_mode:      S.install_mode,
       target_partition:  S.target_partition || '',
+      resize_partition:  S.resize_partition || '',
+      resize_gib:        S.resize_gib || 0,
+      free_region_start: S.free_region_start || 0,
+      free_region_end:   S.free_region_end || 0,
       confirm_backup:    document.getElementById('confirm-backup').checked,
       confirm_erase:     document.getElementById('confirm-erase').checked,
       confirm_current:   document.getElementById('confirm-current').checked,
