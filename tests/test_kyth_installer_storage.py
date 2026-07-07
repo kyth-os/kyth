@@ -21,6 +21,14 @@ class InstallerStorageTests(unittest.TestCase):
     def setUp(self):
         self.installer = load_installer()
 
+    def test_disk_continue_button_id_matches_updater(self):
+        html = self.installer._HTML
+
+        self.assertIn('id="disk-next"', html)
+        self.assertIn("document.getElementById('disk-next').disabled", html)
+        self.assertIn("const btn = document.getElementById('disk-next');", html)
+        self.assertNotIn("getElementById('next-disk')", html)
+
     def test_list_disks_excludes_protected_live_media(self):
         payload = {
             "blockdevices": [
