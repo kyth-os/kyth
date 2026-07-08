@@ -143,7 +143,17 @@ def ensure_system_accounts(deploy_root: str, log) -> None:
 
     sddm_home = root / "var/lib/sddm"
     subprocess.run(_as_root(["mkdir", "-p", str(sddm_home)]), check=True)
-    subprocess.run(_as_root(["chown", "sddm:sddm", str(sddm_home)]), check=False)
+    
+    # Read the actual sddm UID/GID from target's etc/passwd to support dynamic allocation
+    # and ensure numeric chown works even if the host environment has no sddm user/group.
+    sddm_uid, sddm_gid = "959", "959"
+    for line in _read_lines(etc / "passwd"):
+        if line.startswith("sddm:"):
+            parts = line.split(":")
+            if len(parts) >= 4:
+                sddm_uid, sddm_gid = parts[2], parts[3]
+                break
+    subprocess.run(_as_root(["chown", f"{sddm_uid}:{sddm_gid}", str(sddm_home)]), check=False)
     restorecon = shutil.which("restorecon")
     if restorecon:
         subprocess.run(

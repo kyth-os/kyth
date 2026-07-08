@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .config import LOG_FILE, SKIP_FETCH_CHECK
 from .disk import get_root_partition
-from .imagesrc import _friendly_network_error, _install_images
+from .imagesrc import _friendly_network_error, _install_images, _network_preflight
 from .plan import _prepare_install_plan, _validate_install_target
 from .system import (
     _as_root,
@@ -77,6 +77,8 @@ def _parse_size_bytes(size_str: str) -> int:
 
 
 def _run_install() -> None:
+    with _events_lock:
+        _events.clear()
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     LOG_FILE.write_text("")
     os.chmod(LOG_FILE, 0o600)
@@ -204,6 +206,11 @@ def _run_install() -> None:
         kernel = _state.get("kernel", "fedora")
         install_mode = install_plan.mode
         src_ref, tgt_ref = _install_images(kernel)
+        if not SKIP_FETCH_CHECK:
+            log("Running network preflight check...")
+            net_err = _network_preflight(src_ref)
+            if net_err:
+                raise RuntimeError(net_err)
         log(f"Mode         : {install_mode}")
         log(f"Kernel       : {kernel}")
         log(f"Source imgref: {src_ref}")
@@ -461,5 +468,4 @@ def _run_install() -> None:
         # try/finally (which holds the normal umount) is ever entered.
         if alongside_mount:
             subprocess.run(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
-        _install_lock.release()
 

@@ -223,6 +223,7 @@ function selectFreeRegion(idx) {
 
 function updateDiskNext() {
   let ok = !!S.disk;
+  if (ok && S.install_mode === 'wipe' && S.disk.current && !S.isLive) ok = false;
   if (S.install_mode === 'alongside') ok = ok && !!S.target_partition;
   if (S.install_mode === 'resize_ntfs') ok = ok && !!S.resize_partition && Number(S.resize_gib || 0) >= 32;
   if (S.install_mode === 'free_space') ok = ok && Number(S.free_region_end || 0) > Number(S.free_region_start || 0);

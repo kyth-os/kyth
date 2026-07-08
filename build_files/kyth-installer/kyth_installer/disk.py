@@ -400,8 +400,13 @@ def _partitions_after(disk: str, partition: str) -> list[dict]:
 
 def _latest_partition_on_disk(disk: str, before: set[str]) -> str | None:
     after = {p["name"] for p in list_partitions(disk) if p.get("name")}
-    created = sorted(after - before)
-    return created[-1] if created else None
+    created = list(after - before)
+    if not created:
+        return None
+    import re
+    def sort_key(name: str):
+        return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', name)]
+    return sorted(created, key=sort_key)[-1]
 
 
 def find_efi_partition(disk: str) -> str:

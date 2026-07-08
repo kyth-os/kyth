@@ -118,6 +118,17 @@ class InstallerStorageTests(unittest.TestCase):
 
         self.assertEqual(regions, [])
 
+    def test_latest_partition_on_disk_natural_sort(self):
+        before = {"/dev/sda1", "/dev/sda2"}
+        partitions = [
+            {"name": "/dev/sda1"},
+            {"name": "/dev/sda2"},
+            {"name": "/dev/sda10"},
+        ]
+        with patch.object(self.disk, "list_partitions", return_value=partitions):
+            result = self.disk._latest_partition_on_disk("/dev/sda", before)
+        self.assertEqual(result, "/dev/sda10")
+
 
 class InstallerPlanTests(unittest.TestCase):
     def setUp(self):
