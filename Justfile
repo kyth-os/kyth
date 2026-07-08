@@ -960,8 +960,9 @@ format:
 [group('Utility')]
 preview-installer:
     #!/usr/bin/env python3
-    exec(open("build_files/kyth-installer").read())
-    import threading, time
+    import sys, threading, time
+    sys.path.insert(0, "build_files/kyth-installer")
+    from kyth_installer.server import Handler, _Server
     server = _Server(("127.0.0.1", 7777), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print("Installer UI → http://127.0.0.1:7777  (Ctrl-C to stop)")

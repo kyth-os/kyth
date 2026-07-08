@@ -5,67 +5,13 @@ import subprocess  # nosec B404 # nosemgrep
 from .core import (  # noqa: E501
     Worker, _IS_LIVE, _cancel_worker, _command_stdout, _current_branch, _detect_nvidia, _find_ntfs_drives, _finish_worker, _ge_proton_version, _has_rollback_deployment, _is_flatpak_installed, _load_profile, _mark_wizard_done, _restyle, _running_threads, _save_profile,
 )
-from .page_branches import (  # noqa: E501
-    BranchesPage,
+from .page_compatibility import _COMPAT_GAMES
+from .page_gaming import GamingPage
+from .page_hardware import HardwarePage
+from .page_registry import (
+    PROBLEM_ROUTES, SEARCH_ALIASES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups,
 )
-from .page_cloud_storage import (  # noqa: E501
-    CloudStoragePage,
-)
-from .page_compatibility import (  # noqa: E501
-    CompatibilityPage, _COMPAT_GAMES,
-)
-from .page_controllers import (  # noqa: E501
-    ControllerPage,
-)
-from .page_diagnostics import (  # noqa: E501
-    DiagnosticsPage,
-)
-from .page_feedback import (  # noqa: E501
-    FeedbackPage,
-)
-from .page_gaming import (  # noqa: E501
-    GamingPage,
-)
-from .page_hardware import (  # noqa: E501
-    HardwarePage,
-)
-from .page_kernel import (  # noqa: E501
-    KernelPage,
-)
-from .page_network_shares import (  # noqa: E501
-    NetworkSharesPage,
-)
-from .page_nvidia import (  # noqa: E501
-    NvidiaPage,
-)
-from .page_performance import (  # noqa: E501
-    PerformancePage,
-)
-from .page_plasma_wayland import (  # noqa: E501
-    PlasmaWaylandPage,
-)
-from .page_repair import (  # noqa: E501
-    RepairPage,
-)
-from .page_software import (  # noqa: E501
-    SoftwarePage,
-)
-from .page_update import (  # noqa: E501
-    UpdatePage,
-)
-from .page_vpn import (  # noqa: E501
-    VpnPage,
-)
-from .page_welcome import (  # noqa: E501
-    WelcomePage,
-)
-from .page_windows_migration import (  # noqa: E501
-    WindowsMigrationPage,
-)
-from .page_work import (  # noqa: E501
-    WorkSetupPage,
-)
-from .page_registry import descriptors_from_nav_groups
+from .page_update import UpdatePage
 from .qt import (  # noqa: E501
     QCheckBox, QCompleter, QDesktopServices, QFrame, QHBoxLayout, QIcon, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QShortcut, QSize, QSizePolicy, QStackedWidget, QTextEdit, QTimer, QUrl, QVBoxLayout, QWidget, Qt,
 )
@@ -254,49 +200,12 @@ class MainWindow(QMainWindow):
         # section_label=None omits the header row (used for Home).
         page_specs: list[tuple[str, object]] = []
 
-        NavItem = tuple[tuple[str, ...], str, str, str, object]
-        nav_groups: list[tuple[str | None, list[NavItem]]] = [
-            (None, [
-                (("go-home",), "⌂", "Home", "Welcome", lambda: WelcomePage(navigate=self._navigate_to)),
-            ]),
-            ("Gaming", [
-                (("applications-games", "input-gaming"), "◉", "Gaming", "Gaming", GamingPage),
-                (("speedometer", "utilities-system-monitor"), "⚡", "Performance", "Performance", PerformancePage),
-                (("dialog-ok-apply", "checkmark"), "◎", "Compatibility", "Compatibility", CompatibilityPage),
-                (("input-gamepad", "input-gaming"), "⎮", "Controllers", "Controllers", ControllerPage),
-            ]),
-            ("Apps", [
-                (("plasmadiscover", "applications-all"), "⬡", "Discover Apps", "App Store", lambda: SoftwarePage(initial_tab=4, store_landing=True)),
-                (("x-office-document", "applications-office"), "▤", "Work Setup", "Work Setup", lambda: WorkSetupPage(navigate=self._navigate_to)),
-                (("document-import", "drive-harddisk"), "⇄", "Move Files", "Move Files", lambda: WindowsMigrationPage(navigate=self._navigate_to)),
-            ]),
-            ("System", [
-                (("system-software-update", "update-none"), "↻", "Updates", "Update", UpdatePage),
-                (("computer", "computer-laptop"), "◈", "Hardware", "Hardware", lambda: HardwarePage(navigate=self._navigate_to)),
-                (("preferences-desktop-display", "video-display"), "▣", "Plasma & Wayland", "Plasma Wayland", PlasmaWaylandPage),
-                (("view-statistics", "office-chart-bar"), "◌", "Health Report", "Diagnostics", DiagnosticsPage),
-                (("tools-wizard", "configure"), "⚠", "Repair", "Repair", lambda: RepairPage(navigate=self._navigate_to)),
-            ]),
-            ("Network & Internet", [
-                (("network-vpn", "security-high"), "⬡", "VPN", "VPN", VpnPage),
-                (("folder-network", "network-workgroup"), "◫", "Network Shares", "Network Shares", NetworkSharesPage),
-                (("folder-cloud", "weather-clouds"), "☁", "Cloud Storage", "Cloud Storage", CloudStoragePage),
-            ]),
-        ]
-
-        advanced_items: list[NavItem] = []
-        if _detect_nvidia():
-            advanced_items.append((("video-display", "preferences-desktop-display"), "▣", "NVIDIA Drivers", "NVIDIA", NvidiaPage))
-        advanced_items.append((("cpu", "applications-system"), "◌", "Kernel", "Kernel", KernelPage))
-        advanced_items.append((("vcs-branch", "system-switch-user"), "⎇", "Channels", "Channels", BranchesPage))
-        advanced_items.append((("mail-send", "mail-message"), "✉", "Feedback", "Feedback", FeedbackPage))
-        nav_groups.append(("Advanced", advanced_items))
-
+        nav_groups = get_nav_groups(self._navigate_to)
+        self._page_descriptors = descriptors_from_nav_groups(nav_groups, self._SEARCH_ITEMS)
+        self._descriptor_by_key = {descriptor.key: descriptor for descriptor in self._page_descriptors}
         self._nav_buttons: list[NavButton] = []
         self._nav_button_by_key: dict[str, NavButton] = {}
         self._nav_section_labels: dict[str, QLabel] = {}
-        self._page_descriptors = descriptors_from_nav_groups(nav_groups, self._SEARCH_ITEMS)
-        self._descriptor_by_key = {descriptor.key: descriptor for descriptor in self._page_descriptors}
         self._page_crumbs: list[tuple[str | None, str]] = []
         global_idx = 0
         for section_title, items in nav_groups:
@@ -359,73 +268,9 @@ class MainWindow(QMainWindow):
 
     # Familiar phrasings mapped to page keys, including migration/search terms
     # people bring with them from another desktop.
-    _SEARCH_ITEMS: dict[str, tuple[str, str, list[str]]] = {
-        "Welcome": ("Home", "Review this PC, pick a preset, and jump into common setup tasks.", ["Control Panel", "PC focus", "Switch focus", "Everyday preset", "Gaming preset"]),
-        "Gaming": ("Gaming", "Install launchers, scan game libraries, set up capture, saves, and migration helpers.", ["Steam", "Epic Games", "GOG", "Game Pass", "Xbox app", "Xbox Game Bar", "Game capture", "Instant replay", "Battle.net", "screen record", "record gameplay"]),
-        "Performance": ("Performance", "Tune power, scheduler, and desktop performance behavior.", ["Task Manager", "Mission Center", "Performance mode", "slow game", "low FPS", "stutter", "lag", "fan noise", "battery life"]),
-        "Compatibility": ("Compatibility", "Check known game support, ProtonDB context, and blocked anti-cheat titles.", ["Will my games work", "ProtonDB", "Anti-cheat", "game crashes", "game won't launch", "blocked game"]),
-        "Controllers": ("Controllers", "Pair, test, and troubleshoot game controllers.", ["Xbox controller", "PlayStation controller", "Game controllers", "controller not working", "gamepad not detected"]),
-        "App Store": ("App Store", "Install trusted Flatpaks, find familiar app alternatives, and manage AppImages.", ["Add or remove programs", "Apps & features", "Install apps", "Uninstall a program", "dnf install", "rpm", "exe installer", "downloaded installer", "Flathub"]),
-        "Work Setup": ("Work Setup", "Set up office, mail, focus sessions, and workday conveniences.", ["Microsoft 365", "Office", "Outlook", "Focus Assist", "Pomodoro"]),
-        "Move Files": ("Move Files", "Copy files, saves, libraries, bookmarks, fonts, and familiar workflows.", ["Transfer my files", "Copy game saves", "Snipping Tool", "PowerToys", "Phone Link", "Nearby Sharing", "LocalSend", "Remote Desktop", "WSL"]),
-        "Update": ("Updates", "Check OS updates, staged images, rollback status, and auto-update settings.", ["System Update", "Check for updates", "Restart pending", "rollback", "undo update", "bad update"]),
-        "Hardware": ("Hardware", "Inspect graphics, displays, audio, Bluetooth, storage, and device health.", ["Device Manager", "Display", "Sound", "Bluetooth", "no audio", "no sound", "speaker", "microphone", "wifi", "wi-fi", "printer", "monitor", "black screen"]),
-        "Plasma Wayland": ("Plasma & Wayland", "Check portals, PipeWire capture, display settings, shortcuts, and Plasma session repair.", ["Wayland", "Plasma", "KDE", "Screen sharing", "PipeWire", "Portal", "Display settings", "Window rules", "Shortcuts", "screenshot", "screen shot", "screen capture", "blank screen share", "black screen", "display scale"]),
-        "Diagnostics": ("Health Report", "Run system checks and gather useful troubleshooting information.", ["System information", "Diagnostics", "Security", "Sign-in options", "Fingerprint"]),
-        "Repair": ("Repair", "Rollback, restore, collect logs, and open recovery tools when something feels off.", ["Troubleshoot", "Recovery", "Reset this PC", "terminal", "PowerShell", "Quick Assist", "Remote Assistance", "broken", "restore layout", "missing apps", "remote help"]),
-        "VPN": ("VPN", "Connect to VPN profiles, including GlobalProtect-style work VPNs.", ["VPN settings", "GlobalProtect"]),
-        "Network Shares": ("Network Shares", "Map SMB/CIFS shares and configure mount behavior.", ["Map network drive", "Shared folders"]),
-        "Cloud Storage": ("Cloud Storage", "Set up cloud sync and copy workflows for common providers.", ["OneDrive", "Google Drive", "Dropbox"]),
-        "NVIDIA": ("NVIDIA Drivers", "Check NVIDIA driver state and open driver actions.", ["Graphics drivers", "GeForce"]),
-        "Kernel": ("Kernel", "Choose installed kernels and understand advanced boot options.", ["Advanced system settings"]),
-        "Channels": ("Channels", "Choose stable or testing update channels.", ["Update channel", "Insider program"]),
-        "Feedback": ("Feedback", "Send feedback or report a problem with optional system details.", ["Feedback Hub", "Send feedback"]),
-    }
-
-    _SEARCH_ALIASES: dict[str, list[str]] = {
-        "Welcome": ["Home", "Control Panel", "PC focus", "Everyday preset", "Gaming preset", "Switch focus"],
-        "Gaming": ["Gaming", "Game launchers", "Steam", "Epic Games", "GOG", "Game Pass", "Xbox app", "Xbox Game Bar", "Game Bar", "Game capture", "Instant replay", "Battle.net", "Screen record", "Record gameplay"],
-        "Performance": ["Performance", "Task Manager", "Mission Center", "Slow game", "Low FPS", "Stutter", "Lag", "Fan noise", "Battery life"],
-        "Compatibility": ["Game compatibility", "Will my games work", "ProtonDB", "Game crashes", "Game won't launch", "Blocked game"],
-        "Controllers": ["Controllers", "Game controllers", "Xbox controller", "PlayStation controller", "Controller not working", "Gamepad not detected"],
-        "App Store": ["Add or remove programs", "Apps & features", "Install apps", "App store", "Uninstall a program", "dnf install", "rpm", "exe installer", "downloaded installer", "Flathub"],
-        "Work Setup": ["Work setup", "Microsoft 365", "Office", "Outlook", "PST import", "Focus Assist", "Focus Sessions", "Do Not Disturb", "Pomodoro"],
-        "Move Files": ["Move files", "Transfer my files", "PC migration", "Copy game saves", "Keyboard shortcuts", "Snipping Tool", "familiar shortcuts", "PowerToys", "PowerToys Run", "FancyZones", "PowerRename", "Always on Top", "Keyboard Manager", "Awake", "Color Picker", "Copy my files", "Import bookmarks", "Bookmarks", "Phone Link", "Connected Devices", "KDE Connect", "Dynamic Lock", "trusted phone", "cross-device clipboard", "ring phone", "SMS", "send text", "text messages", "Nearby Sharing", "Nearby Share", "Quick Share", "LocalSend", "Send to device", "Wallpaper", "Desktop background", "system fonts", "Segoe UI", "Calibri", "Rescue game saves", "Sticky Notes", "Remote Desktop connections", "RDP", "mstsc", "KRDC", "WSL", "Linux subsystem", "Ubuntu", "Distrobox"],
-        "Update": ["Check for updates", "System Update", "Updates", "Rollback", "Undo update", "Bad update"],
-        "Hardware": ["Hardware", "Device Manager", "Display", "Sound", "Bluetooth", "No audio", "No sound", "Speaker", "Microphone", "Wi-Fi", "Wifi", "Printer", "Monitor", "Black screen"],
-        "Plasma Wayland": ["Plasma", "Wayland", "KDE", "Screen sharing", "PipeWire", "Portal", "xdg desktop portal", "Display settings", "VRR", "HDR", "Scale", "Shortcuts", "Window rules", "Restart Plasma", "Screenshot", "Screen shot", "Screen capture", "Blank screen share", "Display scale"],
-        "Diagnostics": ["Health report", "System information", "Diagnostics", "Sign-in options", "Fingerprint", "Passkeys", "Security"],
-        "Repair": ["Repair", "Troubleshoot", "Recovery", "Reset this PC", "Rollback", "terminal", "command prompt", "PowerShell", "Quick Assist", "Remote Assistance", "RustDesk", "Remote Desktop", "Restore my apps", "Restore my setup", "PC backup", "Restore layout", "Missing apps", "Remote help"],
-        "VPN": ["VPN", "VPN settings"],
-        "Network Shares": ["Network shares", "Map network drive", "Shared folders"],
-        "Cloud Storage": ["Cloud storage", "OneDrive", "Google Drive", "Dropbox"],
-        "NVIDIA": ["NVIDIA drivers", "Graphics drivers", "GeForce"],
-        "Kernel": ["Kernel", "Advanced system settings"],
-        "Channels": ["Update channel", "Channels", "Insider program"],
-        "Feedback": ["Feedback", "Send feedback", "Feedback Hub"],
-    }
-
-    _PROBLEM_ROUTES: dict[str, str] = {
-        "no audio": "Hardware",
-        "no sound": "Hardware",
-        "microphone not working": "Hardware",
-        "bluetooth not working": "Hardware",
-        "wifi not working": "Hardware",
-        "printer setup": "Hardware",
-        "slow game": "Performance",
-        "low fps": "Performance",
-        "game stutter": "Performance",
-        "game won't launch": "Compatibility",
-        "game crashes": "Compatibility",
-        "controller not working": "Controllers",
-        "black screen": "Plasma Wayland",
-        "screen sharing is blank": "Plasma Wayland",
-        "take screenshot": "Plasma Wayland",
-        "restore layout": "Repair",
-        "missing apps": "Repair",
-        "rollback update": "Update",
-        "undo update": "Update",
-    }
+    _SEARCH_ITEMS = SEARCH_ITEMS
+    _SEARCH_ALIASES = SEARCH_ALIASES
+    _PROBLEM_ROUTES = PROBLEM_ROUTES
 
     def _setup_search(self):
         self._search_key_by_entry: dict[str, str] = {}

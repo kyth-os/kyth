@@ -1,33 +1,32 @@
-import importlib.machinery
-import importlib.util
 import json
+import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
+INSTALLER_ROOT = ROOT / "build_files/kyth-installer"
+WEBUI_DIR = INSTALLER_ROOT / "kyth_installer/webui"
+if str(INSTALLER_ROOT) not in sys.path:
+    sys.path.insert(0, str(INSTALLER_ROOT))
+
+from kyth_installer import disk, plan  # noqa: E402
 
 
-def load_installer():
-    loader = importlib.machinery.SourceFileLoader("kyth_installer_test", str(ROOT / "build_files/kyth-installer"))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
+class InstallerWebuiTests(unittest.TestCase):
+    def test_disk_continue_button_id_matches_updater(self):
+        html = (WEBUI_DIR / "index.html").read_text()
+        js = (WEBUI_DIR / "app.js").read_text()
+
+        self.assertIn('id="disk-next"', html)
+        self.assertIn("document.getElementById('disk-next').disabled", js)
+        self.assertIn("const btn = document.getElementById('disk-next');", js)
+        self.assertNotIn("getElementById('next-disk')", js)
 
 
 class InstallerStorageTests(unittest.TestCase):
     def setUp(self):
-        self.installer = load_installer()
-
-    def test_disk_continue_button_id_matches_updater(self):
-        html = self.installer._HTML
-
-        self.assertIn('id="disk-next"', html)
-        self.assertIn("document.getElementById('disk-next').disabled", html)
-        self.assertIn("const btn = document.getElementById('disk-next');", html)
-        self.assertNotIn("getElementById('next-disk')", html)
+        self.disk = disk
 
     def test_list_disks_excludes_protected_live_media(self):
         payload = {
@@ -38,9 +37,9 @@ class InstallerStorageTests(unittest.TestCase):
             ]
         }
 
-        with patch.object(self.installer, "_protected_install_disks", return_value={"/dev/sdb"}), \
-             patch.object(self.installer.subprocess, "check_output", return_value=json.dumps(payload)):
-            disks = self.installer.list_disks()
+        with patch.object(self.disk, "_protected_install_disks", return_value={"/dev/sdb"}), \
+             patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+            disks = self.disk.list_disks()
 
         self.assertEqual([d["name"] for d in disks], ["/dev/nvme0n1"])
 
@@ -50,7 +49,7 @@ class InstallerStorageTests(unittest.TestCase):
                 "name": "/dev/nvme0n1",
                 "type": "disk",
                 "children": [
-                    {"name": "/dev/nvme0n1p1", "size": 1024**3, "type": "part", "fstype": "vfat", "parttype": self.installer.EFI_PART_GUID, "label": "EFI", "mountpoints": ["/boot/efi"]},
+                    {"name": "/dev/nvme0n1p1", "size": 1024**3, "type": "part", "fstype": "vfat", "parttype": self.disk.EFI_PART_GUID, "label": "EFI", "mountpoints": ["/boot/efi"]},
                     {"name": "/dev/nvme0n1p2", "size": 80 * 1024**3, "type": "part", "fstype": "btrfs", "parttype": "", "label": "shared", "mountpoints": []},
                     {"name": "/dev/nvme0n1p3", "size": 40 * 1024**3, "type": "part", "fstype": "ext4", "parttype": "", "label": "other", "mountpoints": []},
                     {"name": "/dev/nvme0n1p4", "size": 40 * 1024**3, "type": "part", "fstype": "btrfs", "parttype": "", "label": "active", "mountpoints": ["/home"]},
@@ -58,134 +57,28 @@ class InstallerStorageTests(unittest.TestCase):
             }]
         }
 
-        with patch.object(self.installer.subprocess, "check_output", return_value=json.dumps(payload)):
-            parts = {p["name"]: p for p in self.installer.list_partitions("/dev/nvme0n1")}
+        with patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+            parts = {p["name"]: p for p in self.disk.list_partitions("/dev/nvme0n1")}
 
         self.assertFalse(parts["/dev/nvme0n1p1"]["alongside_candidate"])
         self.assertTrue(parts["/dev/nvme0n1p2"]["alongside_candidate"])
         self.assertFalse(parts["/dev/nvme0n1p3"]["alongside_candidate"])
         self.assertFalse(parts["/dev/nvme0n1p4"]["alongside_candidate"])
 
-    def test_validate_alongside_requires_partition_on_selected_disk(self):
-        with patch.object(self.installer, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.installer, "list_partitions", return_value=[]), \
-             patch.object(self.installer, "_parent_disk", return_value="/dev/sda"):
-            with self.assertRaisesRegex(RuntimeError, "does not belong"):
-                self.installer._validate_install_target({
-                    "install_mode": "alongside",
-                    "disk": "/dev/nvme0n1",
-                    "target_partition": "/dev/sda2",
-                })
-
-    def test_validate_alongside_requires_btrfs_partition(self):
-        partition = {
-            "name": "/dev/nvme0n1p2",
-            "fstype": "ext4",
-            "efi": False,
-            "current": False,
-        }
-        with patch.object(self.installer, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.installer, "list_partitions", return_value=[partition]), \
-             patch.object(self.installer, "_parent_disk", return_value="/dev/nvme0n1"):
-            with self.assertRaisesRegex(RuntimeError, "Btrfs"):
-                self.installer._validate_install_target({
-                    "install_mode": "alongside",
-                    "disk": "/dev/nvme0n1",
-                    "target_partition": "/dev/nvme0n1p2",
-                })
-
-    def test_validate_wipe_rejects_disk_missing_from_safe_scan(self):
-        with patch.object(self.installer, "list_disks", return_value=[]):
-            with self.assertRaisesRegex(RuntimeError, "not a safe install target"):
-                self.installer._validate_install_target({"install_mode": "wipe", "disk": "/dev/sda"})
-
-    def test_validate_resize_ntfs_requires_last_partition(self):
-        partition = {
-            "name": "/dev/nvme0n1p3",
-            "fstype": "ntfs",
-            "efi": False,
-            "current": False,
-            "size_bytes": 256 * 1024**3,
-        }
-        with patch.object(self.installer, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.installer, "list_partitions", return_value=[partition]), \
-             patch.object(self.installer, "_parent_disk", return_value="/dev/nvme0n1"), \
-             patch.object(self.installer, "_partitions_after", return_value=[{"name": "/dev/nvme0n1p4"}]):
-            with self.assertRaisesRegex(RuntimeError, "not the last partition"):
-                self.installer._validate_resize_ntfs_target({
-                    "disk": "/dev/nvme0n1",
-                    "resize_partition": "/dev/nvme0n1p3",
-                    "resize_gib": 64,
-                })
-
-    def test_validate_resize_ntfs_accepts_clean_last_ntfs_partition(self):
-        partition = {
-            "name": "/dev/nvme0n1p3",
-            "fstype": "ntfs",
-            "efi": False,
-            "current": False,
-            "size_bytes": 256 * 1024**3,
-        }
-        with patch.object(self.installer, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.installer, "list_partitions", return_value=[partition]), \
-             patch.object(self.installer, "_parent_disk", return_value="/dev/nvme0n1"), \
-             patch.object(self.installer, "_partitions_after", return_value=[]), \
-             patch.object(self.installer, "find_efi_partition", return_value="/dev/nvme0n1p1"):
-            disk, target, shrink = self.installer._validate_resize_ntfs_target({
-                "disk": "/dev/nvme0n1",
-                "resize_partition": "/dev/nvme0n1p3",
-                "resize_gib": 64,
-            })
-
-        self.assertEqual(disk, "/dev/nvme0n1")
-        self.assertEqual(target, "/dev/nvme0n1p3")
-        self.assertEqual(shrink, 64 * 1024**3)
-
-    def test_prepare_ntfs_resize_creates_btrfs_target_after_dry_run(self):
-        partition = "/dev/nvme0n1p3"
-        commands = []
-
-        def fake_run(cmd, **kwargs):
-            commands.append(cmd)
-            return self.installer.subprocess.CompletedProcess(cmd, 0, stdout="ok")
-
-        with patch.object(self.installer.shutil, "which", return_value="/usr/bin/tool"), \
-             patch.object(self.installer, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
-             patch.object(self.installer, "_partition_size_bytes", return_value=256 * 1024**3), \
-             patch.object(self.installer, "_partition_number", return_value=3), \
-             patch.object(self.installer, "_partition_start_bytes", return_value=128 * 1024**3), \
-             patch.object(self.installer, "_block_size_bytes", return_value=512), \
-             patch.object(self.installer, "list_partitions", side_effect=[
-                 [{"name": "/dev/nvme0n1p1"}, {"name": partition}],
-                 [{"name": "/dev/nvme0n1p1"}, {"name": partition}, {"name": "/dev/nvme0n1p4"}],
-             ]), \
-             patch.object(self.installer, "_settle_block_devices"), \
-             patch.object(self.installer.subprocess, "run", side_effect=fake_run):
-            created = self.installer._prepare_ntfs_resize_target(
-                {"disk": "/dev/nvme0n1", "resize_partition": partition, "resize_gib": 64},
-                lambda _msg: None,
-            )
-
-        self.assertEqual(created, ("/dev/nvme0n1", "/dev/nvme0n1p4"))
-        flattened = [" ".join(cmd) for cmd in commands]
-        self.assertTrue(any("ntfsresize --no-action" in cmd for cmd in flattened))
-        self.assertTrue(any("parted -s /dev/nvme0n1 unit B resizepart 3" in cmd for cmd in flattened))
-        self.assertTrue(any("mkfs.btrfs -f -L KythOS /dev/nvme0n1p4" in cmd for cmd in flattened))
-
     def test_find_efi_partition_reads_efi_key_without_keyerror(self):
         partitions = [
             {"name": "/dev/nvme0n1p1", "efi": False},
             {"name": "/dev/nvme0n1p2", "efi": True},
         ]
-        with patch.object(self.installer, "list_partitions", return_value=partitions):
-            result = self.installer.find_efi_partition("/dev/nvme0n1")
+        with patch.object(self.disk, "list_partitions", return_value=partitions):
+            result = self.disk.find_efi_partition("/dev/nvme0n1")
 
         self.assertEqual(result, "/dev/nvme0n1p2")
 
     def test_find_efi_partition_falls_back_to_findmnt_when_no_partition_flagged(self):
-        with patch.object(self.installer, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "efi": False}]), \
-             patch.object(self.installer.subprocess, "check_output", return_value="/dev/nvme0n1p1\n"):
-            result = self.installer.find_efi_partition("/dev/nvme0n1")
+        with patch.object(self.disk, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "efi": False}]), \
+             patch.object(self.disk.subprocess, "check_output", return_value="/dev/nvme0n1p1\n"):
+            result = self.disk.find_efi_partition("/dev/nvme0n1")
 
         self.assertEqual(result, "/dev/nvme0n1p1")
 
@@ -203,87 +96,204 @@ class InstallerStorageTests(unittest.TestCase):
         ]
         starts = {"/dev/nvme0n1p1": p1_start, "/dev/nvme0n1p2": p2_start}
 
-        with patch.object(self.installer, "list_partitions", return_value=partitions), \
-             patch.object(self.installer, "_partition_size_bytes", return_value=disk_size), \
-             patch.object(self.installer, "_block_size_bytes", return_value=512), \
-             patch.object(self.installer, "_partition_start_bytes", side_effect=lambda name: starts[name]):
-            regions = self.installer.list_free_space("/dev/nvme0n1")
+        with patch.object(self.disk, "list_partitions", return_value=partitions), \
+             patch.object(self.disk, "_partition_size_bytes", return_value=disk_size), \
+             patch.object(self.disk, "_block_size_bytes", return_value=512), \
+             patch.object(self.disk, "_partition_start_bytes", side_effect=lambda name: starts[name]):
+            regions = self.disk.list_free_space("/dev/nvme0n1")
 
         self.assertEqual(len(regions), 1)
         region = regions[0]
         self.assertEqual(region["start_bytes"], p2_start + p2_size)
         self.assertEqual(region["end_bytes"], disk_size - reserve)
-        self.assertGreater(region["end_bytes"] - region["start_bytes"], self.installer.MIN_KYTHOS_BYTES)
+        self.assertGreater(region["end_bytes"] - region["start_bytes"], self.disk.MIN_KYTHOS_BYTES)
 
     def test_list_free_space_omits_gaps_smaller_than_minimum(self):
         partitions = [{"name": "/dev/nvme0n1p1", "size_bytes": 300 * 1024**2}]
-        with patch.object(self.installer, "list_partitions", return_value=partitions), \
-             patch.object(self.installer, "_partition_size_bytes", return_value=310 * 1024**2), \
-             patch.object(self.installer, "_block_size_bytes", return_value=512), \
-             patch.object(self.installer, "_partition_start_bytes", return_value=1024**2):
-            regions = self.installer.list_free_space("/dev/nvme0n1")
+        with patch.object(self.disk, "list_partitions", return_value=partitions), \
+             patch.object(self.disk, "_partition_size_bytes", return_value=310 * 1024**2), \
+             patch.object(self.disk, "_block_size_bytes", return_value=512), \
+             patch.object(self.disk, "_partition_start_bytes", return_value=1024**2):
+            regions = self.disk.list_free_space("/dev/nvme0n1")
 
         self.assertEqual(regions, [])
 
+
+class InstallerPlanTests(unittest.TestCase):
+    def setUp(self):
+        self.plan = plan
+
+    def test_validate_alongside_requires_partition_on_selected_disk(self):
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/sda"):
+            with self.assertRaisesRegex(RuntimeError, "does not belong"):
+                self.plan._validate_install_target({
+                    "install_mode": "alongside",
+                    "disk": "/dev/nvme0n1",
+                    "target_partition": "/dev/sda2",
+                })
+
+    def test_validate_alongside_requires_btrfs_partition(self):
+        partition = {
+            "name": "/dev/nvme0n1p2",
+            "fstype": "ext4",
+            "efi": False,
+            "current": False,
+        }
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"):
+            with self.assertRaisesRegex(RuntimeError, "Btrfs"):
+                self.plan._validate_install_target({
+                    "install_mode": "alongside",
+                    "disk": "/dev/nvme0n1",
+                    "target_partition": "/dev/nvme0n1p2",
+                })
+
+    def test_validate_wipe_rejects_disk_missing_from_safe_scan(self):
+        with patch.object(self.plan, "list_disks", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "not a safe install target"):
+                self.plan._validate_install_target({"install_mode": "wipe", "disk": "/dev/sda"})
+
+    def test_validate_resize_ntfs_requires_last_partition(self):
+        partition = {
+            "name": "/dev/nvme0n1p3",
+            "fstype": "ntfs",
+            "efi": False,
+            "current": False,
+            "size_bytes": 256 * 1024**3,
+        }
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_partitions_after", return_value=[{"name": "/dev/nvme0n1p4"}]):
+            with self.assertRaisesRegex(RuntimeError, "not the last partition"):
+                self.plan._validate_resize_ntfs_target({
+                    "disk": "/dev/nvme0n1",
+                    "resize_partition": "/dev/nvme0n1p3",
+                    "resize_gib": 64,
+                })
+
+    def test_validate_resize_ntfs_accepts_clean_last_ntfs_partition(self):
+        partition = {
+            "name": "/dev/nvme0n1p3",
+            "fstype": "ntfs",
+            "efi": False,
+            "current": False,
+            "size_bytes": 256 * 1024**3,
+        }
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_partitions_after", return_value=[]), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+            disk_name, target, shrink = self.plan._validate_resize_ntfs_target({
+                "disk": "/dev/nvme0n1",
+                "resize_partition": "/dev/nvme0n1p3",
+                "resize_gib": 64,
+            })
+
+        self.assertEqual(disk_name, "/dev/nvme0n1")
+        self.assertEqual(target, "/dev/nvme0n1p3")
+        self.assertEqual(shrink, 64 * 1024**3)
+
+    def test_prepare_ntfs_resize_creates_btrfs_target_after_dry_run(self):
+        partition = "/dev/nvme0n1p3"
+        commands = []
+
+        def fake_run(cmd, **kwargs):
+            commands.append(cmd)
+            return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
+
+        # _latest_partition_on_disk (defined in disk.py) calls disk's own
+        # list_partitions, not plan's imported reference, so both names must
+        # be patched to the same mock to share the before/after side_effect.
+        list_partitions_mock = MagicMock(side_effect=[
+            [{"name": "/dev/nvme0n1p1"}, {"name": partition}],
+            [{"name": "/dev/nvme0n1p1"}, {"name": partition}, {"name": "/dev/nvme0n1p4"}],
+        ])
+
+        with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
+             patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
+             patch.object(self.plan, "_partition_size_bytes", return_value=256 * 1024**3), \
+             patch.object(self.plan, "_partition_number", return_value=3), \
+             patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
+             patch.object(self.plan, "_block_size_bytes", return_value=512), \
+             patch.object(self.plan, "list_partitions", list_partitions_mock), \
+             patch.object(disk, "list_partitions", list_partitions_mock), \
+             patch.object(self.plan, "_settle_block_devices"), \
+             patch.object(self.plan.subprocess, "run", side_effect=fake_run):
+            created = self.plan._prepare_ntfs_resize_target(
+                {"disk": "/dev/nvme0n1", "resize_partition": partition, "resize_gib": 64},
+                lambda _msg: None,
+            )
+
+        self.assertEqual(created, ("/dev/nvme0n1", "/dev/nvme0n1p4"))
+        flattened = [" ".join(cmd) for cmd in commands]
+        self.assertTrue(any("ntfsresize --no-action" in cmd for cmd in flattened))
+        self.assertTrue(any("parted -s /dev/nvme0n1 unit B resizepart 3" in cmd for cmd in flattened))
+        self.assertTrue(any("mkfs.btrfs -f -L KythOS /dev/nvme0n1p4" in cmd for cmd in flattened))
+
     def test_validate_free_space_rejects_region_below_minimum_size(self):
-        with patch.object(self.installer, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.installer, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
             with self.assertRaisesRegex(RuntimeError, "at least"):
-                self.installer._validate_free_space_target({
+                self.plan._validate_free_space_target({
                     "disk": "/dev/nvme0n1",
                     "free_region_start": 1024**2,
                     "free_region_end": 16 * 1024**3,
                 })
 
     def test_validate_free_space_rejects_stale_region_no_longer_free(self):
-        with patch.object(self.installer, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.installer, "find_efi_partition", return_value="/dev/nvme0n1p1"), \
-             patch.object(self.installer, "list_free_space", return_value=[]):
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"), \
+             patch.object(self.plan, "list_free_space", return_value=[]):
             with self.assertRaisesRegex(RuntimeError, "no longer available"):
-                self.installer._validate_free_space_target({
+                self.plan._validate_free_space_target({
                     "disk": "/dev/nvme0n1",
                     "free_region_start": 40 * 1024**3,
                     "free_region_end": 80 * 1024**3,
                 })
 
     def test_validate_free_space_requires_efi_partition(self):
-        with patch.object(self.installer, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.installer, "find_efi_partition", return_value=""):
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "find_efi_partition", return_value=""):
             with self.assertRaisesRegex(RuntimeError, "EFI system partition"):
-                self.installer._validate_free_space_target({
+                self.plan._validate_free_space_target({
                     "disk": "/dev/nvme0n1",
                     "free_region_start": 40 * 1024**3,
                     "free_region_end": 80 * 1024**3,
                 })
 
     def test_validate_free_space_accepts_region_covered_by_current_scan(self):
-        with patch.object(self.installer, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.installer, "find_efi_partition", return_value="/dev/nvme0n1p1"), \
-             patch.object(self.installer, "list_free_space", return_value=[
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"), \
+             patch.object(self.plan, "list_free_space", return_value=[
                  {"start_bytes": 40 * 1024**3, "end_bytes": 100 * 1024**3},
              ]):
-            disk, start, end = self.installer._validate_free_space_target({
+            disk_name, start, end = self.plan._validate_free_space_target({
                 "disk": "/dev/nvme0n1",
                 "free_region_start": 40 * 1024**3,
                 "free_region_end": 80 * 1024**3,
             })
 
-        self.assertEqual((disk, start, end), ("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3))
+        self.assertEqual((disk_name, start, end), ("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3))
 
     def test_prepare_free_space_target_creates_btrfs_partition(self):
         commands = []
 
         def fake_run(cmd, **kwargs):
             commands.append(cmd)
-            return self.installer.subprocess.CompletedProcess(cmd, 0, stdout="ok")
+            return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
 
-        with patch.object(self.installer.shutil, "which", return_value="/usr/bin/tool"), \
-             patch.object(self.installer, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)), \
-             patch.object(self.installer, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1"}]), \
-             patch.object(self.installer, "_latest_partition_on_disk", return_value="/dev/nvme0n1p2"), \
-             patch.object(self.installer, "_settle_block_devices"), \
-             patch.object(self.installer.subprocess, "run", side_effect=fake_run):
-            created = self.installer._prepare_free_space_target(
+        with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
+             patch.object(self.plan, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)), \
+             patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1"}]), \
+             patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/nvme0n1p2"), \
+             patch.object(self.plan, "_settle_block_devices"), \
+             patch.object(self.plan.subprocess, "run", side_effect=fake_run):
+            created = self.plan._prepare_free_space_target(
                 {"disk": "/dev/nvme0n1", "free_region_start": 40 * 1024**3, "free_region_end": 80 * 1024**3},
                 lambda _msg: None,
             )
@@ -297,10 +307,10 @@ class InstallerStorageTests(unittest.TestCase):
         self.assertTrue(any("mkfs.btrfs -f -L KythOS /dev/nvme0n1p2" in cmd for cmd in flattened))
 
     def test_prepare_free_space_target_requires_partitioning_tools(self):
-        with patch.object(self.installer.shutil, "which", return_value=None), \
-             patch.object(self.installer, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)):
+        with patch.object(self.plan.shutil, "which", return_value=None), \
+             patch.object(self.plan, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)):
             with self.assertRaisesRegex(RuntimeError, "Required partitioning tools"):
-                self.installer._prepare_free_space_target(
+                self.plan._prepare_free_space_target(
                     {"disk": "/dev/nvme0n1", "free_region_start": 40 * 1024**3, "free_region_end": 80 * 1024**3},
                     lambda _msg: None,
                 )

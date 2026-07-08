@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KythOS Installer</title>
+<link rel="stylesheet" href="style.css">
+
+</head>
+<body>
+
+<nav id="sidebar">
+  <div class="logo">KythOS</div>
+  <div class="steps" id="steps">
+    <div class="step" data-step="welcome"><div class="step-num">1</div><div class="step-label">Welcome</div></div>
+    <div class="step" data-step="disk">   <div class="step-num">2</div><div class="step-label">Disk</div></div>
+    <div class="step" data-step="kernel"> <div class="step-num">3</div><div class="step-label">Kernel</div></div>
+    <div class="step" data-step="config"> <div class="step-num">4</div><div class="step-label">Configure</div></div>
+    <div class="step" data-step="review"> <div class="step-num">5</div><div class="step-label">Review</div></div>
+    <div class="step" data-step="install"><div class="step-num">6</div><div class="step-label">Install</div></div>
+  </div>
+  <div class="sidebar-footer">kyth installer</div>
+</nav>
+
+<div id="main">
+
+  <!-- Welcome -->
+  <div class="page active" id="page-welcome">
+    <div class="card">
+      <div class="card-title">Welcome to KythOS</div>
+      <div class="card-sub">Immutable gaming &amp; development desktop — KythOS</div>
+      <hr class="divider">
+      <p style="color:var(--muted);line-height:1.8">
+        This installer will guide you through installing KythOS on your computer.<br><br>
+        <span style="color:var(--amber)">A network connection is required to install KythOS.</span><br>
+        Connect using the network icon in the bottom-right panel before clicking Start Install. Your disk, account, timezone, and kernel selections will remain if you need to reconnect.<br><br>
+        <span style="color:var(--text)">What happens:</span><br>
+        &nbsp; 1. Select a target disk<br>
+        &nbsp; 2. Choose install mode — erase full disk or install alongside existing OS<br>
+        &nbsp; 3. Choose your kernel<br>
+        &nbsp; 4. Set hostname, timezone, and user account<br>
+        &nbsp; 5. Download and write KythOS to disk<br><br>
+        <span style="color:var(--amber)">⚠ The selected disk or partition will be erased.</span><br>
+        Back up any data you need before continuing.
+      </p>
+      <div class="btn-row">
+        <button class="primary" onclick="goto('disk')">Get Started →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Disk -->
+  <div class="page" id="page-disk">
+    <div class="card">
+      <div class="card-title">Select Disk</div>
+      <div class="card-sub">Choose a target disk, then select how KythOS should be installed.</div>
+      <hr class="divider">
+      <div class="disk-grid" id="disk-grid">
+        <div class="status-box status-info">Loading disks…</div>
+      </div>
+      <div class="warn-box" id="disk-warn" style="display:none"></div>
+      <div class="disk-tools">
+        <button onclick="loadDisks()">Refresh</button>
+      </div>
+
+      <!-- Install mode (revealed after disk is selected) -->
+      <div id="mode-section" style="display:none">
+        <hr class="divider" style="margin:22px 0 18px">
+        <div style="font-size:15px;font-weight:700;margin-bottom:12px">Installation Mode</div>
+        <div class="mode-grid">
+          <div class="mode-card selected" id="mcard-wipe" onclick="selectMode('wipe')">
+            <div class="mode-icon">💥</div>
+            <div>
+              <div class="mode-name">Erase Full Disk <span class="kernel-badge">Recommended</span></div>
+              <div class="mode-desc">Install KythOS on the entire disk. All existing data will be erased. Simplest option.</div>
+            </div>
+          </div>
+          <div class="mode-card" id="mcard-alongside" onclick="selectMode('alongside')">
+            <div class="mode-icon">🔀</div>
+            <div>
+              <div class="mode-name">Install Alongside</div>
+              <div class="mode-desc">Install KythOS to a specific partition. Keep Windows, Linux, or other systems.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Partition picker (alongside only) -->
+        <div id="partition-section" style="display:none">
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">Select Target Partition</div>
+          <div id="part-grid" class="part-grid">
+            <div class="status-box status-info">Loading partitions…</div>
+          </div>
+          <div class="warn-box" id="part-warn" style="display:none"></div>
+          <div id="efi-info" style="display:none;font-size:12px;color:var(--muted);margin-top:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border:1px solid var(--border)"></div>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button onclick="goto('welcome')">← Back</button>
+        <button id="disk-next" class="primary" onclick="goto('kernel')" disabled>Continue →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Kernel -->
+  <div class="page" id="page-kernel">
+    <div class="card">
+      <div class="card-title">Choose Kernel</div>
+      <div class="card-sub">Select the kernel for your installed system. You can switch kernels later with <code style="font-family:var(--mono);background:var(--surface2);padding:1px 6px;border-radius:4px;font-size:12px">bootc switch</code></div>
+      <hr class="divider">
+      <div class="kernel-grid" id="kernel-grid"></div>
+      <div class="btn-row">
+        <button onclick="goto('disk')">← Back</button>
+        <button class="primary" onclick="goto('config')">Continue →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config -->
+  <div class="page" id="page-config">
+    <div class="card">
+      <div class="card-title">System Configuration</div>
+      <div class="card-sub">Set hostname, timezone, and your user account</div>
+      <hr class="divider">
+      <div class="field-label">Hostname</div>
+      <input type="text" id="inp-hostname" value="kyth" maxlength="63" spellcheck="false">
+      <div class="field-label">Timezone</div>
+      <select id="sel-tz"></select>
+      <div class="field-label" style="margin-top:20px">Username</div>
+      <input type="text" id="inp-username" maxlength="32" spellcheck="false" autocomplete="off" placeholder="e.g. alice">
+      <div class="field-label">Password</div>
+      <input type="password" id="inp-password" autocomplete="new-password">
+      <div class="field-label">Confirm Password</div>
+      <input type="password" id="inp-password2" autocomplete="new-password">
+      <div id="user-error" style="color:var(--red);font-size:13px;margin-top:8px;min-height:1.2em"></div>
+      <div class="btn-row">
+        <button onclick="goto('kernel')">← Back</button>
+        <button class="primary" onclick="saveConfig()">Continue →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Review -->
+  <div class="page" id="page-review">
+    <div class="card">
+      <div class="card-title">Review &amp; Install</div>
+      <div class="card-sub">Confirm settings — installation begins immediately after you click Install</div>
+      <hr class="divider">
+      <div class="confidence-grid">
+        <div class="confidence-chip ok"><strong>Image Source</strong><span>Reachability checked before install</span></div>
+        <div class="confidence-chip ok"><strong>Boot Target</strong><span>EFI path verified when needed</span></div>
+        <div class="confidence-chip ok"><strong>Disk Safety</strong><span>Unmounted targets are enforced</span></div>
+        <div class="confidence-chip warn"><strong>Rollback</strong><span>bootc history remains available after first boot</span></div>
+      </div>
+      <table class="review-table" id="review-table"></table>
+      <div class="review-wipe" id="review-wipe">⚠ Everything on the selected disk will be permanently erased.</div>
+      <label class="review-confirm">
+        <input type="checkbox" id="confirm-backup" onchange="updateInstallReady()">
+        <span>I have backed up anything I want to keep from the selected disk.</span>
+      </label>
+      <label class="review-confirm">
+        <input type="checkbox" id="confirm-erase" onchange="updateInstallReady()">
+        <span id="confirm-erase-label">I understand KythOS will erase the selected disk and install a fresh system.</span>
+      </label>
+      <label class="review-confirm review-current" id="confirm-current-wrap" style="display:none">
+        <input type="checkbox" id="confirm-current" onchange="updateInstallReady()">
+        <span>This appears to be the disk currently running this session. I understand reinstalling it will replace this KythOS install.</span>
+      </label>
+      <div class="status-box status-info" id="live-iso-required" style="display:none">
+        <strong>Live ISO required to reinstall this disk</strong><br><br>
+        This is the disk running the current KythOS session. The running root filesystem
+        cannot be unmounted, so reinstalling onto it requires booting from the live ISO.<br><br>
+        Download the live ISO from the <strong>Repair</strong> page in kyth-welcome,
+        write it to a USB drive, and boot from it to reinstall.
+      </div>
+      <div class="btn-row">
+        <button onclick="goto('config')">← Back</button>
+        <button class="primary" id="install-now" onclick="startInstall()" disabled>Install Now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Install progress -->
+  <div class="page" id="page-install">
+    <div class="card" style="max-width:700px">
+      <div class="card-title" id="install-title">Installing KythOS…</div>
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span id="install-phase">Preparing…</span>
+          <span id="install-elapsed" style="font-size:12px;color:var(--muted)"></span>
+          <span id="install-pct">0%</span>
+        </div>
+        <div class="phase-rail">
+        <div class="phase-pill active">Prepare Disk</div>
+        <div class="phase-pill">Install Image</div>
+        <div class="phase-pill">Configure Boot</div>
+        <div class="phase-pill">Apply Region</div>
+        <div class="phase-pill">Final Checks</div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill pulsing" id="progress-fill" style="width:0%"></div></div>
+        <div class="stats-row" id="stats-row"></div>
+      </div>
+      <button class="log-toggle" onclick="toggleLog()">
+        <span class="log-arrow" id="log-arrow">▶</span> Show install log
+      </button>
+      <div class="log-wrap" id="log-wrap"></div>
+      <div class="mini-actions">
+        <button onclick="copyVisibleLog()">Copy Visible Log</button>
+        <button onclick="copyFullLog()">Copy Full Log</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done -->
+  <div class="page" id="page-done">
+    <div class="card" style="text-align:center;padding:48px 40px">
+      <span class="hero-icon">✓</span>
+      <div class="done-title">Installation Complete</div>
+      <p class="hero-body">
+        KythOS has been installed successfully.<br>
+        Remove the installation media and reboot to start your new system.
+      </p>
+      <div id="done-sb-notice" style="display:none;text-align:left;margin-top:28px">
+        <div class="status-box status-info">
+          <strong>One more step: Secure Boot key enrollment</strong><br><br>
+          On your first reboot, a one-time Secure Boot enrollment screen will appear before KythOS loads.
+          This is normal — it is a one-time security setup:<br><br>
+          &nbsp;&nbsp;1. Press any key when prompted<br>
+          &nbsp;&nbsp;2. Select <strong>Enroll MOK</strong><br>
+          &nbsp;&nbsp;3. Select <strong>Continue</strong><br>
+          &nbsp;&nbsp;4. Enter password: <strong style="font-family:var(--mono);letter-spacing:.05em">kyth</strong><br>
+          &nbsp;&nbsp;5. Select <strong>Yes</strong>, then <strong>Reboot</strong><br><br>
+          After this, KythOS will boot normally every time.
+        </div>
+      </div>
+      <div class="btn-row" style="justify-content:center;margin-top:32px">
+        <button class="primary" onclick="reboot()" style="padding:11px 32px;font-size:15px">Reboot Now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div class="page" id="page-error">
+    <div class="card">
+      <span class="hero-icon" style="font-size:36px">✗</span>
+      <div class="err-title">Installation Failed</div>
+      <div class="err-pre" id="err-msg"></div>
+      <p style="font-size:12px;color:var(--muted)">Full log saved to /tmp/kyth-installer.log</p>
+      <div class="btn-row">
+        <button class="primary" onclick="goto('review')">← Back to Installer</button>
+        <button onclick="copyFullLog()">Copy Full Log</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- #main -->
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -4,7 +4,7 @@ import time
 
 # __KYTH_GENERATED_IMPORTS__
 from .core import (  # noqa: E501
-    DataWorker, _IS_LIVE, _branch_display_name, _command_stdout, _current_branch, _detect_nvidia, _find_ntfs_drives, _has_rollback_deployment, _has_staged_update, _load_profile, _release_worker_when_finished, _restyle, _save_profile, _steam_libraries_on_ntfs,
+    DataWorker, _IS_LIVE, _branch_display_name, _command_stdout, _current_branch, _detect_nvidia, _find_ntfs_drives, _has_rollback_deployment, _has_staged_update, _load_profile, _restyle, _save_profile, _steam_libraries_on_ntfs,
 )
 from .qt import (  # noqa: E501
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QSizePolicy, QTimer, QVBoxLayout, QWidget, Qt, Signal,
