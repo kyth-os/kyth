@@ -3,9 +3,16 @@ import subprocess  # nosec B404 # nosemgrep
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DataWorker, _IS_LIVE, _branch_display_name, _command_stdout, _current_branch, _detect_nvidia, _find_ntfs_drives, _has_rollback_deployment, _has_staged_update, _load_profile, _restyle, _save_profile, _steam_libraries_on_ntfs,
+from .core_base import (
+    _IS_LIVE, _branch_display_name, _has_rollback_deployment, _has_staged_update, _load_profile, _restyle,
+    _save_profile,
 )
+from .services.diagnostics import _command_stdout
+from .services.gaming import (
+    DataWorker, _find_ntfs_drives, _steam_libraries_on_ntfs,
+)
+from .services.hardware import _detect_nvidia
+from .services.updates import _current_branch
 from .qt import (  # noqa: E501
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QSizePolicy, QTimer, QVBoxLayout, QWidget, Qt, Signal,
 )
@@ -541,20 +548,18 @@ class WelcomePage(Page):
         tasks: list[tuple[str, str]],
     ) -> QFrame:
         card = QFrame()
-        card.setObjectName("genz-category-card")
-        
         # Color coding left border
         title_lower = title.lower()
         if "games" in title_lower:
-            card.setStyleSheet("QFrame { border-left: 5px solid #a855f7; }")
+            card.setObjectName("genz-category-gaming")
         elif "apps" in title_lower:
-            card.setStyleSheet("QFrame { border-left: 5px solid #06b6d4; }")
+            card.setObjectName("genz-category-apps")
         elif "system" in title_lower:
-            card.setStyleSheet("QFrame { border-left: 5px solid #10b981; }")
+            card.setObjectName("genz-category-system")
         elif "network" in title_lower:
-            card.setStyleSheet("QFrame { border-left: 5px solid #f59e0b; }")
+            card.setObjectName("genz-category-network")
         else:
-            card.setStyleSheet("QFrame { border-left: 5px solid #ec4899; }")
+            card.setObjectName("genz-category-advanced")
 
         layout = QHBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)

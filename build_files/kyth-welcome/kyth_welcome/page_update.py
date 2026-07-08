@@ -4,8 +4,17 @@ import time
 from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DownloadMonitor, FirmwareCheckWorker, UpdateCheckWorker, Worker, _active_bootc_operation, _bootc_cancel_block_reason, _bootc_image_timestamp, _bootc_proxy_running, _branch_display_name, _current_branch, _finish_worker, _get_disk_write_bytes, _get_rx_bytes, _has_rollback_deployment, _has_staged_update, _human_bytes, _human_bytes_pair, _parse_size_bytes, _parse_update_phase, _release_worker_when_finished, _restyle, _set_session_inhibit, _with_idle_inhibit,
+from .core_base import (
+    DownloadMonitor, _active_bootc_operation, _bootc_cancel_block_reason, _bootc_image_timestamp,
+    _bootc_proxy_running, _branch_display_name, _get_disk_write_bytes, _get_rx_bytes, _has_rollback_deployment,
+    _has_staged_update, _human_bytes, _human_bytes_pair, _parse_size_bytes, _parse_update_phase,
+    _release_worker_when_finished, _restyle, _set_session_inhibit, _with_idle_inhibit,
+)
+from .services.software import (
+    Worker, _finish_worker,
+)
+from .services.updates import (
+    FirmwareCheckWorker, UpdateCheckWorker, _current_branch,
 )
 from .qt import (  # noqa: E501
     QCheckBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QTimer, QVBoxLayout, Qt,
@@ -107,12 +116,11 @@ class UpdatePage(Page):
             row = QHBoxLayout()
             row.setSpacing(12)
             key = QLabel(label_text)
-            key.setObjectName("card-copy")
-            key.setStyleSheet("color: #b0bccf; min-width: 76px;")
+            key.setObjectName("prop-key")
+            key.setMinimumWidth(76)
             row.addWidget(key)
             val = QLabel()
-            val.setObjectName("card-copy")
-            val.setStyleSheet("color: #dde6f5;")
+            val.setObjectName("prop-val")
             val.setWordWrap(False)
             row.addWidget(val, 1)
             return row, val
@@ -258,11 +266,11 @@ class UpdatePage(Page):
             row = QHBoxLayout()
             row.setSpacing(8)
             k = QLabel(label)
-            k.setObjectName("card-copy")
-            k.setStyleSheet("color: #b0bccf; min-width: 96px;")
+            k.setObjectName("prop-key")
+            k.setMinimumWidth(96)
             row.addWidget(k)
             v = QLabel("—")
-            v.setObjectName("card-copy")
+            v.setObjectName("prop-val")
             row.addWidget(v, 1)
             return row, v
 

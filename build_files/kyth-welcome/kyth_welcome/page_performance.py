@@ -41,11 +41,11 @@ class PerformancePage(Page):
             row = QHBoxLayout()
             row.setSpacing(8)
             k = QLabel(label)
-            k.setObjectName("card-copy")
-            k.setStyleSheet("color: #b0bccf; min-width: 96px;")
+            k.setObjectName("prop-key")
+            k.setMinimumWidth(96)
             row.addWidget(k)
             v = QLabel("—")
-            v.setObjectName("card-copy")
+            v.setObjectName("prop-val")
             row.addWidget(v, 1)
             return row, v
 
@@ -82,14 +82,13 @@ class PerformancePage(Page):
         # ── Session history ────────────────────────────────────────────────────
         self._divider()
         hist_head = QLabel("Session History")
-        hist_head.setObjectName("heading")
-        hist_head.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
+        hist_head.setObjectName("h2-heading")
         self._add(hist_head)
         hist_sub = QLabel(
             "Per-session averages captured by kyth-telem from MangoHud CSV logs. "
             "Launch games with MangoHud enabled — data appears here after each session ends."
         )
-        hist_sub.setObjectName("card-copy")
+        hist_sub.setObjectName("caption-text")
         hist_sub.setWordWrap(True)
         self._add(hist_sub)
 
@@ -213,8 +212,8 @@ class PerformancePage(Page):
             row_l.setSpacing(16)
 
             name_lbl = QLabel(game or "Unknown")
-            name_lbl.setObjectName("card-copy")
-            name_lbl.setStyleSheet("font-weight: 700; color: #dde6f5; min-width: 160px;")
+            name_lbl.setObjectName("prop-val")
+            name_lbl.setMinimumWidth(160)
             row_l.addWidget(name_lbl)
 
             date_str = ""
@@ -224,8 +223,8 @@ class PerformancePage(Page):
                 except Exception:
                     pass
             date_lbl = QLabel(date_str or "—")
-            date_lbl.setObjectName("card-copy")
-            date_lbl.setStyleSheet("color: #7a8899; min-width: 88px;")
+            date_lbl.setObjectName("prop-val-dim")
+            date_lbl.setMinimumWidth(88)
             row_l.addWidget(date_lbl)
 
             dur_str = "—"
@@ -233,27 +232,24 @@ class PerformancePage(Page):
                 m, s = divmod(int(duration), 60)
                 dur_str = f"{m}m {s:02d}s"
             dur_lbl = QLabel(dur_str)
-            dur_lbl.setObjectName("card-copy")
-            dur_lbl.setStyleSheet("color: #b0bccf; min-width: 72px;")
+            dur_lbl.setObjectName("prop-val")
+            dur_lbl.setMinimumWidth(72)
             row_l.addWidget(dur_lbl)
 
             fps_text = f"{avg_fps:.0f} / {p1:.0f} 1%" if avg_fps else "—"
             fps_lbl = QLabel(fps_text)
-            fps_lbl.setObjectName("card-copy")
-            fps_lbl.setStyleSheet("color: #4fc3f7; min-width: 120px;")
+            fps_lbl.setObjectName("prop-val-blue")
+            fps_lbl.setMinimumWidth(120)
             row_l.addWidget(fps_lbl)
 
             sc = stutters or 0
             stutter_lbl = QLabel(f"{sc} stutter{'s' if sc != 1 else ''}")
-            stutter_lbl.setObjectName("card-copy")
-            stutter_lbl.setStyleSheet(
-                f"color: {'#ef5350' if sc > 20 else '#b0bccf'}; min-width: 88px;"
-            )
+            stutter_lbl.setObjectName("prop-val-red" if sc > 20 else "prop-val")
+            stutter_lbl.setMinimumWidth(88)
             row_l.addWidget(stutter_lbl)
 
             sched_lbl = QLabel(sched or "")
-            sched_lbl.setObjectName("card-copy")
-            sched_lbl.setStyleSheet("color: #546e7a;")
+            sched_lbl.setObjectName("prop-val-dim")
             row_l.addWidget(sched_lbl, 1)
 
             self._perf_sessions_layout.addWidget(row_w)

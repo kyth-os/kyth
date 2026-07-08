@@ -2,9 +2,14 @@ import os
 import re
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    Worker, _apply_install_badge, _build_add_share_script, _build_remove_share_script, _is_cifs_available, _is_mounted, _load_smb_config, _restyle, _save_smb_config, _systemd_escape_mount_path,
+from .core_base import (
+    _apply_install_badge, _restyle,
 )
+from .services.network import (
+    _build_add_share_script, _build_remove_share_script, _is_cifs_available, _is_mounted, _load_smb_config,
+    _save_smb_config, _systemd_escape_mount_path,
+)
+from .services.software import Worker
 from .qt import (  # noqa: E501
     QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
@@ -141,6 +146,7 @@ class NetworkSharesPage(Page):
         self._add(self._op_progress)
 
         self._op_log = QTextEdit()
+        self._op_log.document().setMaximumBlockCount(5000)
         self._op_log.setReadOnly(True)
         self._op_log.setMinimumHeight(110)
         self._op_log.hide()

@@ -3,9 +3,13 @@ import subprocess
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DataWorker, HardwareProbe, HardwareProbeWorker, _command_stdout, _finish_worker, _restyle,
+from .core_base import _restyle
+from .services.diagnostics import _command_stdout
+from .services.gaming import DataWorker
+from .services.hardware import (
+    HardwareProbe, HardwareProbeWorker,
 )
+from .services.software import _finish_worker
 from .qt import (  # noqa: E501
     QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer, QUrl, QVBoxLayout, QWidget, Signal,
 )

@@ -2,8 +2,15 @@ import subprocess
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DownloadMonitor, REGISTRY, Worker, _bootc_image_digest, _bootc_image_timestamp, _branch_display_name, _current_branch, _finish_worker, _get_rx_bytes, _human_bytes, _human_bytes_pair, _image_tag_for_channel, _parse_size_bytes, _restyle, _set_session_inhibit, _with_idle_inhibit,
+from .core_base import (
+    DownloadMonitor, _bootc_image_timestamp, _branch_display_name, _get_rx_bytes, _human_bytes, _human_bytes_pair,
+    _image_tag_for_channel, _parse_size_bytes, _restyle, _set_session_inhibit, _with_idle_inhibit,
+)
+from .services.software import (
+    Worker, _finish_worker,
+)
+from .services.updates import (
+    REGISTRY, _bootc_image_digest, _current_branch,
 )
 from .qt import (  # noqa: E501
     QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,

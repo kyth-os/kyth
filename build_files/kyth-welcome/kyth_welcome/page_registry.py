@@ -162,7 +162,7 @@ PROBLEM_ROUTES: dict[str, str] = {
 
 
 def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
-    from .core import _detect_nvidia
+    from .services.hardware import _detect_nvidia
 
     nav_groups: list[tuple[str | None, list[NavItem]]] = [
         (None, [

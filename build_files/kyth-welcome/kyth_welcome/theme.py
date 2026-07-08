@@ -1521,13 +1521,23 @@ QLabel#hud-desc {
     font-size: 12px;
 }
 
-QFrame#genz-category-card {
+QFrame#genz-category-card,
+QFrame#genz-category-gaming,
+QFrame#genz-category-apps,
+QFrame#genz-category-system,
+QFrame#genz-category-network,
+QFrame#genz-category-advanced {
     background-color: #151722;
     border: 1px solid #26293a;
     border-radius: 14px;
 }
 
-QFrame#genz-category-card:hover {
+QFrame#genz-category-card:hover,
+QFrame#genz-category-gaming:hover,
+QFrame#genz-category-apps:hover,
+QFrame#genz-category-system:hover,
+QFrame#genz-category-network:hover,
+QFrame#genz-category-advanced:hover {
     background-color: #242933;
 }
 
@@ -1580,4 +1590,49 @@ QPushButton#genz-task-link:hover {
     background-color: #2b323c;
     color: #c2d9ff;
 }
+
+/* Semantic styles for consistent layout property grids */
+QLabel#prop-key {
+    color: #aab4bf;
+}
+
+QLabel#prop-val {
+    color: #f4f6f8;
+}
+
+QLabel#prop-val-dim {
+    color: #707985;
+}
+
+QLabel#prop-val-green {
+    color: #34d399;
+    font-weight: bold;
+}
+
+QLabel#prop-val-red {
+    color: #ffb0b6;
+    font-weight: bold;
+}
+
+QLabel#prop-val-orange {
+    color: #fbbf24;
+    font-weight: bold;
+}
+
+QLabel#prop-val-blue {
+    color: #8fb8ff;
+    font-weight: bold;
+}
+
+QLabel#h2-heading {
+    font-size: 18px;
+    font-weight: 750;
+    color: #ffffff;
+}
+
+QLabel#caption-text {
+    font-size: 12px;
+    color: #aab4bf;
+}
 """
+

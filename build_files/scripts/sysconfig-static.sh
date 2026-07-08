@@ -878,16 +878,16 @@ ACTION=="add|change", KERNEL=="vd[a-z]*", ATTR{queue/scheduler}="mq-deadline"
 IOEOF
 
 # ── PipeWire low-latency audio ─────────────────────────────────────────────────
-# 256 samples at 48 kHz = ~5.3 ms latency — still responsive for games while
-# giving Bluetooth, USB audio, and busy CPUs more underrun headroom.
-# min-quantum=64 lets pro-audio apps request lower latency when needed.
+# 128 samples at 48 kHz = ~2.7 ms latency — low enough to eliminate perceptible
+# audio lag in games while staying stable on typical hardware.
+# min-quantum=32 lets pro-audio apps request sub-1 ms when needed.
 # Apps that need higher buffering (e.g. Bluetooth) negotiate up automatically.
 mkdir -p /etc/pipewire/pipewire.conf.d
 cat >/etc/pipewire/pipewire.conf.d/99-kyth.conf <<'PWEOF'
 context.properties = {
     default.clock.rate          = 48000
-    default.clock.quantum       = 256
-    default.clock.min-quantum   = 64
+    default.clock.quantum       = 128
+    default.clock.min-quantum   = 32
     default.clock.max-quantum   = 8192
     # Allow PipeWire to switch between 44100 and 48000 Hz rather than resampling.
     # Without this, a game or app that outputs at 44100 Hz forces the entire graph
@@ -1119,6 +1119,7 @@ frametime=1
 frame_timing=1
 
 # GPU
+gpu_name
 gpu_stats
 gpu_temp
 gpu_core_clock
@@ -1126,6 +1127,8 @@ gpu_mem_clock
 vram
 # GPU power draw — a sustained drop toward TDP indicates thermal throttling
 gpu_power
+# Active Vulkan driver (RADV, AMDVLK, ANV, etc.)
+vulkan_driver
 
 # CPU
 cpu_stats
@@ -1140,8 +1143,12 @@ ram
 # Battery (shown only on systems where a battery is present)
 battery
 
+# Presentation mode (FIFO=vsync, Immediate=tearing, Mailbox=triple-buffer)
+present_mode
+
 # Show Wine/Proton version when running Windows games
 wine
+engine_version
 MANGOHUDEOF
 
 # ── vkBasalt default config ───────────────────────────────────────────────────
@@ -1282,9 +1289,6 @@ systemctl enable kyth-first-boot-message.service 2>/dev/null || true
 # On amd_pstate=active systems, EPP is the primary
 # frequency/voltage scaling knob — more direct than powerprofilesctl alone.
 # Valid values: performance, balance_performance, balance_power, power, default
-if [[ -f /ctx/kyth-ai-dev ]]; then
-  install -Dm0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
-fi
 
 install -m 0755 /dev/stdin /usr/bin/kyth-set-epp <<'EPPEOF'
 #!/bin/bash
@@ -1474,3 +1478,92 @@ polkit.addRule(function(action, subject) {
 });
 POLKITEOF
 chmod 0644 /usr/share/polkit-1/rules.d/99-kyth-systemd.rules
+
+mkdir -p /etc/environment.d
+cat >/etc/environment.d/proton-radv.conf <<'PROTONEOF'
+PROTON_FORCE_LARGE_ADDRESS_AWARE=1
+WINE_LARGE_ADDRESS_AWARE=1
+PROTON_USE_NTSYNC=1
+# esync/fsync: fallback sync primitives used when NTSYNC is unavailable (module
+# not loaded, older kernel, or non-kyth install). Proton checks in priority order:
+# NTSYNC → fsync → esync → default. Having both enabled costs nothing when NTSYNC
+# is active, and keeps Wine/Proton fast on any system this image runs on.
+WINEFSYNC=1
+WINEESYNC=1
+mesa_glthread=true
+# FSR upscaling in fullscreen Wine/Proton games — lets older titles that don't
+# run at native resolution get FidelityFX Super Resolution upscaling via Wine's
+# built-in FSR pass. Works on AMD, NVIDIA, and Intel — it's a shader effect, not
+# hardware. Strength 0 = sharpest, 5 = most blur; 2 is a good default balance.
+WINE_FULLSCREEN_FSR=1
+WINE_FULLSCREEN_FSR_STRENGTH=2
+# Suppress the Windows-style crash/error dialog that pops up when a game
+# exits unexpectedly via Wine's built-in error handler. On Linux the crash is
+# already captured by the kernel and Proton's own logging; the dialog just
+# forces the user to click through a meaningless "Application Error" popup.
+PROTON_NO_WINDOWS_CRASH_DIALOG=1
+# Silence DXVK verbose debug output. The default "info" level writes to disk
+# on every DX9/10/11 draw call setup, adding measurable I/O overhead on
+# titles with high draw call counts. "none" keeps only fatal errors.
+DXVK_LOG_LEVEL=none
+# Enable DirectX 12 ray tracing in VKD3D-Proton. dxr advertises Tier 1 RT;
+# dxr11 adds DX11-style conservative RT fallback used by some titles. VKD3D
+# won't expose RT to the game unless the GPU Vulkan driver actually supports the
+# VK_KHR_ray_tracing_pipeline extension, so this is safe to set globally.
+VKD3D_CONFIG=dxr11,dxr
+# VKD3D-Proton logs at "warn" level by default — noisy in the journal.
+# Matches DXVK_LOG_LEVEL=none above.
+VKD3D_LOG_LEVEL=none
+# MangoHud: fall back to dlsym hooking for older OpenGL games that dlopen libGL
+# rather than linking it at load time. Safe to set globally; no-op for Vulkan.
+MANGOHUD_DLSYM=1
+# Prevent Steam from spawning a renderer subprocess for the built-in browser
+# when it is not in use — saves ~100 MB of resident memory.
+STEAM_DISABLE_BROWSER_SUBPROCESS=1
+# Mesa Shader Cache size limit: raise to 10 GB to prevent shader eviction and
+# stuttering on subsequent launches of shader-heavy games.
+MESA_SHADER_CACHE_MAX_SIZE=10G
+PROTONEOF
+
+mkdir -p /etc/skel/.config
+cat >/etc/skel/.config/topgrade.toml <<'TOPGRADEEOF'
+[misc]
+disable = ["system", "distrobox", "containers", "toolbx", "helix"]
+TOPGRADEEOF
+
+mkdir -p /etc/flatpak/overrides
+cat >/etc/flatpak/overrides/com.obsproject.Studio <<'OBSEOF'
+[Environment]
+OBS_VKCAPTURE=1
+OBSEOF
+
+mkdir -p /etc/profile.d /etc/fish/conf.d
+
+cat >/etc/profile.d/brew.sh <<'BREWSHEOF'
+# Add Homebrew to PATH and configure environment for sh/bash/zsh if it exists
+for _brew_path in "/home/linuxbrew/.linuxbrew/bin/brew" "${HOME}/.linuxbrew/bin/brew"; do
+    if [ -x "${_brew_path}" ]; then
+        eval "$("${_brew_path}" shellenv)"
+        break
+    fi
+done
+BREWSHEOF
+
+# Add Homebrew to PATH and configure environment for sh/bash/zsh if it exists
+for _brew_path in "/home/linuxbrew/.linuxbrew/bin/brew" "${HOME}/.linuxbrew/bin/brew"; do
+    if [ -x "${_brew_path}" ]; then
+        eval "$("${_brew_path}" shellenv)"
+        break
+    fi
+done
+BREWSHEOF
+
+cat >/etc/fish/conf.d/brew.fish <<'BREWFISHEOF'
+# Add Homebrew to PATH and configure environment for fish shell if it exists
+for _brew_path in "/home/linuxbrew/.linuxbrew/bin/brew" "$HOME/.linuxbrew/bin/brew"
+    if test -x $_brew_path
+        eval ($_brew_path shellenv)
+        break
+    end
+end
+BREWFISHEOF

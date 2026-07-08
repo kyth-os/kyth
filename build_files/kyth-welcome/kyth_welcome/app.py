@@ -26,8 +26,9 @@ def _acquire_lock() -> bool:
         return True  # can't lock → allow launch
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    _IS_LIVE, _is_first_run, _prefer_xwayland_if_wayland_plugin_missing, _remove_autostart, _shutdown_threads, _wait_for_display_setup,
+from .core_base import (
+    _IS_LIVE, _is_first_run, _prefer_xwayland_if_wayland_plugin_missing, _remove_autostart, _shutdown_threads,
+    _wait_for_display_setup,
 )
 from .qt import (  # noqa: E501
     QApplication, QIcon,

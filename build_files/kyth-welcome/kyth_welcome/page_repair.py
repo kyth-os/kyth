@@ -5,8 +5,13 @@ import subprocess
 from pathlib import Path
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    Worker, _bootc_image_timestamp, _command_stdout, _detect_nvidia, _finish_worker, _has_rollback_deployment, _install_flatpak_inline, _is_flatpak_installed, _restyle, _set_session_inhibit, _with_idle_inhibit,
+from .core_base import (
+    _bootc_image_timestamp, _has_rollback_deployment, _restyle, _set_session_inhibit, _with_idle_inhibit,
+)
+from .services.diagnostics import _command_stdout
+from .services.hardware import _detect_nvidia
+from .services.software import (
+    Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
 )
 from .qt import (  # noqa: E501
     QDesktopServices, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QTextEdit, QTimer, QUrl,

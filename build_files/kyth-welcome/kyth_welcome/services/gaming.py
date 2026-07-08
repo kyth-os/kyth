@@ -1,0 +1,579 @@
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import time
+from urllib.request import Request, urlopen
+
+from ..qt import Signal
+from ..core_base import (
+    TrackedThread, Worker, DataWorker, _run_command, _command_stdout,
+    _is_live_session, _has_staged_update
+)
+from .hardware import _find_ntfs_drives, _detect_controllers
+from .software import _is_flatpak_installed
+
+_PROC_MOUNT_ESCAPE_RE = re.compile(r"\\([0-7]{3})")
+
+_STEAM_NON_GAME_PATTERNS = (
+    "steamworks common redistributables",
+    "steam linux runtime",
+    "proton",
+    "steamvr",
+)
+
+_PROTONDB_CACHE_PATH = os.path.expanduser("~/.cache/kyth-protondb.json")
+_PROTONDB_TIER_STYLE = {
+    "platinum": ("#102010", "#7ee8a2"),
+    "gold":     ("#2b2410", "#d4a843"),
+    "silver":   ("#181e2b", "#8cadcf"),
+    "bronze":   ("#2b1a10", "#c47c4a"),
+    "borked":   ("#3a1010", "#f48771"),
+    "pending":  ("#252526", "#858585"),
+}
+
+def _mangohud_installed() -> bool:
+    return shutil.which("mangohud") is not None
+ # _mangohud_installed
+
+def _gamescope_installed() -> bool:
+    return shutil.which("gamescope") is not None
+ # _gamescope_installed
+
+def _vkbasalt_installed() -> bool:
+    return any(
+        os.path.exists(p) for p in (
+            "/usr/lib64/vkbasalt/libvkbasalt.so",
+            "/usr/lib/vkbasalt/libvkbasalt.so",
+            "/usr/lib64/libvkbasalt.so",
+            "/usr/lib/libvkbasalt.so",
+        )
+    )
+ # _vkbasalt_installed
+
+def _ge_proton_version() -> str | None:
+    """Return the latest installed GE-Proton directory name, or None."""
+    found: list[str] = []
+    for base in (
+        "/usr/share/steam/compatibilitytools.d",
+        "/var/lib/kyth/ge-proton",
+    ):
+        try:
+            found.extend(e for e in os.listdir(base) if e.startswith("GE-Proton"))
+        except OSError:
+            pass
+    return sorted(found)[-1] if found else None
+ # _ge_proton_version
+
+def _compat_tool_version(prefix: str) -> str | None:
+    """Return the latest installed Steam compatibility tool matching prefix."""
+    bases = [
+        "/usr/share/steam/compatibilitytools.d",
+        "/var/lib/kyth/ge-proton",
+        os.path.expanduser("~/.steam/root/compatibilitytools.d"),
+        os.path.expanduser("~/.steam/steam/compatibilitytools.d"),
+        os.path.expanduser("~/.local/share/Steam/compatibilitytools.d"),
+    ]
+    found: list[str] = []
+    for base in bases:
+        try:
+            found.extend(e for e in os.listdir(base) if e.lower().startswith(prefix.lower()))
+        except OSError:
+            pass
+    return sorted(found)[-1] if found else None
+ # _compat_tool_version
+
+def _ntsync_state() -> tuple[str, str]:
+    if os.path.exists("/dev/ntsync"):
+        return "ok", "/dev/ntsync is present."
+    module_probe = _run_command(["modprobe", "-n", "ntsync"], timeout=5)
+    if module_probe is not None and module_probe.returncode == 0:
+        return "warn", "ntsync module exists but /dev/ntsync is not present yet."
+    return "warn", "ntsync device not detected; Proton will fall back to fsync/esync."
+ # _ntsync_state
+
+def _vulkan_state() -> tuple[str, str]:
+    if shutil.which("vulkaninfo"):
+        result = _run_command(["vulkaninfo", "--summary"], timeout=12)
+        if result is not None and result.returncode == 0:
+            gpus = [
+                line.split("=", 1)[1].strip()
+                for line in result.stdout.splitlines()
+                if "deviceName" in line and "=" in line
+            ]
+            return "ok", "Vulkan ready" + (f": {', '.join(gpus[:2])}" if gpus else ".")
+        return "err", "vulkaninfo is installed but Vulkan probing failed."
+    render_nodes = glob.glob("/dev/dri/renderD*")
+    if render_nodes:
+        return "warn", "Render device exists, but vulkaninfo is not installed for a full check."
+    return "err", "No Vulkan render device detected."
+ # _vulkan_state
+
+def _gaming_health_items(*, controllers: dict | None = None,
+                         windows_drives: list | None = None) -> list[tuple[str, str, str]]:
+    """Small, fast checks aimed at PC gamers before they launch a title.
+
+    controllers/windows_drives accept precomputed probe results so callers that
+    build several sections (the gaming dashboard) don't repeat the hardware scans.
+    """
+    ge_ver = _ge_proton_version()
+    cachy_ver = _compat_tool_version("proton-cachyos")
+    vulkan_status, vulkan_summary = _vulkan_state()
+    ntsync_status, ntsync_summary = _ntsync_state()
+    steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
+    heroic_ok = _is_flatpak_installed("com.heroicgameslauncher.hgl")
+    lutris_ok = _is_flatpak_installed("net.lutris.Lutris")
+    if controllers is None:
+        controllers = _detect_controllers()
+    controller_count = len(controllers.get("usb_controllers", [])) + len(controllers.get("input_nodes", []))
+    if windows_drives is None:
+        windows_drives = _find_ntfs_drives()
+    ntfs_count = sum(not d.get("is_bitlocker") for d in windows_drives)
+    bitlocker_count = sum(bool(d.get("is_bitlocker")) for d in windows_drives)
+    if bitlocker_count:
+        windows_drive_summary = (
+            f"{ntfs_count} readable NTFS and {bitlocker_count} locked BitLocker "
+            "partition(s) detected; unlock and migrate them below."
+        )
+    else:
+        windows_drive_summary = f"{ntfs_count} NTFS partition(s) detected; use migration below."
+
+    return [
+        ("ok" if steam_ok else "warn", "Steam", "Installed." if steam_ok else "Install Steam to run your Steam library."),
+        ("ok" if ge_ver else "err", "GE-Proton", ge_ver or "Missing; use Update GE-Proton below."),
+        ("ok" if cachy_ver else "dim", "Proton-CachyOS SLR", cachy_ver or "Optional runner for stubborn games."),
+        (vulkan_status, "Vulkan", vulkan_summary),
+        (ntsync_status, "NTSYNC", ntsync_summary),
+        ("ok" if shutil.which("umu-run") else "warn", "umu-launcher", "Installed." if shutil.which("umu-run") else "Needed by some Lutris/Heroic launcher flows."),
+        ("ok" if _gamescope_installed() else "warn", "Gamescope", "Installed." if _gamescope_installed() else "Missing compositor for HDR/VRR/upscaling presets."),
+        ("ok" if _mangohud_installed() else "warn", "MangoHud", "Installed." if _mangohud_installed() else "Missing performance overlay."),
+        ("ok" if controller_count else "dim", "Controllers", f"{controller_count} controller input(s) detected." if controller_count else "Connect one and press Refresh."),
+        ("ok" if heroic_ok or lutris_ok else "dim", "Non-Steam launchers", "Heroic or Lutris installed." if heroic_ok or lutris_ok else "Install Heroic or Lutris for Epic, GOG, Battle.net, EA, and Ubisoft."),
+        ("warn" if windows_drives else "ok", "PC game drives", windows_drive_summary if windows_drives else "No PC game drives detected."),
+        ("warn" if _has_staged_update() else "ok", "OS update", "Update staged; reboot before benchmarking." if _has_staged_update() else "No staged OS update."),
+    ]
+ # _gaming_health_items
+
+def _gaming_migration_checklist_items(*, controllers: dict | None = None,
+                                      windows_drives: list | None = None,
+                                      saves: tuple | None = None) -> list[tuple[str, str, str]]:
+    steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
+    heroic_ok = _is_flatpak_installed("com.heroicgameslauncher.hgl")
+    lutris_ok = _is_flatpak_installed("net.lutris.Lutris")
+    discord_ok = _is_flatpak_installed("com.discordapp.Discord")
+    obs_ok = _is_flatpak_installed("com.obsproject.Studio")
+    ludusavi_status, _, ludusavi_summary = saves if saves is not None else _ludusavi_backup_summary()
+    controller_info = controllers if controllers is not None else _detect_controllers()
+    controller_count = len(controller_info.get("usb_controllers", [])) + len(controller_info.get("input_nodes", []))
+    if windows_drives is None:
+        windows_drives = _find_ntfs_drives()
+    ntfs_count = sum(not d.get("is_bitlocker") for d in windows_drives)
+    bitlocker_count = sum(bool(d.get("is_bitlocker")) for d in windows_drives)
+    if bitlocker_count:
+        migration_summary = (
+            f"{ntfs_count} readable NTFS and {bitlocker_count} locked BitLocker "
+            "partition(s) detected; unlock them on Move Files first."
+        )
+    else:
+        migration_summary = f"{ntfs_count} NTFS partition(s) detected; copy games read-only below."
+    ge_ver = _ge_proton_version()
+    return [
+        ("ok" if steam_ok else "warn", "Steam installed", "Ready." if steam_ok else "Install Steam, then enable Steam Play for all titles."),
+        ("ok" if ge_ver else "err", "GE-Proton ready", ge_ver or "Missing; update GE-Proton before testing PC games."),
+        ("ok" if heroic_ok and lutris_ok else "warn", "Non-Steam launchers", "Heroic and Lutris installed." if heroic_ok and lutris_ok else "Install Heroic for Epic/GOG and Lutris for Battle.net/EA/Ubisoft."),
+        (ludusavi_status, "Saves backed up", ludusavi_summary),
+        ("warn" if windows_drives else "dim", "Game library migration", migration_summary if windows_drives else "No PC game drive detected."),
+        ("ok" if controller_count else "dim", "Controller tested", f"{controller_count} controller input(s) detected." if controller_count else "Connect a controller and use the Controllers page to verify input."),
+        ("ok" if discord_ok and obs_ok else "warn", "Social and capture", "Discord and OBS installed." if discord_ok and obs_ok else "Install Discord and OBS if this player streams, records, or joins voice chat."),
+        ("ok", "Blocked games explained", "Compatibility page uses dated source checks for anti-cheat blockers."),
+    ]
+ # _gaming_migration_checklist_items
+
+def _collect_gaming_dashboard() -> dict:
+    # Probe hardware and saves once; health and checklist share the results.
+    controllers = _detect_controllers()
+    windows_drives = _find_ntfs_drives()
+    saves = _ludusavi_backup_summary()
+    return {
+        "health": _gaming_health_items(controllers=controllers, windows_drives=windows_drives),
+        "checklist": _gaming_migration_checklist_items(
+            controllers=controllers, windows_drives=windows_drives, saves=saves),
+        "streaming": _streaming_health_items(),
+        "saves": saves,
+        "games": _detect_installed_games(),
+    }
+ # _collect_gaming_dashboard
+
+def _ludusavi_backup_summary() -> tuple[str, str, str]:
+    ludusavi_ok = _is_flatpak_installed("com.github.mtkennerly.ludusavi")
+    candidates = [
+        os.path.expanduser("~/Ludusavi"),
+        os.path.expanduser("~/Games/Ludusavi"),
+        os.path.expanduser("~/Documents/Ludusavi"),
+        os.path.expanduser("~/.var/app/com.github.mtkennerly.ludusavi"),
+    ]
+    existing = [path for path in candidates if os.path.exists(path)]
+    if ludusavi_ok and existing:
+        newest = max(existing, key=lambda path: os.path.getmtime(path))
+        return "ok", "Save backups", f"Ludusavi installed; backup/config path found: {newest}"
+    if ludusavi_ok:
+        return "warn", "Save backups", "Ludusavi installed; run a backup before migration or modding."
+    return "warn", "Save backups", "Install Ludusavi before importing saves or modding."
+ # _ludusavi_backup_summary
+
+def _parse_steam_acf(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            text = fh.read()
+    except OSError:
+        return {}
+    return _parse_steam_acf_text(text)
+ # _parse_steam_acf
+
+def _parse_steam_acf_text(text: str) -> dict:
+    data: dict[str, str] = {}
+    for key in ("appid", "name", "installdir"):
+        match = re.search(rf'"{re.escape(key)}"\s+"([^"]*)"', text, re.IGNORECASE)
+        if match:
+            data[key] = match.group(1)
+    return data
+ # _parse_steam_acf_text
+
+def _steam_library_roots() -> list[str]:
+    roots: list[str] = []
+    for root in (
+        os.path.expanduser("~/.local/share/Steam"),
+        os.path.expanduser("~/.steam/steam"),
+        os.path.expanduser("~/.var/app/com.valvesoftware.Steam/.local/share/Steam"),
+    ):
+        if os.path.isdir(root) and root not in roots:
+            roots.append(root)
+
+    for root in list(roots):
+        vdf = os.path.join(root, "steamapps", "libraryfolders.vdf")
+        try:
+            with open(vdf, "r", encoding="utf-8", errors="ignore") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        for match in re.finditer(r'"path"\s+"([^"]+)"', text):
+            lib = match.group(1).replace("\\\\", "/")
+            lib = os.path.expanduser(lib)
+            if os.path.isdir(lib) and lib not in roots:
+                roots.append(lib)
+    return roots
+ # _steam_library_roots
+
+def _decode_proc_mount_field(value: str) -> str:
+    """Decode the octal escapes used by /proc/mounts fields."""
+    return _PROC_MOUNT_ESCAPE_RE.sub(
+        lambda match: chr(int(match.group(1), 8)),
+        value,
+    )
+ # _decode_proc_mount_field
+
+def _steam_libraries_on_ntfs() -> list[str]:
+    """Steam library roots that sit on an NTFS/other system filesystem.
+
+    Reusing the old PC game drive as a Steam library is the first thing
+    most switchers try, and Proton breaks on NTFS in ways that look like
+    "Linux gaming is broken" rather than "wrong filesystem" — so detect it
+    proactively instead of waiting for the support request.
+    """
+    mounts: list[tuple[str, str]] = []
+    try:
+        with open("/proc/mounts", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 3:
+                    # /proc/mounts octal-escapes spaces and tabs in mount points.
+                    mount_point = _decode_proc_mount_field(parts[1])
+                    mounts.append((mount_point, parts[2].lower()))
+    except OSError:
+        return []
+    # Longest mount point first so nested mounts resolve to the right fs.
+    mounts.sort(key=lambda entry: len(entry[0]), reverse=True)
+
+    flagged: list[str] = []
+    for root in _steam_library_roots():
+        real = os.path.realpath(root)
+        for mount_point, fstype in mounts:
+            if real == mount_point or real.startswith(mount_point.rstrip("/") + "/"):
+                # ntfs-3g mounts report as "fuseblk"; exFAT/FAT are equally
+                # unfit for Proton prefixes (no symlinks), so flag them too.
+                if fstype in ("ntfs", "ntfs3", "fuseblk", "exfat", "vfat"):
+                    flagged.append(root)
+                break
+    return flagged
+ # _steam_libraries_on_ntfs
+
+def _detect_steam_games() -> list[dict]:
+    games: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for root in _steam_library_roots():
+        steamapps = os.path.join(root, "steamapps")
+        for manifest in glob.glob(os.path.join(steamapps, "appmanifest_*.acf")):
+            data = _parse_steam_acf(manifest)
+            name = data.get("name", "").strip()
+            appid = data.get("appid", "").strip()
+            installdir = data.get("installdir", "").strip()
+            if not name:
+                continue
+            install_path = os.path.join(steamapps, "common", installdir) if installdir else steamapps
+            key = ("Steam", appid or name.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            games.append({
+                "name": name,
+                "launcher": "Steam",
+                "path": install_path,
+                "appid": appid,
+            })
+    return games
+ # _detect_steam_games
+
+def _detect_heroic_games() -> list[dict]:
+    games: list[dict] = []
+    seen: set[str] = set()
+    roots = [
+        os.path.expanduser("~/.config/heroic"),
+        os.path.expanduser("~/.var/app/com.heroicgameslauncher.hgl/config/heroic"),
+    ]
+    for root in roots:
+        for pattern in (
+            os.path.join(root, "GamesConfig", "*.json"),
+            os.path.join(root, "legendaryConfig", "legendary", "installed.json"),
+            os.path.join(root, "gog_store", "installed.json"),
+        ):
+            for path in glob.glob(pattern):
+                try:
+                    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                        data = json.load(fh)
+                except (OSError, json.JSONDecodeError):
+                    continue
+                entries = data.values() if isinstance(data, dict) else data if isinstance(data, list) else []
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    name = (
+                        entry.get("title")
+                        or entry.get("name")
+                        or entry.get("app_name")
+                        or entry.get("appName")
+                        or ""
+                    )
+                    install_path = (
+                        entry.get("install_path")
+                        or entry.get("installPath")
+                        or entry.get("path")
+                        or entry.get("folder_name")
+                        or ""
+                    )
+                    name = str(name).strip()
+                    if not name or name in seen:
+                        continue
+                    seen.add(name)
+                    games.append({
+                        "name": name,
+                        "launcher": "Heroic",
+                        "path": str(install_path),
+                        "appid": str(entry.get("app_name") or entry.get("appName") or ""),
+                    })
+    return games
+ # _detect_heroic_games
+
+def _detect_lutris_games() -> list[dict]:
+    games: list[dict] = []
+    seen: set[str] = set()
+    roots = [
+        os.path.expanduser("~/.local/share/lutris/games"),
+        os.path.expanduser("~/.var/app/net.lutris.Lutris/data/lutris/games"),
+    ]
+    for root in roots:
+        for path in glob.glob(os.path.join(root, "*.yml")) + glob.glob(os.path.join(root, "*.yaml")):
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            name_match = re.search(r"(?m)^\s*name:\s*[\"']?(.+?)[\"']?\s*$", text)
+            game_match = re.search(r"(?m)^\s*game_slug:\s*[\"']?(.+?)[\"']?\s*$", text)
+            path_match = re.search(r"(?m)^\s*(?:prefix|working_dir):\s*[\"']?(.+?)[\"']?\s*$", text)
+            name = (name_match.group(1) if name_match else "").strip()
+            if not name:
+                name = os.path.splitext(os.path.basename(path))[0].replace("-", " ").title()
+            key = (game_match.group(1) if game_match else name).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            games.append({
+                "name": name,
+                "launcher": "Lutris",
+                "path": (path_match.group(1).strip() if path_match else path),
+                "appid": "",
+            })
+    return games
+ # _detect_lutris_games
+
+def _detect_bottles_apps() -> list[dict]:
+    games: list[dict] = []
+    seen: set[str] = set()
+    roots = [
+        os.path.expanduser("~/.local/share/bottles/bottles"),
+        os.path.expanduser("~/.var/app/com.usebottles.bottles/data/bottles/bottles"),
+    ]
+    for root in roots:
+        for path in glob.glob(os.path.join(root, "*")):
+            if not os.path.isdir(path):
+                continue
+            name = os.path.basename(path).replace("_", " ").replace("-", " ").strip()
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            games.append({
+                "name": name,
+                "launcher": "Bottles",
+                "path": path,
+                "appid": "",
+            })
+    return games
+ # _detect_bottles_apps
+
+def _detect_installed_games() -> list[dict]:
+    games = []
+    games.extend(_detect_steam_games())
+    games.extend(_detect_heroic_games())
+    games.extend(_detect_lutris_games())
+    games.extend(_detect_bottles_apps())
+    games.sort(key=lambda item: (item.get("launcher", ""), item.get("name", "").lower()))
+    return games
+ # _detect_installed_games
+
+def _load_protondb_cache() -> dict[str, str]:
+    try:
+        with open(_PROTONDB_CACHE_PATH, encoding="utf-8") as _f:
+            data = json.load(_f)
+            if isinstance(data, dict):
+                return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+ # _load_protondb_cache
+
+def _save_protondb_cache(cache: dict[str, str]) -> None:
+    try:
+        os.makedirs(os.path.dirname(_PROTONDB_CACHE_PATH), exist_ok=True)
+        with open(_PROTONDB_CACHE_PATH, "w", encoding="utf-8") as _f:
+            json.dump(cache, _f)
+    except OSError:
+        pass
+ # _save_protondb_cache
+
+class _ProtonDbBatchWorker(TrackedThread):
+    """Fetches ProtonDB tiers for a list of Steam appids, skipping already-cached ones."""
+    tier_fetched = Signal(str, str)   # (appid, tier)
+    finished_all = Signal(dict)       # full {appid: tier} map
+
+    def __init__(self, appids: list[str], existing: dict[str, str]):
+        super().__init__()
+        self._appids = appids
+        self._existing = dict(existing)
+
+    def run(self):
+        result = dict(self._existing)
+        for appid in self._appids:
+            if not appid or appid in result:
+                continue
+            try:
+                req = Request(
+                    f"https://www.protondb.com/api/v1/reports/summaries/{appid}.json",
+                    headers={"User-Agent": "KythOS-GameCheck/1.0"},
+                )
+                with urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    tier = data.get("tier") or "pending"
+                    result[appid] = tier
+                    self.tier_fetched.emit(appid, tier)
+            except Exception:
+                result[appid] = "pending"
+            time.sleep(0.06)
+        self.finished_all.emit(result)
+ # _ProtonDbBatchWorker
+
+def _streaming_health_items() -> list[tuple[str, str, str]]:
+    pipewire_ok = shutil.which("pw-cli") is not None or shutil.which("wpctl") is not None
+    obs_capture_ok = any(
+        os.path.exists(path) for path in (
+            "/usr/lib64/libobs_vkcapture.so",
+            "/usr/lib/libobs_vkcapture.so",
+            "/usr/lib64/obs-plugins/libobs_vkcapture.so",
+            "/usr/lib/obs-plugins/libobs_vkcapture.so",
+        )
+    )
+    v4l2_probe = _run_command(["modprobe", "-n", "v4l2loopback"], timeout=4)
+    v4l2_ok = v4l2_probe is not None and v4l2_probe.returncode == 0
+    mic_hint = "PipeWire ready; test mic in Discord/OBS." if pipewire_ok else "PipeWire tools not found."
+    obs_ok = _is_flatpak_installed("com.obsproject.Studio")
+    discord_ok = _is_flatpak_installed("com.discordapp.Discord")
+
+    return [
+        ("ok" if obs_ok else "warn", "OBS Studio", "Installed." if obs_ok else "Install OBS for capture and streaming."),
+        ("ok" if discord_ok else "warn", "Discord", "Installed." if discord_ok else "Install Discord for voice and screen share testing."),
+        ("ok" if pipewire_ok else "warn", "PipeWire", mic_hint),
+        ("ok" if obs_capture_ok else "warn", "Game capture", "obs-vkcapture runtime present." if obs_capture_ok else "obs-vkcapture runtime not detected."),
+        ("ok" if v4l2_ok else "dim", "Virtual camera", "v4l2loopback available." if v4l2_ok else "Optional: v4l2loopback not available."),
+    ]
+ # _streaming_health_items
+
+def _find_steam_libraries(mount_point: str) -> list[str]:
+    """Scan a mounted NTFS drive for steamapps directories."""
+    found: list[str] = []
+    # Known other system Steam install locations
+    candidates = [
+        os.path.join(mount_point, "Program Files (x86)", "Steam", "steamapps"),
+        os.path.join(mount_point, "Program Files", "Steam", "steamapps"),
+        os.path.join(mount_point, "SteamLibrary", "steamapps"),
+        os.path.join(mount_point, "Steam", "steamapps"),
+        os.path.join(mount_point, "Games", "Steam", "steamapps"),
+        os.path.join(mount_point, "Games", "SteamLibrary", "steamapps"),
+    ]
+    for path in candidates:
+        if os.path.isdir(path):
+            found.append(path)
+    # Shallow scan: check one level of subdirs for SteamLibrary/steamapps patterns
+    try:
+        for entry in os.scandir(mount_point):
+            if not entry.is_dir(follow_symlinks=False):
+                continue
+            for sub in (
+                os.path.join(entry.path, "steamapps"),
+                os.path.join(entry.path, "SteamLibrary", "steamapps"),
+            ):
+                if os.path.isdir(sub) and sub not in found:
+                    found.append(sub)
+    except (PermissionError, OSError):
+        pass
+    return found
+ # _find_steam_libraries
+
+def _scan_steamapps_manifests(steamapps_dir: str) -> list[dict]:
+    """List games recorded in a steamapps directory (works on read-only NTFS mounts)."""
+    games: list[dict] = []
+    seen: set[str] = set()
+    for manifest in glob.glob(os.path.join(steamapps_dir, "appmanifest_*.acf")):
+        data = _parse_steam_acf(manifest)
+        name = data.get("name", "").strip()
+        appid = data.get("appid", "").strip()
+        if not name or (appid or name.lower()) in seen:
+            continue
+        lowered = name.lower()
+        if any(lowered.startswith(pat) for pat in _STEAM_NON_GAME_PATTERNS):
+            continue
+        seen.add(appid or lowered)
+        games.append({"name": name, "appid": appid})
+    games.sort(key=lambda item: item["name"].lower())
+    return games
+ # _scan_steamapps_manifests

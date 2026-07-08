@@ -2,9 +2,10 @@ import shutil
 import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    TrackedThread, Worker, _detect_controllers, _release_worker_when_finished,
-)
+from .core_base import _release_worker_when_finished
+from .services.gaming import TrackedThread
+from .services.hardware import _detect_controllers
+from .services.software import Worker
 from .qt import (  # noqa: E501
     QHBoxLayout, QLabel, QMessageBox, QPushButton, QThread, Signal,
 )

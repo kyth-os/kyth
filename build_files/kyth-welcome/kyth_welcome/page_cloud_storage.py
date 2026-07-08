@@ -6,8 +6,13 @@ import time
 from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    TrackedThread, Worker, _finish_worker, _is_flatpak_installed, _load_sync_config, _rclone_available, _rclone_list_remotes, _restyle, _save_sync_config,
+from .core_base import _restyle
+from .services.gaming import TrackedThread
+from .services.network import (
+    _load_sync_config, _rclone_available, _rclone_list_remotes, _save_sync_config,
+)
+from .services.software import (
+    Worker, _finish_worker, _is_flatpak_installed,
 )
 from .qt import (  # noqa: E501
     QApplication, QComboBox, QDesktopServices, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QTextEdit, QThread, QTimer, QUrl, QVBoxLayout, QWidget, Qt, Signal,
@@ -452,6 +457,7 @@ class RcloneSetupWizard(QDialog):
         done_card_layout.addWidget(cmds_lbl)
 
         self._done_cmds = QTextEdit()
+        self._done_cmds.document().setMaximumBlockCount(5000)
         self._done_cmds.setReadOnly(True)
         self._done_cmds.setMaximumHeight(110)
         done_card_layout.addWidget(self._done_cmds)
@@ -800,6 +806,7 @@ class CloudStoragePage(Page):
         gd_layout.addLayout(gd_interval_row)
 
         self._gd_sync_log = QTextEdit()
+        self._gd_sync_log.document().setMaximumBlockCount(5000)
         self._gd_sync_log.setReadOnly(True)
         self._gd_sync_log.setMaximumHeight(100)
         self._gd_sync_log.setObjectName("card-copy")
@@ -902,6 +909,7 @@ class CloudStoragePage(Page):
         od_layout.addLayout(od_interval_row)
 
         self._od_sync_log = QTextEdit()
+        self._od_sync_log.document().setMaximumBlockCount(5000)
         self._od_sync_log.setReadOnly(True)
         self._od_sync_log.setMaximumHeight(100)
         self._od_sync_log.setObjectName("card-copy")
@@ -973,6 +981,7 @@ class CloudStoragePage(Page):
         self._progress.hide()
         self._add(self._progress)
         self._log = QTextEdit()
+        self._log.document().setMaximumBlockCount(5000)
         self._log.setReadOnly(True)
         self._log.setMinimumHeight(150)
         self._log.hide()

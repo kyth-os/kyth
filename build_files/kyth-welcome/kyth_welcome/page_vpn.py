@@ -6,9 +6,8 @@ from urllib.parse import parse_qs, urlencode, unquote, urlparse
 from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    TrackedThread, _restyle,
-)
+from .core_base import _restyle
+from .services.gaming import TrackedThread
 from .qt import (  # noqa: E501
     QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QTextEdit, QThread, QTimer, QUrl, QVBoxLayout, QWebEnginePage, QWebEngineProfile, QWebEngineUrlRequestJob, QWebEngineUrlSchemeHandler, QWebEngineView, Signal, _WEBENGINE_AVAILABLE,
 )
@@ -741,6 +740,7 @@ class VpnPage(Page):
         ctrl_layout.addWidget(self._vpn_log_toggle)
 
         self._vpn_log = QTextEdit()
+        self._vpn_log.document().setMaximumBlockCount(5000)
         self._vpn_log.setReadOnly(True)
         self._vpn_log.setStyleSheet(
             "font-family: 'Noto Mono', 'Cascadia Code', monospace; font-size: 12px;"

@@ -5,6 +5,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from ..qt import Signal
+from ..core_base import (
+    TrackedThread,
+    _bootc_status_data,
+    _current_branch,
+    _bootc_image_digest,
+    REGISTRY,
+    _run_command,
+)
+
 
 InspectRunner = Callable[[str], subprocess.CompletedProcess[bytes]]
 
@@ -126,3 +136,87 @@ def firmware_check_commands(refresh: bool = True) -> list[list[str]]:
         commands.append(["fwupdmgr", "refresh", "--force"])
     commands.append(["fwupdmgr", "get-updates"])
     return commands
+
+
+# ── Update check worker ────────────────────────────────────────────────────────
+class UpdateCheckWorker(TrackedThread):
+    """Checks if a newer image is available in the registry without downloading anything.
+    Compares the local booted digest against the remote manifest via skopeo inspect.
+    Emits result(state, remote_ts) where state is 'available', 'uptodate', or 'error'."""
+    result = Signal(str, str)
+
+    def run(self):
+        result = check_registry_update(
+            status_data=_bootc_status_data() or {},
+            branch=_current_branch() or "latest",
+            registry=REGISTRY,
+        )
+        self.result.emit(result.state, result.detail)
+
+
+# ── Firmware check worker ──────────────────────────────────────────────────────
+class FirmwareCheckWorker(TrackedThread):
+    """Query fwupd for pending firmware updates (non-blocking background check).
+
+    Emits result(count, summary) where count is:
+      -1  fwupd unavailable or hard error
+       0  up to date
+       n  number of devices with pending updates
+    """
+    result = Signal(int, str)
+
+    def run(self):
+        refresh_cmd, updates_cmd = firmware_check_commands(refresh=True)
+        _run_command(refresh_cmd, timeout=30)
+        updates = _run_command(updates_cmd, timeout=20)
+        if updates is None:
+            self.result.emit(-1, "fwupd not available.")
+            return
+        if updates.returncode == 2 or not updates.stdout.strip():
+            # exit code 2 = nothing to update
+            self.result.emit(0, "")
+            return
+        if updates.returncode != 0:
+            self.result.emit(-1, updates.stdout.strip() or "fwupdmgr get-updates failed.")
+            return
+        count = max(1, updates.stdout.count("Device ID:"))
+        self.result.emit(count, updates.stdout.strip())
+
+
+# ── Changelog worker ───────────────────────────────────────────────────────────
+class ChangelogWorker(TrackedThread):
+    """Fetches OCI revision annotations for the booted and latest remote images so the
+    Update page can show a precise GitHub compare link instead of a generic commits URL."""
+    result = Signal(str, str)  # (booted_rev, remote_rev) — short git SHAs, may be empty
+
+    def _fetch_annotations(self, ref: str) -> dict:
+        try:
+            r = subprocess.run(
+                ["skopeo", "inspect", "--raw", "--no-creds", f"docker://{ref}"],
+                capture_output=True, timeout=30,
+            )
+            if r.returncode != 0:
+                return {}
+            manifest = json.loads(r.stdout)
+            annotations = manifest.get("annotations") or {}
+            # For multi-arch index the interesting annotations are on the amd64 entry.
+            if not annotations.get("org.opencontainers.image.revision"):
+                for entry in manifest.get("manifests", []):
+                    plat = entry.get("platform", {})
+                    if plat.get("architecture") == "amd64" and plat.get("os") == "linux":
+                        annotations = entry.get("annotations") or annotations
+                        break
+            return annotations
+        except Exception:
+            return {}
+
+    def run(self):
+        tag = _current_branch() or "latest"
+        booted_digest = _bootc_image_digest("booted")
+        booted_rev = ""
+        if booted_digest:
+            ann = self._fetch_annotations(f"{REGISTRY}@{booted_digest[1]}")
+            booted_rev = ann.get("org.opencontainers.image.revision", "")[:12]
+        remote_ann = self._fetch_annotations(f"{REGISTRY}:{tag}")
+        remote_rev = remote_ann.get("org.opencontainers.image.revision", "")[:12]
+        self.result.emit(booted_rev, remote_rev)

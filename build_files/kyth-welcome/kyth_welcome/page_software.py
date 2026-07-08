@@ -10,8 +10,12 @@ import subprocess
 import defusedxml.ElementTree as ET
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    Worker, _apply_install_badge, _chromium_app_window_cmd, _davinci_download_dir, _davinci_flatpak_app_id, _davinci_zip_candidates, _finish_worker, _install_flatpak_inline, _is_flatpak_installed, _restyle,
+from .core_base import (
+    _apply_install_badge, _restyle,
+)
+from .services.software import (
+    Worker, _chromium_app_window_cmd, _davinci_download_dir, _davinci_flatpak_app_id, _davinci_zip_candidates,
+    _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
 )
 from .qt import (  # noqa: E501
     QButtonGroup, QCheckBox, QComboBox, QDesktopServices, QDialog, QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout, QIcon, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QRadioButton, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
@@ -500,6 +504,7 @@ class SoftwarePage(Page):
         layout.addWidget(self._starter_log_toggle)
 
         self._starter_log = QTextEdit()
+        self._starter_log.document().setMaximumBlockCount(5000)
         self._starter_log.setReadOnly(True)
         self._starter_log.setMaximumHeight(130)
         self._starter_log.hide()
@@ -1026,6 +1031,7 @@ class SoftwarePage(Page):
         layout.addWidget(self._fp_install_log_toggle)
 
         self._fp_install_log = QTextEdit()
+        self._fp_install_log.document().setMaximumBlockCount(5000)
         self._fp_install_log.setReadOnly(True)
         self._fp_install_log.setMaximumHeight(130)
         self._fp_install_log.hide()
@@ -2089,6 +2095,7 @@ class SoftwarePage(Page):
         layout.addWidget(self._uninstall_log_toggle)
 
         self._uninstall_log = QTextEdit()
+        self._uninstall_log.document().setMaximumBlockCount(5000)
         self._uninstall_log.setReadOnly(True)
         self._uninstall_log.setMaximumHeight(130)
         self._uninstall_log.hide()
@@ -2470,6 +2477,7 @@ class SoftwarePage(Page):
         dev_layout.addWidget(self._dev_progress)
 
         self._dev_log = QTextEdit()
+        self._dev_log.document().setMaximumBlockCount(5000)
         self._dev_log.setReadOnly(True)
         self._dev_log.hide()
         dev_layout.addWidget(self._dev_log)
@@ -2530,6 +2538,7 @@ class SoftwarePage(Page):
         ai_layout.addWidget(self._ai_progress)
 
         self._ai_log = QTextEdit()
+        self._ai_log.document().setMaximumBlockCount(5000)
         self._ai_log.setReadOnly(True)
         self._ai_log.hide()
         ai_layout.addWidget(self._ai_log)
@@ -2865,6 +2874,7 @@ class SoftwarePage(Page):
         kali_layout.addWidget(self._sec_log_toggle)
 
         self._sec_log = QTextEdit()
+        self._sec_log.document().setMaximumBlockCount(5000)
         self._sec_log.setReadOnly(True)
         self._sec_log.setMaximumHeight(150)
         self._sec_log.hide()
@@ -3786,6 +3796,7 @@ echo "Kali box is stopped and removed."
         self._dv_log_toggle.hide()
         dv_layout.addWidget(self._dv_log_toggle)
         self._dv_log = QTextEdit()
+        self._dv_log.document().setMaximumBlockCount(5000)
         self._dv_log.setReadOnly(True)
         self._dv_log.setMaximumHeight(120)
         self._dv_log.hide()

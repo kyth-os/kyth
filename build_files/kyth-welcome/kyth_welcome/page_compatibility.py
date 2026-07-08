@@ -5,9 +5,7 @@ from datetime import datetime
 from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    TrackedThread,
-)
+from .services.gaming import TrackedThread
 from .qt import (  # noqa: E501
     QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QThread, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )

@@ -1,9 +1,8 @@
 import re
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    HardwareProbe, _restyle,
-)
+from .core_base import _restyle
+from .services.hardware import HardwareProbe
 from .qt import (  # noqa: E501
     QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QTimer, QVBoxLayout, QWidget, Qt,
 )
@@ -155,6 +154,7 @@ class CommandResultPanel(QFrame):
         layout.addLayout(row)
 
         self._details = QTextEdit()
+        self._details.document().setMaximumBlockCount(5000)
         self._details.setReadOnly(True)
         self._details.setMaximumHeight(120)
         self._details.hide()

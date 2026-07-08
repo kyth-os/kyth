@@ -9,9 +9,17 @@ import subprocess
 from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DataWorker, HardwareProbe, HardwareProbeWorker, _command_stdout, _diagnostics_report, _finish_worker, _has_rollback_deployment, _has_staged_update, _health_command_report, _health_recommendations, _release_worker_when_finished, _restyle,
+from .core_base import (
+    _has_rollback_deployment, _has_staged_update, _release_worker_when_finished, _restyle,
 )
+from .services.diagnostics import (
+    _command_stdout, _diagnostics_report, _health_command_report, _health_recommendations,
+)
+from .services.gaming import DataWorker
+from .services.hardware import (
+    HardwareProbe, HardwareProbeWorker,
+)
+from .services.software import _finish_worker
 from .qt import (  # noqa: E501
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, QVBoxLayout, QWidget,
 )
@@ -241,6 +249,7 @@ class DiagnosticsPage(Page):
         self._add(self._raw_toggle)
 
         self._report = QTextEdit()
+        self._report.document().setMaximumBlockCount(5000)
         self._report.setReadOnly(True)
         self._report.setMinimumHeight(220)
         self._report.hide()

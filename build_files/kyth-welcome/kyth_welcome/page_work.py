@@ -5,8 +5,12 @@ import shutil
 import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DataWorker, Worker, _chromium_app_window_cmd, _find_ntfs_drives, _install_flatpak_inline, _is_flatpak_installed, _release_worker_when_finished,
+from .core_base import _release_worker_when_finished
+from .services.gaming import (
+    DataWorker, _find_ntfs_drives,
+)
+from .services.software import (
+    Worker, _chromium_app_window_cmd, _install_flatpak_inline, _is_flatpak_installed,
 )
 from .qt import (  # noqa: E501
     QApplication, QCheckBox, QComboBox, QDBusConnection, QDBusInterface, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTimer,

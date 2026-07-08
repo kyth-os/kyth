@@ -1,8 +1,15 @@
 import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    Worker, _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _finish_worker, _hw_setup_done, _hw_setup_service_state, _nvidia_module_loaded, _restyle, _set_session_inhibit,
+from .core_base import (
+    _restyle, _set_session_inhibit,
+)
+from .services.hardware import (
+    _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
+    _nvidia_module_loaded,
+)
+from .services.software import (
+    Worker, _finish_worker,
 )
 from .qt import (  # noqa: E501
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer,
@@ -65,6 +72,7 @@ class NvidiaPage(Page):
         self._add(self._log_toggle)
 
         self._log = QTextEdit()
+        self._log.document().setMaximumBlockCount(5000)
         self._log.setReadOnly(True)
         self._log.setMinimumHeight(200)
         self._log.hide()

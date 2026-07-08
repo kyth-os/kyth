@@ -3,9 +3,9 @@ import shutil
 import subprocess  # nosec B404 # nosemgrep
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DataWorker, HardwareProbe, _release_worker_when_finished,
-)
+from .core_base import _release_worker_when_finished
+from .services.gaming import DataWorker
+from .services.hardware import HardwareProbe
 from .qt import (  # noqa: E501
     QFrame, QHBoxLayout, QLabel, QTimer, QVBoxLayout, Qt,
 )

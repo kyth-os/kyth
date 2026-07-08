@@ -2,9 +2,19 @@ import shlex
 import subprocess  # nosec B404 # nosemgrep
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    Worker, _IS_LIVE, _cancel_worker, _command_stdout, _current_branch, _detect_nvidia, _find_ntfs_drives, _finish_worker, _ge_proton_version, _has_rollback_deployment, _is_flatpak_installed, _load_profile, _mark_wizard_done, _restyle, _running_threads, _save_profile,
+from .core_base import (
+    _IS_LIVE, _cancel_worker, _has_rollback_deployment, _load_profile, _mark_wizard_done, _restyle,
+    _running_threads, _save_profile,
 )
+from .services.diagnostics import _command_stdout
+from .services.gaming import (
+    _find_ntfs_drives, _ge_proton_version,
+)
+from .services.hardware import _detect_nvidia
+from .services.software import (
+    Worker, _finish_worker, _is_flatpak_installed,
+)
+from .services.updates import _current_branch
 from .page_compatibility import _COMPAT_GAMES
 from .page_gaming import GamingPage
 from .page_hardware import HardwarePage
@@ -985,6 +995,7 @@ class WizardWindow(QMainWindow):
         extras_layout.addWidget(self._wizard_install_log_toggle)
 
         self._wizard_install_log = QTextEdit()
+        self._wizard_install_log.document().setMaximumBlockCount(5000)
         self._wizard_install_log.setReadOnly(True)
         self._wizard_install_log.setMaximumHeight(120)
         self._wizard_install_log.hide()

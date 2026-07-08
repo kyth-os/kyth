@@ -499,6 +499,7 @@ _build-bib $target_image $tag $type $config: (_rootful_load_image target_image t
         docker tag "${target_image}:${tag}" "${BIB_IMAGE_REF}"
         docker push "${BIB_IMAGE_REF}"
 
+        mkdir -p "${BUILDTMP}/containers"
         sudo docker run \
             --rm \
             --privileged \
@@ -508,6 +509,7 @@ _build-bib $target_image $tag $type $config: (_rootful_load_image target_image t
             $KEY_MOUNT \
             -v $(pwd)/${config}:/config.toml:ro \
             -v $BUILDTMP:/output \
+            -v "${BUILDTMP}/containers:/var/lib/containers" \
             "${bib_image}" \
             ${args} \
             "${BIB_IMAGE_REF}"

@@ -4,8 +4,13 @@ import subprocess
 from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    TrackedThread, _IS_LIVE, _bootc_image_digest, _command_stdout, _current_branch, _release_worker_when_finished, _restyle,
+from .core_base import (
+    _IS_LIVE, _release_worker_when_finished, _restyle,
+)
+from .services.diagnostics import _command_stdout
+from .services.gaming import TrackedThread
+from .services.updates import (
+    _bootc_image_digest, _current_branch,
 )
 from .qt import (  # noqa: E501
     QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QThread, QUrl, Signal,
@@ -254,6 +259,7 @@ class FeedbackPage(Page):
         self._desc_lbl.setObjectName("card-title")
         form_layout.addWidget(self._desc_lbl)
         self._desc_edit = QTextEdit()
+        self._desc_edit.document().setMaximumBlockCount(5000)
         self._desc_edit.setPlaceholderText(
             "Steps to reproduce, what you expected, and what actually happened"
         )

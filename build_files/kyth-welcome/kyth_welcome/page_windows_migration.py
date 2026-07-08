@@ -10,8 +10,17 @@ import sys
 import tempfile
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DataWorker, TrackedThread, Worker, _command_stdout, _finish_worker, _human_bytes, _install_flatpak_inline, _is_flatpak_installed, _release_worker_when_finished, _restyle, _run_command,
+from .core_base import (
+    _human_bytes, _release_worker_when_finished, _restyle,
+)
+from .services.diagnostics import (
+    _command_stdout, _run_command,
+)
+from .services.gaming import (
+    DataWorker, TrackedThread,
+)
+from .services.software import (
+    Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
 )
 from .page_feedback import (  # noqa: E501
     _probe_windows_partitions,

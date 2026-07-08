@@ -8,8 +8,19 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DataWorker, Worker, _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _apply_install_badge, _cancel_worker, _collect_gaming_dashboard, _command_stdout, _compat_tool_version, _detect_installed_games, _find_ntfs_drives, _find_steam_libraries, _finish_worker, _gamescope_installed, _gaming_health_items, _gaming_migration_checklist_items, _ge_proton_version, _install_flatpak_inline, _is_flatpak_installed, _load_protondb_cache, _ludusavi_backup_summary, _mangohud_installed, _release_worker_when_finished, _restyle, _save_protondb_cache, _scan_steamapps_manifests, _streaming_health_items, _vkbasalt_installed,
+from .core_base import (
+    _apply_install_badge, _cancel_worker, _release_worker_when_finished, _restyle,
+)
+from .services.diagnostics import _command_stdout
+from .services.gaming import (
+    DataWorker, _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _collect_gaming_dashboard, _compat_tool_version,
+    _detect_installed_games, _find_ntfs_drives, _find_steam_libraries, _gamescope_installed, _gaming_health_items,
+    _gaming_migration_checklist_items, _ge_proton_version, _load_protondb_cache, _ludusavi_backup_summary,
+    _mangohud_installed, _save_protondb_cache, _scan_steamapps_manifests, _streaming_health_items,
+    _vkbasalt_installed,
+)
+from .services.software import (
+    Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
 )
 from .page_cloud_storage import (  # noqa: E501
     SteamCopyWorker, _copy_text, _launch_opt_label, _launch_opt_value,
@@ -787,6 +798,7 @@ class GamingPage(Page):
         self._opti_status_lbl.hide()
         opti_layout.addWidget(self._opti_status_lbl)
         self._opti_log = QTextEdit()
+        self._opti_log.document().setMaximumBlockCount(5000)
         self._opti_log.setReadOnly(True)
         self._opti_log.setMaximumHeight(140)
         self._opti_log.hide()
@@ -944,6 +956,7 @@ class GamingPage(Page):
         self._tool_log_toggle.hide()
         launcher_layout.addWidget(self._tool_log_toggle)
         self._tool_log = QTextEdit()
+        self._tool_log.document().setMaximumBlockCount(5000)
         self._tool_log.setReadOnly(True)
         self._tool_log.setMaximumHeight(120)
         self._tool_log.hide()
@@ -1121,6 +1134,7 @@ class GamingPage(Page):
             self._scx_log_toggle.hide()
             scx_layout.addWidget(self._scx_log_toggle)
             self._scx_log = QTextEdit()
+            self._scx_log.document().setMaximumBlockCount(5000)
             self._scx_log.setReadOnly(True)
             self._scx_log.setMaximumHeight(100)
             self._scx_log.hide()
@@ -1170,6 +1184,7 @@ class GamingPage(Page):
         self._gp_log_toggle.hide()
         gp_layout.addWidget(self._gp_log_toggle)
         self._gp_log = QTextEdit()
+        self._gp_log.document().setMaximumBlockCount(5000)
         self._gp_log.setReadOnly(True)
         self._gp_log.setMaximumHeight(120)
         self._gp_log.hide()
@@ -1404,6 +1419,7 @@ class GamingPage(Page):
         migrate_layout.addWidget(self._migrate_log_toggle)
 
         self._migrate_log = QTextEdit()
+        self._migrate_log.document().setMaximumBlockCount(5000)
         self._migrate_log.setReadOnly(True)
         self._migrate_log.setMaximumHeight(140)
         self._migrate_log.hide()

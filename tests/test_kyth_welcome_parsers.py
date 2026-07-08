@@ -66,6 +66,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
 from kyth_welcome import core, page_vpn  # noqa: E402
+from kyth_welcome.services import hardware, gaming  # noqa: E402
 
 
 class CoreParserTests(unittest.TestCase):
@@ -75,7 +76,7 @@ class CoreParserTests(unittest.TestCase):
         self.assertEqual(core._parse_size_bytes("not a size"), 0)
 
     def test_parse_steam_acf_text(self):
-        acf = core._parse_steam_acf_text(
+        acf = gaming._parse_steam_acf_text(
             '"appid" "620"\n"name" "Portal 2"\n"installdir" "Portal 2"\n'
         )
         self.assertEqual(acf["appid"], "620")
@@ -83,11 +84,11 @@ class CoreParserTests(unittest.TestCase):
         self.assertEqual(acf["installdir"], "Portal 2")
 
     def test_format_display_mode(self):
-        self.assertEqual(core._format_display_mode("1920x1080@143.98"), "1920\u00d71080 @ 144Hz")
-        self.assertEqual(core._format_display_mode("bad-mode"), "bad-mode")
+        self.assertEqual(hardware._format_display_mode("1920x1080@143.98"), "1920\u00d71080 @ 144Hz")
+        self.assertEqual(hardware._format_display_mode("bad-mode"), "bad-mode")
 
     def test_parse_kscreen_output(self):
-        display = core._parse_kscreen_output(
+        display = hardware._parse_kscreen_output(
             "Output: 1 HDMI-A-1\n"
             "connected\n"
             "enabled\n"

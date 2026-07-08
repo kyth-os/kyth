@@ -1188,7 +1188,7 @@ toggle-nvapi:
 # on top of any renderer output without per-game deployment.
 #
 # After install, enable per-game via Steam launch options:
-#   ENABLE_LSFG=1 %command%
+# ENABLE_LSFG=1 %command%
 [group('KythOS')]
 install-lsfg-vk:
     #!/usr/bin/env bash
