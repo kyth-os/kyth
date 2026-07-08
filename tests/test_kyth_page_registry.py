@@ -1,10 +1,33 @@
 import sys
 import pathlib
+import types
 import unittest
+
+
+def _install_qt_stubs() -> None:
+    class _Dummy:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __call__(self, *args, **kwargs):
+            return self
+
+        def __getattr__(self, _name):
+            return self
+
+    class _DummySignal(_Dummy):
+        pass
+
+    qt = types.ModuleType("kyth_welcome.qt")
+    for name in ("QLabel", "QPushButton", "QTextEdit", "QThread", "QWidget"):
+        setattr(qt, name, _Dummy)
+    qt.Signal = _DummySignal
+    sys.modules["kyth_welcome.qt"] = qt
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
+_install_qt_stubs()
 
 from kyth_welcome.page_registry import (  # noqa: E402
     PROBLEM_ROUTES,
