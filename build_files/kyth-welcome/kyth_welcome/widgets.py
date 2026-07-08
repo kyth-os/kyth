@@ -7,6 +7,7 @@ from .core import (  # noqa: E501
 from .qt import (  # noqa: E501
     QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QTimer, QVBoxLayout, QWidget, Qt,
 )
+from .ui_tokens import STATUS_ERROR, STATUS_OK, STATUS_WARN
 
 def _theme_icon(*names: str) -> QIcon:
     """Return the first available system theme icon, or a null icon."""
@@ -48,6 +49,7 @@ class StatusBadge(QLabel):
         super().__init__()
         self.setWordWrap(True)
         self.setMinimumWidth(220)
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.set_state(state, text)
 
@@ -55,6 +57,17 @@ class StatusBadge(QLabel):
         self.setText(text)
         self.setObjectName(self._STATE_NAMES.get(state, "task-status-idle"))
         _restyle(self)
+
+
+def status_color(state: str) -> str:
+    return {
+        "ok": STATUS_OK,
+        "success": STATUS_OK,
+        "warn": STATUS_WARN,
+        "warning": STATUS_WARN,
+        "error": STATUS_ERROR,
+        "failed": STATUS_ERROR,
+    }.get(state, STATUS_WARN)
 
 
 class ActionRow(QFrame):

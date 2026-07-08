@@ -65,9 +65,11 @@ from .page_windows_migration import (  # noqa: E501
 from .page_work import (  # noqa: E501
     WorkSetupPage,
 )
+from .page_registry import descriptors_from_nav_groups
 from .qt import (  # noqa: E501
     QCheckBox, QCompleter, QDesktopServices, QFrame, QHBoxLayout, QIcon, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QShortcut, QSize, QSizePolicy, QStackedWidget, QTextEdit, QTimer, QUrl, QVBoxLayout, QWidget, Qt,
 )
+from .ui_tokens import accent_line_style
 from .widgets import (  # noqa: E501
     _divider, _make_card, _set_log_panel, _theme_icon,
 )
@@ -293,6 +295,8 @@ class MainWindow(QMainWindow):
         self._nav_buttons: list[NavButton] = []
         self._nav_button_by_key: dict[str, NavButton] = {}
         self._nav_section_labels: dict[str, QLabel] = {}
+        self._page_descriptors = descriptors_from_nav_groups(nav_groups, self._SEARCH_ITEMS)
+        self._descriptor_by_key = {descriptor.key: descriptor for descriptor in self._page_descriptors}
         self._page_crumbs: list[tuple[str | None, str]] = []
         global_idx = 0
         for section_title, items in nav_groups:
@@ -474,11 +478,18 @@ class MainWindow(QMainWindow):
         if not query:
             return []
         ranked: list[tuple[str, int]] = []
-        for key, (title, description, extra_terms) in self._SEARCH_ITEMS.items():
+        for descriptor in self._page_descriptors:
+            key = descriptor.key
             if key not in self._page_index_by_key:
                 continue
             aliases = self._SEARCH_ALIASES.get(key, [])
-            terms = [key, title, description, *aliases, *extra_terms]
+            terms = [
+                descriptor.key,
+                descriptor.title,
+                descriptor.search_description,
+                *aliases,
+                *descriptor.search_terms,
+            ]
             score = 0
             for term in terms:
                 lower = term.lower()
@@ -497,7 +508,7 @@ class MainWindow(QMainWindow):
                     score = max(score, 130)
             if score:
                 ranked.append((key, score))
-        return sorted(ranked, key=lambda item: (-item[1], self._SEARCH_ITEMS[item[0]][0]))[:5]
+        return sorted(ranked, key=lambda item: (-item[1], self._descriptor_by_key[item[0]].title))[:5]
 
     def _update_search_results(self, text: str):
         self._clear_search_results()
@@ -518,7 +529,9 @@ class MainWindow(QMainWindow):
         self._search_results_title.setText("Search results")
         self._search_results_hint.setText("Matched System Hub tools.")
         for key, _score in matches:
-            title, description, _terms = self._SEARCH_ITEMS[key]
+            descriptor = self._descriptor_by_key[key]
+            title = descriptor.title
+            description = descriptor.search_description
             section, label = self._page_crumbs[self._page_index_by_key[key]]
             crumb = label if not section or section == label else f"{section} / {label}"
             btn = QPushButton(f"{title}\n{description}\n{crumb}")
@@ -704,7 +717,7 @@ class WizardWindow(QMainWindow):
         # Accent line
         accent = QFrame()
         accent.setFixedHeight(2)
-        accent.setStyleSheet("background: #4f8cff; border: none;")
+        accent.setStyleSheet(accent_line_style())
         root_layout.addWidget(accent)
 
         # ── Content stack ─────────────────────────────────────────────────

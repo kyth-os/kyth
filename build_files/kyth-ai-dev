@@ -101,8 +101,18 @@ setup() {
             exit 1
         fi
 
-        python3 -m pip install --user --upgrade pipx uv
-        python3 -m pipx ensurepath || true
+        if command -v dnf5 >/dev/null 2>&1; then
+            sudo dnf5 install -y --skip-unavailable pipx uv
+        elif command -v dnf >/dev/null 2>&1; then
+            sudo dnf install -y --skip-unavailable pipx uv
+        elif ! python3 -m pip install --user --upgrade pipx uv; then
+            python3 -m pip install --user --upgrade --break-system-packages pipx uv
+        fi
+        if command -v pipx >/dev/null 2>&1; then
+            pipx ensurepath || true
+        else
+            python3 -m pipx ensurepath || true
+        fi
     '
 
     echo

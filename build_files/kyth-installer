@@ -52,6 +52,7 @@ import subprocess
 import threading
 import time
 import traceback
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -66,6 +67,75 @@ _bootstrap_token: Optional[str] = None
 SKIP_FETCH_CHECK = os.environ.get("KYTH_INSTALL_SKIP_FETCH_CHECK", "0").lower() in (
     "1", "true", "yes", "on"
 )
+
+
+@dataclass(frozen=True)
+class InstallPlan:
+    mode: str
+    disk: Optional[str] = None
+    target_partition: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RouteSpec:
+    method: str
+    path: str
+    requires_auth: bool = True
+    requires_same_origin: bool = False
+
+
+ROUTES = {
+    "index": RouteSpec("GET", "/", requires_auth=False),
+    "config": RouteSpec("GET", "/api/config"),
+    "disks": RouteSpec("GET", "/api/disks"),
+    "partitions": RouteSpec("GET", "/api/partitions"),
+    "free_space": RouteSpec("GET", "/api/free-space"),
+    "stream": RouteSpec("GET", "/api/stream"),
+    "log": RouteSpec("GET", "/api/log"),
+    "timezones": RouteSpec("GET", "/api/timezones"),
+    "start": RouteSpec("POST", "/api/start", requires_same_origin=True),
+    "reboot": RouteSpec("POST", "/api/reboot", requires_same_origin=True),
+}
+
+
+def _normalized_install_mode(state: dict) -> str:
+    return str(state.get("install_mode") or "wipe").strip().lower() or "wipe"
+
+
+def _install_plan_from_state(state: dict) -> InstallPlan:
+    return InstallPlan(
+        mode=_normalized_install_mode(state),
+        disk=state.get("disk"),
+        target_partition=state.get("target_partition"),
+    )
+
+
+def _apply_install_plan(state: dict, plan: InstallPlan) -> None:
+    state["install_mode"] = plan.mode
+    if plan.disk is not None:
+        state["disk"] = plan.disk
+    if plan.target_partition is not None:
+        state["target_partition"] = plan.target_partition
+
+
+def _parse_cookie_header(cookie_header: str) -> dict[str, str]:
+    cookies: dict[str, str] = {}
+    if not cookie_header:
+        return cookies
+    for pair in cookie_header.split(";"):
+        if "=" not in pair:
+            continue
+        key, value = pair.split("=", 1)
+        cookies[key.strip()] = value.strip()
+    return cookies
+
+
+def _route_for(method: str, path: str) -> RouteSpec | None:
+    method = method.upper()
+    for route in ROUTES.values():
+        if route.method == method and route.path == path:
+            return route
+    return None
 # Present when running from the live ISO (written by installer/build.sh).
 # Absent on a running installed system — used to gate operations that only make sense
 # from a live environment (e.g. wiping the running disk).
@@ -458,11 +528,14 @@ def _partition_size_bytes(partition: str) -> int:
 
 
 def _partition_start_bytes(partition: str) -> int:
+    # lsblk's START column (and the kernel's underlying sysfs "start" attribute)
+    # is always expressed in fixed 512-byte sectors, regardless of the device's
+    # actual logical block size and regardless of the --bytes flag.
     out = _lsblk_text(["-b", "-n", "-o", "START", partition])
     start = _safe_int(out.splitlines()[0] if out else 0, -1)
     if start < 0:
         raise RuntimeError(f"Could not determine partition start for {partition}.")
-    return start
+    return start * 512
 
 
 def _block_size_bytes(device: str) -> int:
@@ -1139,6 +1212,18 @@ def _parse_size_bytes(size_str: str) -> int:
         return 0
 
 
+def _prepare_install_plan(state: dict, log) -> InstallPlan:
+    plan = _install_plan_from_state(state)
+    if plan.mode == "resize_ntfs":
+        disk, target_partition = _prepare_ntfs_resize_target(state, log)
+        plan = InstallPlan("alongside", disk=disk, target_partition=target_partition)
+    elif plan.mode == "free_space":
+        disk, target_partition = _prepare_free_space_target(state, log)
+        plan = InstallPlan("alongside", disk=disk, target_partition=target_partition)
+    _apply_install_plan(state, plan)
+    return plan
+
+
 def _run_install() -> None:
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     LOG_FILE.write_text("")
@@ -1253,34 +1338,19 @@ def _run_install() -> None:
             )
         progress(pct_end)
 
+    alongside_mount = ""
+
     try:
-        if str(_state.get("install_mode") or "").strip().lower() == "resize_ntfs":
-            disk, target_partition = _prepare_ntfs_resize_target(_state, log)
-            _state["disk"] = disk
-            _state["target_partition"] = target_partition
-            _state["install_mode"] = "alongside"
-            config["disk"] = disk
-            config["target_partition"] = target_partition
-            config["install_mode"] = "alongside"
-        elif str(_state.get("install_mode") or "").strip().lower() == "free_space":
-            disk, target_partition = _prepare_free_space_target(_state, log)
-            _state["disk"] = disk
-            _state["target_partition"] = target_partition
-            _state["install_mode"] = "alongside"
-            config["disk"] = disk
-            config["target_partition"] = target_partition
-            config["install_mode"] = "alongside"
-        disk, target_partition = _validate_install_target(config)
-        config["disk"] = disk
+        install_plan = _prepare_install_plan(_state, log)
+        disk, target_partition = _validate_install_target(_state)
         _state["disk"] = disk
         if target_partition:
-            config["target_partition"] = target_partition
             _state["target_partition"] = target_partition
         else:
             _state.pop("target_partition", None)
         disk = _state["disk"]
         kernel = _state.get("kernel", "fedora")
-        install_mode = _state.get("install_mode", "wipe")
+        install_mode = install_plan.mode
         src_ref, tgt_ref = _install_images(kernel)
         log(f"Mode         : {install_mode}")
         log(f"Kernel       : {kernel}")
@@ -1288,8 +1358,6 @@ def _run_install() -> None:
         log(f"Target image : {tgt_ref}")
         log(f"Disk         : {disk}")
         log("")
-
-        alongside_mount = ""
 
         log("── Phase 1: Writing OS image to disk ─────────────────────────────")
 
@@ -1583,22 +1651,16 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:
-        if not self._require_same_origin_context():
+        if (route is None or route.requires_same_origin) and not self._require_same_origin_context():
             return
 
         path = urlparse(self.path).path
+        route = _route_for("GET", path)
         query = urlparse(self.path).query
         from urllib.parse import parse_qs
         qs = parse_qs(query)
 
-        # Parse cookies
-        cookies = {}
-        cookie_header = self.headers.get("Cookie", "")
-        if cookie_header:
-            for pair in cookie_header.split(";"):
-                if "=" in pair:
-                    k, v = pair.strip().split("=", 1)
-                    cookies[k.strip()] = v.strip()
+        cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
 
         global _bootstrap_token
         is_authenticated = False
@@ -1629,21 +1691,21 @@ class Handler(BaseHTTPRequestHandler):
         if not self._require_auth():
             return
 
-        if path == "/api/config":
+        if route == ROUTES["config"]:
             self._json({"source_image": SOURCE_IMAGE, "is_live": _IS_LIVE_SESSION})
-        elif path == "/api/disks":
+        elif route == ROUTES["disks"]:
             self._json(list_disks())
-        elif path == "/api/timezones":
+        elif route == ROUTES["timezones"]:
             self._json(list_timezones())
-        elif path == "/api/partitions":
+        elif route == ROUTES["partitions"]:
             disk = (qs.get("disk") or [""])[0]
             self._json(list_partitions(disk) if disk else [])
-        elif path == "/api/free-space":
+        elif route == ROUTES["free_space"]:
             disk = (qs.get("disk") or [""])[0]
             self._json(list_free_space(disk) if disk else [])
-        elif path == "/api/stream":
+        elif route == ROUTES["stream"]:
             self._sse()
-        elif path == "/api/log":
+        elif route == ROUTES["log"]:
             try:
                 text = LOG_FILE.read_text(errors="replace")
             except Exception as exc:
@@ -1658,6 +1720,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        path = urlparse(self.path).path
+        route = _route_for("POST", path)
         if not self._require_auth():
             return
         if not self._require_same_origin_context():
@@ -1669,7 +1733,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(400, "Invalid JSON")
             return
 
-        if self.path == "/api/start":
+        if route == ROUTES["start"]:
             disk = body.get("disk", "")
             disks = {d["name"]: d for d in list_disks()}
             if disk not in disks:
@@ -1773,7 +1837,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"started": True})
             return
 
-        if self.path == "/api/reboot":
+        if route == ROUTES["reboot"]:
             subprocess.Popen(_as_root(["systemctl", "reboot"]))
             self._json({"ok": True})
             return

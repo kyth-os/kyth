@@ -1,6 +1,5 @@
 import atexit
 import glob
-import hashlib
 import os
 import json
 import re
@@ -14,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
+from .services.updates import check_registry_update, firmware_check_commands
 
 # __KYTH_GENERATED_IMPORTS__
 from .qt import (  # noqa: E501
@@ -263,75 +264,12 @@ class UpdateCheckWorker(TrackedThread):
     result = Signal(str, str)
 
     def run(self):
-        local_data = _bootc_status_data() or {}
-        booted = _nested_get(local_data, ("status", "booted")) or {}
-        local_digest = None
-        for path in (
-            ("image", "imageDigest"),
-            ("image", "digest"),
-            ("imageDigest",),
-            ("digest",),
-        ):
-            v = _nested_get(booted, path)
-            if isinstance(v, str) and v.startswith("sha256:"):
-                local_digest = v
-                break
-
-        if not local_digest:
-            self.result.emit("error", "")
-            return
-
-        tag = _current_branch() or "latest"
-        ref = f"{REGISTRY}:{tag}"
-
-        try:
-            r = subprocess.run(
-                ["skopeo", "inspect", "--raw", "--no-creds", f"docker://{ref}"],
-                capture_output=True, timeout=45,
-            )
-        except FileNotFoundError:
-            self.result.emit("error", "")
-            return
-        except subprocess.TimeoutExpired:
-            self.result.emit("error", "")
-            return
-        except Exception:
-            self.result.emit("error", "")
-            return
-
-        if r.returncode != 0:
-            self.result.emit("error", "")
-            return
-
-        # bootc stores the platform-specific (amd64) manifest digest in imageDigest,
-        # not the OCI image index digest. Parse the index to extract the amd64 entry.
-        # Fall back to hashing the raw bytes (for single-arch images with no index).
-        remote_digest = None
-        remote_ts = ""
-        try:
-            manifest = json.loads(r.stdout)
-            for entry in manifest.get("manifests", []):
-                plat = entry.get("platform", {})
-                if plat.get("architecture") == "amd64" and plat.get("os") == "linux":
-                    d = entry.get("digest", "")
-                    if d.startswith("sha256:"):
-                        remote_digest = d
-                    break
-            annotations = manifest.get("annotations") or {}
-            raw_ts = annotations.get("org.opencontainers.image.created", "")
-            if raw_ts:
-                dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00")).astimezone()
-                remote_ts = dt.strftime("%Y-%m-%d %H:%M %Z")
-        except Exception:
-            pass
-
-        if remote_digest is None:
-            remote_digest = "sha256:" + hashlib.sha256(r.stdout).hexdigest()
-
-        if local_digest and remote_digest == local_digest:
-            self.result.emit("uptodate", remote_ts)
-        else:
-            self.result.emit("available", remote_ts)
+        result = check_registry_update(
+            status_data=_bootc_status_data() or {},
+            branch=_current_branch() or "latest",
+            registry=REGISTRY,
+        )
+        self.result.emit(result.state, result.detail)
 
 
 # ── Firmware check worker ──────────────────────────────────────────────────────
@@ -346,8 +284,9 @@ class FirmwareCheckWorker(TrackedThread):
     result = Signal(int, str)
 
     def run(self):
-        _run_command(["fwupdmgr", "refresh", "--force"], timeout=30)
-        updates = _run_command(["fwupdmgr", "get-updates"], timeout=20)
+        refresh_cmd, updates_cmd = firmware_check_commands(refresh=True)
+        _run_command(refresh_cmd, timeout=30)
+        updates = _run_command(updates_cmd, timeout=20)
         if updates is None:
             self.result.emit(-1, "fwupd not available.")
             return
@@ -1958,7 +1897,9 @@ def _firmware_probe() -> HardwareProbe:
         )
 
     device_count = devices.stdout.count("Device ID:")
-    updates = _run_command(["fwupdmgr", "get-updates"], timeout=20)
+    refresh_cmd, updates_cmd = firmware_check_commands(refresh=True)
+    _run_command(refresh_cmd, timeout=60)
+    updates = _run_command(updates_cmd, timeout=20)
     if updates is not None and updates.returncode == 0:
         return HardwareProbe(
             "Firmware", "warn",
