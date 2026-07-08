@@ -1556,8 +1556,6 @@ for _brew_path in "/home/linuxbrew/.linuxbrew/bin/brew" "${HOME}/.linuxbrew/bin/
         break
     fi
 done
-BREWSHEOF
-
 cat >/etc/fish/conf.d/brew.fish <<'BREWFISHEOF'
 # Add Homebrew to PATH and configure environment for fish shell if it exists
 for _brew_path in "/home/linuxbrew/.linuxbrew/bin/brew" "$HOME/.linuxbrew/bin/brew"
