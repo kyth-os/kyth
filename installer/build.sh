@@ -428,7 +428,7 @@ for unit in \
 	bootc-fetch-apply-updates.service bootc-fetch-apply-updates.timer \
 	systemd-firstboot.service systemd-oomd.service \
 	kyth-default-flatpaks.service kyth-flathub-setup.service \
-	kyth-ge-proton-update.service kyth-ge-proton-update.timer \
+	kyth-proton-cachyos-update.service kyth-proton-cachyos-update.timer \
 	kyth-hw-setup.service kyth-local-bin-migrate.service \
 	kyth-topgrade-migrate.service kyth-duperemove.service kyth-duperemove.timer \
 	kyth-enroll-mok.service plasmalogin.service akmods.service \

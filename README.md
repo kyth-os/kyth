@@ -78,7 +78,7 @@ KythOS doesn't promise every game works on Linux. It makes the games that can wo
 | | What's included |
 |---|---|
 | **Launchers** | Steam, Lutris, Heroic Games Launcher |
-| **Proton** | ProtonUp-Qt, GE-Proton, protontricks, winetricks, umu-launcher, libFAudio |
+| **Proton** | Proton-CachyOS, ProtonUp-Qt, GE-Proton, protontricks, winetricks, umu-launcher, libFAudio |
 | **Overlay & capture** | MangoHud (pre-configured overlay), vkBasalt (sharpening on by default), obs-vkcapture |
 | **Performance** | GameMode, Gamescope presets, sched-ext, ananicy-cpp, system76-scheduler |
 | **Controllers** | steam-devices, xpadneo, xone, OpenRazer, OpenTabletDriver, Piper, OpenRGB, input-remapper |

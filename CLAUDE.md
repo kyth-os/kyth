@@ -39,7 +39,7 @@ build_files/            # Layer 2+: packages, gaming tweaks, branding
   kyth-installer        # Graphical installer (PySide6 + Chromium kiosk)
   kyth-launch-installer # Desktop launcher for the installer
   branding/             # KythOS logos and branding CSS
-  scripts/              # Build layers: packages, thirdparty, sysconfig, branding, ge-proton, mesa-git
+  scripts/              # Build layers: packages, thirdparty, sysconfig, branding, proton-cachyos, mesa-git
   just/kyth.just        # ujust recipes shipped in the OS
   kyth-welcome/         # First-boot welcome app
 disk_config/            # Bootc Image Builder configs

@@ -669,7 +669,7 @@ check_optional_command mangohud "MangoHud"
 check_optional_command kyth-gamescope "KythOS Gamescope presets"
 check_optional_command kyth-performance-mode "KythOS performance modes"
 check_optional_command kyth-nvme-tuning "KythOS NVMe A/B tuning helper"
-check_optional_command kyth-ge-proton-update "GE-Proton updater"
+check_optional_command kyth-proton-cachyos-update "Proton-CachyOS updater"
 check_optional_command umu-run "umu launcher"
 check_file /etc/gamemode.ini "GameMode config"
 check_file /etc/MangoHud/MangoHud.conf "MangoHud config"
@@ -686,7 +686,7 @@ if [[ -d /usr/share/steam/compatibilitytools.d ]] \
     || [[ -d "${HOME}/.local/share/Steam/compatibilitytools.d" ]]; then
     pass "Proton runners" "compatibility tool directory present"
 else
-    warn "Proton runners" "GE-Proton may not be installed yet"
+    warn "Proton runners" "Proton-CachyOS may not be installed yet"
 fi
 
 check_flatpak com.valvesoftware.Steam "Steam Flatpak"
@@ -799,7 +799,7 @@ section "KythOS Background Work"
 check_system_unit_enabled kyth-hw-setup.service "First-boot hardware setup"
 check_system_unit_enabled kyth-flathub-setup.service "Flathub setup"
 check_system_unit_enabled kyth-default-flatpaks.service "Default Flatpaks"
-check_system_unit_enabled kyth-ge-proton-update.timer "GE-Proton timer"
+check_system_unit_enabled kyth-proton-cachyos-update.timer "Proton-CachyOS timer"
 check_system_unit_enabled kyth-duperemove.timer "Game cache dedupe timer"
 check_system_unit_enabled kyth-topgrade-migrate.service "Topgrade migration"
 check_file_contains /etc/skel/.config/topgrade.toml "no_self_update = true" "Topgrade image ownership" "self-update disabled; image updates refresh topgrade"

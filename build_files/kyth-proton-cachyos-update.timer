@@ -1,5 +1,5 @@
 [Unit]
-Description=Weekly GE-Proton update
+Description=Weekly Proton-CachyOS update
 
 [Timer]
 OnCalendar=weekly

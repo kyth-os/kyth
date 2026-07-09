@@ -53,25 +53,25 @@ def _vkbasalt_installed() -> bool:
     )
  # _vkbasalt_installed
 
-def _ge_proton_version() -> str | None:
-    """Return the latest installed GE-Proton directory name, or None."""
+def _proton_cachyos_version() -> str | None:
+    """Return the latest installed Proton-CachyOS directory name, or None."""
     found: list[str] = []
     for base in (
         "/usr/share/steam/compatibilitytools.d",
-        "/var/lib/kyth/ge-proton",
+        "/var/lib/kyth/proton-cachyos",
     ):
         try:
-            found.extend(e for e in os.listdir(base) if e.startswith("GE-Proton"))
+            found.extend(e for e in os.listdir(base) if e.startswith("proton-cachyos"))
         except OSError:
             pass
     return sorted(found)[-1] if found else None
- # _ge_proton_version
+ # _proton_cachyos_version
 
 def _compat_tool_version(prefix: str) -> str | None:
     """Return the latest installed Steam compatibility tool matching prefix."""
     bases = [
         "/usr/share/steam/compatibilitytools.d",
-        "/var/lib/kyth/ge-proton",
+        "/var/lib/kyth/proton-cachyos",
         os.path.expanduser("~/.steam/root/compatibilitytools.d"),
         os.path.expanduser("~/.steam/steam/compatibilitytools.d"),
         os.path.expanduser("~/.local/share/Steam/compatibilitytools.d"),
@@ -118,8 +118,8 @@ def _gaming_health_items(*, controllers: dict | None = None,
     controllers/windows_drives accept precomputed probe results so callers that
     build several sections (the gaming dashboard) don't repeat the hardware scans.
     """
-    ge_ver = _ge_proton_version()
-    cachy_ver = _compat_tool_version("proton-cachyos")
+    pc_ver = _proton_cachyos_version()
+    ge_ver = _compat_tool_version("GE-Proton")
     vulkan_status, vulkan_summary = _vulkan_state()
     ntsync_status, ntsync_summary = _ntsync_state()
     steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
@@ -142,8 +142,8 @@ def _gaming_health_items(*, controllers: dict | None = None,
 
     return [
         ("ok" if steam_ok else "warn", "Steam", "Installed." if steam_ok else "Install Steam to run your Steam library."),
-        ("ok" if ge_ver else "err", "GE-Proton", ge_ver or "Missing; use Update GE-Proton below."),
-        ("ok" if cachy_ver else "dim", "Proton-CachyOS SLR", cachy_ver or "Optional runner for stubborn games."),
+        ("ok" if pc_ver else "err", "Proton-CachyOS", pc_ver or "Missing; use Update Proton-CachyOS below."),
+        ("ok" if ge_ver else "dim", "GE-Proton", ge_ver or "Optional runner for stubborn games."),
         (vulkan_status, "Vulkan", vulkan_summary),
         (ntsync_status, "NTSYNC", ntsync_summary),
         ("ok" if shutil.which("umu-run") else "warn", "umu-launcher", "Installed." if shutil.which("umu-run") else "Needed by some Lutris/Heroic launcher flows."),
@@ -178,10 +178,10 @@ def _gaming_migration_checklist_items(*, controllers: dict | None = None,
         )
     else:
         migration_summary = f"{ntfs_count} NTFS partition(s) detected; copy games read-only below."
-    ge_ver = _ge_proton_version()
+    pc_ver = _proton_cachyos_version()
     return [
         ("ok" if steam_ok else "warn", "Steam installed", "Ready." if steam_ok else "Install Steam, then enable Steam Play for all titles."),
-        ("ok" if ge_ver else "err", "GE-Proton ready", ge_ver or "Missing; update GE-Proton before testing PC games."),
+        ("ok" if pc_ver else "err", "Proton-CachyOS ready", pc_ver or "Missing; update Proton-CachyOS before testing PC games."),
         ("ok" if heroic_ok and lutris_ok else "warn", "Non-Steam launchers", "Heroic and Lutris installed." if heroic_ok and lutris_ok else "Install Heroic for Epic/GOG and Lutris for Battle.net/EA/Ubisoft."),
         (ludusavi_status, "Saves backed up", ludusavi_summary),
         ("warn" if windows_drives else "dim", "Game library migration", migration_summary if windows_drives else "No PC game drive detected."),

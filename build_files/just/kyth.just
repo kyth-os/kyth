@@ -795,12 +795,12 @@ export-kali-apps:
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Kali tools are now exported to the application launcher under 'Security Tools'."
 
-# Download and install the latest GE-Proton to /var/lib/kyth/ge-proton/.
+# Download and install the latest Proton-CachyOS to /var/lib/kyth/proton-cachyos/.
 [group('KythOS')]
-update-ge-proton:
+update-proton-cachyos:
     #!/usr/bin/env bash
     set -euo pipefail
-    sudo /usr/bin/kyth-ge-proton-update
+    sudo /usr/bin/kyth-proton-cachyos-update
 
 # Create a Fedora development container for KythOS work.
 #

@@ -44,16 +44,16 @@ RUN --mount=type=bind,source=build_files/scripts/headroom.sh,target=/ctx/headroo
     HEADROOM_EXTRAS=${HEADROOM_EXTRAS} \
     bash /ctx/headroom.sh
 
-# Layer 2: GE-Proton (~700 MB).
+# Layer 2: Proton-CachyOS (~700 MB).
 # Placed before the daily upgrade layer so its cache is only busted when
-# ge-proton.sh changes or GE_PROTON_VER changes — not on every daily dnf
-# upgrade run.  GE-Proton is a fully self-contained wine bundle with no system
-# library dependencies, so ordering before the upgrade is safe.
-ARG GE_PROTON_VER=
-RUN --mount=type=bind,source=build_files/scripts/ge-proton.sh,target=/ctx/ge-proton.sh \
+# proton-cachyos.sh changes or PROTON_CACHYOS_VER changes — not on every daily
+# dnf upgrade run. Proton-CachyOS is a fully self-contained wine bundle with no
+# system library dependencies, so ordering before the upgrade is safe.
+ARG PROTON_CACHYOS_VER=
+RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/proton-cachyos.sh \
     --mount=type=tmpfs,dst=/tmp \
     --mount=type=secret,id=github_token \
-    GE_PROTON_VER=${GE_PROTON_VER} bash /ctx/ge-proton.sh
+    PROTON_CACHYOS_VER=${PROTON_CACHYOS_VER} bash /ctx/proton-cachyos.sh
 
 # Third-party binaries — topgrade, winetricks, SCX schedulers (~100 MB).
 # Placed before BUILD_DATE so the layer is only re-run when a tool ships a new
@@ -75,7 +75,7 @@ RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/third
 # to the BuildKit cache key and would silently ship a stale cached splash.
 # Kernel packages are excluded from dnf upgrade (see packages.sh excludepkgs), so
 # the kernel version is fixed from the base image and the initramfs built here is
-# the one that ships. Sits after the large GE-Proton/thirdparty download layers
+# the one that ships. Sits after the large Proton-CachyOS/thirdparty download layers
 # (which it does not depend on) so splash tweaks don't re-pull them, and before
 # the BUILD_DATE cache-bust layer.
 COPY build_files/plymouth/kyth.plymouth             /tmp/kyth-plymouth/kyth.plymouth

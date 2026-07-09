@@ -8,7 +8,7 @@ from .core_base import (
 )
 from .services.diagnostics import _command_stdout
 from .services.gaming import (
-    _find_ntfs_drives, _ge_proton_version,
+    _find_ntfs_drives, _proton_cachyos_version,
 )
 from .services.hardware import _detect_nvidia
 from .services.software import (
@@ -788,7 +788,7 @@ class WizardWindow(QMainWindow):
         stats_layout.setSpacing(0)
 
         kernel = _command_stdout(["uname", "-r"]) or "unknown"
-        ge_ver = _ge_proton_version() or "included"
+        pc_ver = _proton_cachyos_version() or "included"
 
         scx_sched = "Fedora"
         try:
@@ -802,7 +802,7 @@ class WizardWindow(QMainWindow):
 
         stat_items = [
             ("Kernel", kernel),
-            ("GE-Proton", ge_ver),
+            ("Proton-CachyOS", pc_ver),
             ("Scheduler", scx_sched),
         ]
         for i, (label, value) in enumerate(stat_items):
@@ -1203,7 +1203,7 @@ class WizardWindow(QMainWindow):
             "1.  Open Steam",
             "2.  Steam  →  Settings  →  Compatibility",
             "3.  Turn on  Enable Steam Play for all other titles",
-            "4.  Select  GE-Proton  from the version dropdown",
+            "4.  Select  Proton-CachyOS  from the version dropdown",
             "5.  Restart Steam — your full game library now appears",
         ]:
             lbl = QLabel(step)
@@ -1212,7 +1212,7 @@ class WizardWindow(QMainWindow):
             pc_layout.addWidget(lbl)
 
         tip = QLabel(
-            "GE-Proton is already installed on this system and kept up to date automatically."
+            "Proton-CachyOS is already installed on this system and kept up to date automatically."
         )
         tip.setObjectName("card-copy")
         tip.setWordWrap(True)

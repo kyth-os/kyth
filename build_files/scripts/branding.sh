@@ -2243,10 +2243,10 @@ chmod +x /etc/skel/Templates/"Python Script.py"
 install -m 0755 /ctx/kyth-rclone-update /usr/bin/kyth-rclone-update
 install -m 0755 /ctx/kyth-session-snapshot /usr/bin/kyth-session-snapshot
 install -m 0755 /ctx/kyth-report-issue /usr/bin/kyth-report-issue
-install -m 0755 /ctx/kyth-ge-proton-update /usr/bin/kyth-ge-proton-update
+install -m 0755 /ctx/kyth-proton-cachyos-update /usr/bin/kyth-proton-cachyos-update
 install -m 0755 /ctx/kyth-steam-game-export /usr/bin/kyth-steam-game-export
-install -m 0644 /ctx/kyth-ge-proton-update.service /usr/lib/systemd/user/kyth-ge-proton-update.service
-install -m 0644 /ctx/kyth-ge-proton-update.timer /usr/lib/systemd/user/kyth-ge-proton-update.timer
+install -m 0644 /ctx/kyth-proton-cachyos-update.service /usr/lib/systemd/user/kyth-proton-cachyos-update.service
+install -m 0644 /ctx/kyth-proton-cachyos-update.timer /usr/lib/systemd/user/kyth-proton-cachyos-update.timer
 install -m 0644 /ctx/kyth-flathub-setup.service /usr/lib/systemd/system/kyth-flathub-setup.service
 install -m 0644 /ctx/kyth-default-flatpaks.service /usr/lib/systemd/system/kyth-default-flatpaks.service
 install -m 0440 /ctx/kyth-bootc-sudo /etc/sudoers.d/kyth-bootc
@@ -2933,7 +2933,7 @@ printf '\nimport? "/usr/share/ublue-os/just/75-kyth.just"\n' >>/usr/share/ublue-
 systemctl enable kyth-local-bin-migrate.service 2>/dev/null || true
 systemctl enable kyth-topgrade-migrate.service 2>/dev/null || true
 systemctl enable kyth-duperemove.timer 2>/dev/null || true
-systemctl --global enable kyth-ge-proton-update.timer 2>/dev/null || true
+systemctl --global enable kyth-proton-cachyos-update.timer 2>/dev/null || true
 # Without wait-online, network-online.target is reached instantly and the
 # flatpak units below race DNS at boot and fail. Enabling it only delays
 # units ordered After=network-online.target, not the rest of boot.
@@ -2986,15 +2986,15 @@ for desktop in \
 	fi
 done
 
-# ── GE-Proton runtime update path ─────────────────────────────────────────────
-# The weekly timer installs new GE-Proton to /var/lib/kyth/ge-proton/ (/var is
-# writable on an immutable system). Tell Steam to check this path in addition to
-# the build-time install in /usr/share/steam/compatibilitytools.d/.
+# ── Proton-CachyOS runtime update path ────────────────────────────────────────
+# The weekly timer installs new Proton-CachyOS to /var/lib/kyth/proton-cachyos/
+# (/var is writable on an immutable system). Tell Steam to check this path in
+# addition to the build-time install in /usr/share/steam/compatibilitytools.d/.
 # The directory must exist at first boot — Lutris (and Steam) call os.stat() on
 # every path in STEAM_EXTRA_COMPAT_TOOLS_PATHS and crash with FileNotFoundError
 # if any are missing, even before the update service has run for the first time.
-mkdir -p /var/lib/kyth/ge-proton
-chmod 1777 /var/lib/kyth/ge-proton
+mkdir -p /var/lib/kyth/proton-cachyos
+chmod 1777 /var/lib/kyth/proton-cachyos
 mkdir -p /usr/lib/tmpfiles.d
-echo 'd /var/lib/kyth/ge-proton 1777 root root - -' >/usr/lib/tmpfiles.d/kyth-ge-proton.conf
-echo 'STEAM_EXTRA_COMPAT_TOOLS_PATHS=/var/lib/kyth/ge-proton' >/etc/environment.d/ge-proton.conf
+echo 'd /var/lib/kyth/proton-cachyos 1777 root root - -' >/usr/lib/tmpfiles.d/kyth-proton-cachyos.conf
+echo 'STEAM_EXTRA_COMPAT_TOOLS_PATHS=/var/lib/kyth/proton-cachyos' >/etc/environment.d/proton-cachyos.conf

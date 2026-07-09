@@ -15,7 +15,7 @@ from .services.diagnostics import _command_stdout
 from .services.gaming import (
     DataWorker, _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _collect_gaming_dashboard, _compat_tool_version,
     _detect_installed_games, _find_ntfs_drives, _find_steam_libraries, _gamescope_installed, _gaming_health_items,
-    _gaming_migration_checklist_items, _ge_proton_version, _load_protondb_cache, _ludusavi_backup_summary,
+    _gaming_migration_checklist_items, _proton_cachyos_version, _load_protondb_cache, _ludusavi_backup_summary,
     _mangohud_installed, _save_protondb_cache, _scan_steamapps_manifests, _streaming_health_items,
     _vkbasalt_installed,
 )
@@ -276,13 +276,13 @@ class GamingPage(Page):
         )
 
         # 2. Runtime Engine
-        ge_ver = _ge_proton_version() or "None"
+        pc_ver = _proton_cachyos_version() or "None"
         mangohud = "🟢 Active" if _mangohud_installed() else "🔴 Missing"
         vkbasalt = "🟢 Active" if _vkbasalt_installed() else "⚪ Optional"
         gamescope = "🟢 Active" if _gamescope_installed() else "🔴 Missing"
-        
+
         self._hud_runtime_desc.setText(
-            f"<b>GE-Proton:</b> {ge_ver}<br>"
+            f"<b>Proton-CachyOS:</b> {pc_ver}<br>"
             f"<b>Gamescope compositor:</b> {gamescope}<br>"
             f"<b>MangoHud overlay:</b> {mangohud}<br>"
             f"<b>vkBasalt post-processing:</b> {vkbasalt}"
@@ -338,7 +338,7 @@ class GamingPage(Page):
     def __init__(self, wizard_mode: bool = False):
         super().__init__()
         self._wizard_mode = wizard_mode
-        self._ge_update_worker = None
+        self._pc_update_worker = None
         self._win_lib_worker: WindowsLibraryWorker | None = None
         self._win_lib_probed = False
         self._data_workers: dict[str, DataWorker] = {}
@@ -353,7 +353,7 @@ class GamingPage(Page):
         self._page_header(
             "Gaming",
             "Gaming",
-            "KythOS ships a full gaming stack — Gamescope, MangoHud, GE-Proton, and more. "
+            "KythOS ships a full gaming stack — Gamescope, MangoHud, Proton-CachyOS, and more. "
             "Install your preferred launchers below.",
         )
 
@@ -1142,97 +1142,97 @@ class GamingPage(Page):
             self._scx_worker = None
             self._add(scx_card)
 
-        # ── GE-Proton ─────────────────────────────────────────────────────────
-        gp_card, gp_layout = _make_card()
-        gp_top = QHBoxLayout()
-        gp_title = QLabel("GE-Proton")
-        gp_title.setObjectName("card-title")
-        gp_top.addWidget(gp_title)
-        gp_top.addStretch()
-        self._gp_badge = QLabel()
-        self._gp_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        gp_top.addWidget(self._gp_badge)
-        gp_layout.addLayout(gp_top)
-        gp_desc = QLabel(
-            "Community Proton build with extra game patches, codec support, and "
-            "bleeding-edge Wine. Select it per-game in Steam → Properties → "
-            "Compatibility → Force the use of a specific Steam Play compatibility tool."
+        # ── Proton-CachyOS ────────────────────────────────────────────────────
+        pc_card, pc_layout = _make_card()
+        pc_top = QHBoxLayout()
+        pc_title = QLabel("Proton-CachyOS")
+        pc_title.setObjectName("card-title")
+        pc_top.addWidget(pc_title)
+        pc_top.addStretch()
+        self._pc_badge = QLabel()
+        self._pc_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pc_top.addWidget(self._pc_badge)
+        pc_layout.addLayout(pc_top)
+        pc_desc = QLabel(
+            "CachyOS's Proton build with performance patches, NTSYNC, and Wine "
+            "tuning baked in. Installed and kept up to date automatically — no "
+            "setup required."
         )
-        gp_desc.setObjectName("card-copy")
-        gp_desc.setWordWrap(True)
-        gp_layout.addWidget(gp_desc)
-        self._gp_version_lbl = QLabel()
-        self._gp_version_lbl.setObjectName("card-copy")
-        gp_layout.addWidget(self._gp_version_lbl)
-        gp_btns = QHBoxLayout()
-        gp_btns.setSpacing(10)
-        self._gp_update_btn = QPushButton("Update GE-Proton")
-        self._gp_update_btn.clicked.connect(self._update_ge_proton)
-        gp_btns.addWidget(self._gp_update_btn)
-        gp_btns.addStretch()
-        gp_layout.addLayout(gp_btns)
-        self._gp_op_status = QLabel()
-        self._gp_op_status.hide()
-        gp_layout.addWidget(self._gp_op_status)
-        self._gp_progress = QProgressBar()
-        self._gp_progress.setRange(0, 0)
-        self._gp_progress.hide()
-        gp_layout.addWidget(self._gp_progress)
-        self._gp_log_toggle = QPushButton("Show details")
-        self._gp_log_toggle.setCheckable(True)
-        self._gp_log_toggle.clicked.connect(lambda checked: _set_log_panel(self._gp_log_toggle, self._gp_log, checked))
-        self._gp_log_toggle.hide()
-        gp_layout.addWidget(self._gp_log_toggle)
-        self._gp_log = QTextEdit()
-        self._gp_log.document().setMaximumBlockCount(5000)
-        self._gp_log.setReadOnly(True)
-        self._gp_log.setMaximumHeight(120)
-        self._gp_log.hide()
-        gp_layout.addWidget(self._gp_log)
-        self._gp_worker = None
-        self._add(gp_card)
+        pc_desc.setObjectName("card-copy")
+        pc_desc.setWordWrap(True)
+        pc_layout.addWidget(pc_desc)
+        self._pc_version_lbl = QLabel()
+        self._pc_version_lbl.setObjectName("card-copy")
+        pc_layout.addWidget(self._pc_version_lbl)
+        pc_btns = QHBoxLayout()
+        pc_btns.setSpacing(10)
+        self._pc_update_btn = QPushButton("Update Proton-CachyOS")
+        self._pc_update_btn.clicked.connect(self._update_proton_cachyos)
+        pc_btns.addWidget(self._pc_update_btn)
+        pc_btns.addStretch()
+        pc_layout.addLayout(pc_btns)
+        self._pc_op_status = QLabel()
+        self._pc_op_status.hide()
+        pc_layout.addWidget(self._pc_op_status)
+        self._pc_progress = QProgressBar()
+        self._pc_progress.setRange(0, 0)
+        self._pc_progress.hide()
+        pc_layout.addWidget(self._pc_progress)
+        self._pc_log_toggle = QPushButton("Show details")
+        self._pc_log_toggle.setCheckable(True)
+        self._pc_log_toggle.clicked.connect(lambda checked: _set_log_panel(self._pc_log_toggle, self._pc_log, checked))
+        self._pc_log_toggle.hide()
+        pc_layout.addWidget(self._pc_log_toggle)
+        self._pc_log = QTextEdit()
+        self._pc_log.document().setMaximumBlockCount(5000)
+        self._pc_log.setReadOnly(True)
+        self._pc_log.setMaximumHeight(120)
+        self._pc_log.hide()
+        pc_layout.addWidget(self._pc_log)
+        self._pc_worker = None
+        self._add(pc_card)
 
         if not wizard_mode:
-            # ── Optional Proton-CachyOS SLR ───────────────────────────────────
-            pc_card, pc_layout = _make_card()
-            pc_top = QHBoxLayout()
-            pc_title = QLabel("Optional Proton-CachyOS SLR")
-            pc_title.setObjectName("card-title")
-            pc_top.addWidget(pc_title)
-            pc_top.addStretch()
-            self._pc_badge = QLabel()
-            self._pc_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            pc_top.addWidget(self._pc_badge)
-            pc_layout.addLayout(pc_top)
-            pc_desc = QLabel(
-                "Keep GE-Proton as the default. Proton-CachyOS SLR is worth having as "
-                "a second per-game runner for stubborn launchers, anti-cheat edge cases, "
-                "and games where ProtonDB reports Cachy-specific success."
+            # ── Optional GE-Proton ────────────────────────────────────────────
+            ge_card, ge_layout = _make_card()
+            ge_top = QHBoxLayout()
+            ge_title = QLabel("Optional GE-Proton")
+            ge_title.setObjectName("card-title")
+            ge_top.addWidget(ge_title)
+            ge_top.addStretch()
+            self._ge_badge = QLabel()
+            self._ge_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            ge_top.addWidget(self._ge_badge)
+            ge_layout.addLayout(ge_top)
+            ge_desc = QLabel(
+                "Keep Proton-CachyOS as the default. GE-Proton is worth having as "
+                "a second per-game runner for extra game-specific patches, codec "
+                "support, and bleeding-edge Wine tweaks not yet in Proton-CachyOS."
             )
-            pc_desc.setObjectName("card-copy")
-            pc_desc.setWordWrap(True)
-            pc_layout.addWidget(pc_desc)
-            self._pc_version_lbl = QLabel()
-            self._pc_version_lbl.setObjectName("card-copy")
-            pc_layout.addWidget(self._pc_version_lbl)
-            pc_btns = QHBoxLayout()
-            pc_btns.setSpacing(10)
-            pc_open = QPushButton("Open ProtonUp-Qt")
-            pc_open.clicked.connect(lambda _=False: self._open_protonupqt())
-            pc_btns.addWidget(pc_open)
-            pc_docs = QPushButton("Open CachyOS Guide")
-            pc_docs.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://wiki.cachyos.org/configuration/gaming/")))
-            pc_btns.addWidget(pc_docs)
-            pc_btns.addStretch()
-            pc_layout.addLayout(pc_btns)
-            pc_note = QLabel(
-                "In ProtonUp-Qt, add a Steam compatibility tool and choose Proton-CachyOS SLR. "
+            ge_desc.setObjectName("card-copy")
+            ge_desc.setWordWrap(True)
+            ge_layout.addWidget(ge_desc)
+            self._ge_version_lbl = QLabel()
+            self._ge_version_lbl.setObjectName("card-copy")
+            ge_layout.addWidget(self._ge_version_lbl)
+            ge_btns = QHBoxLayout()
+            ge_btns.setSpacing(10)
+            ge_open = QPushButton("Open ProtonUp-Qt")
+            ge_open.clicked.connect(lambda _=False: self._open_protonupqt())
+            ge_btns.addWidget(ge_open)
+            ge_docs = QPushButton("Open GE-Proton Page")
+            ge_docs.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/GloriousEggroll/proton-ge-custom")))
+            ge_btns.addWidget(ge_docs)
+            ge_btns.addStretch()
+            ge_layout.addLayout(ge_btns)
+            ge_note = QLabel(
+                "In ProtonUp-Qt, add a Steam compatibility tool and choose GE-Proton. "
                 "Restart Steam, then select it per-game under Properties -> Compatibility."
             )
-            pc_note.setObjectName("card-copy")
-            pc_note.setWordWrap(True)
-            pc_layout.addWidget(pc_note)
-            self._add(pc_card)
+            ge_note.setObjectName("card-copy")
+            ge_note.setWordWrap(True)
+            ge_layout.addWidget(ge_note)
+            self._add(ge_card)
 
             # ── vkBasalt ──────────────────────────────────────────────────────
             vk_card, vk_layout = _make_card()
@@ -1970,7 +1970,7 @@ class GamingPage(Page):
             return "None on Linux until the publisher enables support"
         if game.status == "native":
             return "Steam native Linux build"
-        return "Steam with Proton Experimental first, then GE-Proton"
+        return "Steam with Proton Experimental first, then Proton-CachyOS"
 
     def _recommended_profile_for_game(self, game) -> str:
         if game.status == "blocked":
@@ -2151,19 +2151,19 @@ class GamingPage(Page):
             else:
                 self._scx_status_lbl.setText("sched-ext status unavailable.")
 
-        gp_ver = _ge_proton_version()
-        _apply_install_badge(self._gp_badge, bool(gp_ver), ok_text=gp_ver or "Installed")
-        self._gp_version_lbl.setText(
-            f"Installed: {gp_ver}" if gp_ver
-            else "GE-Proton not found in compatibilitytools.d"
+        pc_ver = _proton_cachyos_version()
+        _apply_install_badge(self._pc_badge, bool(pc_ver), ok_text=pc_ver or "Installed")
+        self._pc_version_lbl.setText(
+            f"Installed: {pc_ver}" if pc_ver
+            else "Proton-CachyOS not found in compatibilitytools.d"
         )
 
-        if hasattr(self, "_pc_badge"):
-            pc_ver = _compat_tool_version("proton-cachyos")
-            _apply_install_badge(self._pc_badge, bool(pc_ver), ok_text=pc_ver or "Installed", warn_text="Optional")
-            self._pc_version_lbl.setText(
-                f"Installed: {pc_ver}" if pc_ver
-                else "Not installed. Optional fallback runner; GE-Proton remains the recommended default."
+        if hasattr(self, "_ge_badge"):
+            ge_ver = _compat_tool_version("GE-Proton")
+            _apply_install_badge(self._ge_badge, bool(ge_ver), ok_text=ge_ver or "Installed", warn_text="Optional")
+            self._ge_version_lbl.setText(
+                f"Installed: {ge_ver}" if ge_ver
+                else "Not installed. Optional fallback runner; Proton-CachyOS remains the recommended default."
             )
 
         for refs in self._tool_refs:
@@ -2705,41 +2705,41 @@ class GamingPage(Page):
             refs["uninstall"].setEnabled(True)
         self._refresh_status()
 
-    # ── GE-Proton update ───────────────────────────────────────────────────────
+    # ── Proton-CachyOS update ────────────────────────────────────────────────────
 
-    def _update_ge_proton(self):
-        if self._gp_worker and self._gp_worker.isRunning():
+    def _update_proton_cachyos(self):
+        if self._pc_worker and self._pc_worker.isRunning():
             return
-        self._gp_update_btn.setEnabled(False)
-        self._gp_log.clear()
-        self._gp_log.append("→ /usr/bin/kyth-ge-proton-update\n")
-        self._gp_log_toggle.show()
-        _set_log_panel(self._gp_log_toggle, self._gp_log, False)
-        self._gp_progress.show()
-        self._gp_op_status.setText("Checking for GE-Proton update…")
-        self._gp_op_status.setObjectName("subheading")
-        self._gp_op_status.show()
-        _restyle(self._gp_op_status)
-        self._gp_worker = Worker(["/usr/bin/kyth-ge-proton-update"])
-        self._gp_worker.line.connect(lambda ln: (
-            self._gp_log.append(ln),
-            self._gp_log.ensureCursorVisible(),
+        self._pc_update_btn.setEnabled(False)
+        self._pc_log.clear()
+        self._pc_log.append("→ /usr/bin/kyth-proton-cachyos-update\n")
+        self._pc_log_toggle.show()
+        _set_log_panel(self._pc_log_toggle, self._pc_log, False)
+        self._pc_progress.show()
+        self._pc_op_status.setText("Checking for Proton-CachyOS update…")
+        self._pc_op_status.setObjectName("subheading")
+        self._pc_op_status.show()
+        _restyle(self._pc_op_status)
+        self._pc_worker = Worker(["/usr/bin/kyth-proton-cachyos-update"])
+        self._pc_worker.line.connect(lambda ln: (
+            self._pc_log.append(ln),
+            self._pc_log.ensureCursorVisible(),
         ))
-        self._gp_worker.done.connect(self._on_gp_update_done)
-        self._gp_worker.start()
+        self._pc_worker.done.connect(self._on_pc_update_done)
+        self._pc_worker.start()
 
-    def _on_gp_update_done(self, code: int):
-        self._gp_progress.hide()
-        _finish_worker(self, attr="_gp_worker")
-        self._gp_update_btn.setEnabled(True)
+    def _on_pc_update_done(self, code: int):
+        self._pc_progress.hide()
+        _finish_worker(self, attr="_pc_worker")
+        self._pc_update_btn.setEnabled(True)
         if code == 0:
-            self._gp_op_status.setText("GE-Proton is up to date.")
-            self._gp_op_status.setObjectName("status-ok")
-            self._gp_log.append("\nDone.")
+            self._pc_op_status.setText("Proton-CachyOS is up to date.")
+            self._pc_op_status.setObjectName("status-ok")
+            self._pc_log.append("\nDone.")
         else:
-            self._gp_op_status.setText(f"Update failed (exit {code}).")
-            self._gp_op_status.setObjectName("status-err")
-        _restyle(self._gp_op_status)
+            self._pc_op_status.setText(f"Update failed (exit {code}).")
+            self._pc_op_status.setObjectName("status-err")
+        _restyle(self._pc_op_status)
         self._refresh_status()
 
     def _refresh_game_bar_btn(self):
@@ -3040,12 +3040,12 @@ class GamingPage(Page):
 
     def _make_gaming_ready_panel(self) -> QFrame:
         steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
-        ge_ver = _ge_proton_version()
+        pc_ver = _proton_cachyos_version()
         vulkan_hint = bool(glob.glob("/dev/dri/renderD*")) or shutil.which("vulkaninfo") is not None
         ntsync_ok = os.path.exists("/dev/ntsync")
         items = [
             ("ok" if steam_ok else "warn", "Steam", "Installed." if steam_ok else "Install Steam for your library."),
-            ("ok" if ge_ver else "err", "GE-Proton", ge_ver or "Update GE-Proton before testing PC games."),
+            ("ok" if pc_ver else "err", "Proton-CachyOS", pc_ver or "Update Proton-CachyOS before testing PC games."),
             ("ok" if vulkan_hint else "err", "Vulkan", "Render device found." if vulkan_hint else "No Vulkan render device found."),
             ("ok" if ntsync_ok else "warn", "NTSYNC", "Ready." if ntsync_ok else "Not active; Proton can fall back safely."),
             ("ok" if _gamescope_installed() else "warn", "Gamescope", "Ready." if _gamescope_installed() else "Install for scaling, HDR, and frame pacing presets."),

@@ -6,9 +6,9 @@
 # diagnostics go to stderr.
 #
 # Subcommands:
-#   ge-proton        Latest GE-Proton release tag. Prints "" on failure so
-#                    ge-proton.sh falls back to the /latest release endpoint
-#                    instead of requesting a nonexistent tag.
+#   proton-cachyos   Latest Proton-CachyOS release tag. Prints "" on failure so
+#                    proton-cachyos.sh falls back to the /latest release
+#                    endpoint instead of requesting a nonexistent tag.
 #   thirdparty-hash  16-char digest of the five thirdparty tool release tags.
 #                    Only used as a Docker layer cache-bust value: when every
 #                    tool's tag is unchanged the thirdparty layer is a cache hit.
@@ -49,10 +49,10 @@ PY
 	rm -f "${tmp}"
 }
 
-cmd_ge_proton() {
+cmd_proton_cachyos() {
 	local tag
-	tag=$(gh_latest_tag GloriousEggroll/proton-ge-custom)
-	[[ -n "${tag}" ]] || echo "WARNING: could not resolve latest GE-Proton release; ge-proton.sh will use the /latest endpoint" >&2
+	tag=$(gh_latest_tag CachyOS/proton-cachyos)
+	[[ -n "${tag}" ]] || echo "WARNING: could not resolve latest Proton-CachyOS release; proton-cachyos.sh will use the /latest endpoint" >&2
 	printf '%s\n' "${tag}"
 }
 
@@ -105,11 +105,11 @@ PY
 }
 
 case "${1:-}" in
-ge-proton) cmd_ge_proton ;;
+proton-cachyos) cmd_proton_cachyos ;;
 thirdparty-hash) cmd_thirdparty_hash ;;
 cachyos-kernel) cmd_cachyos_kernel ;;
 *)
-	echo "usage: $0 {ge-proton|thirdparty-hash|cachyos-kernel}" >&2
+	echo "usage: $0 {proton-cachyos|thirdparty-hash|cachyos-kernel}" >&2
 	exit 2
 	;;
 esac

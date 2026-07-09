@@ -195,15 +195,15 @@ jobs:
           echo "version=${KVER}" >&3
           echo "Resolved CachyOS kernel: ${KVER}"
 
-      - name: Resolve latest GE-Proton version
-        id: ge_proton
+      - name: Resolve latest Proton-CachyOS version
+        id: proton_cachyos
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
-          GE_VER=$(./build_files/scripts/resolve-versions.sh ge-proton)
-          echo "version=${GE_VER}" >&3
-          echo "Resolved GE-Proton: ${GE_VER:-latest}"
+          PC_VER=$(./build_files/scripts/resolve-versions.sh proton-cachyos)
+          echo "version=${PC_VER}" >&3
+          echo "Resolved Proton-CachyOS: ${PC_VER:-latest}"
 
       - name: Resolve thirdparty tool versions
         id: thirdparty_versions
@@ -273,7 +273,7 @@ jobs:
             --label "org.opencontainers.image.base.name=${STEPS_BUILD_BASE_OUTPUTS_IMAGE}"
             --label "org.opencontainers.image.base.digest=${STEPS_BUILD_BASE_OUTPUTS_DIGEST}"
             --label "org.kyth.build.upstream-base=${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}"
-            --label "org.kyth.build.ge-proton-version=${STEPS_GE_PROTON_OUTPUTS_VERSION}"
+            --label "org.kyth.build.proton-cachyos-version=${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}"
             --label "org.kyth.build.thirdparty-versions-hash=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}"
             --label "org.kyth.build.kernel-flavor=${MATRIX_KERNEL_FLAVOR}"
             --label "org.kyth.build.cachyos-kernel-version=${CACHYOS_KERNEL_VERSION}"
@@ -296,7 +296,7 @@ jobs:
             --secret id=github_token,env=GITHUB_TOKEN \
             "${MOK_SECRET_ARG[@]}" \
             --build-arg BASE_IMAGE="${STEPS_BUILD_BASE_OUTPUTS_PINNED}" \
-            --build-arg GE_PROTON_VER="${STEPS_GE_PROTON_OUTPUTS_VERSION}" \
+            --build-arg PROTON_CACHYOS_VER="${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}" \
             --build-arg THIRDPARTY_VERSIONS_HASH="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}" \
             --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
             --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
@@ -331,7 +331,7 @@ jobs:
           STEPS_BUILD_BASE_OUTPUTS_IMAGE: ${{ steps.build_base.outputs.image }}
           STEPS_BUILD_BASE_OUTPUTS_DIGEST: ${{ steps.build_base.outputs.digest }}
           STEPS_UPSTREAM_BASE_OUTPUTS_PINNED: ${{ steps.upstream_base.outputs.pinned }}
-          STEPS_GE_PROTON_OUTPUTS_VERSION: ${{ steps.ge_proton.outputs.version }}
+          STEPS_PROTON_CACHYOS_OUTPUTS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
           STEPS_BUILD_BASE_OUTPUTS_PINNED: ${{ steps.build_base.outputs.pinned }}
           STEPS_CHECKOUT_SHA_OUTPUTS_SHA: ${{ steps.checkout_sha.outputs.sha }}
@@ -373,7 +373,7 @@ jobs:
             org.opencontainers.image.base.name=${{ steps.build_base.outputs.image }}
             org.opencontainers.image.base.digest=${{ steps.build_base.outputs.digest }}
             org.kyth.build.upstream-base=${{ steps.upstream_base.outputs.pinned }}
-            org.kyth.build.ge-proton-version=${{ steps.ge_proton.outputs.version }}
+            org.kyth.build.proton-cachyos-version=${{ steps.proton_cachyos.outputs.version }}
             org.kyth.build.thirdparty-versions-hash=${{ steps.thirdparty_versions.outputs.hash }}
             org.kyth.build.kernel-flavor=${{ matrix.kernel_flavor }}
             org.kyth.build.cachyos-kernel-version=${{ steps.cachyos_kernel.outputs.version || 'unused' }}
@@ -476,7 +476,7 @@ jobs:
           SOURCE_TAG: ${{ steps.prep.outputs.default_tag }}
           UPSTREAM_BASE: ${{ steps.upstream_base.outputs.pinned }}
           BUILD_BASE: ${{ steps.build_base.outputs.pinned }}
-          GE_PROTON_VERSION: ${{ steps.ge_proton.outputs.version }}
+          PROTON_CACHYOS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           THIRDPARTY_VERSIONS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
           KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           WORKFLOW_GITHUB_SHA: ${{ github.sha }}
@@ -502,7 +502,7 @@ jobs:
               "materials": {
                   "upstream_base": os.environ["UPSTREAM_BASE"],
                   "build_base": os.environ["BUILD_BASE"],
-                  "ge_proton_version": os.environ["GE_PROTON_VERSION"],
+                  "proton_cachyos_version": os.environ["PROTON_CACHYOS_VERSION"],
                   "thirdparty_versions_hash": os.environ["THIRDPARTY_VERSIONS_HASH"],
                   "kernel_flavor": os.environ["KERNEL_FLAVOR"],
               },
@@ -666,15 +666,15 @@ jobs:
           echo "version=${KVER}" >&3
           echo "Resolved CachyOS kernel: ${KVER}"
 
-      - name: Resolve latest GE-Proton version
-        id: ge_proton
+      - name: Resolve latest Proton-CachyOS version
+        id: proton_cachyos
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
-          GE_VER=$(./build_files/scripts/resolve-versions.sh ge-proton)
-          echo "version=${GE_VER}" >&3
-          echo "Resolved GE-Proton: ${GE_VER:-latest}"
+          PC_VER=$(./build_files/scripts/resolve-versions.sh proton-cachyos)
+          echo "version=${PC_VER}" >&3
+          echo "Resolved Proton-CachyOS: ${PC_VER:-latest}"
 
       - name: Resolve thirdparty tool versions
         id: thirdparty_versions
@@ -744,7 +744,7 @@ jobs:
             --label "org.opencontainers.image.base.name=${STEPS_BUILD_BASE_OUTPUTS_IMAGE}"
             --label "org.opencontainers.image.base.digest=${STEPS_BUILD_BASE_OUTPUTS_DIGEST}"
             --label "org.kyth.build.upstream-base=${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}"
-            --label "org.kyth.build.ge-proton-version=${STEPS_GE_PROTON_OUTPUTS_VERSION}"
+            --label "org.kyth.build.proton-cachyos-version=${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}"
             --label "org.kyth.build.thirdparty-versions-hash=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}"
             --label "org.kyth.build.kernel-flavor=${MATRIX_KERNEL_FLAVOR}"
             --label "org.kyth.build.cachyos-kernel-version=${CACHYOS_KERNEL_VERSION}"
@@ -767,7 +767,7 @@ jobs:
             --secret id=github_token,env=GITHUB_TOKEN \
             "${MOK_SECRET_ARG[@]}" \
             --build-arg BASE_IMAGE="${STEPS_BUILD_BASE_OUTPUTS_PINNED}" \
-            --build-arg GE_PROTON_VER="${STEPS_GE_PROTON_OUTPUTS_VERSION}" \
+            --build-arg PROTON_CACHYOS_VER="${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}" \
             --build-arg THIRDPARTY_VERSIONS_HASH="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}" \
             --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
             --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
@@ -802,7 +802,7 @@ jobs:
           STEPS_BUILD_BASE_OUTPUTS_IMAGE: ${{ steps.build_base.outputs.image }}
           STEPS_BUILD_BASE_OUTPUTS_DIGEST: ${{ steps.build_base.outputs.digest }}
           STEPS_UPSTREAM_BASE_OUTPUTS_PINNED: ${{ steps.upstream_base.outputs.pinned }}
-          STEPS_GE_PROTON_OUTPUTS_VERSION: ${{ steps.ge_proton.outputs.version }}
+          STEPS_PROTON_CACHYOS_OUTPUTS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
           STEPS_BUILD_BASE_OUTPUTS_PINNED: ${{ steps.build_base.outputs.pinned }}
           STEPS_CHECKOUT_SHA_OUTPUTS_SHA: ${{ steps.checkout_sha.outputs.sha }}
@@ -835,7 +835,7 @@ jobs:
             org.opencontainers.image.base.name=${{ steps.build_base.outputs.image }}
             org.opencontainers.image.base.digest=${{ steps.build_base.outputs.digest }}
             org.kyth.build.upstream-base=${{ steps.upstream_base.outputs.pinned }}
-            org.kyth.build.ge-proton-version=${{ steps.ge_proton.outputs.version }}
+            org.kyth.build.proton-cachyos-version=${{ steps.proton_cachyos.outputs.version }}
             org.kyth.build.thirdparty-versions-hash=${{ steps.thirdparty_versions.outputs.hash }}
             org.kyth.build.kernel-flavor=${{ matrix.kernel_flavor }}
             org.kyth.build.cachyos-kernel-version=${{ steps.cachyos_kernel.outputs.version || 'unused' }}
@@ -938,7 +938,7 @@ jobs:
           SOURCE_TAG: ${{ steps.prep.outputs.default_tag }}
           UPSTREAM_BASE: ${{ steps.upstream_base.outputs.pinned }}
           BUILD_BASE: ${{ steps.build_base.outputs.pinned }}
-          GE_PROTON_VERSION: ${{ steps.ge_proton.outputs.version }}
+          PROTON_CACHYOS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           THIRDPARTY_VERSIONS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
           KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           WORKFLOW_GITHUB_SHA: ${{ github.sha }}
@@ -964,7 +964,7 @@ jobs:
               "materials": {
                   "upstream_base": os.environ["UPSTREAM_BASE"],
                   "build_base": os.environ["BUILD_BASE"],
-                  "ge_proton_version": os.environ["GE_PROTON_VERSION"],
+                  "proton_cachyos_version": os.environ["PROTON_CACHYOS_VERSION"],
                   "thirdparty_versions_hash": os.environ["THIRDPARTY_VERSIONS_HASH"],
                   "kernel_flavor": os.environ["KERNEL_FLAVOR"],
               },

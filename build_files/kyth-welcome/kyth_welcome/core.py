@@ -18,7 +18,7 @@ from .services.hardware import (
     _detect_controllers
 )
 from .services.gaming import (
-    _mangohud_installed, _gamescope_installed, _vkbasalt_installed, _ge_proton_version,
+    _mangohud_installed, _gamescope_installed, _vkbasalt_installed, _proton_cachyos_version,
     _compat_tool_version, _ntsync_state, _vulkan_state, _gaming_health_items,
     _gaming_migration_checklist_items, _collect_gaming_dashboard, _ludusavi_backup_summary,
     _parse_steam_acf, _parse_steam_acf_text, _steam_library_roots, _decode_proc_mount_field,
