@@ -91,7 +91,13 @@ def _run_install() -> None:
     def progress(pct: int) -> None:
         _push({"type": "progress", "value": pct})
 
-    def run_cmd(cmd: list[str], pct_start: int, pct_end: int) -> None:
+    def run_cmd(
+        cmd: list[str],
+        pct_start: int,
+        pct_end: int,
+        stall_timeout: int = 600,
+        absolute_timeout: int = 3600,
+    ) -> None:
         full_cmd = _as_root(cmd)
         log(f"$ {' '.join(full_cmd)}")
         proc = subprocess.Popen(
@@ -135,8 +141,11 @@ def _run_install() -> None:
         monitor_thread = threading.Thread(target=_net_monitor, daemon=True)
         monitor_thread.start()
 
-        STALL_TIMEOUT = 600
-        last_output   = time.monotonic()
+        STALL_TIMEOUT    = stall_timeout
+        ABSOLUTE_TIMEOUT = absolute_timeout
+        started       = time.monotonic()
+        last_output   = started
+        last_rx       = _get_rx_bytes()
         recent_output: list[str] = []
         while True:
             ready, _, _ = select.select([proc.stdout], [], [], 30)
@@ -158,7 +167,17 @@ def _run_install() -> None:
                     except Exception:
                         pass
             else:
-                if time.monotonic() - last_output > STALL_TIMEOUT:
+                now = time.monotonic()
+                if now - started > ABSOLUTE_TIMEOUT:
+                    proc.kill()
+                    raise RuntimeError(
+                        f"Command exceeded absolute timeout of {ABSOLUTE_TIMEOUT // 60} min"
+                    )
+                rx_now = _get_rx_bytes()
+                if rx_now > last_rx:
+                    last_rx     = rx_now
+                    last_output = now
+                elif now - last_output > STALL_TIMEOUT:
                     proc.kill()
                     raise RuntimeError(
                         f"Command timed out (no output for {STALL_TIMEOUT // 60} min)"
@@ -232,7 +251,7 @@ def _run_install() -> None:
             subprocess.run(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
 
             log(f"Formatting {target_part} as btrfs ...")
-            run_cmd(["mkfs.btrfs", "-f", target_part], 5, 10)
+            run_cmd(["mkfs.btrfs", "-f", "-L", "KythOS", target_part], 5, 10)
 
             # Create btrfs subvolumes @ and @home
             log("Creating Btrfs subvolumes @ and @home ...")
@@ -283,7 +302,7 @@ def _run_install() -> None:
             if SKIP_FETCH_CHECK:
                 install_cmd.append("--skip-fetch-check")
             install_cmd.append(alongside_mount)
-            run_cmd(install_cmd, 12, 90)
+            run_cmd(install_cmd, 12, 90, stall_timeout=3600, absolute_timeout=14400)
 
             root_part = target_part
 
@@ -300,7 +319,7 @@ def _run_install() -> None:
             if SKIP_FETCH_CHECK:
                 install_cmd.append("--skip-fetch-check")
             install_cmd.append(disk)
-            run_cmd(install_cmd, 5, 90)
+            run_cmd(install_cmd, 5, 90, stall_timeout=3600, absolute_timeout=14400)
             root_part = get_root_partition(disk)
 
         log("── Phase 2: Configuring installed system ─────────────────────────")

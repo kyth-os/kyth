@@ -56,7 +56,7 @@ from .disk import (
     list_free_space,
     list_partitions,
 )
-from .system import _as_root
+from .system import _as_root, unmount_target_disk
 
 
 @dataclass(frozen=True)
@@ -141,7 +141,7 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
         if (part.get("fstype") or "").lower() != "btrfs":
             raise RuntimeError("Alongside installation requires an existing Btrfs target partition.")
         if not find_efi_partition(disk):
-            raise RuntimeError("Alongside installation requires an EFI system partition on the selected disk.")
+            raise RuntimeError("Alongside installation requires an EFI system partition on the system.")
         return disk, target
 
     raise RuntimeError(f"Unsupported install mode: {mode}")
@@ -181,7 +181,7 @@ def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
     if (part.get("fstype") or "").lower() not in ("ntfs", "ntfs3"):
         raise RuntimeError("Only NTFS partitions can be resized by this installer path.")
     if not find_efi_partition(disk):
-        raise RuntimeError("NTFS resize installation requires an EFI system partition on the selected disk.")
+        raise RuntimeError("NTFS resize installation requires an EFI system partition on the system.")
 
     shrink_bytes = shrink_gib * 1024**3
     current_size = _safe_int(part.get("size_bytes")) or _partition_size_bytes(partition)
@@ -192,6 +192,9 @@ def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
 
 
 def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
+    disk = _normal_device_path(config.get("disk"))
+    if disk:
+        unmount_target_disk(disk, log)
     disk, partition, shrink_bytes = _validate_resize_ntfs_target(config)
     missing = [cmd for cmd in ("ntfsresize", "parted", "partprobe", "udevadm", "mkfs.btrfs") if shutil.which(cmd) is None]
     if missing:
@@ -205,20 +208,26 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
 
     log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
     log("Checking NTFS resize safety...")
-    info = subprocess.run(["ntfsresize", "--info", partition], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+    info = subprocess.run(_as_root(["ntfsresize", "--info", partition]), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
     if info.returncode != 0:
         raise RuntimeError("NTFS partition is not clean enough to resize. Boot Windows, disable Fast Startup/hibernation, run chkdsk, and try again.")
 
     size_arg = str(new_ntfs_size)
     dry = subprocess.run(
-        ["ntfsresize", "--no-action", "--size", size_arg, partition],
+        _as_root(["ntfsresize", "--no-action", "--size", size_arg, partition]),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         timeout=240,
     )
     if dry.returncode != 0:
-        raise RuntimeError("NTFS resize dry-run failed. Boot Windows, shrink the volume there, then return to the installer.")
+        out = (dry.stdout or "").lower()
+        if "too small" in out or "not enough space" in out:
+            raise RuntimeError("NTFS shrink failed: Not enough free space on the NTFS partition to shrink it by the requested amount.")
+        elif "immovable" in out:
+            raise RuntimeError("NTFS shrink failed: Immovable files prevent shrinking this partition further. Boot Windows, defragment the drive, and try again.")
+        else:
+            raise RuntimeError(f"NTFS resize dry-run failed. Output:\n{dry.stdout}\nBoot Windows, shrink the volume there, then return to the installer.")
 
     log("Shrinking NTFS filesystem...")
     subprocess.run(
@@ -262,7 +271,7 @@ def _validate_free_space_target(config: dict) -> tuple[str, int, int]:
     if disk not in safe_disks:
         raise RuntimeError("The selected disk is not a safe install target.")
     if not find_efi_partition(disk):
-        raise RuntimeError("Free space installation requires an EFI system partition on the selected disk.")
+        raise RuntimeError("Free space installation requires an EFI system partition on the system.")
 
     # Re-scan right before committing so a stale UI selection can't partition
     # space that's no longer actually free.
@@ -274,6 +283,9 @@ def _validate_free_space_target(config: dict) -> tuple[str, int, int]:
 
 
 def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
+    disk = _normal_device_path(config.get("disk"))
+    if disk:
+        unmount_target_disk(disk, log)
     disk, start, end = _validate_free_space_target(config)
     missing = [cmd for cmd in ("parted", "partprobe", "udevadm", "mkfs.btrfs") if shutil.which(cmd) is None]
     if missing:

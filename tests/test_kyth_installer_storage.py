@@ -182,6 +182,17 @@ class InstallerStorageTests(unittest.TestCase):
             result = self.disk._latest_partition_on_disk("/dev/sda", before)
         self.assertEqual(result, "/dev/sda10")
 
+    def test_find_efi_partition_scans_other_disks_as_fallback(self):
+        def fake_list_partitions(d):
+            if d == "/dev/nvme0n1":
+                return [{"name": "/dev/nvme0n1p1", "efi": True}]
+            return [{"name": "/dev/nvme1n1p1", "efi": False}]
+
+        with patch.object(self.disk, "list_partitions", side_effect=fake_list_partitions), \
+             patch.object(self.disk, "list_disks", return_value=[{"name": "/dev/nvme0n1"}, {"name": "/dev/nvme1n1"}]):
+            result = self.disk.find_efi_partition("/dev/nvme1n1")
+            self.assertEqual(result, "/dev/nvme0n1p1")
+
 
 class InstallerPlanTests(unittest.TestCase):
     def setUp(self):
@@ -294,6 +305,7 @@ class InstallerPlanTests(unittest.TestCase):
         ])
 
         with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
+             patch.object(self.plan, "unmount_target_disk") as mock_unmount, \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
              patch.object(self.plan, "_partition_size_bytes", return_value=256 * 1024**3), \
              patch.object(self.plan, "_partition_number", return_value=3), \
@@ -308,6 +320,7 @@ class InstallerPlanTests(unittest.TestCase):
                 lambda _msg: None,
             )
 
+        mock_unmount.assert_called_once_with("/dev/nvme0n1", unittest.mock.ANY)
         self.assertEqual(created, ("/dev/nvme0n1", "/dev/nvme0n1p4"))
         flattened = [" ".join(cmd) for cmd in commands]
         self.assertTrue(any("ntfsresize --no-action" in cmd for cmd in flattened))
@@ -367,6 +380,7 @@ class InstallerPlanTests(unittest.TestCase):
             return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
 
         with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
+             patch.object(self.plan, "unmount_target_disk") as mock_unmount, \
              patch.object(self.plan, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)), \
              patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1"}]), \
              patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/nvme0n1p2"), \
@@ -377,6 +391,7 @@ class InstallerPlanTests(unittest.TestCase):
                 lambda _msg: None,
             )
 
+        mock_unmount.assert_called_once_with("/dev/nvme0n1", unittest.mock.ANY)
         self.assertEqual(created, ("/dev/nvme0n1", "/dev/nvme0n1p2"))
         flattened = [" ".join(cmd) for cmd in commands]
         self.assertTrue(any(
@@ -387,6 +402,7 @@ class InstallerPlanTests(unittest.TestCase):
 
     def test_prepare_free_space_target_requires_partitioning_tools(self):
         with patch.object(self.plan.shutil, "which", return_value=None), \
+             patch.object(self.plan, "unmount_target_disk"), \
              patch.object(self.plan, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)):
             with self.assertRaisesRegex(RuntimeError, "Required partitioning tools"):
                 self.plan._prepare_free_space_target(

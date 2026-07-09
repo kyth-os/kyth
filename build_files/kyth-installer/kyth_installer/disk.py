@@ -379,7 +379,7 @@ def _partitions_after(disk: str, partition: str) -> list[dict]:
             item = stack.pop()
             if item.get("type") == "part":
                 name = _normal_device_path(item.get("name"))
-                if name and name != partition and _safe_int(item.get("start"), -1) > part_start:
+                if name and name != partition and _safe_int(item.get("start"), -1) * 512 > part_start:
                     found.append(item)
             stack.extend(item.get("children") or [])
     except Exception:
@@ -399,10 +399,19 @@ def _latest_partition_on_disk(disk: str, before: set[str]) -> str | None:
 
 
 def find_efi_partition(disk: str) -> str:
-    """Return the EFI partition path on disk, or '' if not found."""
+    """Return the EFI partition path on disk, or on another safe disk as fallback, or ''."""
     for part in list_partitions(disk):
-        if part["efi"]:
+        if part.get("efi"):
             return part["name"]
+    try:
+        for d in list_disks():
+            other_disk = d.get("name")
+            if other_disk and other_disk != disk:
+                for part in list_partitions(other_disk):
+                    if part.get("efi"):
+                        return part["name"]
+    except Exception:
+        pass
     for mount in ("/boot/efi", "/efi"):
         try:
             out = subprocess.check_output(
