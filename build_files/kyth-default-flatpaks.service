@@ -8,8 +8,8 @@ Requires=network-online.target kyth-flathub-setup.service
 # Sentinel is VERSIONED — bump the filename (v2 → v3, etc.) any time the app
 # list changes. The old sentinel survives OS upgrades (it lives in /var which
 # bootc never touches), so without versioning existing users never see new apps.
-# Current version: v6 (added Mission Center — Task Manager equivalent)
-ConditionPathExists=!/var/lib/kyth/default-flatpaks-v8-done
+# Current version: v9 (added WiVRn VR streaming)
+ConditionPathExists=!/var/lib/kyth/default-flatpaks-v9-done
 
 [Service]
 Type=oneshot
@@ -32,9 +32,10 @@ ExecStart=/usr/bin/flatpak install -y --noninteractive --system --or-update flat
     dev.vencord.Vesktop \
     io.missioncenter.MissionCenter \
     org.videolan.VLC \
-    com.obsproject.Studio
+    com.obsproject.Studio \
+    io.github.wivrn.wivrn
 ExecStartPost=/bin/mkdir -p /var/lib/kyth
-ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v8-done
+ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v9-done
 RemainAfterExit=yes
 Nice=10
 IOSchedulingClass=idle
