@@ -2760,10 +2760,7 @@ systemctl enable kyth-boot-splash-initramfs.service 2>/dev/null || true
 cat >/usr/lib/systemd/system/kyth-firstboot-notice.service <<'FBOOTEOF'
 [Unit]
 Description=KythOS first-boot Plymouth notice
-# ostree-remount.service is what makes /var writable on ostree — with
-# DefaultDependencies=no this unit otherwise races it and the sentinel
-# mkdir fails with "Read-only file system".
-After=plymouth-start.service local-fs.target ostree-remount.service
+After=plymouth-start.service local-fs.target
 Before=plymouth-quit.service
 DefaultDependencies=no
 ConditionPathExists=!/var/lib/kyth/first-boot-done

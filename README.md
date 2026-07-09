@@ -102,7 +102,7 @@ Gaming-first doesn't mean gaming-only.
 - **Video & streaming:** OBS Studio (pre-installed Flatpak with Vulkan/OpenGL `OBS_VKCAPTURE=1` capture enabled), Kdenlive, DaVinci Resolve helper
 - **Audio:** Audacity, PipeWire tuned for low latency
 - **Graphics:** GIMP, full media codec stack including thumbnails
-- **Dev tools:** Google Antigravity IDE (native RPM with full host filesystem access), VS Code, docker-compose, direnv, jq, yq, GitHub CLI, Docker, Homebrew, Distrobox, QEMU/libvirt, Incus/LXC
+- **Dev tools:** Google Antigravity IDE (native RPM with full host filesystem access), VS Code, docker-compose, direnv, jq, yq, GitHub CLI, GitKraken, Docker, Homebrew, Distrobox, QEMU/libvirt, Incus/LXC
 - **Productivity:** Brave, KDE Connect, OpenDeck, rclone cloud storage mounts, Mission Center (Task Manager)
 - **Security:** Optional Kali Linux toolbox container, Wireshark, Burp Suite Community
 - **VPN:** Standalone VPN Connect app with GlobalProtect SAML flow
