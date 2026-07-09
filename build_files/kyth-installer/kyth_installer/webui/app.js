@@ -333,7 +333,8 @@ function buildReview() {
   ];
   if (S.install_mode === 'alongside' && S.target_partition) {
     rows.push(['Target Partition', S.target_partition]);
-    if (S.target_partition.fstype) rows.push(['Partition FS', S.target_partition.fstype]);
+    const targetPart = _partitions.find(p => p.name === S.target_partition);
+    if (targetPart && targetPart.fstype) rows.push(['Partition FS', targetPart.fstype]);
   }
   rows.push(
     ['Hostname', S.hostname],
@@ -356,7 +357,7 @@ function buildReview() {
   document.getElementById('confirm-current-wrap').style.display = isCurrentLive ? 'flex' : 'none';
   document.getElementById('live-iso-required').style.display    = isCurrentNonLive ? 'block' : 'none';
 
-  const partName = isAlongside && S.target_partition ? S.target_partition.name : '';
+  const partName = isAlongside && S.target_partition ? S.target_partition : '';
   const isFreeSpace = S.install_mode === 'free_space';
   document.getElementById('review-wipe').textContent = isCurrentNonLive
     ? '⚠ This is the running system disk — see notice below.'

@@ -1,3 +1,4 @@
+import io
 import json
 import sys
 import unittest
@@ -10,7 +11,7 @@ WEBUI_DIR = INSTALLER_ROOT / "kyth_installer/webui"
 if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
-from kyth_installer import disk, plan  # noqa: E402
+from kyth_installer import disk, install, plan, server  # noqa: E402
 
 
 class InstallerWebuiTests(unittest.TestCase):
@@ -22,6 +23,15 @@ class InstallerWebuiTests(unittest.TestCase):
         self.assertIn("document.getElementById('disk-next').disabled", js)
         self.assertIn("const btn = document.getElementById('disk-next');", js)
         self.assertNotIn("getElementById('next-disk')", js)
+
+    def test_review_page_treats_target_partition_as_plain_name_string(self):
+        # S.target_partition is set from p.name (a string), never a partition
+        # object — `.name`/`.fstype` accesses on it are always undefined and
+        # silently blank the review page's "which partition gets erased" text.
+        js = (WEBUI_DIR / "app.js").read_text()
+
+        self.assertNotIn("S.target_partition.name", js)
+        self.assertNotIn("S.target_partition.fstype", js)
 
 
 class InstallerStorageTests(unittest.TestCase):
@@ -42,6 +52,49 @@ class InstallerStorageTests(unittest.TestCase):
             disks = self.disk.list_disks()
 
         self.assertEqual([d["name"] for d in disks], ["/dev/nvme0n1"])
+
+    def test_list_disks_flags_running_system_disk_as_current(self):
+        payload = {
+            "blockdevices": [
+                {"name": "/dev/nvme0n1", "size": 128 * 1024**3, "model": "Internal", "type": "disk", "tran": "nvme", "rota": False, "rm": False},
+                {"name": "/dev/sdb", "size": 512 * 1024**3, "model": "Secondary", "type": "disk", "tran": "sata", "rota": False, "rm": False},
+            ]
+        }
+
+        with patch.object(self.disk, "_protected_install_disks", return_value=set()), \
+             patch.object(self.disk, "_running_system_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.disk, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+            disks = {d["name"]: d for d in self.disk.list_disks()}
+
+        self.assertTrue(disks["/dev/nvme0n1"]["current"])
+        self.assertFalse(disks["/dev/sdb"]["current"])
+
+    def test_parent_disk_walks_through_lvm_and_luks_layers(self):
+        # Root on an LVM logical volume backed by a LUKS-encrypted partition:
+        # LV -> crypt mapper -> partition -> disk is three PKNAME hops, not one.
+        chain = {
+            ("lsblk", "-n", "-o", "TYPE", "/dev/mapper/kyth-root"): "lvm\n",
+            ("lsblk", "-n", "-o", "PKNAME", "/dev/mapper/kyth-root"): "dm-0\n",
+            ("lsblk", "-n", "-o", "TYPE", "/dev/dm-0"): "crypt\n",
+            ("lsblk", "-n", "-o", "PKNAME", "/dev/dm-0"): "nvme0n1p3\n",
+            ("lsblk", "-n", "-o", "TYPE", "/dev/nvme0n1p3"): "part\n",
+            ("lsblk", "-n", "-o", "PKNAME", "/dev/nvme0n1p3"): "nvme0n1\n",
+            ("lsblk", "-n", "-o", "TYPE", "/dev/nvme0n1"): "disk\n",
+        }
+
+        def fake_check_output(cmd, **_kwargs):
+            key = tuple(cmd)
+            if key not in chain:
+                raise AssertionError(f"unexpected lsblk invocation: {cmd}")
+            return chain[key]
+
+        normalize = lambda p: p if p.startswith("/dev/") else f"/dev/{p}"
+        with patch.object(self.disk, "_normal_device_path", side_effect=normalize), \
+             patch.object(self.disk.subprocess, "check_output", side_effect=fake_check_output):
+            result = self.disk._parent_disk("/dev/mapper/kyth-root")
+
+        self.assertEqual(result, "/dev/nvme0n1")
 
     def test_list_partitions_marks_only_unmounted_btrfs_as_alongside_candidate(self):
         payload = {
@@ -166,6 +219,21 @@ class InstallerPlanTests(unittest.TestCase):
         with patch.object(self.plan, "list_disks", return_value=[]):
             with self.assertRaisesRegex(RuntimeError, "not a safe install target"):
                 self.plan._validate_install_target({"install_mode": "wipe", "disk": "/dev/sda"})
+
+    def test_validate_wipe_rejects_disk_below_minimum_size(self):
+        with patch.object(self.plan, "list_disks", return_value=[
+            {"name": "/dev/sda", "size_bytes": 16 * 1024**3},
+        ]):
+            with self.assertRaisesRegex(RuntimeError, "too small"):
+                self.plan._validate_install_target({"install_mode": "wipe", "disk": "/dev/sda"})
+
+    def test_validate_wipe_accepts_disk_at_minimum_size(self):
+        with patch.object(self.plan, "list_disks", return_value=[
+            {"name": "/dev/sda", "size_bytes": 32 * 1024**3},
+        ]):
+            disk_name, target = self.plan._validate_install_target({"install_mode": "wipe", "disk": "/dev/sda"})
+
+        self.assertEqual((disk_name, target), ("/dev/sda", None))
 
     def test_validate_resize_ntfs_requires_last_partition(self):
         partition = {
@@ -325,6 +393,64 @@ class InstallerPlanTests(unittest.TestCase):
                     {"disk": "/dev/nvme0n1", "free_region_start": 40 * 1024**3, "free_region_end": 80 * 1024**3},
                     lambda _msg: None,
                 )
+
+
+class InstallerServerConfirmationTests(unittest.TestCase):
+    """/api/start must re-check the review-page acknowledgement checkboxes
+    server-side, not just trust the frontend to keep "Install Now" disabled."""
+
+    def _make_handler(self, body: dict) -> server.Handler:
+        handler = server.Handler.__new__(server.Handler)
+        payload = json.dumps(body).encode()
+        handler.headers = {"Content-Length": str(len(payload))}
+        handler.rfile = io.BytesIO(payload)
+        handler.wfile = io.BytesIO()
+        handler.path = "/api/start"
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.send_error = MagicMock()
+        return handler
+
+    @patch.object(server.Handler, "_require_same_origin_context", return_value=True)
+    @patch.object(server.Handler, "_require_auth", return_value=True)
+    def test_start_rejects_missing_confirmation_checkboxes(self, *_mocks):
+        disks = [{"name": "/dev/sda", "current": False, "size_bytes": 64 * 1024**3}]
+        handler = self._make_handler({
+            "disk": "/dev/sda",
+            "install_mode": "wipe",
+            "confirm_backup": True,
+            "confirm_erase": False,
+        })
+        with patch.object(server, "list_disks", return_value=disks), \
+             patch.object(install, "_run_install") as run_install:
+            handler.do_POST()
+
+        handler.send_error.assert_not_called()
+        written = handler.wfile.getvalue().decode().lower()
+        self.assertIn('"started": false', written)
+        run_install.assert_not_called()
+
+    @patch.object(server.Handler, "_require_same_origin_context", return_value=True)
+    @patch.object(server.Handler, "_require_auth", return_value=True)
+    def test_start_accepts_when_confirmations_present(self, *_mocks):
+        disks = [{"name": "/dev/sda", "current": False, "size_bytes": 64 * 1024**3}]
+        handler = self._make_handler({
+            "disk": "/dev/sda",
+            "install_mode": "wipe",
+            "username": "user",
+            "password": "x",
+            "confirm_backup": True,
+            "confirm_erase": True,
+        })
+        with patch.object(server, "list_disks", return_value=disks), \
+             patch.object(server, "list_timezones", return_value=["UTC"]), \
+             patch.object(install, "_run_install"):
+            handler.do_POST()
+
+        handler.send_error.assert_not_called()
+        written = handler.wfile.getvalue().decode().lower()
+        self.assertIn('"started": true', written)
 
 
 if __name__ == "__main__":

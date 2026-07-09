@@ -241,6 +241,18 @@ class Handler(BaseHTTPRequestHandler):
                 }, status=409)
                 return
 
+            # The UI only lets the "Install Now" button enable once these
+            # boxes are checked; re-check server-side so a stale/bypassed
+            # frontend can't skip the user's explicit destructive-action ack.
+            is_current_disk = bool(disks[disk].get("current"))
+            current_ok = install_mode == "alongside" or not is_current_disk or bool(body.get("confirm_current"))
+            if not (body.get("confirm_backup") and body.get("confirm_erase") and current_ok):
+                self._json({
+                    "started": False,
+                    "message": "Please confirm the on-screen acknowledgements before starting the install.",
+                }, status=400)
+                return
+
             password = body.get("password", "")
             try:
                 password_hash = _hash_password(password)

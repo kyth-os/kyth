@@ -24,6 +24,10 @@ def _human_size(n: int) -> str:
 
 
 def _running_system_disk() -> str:
+    # Returns the raw mount SOURCE for "/" (which may be a partition, an LVM
+    # logical volume, or a LUKS dm-crypt mapping) — callers resolve this up
+    # to the physical disk via _parent_disk(), which walks every layer of
+    # device-mapper indirection rather than assuming a single PKNAME hop.
     try:
         source = subprocess.check_output(
             ["findmnt", "-n", "-o", "SOURCE", "/"],
@@ -33,28 +37,7 @@ def _running_system_disk() -> str:
         return ""
     if not source or not source.startswith("/dev/"):
         return ""
-    try:
-        pkname = subprocess.check_output(
-            ["lsblk", "-n", "-o", "PKNAME", source],
-            text=True, stderr=subprocess.DEVNULL, timeout=5,
-        ).strip().splitlines()
-        parent = next((line.strip() for line in pkname if line.strip()), "")
-        if parent:
-            return f"/dev/{parent}"
-    except Exception:
-        pass
-    try:
-        disk = subprocess.check_output(
-            ["lsblk", "-n", "-o", "NAME,TYPE", source],
-            text=True, stderr=subprocess.DEVNULL, timeout=5,
-        )
-        for line in disk.splitlines():
-            parts = line.split()
-            if len(parts) >= 2 and parts[1] == "disk":
-                return f"/dev/{parts[0].lstrip('└─├─')}"
-    except Exception:
-        pass
-    return ""
+    return source
 
 
 def _get_live_usb_disk() -> Optional[str]:
@@ -135,15 +118,20 @@ def _device_type(dev: str | None) -> str:
 
 
 def _parent_disk(dev: str | None) -> str | None:
+    # Walks every layer of indirection (partition, LVM LV/PV, LUKS mapper)
+    # up to the underlying physical disk. A single PKNAME hop is not enough
+    # for e.g. an LVM logical volume on a LUKS-encrypted partition, where
+    # the immediate PKNAME is itself another non-disk device.
     dev = _normal_device_path(dev)
-    if not dev:
-        return None
-    dtype = _device_type(dev)
-    if dtype == "disk":
-        return dev
-    parent = _lsblk_text(["-n", "-o", "PKNAME", dev])
-    if parent:
-        return _normal_device_path(parent.splitlines()[0])
+    seen: set[str] = set()
+    while dev and dev not in seen:
+        seen.add(dev)
+        if _device_type(dev) == "disk":
+            return dev
+        parent = _lsblk_text(["-n", "-o", "PKNAME", dev])
+        if not parent:
+            return None
+        dev = _normal_device_path(parent.splitlines()[0])
     return None
 
 
@@ -196,6 +184,7 @@ def _disk_path_is_safe(path: str) -> bool:
 
 def list_disks():
     protected = _protected_install_disks()
+    current_disk = _parent_disk(_running_system_disk())
     disks = []
     try:
         out = subprocess.check_output(
@@ -223,7 +212,7 @@ def list_disks():
                 "ssd": not bool(d.get("rota")),
                 "transport": d.get("tran") or "",
                 "removable": bool(d.get("rm")),
-                "current": False,
+                "current": bool(current_disk) and name == current_disk,
             })
     except Exception as exc:
         print(f"disk scan failed: {exc}", file=sys.stderr)

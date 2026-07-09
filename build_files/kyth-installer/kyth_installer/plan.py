@@ -119,6 +119,9 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
         raise RuntimeError("The selected disk is not a safe install target. Re-scan disks and choose a non-live, non-mounted disk.")
 
     if mode == "wipe":
+        size_bytes = _safe_int(safe_disks[disk].get("size_bytes"))
+        if size_bytes < MIN_KYTHOS_BYTES:
+            raise RuntimeError(f"This disk is too small for KythOS. At least {MIN_KYTHOS_GIB} GiB is required.")
         return disk, None
 
     if mode == "alongside":
