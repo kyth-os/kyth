@@ -1045,7 +1045,7 @@ KWALLETRCEOF
 # by a system-context process (sddm-helper runs as xdm_t; SELinux denies
 # xdm_t→default_t getattr, so pam_kwallet5 cannot read the salt file and
 # silently fails to unlock the wallet on every login).
-cat > /usr/libexec/kyth-kwallet-relabel <<'RELABELEOF'
+cat >/usr/libexec/kyth-kwallet-relabel <<'RELABELEOF'
 #!/bin/bash
 [[ -n "${PAM_USER:-}" && -d "/var/home/${PAM_USER}/.local/share/kwalletd" ]] && \
     restorecon -RF "/var/home/${PAM_USER}/.local/share/kwalletd" &>/dev/null
@@ -1055,18 +1055,18 @@ chmod 0755 /usr/libexec/kyth-kwallet-relabel
 
 SDDM_PAM=/etc/pam.d/sddm
 if [ -f "${SDDM_PAM}" ]; then
-    if ! grep -q pam_kwallet5 "${SDDM_PAM}"; then
-        # Fedora SDDM package didn't include kwallet5 lines — add them with relabeler.
-        printf '\nauth     optional     pam_kwallet5.so\nsession  optional     pam_exec.so /usr/libexec/kyth-kwallet-relabel\nsession  optional     pam_kwallet5.so auto_start\n' >> "${SDDM_PAM}"
-    elif ! grep -q kyth-kwallet-relabel "${SDDM_PAM}"; then
-        # kwallet5 lines already present (standard Fedora path) — insert relabeler
-        # immediately before the first pam_kwallet5 session line so restorecon
-        # corrects the label before pam_kwallet5 tries to open the salt file.
-        awk '!done && /pam_kwallet5.*auto_start/ {
+	if ! grep -q pam_kwallet5 "${SDDM_PAM}"; then
+		# Fedora SDDM package didn't include kwallet5 lines — add them with relabeler.
+		printf '\nauth     optional     pam_kwallet5.so\nsession  optional     pam_exec.so /usr/libexec/kyth-kwallet-relabel\nsession  optional     pam_kwallet5.so auto_start\n' >>"${SDDM_PAM}"
+	elif ! grep -q kyth-kwallet-relabel "${SDDM_PAM}"; then
+		# kwallet5 lines already present (standard Fedora path) — insert relabeler
+		# immediately before the first pam_kwallet5 session line so restorecon
+		# corrects the label before pam_kwallet5 tries to open the salt file.
+		awk '!done && /pam_kwallet5.*auto_start/ {
             print "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel"
             done=1
-        } { print }' "${SDDM_PAM}" > /tmp/kyth-sddm.tmp && mv /tmp/kyth-sddm.tmp "${SDDM_PAM}"
-    fi
+        } { print }' "${SDDM_PAM}" >/tmp/kyth-sddm.tmp && mv /tmp/kyth-sddm.tmp "${SDDM_PAM}"
+	fi
 fi
 
 # ── Baloo file indexer — disabled by default ─────────────────────────────────
@@ -1551,10 +1551,10 @@ BREWSHEOF
 
 # Add Homebrew to PATH and configure environment for sh/bash/zsh if it exists
 for _brew_path in "/home/linuxbrew/.linuxbrew/bin/brew" "${HOME}/.linuxbrew/bin/brew"; do
-    if [ -x "${_brew_path}" ]; then
-        eval "$("${_brew_path}" shellenv)"
-        break
-    fi
+	if [ -x "${_brew_path}" ]; then
+		eval "$("${_brew_path}" shellenv)"
+		break
+	fi
 done
 cat >/etc/fish/conf.d/brew.fish <<'BREWFISHEOF'
 # Add Homebrew to PATH and configure environment for fish shell if it exists

@@ -307,6 +307,10 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
 
 
 def _hash_password(password: str) -> str:
+    # openssl passwd -stdin emits nothing (exit 0) for empty input, which
+    # would surface as a confusing "invalid SHA-512 crypt value" error.
+    if not password:
+        raise RuntimeError("Password cannot be empty. Return to the Configure step and re-enter it.")
     result = subprocess.run(
         ["openssl", "passwd", "-6", "-stdin"],
         input=password,

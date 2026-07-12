@@ -39,7 +39,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
-from .config import MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
+from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
 from .disk import (
     _human_size,
     _latest_partition_on_disk,
@@ -152,6 +152,54 @@ def _settle_block_devices():
     subprocess.run(["udevadm", "settle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
 
 
+def _is_gpt_disk(disk: str) -> bool:
+    try:
+        out = subprocess.check_output(
+            ["blkid", "-o", "value", "-s", "PTTYPE", disk],
+            text=True, stderr=subprocess.DEVNULL, timeout=5
+        )
+        if out.strip().lower() == "gpt":
+            return True
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(
+            ["parted", "-s", disk, "print"],
+            text=True, stderr=subprocess.DEVNULL, timeout=5
+        )
+        return "Partition Table: gpt" in out
+    except Exception:
+        return False
+
+
+def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
+    """Create a 1 MiB bios_grub partition at gap_start if the GPT disk lacks
+    one, returning the byte offset where the KythOS partition should begin.
+
+    The OS image ships a bootupd BIOS (i386-pc GRUB) component, and bootc's
+    bootloader step installs every shipped component. Without a bios_grub
+    partition grub2-install falls back to blocklists, which Btrfs rejects —
+    "filesystem 'btrfs' doesn't support blocklists" — failing the whole
+    install. bootc install to-disk creates this partition itself; the
+    alongside paths partition the disk manually, so they must match.
+    """
+    if not _is_gpt_disk(disk):
+        return gap_start
+    if any((p.get("parttype") or "").lower() == BIOS_BOOT_GUID for p in list_partitions(disk)):
+        return gap_start
+    before = {p["name"] for p in list_partitions(disk) if p.get("name")}
+    bios_end = gap_start + BIOS_BOOT_BYTES
+    log("Creating BIOS boot partition for GRUB...")
+    subprocess.run(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "biosboot", f"{gap_start}B", f"{bios_end}B"]), check=True, timeout=120)
+    _settle_block_devices()
+    created = _latest_partition_on_disk(disk, before)
+    if not created:
+        raise RuntimeError("The installer could not find the new BIOS boot partition after partitioning.")
+    subprocess.run(_as_root(["parted", "-s", disk, "set", str(_partition_number(created)), "bios_grub", "on"]), check=True, timeout=120)
+    _settle_block_devices()
+    return bios_end
+
+
 def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
     disk = _normal_device_path(config.get("disk"))
     partition = _normal_device_path(config.get("resize_partition") or config.get("target_partition"))
@@ -204,7 +252,6 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     part_num = _partition_number(partition)
     sector = _block_size_bytes(disk)
     new_end = _partition_start_bytes(partition) + new_ntfs_size - sector
-    before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
     log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
     log("Checking NTFS resize safety...")
@@ -240,11 +287,21 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     )
 
     log("Shrinking partition boundary...")
-    subprocess.run(_as_root(["parted", "-s", disk, "unit", "B", "resizepart", str(part_num), f"{new_end}B"]), check=True, timeout=120)
+    # parted >= 3.3 refuses to shrink a partition in script mode (-s): it asks
+    # "Shrinking a partition can cause data loss, are you sure?" and exits 1
+    # when it cannot prompt. ---pretend-input-tty with "Yes" piped on stdin is
+    # the documented way to answer that prompt non-interactively.
+    subprocess.run(
+        _as_root(["parted", "---pretend-input-tty", disk, "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
+        input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True, timeout=120,
+    )
     _settle_block_devices()
 
+    btrfs_start = _ensure_bios_boot_partition(disk, new_end + sector, log)
+    before = {p["name"] for p in list_partitions(disk) if p.get("name")}
+
     log("Creating KythOS Btrfs partition in freed space...")
-    subprocess.run(_as_root(["parted", "-s", disk, "mkpart", "KythOS", "btrfs", f"{new_end + sector}B", "100%"]), check=True, timeout=120)
+    subprocess.run(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", "100%"]), check=True, timeout=120)
     _settle_block_devices()
 
     created = _latest_partition_on_disk(disk, before)
@@ -291,6 +348,7 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     if missing:
         raise RuntimeError(f"Required partitioning tools are missing from the live environment: {', '.join(missing)}")
 
+    start = _ensure_bios_boot_partition(disk, start, log)
     before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
     log(f"Creating KythOS Btrfs partition in {_human_size(end - start)} of free space...")

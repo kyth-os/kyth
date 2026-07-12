@@ -13,7 +13,6 @@ else
 	dnf clean all
 fi
 
-
 SOURCE_TAG=${SOURCE_TAG:?}
 
 # bwrap tries to write /proc/sys/user/max_user_namespaces which is mounted as ro

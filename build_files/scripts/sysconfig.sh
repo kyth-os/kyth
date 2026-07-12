@@ -7,25 +7,25 @@ set -euo pipefail
 
 # Install the optional AI developer helper when the build context provides it.
 if [[ -f /ctx/kyth-ai-dev ]]; then
-  install -Dm0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
+	install -Dm0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
 fi
 
 # Repair accounts/groups that may be missing after layering package changes.
 if [[ -x /usr/libexec/kyth-fix-system-accounts ]]; then
-  /usr/libexec/kyth-fix-system-accounts || true
+	/usr/libexec/kyth-fix-system-accounts || true
 fi
 
 for group in docker plugdev polkitd; do
-  if ! grep -q "^${group}:" /etc/group && grep -q "^${group}:" /usr/lib/group; then
-    grep "^${group}:" /usr/lib/group >>/etc/group
-  fi
+	if ! grep -q "^${group}:" /etc/group && grep -q "^${group}:" /usr/lib/group; then
+		grep "^${group}:" /usr/lib/group >>/etc/group
+	fi
 done
 
 # Keep the display manager and graphical target explicit across upgrades.
 mkdir -p /etc/systemd/system/graphical.target.wants
-ln -sf /usr/lib/systemd/system/sddm.service   /etc/systemd/system/display-manager.service
-ln -sf /etc/systemd/system/display-manager.service   /etc/systemd/system/graphical.target.wants/display-manager.service
-ln -sf /usr/lib/systemd/system/graphical.target   /etc/systemd/system/default.target
+ln -sf /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
+ln -sf /etc/systemd/system/display-manager.service /etc/systemd/system/graphical.target.wants/display-manager.service
+ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
 
 # Service masks/disables that are intentionally runtime-layer policy.
 systemctl mask systemd-remount-fs.service

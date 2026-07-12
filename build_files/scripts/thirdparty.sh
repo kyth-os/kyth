@@ -554,7 +554,6 @@ install_msfonts() {
 	echo "msfonts: installed ${count} TrueType fonts"
 }
 
-
 install_opticscaler() {
 	# OptiScaler — universal upscaling intermediary that lets any game use FSR2/3,
 	# XeSS, or DLSS-translation on AMD/Intel GPUs via Proton's DLL override

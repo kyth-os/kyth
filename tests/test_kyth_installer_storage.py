@@ -11,7 +11,7 @@ WEBUI_DIR = INSTALLER_ROOT / "kyth_installer/webui"
 if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
-from kyth_installer import disk, install, plan, server  # noqa: E402
+from kyth_installer import disk, install, plan, server, system  # noqa: E402
 
 
 class InstallerWebuiTests(unittest.TestCase):
@@ -32,6 +32,11 @@ class InstallerWebuiTests(unittest.TestCase):
 
         self.assertNotIn("S.target_partition.name", js)
         self.assertNotIn("S.target_partition.fstype", js)
+
+    def test_back_from_error_routes_to_config_not_configure(self):
+        js = (WEBUI_DIR / "app.js").read_text()
+        self.assertIn("goto(S.password ? 'review' : 'config')", js)
+        self.assertNotIn("goto(S.password ? 'review' : 'configure')", js)
 
 
 class InstallerStorageTests(unittest.TestCase):
@@ -291,17 +296,27 @@ class InstallerPlanTests(unittest.TestCase):
     def test_prepare_ntfs_resize_creates_btrfs_target_after_dry_run(self):
         partition = "/dev/nvme0n1p3"
         commands = []
+        run_kwargs = []
 
         def fake_run(cmd, **kwargs):
             commands.append(cmd)
+            run_kwargs.append(kwargs)
             return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
 
         # _latest_partition_on_disk (defined in disk.py) calls disk's own
         # list_partitions, not plan's imported reference, so both names must
         # be patched to the same mock to share the before/after side_effect.
+        # p1 already carries the bios_grub GUID so _ensure_bios_boot_partition
+        # (call 1) skips creation; calls 2 and 3 are the before/after
+        # snapshots around the KythOS mkpart.
+        existing = [
+            {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
+            {"name": partition},
+        ]
         list_partitions_mock = MagicMock(side_effect=[
-            [{"name": "/dev/nvme0n1p1"}, {"name": partition}],
-            [{"name": "/dev/nvme0n1p1"}, {"name": partition}, {"name": "/dev/nvme0n1p4"}],
+            existing,
+            existing,
+            existing + [{"name": "/dev/nvme0n1p4"}],
         ])
 
         with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
@@ -314,6 +329,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "list_partitions", list_partitions_mock), \
              patch.object(disk, "list_partitions", list_partitions_mock), \
              patch.object(self.plan, "_settle_block_devices"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan.subprocess, "run", side_effect=fake_run):
             created = self.plan._prepare_ntfs_resize_target(
                 {"disk": "/dev/nvme0n1", "resize_partition": partition, "resize_gib": 64},
@@ -324,8 +340,53 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertEqual(created, ("/dev/nvme0n1", "/dev/nvme0n1p4"))
         flattened = [" ".join(cmd) for cmd in commands]
         self.assertTrue(any("ntfsresize --no-action" in cmd for cmd in flattened))
-        self.assertTrue(any("parted -s /dev/nvme0n1 unit B resizepart 3" in cmd for cmd in flattened))
+        # parted >= 3.3 exits 1 on a script-mode (-s) shrink because it cannot
+        # ask its "can cause data loss" question; the shrink must run with
+        # ---pretend-input-tty and "Yes" on stdin instead.
+        shrink_calls = [
+            (cmd, kwargs)
+            for cmd, kwargs in zip(flattened, run_kwargs)
+            if "resizepart 3" in cmd
+        ]
+        self.assertEqual(len(shrink_calls), 1)
+        shrink_cmd, shrink_kwargs = shrink_calls[0]
+        self.assertIn("parted ---pretend-input-tty /dev/nvme0n1 unit B resizepart 3", shrink_cmd)
+        self.assertNotIn(" -s ", shrink_cmd)
+        self.assertEqual(shrink_kwargs.get("input"), "Yes\n")
         self.assertTrue(any("mkfs.btrfs -f -L KythOS /dev/nvme0n1p4" in cmd for cmd in flattened))
+
+    def test_ensure_bios_boot_partition_creates_and_flags_when_missing(self):
+        # The OS image ships a bootupd BIOS component and bootc installs every
+        # shipped component; without a bios_grub partition grub2-install falls
+        # back to blocklists, which Btrfs rejects, failing the install.
+        commands = []
+
+        def fake_run(cmd, **kwargs):
+            commands.append(" ".join(cmd))
+            return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
+
+        gap_start = 128 * 1024**3
+        with patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/sda1", "parttype": ""}]), \
+             patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/sda2"), \
+             patch.object(self.plan, "_partition_number", return_value=2), \
+             patch.object(self.plan, "_settle_block_devices"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
+             patch.object(self.plan.subprocess, "run", side_effect=fake_run):
+            btrfs_start = self.plan._ensure_bios_boot_partition("/dev/sda", gap_start, lambda _msg: None)
+
+        self.assertEqual(btrfs_start, gap_start + self.plan.BIOS_BOOT_BYTES)
+        self.assertTrue(any(f"mkpart biosboot {gap_start}B {gap_start + self.plan.BIOS_BOOT_BYTES}B" in cmd for cmd in commands))
+        self.assertTrue(any("set 2 bios_grub on" in cmd for cmd in commands))
+
+    def test_ensure_bios_boot_partition_skips_when_already_present(self):
+        with patch.object(self.plan, "_is_gpt_disk", return_value=True), \
+             patch.object(self.plan, "list_partitions", return_value=[
+                 {"name": "/dev/sda1", "parttype": self.plan.BIOS_BOOT_GUID},
+             ]), patch.object(self.plan.subprocess, "run") as mock_run:
+            btrfs_start = self.plan._ensure_bios_boot_partition("/dev/sda", 4096, lambda _msg: None)
+
+        self.assertEqual(btrfs_start, 4096)
+        mock_run.assert_not_called()
 
     def test_validate_free_space_rejects_region_below_minimum_size(self):
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
@@ -382,9 +443,12 @@ class InstallerPlanTests(unittest.TestCase):
         with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
              patch.object(self.plan, "unmount_target_disk") as mock_unmount, \
              patch.object(self.plan, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)), \
-             patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[
+                 {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
+             ]), \
              patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/nvme0n1p2"), \
              patch.object(self.plan, "_settle_block_devices"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan.subprocess, "run", side_effect=fake_run):
             created = self.plan._prepare_free_space_target(
                 {"disk": "/dev/nvme0n1", "free_region_start": 40 * 1024**3, "free_region_end": 80 * 1024**3},
@@ -467,6 +531,74 @@ class InstallerServerConfirmationTests(unittest.TestCase):
         handler.send_error.assert_not_called()
         written = handler.wfile.getvalue().decode().lower()
         self.assertIn('"started": true', written)
+
+    @patch.object(server.Handler, "_require_same_origin_context", return_value=True)
+    @patch.object(server.Handler, "_require_auth", return_value=True)
+    def test_start_rejects_empty_password(self, *_mocks):
+        disks = [{"name": "/dev/sda", "current": False, "size_bytes": 64 * 1024**3}]
+        handler = self._make_handler({
+            "disk": "/dev/sda",
+            "install_mode": "wipe",
+            "username": "user",
+            "password": "",
+            "confirm_backup": True,
+            "confirm_erase": True,
+        })
+        with patch.object(server, "list_disks", return_value=disks), \
+             patch.object(server, "list_timezones", return_value=["UTC"]), \
+             patch.object(install, "_run_install"):
+            handler.do_POST()
+
+        written = handler.wfile.getvalue().decode().lower()
+        self.assertIn('"started": false', written)
+        self.assertIn('could not hash password', written)
+
+
+class InstallerSystemTests(unittest.TestCase):
+    @patch("kyth_installer.system.subprocess.run")
+    def test_hash_password_success(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="$6$hashedpassword\n")
+        res = system._hash_password("mypassword")
+        self.assertEqual(res, "$6$hashedpassword")
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        self.assertEqual(cmd, ["openssl", "passwd", "-6", "-stdin"])
+        self.assertEqual(mock_run.call_args[1].get("input"), "mypassword")
+
+    def test_hash_password_empty_raises(self):
+        with self.assertRaisesRegex(RuntimeError, "Password cannot be empty"):
+            system._hash_password("")
+
+    @patch("kyth_installer.system.subprocess.run")
+    def test_hash_password_invalid_hash_raises(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="invalidhash\n")
+        with self.assertRaisesRegex(RuntimeError, "invalid SHA-512 crypt value"):
+            system._hash_password("mypassword")
+
+
+class InstallerGptDiskTests(unittest.TestCase):
+    @patch("kyth_installer.plan.subprocess.check_output")
+    def test_is_gpt_disk_via_blkid(self, mock_check_output):
+        mock_check_output.return_value = "gpt\n"
+        self.assertTrue(plan._is_gpt_disk("/dev/sda"))
+        mock_check_output.assert_called_once_with(
+            ["blkid", "-o", "value", "-s", "PTTYPE", "/dev/sda"],
+            text=True, stderr=plan.subprocess.DEVNULL, timeout=5
+        )
+
+    @patch("kyth_installer.plan.subprocess.check_output")
+    def test_is_gpt_disk_via_parted(self, mock_check_output):
+        mock_check_output.side_effect = [
+            plan.subprocess.CalledProcessError(1, "blkid"),
+            "Model: Virtual Disk\nPartition Table: gpt\n"
+        ]
+        self.assertTrue(plan._is_gpt_disk("/dev/sda"))
+        self.assertEqual(mock_check_output.call_count, 2)
+
+    @patch("kyth_installer.plan.subprocess.check_output")
+    def test_is_gpt_disk_non_gpt(self, mock_check_output):
+        mock_check_output.return_value = "dos\n"
+        self.assertFalse(plan._is_gpt_disk("/dev/sda"))
 
 
 if __name__ == "__main__":

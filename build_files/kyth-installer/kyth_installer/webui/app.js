@@ -542,6 +542,13 @@ function showError(msg) {
   goto('error');
 }
 
+function backFromError() {
+  // S.password is wiped once an install starts, so a retry straight from the
+  // review page would POST an empty password. Route through Configure to make
+  // the user re-enter it whenever it is gone.
+  goto(S.password ? 'review' : 'config');
+}
+
 function reboot() {
   document.body.innerHTML = '<div id="main" style="display:flex;align-items:center;justify-content:center"><div class="card" style="text-align:center;padding:48px 40px"><div class="done-title">Restarting</div><p class="hero-body">Remove the installation media when your computer begins to restart.</p></div></div>';
   apiFetch('/api/reboot', {method:'POST'}).catch(()=>{});
