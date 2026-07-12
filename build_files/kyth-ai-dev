@@ -6,7 +6,7 @@ image="${KYTH_AI_DEV_IMAGE:-registry.fedoraproject.org/fedora-toolbox:44}"
 model_dir="${KYTH_AI_MODEL_DIR:-${HOME}/.local/share/kyth-ai/models}"
 
 usage() {
-    cat <<EOF
+	cat <<EOF
 Usage: kyth-ai-dev <setup|status|enter|remove|start|stop>
 
 Creates and manages the optional KythOS local AI developer Distrobox.
@@ -15,73 +15,73 @@ EOF
 }
 
 have_box() {
-    distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"
+	distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"
 }
 
 need_distrobox() {
-    if ! command -v distrobox >/dev/null 2>&1; then
-        echo "ERROR: distrobox is not installed." >&2
-        exit 1
-    fi
+	if ! command -v distrobox >/dev/null 2>&1; then
+		echo "ERROR: distrobox is not installed." >&2
+		exit 1
+	fi
 }
 
 enter_box() {
-    distrobox enter "${box}" -- "$@"
+	distrobox enter "${box}" -- "$@"
 }
 
 status() {
-    need_distrobox
-    echo "KythOS AI developer environment"
-    echo "Box: ${box}"
-    echo "Image: ${image}"
-    echo "Models: ${model_dir}"
-    echo
+	need_distrobox
+	echo "KythOS AI developer environment"
+	echo "Box: ${box}"
+	echo "Image: ${image}"
+	echo "Models: ${model_dir}"
+	echo
 
-    if have_box; then
-        echo "Box: present"
-    else
-        echo "Box: missing"
-        echo "Run: ujust ai-dev-setup"
-        return 0
-    fi
+	if have_box; then
+		echo "Box: present"
+	else
+		echo "Box: missing"
+		echo "Run: ujust ai-dev-setup"
+		return 0
+	fi
 
-    if enter_box bash -lc 'command -v ollama >/dev/null 2>&1'; then
-        echo "Ollama: installed"
-    else
-        echo "Ollama: not installed"
-    fi
+	if enter_box bash -lc 'command -v ollama >/dev/null 2>&1'; then
+		echo "Ollama: installed"
+	else
+		echo "Ollama: not installed"
+	fi
 
-    if enter_box bash -lc 'command -v llama-cli >/dev/null 2>&1 || command -v llama-cpp >/dev/null 2>&1'; then
-        echo "llama.cpp CLI: installed"
-    else
-        echo "llama.cpp CLI: not installed"
-    fi
+	if enter_box bash -lc 'command -v llama-cli >/dev/null 2>&1 || command -v llama-cpp >/dev/null 2>&1'; then
+		echo "llama.cpp CLI: installed"
+	else
+		echo "llama.cpp CLI: not installed"
+	fi
 
-    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
-        echo "GPU: NVIDIA detected"
-    elif command -v rocminfo >/dev/null 2>&1 && rocminfo >/dev/null 2>&1; then
-        echo "GPU: ROCm-capable AMD stack detected"
-    elif command -v vulkaninfo >/dev/null 2>&1 && vulkaninfo --summary >/dev/null 2>&1; then
-        echo "GPU: Vulkan device detected"
-    else
-        echo "GPU: no accelerated AI runtime detected; CPU inference should still work"
-    fi
+	if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+		echo "GPU: NVIDIA detected"
+	elif command -v rocminfo >/dev/null 2>&1 && rocminfo >/dev/null 2>&1; then
+		echo "GPU: ROCm-capable AMD stack detected"
+	elif command -v vulkaninfo >/dev/null 2>&1 && vulkaninfo --summary >/dev/null 2>&1; then
+		echo "GPU: Vulkan device detected"
+	else
+		echo "GPU: no accelerated AI runtime detected; CPU inference should still work"
+	fi
 }
 
 setup() {
-    need_distrobox
-    mkdir -p "${model_dir}"
+	need_distrobox
+	mkdir -p "${model_dir}"
 
-    if ! have_box; then
-        echo "Creating ${box} from ${image}..."
-        distrobox create --yes --name "${box}" --image "${image}" \
-            --volume "${model_dir}:${model_dir}:rw"
-    else
-        echo "${box} already exists."
-    fi
+	if ! have_box; then
+		echo "Creating ${box} from ${image}..."
+		distrobox create --yes --name "${box}" --image "${image}" \
+			--volume "${model_dir}:${model_dir}:rw"
+	else
+		echo "${box} already exists."
+	fi
 
-    echo "Installing AI developer tools in ${box}..."
-    enter_box bash -lc '
+	echo "Installing AI developer tools in ${box}..."
+	enter_box bash -lc '
         set -euo pipefail
         packages=(
             git git-lfs curl wget jq make cmake gcc gcc-c++
@@ -102,10 +102,14 @@ setup() {
         fi
 
         if command -v dnf5 >/dev/null 2>&1; then
-            sudo dnf5 install -y --skip-unavailable pipx uv
+            sudo dnf5 install -y --skip-unavailable pipx uv || true
         elif command -v dnf >/dev/null 2>&1; then
-            sudo dnf install -y --skip-unavailable pipx uv
-        elif ! python3 -m pip install --user --upgrade pipx uv; then
+            sudo dnf install -y --skip-unavailable pipx uv || true
+        fi
+
+        # Always ensure latest pipx and uv are installed/upgraded via pip.
+        # Quietly try standard install first, fallback to --break-system-packages if blocked by PEP 668.
+        if ! python3 -m pip install --user --upgrade pipx uv 2>/dev/null; then
             python3 -m pip install --user --upgrade --break-system-packages pipx uv
         fi
         if command -v pipx >/dev/null 2>&1; then
@@ -115,51 +119,51 @@ setup() {
         fi
     '
 
-    echo
-    echo "AI developer environment is ready."
-    echo "Enter it with: distrobox enter ${box}"
-    echo "Models directory: ${model_dir}"
-    echo "No models were downloaded."
+	echo
+	echo "AI developer environment is ready."
+	echo "Enter it with: distrobox enter ${box}"
+	echo "Models directory: ${model_dir}"
+	echo "No models were downloaded."
 }
 
 start() {
-    need_distrobox
-    if ! have_box; then
-        echo "ERROR: ${box} does not exist. Run: ujust ai-dev-setup" >&2
-        exit 1
-    fi
-    enter_box bash -lc 'command -v ollama >/dev/null 2>&1 || { echo "ERROR: ollama is not installed. Run: ujust ai-dev-setup" >&2; exit 1; }; nohup ollama serve >/tmp/kyth-ollama.log 2>&1 &'
-    echo "Started Ollama inside ${box}."
+	need_distrobox
+	if ! have_box; then
+		echo "ERROR: ${box} does not exist. Run: ujust ai-dev-setup" >&2
+		exit 1
+	fi
+	enter_box bash -lc 'command -v ollama >/dev/null 2>&1 || { echo "ERROR: ollama is not installed. Run: ujust ai-dev-setup" >&2; exit 1; }; nohup ollama serve >/tmp/kyth-ollama.log 2>&1 &'
+	echo "Started Ollama inside ${box}."
 }
 
 stop() {
-    need_distrobox
-    if have_box; then
-        enter_box bash -lc 'pkill -x ollama 2>/dev/null || true'
-    fi
-    echo "Stopped Ollama in ${box}."
+	need_distrobox
+	if have_box; then
+		enter_box bash -lc 'pkill -x ollama 2>/dev/null || true'
+	fi
+	echo "Stopped Ollama in ${box}."
 }
 
 remove() {
-    need_distrobox
-    distrobox rm --force "${box}"
-    echo "Removed ${box}."
-    echo "Models were left in: ${model_dir}"
+	need_distrobox
+	distrobox rm --force "${box}"
+	echo "Removed ${box}."
+	echo "Models were left in: ${model_dir}"
 }
 
 case "${1:-}" in
-    setup) setup ;;
-    status) status ;;
-    enter)
-        need_distrobox
-        exec distrobox enter "${box}"
-        ;;
-    remove) remove ;;
-    start) start ;;
-    stop) stop ;;
-    -h|--help|help|"") usage ;;
-    *)
-        usage >&2
-        exit 2
-        ;;
+setup) setup ;;
+status) status ;;
+enter)
+	need_distrobox
+	exec distrobox enter "${box}"
+	;;
+remove) remove ;;
+start) start ;;
+stop) stop ;;
+-h | --help | help | "") usage ;;
+*)
+	usage >&2
+	exit 2
+	;;
 esac
