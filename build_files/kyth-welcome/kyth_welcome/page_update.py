@@ -14,7 +14,7 @@ from .services.software import (
     Worker, _finish_worker,
 )
 from .services.updates import (
-    FirmwareCheckWorker, UpdateCheckWorker, _current_branch,
+    FirmwareCheckWorker, UpdateCheckWorker, _current_branch, FlatpakCheckWorker, ChangelogWorker,
 )
 from .qt import (  # noqa: E501
     QCheckBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QTimer, QVBoxLayout, Qt,
@@ -44,6 +44,11 @@ class UpdatePage(Page):
         self._heartbeat.setInterval(5000)
         self._heartbeat.timeout.connect(self._heartbeat_tick)
         self._check_worker = None
+        self._flatpak_check_worker = None
+        self._flatpak_checked = False
+        self._system_checked = False
+        self._flatpak_count = 0
+        self._remote_manifest = ""
         self._check_state = "idle"   # idle | checking | available | uptodate | error
         self._check_ts = ""
 
@@ -604,19 +609,19 @@ class UpdatePage(Page):
                 self._status_lbl.setObjectName("status-warn")
                 self._log.append("\nDone. Restart to switch to the previous deployment.")
                 self._reboot_btn.show()
-                self._on_check_result(self._check_state, "")
+                self._check_for_update()
             elif self._mode == "switch":
                 self._status_lbl.setText("Branch staged — restart to apply the new channel.")
                 self._status_lbl.setObjectName("status-ok")
                 self._log.append("\nDone. Restart to boot into the new branch.")
                 self._reboot_btn.show()
-                self._on_check_result(self._check_state, "")
+                self._check_for_update()
             elif _has_staged_update():
                 self._status_lbl.setText("Update staged — restart when you're ready to apply it.")
                 self._status_lbl.setObjectName("status-ok")
                 self._log.append("\nDone. Your next system image is staged and waiting for restart.")
                 self._reboot_btn.show()
-                self._on_check_result(self._check_state, "")
+                self._check_for_update()
             elif self._mode == "topgrade":
                 self._status_lbl.setText("Update complete — everything is up to date.")
                 self._status_lbl.setObjectName("status-ok")
@@ -698,7 +703,7 @@ class UpdatePage(Page):
         self._check_firmware()
 
     def _check_for_update(self):
-        if self._check_worker and self._check_worker.isRunning():
+        if (self._check_worker and self._check_worker.isRunning()) or (self._flatpak_check_worker and self._flatpak_check_worker.isRunning()):
             return
         self._check_state = "checking"
         self._check_btn.setEnabled(False)
@@ -710,19 +715,57 @@ class UpdatePage(Page):
         self._avail_lbl.setText("")
         self._update_now_btn.hide()
         self._restart_now_btn.hide()
+
+        self._system_checked = False
+        self._flatpak_checked = False
+        self._flatpak_count = 0
+        self._remote_manifest = ""
+
+        # Start system update check
         self._check_worker = UpdateCheckWorker()
-        self._check_worker.result.connect(self._on_check_result)
+        self._check_worker.result.connect(self._on_system_check_result)
         _release_worker_when_finished(self, "_check_worker", self._check_worker)
         self._check_worker.start()
 
-    def _on_check_result(self, state: str, remote_ts: str):
+        # Start flatpak update check
+        self._flatpak_check_worker = FlatpakCheckWorker()
+        self._flatpak_check_worker.result.connect(self._on_flatpak_check_result)
+        _release_worker_when_finished(self, "_flatpak_check_worker", self._flatpak_check_worker)
+        self._flatpak_check_worker.start()
+
+    def _on_system_check_result(self, state: str, remote_ts: str, manifest_raw: str):
+        self._system_checked = True
         self._check_state = state
         self._check_ts = datetime.now().strftime("%H:%M")
+        self._check_ts_details = remote_ts
+        self._remote_manifest = manifest_raw
+        self._update_ui_after_check()
+
+    def _on_flatpak_check_result(self, count: int):
+        self._flatpak_checked = True
+        self._flatpak_count = count
+        self._update_ui_after_check()
+
+    def _update_ui_after_check(self):
+        if not self._system_checked or not self._flatpak_checked:
+            return
+
         self._check_btn.setEnabled(True)
         ts_hint = f"  ·  Checked at {self._check_ts}"
-        built = f"  ·  built {remote_ts}" if remote_ts else ""
+        built = f"  ·  built {self._check_ts_details}" if self._check_ts_details else ""
 
         staged = _has_staged_update()
+        flatpak_count = self._flatpak_count
+
+        # Update the automatic updates status card locally with the fresh counts
+        self._au_last_lbl.setText(self._check_ts)
+        if flatpak_count > 0:
+            noun = "update" if flatpak_count == 1 else "updates"
+            self._au_flatpak_lbl.setText(f"{flatpak_count} {noun} pending")
+            self._au_flatpak_lbl.setStyleSheet("color: #ffa726;")
+        else:
+            self._au_flatpak_lbl.setText("Up to date")
+            self._au_flatpak_lbl.setStyleSheet("color: #4caf50;")
 
         if staged:
             self._avail_card.setObjectName("card-accent-ok")
@@ -732,29 +775,54 @@ class UpdatePage(Page):
             self._avail_title.setText("Restart required")
             staged_ts = _bootc_image_timestamp("staged")
             built_staged = f"  ·  built {staged_ts}" if staged_ts else ""
+            
+            flatpak_part = ""
+            if flatpak_count > 0:
+                noun = "update" if flatpak_count == 1 else "updates"
+                flatpak_part = f" Additionally, {flatpak_count} Flatpak {noun} can be installed."
+
             self._avail_lbl.setText(
-                f"A new image is staged and waiting{built_staged}. "
+                f"A new image is staged and waiting{built_staged}.{flatpak_part} "
                 f"Restart now or later — your current system stays available as a fallback.{ts_hint}"
             )
             self._restart_now_btn.show()
             self._update_now_btn.hide()
-        elif state == "available":
+        elif self._check_state == "available":
             self._avail_card.setObjectName("card-accent-warn")
             _restyle(self._avail_card)
             self._avail_icon.setText("↓")
             self._avail_icon.setStyleSheet("font-size: 28px; color: #d4a843;")
             self._avail_title.setText("Update available")
+            
+            flatpak_part = ""
+            if flatpak_count > 0:
+                noun = "update" if flatpak_count == 1 else "updates"
+                flatpak_part = f" and {flatpak_count} Flatpak {noun} are pending"
+
             self._avail_lbl.setText(
-                f"A new image is ready{built}. "
-                f"Run a full update to download it — restart whenever you're ready.{ts_hint}"
+                f"A new system image is ready{built}{flatpak_part}. "
+                f"Run a full update to download and install them.{ts_hint}"
             )
             self._update_now_btn.show()
             self._restart_now_btn.hide()
-        elif state == "uptodate":
+        elif flatpak_count > 0:
+            self._avail_card.setObjectName("card-accent-warn")
+            _restyle(self._avail_card)
+            self._avail_icon.setText("↓")
+            self._avail_icon.setStyleSheet("font-size: 28px; color: #d4a843;")
+            self._avail_title.setText("App updates available")
+            noun = "update is" if flatpak_count == 1 else "updates are"
+            self._avail_lbl.setText(
+                f"Your system OS is up to date, but {flatpak_count} Flatpak app {noun} available. "
+                f"Run a full update to install them.{ts_hint}"
+            )
+            self._update_now_btn.show()
+            self._restart_now_btn.hide()
+        elif self._check_state == "uptodate":
             self._avail_card.setObjectName("card-accent-ok")
             _restyle(self._avail_card)
             self._avail_icon.setText("✓")
-            self._avail_icon.setStyleSheet("font-size: 28px; color: #4fc1ff;")
+            self._avail_icon.setStyleSheet("font-size: 28px; color: #4caf50;")
             self._avail_title.setText("Up to date")
             self._avail_lbl.setText(f"Running the latest image{built}.{ts_hint}")
             self._update_now_btn.hide()

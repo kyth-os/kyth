@@ -5,7 +5,7 @@ from . import core_base
 for _k, _v in core_base.__dict__.items():
     if not _k.startswith("__"):
         globals()[_k] = _v
-from .services.updates import UpdateCheckWorker, FirmwareCheckWorker, ChangelogWorker
+from .services.updates import UpdateCheckWorker, FirmwareCheckWorker, ChangelogWorker, FlatpakCheckWorker
 from .services.hardware import (
     HardwareProbe, HardwareProbeWorker, _detect_nvidia, _nvidia_module_loaded,
     _akmod_nvidia_built, _akmod_nvidia_installed, _hw_setup_service_state, _hw_setup_done,

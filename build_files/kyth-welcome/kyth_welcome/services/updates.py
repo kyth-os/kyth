@@ -23,6 +23,10 @@ InspectRunner = Callable[[str], subprocess.CompletedProcess[bytes]]
 class UpdateCheckResult:
     state: str
     detail: str = ""
+    manifest_raw: bytes = b""
+
+
+_BOOTED_ANNOTATIONS_CACHE: dict[str, dict] = {}
 
 
 def nested_get(data: dict[str, Any], path: tuple[str, ...]) -> Any:
@@ -126,14 +130,14 @@ def check_registry_update(
         remote_digest = "sha256:" + hashlib.sha256(result.stdout).hexdigest()
 
     if remote_digest == local_digest:
-        return UpdateCheckResult("uptodate", remote_ts)
-    return UpdateCheckResult("available", remote_ts)
+        return UpdateCheckResult("uptodate", remote_ts, result.stdout)
+    return UpdateCheckResult("available", remote_ts, result.stdout)
 
 
 def firmware_check_commands(refresh: bool = True) -> list[list[str]]:
     commands: list[list[str]] = []
     if refresh:
-        commands.append(["fwupdmgr", "refresh", "--force"])
+        commands.append(["fwupdmgr", "refresh"])
     commands.append(["fwupdmgr", "get-updates"])
     return commands
 
@@ -142,8 +146,8 @@ def firmware_check_commands(refresh: bool = True) -> list[list[str]]:
 class UpdateCheckWorker(TrackedThread):
     """Checks if a newer image is available in the registry without downloading anything.
     Compares the local booted digest against the remote manifest via skopeo inspect.
-    Emits result(state, remote_ts) where state is 'available', 'uptodate', or 'error'."""
-    result = Signal(str, str)
+    Emits result(state, remote_ts, manifest_raw) where state is 'available', 'uptodate', or 'error'."""
+    result = Signal(str, str, str)
 
     def run(self):
         result = check_registry_update(
@@ -151,7 +155,11 @@ class UpdateCheckWorker(TrackedThread):
             branch=_current_branch() or "latest",
             registry=REGISTRY,
         )
-        self.result.emit(result.state, result.detail)
+        self.result.emit(
+            result.state,
+            result.detail,
+            result.manifest_raw.decode("utf-8", errors="ignore")
+        )
 
 
 # ── Firmware check worker ──────────────────────────────────────────────────────
@@ -189,7 +197,14 @@ class ChangelogWorker(TrackedThread):
     Update page can show a precise GitHub compare link instead of a generic commits URL."""
     result = Signal(str, str)  # (booted_rev, remote_rev) — short git SHAs, may be empty
 
+    def __init__(self, remote_manifest: str = ""):
+        super().__init__()
+        self._remote_manifest = remote_manifest
+
     def _fetch_annotations(self, ref: str) -> dict:
+        global _BOOTED_ANNOTATIONS_CACHE
+        if "@sha256:" in ref and ref in _BOOTED_ANNOTATIONS_CACHE:
+            return _BOOTED_ANNOTATIONS_CACHE[ref]
         try:
             r = subprocess.run(
                 ["skopeo", "inspect", "--raw", "--no-creds", f"docker://{ref}"],
@@ -206,6 +221,8 @@ class ChangelogWorker(TrackedThread):
                     if plat.get("architecture") == "amd64" and plat.get("os") == "linux":
                         annotations = entry.get("annotations") or annotations
                         break
+            if "@sha256:" in ref:
+                _BOOTED_ANNOTATIONS_CACHE[ref] = annotations
             return annotations
         except Exception:
             return {}
@@ -217,6 +234,54 @@ class ChangelogWorker(TrackedThread):
         if booted_digest:
             ann = self._fetch_annotations(f"{REGISTRY}@{booted_digest[1]}")
             booted_rev = ann.get("org.opencontainers.image.revision", "")[:12]
-        remote_ann = self._fetch_annotations(f"{REGISTRY}:{tag}")
+
+        remote_ann = {}
+        if self._remote_manifest:
+            try:
+                manifest = json.loads(self._remote_manifest)
+                remote_ann = manifest.get("annotations") or {}
+                if not remote_ann.get("org.opencontainers.image.revision"):
+                    for entry in manifest.get("manifests", []):
+                        plat = entry.get("platform", {})
+                        if plat.get("architecture") == "amd64" and plat.get("os") == "linux":
+                            remote_ann = entry.get("annotations") or remote_ann
+                            break
+            except Exception:
+                pass
+
+        if not remote_ann:
+            remote_ann = self._fetch_annotations(f"{REGISTRY}:{tag}")
+
         remote_rev = remote_ann.get("org.opencontainers.image.revision", "")[:12]
         self.result.emit(booted_rev, remote_rev)
+
+
+# ── Flatpak check worker ───────────────────────────────────────────────────────
+class FlatpakCheckWorker(TrackedThread):
+    """Query flatpak for pending updates (both system-wide and user-level).
+    Emits result(count)."""
+    result = Signal(int)
+
+    def run(self):
+        total = 0
+        try:
+            r = subprocess.run(
+                ["flatpak", "remote-ls", "--updates", "--system", "--columns=application"],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+            if r.returncode == 0:
+                total += len([ln for ln in r.stdout.splitlines() if ln.strip()])
+        except Exception:
+            pass
+
+        try:
+            r = subprocess.run(
+                ["flatpak", "remote-ls", "--updates", "--user", "--columns=application"],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+            if r.returncode == 0:
+                total += len([ln for ln in r.stdout.splitlines() if ln.strip()])
+        except Exception:
+            pass
+
+        self.result.emit(total)
