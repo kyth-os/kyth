@@ -126,7 +126,7 @@ find_existing_kyth_partition() {
 	local disk="$1"
 
 	lsblk -lnpo NAME,LABEL,PARTLABEL "$disk" |
-		awk '$2 == "kyth-root" || $3 == "kyth-root" { print $1 }' |
+		awk '$2 == "kyth-root" || $2 == "KythOS" || $3 == "kyth-root" || $3 == "KythOS" { print $1 }' |
 		tail -n1
 }
 

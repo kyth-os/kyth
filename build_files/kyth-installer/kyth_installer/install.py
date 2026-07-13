@@ -262,6 +262,8 @@ def _run_install() -> None:
             try:
                 subprocess.run(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
                 subprocess.run(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@home"]), check=True)
+                log("Setting Btrfs default subvolume to @ ...")
+                subprocess.run(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
             finally:
                 subprocess.run(_as_root(["umount", "-l", btrfs_temp_root]), check=True)
 
@@ -298,6 +300,7 @@ def _run_install() -> None:
                 "--target-imgref", tgt_ref,
                 "--generic-image",
                 "--acknowledge-destructive",
+                "--karg=rootflags=subvol=@",
             ]
             if SKIP_FETCH_CHECK:
                 install_cmd.append("--skip-fetch-check")
