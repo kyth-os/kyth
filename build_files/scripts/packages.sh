@@ -48,9 +48,12 @@ dnf5 install -y docker container-selinux
 # Fail loudly: every later codec install uses --skip-unavailable, so a missing
 # RPM Fusion repo would otherwise ship an image silently lacking the
 # freeworld codec stack.
+fedora_release="$(rpm -E %fedora)"
 dnf5 install -y \
-	https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-44.noarch.rpm \
-	https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-44.noarch.rpm
+	--setopt=retries=10 \
+	--setopt=timeout=120 \
+	"https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_release}.noarch.rpm" \
+	"https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_release}.noarch.rpm"
 rpm -q rpmfusion-free-release rpmfusion-nonfree-release
 
 # Fedora 44 transitions can leave debug/source repo metalinks unpublished or
