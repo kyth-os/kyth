@@ -21,12 +21,10 @@ class InstallerImageSourceTests(unittest.TestCase):
         create_connection.assert_not_called()
 
     def test_network_preflight_reports_missing_default_route(self):
-        with mock.patch.object(imagesrc, "run_command") as run_command:
-            run_command.return_value.returncode = 1
-            run_command.return_value.stderr = "network unreachable"
-            run_command.return_value.stdout = ""
+        with mock.patch.object(imagesrc.socket, "getaddrinfo", return_value=[]), \
+             mock.patch.object(imagesrc.socket, "create_connection", side_effect=OSError("network unreachable")):
 
-        result = imagesrc._network_preflight("docker://ghcr.io/mrtrick37/kyth:latest")
+            result = imagesrc._network_preflight("docker://ghcr.io/mrtrick37/kyth:latest")
 
         self.assertIsInstance(result, str)
         self.assertIn("Connect", result)
