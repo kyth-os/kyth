@@ -238,7 +238,7 @@ def list_partitions(disk: str):
     parts = []
     try:
         out = subprocess.check_output(
-            ["lsblk", "--json", "--bytes", "--paths", "--output", "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS", disk],
+            ["lsblk", "--json", "--bytes", "--paths", "--output", "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS,START", disk],
             text=True,
             stderr=subprocess.DEVNULL,
             timeout=5,
@@ -256,10 +256,13 @@ def list_partitions(disk: str):
                     is_efi = parttype == EFI_PART_GUID or (fstype == "vfat" and "/boot/efi" in mounts)
                     current = _is_active_mount(mounts)
                     alongside_candidate = bool(name and size > 0 and fstype == "btrfs" and not is_efi and not current)
+                    start_val = _safe_int(child.get("start"))
+                    start_bytes = start_val * 512
                     parts.append({
                         "name": name,
                         "size": _human_size(size),
                         "size_bytes": size,
+                        "start_bytes": start_bytes,
                         "fstype": fstype,
                         "label": child.get("label") or "",
                         "parttype": parttype,

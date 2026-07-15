@@ -242,7 +242,7 @@ class InstallerPlanTests(unittest.TestCase):
                     "target_partition": "/dev/sda2",
                 })
 
-    def test_validate_alongside_requires_btrfs_partition(self):
+    def test_validate_alongside_allows_any_filesystem_partition(self):
         partition = {
             "name": "/dev/nvme0n1p2",
             "fstype": "ext4",
@@ -251,13 +251,14 @@ class InstallerPlanTests(unittest.TestCase):
         }
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
              patch.object(self.plan, "list_partitions", return_value=[partition]), \
-             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"):
-            with self.assertRaisesRegex(RuntimeError, "Btrfs"):
-                self.plan._validate_install_target({
-                    "install_mode": "alongside",
-                    "disk": "/dev/nvme0n1",
-                    "target_partition": "/dev/nvme0n1p2",
-                })
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+            disk_name, target = self.plan._validate_install_target({
+                "install_mode": "alongside",
+                "disk": "/dev/nvme0n1",
+                "target_partition": "/dev/nvme0n1p2",
+            })
+            self.assertEqual((disk_name, target), ("/dev/nvme0n1", "/dev/nvme0n1p2"))
 
     def test_validate_wipe_rejects_disk_missing_from_safe_scan(self):
         with patch.object(self.plan, "list_disks", return_value=[]):

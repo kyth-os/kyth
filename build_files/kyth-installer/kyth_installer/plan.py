@@ -139,8 +139,6 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
             raise RuntimeError("The EFI system partition cannot be used as the KythOS target partition.")
         if part.get("current"):
             raise RuntimeError("The selected partition is currently mounted by the live or running system.")
-        if (part.get("fstype") or "").lower() != "btrfs":
-            raise RuntimeError("Alongside installation requires an existing Btrfs target partition.")
         if not find_efi_partition(disk):
             raise RuntimeError("Alongside installation requires an EFI system partition on the system.")
         return disk, target

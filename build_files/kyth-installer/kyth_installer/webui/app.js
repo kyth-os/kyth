@@ -42,7 +42,9 @@ function loadDisks(attempt) {
   document.getElementById('disk-warn').style.display = 'none';
   document.getElementById('mode-section').style.display = 'none';
   document.getElementById('partition-section').style.display = 'none';
+  document.getElementById('visual-layout-section').style.display = 'none';
   S.disk = null; S.install_mode = 'wipe'; S.target_partition = null;
+  S.resize_partition = null; S.free_region_start = 0; S.free_region_end = 0;
   apiFetch('/api/disks').then(r=>r.json()).then(disks => {
     _disks = disks;
     const grid = document.getElementById('disk-grid');
@@ -76,8 +78,7 @@ function selectDisk(idx) {
   S.resize_partition = null; S.free_region_start = 0; S.free_region_end = 0;
   document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
   document.getElementById('mcard-wipe').classList.add('selected');
-  document.getElementById('partition-section').style.display = 'none';
-  document.getElementById('mode-section').style.display = '';
+  
   const warn = document.getElementById('disk-warn');
   warn.style.display = 'block';
   warn.textContent = S.disk.current
@@ -86,161 +87,369 @@ function selectDisk(idx) {
         : '⚠ This is the running system disk. To reinstall this disk, boot from the KythOS live ISO.')
     : S.disk.usb
         ? '⚠ This is a USB storage device. Make sure you have the right disk selected.'
-        : '⚠ All data on this disk will be permanently destroyed (Erase mode) or a partition will be erased (Alongside mode).';
-  checkOtherOs();
-  updateDiskNext();
-}
-
-const WIPE_DESC_DEFAULT = 'Install KythOS on the entire disk. All existing data will be erased. Simplest option.';
-const WIPE_DESC_WINDOWS = 'Install KythOS on the entire disk. A Windows installation was detected here — this will erase it. Use "Install Alongside" to keep it.';
-
-function checkOtherOs() {
-  const badge = document.getElementById('wipe-recommended-badge');
-  const desc  = document.getElementById('wipe-mode-desc');
-  badge.style.display = '';
-  desc.textContent = WIPE_DESC_DEFAULT;
-  if (!S.disk) return;
-  const requestDisk = S.disk.name;
-  apiFetch('/api/partitions?disk=' + encodeURIComponent(requestDisk)).then(r=>r.json()).then(parts => {
-    if (!S.disk || S.disk.name !== requestDisk) return;
-    const hasWindows = (parts || []).some(p => ['ntfs', 'ntfs3'].includes((p.fstype || '').toLowerCase()));
-    if (hasWindows) {
-      badge.style.display = 'none';
-      desc.textContent = WIPE_DESC_WINDOWS;
-    }
-  }).catch(() => {});
+        : '⚠ Proceeding will write KythOS to the selected disk. Back up any important files first.';
+  
+  loadPartitions();
 }
 
 function selectMode(id) {
-  S.install_mode = id; S.target_partition = null;
-  S.resize_partition = null; S.free_region_start = 0; S.free_region_end = 0;
+  S.install_mode = id; 
+  S.target_partition = null;
+  S.resize_partition = null; 
+  S.free_region_start = 0; 
+  S.free_region_end = 0;
+  
   document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
-  document.getElementById('mcard-' + id).classList.add('selected');
-  const ps = document.getElementById('partition-section');
-  ps.style.display = id === 'alongside' ? '' : 'none';
-  if (id === 'alongside') loadPartitions();
+  const card = document.getElementById('mcard-' + id);
+  if (card) card.classList.add('selected');
+  
+  // Toggle control visibility
+  document.getElementById('shrink-controls').style.display = id === 'resize_ntfs' ? 'block' : 'none';
+  document.getElementById('replace-controls').style.display = id === 'alongside' ? 'block' : 'none';
+  document.getElementById('free-space-controls').style.display = id === 'free_space' ? 'block' : 'none';
+  
+  // Auto-select defaults
+  if (id === 'resize_ntfs') {
+    const defaultNtfs = _partitions.find(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= 96 * 1024**3);
+    if (defaultNtfs) selectResizePartitionByName(defaultNtfs.name);
+  } else if (id === 'alongside') {
+    const defaultReplace = _partitions.find(p => !p.efi && !p.current && p.size_bytes >= 32 * 1024**3);
+    if (defaultReplace) selectPartitionByName(defaultReplace.name);
+  } else if (id === 'free_space') {
+    const defaultFree = _freeRegions.find(r => r.size_bytes >= 32 * 1024**3);
+    if (defaultFree) selectFreeRegionByStart(defaultFree.start_bytes);
+  }
+  
+  renderDiskLayouts();
   updateDiskNext();
 }
 
 let _partitions = [];
 let _freeRegions = [];
+
 function loadPartitions() {
   if (!S.disk) return;
-  document.getElementById('part-grid').innerHTML = '<div class="status-box status-info">Loading partitions...</div>';
-  document.getElementById('part-warn').style.display = 'none';
-  document.getElementById('efi-info').style.display = 'none';
+  
+  document.getElementById('mode-section').style.display = 'none';
+  document.getElementById('partition-section').style.display = 'none';
+  document.getElementById('visual-layout-section').style.display = 'none';
+  
   Promise.all([
     apiFetch('/api/partitions?disk=' + encodeURIComponent(S.disk.name)).then(r=>r.json()),
     apiFetch('/api/free-space?disk=' + encodeURIComponent(S.disk.name)).then(r=>r.json()),
   ]).then(([parts, regions])=>{
     _partitions = parts;
     _freeRegions = regions;
-    const box = document.getElementById('part-grid');
-    if (!parts.length && !regions.length) {
-      box.innerHTML = '<div class="warn-box">No partitions were found on this disk.</div>';
-      updateDiskNext();
-      return;
-    }
+    
     const hasEfi = parts.some(p => p.efi);
     document.getElementById('efi-info').style.display = hasEfi ? 'none' : 'block';
-    const partCards = parts.map((p,i)=>{
-      const fs = (p.fstype || '').toLowerCase();
-      const isBtrfs = fs === 'btrfs' && !p.efi && !p.current;
-      const isNtfs = (fs === 'ntfs' || fs === 'ntfs3') && !p.efi && !p.current;
-      const selectedBtrfs = S.install_mode === 'alongside' && S.target_partition === p.name;
-      const selectedNtfs = S.install_mode === 'resize_ntfs' && S.resize_partition === p.name;
-      const badge = p.efi ? ' <span class="badge warn">EFI</span>' : (p.current ? ' <span class="badge warn">Mounted</span>' : '');
-      let action = '';
-      let klass = selectedBtrfs || selectedNtfs ? ' selected' : '';
-      if (isBtrfs) {
-        action = `<button class="secondary" type="button" onclick="selectPartition(${i})">Use partition</button>`;
-      } else if (isNtfs) {
-        const val = selectedNtfs ? S.resize_gib : 64;
-        action = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-          <input id="resize-size-${i}" type="number" min="32" step="1" value="${val}" oninput="setResizeSize(${i}, this.value)" style="width:92px">
-          <span style="font-size:12px;color:var(--muted)">GiB</span>
-          <button class="secondary" type="button" onclick="selectResizePartition(${i})">Shrink NTFS</button>
-        </div>`;
-      } else {
-        klass += ' locked';
-        action = '<span style="font-size:12px;color:var(--muted)">Not eligible</span>';
-      }
-      return `<div class="part-card${klass}">
-        <div class="part-info">
-          <div class="part-name">${esc(p.name)}${badge}</div>
-          <div class="part-meta">${esc(p.size)} · ${esc(p.fstype || 'unknown')}${p.label ? ' · ' + esc(p.label) : ''}</div>
-        </div>
-        ${action}
-      </div>`;
-    }).join('');
-    const freeCards = regions.map((r,i)=>{
-      const selected = S.install_mode === 'free_space' && S.free_region_start === r.start_bytes && S.free_region_end === r.end_bytes;
-      return `<div class="part-card${selected ? ' selected' : ''}">
-        <div class="part-info">
-          <div class="part-name">Unallocated space <span class="badge">free</span></div>
-          <div class="part-meta">${esc(r.size)} available</div>
-        </div>
-        <button class="secondary" type="button" onclick="selectFreeRegion(${i})">Use free space</button>
-      </div>`;
-    }).join('');
-    box.innerHTML = partCards + freeCards;
-    updateDiskNext();
+    if (!hasEfi) {
+      document.getElementById('efi-info').innerHTML = '<strong>No EFI System Partition found on this disk.</strong> KythOS installation requires an EFI partition. The Erase Disk mode will automatically create one, but Alongside, Replace, and Free Space modes require an existing EFI partition to configure boot files.';
+    }
+    
+    // Enable/Disable mode cards based on candidates
+    const hasNtfsCandidate = parts.some(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= 96 * 1024**3);
+    const hasFreeCandidate = regions.some(r => r.size_bytes >= 32 * 1024**3);
+    const hasReplaceCandidate = parts.some(p => !p.efi && !p.current && p.size_bytes >= 32 * 1024**3);
+    
+    const mResize = document.getElementById('mcard-resize_ntfs');
+    mResize.style.opacity = hasNtfsCandidate ? '1' : '0.4';
+    mResize.style.pointerEvents = hasNtfsCandidate ? 'auto' : 'none';
+    mResize.querySelector('.mode-desc').innerHTML = hasNtfsCandidate 
+      ? 'Shrink an existing Windows/NTFS partition to make room for KythOS.'
+      : 'Shrink Alongside (Unavailable: no NTFS partition >= 96 GiB found)';
+
+    const mFree = document.getElementById('mcard-free_space');
+    mFree.style.opacity = hasFreeCandidate ? '1' : '0.4';
+    mFree.style.pointerEvents = hasFreeCandidate ? 'auto' : 'none';
+    mFree.querySelector('.mode-desc').innerHTML = hasFreeCandidate
+      ? 'Install KythOS into unallocated free space on the disk.'
+      : 'Use Free Space (Unavailable: no free space >= 32 GiB found)';
+
+    const mReplace = document.getElementById('mcard-alongside');
+    mReplace.style.opacity = hasReplaceCandidate ? '1' : '0.4';
+    mReplace.style.pointerEvents = hasReplaceCandidate ? 'auto' : 'none';
+    mReplace.querySelector('.mode-desc').innerHTML = hasReplaceCandidate
+      ? 'Overwrite an existing partition with KythOS.'
+      : 'Replace a Partition (Unavailable: no partitions >= 32 GiB found)';
+    
+    document.getElementById('mode-section').style.display = '';
+    document.getElementById('partition-section').style.display = '';
+    
+    populateReplacementList();
+    populateFreeSpaceList();
+    
+    // Select default mode
+    selectMode('wipe');
   });
 }
 
-function setResizeSize(idx, value) {
-  const p = _partitions[idx];
-  if (!p) return;
-  const n = Math.max(0, parseInt(value || '0', 10));
-  if (S.resize_partition === p.name) S.resize_gib = n;
+function getDiskBlocks(parts, diskSize) {
+  const sortedParts = [...parts].sort((a, b) => a.start_bytes - b.start_bytes);
+  const blocks = [];
+  let cursor = 0;
+  
+  for (const p of sortedParts) {
+    if (p.start_bytes > cursor) {
+      blocks.push({
+        type: 'free',
+        start_bytes: cursor,
+        size_bytes: p.start_bytes - cursor,
+        name: 'Unallocated',
+        fstype: ''
+      });
+    }
+    blocks.push({
+      type: 'part',
+      start_bytes: p.start_bytes,
+      size_bytes: p.size_bytes,
+      name: p.name,
+      fstype: p.fstype,
+      label: p.label,
+      efi: p.efi,
+      current: p.current,
+      ref: p
+    });
+    cursor = p.start_bytes + p.size_bytes;
+  }
+  
+  if (cursor < diskSize) {
+    blocks.push({
+      type: 'free',
+      start_bytes: cursor,
+      size_bytes: diskSize - cursor,
+      name: 'Unallocated',
+      fstype: ''
+    });
+  }
+  
+  return blocks;
+}
+
+function blockToHtml(block, isProposed = false) {
+  let label = block.name ? block.name.replace('/dev/', '') : (block.type === 'free' ? 'Free' : 'KythOS');
+  let typeStr = block.fstype ? block.fstype.toUpperCase() : (block.type === 'free' ? 'FREE' : '');
+  if (block.efi) typeStr = 'EFI';
+  if (block.isKythos) {
+    label = 'KythOS';
+    typeStr = 'BTRFS';
+  }
+  
+  const sizeStr = fmtBytes(block.size_bytes);
+  let klass = 'disk-part';
+  
+  if (block.isKythos) {
+    klass += ' part-kythos';
+  } else if (block.type === 'free') {
+    klass += ' part-free';
+  } else if (block.efi) {
+    klass += ' part-efi';
+  } else if (['ntfs', 'ntfs3'].includes(block.fstype)) {
+    klass += ' part-ntfs';
+  } else if (block.fstype === 'btrfs') {
+    klass += ' part-btrfs';
+  } else if (block.fstype === 'ext4') {
+    klass += ' part-ext4';
+  } else {
+    klass += ' part-other';
+  }
+  
+  let clickAttr = '';
+  if (!isProposed) {
+    if (S.install_mode === 'alongside' && block.type === 'part' && !block.efi && !block.current && block.size_bytes >= 32 * 1024**3) {
+      klass += ' clickable';
+      if (S.target_partition === block.name) klass += ' selected-target';
+      clickAttr = `onclick="selectPartitionByName('${block.name}')"`;
+    } else if (S.install_mode === 'resize_ntfs' && block.type === 'part' && ['ntfs', 'ntfs3'].includes(block.fstype) && block.size_bytes >= 96 * 1024**3) {
+      klass += ' clickable';
+      if (S.resize_partition === block.name) klass += ' selected-target';
+      clickAttr = `onclick="selectResizePartitionByName('${block.name}')"`;
+    } else if (S.install_mode === 'free_space' && block.type === 'free' && block.size_bytes >= 32 * 1024**3) {
+      klass += ' clickable';
+      if (S.free_region_start === block.start_bytes) klass += ' selected-target';
+      clickAttr = `onclick="selectFreeRegionByStart(${block.start_bytes})"`;
+    }
+  } else {
+    if (block.isKythos) {
+      klass += ' selected-target';
+    }
+  }
+  
+  const isSmall = block.size_bytes < (S.disk.size_bytes * 0.08);
+  const content = isSmall 
+    ? `<span class="part-name-lbl" title="${esc(label)} ${esc(sizeStr)}">${esc(label)}</span>`
+    : `<span class="part-name-lbl">${esc(label)}</span><span class="part-size-lbl">${esc(typeStr)} · ${esc(sizeStr)}</span>`;
+    
+  return `<div class="${klass}" style="flex-grow: ${block.size_bytes}; min-width: 45px;" ${clickAttr} title="${esc(label)} (${esc(typeStr)}) - ${esc(sizeStr)}">
+    ${content}
+  </div>`;
+}
+
+function renderDiskLayouts() {
+  if (!S.disk) return;
+  document.getElementById('visual-layout-section').style.display = 'block';
+  
+  const diskSize = S.disk.size_bytes;
+  const blocks = getDiskBlocks(_partitions, diskSize);
+  
+  // Render Current Layout
+  const currentBar = document.getElementById('current-layout-bar');
+  currentBar.innerHTML = blocks.map(b => blockToHtml(b, false)).join('');
+  
+  // Render Proposed Layout
+  const proposedBar = document.getElementById('proposed-layout-bar');
+  const proposedBlocks = [];
+  
+  if (S.install_mode === 'wipe') {
+    // 512MB EFI + remaining Btrfs
+    const efiSize = 512 * 1024 * 1024;
+    proposedBlocks.push({
+      type: 'part',
+      size_bytes: efiSize,
+      name: 'boot/efi',
+      fstype: 'fat32',
+      efi: true
+    });
+    proposedBlocks.push({
+      type: 'part',
+      size_bytes: diskSize - efiSize,
+      name: 'KythOS',
+      fstype: 'btrfs',
+      isKythos: true
+    });
+  } else {
+    for (const b of blocks) {
+      if (S.install_mode === 'resize_ntfs' && b.name === S.resize_partition) {
+        const shrinkBytes = S.resize_gib * 1024 * 1024 * 1024;
+        proposedBlocks.push({
+          type: 'part',
+          size_bytes: b.size_bytes - shrinkBytes,
+          name: b.name,
+          fstype: b.fstype
+        });
+        proposedBlocks.push({
+          type: 'part',
+          size_bytes: shrinkBytes,
+          name: 'KythOS',
+          fstype: 'btrfs',
+          isKythos: true
+        });
+      } else if (S.install_mode === 'alongside' && b.name === S.target_partition) {
+        proposedBlocks.push({
+          type: 'part',
+          size_bytes: b.size_bytes,
+          name: 'KythOS',
+          fstype: 'btrfs',
+          isKythos: true
+        });
+      } else if (S.install_mode === 'free_space' && b.type === 'free' && b.start_bytes === S.free_region_start) {
+        proposedBlocks.push({
+          type: 'part',
+          size_bytes: b.size_bytes,
+          name: 'KythOS',
+          fstype: 'btrfs',
+          isKythos: true
+        });
+      } else {
+        proposedBlocks.push(b);
+      }
+    }
+  }
+  
+  proposedBar.innerHTML = proposedBlocks.map(b => blockToHtml(b, true)).join('');
+}
+
+function selectPartitionByName(name) {
+  S.target_partition = name;
+  const pIdx = _partitions.findIndex(p => p.name === name);
+  if (pIdx >= 0) {
+    const cards = document.querySelectorAll('#replace-list .part-selector-card');
+    cards.forEach(c => c.classList.toggle('selected', c.dataset.name === name));
+  }
+  renderDiskLayouts();
   updateDiskNext();
 }
 
-
-function selectPartition(idx) {
-  const p = _partitions[idx];
-  if (!p || p.efi || p.current || (p.fstype || '').toLowerCase() !== 'btrfs') return;
-  S.install_mode = 'alongside';
-  S.target_partition = p.name;
-  S.resize_partition = null;
-  S.free_region_start = 0; S.free_region_end = 0;
-  document.getElementById('part-warn').style.display = 'none';
-  loadPartitions();
+function selectResizePartitionByName(name) {
+  S.resize_partition = name;
+  const p = _partitions.find(part => part.name === name);
+  if (p) {
+    const maxShrinkGib = Math.floor((p.size_bytes - 64 * 1024**3) / 1024**3);
+    const slider = document.getElementById('shrink-slider');
+    slider.max = maxShrinkGib;
+    slider.min = 32;
+    const defaultVal = Math.min(maxShrinkGib, Math.max(32, Math.floor(p.size_bytes / 2 / 1024**3)));
+    slider.value = defaultVal;
+    S.resize_gib = defaultVal;
+    
+    document.getElementById('shrink-label-old').textContent = `${esc(p.name.replace('/dev/', ''))} (shrunk): ${Math.floor(p.size_bytes / 1024**3) - S.resize_gib} GiB`;
+    document.getElementById('shrink-label-new').textContent = `KythOS: ${S.resize_gib} GiB`;
+  }
+  renderDiskLayouts();
   updateDiskNext();
 }
 
-function selectResizePartition(idx) {
-  const p = _partitions[idx];
-  const fs = (p && p.fstype || '').toLowerCase();
-  if (!p || p.efi || p.current || (fs !== 'ntfs' && fs !== 'ntfs3')) return;
-  const input = document.getElementById(`resize-size-${idx}`);
-  S.install_mode = 'resize_ntfs';
-  S.target_partition = null;
-  S.resize_partition = p.name;
-  S.resize_gib = Math.max(32, parseInt((input && input.value) || S.resize_gib || 64, 10));
-  S.free_region_start = 0; S.free_region_end = 0;
-  const warn = document.getElementById('part-warn');
-  warn.textContent = 'The installer will shrink this NTFS partition, create a new Btrfs partition in the freed space, and install KythOS there. Back up important Windows files first.';
-  warn.style.display = 'block';
-  loadPartitions();
+function selectFreeRegionByStart(start) {
+  const r = _freeRegions.find(region => region.start_bytes === start);
+  if (r) {
+    S.free_region_start = r.start_bytes;
+    S.free_region_end = r.end_bytes;
+    const cards = document.querySelectorAll('#free-space-list .part-selector-card');
+    cards.forEach(c => c.classList.toggle('selected', parseInt(c.dataset.start) === start));
+  }
+  renderDiskLayouts();
   updateDiskNext();
 }
 
-function selectFreeRegion(idx) {
-  const r = _freeRegions[idx];
-  if (!r) return;
-  S.install_mode = 'free_space';
-  S.target_partition = null;
-  S.resize_partition = null;
-  S.free_region_start = r.start_bytes;
-  S.free_region_end = r.end_bytes;
-  const warn = document.getElementById('part-warn');
-  warn.textContent = `The installer will create a new ${esc(r.size)} Btrfs partition in this unallocated space and install KythOS there.`;
-  warn.style.display = 'block';
-  loadPartitions();
-  updateDiskNext();
+function populateReplacementList() {
+  const container = document.getElementById('replace-list');
+  const replaceable = _partitions.filter(p => !p.efi && !p.current && p.size_bytes >= 32 * 1024**3);
+  if (!replaceable.length) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">No partitions available to replace.</div>';
+    return;
+  }
+  container.innerHTML = replaceable.map(p => {
+    const isSelected = S.target_partition === p.name;
+    const desc = `${p.fstype || 'unknown'} partition ${p.label ? ' · ' + p.label : ''}`;
+    return `<div class="part-selector-card${isSelected ? ' selected' : ''}" data-name="${p.name}" onclick="selectPartitionByName('${p.name}')">
+      <div class="part-meta-info">
+        <span class="part-meta-name">${esc(p.name)}</span>
+        <span class="part-meta-desc">${esc(desc)}</span>
+      </div>
+      <span class="part-meta-size">${esc(p.size)}</span>
+    </div>`;
+  }).join('');
 }
 
+function populateFreeSpaceList() {
+  const container = document.getElementById('free-space-list');
+  const freeGaps = _freeRegions.filter(r => r.size_bytes >= 32 * 1024**3);
+  if (!freeGaps.length) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">No free space gaps available.</div>';
+    return;
+  }
+  container.innerHTML = freeGaps.map(r => {
+    const isSelected = S.free_region_start === r.start_bytes;
+    return `<div class="part-selector-card${isSelected ? ' selected' : ''}" data-start="${r.start_bytes}" onclick="selectFreeRegionByStart(${r.start_bytes})">
+      <div class="part-meta-info">
+        <span class="part-meta-name">Unallocated Space</span>
+        <span class="part-meta-desc">At byte offset ${r.start_bytes}</span>
+      </div>
+      <span class="part-meta-size">${esc(r.size)}</span>
+    </div>`;
+  }).join('');
+}
+
+function onSliderMove(val) {
+  S.resize_gib = parseInt(val, 10);
+  const p = _partitions.find(part => part.name === S.resize_partition);
+  if (p) {
+    document.getElementById('shrink-label-old').textContent = `${esc(p.name.replace('/dev/', ''))} (shrunk): ${Math.floor(p.size_bytes / 1024**3) - S.resize_gib} GiB`;
+    document.getElementById('shrink-label-new').textContent = `KythOS: ${S.resize_gib} GiB`;
+  }
+  renderDiskLayouts();
+  updateDiskNext();
+}
 
 function updateDiskNext() {
   let ok = !!S.disk;

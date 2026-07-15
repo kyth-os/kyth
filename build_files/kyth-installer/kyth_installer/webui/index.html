@@ -77,25 +77,77 @@
           <div class="mode-card selected" id="mcard-wipe" onclick="selectMode('wipe')">
             <div class="mode-icon">💥</div>
             <div>
-              <div class="mode-name">Erase Full Disk <span class="kernel-badge" id="wipe-recommended-badge">Recommended</span></div>
+              <div class="mode-name">Erase Full Disk</div>
               <div class="mode-desc" id="wipe-mode-desc">Install KythOS on the entire disk. All existing data will be erased. Simplest option.</div>
             </div>
           </div>
-          <div class="mode-card" id="mcard-alongside" onclick="selectMode('alongside')">
+          <div class="mode-card" id="mcard-resize_ntfs" onclick="selectMode('resize_ntfs')">
             <div class="mode-icon">🔀</div>
             <div>
               <div class="mode-name">Install Alongside</div>
-              <div class="mode-desc">Install KythOS to a specific partition, or shrink an existing Windows/NTFS partition or use free space to make room. Keep Windows, Linux, or other systems.</div>
+              <div class="mode-desc">Shrink an existing Windows/NTFS partition to make room for KythOS. Keep your existing operating system.</div>
+            </div>
+          </div>
+          <div class="mode-card" id="mcard-alongside" onclick="selectMode('alongside')">
+            <div class="mode-icon">🔄</div>
+            <div>
+              <div class="mode-name">Replace a Partition</div>
+              <div class="mode-desc">Overwrite an existing partition with KythOS. The selected partition will be erased and formatted.</div>
+            </div>
+          </div>
+          <div class="mode-card" id="mcard-free_space" onclick="selectMode('free_space')">
+            <div class="mode-icon">🆓</div>
+            <div>
+              <div class="mode-name">Use Free Space</div>
+              <div class="mode-desc">Install KythOS into unallocated free space on the disk. Leaving all existing partitions untouched.</div>
             </div>
           </div>
         </div>
 
-        <!-- Partition picker (alongside only) -->
-        <div id="partition-section" style="display:none">
-          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">Select Target Partition</div>
-          <div id="part-grid" class="part-grid">
-            <div class="status-box status-info">Loading partitions…</div>
+        <!-- Visual Partition Layout Bars -->
+        <div id="visual-layout-section" style="display:none; margin: 24px 0 18px;">
+          <div class="layout-label-row">
+            <span style="font-size:13px;font-weight:700;color:var(--text)">Current Disk Layout</span>
           </div>
+          <div class="disk-layout-bar-container">
+            <div class="disk-layout-bar" id="current-layout-bar"></div>
+          </div>
+          
+          <div class="layout-label-row" style="margin-top:20px">
+            <span style="font-size:13px;font-weight:700;color:var(--text)">Proposed Disk Layout</span>
+          </div>
+          <div class="disk-layout-bar-container">
+            <div class="disk-layout-bar" id="proposed-layout-bar"></div>
+          </div>
+        </div>
+
+        <!-- Mode specific controls -->
+        <div id="partition-section" style="display:none">
+          <!-- Install Alongside Slider -->
+          <div id="shrink-controls" style="display:none; margin: 18px 0 14px;">
+            <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Choose how much space to shrink from Windows:</div>
+            <div class="shrink-slider-container">
+              <div class="slider-labels">
+                <span id="shrink-label-old">Windows: -- GiB</span>
+                <span id="shrink-label-new">KythOS: -- GiB</span>
+              </div>
+              <input type="range" id="shrink-slider" class="slider-input" min="32" max="100" value="64" oninput="onSliderMove(this.value)">
+              <div class="slider-subtext">Drag the slider to adjust allocation. KythOS requires at least 32 GiB.</div>
+            </div>
+          </div>
+
+          <!-- Replace partition list -->
+          <div id="replace-controls" style="display:none; margin: 18px 0 14px;">
+            <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Select target partition to replace (click on disk bar or select below):</div>
+            <div id="replace-list" class="part-selector-grid"></div>
+          </div>
+
+          <!-- Free space list -->
+          <div id="free-space-controls" style="display:none; margin: 18px 0 14px;">
+            <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Select unallocated free space region to use:</div>
+            <div id="free-space-list" class="part-selector-grid"></div>
+          </div>
+
           <div class="warn-box" id="part-warn" style="display:none"></div>
           <div id="efi-info" style="display:none;font-size:12px;color:var(--muted);margin-top:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border:1px solid var(--border)"></div>
         </div>
