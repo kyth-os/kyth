@@ -126,6 +126,8 @@ function selectMode(id) {
 
 let _partitions = [];
 let _freeRegions = [];
+let _minGuidedGiB = 32;
+let _replaceAllowed = true;
 
 function loadPartitions() {
   if (!S.disk) return;
@@ -142,15 +144,19 @@ function loadPartitions() {
     _freeRegions = regions;
     
     const hasEfi = parts.some(p => p.efi);
+    const hasBiosBoot = parts.some(p => (p.parttype || '').toLowerCase() === '21686148-6449-6e6f-744e-656564454649');
+    const needsBiosBoot = (S.disk.partition_table || '').toLowerCase() === 'gpt' && !hasBiosBoot;
+    _minGuidedGiB = needsBiosBoot ? 33 : 32;
+    _replaceAllowed = !needsBiosBoot;
     document.getElementById('efi-info').style.display = hasEfi ? 'none' : 'block';
     if (!hasEfi) {
       document.getElementById('efi-info').innerHTML = '<strong>No EFI System Partition found on this disk.</strong> KythOS installation requires an EFI partition. The Erase Disk mode will automatically create one, but Alongside, Replace, and Free Space modes require an existing EFI partition to configure boot files.';
     }
     
     // Enable/Disable mode cards based on candidates
-    const hasNtfsCandidate = parts.some(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= 96 * 1024**3);
-    const hasFreeCandidate = regions.some(r => r.size_bytes >= 32 * 1024**3);
-    const hasReplaceCandidate = parts.some(p => !p.efi && !p.current && p.size_bytes >= 32 * 1024**3);
+    const hasNtfsCandidate = parts.some(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= (64 + _minGuidedGiB) * 1024**3);
+    const hasFreeCandidate = regions.some(r => r.size_bytes >= _minGuidedGiB * 1024**3);
+    const hasReplaceCandidate = _replaceAllowed && parts.some(p => !p.efi && !p.current && !p.in_use && p.size_bytes >= 32 * 1024**3);
     
     const mResize = document.getElementById('mcard-resize_ntfs');
     mResize.style.opacity = hasNtfsCandidate ? '1' : '0.4';
@@ -256,7 +262,7 @@ function blockToHtml(block, isProposed = false) {
   
   let clickAttr = '';
   if (!isProposed) {
-    if (S.install_mode === 'alongside' && block.type === 'part' && !block.efi && !block.current && block.size_bytes >= 32 * 1024**3) {
+    if (S.install_mode === 'alongside' && _replaceAllowed && block.type === 'part' && !block.efi && !block.current && !block.ref.in_use && block.size_bytes >= 32 * 1024**3) {
       klass += ' clickable';
       if (S.target_partition === block.name) klass += ' selected-target';
       clickAttr = `onclick="selectPartitionByName('${block.name}')"`;
@@ -264,7 +270,7 @@ function blockToHtml(block, isProposed = false) {
       klass += ' clickable';
       if (S.resize_partition === block.name) klass += ' selected-target';
       clickAttr = `onclick="selectResizePartitionByName('${block.name}')"`;
-    } else if (S.install_mode === 'free_space' && block.type === 'free' && block.size_bytes >= 32 * 1024**3) {
+    } else if (S.install_mode === 'free_space' && block.type === 'free' && block.size_bytes >= _minGuidedGiB * 1024**3) {
       klass += ' clickable';
       if (S.free_region_start === block.start_bytes) klass += ' selected-target';
       clickAttr = `onclick="selectFreeRegionByStart(${block.start_bytes})"`;
@@ -377,8 +383,8 @@ function selectResizePartitionByName(name) {
     const maxShrinkGib = Math.floor((p.size_bytes - 64 * 1024**3) / 1024**3);
     const slider = document.getElementById('shrink-slider');
     slider.max = maxShrinkGib;
-    slider.min = 32;
-    const defaultVal = Math.min(maxShrinkGib, Math.max(32, Math.floor(p.size_bytes / 2 / 1024**3)));
+    slider.min = _minGuidedGiB;
+    const defaultVal = Math.min(maxShrinkGib, Math.max(_minGuidedGiB, Math.floor(p.size_bytes / 2 / 1024**3)));
     slider.value = defaultVal;
     S.resize_gib = defaultVal;
     
@@ -403,7 +409,9 @@ function selectFreeRegionByStart(start) {
 
 function populateReplacementList() {
   const container = document.getElementById('replace-list');
-  const replaceable = _partitions.filter(p => !p.efi && !p.current && p.size_bytes >= 32 * 1024**3);
+  const replaceable = _replaceAllowed
+    ? _partitions.filter(p => !p.efi && !p.current && !p.in_use && p.size_bytes >= 32 * 1024**3)
+    : [];
   if (!replaceable.length) {
     container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">No partitions available to replace.</div>';
     return;
@@ -423,7 +431,7 @@ function populateReplacementList() {
 
 function populateFreeSpaceList() {
   const container = document.getElementById('free-space-list');
-  const freeGaps = _freeRegions.filter(r => r.size_bytes >= 32 * 1024**3);
+  const freeGaps = _freeRegions.filter(r => r.size_bytes >= _minGuidedGiB * 1024**3);
   if (!freeGaps.length) {
     container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">No free space gaps available.</div>';
     return;
@@ -455,7 +463,7 @@ function updateDiskNext() {
   let ok = !!S.disk;
   if (ok && S.install_mode === 'wipe' && S.disk.current && !S.isLive) ok = false;
   if (S.install_mode === 'alongside') ok = ok && !!S.target_partition;
-  if (S.install_mode === 'resize_ntfs') ok = ok && !!S.resize_partition && Number(S.resize_gib || 0) >= 32;
+  if (S.install_mode === 'resize_ntfs') ok = ok && !!S.resize_partition && Number(S.resize_gib || 0) >= _minGuidedGiB;
   if (S.install_mode === 'free_space') ok = ok && Number(S.free_region_end || 0) > Number(S.free_region_start || 0);
   const btn = document.getElementById('disk-next');
   if (btn) btn.disabled = !ok;

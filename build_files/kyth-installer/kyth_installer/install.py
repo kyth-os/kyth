@@ -7,18 +7,20 @@ than importing by name, since re-binding via `from .install import _state`
 would not see later mutations.
 """
 
+import codecs
 import os
 import select
 import subprocess
 import threading
 import time
 import traceback
+from collections import deque
 from pathlib import Path
 
 from .config import LOG_FILE, SKIP_FETCH_CHECK
 from .disk import get_root_partition
 from .imagesrc import _friendly_network_error, _install_images, _network_preflight
-from .plan import _prepare_install_plan, _validate_install_target
+from .plan import _prepare_install_plan, _validate_install_target, _validate_storage_intent
 from .runner import run_command
 from .system import (
     _as_root,
@@ -84,96 +86,127 @@ def _run_cmd(
     log,
     progress,
     stall_timeout: int = 600,
-    absolute_timeout: int = 3600,
+    absolute_timeout: int | None = 3600,
 ) -> None:
     full_cmd = _as_root(cmd)
     log(f"$ {' '.join(full_cmd)}")
     proc = subprocess.Popen(
-        full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1,
+        full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0,
     )
+    if proc.stdout is None:
+        proc.kill()
+        proc.wait()
+        raise RuntimeError("Could not capture installer command output.")
 
-    _total_bytes:  list[int]  = [0]
-    _rx_start:     list[int]  = [0]
-    _monitor_stop: list[bool] = [False]
+    monitor_stop = threading.Event()
+    recent_output: deque[str] = deque(maxlen=30)
+    output_state = {"total": 0, "rx_start": 0}
 
     def _net_monitor() -> None:
         rx_prev = 0
         t_prev  = time.monotonic()
-        speed_samples: list[float] = []
-        while not _monitor_stop[0]:
-            time.sleep(1)
-            if _total_bytes[0] == 0 or _rx_start[0] == 0:
+        speed_samples: deque[float] = deque(maxlen=5)
+        while not monitor_stop.wait(1):
+            if output_state["total"] <= 0 or output_state["rx_start"] <= 0:
                 continue
             rx_now     = _get_rx_bytes()
             t_now      = time.monotonic()
-            downloaded = min(_total_bytes[0], max(0, rx_now - _rx_start[0]))
-            frac       = min(0.95, downloaded / _total_bytes[0])
+            downloaded = min(output_state["total"], max(0, rx_now - output_state["rx_start"]))
+            frac       = min(0.95, downloaded / output_state["total"])
             progress(int(pct_start + frac * (pct_end - pct_start)))
             dt = t_now - t_prev
-            if dt > 0 and rx_prev > 0:
-                speed_samples.append((rx_now - rx_prev) / dt)
-                if len(speed_samples) > 5:
-                    speed_samples.pop(0)
+            delta = max(0, rx_now - rx_prev)
+            if dt > 0 and rx_prev > 0 and delta > 0:
+                speed_samples.append(delta / dt)
             rx_prev = rx_now
             t_prev  = t_now
             if speed_samples:
                 avg_speed = sum(speed_samples) / len(speed_samples)
-                remaining = max(0, _total_bytes[0] - downloaded)
+                remaining = max(0, output_state["total"] - downloaded)
                 _push({"type": "stats",
                        "downloaded": downloaded,
-                       "total":      _total_bytes[0],
+                       "total":      output_state["total"],
                        "speed":      int(avg_speed),
                        "eta_sec":    int(remaining / avg_speed) if avg_speed > 0 else 0})
 
     monitor_thread = threading.Thread(target=_net_monitor, daemon=True)
     monitor_thread.start()
 
-    STALL_TIMEOUT    = stall_timeout
-    ABSOLUTE_TIMEOUT = absolute_timeout
-    started       = time.monotonic()
-    last_output   = started
-    last_rx       = _get_rx_bytes()
-    recent_output: list[str] = []
-    while True:
-        ready, _, _ = select.select([proc.stdout], [], [], 30)
-        if ready:
-            line = proc.stdout.readline()
-            if not line:
+    started = time.monotonic()
+    last_activity = started
+    last_rx = _get_rx_bytes()
+    pending = ""
+    last_line = None
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+    def emit_line(line: str) -> None:
+        nonlocal last_line
+        stripped = line.strip()
+        if not stripped or stripped == last_line:
+            return
+        last_line = stripped
+        log(stripped)
+        recent_output.append(stripped)
+        if "layers needed:" in stripped:
+            try:
+                details = stripped.split("layers needed:", 1)[1]
+                size_str = details.split("(", 1)[1].rstrip(")") if "(" in details else ""
+                output_state["total"] = _parse_size_bytes(size_str)
+                output_state["rx_start"] = _get_rx_bytes()
+            except Exception:
+                pass
+
+    def consume_output(text: str, final: bool = False) -> None:
+        nonlocal pending
+        pending += text
+        while True:
+            indexes = [idx for idx in (pending.find("\n"), pending.find("\r")) if idx >= 0]
+            if not indexes:
                 break
-            last_output = time.monotonic()
-            stripped = line.rstrip()
-            log(stripped)
-            recent_output.append(stripped)
-            recent_output = recent_output[-30:]
-            if "layers needed:" in stripped:
-                try:
-                    m = stripped.split("layers needed:")[1]
-                    size_str = m.split("(")[1].rstrip(")") if "(" in m else ""
-                    _total_bytes[0] = _parse_size_bytes(size_str)
-                    _rx_start[0]    = _get_rx_bytes()
-                except Exception:
-                    pass
-        else:
+            split_at = min(indexes)
+            emit_line(pending[:split_at])
+            pending = pending[split_at + 1:]
+        if final and pending:
+            emit_line(pending)
+            pending = ""
+
+    try:
+        fd = proc.stdout.fileno()
+        while True:
+            ready, _, _ = select.select([fd], [], [], 1)
+            if ready:
+                chunk = os.read(fd, 64 * 1024)
+                if not chunk:
+                    break
+                last_activity = time.monotonic()
+                consume_output(decoder.decode(chunk))
+
             now = time.monotonic()
-            if now - started > ABSOLUTE_TIMEOUT:
-                proc.kill()
-                raise RuntimeError(
-                    f"Command exceeded absolute timeout of {ABSOLUTE_TIMEOUT // 60} min"
-                )
             rx_now = _get_rx_bytes()
             if rx_now > last_rx:
-                last_rx     = rx_now
-                last_output = now
-            elif now - last_output > STALL_TIMEOUT:
-                proc.kill()
+                last_rx = rx_now
+                last_activity = now
+            if absolute_timeout is not None and now - started > absolute_timeout:
                 raise RuntimeError(
-                    f"Command timed out (no output for {STALL_TIMEOUT // 60} min)"
+                    f"Command exceeded absolute timeout of {absolute_timeout // 60} min"
+                )
+            if now - last_activity > stall_timeout:
+                raise RuntimeError(
+                    "Command timed out after "
+                    f"{stall_timeout // 60} min with no output or network traffic"
                 )
 
-    _monitor_stop[0] = True
-    monitor_thread.join(timeout=2)
-    proc.wait()
+        consume_output(decoder.decode(b"", final=True), final=True)
+        proc.wait()
+    except Exception:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        raise
+    finally:
+        monitor_stop.set()
+        monitor_thread.join(timeout=2)
+        proc.stdout.close()
     if proc.returncode != 0:
         lowered = "\n".join(recent_output).lower()
         network_tokens = (
@@ -194,12 +227,19 @@ def _run_cmd(
                     "The image download lost network access before it finished."
                 )
             )
-        raise RuntimeError(
-            f"Command failed (exit {proc.returncode}):\n  {' '.join(full_cmd)}"
-        )
+        detail = "\n".join(list(recent_output)[-10:]) or "No command output was captured."
+        raise RuntimeError(f"Command failed (exit {proc.returncode}):\n  {' '.join(full_cmd)}\n\n{detail}")
     progress(pct_end)
 
 def _prepare_install_context(log):
+    kernel = _state.get("kernel", "fedora")
+    src_ref, tgt_ref = _install_images(kernel)
+    _validate_storage_intent(_state)
+    if not SKIP_FETCH_CHECK:
+        log("Running network preflight check...")
+        net_err = _network_preflight(src_ref)
+        if net_err:
+            raise RuntimeError(net_err)
     install_plan = _prepare_install_plan(_state, log)
     disk, target_partition = _validate_install_target(_state)
     _state["disk"] = disk
@@ -208,14 +248,7 @@ def _prepare_install_context(log):
     else:
         _state.pop("target_partition", None)
     disk = _state["disk"]
-    kernel = _state.get("kernel", "fedora")
     install_mode = install_plan.mode
-    src_ref, tgt_ref = _install_images(kernel)
-    if not SKIP_FETCH_CHECK:
-        log("Running network preflight check...")
-        net_err = _network_preflight(src_ref)
-        if net_err:
-            raise RuntimeError(net_err)
     log(f"Mode         : {install_mode}")
     log(f"Kernel       : {kernel}")
     log(f"Source imgref: {src_ref}")
@@ -296,7 +329,7 @@ def _prepare_install_storage(
         if SKIP_FETCH_CHECK:
             install_cmd.append("--skip-fetch-check")
         install_cmd.append(alongside_mount)
-        _run_cmd(install_cmd, 12, 90, log, progress, stall_timeout=3600, absolute_timeout=14400)
+        _run_cmd(install_cmd, 12, 90, log, progress, stall_timeout=3600, absolute_timeout=None)
 
         root_part = target_part
 
@@ -312,7 +345,7 @@ def _prepare_install_storage(
         if SKIP_FETCH_CHECK:
             install_cmd.append("--skip-fetch-check")
         install_cmd.append(disk)
-        _run_cmd(install_cmd, 5, 90, log, progress, stall_timeout=3600, absolute_timeout=14400)
+        _run_cmd(install_cmd, 5, 90, log, progress, stall_timeout=3600, absolute_timeout=None)
         root_part = get_root_partition(disk)
     return target_part, root_part, alongside_mount
 

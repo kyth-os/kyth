@@ -16,9 +16,8 @@ install_mode invariants:
                   real bootc) that this flag does not change behavior on a clean
                   target — it exists for parity with the shell fallback, not
                   because it gates a real rejection in current bootc.
-  "resize_ntfs" — _validate_resize_ntfs_target() shrinks a trailing NTFS
-                  partition (must be the last partition on disk, see
-                  _partitions_after()), then _prepare_ntfs_resize_target()
+  "resize_ntfs" — _validate_resize_ntfs_target() shrinks an NTFS partition,
+                  then _prepare_ntfs_resize_target()
                   creates a Btrfs partition in the freed space and REWRITES
                   install_mode to "alongside" (target_partition = new partition)
                   before falling through to the alongside path above.
@@ -48,7 +47,6 @@ from .disk import (
     _partition_number,
     _partition_size_bytes,
     _partition_start_bytes,
-    _partitions_after,
     _block_size_bytes,
     _safe_int,
     find_efi_partition,
@@ -137,8 +135,15 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
             raise RuntimeError("The selected partition was not found during the final disk scan.")
         if part.get("efi"):
             raise RuntimeError("The EFI system partition cannot be used as the KythOS target partition.")
-        if part.get("current"):
-            raise RuntimeError("The selected partition is currently mounted by the live or running system.")
+        if part.get("current") or part.get("in_use"):
+            raise RuntimeError("The selected partition is mounted or has active encrypted/LVM mappings.")
+        if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
+            raise RuntimeError(f"The target partition is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
+        if _is_gpt_disk(disk) and not _has_bios_boot_partition(disk):
+            raise RuntimeError(
+                "This GPT disk has no BIOS boot partition required by the KythOS bootloader. "
+                "Choose unallocated space, shrink Windows, or erase the disk so the installer can create one."
+            )
         if not find_efi_partition(disk):
             raise RuntimeError("Alongside installation requires an EFI system partition on the system.")
         return disk, target
@@ -171,6 +176,19 @@ def _is_gpt_disk(disk: str) -> bool:
         return False
 
 
+def _has_bios_boot_partition(disk: str) -> bool:
+    return any(
+        (part.get("parttype") or "").lower() == BIOS_BOOT_GUID
+        for part in list_partitions(disk)
+    )
+
+
+def _required_guided_space(disk: str) -> int:
+    if _is_gpt_disk(disk) and not _has_bios_boot_partition(disk):
+        return MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
+    return MIN_KYTHOS_BYTES
+
+
 def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     """Create a 1 MiB bios_grub partition at gap_start if the GPT disk lacks
     one, returning the byte offset where the KythOS partition should begin.
@@ -184,10 +202,11 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     """
     if not _is_gpt_disk(disk):
         return gap_start
-    if any((p.get("parttype") or "").lower() == BIOS_BOOT_GUID for p in list_partitions(disk)):
+    if _has_bios_boot_partition(disk):
         return gap_start
     before = {p["name"] for p in list_partitions(disk) if p.get("name")}
-    bios_end = gap_start + BIOS_BOOT_BYTES
+    sector = _block_size_bytes(disk)
+    bios_end = gap_start + BIOS_BOOT_BYTES - sector
     log("Creating BIOS boot partition for GRUB...")
     run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "biosboot", f"{gap_start}B", f"{bios_end}B"]), check=True, timeout=120)
     _settle_block_devices()
@@ -196,7 +215,7 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
         raise RuntimeError("The installer could not find the new BIOS boot partition after partitioning.")
     run_command(_as_root(["parted", "-s", disk, "set", str(_partition_number(created)), "bios_grub", "on"]), check=True, timeout=120)
     _settle_block_devices()
-    return bios_end
+    return bios_end + sector
 
 
 def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
@@ -216,14 +235,11 @@ def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
         raise RuntimeError("The selected disk is not a safe install target.")
     if _parent_disk(partition) != disk:
         raise RuntimeError("The selected NTFS partition does not belong to the selected disk.")
-    if _partitions_after(disk, partition):
-        raise RuntimeError("This NTFS partition is not the last partition on the disk. Shrinking it would not create contiguous space for KythOS.")
-
     parts = {p["name"]: p for p in list_partitions(disk)}
     part = parts.get(partition)
     if not part:
         raise RuntimeError("The selected NTFS partition was not found during the final disk scan.")
-    if part.get("efi") or part.get("current"):
+    if part.get("efi") or part.get("current") or part.get("in_use"):
         raise RuntimeError("The selected partition is currently mounted or reserved and cannot be resized.")
     if (part.get("fstype") or "").lower() not in ("ntfs", "ntfs3"):
         raise RuntimeError("Only NTFS partitions can be resized by this installer path.")
@@ -231,6 +247,11 @@ def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
         raise RuntimeError("NTFS resize installation requires an EFI system partition on the system.")
 
     shrink_bytes = shrink_gib * 1024**3
+    if shrink_bytes < _required_guided_space(disk):
+        raise RuntimeError(
+            f"This layout needs at least {MIN_KYTHOS_GIB + 1} GiB of shrink space "
+            "to create KythOS and its boot partition."
+        )
     current_size = _safe_int(part.get("size_bytes")) or _partition_size_bytes(partition)
     remaining_size = current_size - shrink_bytes
     if remaining_size < 64 * 1024**3:
@@ -239,21 +260,28 @@ def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
 
 
 def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
-    disk = _normal_device_path(config.get("disk"))
-    if disk:
-        unmount_target_disk(disk, log)
     disk, partition, shrink_bytes = _validate_resize_ntfs_target(config)
     missing = [cmd for cmd in ("ntfsresize", "parted", "partprobe", "udevadm", "mkfs.btrfs") if shutil.which(cmd) is None]
     if missing:
         raise RuntimeError(f"Required NTFS resize tools are missing from the live environment: {', '.join(missing)}")
+    unmount_target_disk(disk, log)
+    disk, partition, shrink_bytes = _validate_resize_ntfs_target(config)
     current_size = _partition_size_bytes(partition)
     new_ntfs_size = current_size - shrink_bytes
     part_num = _partition_number(partition)
     sector = _block_size_bytes(disk)
-    new_end = _partition_start_bytes(partition) + new_ntfs_size - sector
+    partition_start = _partition_start_bytes(partition)
+    old_end = partition_start + current_size - sector
+    new_end = partition_start + new_ntfs_size - sector
 
     log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
     log("Checking NTFS resize safety...")
+    check = run_command(
+        _as_root(["ntfsresize", "--check", partition]),
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=240,
+    )
+    if check.returncode != 0:
+        raise RuntimeError("Windows left this NTFS volume in an unsafe state. Disable Fast Startup and hibernation, run chkdsk in Windows, then try again.")
     info = run_command(_as_root(["ntfsresize", "--info", partition]), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
     if info.returncode != 0:
         raise RuntimeError("NTFS partition is not clean enough to resize. Boot Windows, disable Fast Startup/hibernation, run chkdsk, and try again.")
@@ -276,14 +304,16 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
             raise RuntimeError(f"NTFS resize dry-run failed. Output:\n{dry.stdout}\nBoot Windows, shrink the volume there, then return to the installer.")
 
     log("Shrinking NTFS filesystem...")
-    run_command(
-        _as_root(["ntfsresize", "--force", "--size", size_arg, partition]),
+    shrink = run_command(
+        _as_root(["ntfsresize", "--size", size_arg, partition]),
+        input="y\n",
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        check=True,
         timeout=1800,
     )
+    if shrink.returncode != 0:
+        raise RuntimeError(f"NTFS filesystem resize failed before the partition boundary was changed. Output:\n{shrink.stdout}")
 
     log("Shrinking partition boundary...")
     # parted >= 3.3 refuses to shrink a partition in script mode (-s): it asks
@@ -300,7 +330,7 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
     log("Creating KythOS Btrfs partition in freed space...")
-    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", "100%"]), check=True, timeout=120)
+    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{old_end}B"]), check=True, timeout=120)
     _settle_block_devices()
 
     created = _latest_partition_on_disk(disk, before)
@@ -326,32 +356,37 @@ def _validate_free_space_target(config: dict) -> tuple[str, int, int]:
     safe_disks = {d["name"]: d for d in list_disks()}
     if disk not in safe_disks:
         raise RuntimeError("The selected disk is not a safe install target.")
+    if end - start < _required_guided_space(disk):
+        raise RuntimeError(
+            f"This layout needs at least {MIN_KYTHOS_GIB + 1} GiB of free space "
+            "to create KythOS and its boot partition."
+        )
     if not find_efi_partition(disk):
         raise RuntimeError("Free space installation requires an EFI system partition on the system.")
 
     # Re-scan right before committing so a stale UI selection can't partition
     # space that's no longer actually free.
     current_regions = list_free_space(disk)
-    if not any(r["start_bytes"] <= start and r["end_bytes"] >= end for r in current_regions):
+    if not any(r["start_bytes"] == start and r["end_bytes"] == end for r in current_regions):
         raise RuntimeError("The selected free space is no longer available. Re-scan the disk and try again.")
 
     return disk, start, end
 
 
 def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
-    disk = _normal_device_path(config.get("disk"))
-    if disk:
-        unmount_target_disk(disk, log)
     disk, start, end = _validate_free_space_target(config)
     missing = [cmd for cmd in ("parted", "partprobe", "udevadm", "mkfs.btrfs") if shutil.which(cmd) is None]
     if missing:
         raise RuntimeError(f"Required partitioning tools are missing from the live environment: {', '.join(missing)}")
+    unmount_target_disk(disk, log)
+    disk, start, end = _validate_free_space_target(config)
 
     start = _ensure_bios_boot_partition(disk, start, log)
     before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
     log(f"Creating KythOS Btrfs partition in {_human_size(end - start)} of free space...")
-    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{start}B", f"{end}B"]), check=True, timeout=120)
+    sector = _block_size_bytes(disk)
+    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{start}B", f"{end - sector}B"]), check=True, timeout=120)
     _settle_block_devices()
 
     created = _latest_partition_on_disk(disk, before)
@@ -365,11 +400,26 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
 def _prepare_install_plan(state: dict, log) -> InstallPlan:
     plan = _install_plan_from_state(state)
     if plan.mode == "resize_ntfs":
+        _validate_resize_ntfs_target(state)
         disk, target_partition = _prepare_ntfs_resize_target(state, log)
         plan = InstallPlan("alongside", disk=disk, target_partition=target_partition)
     elif plan.mode == "free_space":
+        _validate_free_space_target(state)
         disk, target_partition = _prepare_free_space_target(state, log)
         plan = InstallPlan("alongside", disk=disk, target_partition=target_partition)
+    else:
+        disk, target_partition = _validate_install_target(state)
+        plan = InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
     _apply_install_plan(state, plan)
     return plan
 
+
+def _validate_storage_intent(state: dict) -> None:
+    """Validate a review-page storage choice without changing the machine."""
+    mode = _normalized_install_mode(state)
+    if mode == "resize_ntfs":
+        _validate_resize_ntfs_target(state)
+    elif mode == "free_space":
+        _validate_free_space_target(state)
+    else:
+        _validate_install_target(state)

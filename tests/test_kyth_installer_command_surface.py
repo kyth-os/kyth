@@ -196,6 +196,10 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             return_value=None,
         ), mock.patch.object(
             install,
+            "_validate_storage_intent",
+            return_value=None,
+        ), mock.patch.object(
+            install,
             "run_command",
         ) as run_command, mock.patch.object(
             install,
@@ -263,6 +267,10 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         ), mock.patch.object(
             install,
             "_network_preflight",
+            return_value=None,
+        ), mock.patch.object(
+            install,
+            "_validate_storage_intent",
             return_value=None,
         ), mock.patch.object(
             install,

@@ -67,6 +67,38 @@ class InstallerWebuiTests(unittest.TestCase):
             self.assertEqual(plan._install_plan_from_state({"install_mode": mode}).mode, mode)
 
 
+class InstallerCommandTests(unittest.TestCase):
+    def test_streaming_command_handles_carriage_return_progress(self):
+        logs = []
+        progress = []
+        command = [
+            sys.executable,
+            "-c",
+            (
+                "import sys,time; "
+                "sys.stdout.write('Downloading layer 1\\r'); sys.stdout.flush(); "
+                "time.sleep(0.05); print('Writing image')"
+            ),
+        ]
+
+        with patch.object(install, "_as_root", side_effect=lambda cmd: cmd), \
+             patch.object(install, "_get_rx_bytes", return_value=0):
+            install._run_cmd(
+                command, 5, 90, logs.append, progress.append,
+                stall_timeout=2, absolute_timeout=None,
+            )
+
+        self.assertIn("Downloading layer 1", logs)
+        self.assertIn("Writing image", logs)
+        self.assertEqual(progress[-1], 90)
+
+    def test_bootc_install_calls_disable_absolute_timeout(self):
+        source = (INSTALLER_ROOT / "kyth_installer/install.py").read_text()
+
+        self.assertEqual(source.count("stall_timeout=3600, absolute_timeout=None"), 2)
+        self.assertNotIn("absolute_timeout=14400", source)
+
+
 class InstallerStorageTests(unittest.TestCase):
     def setUp(self):
         self.disk = disk
@@ -103,6 +135,18 @@ class InstallerStorageTests(unittest.TestCase):
         self.assertTrue(disks["/dev/nvme0n1"]["current"])
         self.assertFalse(disks["/dev/sdb"]["current"])
 
+    def test_list_disks_excludes_read_only_devices(self):
+        payload = {"blockdevices": [
+            {"name": "/dev/sda", "size": 64 * 1024**3, "model": "Read only", "type": "disk", "ro": True},
+            {"name": "/dev/sdb", "size": 64 * 1024**3, "model": "Writable", "type": "disk", "ro": False},
+        ]}
+        with patch.object(self.disk, "_protected_install_disks", return_value=set()), \
+             patch.object(self.disk, "_running_system_disk", return_value=""), \
+             patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+            disks = self.disk.list_disks()
+
+        self.assertEqual([item["name"] for item in disks], ["/dev/sdb"])
+
     def test_parent_disk_walks_through_lvm_and_luks_layers(self):
         # Root on an LVM logical volume backed by a LUKS-encrypted partition:
         # LV -> crypt mapper -> partition -> disk is three PKNAME hops, not one.
@@ -129,7 +173,7 @@ class InstallerStorageTests(unittest.TestCase):
 
         self.assertEqual(result, "/dev/nvme0n1")
 
-    def test_list_partitions_marks_only_unmounted_btrfs_as_alongside_candidate(self):
+    def test_list_partitions_marks_replaceable_unmounted_partitions(self):
         payload = {
             "blockdevices": [{
                 "name": "/dev/nvme0n1",
@@ -139,6 +183,9 @@ class InstallerStorageTests(unittest.TestCase):
                     {"name": "/dev/nvme0n1p2", "size": 80 * 1024**3, "type": "part", "fstype": "btrfs", "parttype": "", "label": "shared", "mountpoints": []},
                     {"name": "/dev/nvme0n1p3", "size": 40 * 1024**3, "type": "part", "fstype": "ext4", "parttype": "", "label": "other", "mountpoints": []},
                     {"name": "/dev/nvme0n1p4", "size": 40 * 1024**3, "type": "part", "fstype": "btrfs", "parttype": "", "label": "active", "mountpoints": ["/home"]},
+                    {"name": "/dev/nvme0n1p5", "size": 80 * 1024**3, "type": "part", "fstype": "crypto_LUKS", "parttype": "", "label": "vault", "mountpoints": [], "children": [
+                        {"name": "/dev/mapper/vault", "size": 80 * 1024**3, "type": "crypt", "fstype": "ext4", "mountpoints": []},
+                    ]},
                 ],
             }]
         }
@@ -148,8 +195,10 @@ class InstallerStorageTests(unittest.TestCase):
 
         self.assertFalse(parts["/dev/nvme0n1p1"]["alongside_candidate"])
         self.assertTrue(parts["/dev/nvme0n1p2"]["alongside_candidate"])
-        self.assertFalse(parts["/dev/nvme0n1p3"]["alongside_candidate"])
+        self.assertTrue(parts["/dev/nvme0n1p3"]["alongside_candidate"])
         self.assertFalse(parts["/dev/nvme0n1p4"]["alongside_candidate"])
+        self.assertFalse(parts["/dev/nvme0n1p5"]["alongside_candidate"])
+        self.assertTrue(parts["/dev/nvme0n1p5"]["in_use"])
 
     def test_find_efi_partition_reads_efi_key_without_keyerror(self):
         partitions = [
@@ -204,6 +253,14 @@ class InstallerStorageTests(unittest.TestCase):
 
         self.assertEqual(regions, [])
 
+    def test_list_free_space_fails_closed_when_partition_scan_fails(self):
+        with patch.object(self.disk, "list_partitions", side_effect=RuntimeError("scan failed")), \
+             patch.object(self.disk, "_partition_size_bytes", return_value=120 * 1024**3), \
+             patch.object(self.disk, "_block_size_bytes", return_value=512):
+            regions = self.disk.list_free_space("/dev/nvme0n1")
+
+        self.assertEqual(regions, [])
+
     def test_latest_partition_on_disk_natural_sort(self):
         before = {"/dev/sda1", "/dev/sda2"}
         partitions = [
@@ -248,10 +305,12 @@ class InstallerPlanTests(unittest.TestCase):
             "fstype": "ext4",
             "efi": False,
             "current": False,
+            "size_bytes": 128 * 1024**3,
         }
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
              patch.object(self.plan, "list_partitions", return_value=[partition]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=False), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
             disk_name, target = self.plan._validate_install_target({
                 "install_mode": "alongside",
@@ -259,6 +318,26 @@ class InstallerPlanTests(unittest.TestCase):
                 "target_partition": "/dev/nvme0n1p2",
             })
             self.assertEqual((disk_name, target), ("/dev/nvme0n1", "/dev/nvme0n1p2"))
+
+    def test_validate_alongside_rejects_gpt_without_bios_boot_partition(self):
+        partition = {
+            "name": "/dev/nvme0n1p2",
+            "fstype": "ext4",
+            "efi": False,
+            "current": False,
+            "size_bytes": 128 * 1024**3,
+        }
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
+             patch.object(self.plan, "_has_bios_boot_partition", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "no BIOS boot partition"):
+                self.plan._validate_install_target({
+                    "install_mode": "alongside",
+                    "disk": "/dev/nvme0n1",
+                    "target_partition": "/dev/nvme0n1p2",
+                })
 
     def test_validate_wipe_rejects_disk_missing_from_safe_scan(self):
         with patch.object(self.plan, "list_disks", return_value=[]):
@@ -280,7 +359,7 @@ class InstallerPlanTests(unittest.TestCase):
 
         self.assertEqual((disk_name, target), ("/dev/sda", None))
 
-    def test_validate_resize_ntfs_requires_last_partition(self):
+    def test_validate_resize_ntfs_allows_trailing_recovery_partition(self):
         partition = {
             "name": "/dev/nvme0n1p3",
             "fstype": "ntfs",
@@ -291,13 +370,15 @@ class InstallerPlanTests(unittest.TestCase):
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
              patch.object(self.plan, "list_partitions", return_value=[partition]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
-             patch.object(self.plan, "_partitions_after", return_value=[{"name": "/dev/nvme0n1p4"}]):
-            with self.assertRaisesRegex(RuntimeError, "not the last partition"):
-                self.plan._validate_resize_ntfs_target({
-                    "disk": "/dev/nvme0n1",
-                    "resize_partition": "/dev/nvme0n1p3",
-                    "resize_gib": 64,
-                })
+             patch.object(self.plan, "_is_gpt_disk", return_value=False), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+            result = self.plan._validate_resize_ntfs_target({
+                "disk": "/dev/nvme0n1",
+                "resize_partition": "/dev/nvme0n1p3",
+                "resize_gib": 64,
+            })
+
+        self.assertEqual(result, ("/dev/nvme0n1", "/dev/nvme0n1p3", 64 * 1024**3))
 
     def test_validate_resize_ntfs_accepts_clean_last_ntfs_partition(self):
         partition = {
@@ -310,7 +391,7 @@ class InstallerPlanTests(unittest.TestCase):
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
              patch.object(self.plan, "list_partitions", return_value=[partition]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
-             patch.object(self.plan, "_partitions_after", return_value=[]), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=False), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
             disk_name, target, shrink = self.plan._validate_resize_ntfs_target({
                 "disk": "/dev/nvme0n1",
@@ -359,7 +440,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(disk, "list_partitions", list_partitions_mock), \
              patch.object(self.plan, "_settle_block_devices"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
-             patch.object(self.plan.subprocess, "run", side_effect=fake_run):
+             patch.object(self.plan, "run_command", side_effect=fake_run):
             created = self.plan._prepare_ntfs_resize_target(
                 {"disk": "/dev/nvme0n1", "resize_partition": partition, "resize_gib": 64},
                 lambda _msg: None,
@@ -382,6 +463,12 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertIn("parted ---pretend-input-tty /dev/nvme0n1 unit B resizepart 3", shrink_cmd)
         self.assertNotIn(" -s ", shrink_cmd)
         self.assertEqual(shrink_kwargs.get("input"), "Yes\n")
+        ntfs_shrink = next(
+            kwargs for cmd, kwargs in zip(flattened, run_kwargs)
+            if "ntfsresize --size" in cmd and "--no-action" not in cmd
+        )
+        self.assertEqual(ntfs_shrink.get("input"), "y\n")
+        self.assertTrue(any("mkpart KythOS btrfs" in cmd and "100%" not in cmd for cmd in flattened))
         self.assertTrue(any("mkfs.btrfs -f -L KythOS /dev/nvme0n1p4" in cmd for cmd in flattened))
 
     def test_ensure_bios_boot_partition_creates_and_flags_when_missing(self):
@@ -398,20 +485,22 @@ class InstallerPlanTests(unittest.TestCase):
         with patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/sda1", "parttype": ""}]), \
              patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/sda2"), \
              patch.object(self.plan, "_partition_number", return_value=2), \
+             patch.object(self.plan, "_block_size_bytes", return_value=512), \
              patch.object(self.plan, "_settle_block_devices"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
-             patch.object(self.plan.subprocess, "run", side_effect=fake_run):
+             patch.object(self.plan, "run_command", side_effect=fake_run):
             btrfs_start = self.plan._ensure_bios_boot_partition("/dev/sda", gap_start, lambda _msg: None)
 
         self.assertEqual(btrfs_start, gap_start + self.plan.BIOS_BOOT_BYTES)
-        self.assertTrue(any(f"mkpart biosboot {gap_start}B {gap_start + self.plan.BIOS_BOOT_BYTES}B" in cmd for cmd in commands))
+        bios_end = gap_start + self.plan.BIOS_BOOT_BYTES - 512
+        self.assertTrue(any(f"mkpart biosboot {gap_start}B {bios_end}B" in cmd for cmd in commands))
         self.assertTrue(any("set 2 bios_grub on" in cmd for cmd in commands))
 
     def test_ensure_bios_boot_partition_skips_when_already_present(self):
         with patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan, "list_partitions", return_value=[
                  {"name": "/dev/sda1", "parttype": self.plan.BIOS_BOOT_GUID},
-             ]), patch.object(self.plan.subprocess, "run") as mock_run:
+             ]), patch.object(self.plan, "run_command") as mock_run:
             btrfs_start = self.plan._ensure_bios_boot_partition("/dev/sda", 4096, lambda _msg: None)
 
         self.assertEqual(btrfs_start, 4096)
@@ -425,6 +514,19 @@ class InstallerPlanTests(unittest.TestCase):
                     "disk": "/dev/nvme0n1",
                     "free_region_start": 1024**2,
                     "free_region_end": 16 * 1024**3,
+                })
+
+    def test_validate_free_space_reserves_room_for_new_bios_partition(self):
+        start = 40 * 1024**3
+        end = start + 32 * 1024**3
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
+             patch.object(self.plan, "_has_bios_boot_partition", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "33 GiB"):
+                self.plan._validate_free_space_target({
+                    "disk": "/dev/nvme0n1",
+                    "free_region_start": start,
+                    "free_region_end": end,
                 })
 
     def test_validate_free_space_rejects_stale_region_no_longer_free(self):
@@ -448,11 +550,11 @@ class InstallerPlanTests(unittest.TestCase):
                     "free_region_end": 80 * 1024**3,
                 })
 
-    def test_validate_free_space_accepts_region_covered_by_current_scan(self):
+    def test_validate_free_space_accepts_exact_region_from_current_scan(self):
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"), \
              patch.object(self.plan, "list_free_space", return_value=[
-                 {"start_bytes": 40 * 1024**3, "end_bytes": 100 * 1024**3},
+                 {"start_bytes": 40 * 1024**3, "end_bytes": 80 * 1024**3},
              ]):
             disk_name, start, end = self.plan._validate_free_space_target({
                 "disk": "/dev/nvme0n1",
@@ -461,6 +563,19 @@ class InstallerPlanTests(unittest.TestCase):
             })
 
         self.assertEqual((disk_name, start, end), ("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3))
+
+    def test_validate_free_space_rejects_ui_supplied_subregion(self):
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"), \
+             patch.object(self.plan, "list_free_space", return_value=[
+                 {"start_bytes": 40 * 1024**3, "end_bytes": 100 * 1024**3},
+             ]):
+            with self.assertRaisesRegex(RuntimeError, "no longer available"):
+                self.plan._validate_free_space_target({
+                    "disk": "/dev/nvme0n1",
+                    "free_region_start": 40 * 1024**3,
+                    "free_region_end": 80 * 1024**3,
+                })
 
     def test_prepare_free_space_target_creates_btrfs_partition(self):
         commands = []
@@ -476,9 +591,10 @@ class InstallerPlanTests(unittest.TestCase):
                  {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
              ]), \
              patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/nvme0n1p2"), \
+             patch.object(self.plan, "_block_size_bytes", return_value=512), \
              patch.object(self.plan, "_settle_block_devices"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
-             patch.object(self.plan.subprocess, "run", side_effect=fake_run):
+             patch.object(self.plan, "run_command", side_effect=fake_run):
             created = self.plan._prepare_free_space_target(
                 {"disk": "/dev/nvme0n1", "free_region_start": 40 * 1024**3, "free_region_end": 80 * 1024**3},
                 lambda _msg: None,
@@ -488,7 +604,7 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertEqual(created, ("/dev/nvme0n1", "/dev/nvme0n1p2"))
         flattened = [" ".join(cmd) for cmd in commands]
         self.assertTrue(any(
-            f"parted -s /dev/nvme0n1 unit B mkpart KythOS btrfs {40 * 1024**3}B {80 * 1024**3}B" in cmd
+            f"parted -s /dev/nvme0n1 unit B mkpart KythOS btrfs {40 * 1024**3}B {80 * 1024**3 - 512}B" in cmd
             for cmd in flattened
         ))
         self.assertTrue(any("mkfs.btrfs -f -L KythOS /dev/nvme0n1p2" in cmd for cmd in flattened))

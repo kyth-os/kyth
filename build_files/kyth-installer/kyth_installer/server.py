@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from . import config, install
 from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, _IS_LIVE_SESSION
 from .disk import _safe_int, find_efi_partition, list_disks, list_partitions, list_free_space
-from .plan import ROUTES, RouteSpec
+from .plan import ROUTES, RouteSpec, _validate_storage_intent
 from .system import _as_root, _hash_password, list_timezones
 
 _WEBUI_DIR = Path(__file__).parent / "webui"
@@ -241,6 +241,21 @@ class Handler(BaseHTTPRequestHandler):
                 }, status=409)
                 return
 
+            validation_state = {
+                "disk": disk,
+                "install_mode": install_mode,
+                "target_partition": target_partition,
+                "resize_partition": resize_partition,
+                "resize_gib": resize_gib,
+                "free_region_start": free_region_start,
+                "free_region_end": free_region_end,
+            }
+            try:
+                _validate_storage_intent(validation_state)
+            except RuntimeError as exc:
+                self._json({"started": False, "message": str(exc)}, status=409)
+                return
+
             # The UI only lets the "Install Now" button enable once these
             # boxes are checked; re-check server-side so a stale/bypassed
             # frontend can't skip the user's explicit destructive-action ack.
@@ -352,5 +367,4 @@ class _Server(ThreadingHTTPServer):
     # Allow the port to be reused immediately if the previous process crashed
     # and left a TIME_WAIT socket — prevents EADDRINUSE on rapid restarts.
     allow_reuse_address = True
-
 

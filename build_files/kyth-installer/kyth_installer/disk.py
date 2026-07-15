@@ -188,7 +188,7 @@ def list_disks():
     disks = []
     try:
         out = subprocess.check_output(
-            ["lsblk", "--json", "--bytes", "--paths", "--nodeps", "--output", "NAME,SIZE,MODEL,TYPE,TRAN,ROTA,RM"],
+            ["lsblk", "--json", "--bytes", "--paths", "--nodeps", "--output", "NAME,SIZE,MODEL,TYPE,TRAN,ROTA,RM,RO,PTTYPE"],
             text=True,
             stderr=subprocess.DEVNULL,
             timeout=5,
@@ -200,7 +200,7 @@ def list_disks():
             if not name or not _disk_path_is_safe(name):
                 continue
             size = _safe_int(d.get("size"))
-            if size <= 0:
+            if size <= 0 or bool(d.get("ro")):
                 continue
             if name in protected:
                 continue
@@ -212,6 +212,7 @@ def list_disks():
                 "ssd": not bool(d.get("rota")),
                 "transport": d.get("tran") or "",
                 "removable": bool(d.get("rm")),
+                "partition_table": (d.get("pttype") or "").lower(),
                 "current": bool(current_disk) and name == current_disk,
             })
     except Exception as exc:
@@ -231,7 +232,15 @@ def _is_active_mount(mounts: list[str]) -> bool:
     return bool(mounts)
 
 
-def list_partitions(disk: str):
+def _descendant_mountpoints(device: dict) -> list[str]:
+    mounts: list[str] = []
+    for child in device.get("children") or []:
+        mounts.extend(_partition_mountpoints(child))
+        mounts.extend(_descendant_mountpoints(child))
+    return mounts
+
+
+def list_partitions(disk: str, *, strict: bool = False):
     disk = _normal_device_path(disk)
     if not disk:
         return []
@@ -252,10 +261,14 @@ def list_partitions(disk: str):
                     size = _safe_int(child.get("size"))
                     fstype = (child.get("fstype") or "").lower()
                     parttype = (child.get("parttype") or "").lower()
-                    mounts = _partition_mountpoints(child)
+                    mounts = _partition_mountpoints(child) + _descendant_mountpoints(child)
                     is_efi = parttype == EFI_PART_GUID or (fstype == "vfat" and "/boot/efi" in mounts)
                     current = _is_active_mount(mounts)
-                    alongside_candidate = bool(name and size > 0 and fstype == "btrfs" and not is_efi and not current)
+                    in_use = bool(child.get("children"))
+                    alongside_candidate = bool(
+                        name and size >= MIN_KYTHOS_BYTES and not is_efi
+                        and not current and not in_use
+                    )
                     start_val = _safe_int(child.get("start"))
                     start_bytes = start_val * 512
                     parts.append({
@@ -269,6 +282,7 @@ def list_partitions(disk: str):
                         "mountpoints": mounts,
                         "efi": is_efi,
                         "current": current,
+                        "in_use": in_use,
                         "alongside_candidate": alongside_candidate,
                     })
                 walk(child.get("children"))
@@ -276,6 +290,10 @@ def list_partitions(disk: str):
         walk(devices)
     except Exception as exc:
         print(f"partition scan failed for {disk}: {exc}", file=sys.stderr)
+        if strict:
+            raise RuntimeError(
+                f"Could not read the partition table on {disk}. No storage changes were made."
+            ) from exc
     return parts
 
 
@@ -291,16 +309,25 @@ def list_free_space(disk: str) -> list[dict]:
         print(f"free space scan failed for {disk}: {exc}", file=sys.stderr)
         return []
 
+    try:
+        partitions = list_partitions(disk, strict=True)
+    except RuntimeError:
+        return []
+
     spans = []
-    for part in list_partitions(disk):
+    for part in partitions:
         name = part.get("name")
         size = _safe_int(part.get("size_bytes"))
         if not name or size <= 0:
-            continue
+            return []
         try:
-            start = _partition_start_bytes(name)
+            start = _safe_int(part.get("start_bytes"), -1)
+            if start < 0:
+                start = _partition_start_bytes(name)
         except Exception:
-            continue
+            return []
+        if start < 0 or start + size > disk_size:
+            return []
         spans.append((start, start + size))
     spans.sort()
 
@@ -385,8 +412,10 @@ def _partitions_after(disk: str, partition: str) -> list[dict]:
                 if name and name != partition and _safe_int(item.get("start"), -1) * 512 > part_start:
                     found.append(item)
             stack.extend(item.get("children") or [])
-    except Exception:
-        return []
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not verify the partition order on {disk}. No storage changes were made."
+        ) from exc
     return found
 
 
