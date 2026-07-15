@@ -582,15 +582,32 @@ QPushButton#saml-cancel:pressed {
             self._info.setText("SAML completed, but the VPN portal did not return a GP auth token.")
             self._status_msg.setText("VPN token not received")
 
-        def _emit_cookie(self, cookie_str: str) -> None:
+        def _teardown_webengine(self) -> None:
+            # QWebEngineProfile must outlive every Page/View created from it.
+            # _profile, _page, and _view are otherwise independent children of
+            # this dialog, so leaving their destruction to Qt's default
+            # parent/child teardown order crashes with "Release of profile
+            # requested but WebEnginePage still not deleted." Detach and
+            # schedule deletion in the safe order explicitly, from every path
+            # that ends the dialog (success and cancel/close alike).
             if self._done:
                 return
             self._done = True
-            self._status_msg.setText("Sign-in complete")
             self._view.setPage(None)
             self._page.deleteLater()
+            self._profile.deleteLater()
+
+        def _emit_cookie(self, cookie_str: str) -> None:
+            if self._done:
+                return
+            self._teardown_webengine()
+            self._status_msg.setText("Sign-in complete")
             self.cookie_ready.emit(cookie_str)
             self.accept()
+
+        def reject(self) -> None:
+            self._teardown_webengine()
+            super().reject()
 
 
 class _VpnConnectWorker(TrackedThread):
@@ -918,6 +935,7 @@ class VpnPage(Page):
         dlg.cookie_ready.connect(self._on_saml_cookie)
         dlg.rejected.connect(self._on_saml_cancelled)
         dlg.exec()
+        dlg.deleteLater()
 
     def _on_saml_cookie(self, cookie: str) -> None:
         self._saml_pending = False
