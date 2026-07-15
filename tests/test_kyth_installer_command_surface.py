@@ -92,6 +92,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
 
         with mock.patch.object(install, "_run_cmd") as run_cmd, \
              mock.patch.object(install, "run_command") as run_command, \
+             mock.patch.object(install, "unmount_target_disk") as unmount_target_disk, \
              mock.patch.object(install, "get_root_partition", return_value="/dev/sda3"):
             target_part, root_part, alongside_mount = install._prepare_install_storage(
                 "/dev/sda",
@@ -104,6 +105,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             )
 
         self.assertEqual((target_part, root_part, alongside_mount), ("", "/dev/sda3", ""))
+        unmount_target_disk.assert_called_once_with("/dev/sda", logs.append)
 
     def test_storage_phase_returns_partition_context_for_non_wipe_modes(self):
         cases = ["alongside", "free-space", "resize-ntfs"]
