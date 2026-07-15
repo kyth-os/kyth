@@ -302,7 +302,7 @@ fi
 # ── Kernel args (bootc kargs.d) ───────────────────────────────────────────────
 mkdir -p /usr/lib/bootc/kargs.d
 cat >/usr/lib/bootc/kargs.d/99-kyth.toml <<'KARGSEOF'
-kargs = ["quiet", "rhgb", "splash", "rd.plymouth=1", "plymouth.enable=1", "plymouth.ignore-serial-consoles", "systemd.show_status=false", "rd.systemd.show_status=false", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0", "threadirqs"]
+kargs = ["quiet", "rhgb", "splash", "rd.plymouth=1", "plymouth.enable=1", "plymouth.ignore-serial-consoles", "systemd.show_status=false", "rd.systemd.show_status=false", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0", "threadirqs", "amdgpu.runpm=0"]
 KARGSEOF
 
 # ── SDDM — ensure graphical target ───────────────────────────────────────────
