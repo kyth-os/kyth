@@ -38,6 +38,34 @@ class InstallerWebuiTests(unittest.TestCase):
         self.assertIn("goto(S.password ? 'review' : 'config')", js)
         self.assertNotIn("goto(S.password ? 'review' : 'configure')", js)
 
+    def test_backend_route_table_keeps_frontend_api_paths(self):
+        expected = {
+            ("GET", "/api/disks"),
+            ("GET", "/api/free-space"),
+            ("GET", "/api/partitions"),
+            ("GET", "/api/timezones"),
+            ("GET", "/api/log"),
+            ("POST", "/api/start"),
+        }
+        actual = {(route.method, route.path) for route in plan.ROUTES.values()}
+
+        self.assertTrue(expected.issubset(actual))
+
+    def test_webui_and_backend_share_install_mode_names(self):
+        js = (WEBUI_DIR / "app.js").read_text()
+
+        for field in (
+            "install_mode",
+            "target_partition",
+            "resize_partition",
+            "free_region_start",
+            "free_region_end",
+        ):
+            self.assertIn(field, js)
+
+        for mode in ("wipe", "alongside", "free-space", "resize-ntfs"):
+            self.assertEqual(plan._install_plan_from_state({"install_mode": mode}).mode, mode)
+
 
 class InstallerStorageTests(unittest.TestCase):
     def setUp(self):
@@ -531,6 +559,11 @@ class InstallerServerConfirmationTests(unittest.TestCase):
         handler.send_error.assert_not_called()
         written = handler.wfile.getvalue().decode().lower()
         self.assertIn('"started": true', written)
+        self.assertEqual(install._state["disk"], "/dev/sda")
+        self.assertEqual(install._state["install_mode"], "wipe")
+        self.assertEqual(install._state["username"], "user")
+        self.assertEqual(install._state["timezone"], "UTC")
+        self.assertTrue(install._state["password_hash"].startswith("$6$"))
 
     @patch.object(server.Handler, "_require_same_origin_context", return_value=True)
     @patch.object(server.Handler, "_require_auth", return_value=True)

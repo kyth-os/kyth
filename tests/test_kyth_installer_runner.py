@@ -48,6 +48,15 @@ class InstallerRunnerTests(unittest.TestCase):
             run_command(["mkfs.btrfs"], description="format root failed", check=True)
 
     @mock.patch("kyth_installer.runner.subprocess.run")
+    def test_non_checked_failure_returns_process(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(["false"], 1)
+
+        result = run_command(["false"])
+
+        self.assertEqual(result.returncode, 1)
+        mock_run.assert_called_once_with(["false"], timeout=None)
+
+    @mock.patch("kyth_installer.runner.subprocess.run")
     def test_timeout_gets_context(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(
             cmd=["partprobe"],

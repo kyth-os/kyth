@@ -11,10 +11,10 @@ from .runner import run_command
 
 
 def _source_imgref(image: str) -> str:
-    # Allow installer env to pass an explicit containers/image transport, e.g.
-    # oci:/usr/share/kyth/image:latest for local QEMU test ISOs. Plain image
-    # names still default to docker:// for registry installs.
-    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", image):
+    image = (image or "").strip()
+    if not image:
+        return SOURCE_IMAGE
+    if image.startswith(("docker://", "containers-storage:", "ostree:")):
         return image
     return f"docker://{image}"
 

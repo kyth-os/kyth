@@ -229,6 +229,8 @@ def _prepare_install_context(log):
 def _prepare_install_storage(
     disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount
 ):
+    target_part = ""
+    root_part = ""
     if install_mode == "alongside":
         target_part = _state.get("target_partition", "")
         efi_part    = _state.get("efi_partition", "")
