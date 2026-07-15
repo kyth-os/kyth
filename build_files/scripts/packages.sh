@@ -511,10 +511,18 @@ dnf5 install -y --skip-unavailable \
 # Clear the exclude for this one transaction, pin kernel-devel to the exact
 # kernel in the image so akmods finds matching headers at first boot, and
 # verify the result so a regression fails the build instead of first boot.
+#
+# --disablerepo=fedora-multimedia: the negativo17 disable earlier in this
+# script doesn't reliably hold all the way to here (same class of leak
+# mesa-git.sh guards against). Left enabled, dnf5 resolves this transaction
+# across both RPM Fusion and negativo17 and picks up negativo17's
+# nvidia-driver-common alongside RPM Fusion's xorg-x11-drv-nvidia-power —
+# both ship /usr/lib/systemd/system/nvidia-powerd.service and the transaction
+# fails outright.
 KERNEL_FLAVOR="$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)"
 if [[ "${KERNEL_FLAVOR}" == "fedora" ]]; then
 	KERNEL_VR=$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort -V | tail -n 1)
-	dnf5 install -y --setopt=excludepkgs= \
+	dnf5 install -y --setopt=excludepkgs= --disablerepo=fedora-multimedia \
 		"kernel-devel-${KERNEL_VR}" \
 		akmod-nvidia \
 		xorg-x11-drv-nvidia \
@@ -527,7 +535,7 @@ if [[ "${KERNEL_FLAVOR}" == "fedora" ]]; then
 else
 	# CachyOS flavor: matching headers (kernel-cachyos-devel-matched) come from
 	# the COPR in build_base; only the akmod machinery is needed here.
-	dnf5 install -y --setopt=excludepkgs= \
+	dnf5 install -y --setopt=excludepkgs= --disablerepo=fedora-multimedia \
 		akmod-nvidia \
 		xorg-x11-drv-nvidia \
 		xorg-x11-drv-nvidia-libs \
@@ -536,6 +544,12 @@ else
 		egl-wayland
 	rpm -q akmod-nvidia akmods \
 		xorg-x11-drv-nvidia egl-wayland
+fi
+
+nvidia_origin=$(rpm -q --queryformat '%{VENDOR} %{PACKAGER}\n' akmod-nvidia xorg-x11-drv-nvidia 2>/dev/null || true)
+if grep -Eiq 'negativo17|fedora-multimedia' <<<"${nvidia_origin}"; then
+	echo "ERROR: NVIDIA stack installed from negativo17 despite --disablerepo: ${nvidia_origin:-unknown}"
+	exit 1
 fi
 # nvidia-vaapi-driver and 32-bit CUDA libs: best-effort — not yet consistently
 # published for Fedora 44 in RPM Fusion nonfree. Install when available;
