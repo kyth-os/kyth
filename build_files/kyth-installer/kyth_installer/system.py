@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
+from .runner import run_command
 
 
 def _as_root(cmd: list[str]) -> list[str]:
@@ -142,7 +143,7 @@ def ensure_system_accounts(deploy_root: str, log) -> None:
         os.chmod(shadow, 0o000)
 
     sddm_home = root / "var/lib/sddm"
-    subprocess.run(_as_root(["mkdir", "-p", str(sddm_home)]), check=True)
+    run_command(_as_root(["mkdir", "-p", str(sddm_home)]), check=True)
     
     # Read the actual sddm UID/GID from target's etc/passwd to support dynamic allocation
     # and ensure numeric chown works even if the host environment has no sddm user/group.
@@ -153,10 +154,10 @@ def ensure_system_accounts(deploy_root: str, log) -> None:
             if len(parts) >= 4:
                 sddm_uid, sddm_gid = parts[2], parts[3]
                 break
-    subprocess.run(_as_root(["chown", f"{sddm_uid}:{sddm_gid}", str(sddm_home)]), check=False)
+    run_command(_as_root(["chown", f"{sddm_uid}:{sddm_gid}", str(sddm_home)]), check=False)
     restorecon = shutil.which("restorecon")
     if restorecon:
-        subprocess.run(
+        run_command(
             _as_root([
                 restorecon,
                 str(etc / "passwd"),
@@ -202,7 +203,7 @@ def unmount_target_disk(disk: str, log) -> None:
     """Unmount any live-session mounts that would block wiping disk."""
     log(f"Unmounting any existing mounts on {disk} ...")
     for mount in ("/mnt", "/sysroot", "/target"):
-        subprocess.run(_as_root(["umount", "-R", mount]), check=False)
+        run_command(_as_root(["umount", "-R", mount]), check=False)
 
     try:
         mounts = _lsblk_target_mounts(disk)
@@ -212,7 +213,7 @@ def unmount_target_disk(disk: str, log) -> None:
 
     for dev, mount in mounts:
         log(f"Unmounting {dev} from {mount}")
-        result = subprocess.run(
+        result = run_command(
             _as_root(["umount", "-R", mount]),
             capture_output=True, text=True,
         )
@@ -222,7 +223,7 @@ def unmount_target_disk(disk: str, log) -> None:
             if mount in _CRITICAL_MOUNTS:
                 log(f"Skipping lazy unmount of running system mount: {mount}")
             else:
-                subprocess.run(_as_root(["umount", "-l", mount]), check=False)
+                run_command(_as_root(["umount", "-l", mount]), check=False)
 
     try:
         remaining = _lsblk_target_mounts(disk)
@@ -257,7 +258,7 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
         return "skipped"
 
     try:
-        result = subprocess.run(
+        result = run_command(
             _as_root([mokutil, "--sb-state"]),
             capture_output=True, text=True, timeout=5,
         )
@@ -270,7 +271,7 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
         return "skipped"
 
     try:
-        enrolled = subprocess.run(
+        enrolled = run_command(
             _as_root([mokutil, "--list-enrolled"]),
             capture_output=True, text=True, timeout=5,
         )
@@ -281,7 +282,7 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
         pass
 
     try:
-        pending = subprocess.run(
+        pending = run_command(
             _as_root([mokutil, "--list-new"]),
             capture_output=True, text=True, timeout=5,
         )
@@ -292,7 +293,7 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
         pass
 
     try:
-        result = subprocess.run(
+        result = run_command(
             _as_root([mokutil, "--import", str(cert_der), "--stdin-passwd"]),
             input=f"{mok_password}\n", text=True, capture_output=True, timeout=15,
         )
@@ -311,7 +312,7 @@ def _hash_password(password: str) -> str:
     # would surface as a confusing "invalid SHA-512 crypt value" error.
     if not password:
         raise RuntimeError("Password cannot be empty. Return to the Configure step and re-enter it.")
-    result = subprocess.run(
+    result = run_command(
         ["openssl", "passwd", "-6", "-stdin"],
         input=password,
         text=True,

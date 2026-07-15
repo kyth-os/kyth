@@ -57,6 +57,7 @@ from .disk import (
     list_partitions,
 )
 from .system import _as_root, unmount_target_disk
+from .runner import run_command
 
 
 @dataclass(frozen=True)
@@ -148,8 +149,8 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
 
 
 def _settle_block_devices():
-    subprocess.run(_as_root(["partprobe"]), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-    subprocess.run(["udevadm", "settle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+    run_command(_as_root(["partprobe"]), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+    run_command(["udevadm", "settle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
 
 
 def _is_gpt_disk(disk: str) -> bool:
@@ -190,12 +191,12 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     before = {p["name"] for p in list_partitions(disk) if p.get("name")}
     bios_end = gap_start + BIOS_BOOT_BYTES
     log("Creating BIOS boot partition for GRUB...")
-    subprocess.run(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "biosboot", f"{gap_start}B", f"{bios_end}B"]), check=True, timeout=120)
+    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "biosboot", f"{gap_start}B", f"{bios_end}B"]), check=True, timeout=120)
     _settle_block_devices()
     created = _latest_partition_on_disk(disk, before)
     if not created:
         raise RuntimeError("The installer could not find the new BIOS boot partition after partitioning.")
-    subprocess.run(_as_root(["parted", "-s", disk, "set", str(_partition_number(created)), "bios_grub", "on"]), check=True, timeout=120)
+    run_command(_as_root(["parted", "-s", disk, "set", str(_partition_number(created)), "bios_grub", "on"]), check=True, timeout=120)
     _settle_block_devices()
     return bios_end
 
@@ -255,12 +256,12 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
 
     log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
     log("Checking NTFS resize safety...")
-    info = subprocess.run(_as_root(["ntfsresize", "--info", partition]), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+    info = run_command(_as_root(["ntfsresize", "--info", partition]), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
     if info.returncode != 0:
         raise RuntimeError("NTFS partition is not clean enough to resize. Boot Windows, disable Fast Startup/hibernation, run chkdsk, and try again.")
 
     size_arg = str(new_ntfs_size)
-    dry = subprocess.run(
+    dry = run_command(
         _as_root(["ntfsresize", "--no-action", "--size", size_arg, partition]),
         text=True,
         stdout=subprocess.PIPE,
@@ -277,7 +278,7 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
             raise RuntimeError(f"NTFS resize dry-run failed. Output:\n{dry.stdout}\nBoot Windows, shrink the volume there, then return to the installer.")
 
     log("Shrinking NTFS filesystem...")
-    subprocess.run(
+    run_command(
         _as_root(["ntfsresize", "--force", "--size", size_arg, partition]),
         text=True,
         stdout=subprocess.PIPE,
@@ -291,7 +292,7 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     # "Shrinking a partition can cause data loss, are you sure?" and exits 1
     # when it cannot prompt. ---pretend-input-tty with "Yes" piped on stdin is
     # the documented way to answer that prompt non-interactively.
-    subprocess.run(
+    run_command(
         _as_root(["parted", "---pretend-input-tty", disk, "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
         input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True, timeout=120,
     )
@@ -301,13 +302,13 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
     log("Creating KythOS Btrfs partition in freed space...")
-    subprocess.run(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", "100%"]), check=True, timeout=120)
+    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", "100%"]), check=True, timeout=120)
     _settle_block_devices()
 
     created = _latest_partition_on_disk(disk, before)
     if not created:
         raise RuntimeError("The installer could not find the new KythOS partition after resizing.")
-    subprocess.run(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
+    run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
     log(f"Created target partition {created}")
     return disk, created
 
@@ -352,13 +353,13 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
     log(f"Creating KythOS Btrfs partition in {_human_size(end - start)} of free space...")
-    subprocess.run(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{start}B", f"{end}B"]), check=True, timeout=120)
+    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{start}B", f"{end}B"]), check=True, timeout=120)
     _settle_block_devices()
 
     created = _latest_partition_on_disk(disk, before)
     if not created:
         raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
-    subprocess.run(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
+    run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
     log(f"Created target partition {created}")
     return disk, created
 

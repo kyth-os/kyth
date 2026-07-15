@@ -577,3 +577,206 @@ def _scan_steamapps_manifests(steamapps_dir: str) -> list[dict]:
     games.sort(key=lambda item: item["name"].lower())
     return games
  # _scan_steamapps_manifests
+
+# Static gaming tool definitions used by GamingPage.
+GAMING_TOOLS = [
+    {
+        "flatpak": "com.valvesoftware.Steam",
+        "name": "Steam",
+        "desc": "Valve's gaming platform plus PC games through Proton.",
+        "ujust": "install-steam",
+        "launch": ["flatpak", "run", "com.valvesoftware.Steam"],
+    },
+    {
+        "flatpak": "net.lutris.Lutris",
+        "name": "Lutris",
+        "desc": "Battle.net, EA App, Ubisoft Connect, and other compatibility launchers.",
+        "ujust": "install-lutris",
+        "launch": ["flatpak", "run", "net.lutris.Lutris"],
+    },
+    {
+        "flatpak": "com.heroicgameslauncher.hgl",
+        "name": "Heroic Games Launcher",
+        "desc": "Epic Games, GOG, and Amazon Games library in one place.",
+        "ujust": "install-heroic",
+        "launch": ["flatpak", "run", "com.heroicgameslauncher.hgl"],
+    },
+    {
+        "flatpak": "com.usebottles.bottles",
+        "name": "Bottles",
+        "desc": "Best for running standalone .exe and .msi installers in isolated app environments.",
+        "ujust": "install-bottles",
+        "launch": ["flatpak", "run", "com.usebottles.bottles"],
+    },
+    {
+        "flatpak": "com.github.mtkennerly.ludusavi",
+        "name": "Ludusavi",
+        "desc": "Back up and restore game saves across Steam, Heroic, Lutris, and PC migrations.",
+        "ujust": "install-ludusavi",
+        "launch": ["flatpak", "run", "com.github.mtkennerly.ludusavi"],
+    },
+    {
+        "flatpak": "org.prismlauncher.PrismLauncher",
+        "name": "Prism Launcher",
+        "desc": "Minecraft launcher with modpacks, multiple instances, and Java version control.",
+        "ujust": "install-prismlauncher",
+        "launch": ["flatpak", "run", "org.prismlauncher.PrismLauncher"],
+    },
+    {
+        "flatpak": "io.itch.itch",
+        "name": "Itch.io",
+        "desc": "Indie game store and library manager.",
+        "ujust": "install-itch",
+        "launch": ["flatpak", "run", "io.itch.itch"],
+    },
+    {
+        "flatpak": "org.libretro.RetroArch",
+        "name": "RetroArch",
+        "desc": "Multi-system emulator frontend (NES, SNES, PS1, N64, …).",
+        "ujust": "install-retroarch",
+        "launch": ["flatpak", "run", "org.libretro.RetroArch"],
+    },
+    {
+        "flatpak": "org.freedesktop.Piper",
+        "name": "Piper",
+        "desc": "GUI for configuring gaming mice — DPI, buttons, and LEDs.",
+        "ujust": "install-piper",
+        "launch": ["flatpak", "run", "org.freedesktop.Piper"],
+    },
+    {
+        "flatpak": "org.openrgb.OpenRGB",
+        "name": "OpenRGB",
+        "desc": "Unified RGB lighting control for motherboards, RAM, GPUs, and peripherals. Pre-installed — RGB profiles are applied automatically at login.",
+        "ujust": "install-openrgb",
+        "launch": ["openrgb"],
+    },
+    {
+        "flatpak": "io.github.benjamimgois.goverlay",
+        "name": "GOverlay",
+        "desc": "Graphical tuning for MangoHud and vkBasalt overlays — adjust metrics, colors, and presets without editing config files.",
+        "ujust": "install-goverlay",
+        "launch": ["flatpak", "run", "io.github.benjamimgois.goverlay"],
+    },
+    {
+        "flatpak": "io.github.radiolamp.mangojuice",
+        "name": "MangoJuice",
+        "desc": "Lightweight MangoHud configuration editor for overlay layout and metrics.",
+        "ujust": "install-mangojuice",
+        "launch": ["flatpak", "run", "io.github.radiolamp.mangojuice"],
+    },
+    {
+        "flatpak": "com.dec05eba.gpu_screen_recorder",
+        "name": "GPU Screen Recorder",
+        "desc": "Near-zero overhead gameplay capture and instant replay using AMD/NVIDIA GPU encoding.",
+        "ujust": "install-gpu-screen-recorder",
+        "launch": ["flatpak", "run", "com.dec05eba.gpu_screen_recorder"],
+    },
+    {
+        "flatpak": "dev.vencord.Vesktop",
+        "name": "Vesktop",
+        "desc": "Discord client with native Wayland support, better screenshare, and no telemetry.",
+        "ujust": "install-vesktop",
+        "launch": ["flatpak", "run", "dev.vencord.Vesktop"],
+    },
+]
+
+# Gaming action command builders extracted from GamingPage.
+def discord_screenshare_fix_command():
+    return [
+        "bash", "-c",
+        "flatpak override --user com.discordapp.Discord "
+        "--env=ELECTRON_OZONE_PLATFORM_HINT=auto "
+        "--socket=wayland --socket=fallback-x11 --device=dri "
+        "--talk-name=org.freedesktop.portal.Desktop "
+        "--talk-name=org.kde.StatusNotifierWatcher",
+    ]
+
+def obs_pipewire_fix_command():
+    return [
+        "bash", "-c",
+        "flatpak override --user com.obsproject.Studio "
+        "--socket=wayland --socket=pulseaudio --device=dri "
+        "--talk-name=org.freedesktop.portal.Desktop",
+    ]
+
+# Parameterized gaming action command builders extracted from GamingPage.
+def opticscaler_deploy_command(game_dir):
+    return ["ujust", "deploy-opticscaler", game_dir]
+
+def heroic_epic_launcher_command():
+    return ["flatpak", "run", "com.heroicgameslauncher.hgl"]
+
+def lutris_installer_command(lutris_target):
+    return ["flatpak", "run", "net.lutris.Lutris", lutris_target]
+
+# Scheduler command builder extracted from GamingPage.
+def scx_scheduler_command(scheduler):
+    if scheduler == "stop":
+        return ["kyth-scx", "stop"]
+        label = "Stopping sched-ext loader"
+    else:
+        return ["kyth-scx", "set", scheduler]
+        label = f"Switching sched-ext scheduler to {scheduler}"
+
+# Page-level gaming helpers extracted from GamingPage.
+def command_details(cmd: list[str], result=None, exc: Exception | None = None) -> str:
+    lines = ["Command:", "  " + " ".join(cmd)]
+    if exc is not None:
+        lines.extend(["", "Error:", str(exc)])
+        return "\n".join(lines)
+    if result is None:
+        return "\n".join(lines)
+    lines.extend(["", f"Exit code: {result.returncode}"])
+    stdout = result.stdout.decode("utf-8", errors="replace").strip() if result.stdout else ""
+    stderr = result.stderr.decode("utf-8", errors="replace").strip() if result.stderr else ""
+    if stdout:
+        lines.extend(["", "stdout:", stdout])
+    if stderr:
+        lines.extend(["", "stderr:", stderr])
+    return "\n".join(lines)
+
+def find_compat_game(compat_games, query: str):
+    needle = query.strip().lower()
+    if not needle:
+        return None
+    for game in compat_games:
+        if game.name.lower() == needle:
+            return game
+    for game in compat_games:
+        if needle in game.name.lower() or game.name.lower() in needle:
+            return game
+    return None
+
+def recommended_launcher_for_game(game) -> str:
+    name = game.name.lower()
+    if "overwatch" in name:
+        return "Lutris with Battle.net via umu-run"
+    if any(token in name for token in ("red dead", "gta")):
+        return "Steam when owned there; otherwise Lutris/Heroic plus the Rockstar launcher"
+    if game.status == "blocked":
+        return "None on Linux until the publisher enables support"
+    if game.status == "native":
+        return "Steam native Linux build"
+    return "Steam with Proton Experimental first, then Proton-CachyOS"
+
+def recommended_profile_for_game(game) -> str:
+    if game.status == "blocked":
+        return "Do not try bypass launch options; use other system or wait for publisher support."
+    if any(token in game.name.lower() for token in ("cyberpunk", "red dead", "hogwarts")):
+        return "kyth-gamescope quality -- %command%"
+    if game.anticheat in ("EAC", "BattlEye", "VAC", "Warden"):
+        return "game-performance --profile gaming -- %command%"
+    return "kyth-gamescope quality -- %command%"
+
+def blocked_compat_lookup(compat_games) -> tuple[dict[str, str], set[str]]:
+    """Blocked Steam appids (from compat source URLs) and lowercase names."""
+    appids: dict[str, str] = {}
+    names: set[str] = set()
+    for game in compat_games:
+        if game.status != "blocked":
+            continue
+        names.add(game.name.lower())
+        m = re.search(r"protondb\.com/app/(\d+)", game.source_url)
+        if m:
+            appids[m.group(1)] = game.name
+    return appids, names

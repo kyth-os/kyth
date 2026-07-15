@@ -19,6 +19,7 @@ from .config import LOG_FILE, SKIP_FETCH_CHECK
 from .disk import get_root_partition
 from .imagesrc import _friendly_network_error, _install_images, _network_preflight
 from .plan import _prepare_install_plan, _validate_install_target
+from .runner import run_command
 from .system import (
     _as_root,
     _try_stage_mok_enrollment,
@@ -76,252 +77,384 @@ def _parse_size_bytes(size_str: str) -> int:
         return 0
 
 
-def _run_install() -> None:
-    with _events_lock:
-        _events.clear()
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LOG_FILE.write_text("")
-    os.chmod(LOG_FILE, 0o600)
+def _run_cmd(
+    cmd: list[str],
+    pct_start: int,
+    pct_end: int,
+    log,
+    progress,
+    stall_timeout: int = 600,
+    absolute_timeout: int = 3600,
+) -> None:
+    full_cmd = _as_root(cmd)
+    log(f"$ {' '.join(full_cmd)}")
+    proc = subprocess.Popen(
+        full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1,
+    )
 
-    def log(msg: str) -> None:
-        _push({"type": "log", "text": msg})
-        with LOG_FILE.open("a") as f:
-            f.write(msg + "\n")
+    _total_bytes:  list[int]  = [0]
+    _rx_start:     list[int]  = [0]
+    _monitor_stop: list[bool] = [False]
 
-    def progress(pct: int) -> None:
-        _push({"type": "progress", "value": pct})
+    def _net_monitor() -> None:
+        rx_prev = 0
+        t_prev  = time.monotonic()
+        speed_samples: list[float] = []
+        while not _monitor_stop[0]:
+            time.sleep(1)
+            if _total_bytes[0] == 0 or _rx_start[0] == 0:
+                continue
+            rx_now     = _get_rx_bytes()
+            t_now      = time.monotonic()
+            downloaded = min(_total_bytes[0], max(0, rx_now - _rx_start[0]))
+            frac       = min(0.95, downloaded / _total_bytes[0])
+            progress(int(pct_start + frac * (pct_end - pct_start)))
+            dt = t_now - t_prev
+            if dt > 0 and rx_prev > 0:
+                speed_samples.append((rx_now - rx_prev) / dt)
+                if len(speed_samples) > 5:
+                    speed_samples.pop(0)
+            rx_prev = rx_now
+            t_prev  = t_now
+            if speed_samples:
+                avg_speed = sum(speed_samples) / len(speed_samples)
+                remaining = max(0, _total_bytes[0] - downloaded)
+                _push({"type": "stats",
+                       "downloaded": downloaded,
+                       "total":      _total_bytes[0],
+                       "speed":      int(avg_speed),
+                       "eta_sec":    int(remaining / avg_speed) if avg_speed > 0 else 0})
 
-    def run_cmd(
-        cmd: list[str],
-        pct_start: int,
-        pct_end: int,
-        stall_timeout: int = 600,
-        absolute_timeout: int = 3600,
-    ) -> None:
-        full_cmd = _as_root(cmd)
-        log(f"$ {' '.join(full_cmd)}")
-        proc = subprocess.Popen(
-            full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
-        )
+    monitor_thread = threading.Thread(target=_net_monitor, daemon=True)
+    monitor_thread.start()
 
-        _total_bytes:  list[int]  = [0]
-        _rx_start:     list[int]  = [0]
-        _monitor_stop: list[bool] = [False]
-
-        def _net_monitor() -> None:
-            rx_prev = 0
-            t_prev  = time.monotonic()
-            speed_samples: list[float] = []
-            while not _monitor_stop[0]:
-                time.sleep(1)
-                if _total_bytes[0] == 0 or _rx_start[0] == 0:
-                    continue
-                rx_now     = _get_rx_bytes()
-                t_now      = time.monotonic()
-                downloaded = min(_total_bytes[0], max(0, rx_now - _rx_start[0]))
-                frac       = min(0.95, downloaded / _total_bytes[0])
-                progress(int(pct_start + frac * (pct_end - pct_start)))
-                dt = t_now - t_prev
-                if dt > 0 and rx_prev > 0:
-                    speed_samples.append((rx_now - rx_prev) / dt)
-                    if len(speed_samples) > 5:
-                        speed_samples.pop(0)
-                rx_prev = rx_now
-                t_prev  = t_now
-                if speed_samples:
-                    avg_speed = sum(speed_samples) / len(speed_samples)
-                    remaining = max(0, _total_bytes[0] - downloaded)
-                    _push({"type": "stats",
-                           "downloaded": downloaded,
-                           "total":      _total_bytes[0],
-                           "speed":      int(avg_speed),
-                           "eta_sec":    int(remaining / avg_speed) if avg_speed > 0 else 0})
-
-        monitor_thread = threading.Thread(target=_net_monitor, daemon=True)
-        monitor_thread.start()
-
-        STALL_TIMEOUT    = stall_timeout
-        ABSOLUTE_TIMEOUT = absolute_timeout
-        started       = time.monotonic()
-        last_output   = started
-        last_rx       = _get_rx_bytes()
-        recent_output: list[str] = []
-        while True:
-            ready, _, _ = select.select([proc.stdout], [], [], 30)
-            if ready:
-                line = proc.stdout.readline()
-                if not line:
-                    break
-                last_output = time.monotonic()
-                stripped = line.rstrip()
-                log(stripped)
-                recent_output.append(stripped)
-                recent_output = recent_output[-30:]
-                if "layers needed:" in stripped:
-                    try:
-                        m = stripped.split("layers needed:")[1]
-                        size_str = m.split("(")[1].rstrip(")") if "(" in m else ""
-                        _total_bytes[0] = _parse_size_bytes(size_str)
-                        _rx_start[0]    = _get_rx_bytes()
-                    except Exception:
-                        pass
-            else:
-                now = time.monotonic()
-                if now - started > ABSOLUTE_TIMEOUT:
-                    proc.kill()
-                    raise RuntimeError(
-                        f"Command exceeded absolute timeout of {ABSOLUTE_TIMEOUT // 60} min"
-                    )
-                rx_now = _get_rx_bytes()
-                if rx_now > last_rx:
-                    last_rx     = rx_now
-                    last_output = now
-                elif now - last_output > STALL_TIMEOUT:
-                    proc.kill()
-                    raise RuntimeError(
-                        f"Command timed out (no output for {STALL_TIMEOUT // 60} min)"
-                    )
-
-        _monitor_stop[0] = True
-        monitor_thread.join(timeout=2)
-        proc.wait()
-        if proc.returncode != 0:
-            lowered = "\n".join(recent_output).lower()
-            network_tokens = (
-                "network is unreachable",
-                "no route to host",
-                "temporary failure in name resolution",
-                "name or service not known",
-                "could not resolve",
-                "connection timed out",
-                "i/o timeout",
-                "tls handshake timeout",
-                "connection reset",
-                "connection refused",
-            )
-            if any(token in lowered for token in network_tokens):
-                raise RuntimeError(
-                    _friendly_network_error(
-                        "The image download lost network access before it finished."
-                    )
-                )
-            raise RuntimeError(
-                f"Command failed (exit {proc.returncode}):\n  {' '.join(full_cmd)}"
-            )
-        progress(pct_end)
-
-    alongside_mount = ""
-
-    try:
-        install_plan = _prepare_install_plan(_state, log)
-        disk, target_partition = _validate_install_target(_state)
-        _state["disk"] = disk
-        if target_partition:
-            _state["target_partition"] = target_partition
-        else:
-            _state.pop("target_partition", None)
-        disk = _state["disk"]
-        kernel = _state.get("kernel", "fedora")
-        install_mode = install_plan.mode
-        src_ref, tgt_ref = _install_images(kernel)
-        if not SKIP_FETCH_CHECK:
-            log("Running network preflight check...")
-            net_err = _network_preflight(src_ref)
-            if net_err:
-                raise RuntimeError(net_err)
-        log(f"Mode         : {install_mode}")
-        log(f"Kernel       : {kernel}")
-        log(f"Source imgref: {src_ref}")
-        log(f"Target image : {tgt_ref}")
-        log(f"Disk         : {disk}")
-        log("")
-
-        log("── Phase 1: Writing OS image to disk ─────────────────────────────")
-
-        if install_mode == "alongside":
-            target_part = _state.get("target_partition", "")
-            efi_part    = _state.get("efi_partition", "")
-            alongside_mount = "/var/tmp/kyth-alongside-target"
-
-            log(f"Target partition : {target_part}")
-            log(f"EFI partition    : {efi_part or '(none detected)'}")
-
-            subprocess.run(_as_root(["umount", "-l", target_part]), check=False, capture_output=True)
-            subprocess.run(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
-
-            log(f"Formatting {target_part} as btrfs ...")
-            run_cmd(["mkfs.btrfs", "-f", "-L", "KythOS", target_part], 5, 10)
-
-            # Create btrfs subvolumes @ and @home
-            log("Creating Btrfs subvolumes @ and @home ...")
-            btrfs_temp_root = "/var/tmp/kyth-btrfs-root"
-            subprocess.run(_as_root(["umount", "-l", btrfs_temp_root]), check=False, capture_output=True)
-            Path(btrfs_temp_root).mkdir(parents=True, exist_ok=True)
-            subprocess.run(_as_root(["mount", target_part, btrfs_temp_root]), check=True)
-            try:
-                subprocess.run(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
-                subprocess.run(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@home"]), check=True)
-                log("Setting Btrfs default subvolume to @ ...")
-                subprocess.run(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
-            finally:
-                subprocess.run(_as_root(["umount", "-l", btrfs_temp_root]), check=True)
-
-            Path(alongside_mount).mkdir(parents=True, exist_ok=True)
-            subprocess.run(_as_root(["mount", "-o", "subvol=@", target_part, alongside_mount]), check=True)
-            progress(11)
-
-            if efi_part:
-                efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
-                efi_mountpoint.mkdir(parents=True, exist_ok=True)
+    STALL_TIMEOUT    = stall_timeout
+    ABSOLUTE_TIMEOUT = absolute_timeout
+    started       = time.monotonic()
+    last_output   = started
+    last_rx       = _get_rx_bytes()
+    recent_output: list[str] = []
+    while True:
+        ready, _, _ = select.select([proc.stdout], [], [], 30)
+        if ready:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            last_output = time.monotonic()
+            stripped = line.rstrip()
+            log(stripped)
+            recent_output.append(stripped)
+            recent_output = recent_output[-30:]
+            if "layers needed:" in stripped:
                 try:
-                    current_efi_mnt = subprocess.check_output(
-                        ["findmnt", "-n", "-o", "MOUNTPOINT", efi_part],
-                        text=True, stderr=subprocess.DEVNULL, timeout=5,
-                    ).strip()
+                    m = stripped.split("layers needed:")[1]
+                    size_str = m.split("(")[1].rstrip(")") if "(" in m else ""
+                    _total_bytes[0] = _parse_size_bytes(size_str)
+                    _rx_start[0]    = _get_rx_bytes()
                 except Exception:
-                    current_efi_mnt = ""
-                if current_efi_mnt:
-                    subprocess.run(
-                        _as_root(["mount", "--bind", current_efi_mnt, str(efi_mountpoint)]),
-                        check=True,
-                    )
-                    log(f"EFI bind-mounted from {current_efi_mnt}")
-                else:
-                    subprocess.run(
-                        _as_root(["mount", efi_part, str(efi_mountpoint)]),
-                        check=True,
-                    )
-                    log(f"EFI mounted from {efi_part}")
-
-            install_cmd = [
-                "bootc", "install", "to-filesystem",
-                "--source-imgref", src_ref,
-                "--target-imgref", tgt_ref,
-                "--acknowledge-destructive",
-                "--karg=rootflags=subvol=@",
-            ]
-            if SKIP_FETCH_CHECK:
-                install_cmd.append("--skip-fetch-check")
-            install_cmd.append(alongside_mount)
-            run_cmd(install_cmd, 12, 90, stall_timeout=3600, absolute_timeout=14400)
-
-            root_part = target_part
-
+                    pass
         else:
-            unmount_target_disk(disk, log)
-            install_cmd = [
-                "bootc", "install", "to-disk",
-                "--source-imgref", src_ref,
-                "--target-imgref", tgt_ref,
-                "--filesystem", "btrfs",
-                "--wipe",
-            ]
-            if SKIP_FETCH_CHECK:
-                install_cmd.append("--skip-fetch-check")
-            install_cmd.append(disk)
-            run_cmd(install_cmd, 5, 90, stall_timeout=3600, absolute_timeout=14400)
-            root_part = get_root_partition(disk)
+            now = time.monotonic()
+            if now - started > ABSOLUTE_TIMEOUT:
+                proc.kill()
+                raise RuntimeError(
+                    f"Command exceeded absolute timeout of {ABSOLUTE_TIMEOUT // 60} min"
+                )
+            rx_now = _get_rx_bytes()
+            if rx_now > last_rx:
+                last_rx     = rx_now
+                last_output = now
+            elif now - last_output > STALL_TIMEOUT:
+                proc.kill()
+                raise RuntimeError(
+                    f"Command timed out (no output for {STALL_TIMEOUT // 60} min)"
+                )
+
+    _monitor_stop[0] = True
+    monitor_thread.join(timeout=2)
+    proc.wait()
+    if proc.returncode != 0:
+        lowered = "\n".join(recent_output).lower()
+        network_tokens = (
+            "network is unreachable",
+            "no route to host",
+            "temporary failure in name resolution",
+            "name or service not known",
+            "could not resolve",
+            "connection timed out",
+            "i/o timeout",
+            "tls handshake timeout",
+            "connection reset",
+            "connection refused",
+        )
+        if any(token in lowered for token in network_tokens):
+            raise RuntimeError(
+                _friendly_network_error(
+                    "The image download lost network access before it finished."
+                )
+            )
+        raise RuntimeError(
+            f"Command failed (exit {proc.returncode}):\n  {' '.join(full_cmd)}"
+        )
+    progress(pct_end)
+
+def _prepare_install_context(log):
+    install_plan = _prepare_install_plan(_state, log)
+    disk, target_partition = _validate_install_target(_state)
+    _state["disk"] = disk
+    if target_partition:
+        _state["target_partition"] = target_partition
+    else:
+        _state.pop("target_partition", None)
+    disk = _state["disk"]
+    kernel = _state.get("kernel", "fedora")
+    install_mode = install_plan.mode
+    src_ref, tgt_ref = _install_images(kernel)
+    if not SKIP_FETCH_CHECK:
+        log("Running network preflight check...")
+        net_err = _network_preflight(src_ref)
+        if net_err:
+            raise RuntimeError(net_err)
+    log(f"Mode         : {install_mode}")
+    log(f"Kernel       : {kernel}")
+    log(f"Source imgref: {src_ref}")
+    log(f"Target image : {tgt_ref}")
+    log(f"Disk         : {disk}")
+    log("")
+
+    log("── Phase 1: Writing OS image to disk ─────────────────────────────")
+    return disk, install_mode, kernel, src_ref, tgt_ref
+
+def _prepare_install_storage(
+    disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount
+):
+    if install_mode == "alongside":
+        target_part = _state.get("target_partition", "")
+        efi_part    = _state.get("efi_partition", "")
+        alongside_mount = "/var/tmp/kyth-alongside-target"
+
+        log(f"Target partition : {target_part}")
+        log(f"EFI partition    : {efi_part or '(none detected)'}")
+
+        run_command(_as_root(["umount", "-l", target_part]), check=False, capture_output=True)
+        run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
+
+        log(f"Formatting {target_part} as btrfs ...")
+        _run_cmd(["mkfs.btrfs", "-f", "-L", "KythOS", target_part], 5, 10, log, progress)
+
+        # Create btrfs subvolumes @ and @home
+        log("Creating Btrfs subvolumes @ and @home ...")
+        btrfs_temp_root = "/var/tmp/kyth-btrfs-root"
+        run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=False, capture_output=True)
+        Path(btrfs_temp_root).mkdir(parents=True, exist_ok=True)
+        run_command(_as_root(["mount", target_part, btrfs_temp_root]), check=True)
+        try:
+            run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
+            run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@home"]), check=True)
+            log("Setting Btrfs default subvolume to @ ...")
+            run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
+        finally:
+            run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=True)
+
+        Path(alongside_mount).mkdir(parents=True, exist_ok=True)
+        run_command(_as_root(["mount", "-o", "subvol=@", target_part, alongside_mount]), check=True)
+        progress(11)
+
+        if efi_part:
+            efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
+            efi_mountpoint.mkdir(parents=True, exist_ok=True)
+            try:
+                current_efi_mnt = subprocess.check_output(
+                    ["findmnt", "-n", "-o", "MOUNTPOINT", efi_part],
+                    text=True, stderr=subprocess.DEVNULL, timeout=5,
+                ).strip()
+            except Exception:
+                current_efi_mnt = ""
+            if current_efi_mnt:
+                run_command(
+                    _as_root(["mount", "--bind", current_efi_mnt, str(efi_mountpoint)]),
+                    check=True,
+                )
+                log(f"EFI bind-mounted from {current_efi_mnt}")
+            else:
+                run_command(
+                    _as_root(["mount", efi_part, str(efi_mountpoint)]),
+                    check=True,
+                )
+                log(f"EFI mounted from {efi_part}")
+
+        install_cmd = [
+            "bootc", "install", "to-filesystem",
+            "--source-imgref", src_ref,
+            "--target-imgref", tgt_ref,
+            "--acknowledge-destructive",
+            "--karg=rootflags=subvol=@",
+        ]
+        if SKIP_FETCH_CHECK:
+            install_cmd.append("--skip-fetch-check")
+        install_cmd.append(alongside_mount)
+        _run_cmd(install_cmd, 12, 90, log, progress, stall_timeout=3600, absolute_timeout=14400)
+
+        root_part = target_part
+
+    else:
+        unmount_target_disk(disk, log)
+        install_cmd = [
+            "bootc", "install", "to-disk",
+            "--source-imgref", src_ref,
+            "--target-imgref", tgt_ref,
+            "--filesystem", "btrfs",
+            "--wipe",
+        ]
+        if SKIP_FETCH_CHECK:
+            install_cmd.append("--skip-fetch-check")
+        install_cmd.append(disk)
+        _run_cmd(install_cmd, 5, 90, log, progress, stall_timeout=3600, absolute_timeout=14400)
+        root_part = get_root_partition(disk)
+    return target_part, root_part, alongside_mount
+
+def _configure_installed_system(
+    root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress
+):
+    try:
+        etc = find_deploy_etc(config_root)
+        if etc:
+            if install_mode == "alongside":
+                target_home = Path(config_root) / "ostree/deploy/default/var/home"
+                target_home.mkdir(parents=True, exist_ok=True)
+                run_command(_as_root(["umount", "-l", str(target_home)]), check=False, capture_output=True)
+                run_command(_as_root(["mount", "-o", "subvol=@home", target_part, str(target_home)]), check=True)
+
+                try:
+                    uuid_out = subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", target_part], text=True).strip()
+                    if uuid_out:
+                        fstab_path = Path(etc, "fstab")
+                        fstab_line = f"UUID={uuid_out} /var/home btrfs subvol=@home,compress=zstd:1 0 0\n"
+                        run_command(
+                            _as_root(["/usr/bin/tee", "-a", str(fstab_path)]),
+                            input=fstab_line, text=True,
+                            stdout=subprocess.DEVNULL, check=True
+                        )
+                        log(f"Fstab updated with Btrfs subvolume @home: {fstab_line.strip()}")
+                except Exception as fe:
+                    log(f"Warning: failed to update fstab with @home subvolume: {fe}")
+            run_command(
+                _as_root(["/usr/bin/tee", str(Path(etc, "hostname"))]),
+                input=f"{_state['hostname']}\n", text=True,
+                stdout=subprocess.DEVNULL, check=True,
+            )
+            log(f"Hostname : {_state['hostname']}")
+
+            run_command(
+                _as_root(["ln", "-snf",
+                          f"/usr/share/zoneinfo/{_state['timezone']}",
+                          str(Path(etc, "localtime"))]),
+                check=True,
+            )
+            log(f"Timezone : {_state['timezone']}")
+            progress(95)
+
+            deploy_root = str(Path(etc).parent)
+            ensure_system_accounts(deploy_root, log)
+
+            username = _state.get("username", "").strip()
+            password_hash = _state.get("password_hash", "")
+            if username and password_hash:
+                log(f"Creating user: {username}")
+                try:
+                    run_command(
+                        _as_root([
+                            "useradd", "--root", deploy_root,
+                            "-M", "-G", "wheel,video,audio,render",
+                            "-s", "/bin/bash", username,
+                        ]),
+                        check=True,
+                    )
+
+                    shadow_path = f"{etc}/shadow"
+                    cat_r = run_command(
+                        _as_root(["cat", shadow_path]),
+                        capture_output=True, text=True, check=True,
+                    )
+                    new_lines = []
+                    hash_written = False
+                    for line in cat_r.stdout.splitlines(keepends=True):
+                        if line.startswith(f"{username}:"):
+                            fields = line.split(":")
+                            fields[1] = password_hash
+                            new_lines.append(":".join(fields))
+                            hash_written = True
+                        else:
+                            new_lines.append(line)
+                    if not hash_written:
+                        raise RuntimeError(
+                            f"User '{username}' not found in shadow after useradd"
+                        )
+                    run_command(
+                        _as_root(["tee", shadow_path]),
+                        input="".join(new_lines), text=True,
+                        stdout=subprocess.DEVNULL, check=True,
+                    )
+
+                    uid, gid = "1000", "1000"
+                    cat_r = run_command(
+                        _as_root(["cat", f"{etc}/passwd"]),
+                        capture_output=True, text=True,
+                    )
+                    for line in cat_r.stdout.splitlines():
+                        if line.startswith(f"{username}:"):
+                            parts = line.split(":")
+                            uid, gid = parts[2], parts[3]
+                            break
+
+                    var_home = (
+                        Path(config_root) / "ostree/deploy/default/var/home" / username
+                    )
+                    run_command(_as_root(["mkdir", "-p", str(var_home)]), check=True)
+                    run_command(_as_root(["chown", f"{uid}:{gid}", str(var_home)]), check=True)
+                    run_command(_as_root(["chmod", "700", str(var_home)]), check=True)
+
+                    skel = Path(deploy_root) / "etc/skel"
+                    if skel.exists():
+                        run_command(
+                            _as_root(["cp", "-rT", str(skel), str(var_home)]),
+                            check=True,
+                        )
+                        run_command(
+                            _as_root(["chown", "-R", f"{uid}:{gid}", str(var_home)]),
+                            check=True,
+                        )
+
+                    run_command(
+                        _as_root(["restorecon", "-RF", str(var_home)]),
+                        check=False,
+                    )
+                    log(f"User '{username}' created (uid={uid})")
+                    ensure_system_accounts(deploy_root, log)
+                    progress(97)
+                except Exception as ue:
+                    log(f"Warning: user creation failed: {ue}")
+                    log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
+        else:
+            log("Warning: deploy/etc not found — skipping post-install configuration")
+    finally:
+        run_command(_as_root(["sync"]), check=False)
+        progress(99)
+        if alongside_mount:
+            target_home = Path(alongside_mount) / "ostree/deploy/default/var/home"
+            run_command(_as_root(["umount", "-Rl", str(target_home)]), check=False, capture_output=True)
+            run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
+        else:
+            run_command(_as_root(["umount", config_root]), check=False)
+
+def _run_install_worker(log, progress, alongside_mount):
+    try:
+        disk, install_mode, kernel, src_ref, tgt_ref = _prepare_install_context(log)
+
+        target_part, root_part, alongside_mount = _prepare_install_storage(
+            disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount
+        )
 
         log("── Phase 2: Configuring installed system ─────────────────────────")
         progress(91)
@@ -332,141 +465,14 @@ def _run_install() -> None:
             config_root = "/var/tmp/kyth-install-root"
             Path(config_root).mkdir(parents=True, exist_ok=True)
             # Detach any stale mount left by a previously crashed install attempt.
-            subprocess.run(_as_root(["umount", "-l", config_root]), check=False, capture_output=True)
-            subprocess.run(_as_root(["mount", root_part, config_root]), check=True)
+            run_command(_as_root(["umount", "-l", config_root]), check=False, capture_output=True)
+            run_command(_as_root(["mount", root_part, config_root]), check=True)
 
         progress(93)
 
-        try:
-            etc = find_deploy_etc(config_root)
-            if etc:
-                if install_mode == "alongside":
-                    target_home = Path(config_root) / "ostree/deploy/default/var/home"
-                    target_home.mkdir(parents=True, exist_ok=True)
-                    subprocess.run(_as_root(["umount", "-l", str(target_home)]), check=False, capture_output=True)
-                    subprocess.run(_as_root(["mount", "-o", "subvol=@home", target_part, str(target_home)]), check=True)
-
-                    try:
-                        uuid_out = subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", target_part], text=True).strip()
-                        if uuid_out:
-                            fstab_path = Path(etc, "fstab")
-                            fstab_line = f"UUID={uuid_out} /var/home btrfs subvol=@home,compress=zstd:1 0 0\n"
-                            subprocess.run(
-                                _as_root(["/usr/bin/tee", "-a", str(fstab_path)]),
-                                input=fstab_line, text=True,
-                                stdout=subprocess.DEVNULL, check=True
-                            )
-                            log(f"Fstab updated with Btrfs subvolume @home: {fstab_line.strip()}")
-                    except Exception as fe:
-                        log(f"Warning: failed to update fstab with @home subvolume: {fe}")
-                subprocess.run(
-                    _as_root(["/usr/bin/tee", str(Path(etc, "hostname"))]),
-                    input=f"{_state['hostname']}\n", text=True,
-                    stdout=subprocess.DEVNULL, check=True,
-                )
-                log(f"Hostname : {_state['hostname']}")
-
-                subprocess.run(
-                    _as_root(["ln", "-snf",
-                              f"/usr/share/zoneinfo/{_state['timezone']}",
-                              str(Path(etc, "localtime"))]),
-                    check=True,
-                )
-                log(f"Timezone : {_state['timezone']}")
-                progress(95)
-
-                deploy_root = str(Path(etc).parent)
-                ensure_system_accounts(deploy_root, log)
-
-                username = _state.get("username", "").strip()
-                password_hash = _state.get("password_hash", "")
-                if username and password_hash:
-                    log(f"Creating user: {username}")
-                    try:
-                        subprocess.run(
-                            _as_root([
-                                "useradd", "--root", deploy_root,
-                                "-M", "-G", "wheel,video,audio,render",
-                                "-s", "/bin/bash", username,
-                            ]),
-                            check=True,
-                        )
-
-                        shadow_path = f"{etc}/shadow"
-                        cat_r = subprocess.run(
-                            _as_root(["cat", shadow_path]),
-                            capture_output=True, text=True, check=True,
-                        )
-                        new_lines = []
-                        hash_written = False
-                        for line in cat_r.stdout.splitlines(keepends=True):
-                            if line.startswith(f"{username}:"):
-                                fields = line.split(":")
-                                fields[1] = password_hash
-                                new_lines.append(":".join(fields))
-                                hash_written = True
-                            else:
-                                new_lines.append(line)
-                        if not hash_written:
-                            raise RuntimeError(
-                                f"User '{username}' not found in shadow after useradd"
-                            )
-                        subprocess.run(
-                            _as_root(["tee", shadow_path]),
-                            input="".join(new_lines), text=True,
-                            stdout=subprocess.DEVNULL, check=True,
-                        )
-
-                        uid, gid = "1000", "1000"
-                        cat_r = subprocess.run(
-                            _as_root(["cat", f"{etc}/passwd"]),
-                            capture_output=True, text=True,
-                        )
-                        for line in cat_r.stdout.splitlines():
-                            if line.startswith(f"{username}:"):
-                                parts = line.split(":")
-                                uid, gid = parts[2], parts[3]
-                                break
-
-                        var_home = (
-                            Path(config_root) / "ostree/deploy/default/var/home" / username
-                        )
-                        subprocess.run(_as_root(["mkdir", "-p", str(var_home)]), check=True)
-                        subprocess.run(_as_root(["chown", f"{uid}:{gid}", str(var_home)]), check=True)
-                        subprocess.run(_as_root(["chmod", "700", str(var_home)]), check=True)
-
-                        skel = Path(deploy_root) / "etc/skel"
-                        if skel.exists():
-                            subprocess.run(
-                                _as_root(["cp", "-rT", str(skel), str(var_home)]),
-                                check=True,
-                            )
-                            subprocess.run(
-                                _as_root(["chown", "-R", f"{uid}:{gid}", str(var_home)]),
-                                check=True,
-                            )
-
-                        subprocess.run(
-                            _as_root(["restorecon", "-RF", str(var_home)]),
-                            check=False,
-                        )
-                        log(f"User '{username}' created (uid={uid})")
-                        ensure_system_accounts(deploy_root, log)
-                        progress(97)
-                    except Exception as ue:
-                        log(f"Warning: user creation failed: {ue}")
-                        log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
-            else:
-                log("Warning: deploy/etc not found — skipping post-install configuration")
-        finally:
-            subprocess.run(_as_root(["sync"]), check=False)
-            progress(99)
-            if alongside_mount:
-                target_home = Path(alongside_mount) / "ostree/deploy/default/var/home"
-                subprocess.run(_as_root(["umount", "-Rl", str(target_home)]), check=False, capture_output=True)
-                subprocess.run(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
-            else:
-                subprocess.run(_as_root(["umount", config_root]), check=False)
+        _configure_installed_system(
+            root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress
+        )
 
         log("── Phase 3: Staging Secure Boot enrollment ───────────────────────")
         mok_state = _try_stage_mok_enrollment(log, kernel, _state["mok_password"])
@@ -487,5 +493,24 @@ def _run_install() -> None:
         # Guard against orphaned mounts when Phase 1 fails before the inner
         # try/finally (which holds the normal umount) is ever entered.
         if alongside_mount:
-            subprocess.run(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
+            run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
 
+def _run_install() -> None:
+    with _events_lock:
+        _events.clear()
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LOG_FILE.write_text("")
+    os.chmod(LOG_FILE, 0o600)
+
+    def log(msg: str) -> None:
+        _push({"type": "log", "text": msg})
+        with LOG_FILE.open("a") as f:
+            f.write(msg + "\n")
+
+    def progress(pct: int) -> None:
+        _push({"type": "progress", "value": pct})
+
+
+    alongside_mount = ""
+
+    _run_install_worker(log, progress, alongside_mount)

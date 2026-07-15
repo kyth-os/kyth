@@ -18,6 +18,18 @@ from .services.gaming import (
     _gaming_migration_checklist_items, _proton_cachyos_version, _load_protondb_cache, _ludusavi_backup_summary,
     _mangohud_installed, _save_protondb_cache, _scan_steamapps_manifests, _streaming_health_items,
     _vkbasalt_installed,
+    command_details,
+    find_compat_game,
+    recommended_launcher_for_game,
+    recommended_profile_for_game,
+    blocked_compat_lookup,
+    GAMING_TOOLS,
+    discord_screenshare_fix_command,
+    obs_pipewire_fix_command,
+    opticscaler_deploy_command,
+    heroic_epic_launcher_command,
+    lutris_installer_command,
+    scx_scheduler_command,
 )
 from .services.software import (
     Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
@@ -318,23 +330,6 @@ class GamingPage(Page):
         badge.set_state(state, text)
         badge.show()
 
-    @staticmethod
-    def _command_details(cmd: list[str], result=None, exc: Exception | None = None) -> str:
-        lines = ["Command:", "  " + " ".join(cmd)]
-        if exc is not None:
-            lines.extend(["", "Error:", str(exc)])
-            return "\n".join(lines)
-        if result is None:
-            return "\n".join(lines)
-        lines.extend(["", f"Exit code: {result.returncode}"])
-        stdout = result.stdout.decode("utf-8", errors="replace").strip() if result.stdout else ""
-        stderr = result.stderr.decode("utf-8", errors="replace").strip() if result.stderr else ""
-        if stdout:
-            lines.extend(["", "stdout:", stdout])
-        if stderr:
-            lines.extend(["", "stderr:", stderr])
-        return "\n".join(lines)
-
     def __init__(self, wizard_mode: bool = False):
         super().__init__()
         self._wizard_mode = wizard_mode
@@ -621,106 +616,7 @@ class GamingPage(Page):
         tools_sub.setWordWrap(True)
         self._add(tools_sub)
 
-        self._TOOLS = [
-            {
-                "flatpak": "com.valvesoftware.Steam",
-                "name": "Steam",
-                "desc": "Valve's gaming platform plus PC games through Proton.",
-                "ujust": "install-steam",
-                "launch": ["flatpak", "run", "com.valvesoftware.Steam"],
-            },
-            {
-                "flatpak": "net.lutris.Lutris",
-                "name": "Lutris",
-                "desc": "Battle.net, EA App, Ubisoft Connect, and other compatibility launchers.",
-                "ujust": "install-lutris",
-                "launch": ["flatpak", "run", "net.lutris.Lutris"],
-            },
-            {
-                "flatpak": "com.heroicgameslauncher.hgl",
-                "name": "Heroic Games Launcher",
-                "desc": "Epic Games, GOG, and Amazon Games library in one place.",
-                "ujust": "install-heroic",
-                "launch": ["flatpak", "run", "com.heroicgameslauncher.hgl"],
-            },
-            {
-                "flatpak": "com.usebottles.bottles",
-                "name": "Bottles",
-                "desc": "Best for running standalone .exe and .msi installers in isolated app environments.",
-                "ujust": "install-bottles",
-                "launch": ["flatpak", "run", "com.usebottles.bottles"],
-            },
-            {
-                "flatpak": "com.github.mtkennerly.ludusavi",
-                "name": "Ludusavi",
-                "desc": "Back up and restore game saves across Steam, Heroic, Lutris, and PC migrations.",
-                "ujust": "install-ludusavi",
-                "launch": ["flatpak", "run", "com.github.mtkennerly.ludusavi"],
-            },
-            {
-                "flatpak": "org.prismlauncher.PrismLauncher",
-                "name": "Prism Launcher",
-                "desc": "Minecraft launcher with modpacks, multiple instances, and Java version control.",
-                "ujust": "install-prismlauncher",
-                "launch": ["flatpak", "run", "org.prismlauncher.PrismLauncher"],
-            },
-            {
-                "flatpak": "io.itch.itch",
-                "name": "Itch.io",
-                "desc": "Indie game store and library manager.",
-                "ujust": "install-itch",
-                "launch": ["flatpak", "run", "io.itch.itch"],
-            },
-            {
-                "flatpak": "org.libretro.RetroArch",
-                "name": "RetroArch",
-                "desc": "Multi-system emulator frontend (NES, SNES, PS1, N64, …).",
-                "ujust": "install-retroarch",
-                "launch": ["flatpak", "run", "org.libretro.RetroArch"],
-            },
-            {
-                "flatpak": "org.freedesktop.Piper",
-                "name": "Piper",
-                "desc": "GUI for configuring gaming mice — DPI, buttons, and LEDs.",
-                "ujust": "install-piper",
-                "launch": ["flatpak", "run", "org.freedesktop.Piper"],
-            },
-            {
-                "flatpak": "org.openrgb.OpenRGB",
-                "name": "OpenRGB",
-                "desc": "Unified RGB lighting control for motherboards, RAM, GPUs, and peripherals. Pre-installed — RGB profiles are applied automatically at login.",
-                "ujust": "install-openrgb",
-                "launch": ["openrgb"],
-            },
-            {
-                "flatpak": "io.github.benjamimgois.goverlay",
-                "name": "GOverlay",
-                "desc": "Graphical tuning for MangoHud and vkBasalt overlays — adjust metrics, colors, and presets without editing config files.",
-                "ujust": "install-goverlay",
-                "launch": ["flatpak", "run", "io.github.benjamimgois.goverlay"],
-            },
-            {
-                "flatpak": "io.github.radiolamp.mangojuice",
-                "name": "MangoJuice",
-                "desc": "Lightweight MangoHud configuration editor for overlay layout and metrics.",
-                "ujust": "install-mangojuice",
-                "launch": ["flatpak", "run", "io.github.radiolamp.mangojuice"],
-            },
-            {
-                "flatpak": "com.dec05eba.gpu_screen_recorder",
-                "name": "GPU Screen Recorder",
-                "desc": "Near-zero overhead gameplay capture and instant replay using AMD/NVIDIA GPU encoding.",
-                "ujust": "install-gpu-screen-recorder",
-                "launch": ["flatpak", "run", "com.dec05eba.gpu_screen_recorder"],
-            },
-            {
-                "flatpak": "dev.vencord.Vesktop",
-                "name": "Vesktop",
-                "desc": "Discord client with native Wayland support, better screenshare, and no telemetry.",
-                "ujust": "install-vesktop",
-                "launch": ["flatpak", "run", "dev.vencord.Vesktop"],
-            },
-        ]
+        self._TOOLS = GAMING_TOOLS
 
         # Build tiles in a 2-column grid
         self._tool_refs: list[dict] = []
@@ -1696,9 +1592,6 @@ class GamingPage(Page):
         self._set_rows_loading(self._health_rows_layout, "Checking launchers, Vulkan, Proton, controllers, and game drives…")
         self._start_data_worker("health", _gaming_health_items)
 
-    def _migration_checklist_items(self) -> list[tuple[str, str, str]]:
-        return _gaming_migration_checklist_items()
-
     def _refresh_migration_checklist(self):
         self._set_rows_loading(self._checklist_rows_layout, "Checking first-week setup items…")
         self._start_data_worker("checklist", _gaming_migration_checklist_items)
@@ -1719,70 +1612,58 @@ class GamingPage(Page):
 
     def _fix_discord_screenshare(self):
         self._discord_fix_btn.setEnabled(False)
-        cmd = [
-            "bash", "-c",
-            "flatpak override --user com.discordapp.Discord "
-            "--env=ELECTRON_OZONE_PLATFORM_HINT=auto "
-            "--socket=wayland --socket=fallback-x11 --device=dri "
-            "--talk-name=org.freedesktop.portal.Desktop "
-            "--talk-name=org.kde.StatusNotifierWatcher",
-        ]
+        cmd = discord_screenshare_fix_command()
         self._discord_fix_status.hide()
-        self._discord_fix_result.set_running("Applying Discord screen share repair…", self._command_details(cmd))
+        self._discord_fix_result.set_running("Applying Discord screen share repair…", command_details(cmd))
         try:
             result = subprocess.run(cmd, timeout=10, capture_output=True)
             if result.returncode == 0:
                 self._discord_fix_result.set_result(
                     "ok",
                     "Applied. Restart Discord to take effect.",
-                    self._command_details(cmd, result),
+                    command_details(cmd, result),
                 )
             else:
                 err = result.stderr.decode("utf-8", errors="replace").strip()
                 self._discord_fix_result.set_result(
                     "err",
                     f"Could not repair Discord screen share: {err or 'unknown error'}.",
-                    self._command_details(cmd, result),
+                    command_details(cmd, result),
                 )
         except Exception as exc:
             self._discord_fix_result.set_result(
                 "err",
                 f"Could not repair Discord screen share: {exc}.",
-                self._command_details(cmd, exc=exc),
+                command_details(cmd, exc=exc),
             )
         finally:
             self._discord_fix_btn.setEnabled(True)
 
     def _fix_obs_pipewire(self):
         self._obs_fix_btn.setEnabled(False)
-        cmd = [
-            "bash", "-c",
-            "flatpak override --user com.obsproject.Studio "
-            "--socket=wayland --socket=pulseaudio --device=dri "
-            "--talk-name=org.freedesktop.portal.Desktop",
-        ]
+        cmd = obs_pipewire_fix_command()
         self._obs_fix_status.hide()
-        self._obs_fix_result.set_running("Applying OBS capture repair…", self._command_details(cmd))
+        self._obs_fix_result.set_running("Applying OBS capture repair…", command_details(cmd))
         try:
             result = subprocess.run(cmd, timeout=10, capture_output=True)
             if result.returncode == 0:
                 self._obs_fix_result.set_result(
                     "ok",
                     "Applied. Restart OBS to take effect.",
-                    self._command_details(cmd, result),
+                    command_details(cmd, result),
                 )
             else:
                 err = result.stderr.decode("utf-8", errors="replace").strip()
                 self._obs_fix_result.set_result(
                     "err",
                     f"Could not repair OBS capture: {err or 'unknown error'}.",
-                    self._command_details(cmd, result),
+                    command_details(cmd, result),
                 )
         except Exception as exc:
             self._obs_fix_result.set_result(
                 "err",
                 f"Could not repair OBS capture: {exc}.",
-                self._command_details(cmd, exc=exc),
+                command_details(cmd, exc=exc),
             )
         finally:
             self._obs_fix_btn.setEnabled(True)
@@ -1806,7 +1687,7 @@ class GamingPage(Page):
         self._saves_status_lbl.setText(f"{prefix}: {title} - {summary}")
 
     def _make_my_game_row(self, game_info: dict, protondb_tier: str = "") -> QFrame:
-        compat = self._find_compat_game(game_info.get("name", ""))
+        compat = find_compat_game(_COMPAT_GAMES, game_info.get("name", ""))
         if compat is None:
             status = "dim"
             status_text = "Unknown"
@@ -1821,7 +1702,7 @@ class GamingPage(Page):
                 "blocked": "Blocked",
             }.get(compat.status, compat.status)
             summary = f"{compat.note} Checked {compat.checked} via {compat.source}."
-            profile = self._recommended_profile_for_game(compat)
+            profile = recommended_profile_for_game(compat)
 
         row = QFrame()
         row.setObjectName("hw-card-dim")
@@ -1914,7 +1795,7 @@ class GamingPage(Page):
         if cache is None:
             cache = _load_protondb_cache()
 
-        matched = sum(1 for game in games if self._find_compat_game(game.get("name", "")))
+        matched = sum(1 for game in games if find_compat_game(_COMPAT_GAMES, game.get("name", "")))
         by_launcher: dict[str, int] = {}
         for game in games:
             launcher = game.get("launcher", "Unknown")
@@ -1948,42 +1829,9 @@ class GamingPage(Page):
         if self._last_detected_games:
             self._render_my_games(self._last_detected_games, full_cache)
 
-    def _find_compat_game(self, query: str):
-        needle = query.strip().lower()
-        if not needle:
-            return None
-        for game in _COMPAT_GAMES:
-            if game.name.lower() == needle:
-                return game
-        for game in _COMPAT_GAMES:
-            if needle in game.name.lower() or game.name.lower() in needle:
-                return game
-        return None
-
-    def _recommended_launcher_for_game(self, game) -> str:
-        name = game.name.lower()
-        if "overwatch" in name:
-            return "Lutris with Battle.net via umu-run"
-        if any(token in name for token in ("red dead", "gta")):
-            return "Steam when owned there; otherwise Lutris/Heroic plus the Rockstar launcher"
-        if game.status == "blocked":
-            return "None on Linux until the publisher enables support"
-        if game.status == "native":
-            return "Steam native Linux build"
-        return "Steam with Proton Experimental first, then Proton-CachyOS"
-
-    def _recommended_profile_for_game(self, game) -> str:
-        if game.status == "blocked":
-            return "Do not try bypass launch options; use other system or wait for publisher support."
-        if any(token in game.name.lower() for token in ("cyberpunk", "red dead", "hogwarts")):
-            return "kyth-gamescope quality -- %command%"
-        if game.anticheat in ("EAC", "BattlEye", "VAC", "Warden"):
-            return "game-performance --profile gaming -- %command%"
-        return "kyth-gamescope quality -- %command%"
-
     def _check_game_readiness(self):
         query = self._readiness_combo.currentText()
-        game = self._find_compat_game(query)
+        game = find_compat_game(_COMPAT_GAMES, query)
         if game is None:
             encoded = urlencode({"q": query.strip() or "game"})
             self._readiness_result.setText(
@@ -2011,8 +1859,8 @@ class GamingPage(Page):
         self._readiness_result.setText(
             f"{game.name}: {status_label}\n"
             f"Anti-cheat/middleware: {game.anticheat}\n"
-            f"Launcher: {self._recommended_launcher_for_game(game)}\n"
-            f"Runner/profile: {self._recommended_profile_for_game(game)}\n"
+            f"Launcher: {recommended_launcher_for_game(game)}\n"
+            f"Runner/profile: {recommended_profile_for_game(game)}\n"
             f"Saves: {save_note}\n"
             f"Mods: {mod_note}\n"
             f"Checked: {game.checked} via {game.source}\n"
@@ -2292,7 +2140,7 @@ class GamingPage(Page):
         self._opti_status_lbl.setObjectName("subheading")
         self._opti_status_lbl.show()
         _restyle(self._opti_status_lbl)
-        cmd = ["ujust", "deploy-opticscaler", game_dir]
+        cmd = opticscaler_deploy_command(game_dir)
         self._opticscaler_worker = Worker(cmd)
         self._opticscaler_worker.line.connect(lambda ln: (
             self._opti_log.append(ln),
@@ -2318,12 +2166,7 @@ class GamingPage(Page):
         if self._scx_worker and self._scx_worker.isRunning():
             return
 
-        if scheduler == "stop":
-            cmd = ["kyth-scx", "stop"]
-            label = "Stopping sched-ext loader"
-        else:
-            cmd = ["kyth-scx", "set", scheduler]
-            label = f"Switching sched-ext scheduler to {scheduler}"
+        cmd = scx_scheduler_command(scheduler)
 
         self._scx_log.clear()
         self._scx_log.append(f"→ {' '.join(cmd)}\n")
@@ -2356,7 +2199,7 @@ class GamingPage(Page):
         self._refresh_status()
 
     def _open_heroic_for_epic(self):
-        cmd = ["flatpak", "run", "com.heroicgameslauncher.hgl"]
+        cmd = heroic_epic_launcher_command()
         self._tool_log.clear()
         self._tool_log.append(f"→ {' '.join(cmd)}\n")
         self._tool_log.append("Heroic should open. Sign in to Epic Games there to install your library.")
@@ -2502,7 +2345,7 @@ class GamingPage(Page):
             return
 
         lutris_target = target if target.startswith("lutris:") else f"lutris:install/{target}"
-        cmd = ["flatpak", "run", "net.lutris.Lutris", lutris_target]
+        cmd = lutris_installer_command(lutris_target)
         self._tool_log.append(f"→ {' '.join(cmd)}\n")
         self._tool_log.append("Lutris should open the installer dialog.")
         self._tool_log_toggle.show()
@@ -2882,19 +2725,6 @@ class GamingPage(Page):
 
     _READY_TIERS = ("native", "platinum", "gold", "silver")
 
-    def _blocked_compat_lookup(self) -> tuple[dict[str, str], set[str]]:
-        """Blocked Steam appids (from compat source URLs) and lowercase names."""
-        appids: dict[str, str] = {}
-        names: set[str] = set()
-        for game in _COMPAT_GAMES:
-            if game.status != "blocked":
-                continue
-            names.add(game.name.lower())
-            m = re.search(r"protondb\.com/app/(\d+)", game.source_url)
-            if m:
-                appids[m.group(1)] = game.name
-        return appids, names
-
     def _check_windows_library_compat(self):
         steamapps = self._lib_combo.currentText().strip()
         if not steamapps:
@@ -2926,7 +2756,7 @@ class GamingPage(Page):
 
     def _render_winlib_compat(self, games: list[dict], cache: dict[str, str]):
         self._clear_rows(self._winlib_rows)
-        blocked_appids, blocked_names = self._blocked_compat_lookup()
+        blocked_appids, blocked_names = blocked_compat_lookup(_COMPAT_GAMES)
         graded: list[tuple[dict, str, str]] = []  # (game, category, badge text)
         ready = blocked = 0
         for game in games:

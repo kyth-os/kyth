@@ -7,6 +7,7 @@ import socket
 import subprocess
 
 from .config import SOURCE_IMAGE, TARGET_IMAGE
+from .runner import run_command
 
 
 def _source_imgref(image: str) -> str:
@@ -50,7 +51,7 @@ def _network_preflight(imgref: str) -> str | None:
         return _friendly_network_error("The selected image registry could not be determined.")
 
     try:
-        route = subprocess.run(
+        route = run_command(
             ["ip", "route", "show", "default"],
             capture_output=True, text=True, timeout=3,
         )
