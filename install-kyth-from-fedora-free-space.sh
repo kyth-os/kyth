@@ -430,7 +430,6 @@ bootc install to-filesystem \
 	--source-imgref "docker://$SOURCE_IMAGE" \
 	--target-imgref "$TARGET_IMAGE" \
 	--skip-fetch-check \
-	--generic-image \
 	--acknowledge-destructive \
 	"$ROOT_MNT"
 

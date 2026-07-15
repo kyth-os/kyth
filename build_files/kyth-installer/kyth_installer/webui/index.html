@@ -77,15 +77,15 @@
           <div class="mode-card selected" id="mcard-wipe" onclick="selectMode('wipe')">
             <div class="mode-icon">💥</div>
             <div>
-              <div class="mode-name">Erase Full Disk <span class="kernel-badge">Recommended</span></div>
-              <div class="mode-desc">Install KythOS on the entire disk. All existing data will be erased. Simplest option.</div>
+              <div class="mode-name">Erase Full Disk <span class="kernel-badge" id="wipe-recommended-badge">Recommended</span></div>
+              <div class="mode-desc" id="wipe-mode-desc">Install KythOS on the entire disk. All existing data will be erased. Simplest option.</div>
             </div>
           </div>
           <div class="mode-card" id="mcard-alongside" onclick="selectMode('alongside')">
             <div class="mode-icon">🔀</div>
             <div>
               <div class="mode-name">Install Alongside</div>
-              <div class="mode-desc">Install KythOS to a specific partition. Keep Windows, Linux, or other systems.</div>
+              <div class="mode-desc">Install KythOS to a specific partition, or shrink an existing Windows/NTFS partition or use free space to make room. Keep Windows, Linux, or other systems.</div>
             </div>
           </div>
         </div>
@@ -226,6 +226,16 @@
         KythOS has been installed successfully.<br>
         Remove the installation media and reboot to start your new system.
       </p>
+      <div id="done-boot-notice" style="display:none;text-align:left;margin-top:28px">
+        <div class="status-box status-info">
+          <strong>Finding KythOS on reboot</strong><br><br>
+          Your PC may still boot straight into your existing OS by default. If KythOS doesn't
+          appear automatically, restart and open your firmware's boot menu — commonly by pressing
+          <strong>F12</strong>, <strong>F10</strong>, <strong>F9</strong>, or <strong>Esc</strong>
+          right after power-on — and choose KythOS from the list. You can also change the default
+          boot order from your firmware setup screen once KythOS appears there.
+        </div>
+      </div>
       <div id="done-sb-notice" style="display:none;text-align:left;margin-top:28px">
         <div class="status-box status-info">
           <strong>One more step: Secure Boot key enrollment</strong><br><br>

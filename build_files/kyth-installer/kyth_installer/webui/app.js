@@ -87,7 +87,28 @@ function selectDisk(idx) {
     : S.disk.usb
         ? '⚠ This is a USB storage device. Make sure you have the right disk selected.'
         : '⚠ All data on this disk will be permanently destroyed (Erase mode) or a partition will be erased (Alongside mode).';
+  checkOtherOs();
   updateDiskNext();
+}
+
+const WIPE_DESC_DEFAULT = 'Install KythOS on the entire disk. All existing data will be erased. Simplest option.';
+const WIPE_DESC_WINDOWS = 'Install KythOS on the entire disk. A Windows installation was detected here — this will erase it. Use "Install Alongside" to keep it.';
+
+function checkOtherOs() {
+  const badge = document.getElementById('wipe-recommended-badge');
+  const desc  = document.getElementById('wipe-mode-desc');
+  badge.style.display = '';
+  desc.textContent = WIPE_DESC_DEFAULT;
+  if (!S.disk) return;
+  const requestDisk = S.disk.name;
+  apiFetch('/api/partitions?disk=' + encodeURIComponent(requestDisk)).then(r=>r.json()).then(parts => {
+    if (!S.disk || S.disk.name !== requestDisk) return;
+    const hasWindows = (parts || []).some(p => ['ntfs', 'ntfs3'].includes((p.fstype || '').toLowerCase()));
+    if (hasWindows) {
+      badge.style.display = 'none';
+      desc.textContent = WIPE_DESC_WINDOWS;
+    }
+  }).catch(() => {});
 }
 
 function selectMode(id) {
@@ -350,43 +371,50 @@ function buildReview() {
   document.getElementById('confirm-erase').checked = false;
   document.getElementById('confirm-current').checked = false;
 
-  const isAlongside    = S.install_mode === 'alongside';
-  const isCurrentNonLive = !isAlongside && S.disk && S.disk.current && !S.isLive;
-  const isCurrentLive    = !isAlongside && S.disk && S.disk.current && S.isLive;
+  const isAlongside  = S.install_mode === 'alongside';
+  const isResizeNtfs = S.install_mode === 'resize_ntfs';
+  const isFreeSpace  = S.install_mode === 'free_space';
+  const isPartial    = isAlongside || isResizeNtfs || isFreeSpace;
+
+  const isCurrentNonLive = !isPartial && S.disk && S.disk.current && !S.isLive;
+  const isCurrentLive    = !isPartial && S.disk && S.disk.current && S.isLive;
 
   document.getElementById('confirm-current-wrap').style.display = isCurrentLive ? 'flex' : 'none';
   document.getElementById('live-iso-required').style.display    = isCurrentNonLive ? 'block' : 'none';
 
   const partName = isAlongside && S.target_partition ? S.target_partition : '';
-  const isFreeSpace = S.install_mode === 'free_space';
   document.getElementById('review-wipe').textContent = isCurrentNonLive
     ? '⚠ This is the running system disk — see notice below.'
     : isAlongside
         ? `⚠ Partition ${partName || '?'} will be erased and replaced with KythOS.`
-        : isFreeSpace
-            ? '⚠ A new partition will be created in the unallocated space and used for KythOS. Existing partitions are left untouched.'
-            : (S.disk && S.disk.current
-                ? '⚠ Reinstall target: this appears to be the disk currently running KythOS. The selected disk will be erased and replaced.'
-                : '⚠ Everything on the selected disk will be permanently erased.');
+        : isResizeNtfs
+            ? `⚠ ${S.resize_partition || 'The selected NTFS partition'} will be shrunk by ${S.resize_gib} GiB. Windows and its files are preserved, but back up anything important first.`
+            : isFreeSpace
+                ? '⚠ A new partition will be created in the unallocated space and used for KythOS. Existing partitions are left untouched.'
+                : (S.disk && S.disk.current
+                    ? '⚠ Reinstall target: this appears to be the disk currently running KythOS. The selected disk will be erased and replaced.'
+                    : '⚠ Everything on the selected disk will be permanently erased.');
 
   document.getElementById('confirm-erase-label').textContent = isAlongside
     ? `I understand partition ${partName || '?'} will be erased and replaced with KythOS.`
-    : isFreeSpace
-        ? 'I understand KythOS will be installed into the selected unallocated space.'
-        : 'I understand KythOS will erase the selected disk and install a fresh system.';
+    : isResizeNtfs
+        ? `I understand ${S.resize_partition || 'the selected NTFS partition'} will be shrunk by ${S.resize_gib} GiB to make room for KythOS.`
+        : isFreeSpace
+            ? 'I understand KythOS will be installed into the selected unallocated space.'
+            : 'I understand KythOS will erase the selected disk and install a fresh system.';
 
   updateInstallReady();
 }
 
 function updateInstallReady() {
-  const isAlongside = S.install_mode === 'alongside';
-  if (!isAlongside && S.disk && S.disk.current && !S.isLive) {
+  const isPartial = S.install_mode === 'alongside' || S.install_mode === 'resize_ntfs' || S.install_mode === 'free_space';
+  if (!isPartial && S.disk && S.disk.current && !S.isLive) {
     document.getElementById('install-now').disabled = true;
     return;
   }
   const backup    = document.getElementById('confirm-backup').checked;
   const erase     = document.getElementById('confirm-erase').checked;
-  const currentOk = isAlongside || !(S.disk && S.disk.current) || document.getElementById('confirm-current').checked;
+  const currentOk = isPartial || !(S.disk && S.disk.current) || document.getElementById('confirm-current').checked;
   document.getElementById('install-now').disabled = !(backup && erase && currentOk);
 }
 
@@ -532,6 +560,10 @@ function onDone(mokState) {
   clearInterval(_elapsedTimer);
   if (mokState === 'staged' || mokState === 'pending') {
     document.getElementById('done-sb-notice').style.display = '';
+  }
+  const isPartial = S.install_mode === 'alongside' || S.install_mode === 'resize_ntfs' || S.install_mode === 'free_space';
+  if (isPartial) {
+    document.getElementById('done-boot-notice').style.display = '';
   }
   goto('done');
 }

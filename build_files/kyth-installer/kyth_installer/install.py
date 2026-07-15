@@ -298,7 +298,6 @@ def _run_install() -> None:
                 "bootc", "install", "to-filesystem",
                 "--source-imgref", src_ref,
                 "--target-imgref", tgt_ref,
-                "--generic-image",
                 "--acknowledge-destructive",
                 "--karg=rootflags=subvol=@",
             ]
@@ -316,7 +315,6 @@ def _run_install() -> None:
                 "--source-imgref", src_ref,
                 "--target-imgref", tgt_ref,
                 "--filesystem", "btrfs",
-                "--generic-image",
                 "--wipe",
             ]
             if SKIP_FETCH_CHECK:
