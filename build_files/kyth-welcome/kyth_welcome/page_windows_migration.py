@@ -17,13 +17,10 @@ from .services.diagnostics import (
     _command_stdout, _run_command,
 )
 from .services.gaming import (
-    DataWorker, TrackedThread,
+    DataWorker, TrackedThread, _probe_windows_partitions,
 )
 from .services.software import (
     Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
-)
-from .page_feedback import (  # noqa: E501
-    _probe_windows_partitions,
 )
 from .qt import (  # noqa: E501
     QCheckBox, QComboBox, QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QProgressBar, QPushButton, QThread, QTimer, QUrl, QVBoxLayout, Signal,
@@ -383,27 +380,18 @@ def _write_bookmarks_html(sources: list[dict], dest: str) -> int:
     return total
 
 
+from .services.config import load_json_config, save_json_config
+
 _DYNAMIC_LOCK_CONFIG = os.path.expanduser("~/.config/kyth-dynamic-lock.json")
 
 
 def _load_dynamic_lock_config() -> dict:
-    try:
-        with open(_DYNAMIC_LOCK_CONFIG, "r", encoding="utf-8") as fh:
-            config = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return {}
+    config = load_json_config(_DYNAMIC_LOCK_CONFIG, default={})
     return config if isinstance(config, dict) else {}
 
 
 def _save_dynamic_lock_config(config: dict) -> None:
-    directory = os.path.dirname(_DYNAMIC_LOCK_CONFIG)
-    os.makedirs(directory, exist_ok=True)
-    temp_path = f"{_DYNAMIC_LOCK_CONFIG}.tmp"
-    with open(temp_path, "w", encoding="utf-8") as fh:
-        json.dump(config, fh, indent=2)
-        fh.write("\n")
-    os.chmod(temp_path, 0o600)
-    os.replace(temp_path, _DYNAMIC_LOCK_CONFIG)
+    save_json_config(_DYNAMIC_LOCK_CONFIG, config, mode=0o600)
 
 
 def _kdeconnect_devices() -> list[dict]:

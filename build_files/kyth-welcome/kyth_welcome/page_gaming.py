@@ -23,6 +23,7 @@ from .services.gaming import (
     recommended_launcher_for_game,
     recommended_profile_for_game,
     blocked_compat_lookup,
+    GameNightManager,
     GAMING_TOOLS,
     discord_screenshare_fix_command,
     obs_pipewire_fix_command,
@@ -1417,15 +1418,8 @@ class GamingPage(Page):
         return row
 
     def _start_game_night(self):
-        if self._game_night_inhibit and self._game_night_inhibit.poll() is None:
+        if not GameNightManager.start():
             return
-        subprocess.Popen(["kyth-performance-mode", "save"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.Popen(["kyth-performance-mode", "gaming"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if shutil.which("systemd-inhibit"):
-            self._game_night_inhibit = subprocess.Popen(
-                ["systemd-inhibit", "--what=idle:sleep", "--why=KythOS Game Night Mode", "sleep", "14400"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
         self._game_night_start_btn.setEnabled(False)
         self._game_night_stop_btn.setEnabled(True)
         self._set_status_badge(
@@ -1443,9 +1437,7 @@ class GamingPage(Page):
             )
 
     def _stop_game_night(self):
-        if self._game_night_inhibit and self._game_night_inhibit.poll() is None:
-            self._game_night_inhibit.terminate()
-        subprocess.Popen(["kyth-performance-mode", "restore"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        GameNightManager.stop()
         self._game_night_start_btn.setEnabled(True)
         self._game_night_stop_btn.setEnabled(False)
         self._set_status_badge(
@@ -2019,6 +2011,39 @@ class GamingPage(Page):
             refs["install"].setVisible(not installed)
             refs["launch"].setVisible(installed)
             refs["uninstall"].setVisible(installed)
+
+        # Sync Game Night UI states
+        gn_active = GameNightManager.is_active()
+        self._game_night_start_btn.setEnabled(not gn_active)
+        self._game_night_stop_btn.setEnabled(gn_active)
+        if gn_active:
+            self._set_status_badge(
+                self._game_night_status,
+                "ok",
+                "Game Night Mode is on for up to 4 hours. Sleep is blocked and gaming performance mode is active.",
+            )
+        else:
+            self._set_status_badge(
+                self._game_night_status,
+                "idle",
+                "Game Night Mode ended. Normal desktop behavior restored.",
+            )
+
+        if hasattr(self, "_hud_game_night_start_btn"):
+            self._hud_game_night_start_btn.setEnabled(not gn_active)
+            self._hud_game_night_stop_btn.setEnabled(gn_active)
+            if gn_active:
+                self._set_status_badge(
+                    self._hud_game_night_status,
+                    "ok",
+                    "Game Night Mode is active.",
+                )
+            else:
+                self._set_status_badge(
+                    self._hud_game_night_status,
+                    "idle",
+                    "Ready.",
+                )
 
     def showEvent(self, event):  # noqa: N802
         super().showEvent(event)

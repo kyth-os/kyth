@@ -5,6 +5,7 @@ import shutil
 import subprocess
 
 from ..core_base import _run_command, _command_stdout
+from .config import load_json_config, save_json_config
 
 _CLOUD_SYNC_CONFIG = os.path.expanduser("~/.config/kyth-cloud-sync.json")
 _SMB_CONFIG = os.path.expanduser("~/.config/kyth-smb-shares.json")
@@ -34,33 +35,19 @@ def _rclone_has_remote_type(remote_type: str) -> bool:
 
 def _load_sync_config() -> dict:
     """Load {remote_name: {folder, last_sync, last_ok}} from disk."""
-    try:
-        with open(_CLOUD_SYNC_CONFIG) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return load_json_config(_CLOUD_SYNC_CONFIG, default={})
  # _load_sync_config
 
 def _save_sync_config(cfg: dict) -> None:
-    os.makedirs(os.path.dirname(_CLOUD_SYNC_CONFIG), exist_ok=True)
-    with open(_CLOUD_SYNC_CONFIG, "w") as f:
-        json.dump(cfg, f, indent=2)
+    save_json_config(_CLOUD_SYNC_CONFIG, cfg)
  # _save_sync_config
 
 def _load_smb_config() -> list[dict]:
-    try:
-        with open(_SMB_CONFIG) as f:
-            data = json.load(f)
-            return data if isinstance(data, list) else []
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+    return load_json_config(_SMB_CONFIG, default=[])
  # _load_smb_config
 
 def _save_smb_config(shares: list[dict]) -> None:
-    os.makedirs(os.path.dirname(_SMB_CONFIG), exist_ok=True)
-    fd = os.open(_SMB_CONFIG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(shares, f, indent=2)
+    save_json_config(_SMB_CONFIG, shares, mode=0o600)
  # _save_smb_config
 
 def _systemd_escape_mount_path(path: str) -> str:

@@ -72,6 +72,7 @@ def _chromium_app_window_cmd(url: str) -> tuple[list[str], str] | None:
 
     KythOS ships Brave as a Flatpak, not a native chromium-browser binary, so
     native binaries are only found on systems where the user installed one.
+    If no Chromium-based browser is available, falls back to Firefox.
     """
     args = [f"--app={url}"]
     for binary in ("chromium-browser", "chromium", "brave-browser",
@@ -83,6 +84,13 @@ def _chromium_app_window_cmd(url: str) -> tuple[list[str], str] | None:
         if _is_flatpak_installed(app_id):
             return (["flatpak", "run", app_id, *args],
                     _chromium_app_window_id(app_id, url))
+
+    # Fall back to Firefox if no Chromium-based browser is available
+    if shutil.which("firefox"):
+        return ["firefox", "--new-window", url], "firefox"
+    if _is_flatpak_installed("org.mozilla.firefox"):
+        return ["flatpak", "run", "org.mozilla.firefox", "--new-window", url], "org.mozilla.firefox"
+
     return None
  # _chromium_app_window_cmd
 
@@ -223,3 +231,160 @@ def _davinci_zip_candidates() -> list[str]:
 
     return sorted(matches, key=lambda item: (matches[item], item.lower()), reverse=True)
  # _davinci_zip_candidates
+
+
+_APPSTREAM_CACHE_PATH = os.path.expanduser("~/.cache/kyth-appstream.json")
+
+
+def _ui_lang() -> str:
+    lang = os.environ.get("LANG", "en")
+    return lang.split(".")[0].split("_")[0]
+
+
+def _as_localized(parent, tag: str, lang: str) -> str:
+    import xml.etree.ElementTree as ET
+    if parent is None:
+        return ""
+    exact = None
+    base = lang.split("-")[0]
+    base_match = None
+    untagged = None
+    first = None
+
+    for el in parent.findall(tag):
+        if first is None and el.text:
+            first = el.text.strip()
+        el_lang = el.get("{http://www.w3.org/XML/1998/namespace}lang")
+        if not el_lang:
+            if el.text:
+                untagged = el.text.strip()
+            continue
+        text = el.text.strip() if el.text else ""
+        if el_lang == lang:
+            exact = text
+        elif el_lang == base and base_match is None:
+            base_match = text
+    return exact or base_match or untagged or first or ""
+
+
+def _as_localized_desc(component, lang: str) -> str:
+    import xml.etree.ElementTree as ET
+    desc_node = component.find("description")
+    if desc_node is None:
+        return ""
+
+    def _extract(node) -> str:
+        parts = []
+        for child in node:
+            if child.tag == "p" and child.text:
+                parts.append(child.text.strip() + "\n")
+            elif child.tag == "ul":
+                for li in child.findall("li"):
+                    if li.text:
+                        parts.append(" - " + li.text.strip() + "\n")
+        return "".join(parts).strip()
+
+    exact = None
+    base = lang.split("-")[0]
+    base_match = None
+    untagged = None
+    first = None
+
+    for el in component.findall("description"):
+        if first is None:
+            first = _extract(el)
+        el_lang = el.get("{http://www.w3.org/XML/1998/namespace}lang")
+        if not el_lang:
+            untagged = _extract(el)
+            continue
+        text = _extract(el)
+        if el_lang == lang:
+            exact = text
+        elif el_lang == base and base_match is None:
+            base_match = text
+    return exact or base_match or untagged or first or ""
+
+
+def _fp_component_url(component, url_type: str) -> str:
+    for url_node in component.findall("url"):
+        if url_node.get("type") == url_type and url_node.text:
+            return url_node.text.strip()
+    return ""
+
+
+def load_appstream_catalog() -> dict[str, dict]:
+    import xml.etree.ElementTree as ET
+    import glob
+    from .config import load_json_config, save_json_config
+
+    xml_path = "/var/lib/flatpak/appstream/flathub/x86_64/active/appstream.xml"
+    if not os.path.exists(xml_path):
+        matches = glob.glob("/var/lib/flatpak/appstream/flathub/x86_64/*/appstream.xml")
+        xml_path = matches[0] if matches else ""
+    if not xml_path:
+        return {}
+
+    try:
+        xml_mtime = os.path.getmtime(xml_path)
+        if os.path.exists(_APPSTREAM_CACHE_PATH):
+            cache_mtime = os.path.getmtime(_APPSTREAM_CACHE_PATH)
+            if cache_mtime > xml_mtime:
+                cached = load_json_config(_APPSTREAM_CACHE_PATH, default=None)
+                if cached:
+                    return cached
+    except Exception:
+        pass
+
+    catalog: dict[str, dict] = {}
+    try:
+        root = ET.parse(xml_path).getroot()
+    except Exception:
+        return {}
+
+    lang = _ui_lang()
+    for component in root.findall("component"):
+        app_id = (component.findtext("id") or "").strip()
+        bundle = component.find("bundle")
+        if not app_id or bundle is None or (bundle.get("type") or "") != "flatpak":
+            continue
+        categories_node = component.find("categories")
+        screenshots = []
+        screenshots_node = component.find("screenshots")
+        if screenshots_node is not None:
+            for screenshot in screenshots_node.findall("screenshot"):
+                for image in screenshot.findall("image"):
+                    if image.text and image.get("type") in ("thumbnail", "source"):
+                        screenshots.append(image.text.strip())
+                        break
+        custom = component.find("custom")
+        verified = False
+        if custom is not None:
+            for value in custom.findall("value"):
+                if value.get("key") == "flathub::verification::verified":
+                    verified = (value.text or "").strip().lower() == "true"
+        releases = component.find("releases")
+        version = ""
+        if releases is not None:
+            release = releases.find("release")
+            if release is not None:
+                version = release.get("version") or ""
+        developer_node = component.find("developer")
+        catalog[app_id] = {
+            "name": _as_localized(component, "name", lang) or app_id,
+            "summary": _as_localized(component, "summary", lang),
+            "description": _as_localized_desc(component, lang),
+            "developer": (_as_localized(developer_node, "name", lang) if developer_node is not None else (component.findtext("developer/name") or "").strip()),
+            "license": (component.findtext("project_license") or "").strip(),
+            "homepage": _fp_component_url(component, "homepage"),
+            "categories": [
+                (cat.text or "").strip()
+                for cat in (categories_node.findall("category") if categories_node is not None else [])
+                if (cat.text or "").strip()
+            ],
+            "screenshots": screenshots,
+            "verified": verified,
+            "version": version,
+        }
+
+    save_json_config(_APPSTREAM_CACHE_PATH, catalog)
+    return catalog

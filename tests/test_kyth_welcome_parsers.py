@@ -123,5 +123,34 @@ class VpnParserTests(unittest.TestCase):
         self.assertFalse(page_vpn._vpn_line_is_connected("Authentication failed"))
 
 
+class AppStreamCatalogTests(unittest.TestCase):
+    def test_as_localized(self):
+        import xml.etree.ElementTree as ET
+        from kyth_welcome.services import software
+        xml_str = """
+        <component>
+            <name xml:lang="en">English App</name>
+            <name xml:lang="de">Deutsches App</name>
+            <name>Default App</name>
+        </component>
+        """
+        elem = ET.fromstring(xml_str)
+        self.assertEqual(software._as_localized(elem, "name", "de"), "Deutsches App")
+        self.assertEqual(software._as_localized(elem, "name", "en"), "English App")
+
+    def test_as_localized_desc(self):
+        import xml.etree.ElementTree as ET
+        from kyth_welcome.services import software
+        xml_str = """
+        <component>
+            <description xml:lang="en">
+                <p>Hello world</p>
+            </description>
+        </component>
+        """
+        elem = ET.fromstring(xml_str)
+        self.assertEqual(software._as_localized_desc(elem, "en"), "Hello world")
+
+
 if __name__ == "__main__":
     unittest.main()

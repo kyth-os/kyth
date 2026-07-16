@@ -68,18 +68,3 @@ grep -q 'force_add_dracutmodules=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.con
 	printf 'force_add_dracutmodules+=" kyth-plymouth "\n' >>/etc/dracut.conf.d/99-kyth.conf
 
 plymouth-set-default-theme kyth
-
-# Rebuild the initramfs for every installed kernel. dracut exits non-zero on
-# any failure, so no separate integrity check is needed.
-for _kernel_dir in /usr/lib/modules/*; do
-	[ -d "${_kernel_dir}" ] || continue
-	_kernel_ver=$(basename "${_kernel_dir}")
-	TMPDIR=/var/tmp dracut \
-		--no-hostonly \
-		--compress "zstd -1" \
-		--kver "${_kernel_ver}" \
-		--force \
-		"${_kernel_dir}/initramfs" \
-		2> >(grep -Ev 'xattr|fail to copy' >&2)
-done
-unset _kernel_dir _kernel_ver

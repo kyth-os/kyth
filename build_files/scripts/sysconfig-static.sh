@@ -475,6 +475,7 @@ AMDGPUEOF
 cat >/etc/modprobe.d/nvidia-kyth.conf <<'NVEOF'
 options nvidia-drm modeset=1
 options nvidia NVreg_PreserveVideoMemoryAllocations=1
+options nvidia NVreg_TemporaryFilePath=/var/tmp
 NVEOF
 
 # ── Intel GPU kernel module options ─────────────────────────────────────────

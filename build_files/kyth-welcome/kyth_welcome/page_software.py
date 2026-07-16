@@ -15,7 +15,7 @@ from .core_base import (
 )
 from .services.software import (
     Worker, _chromium_app_window_cmd, _davinci_download_dir, _davinci_flatpak_app_id, _davinci_zip_candidates,
-    _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
+    _finish_worker, _install_flatpak_inline, _is_flatpak_installed, load_appstream_catalog,
 )
 from .qt import (  # noqa: E501
     QButtonGroup, QCheckBox, QComboBox, QDesktopServices, QDialog, QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout, QIcon, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QRadioButton, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
@@ -1405,150 +1405,11 @@ class SoftwarePage(Page):
                 return path
         return ""
 
-    @staticmethod
-    def _ui_lang() -> str:
-        """Return the user's locale code (e.g. 'en_US'), falling back to 'en_US'."""
-        # POSIX precedence: LC_ALL > LC_MESSAGES > LANG
-        for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
-            val = os.environ.get(var, "")
-            code = val.split(".")[0].replace("-", "_") if val else ""
-            if code and code not in ("C", "POSIX"):
-                return code
-        # Fall back to Python's locale module (requires the C locale to be
-        # initialized, which may not be the case unless setlocale was called).
-        try:
-            locale.setlocale(locale.LC_ALL, "")
-            code, _ = locale.getlocale()
-            if code and code not in ("C", "POSIX"):
-                return code
-        except Exception:
-            pass
-        return "en_US"
-
-    @staticmethod
-    def _as_localized(parent: ET.Element, tag: str, lang: str) -> str:
-        """Return the best locale-matched text for *tag* children of *parent*.
-
-        Preference: exact lang match → base-language match (e.g. 'en' for 'en_US')
-        → untagged element (canonical source, typically English) → first found.
-        xml:lang lives in the W3C XML namespace so ElementTree expands it.
-        """
-        _XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
-        base = lang.split("_")[0]
-        untagged = exact = base_match = first = None
-        for el in parent.findall(tag):
-            el_lang = el.get(_XML_LANG)
-            text = " ".join("".join(el.itertext()).split()) or None
-            if text is None:
-                continue
-            if first is None:
-                first = text
-            if el_lang is None:
-                untagged = text
-            elif el_lang == lang:
-                exact = text
-            elif el_lang == base and base_match is None:
-                base_match = text
-        return exact or base_match or untagged or first or ""
-
-    @staticmethod
-    def _as_localized_desc(component: ET.Element, lang: str) -> str:
-        """Return the best locale-matched description, assembled from <p> children."""
-        _XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
-        base = lang.split("_")[0]
-
-        def _extract(desc_node: ET.Element) -> str:
-            parts = [
-                " ".join("".join(p.itertext()).split())
-                for p in desc_node.findall("p")
-                if "".join(p.itertext()).strip()
-            ]
-            return "\n\n".join(parts)
-
-        untagged = exact = base_match = first = None
-        for desc_node in component.findall("description"):
-            el_lang = desc_node.get(_XML_LANG)
-            text = _extract(desc_node) or None
-            if text is None:
-                continue
-            if first is None:
-                first = text
-            if el_lang is None:
-                untagged = text
-            elif el_lang == lang:
-                exact = text
-            elif el_lang == base and base_match is None:
-                base_match = text
-        return exact or base_match or untagged or first or ""
-
     def _fp_appstream_catalog(self) -> dict[str, dict]:
         if self._fp_appstream_cache is not None:
             return self._fp_appstream_cache
-        catalog: dict[str, dict] = {}
-        xml_path = "/var/lib/flatpak/appstream/flathub/x86_64/active/appstream.xml"
-        if not os.path.exists(xml_path):
-            matches = glob.glob("/var/lib/flatpak/appstream/flathub/x86_64/*/appstream.xml")
-            xml_path = matches[0] if matches else ""
-        if not xml_path:
-            self._fp_appstream_cache = catalog
-            return catalog
-        try:
-            root = ET.parse(xml_path).getroot()
-        except (ET.ParseError, OSError):
-            self._fp_appstream_cache = catalog
-            return catalog
-        lang = self._ui_lang()
-        for component in root.findall("component"):
-            app_id = (component.findtext("id") or "").strip()
-            bundle = component.find("bundle")
-            if not app_id or bundle is None or (bundle.get("type") or "") != "flatpak":
-                continue
-            categories_node = component.find("categories")
-            screenshots = []
-            screenshots_node = component.find("screenshots")
-            if screenshots_node is not None:
-                for screenshot in screenshots_node.findall("screenshot"):
-                    for image in screenshot.findall("image"):
-                        if image.text and image.get("type") in ("thumbnail", "source"):
-                            screenshots.append(image.text.strip())
-                            break
-            custom = component.find("custom")
-            verified = False
-            if custom is not None:
-                for value in custom.findall("value"):
-                    if value.get("key") == "flathub::verification::verified":
-                        verified = (value.text or "").strip().lower() == "true"
-            releases = component.find("releases")
-            version = ""
-            if releases is not None:
-                release = releases.find("release")
-                if release is not None:
-                    version = release.get("version") or ""
-            developer_node = component.find("developer")
-            catalog[app_id] = {
-                "name": self._as_localized(component, "name", lang) or app_id,
-                "summary": self._as_localized(component, "summary", lang),
-                "description": self._as_localized_desc(component, lang),
-                "developer": (self._as_localized(developer_node, "name", lang) if developer_node is not None else (component.findtext("developer/name") or "").strip()),
-                "license": (component.findtext("project_license") or "").strip(),
-                "homepage": self._fp_component_url(component, "homepage"),
-                "categories": [
-                    (cat.text or "").strip()
-                    for cat in (categories_node.findall("category") if categories_node is not None else [])
-                    if (cat.text or "").strip()
-                ],
-                "screenshots": screenshots,
-                "verified": verified,
-                "version": version,
-            }
-        self._fp_appstream_cache = catalog
-        return catalog
-
-    def _fp_component_url(self, component: ET.Element, url_type: str) -> str:
-        for url_node in component.findall("url"):
-            if url_node.get("type") == url_type and url_node.text:
-                return url_node.text.strip()
-        return ""
+        self._fp_appstream_cache = load_appstream_catalog()
+        return self._fp_appstream_cache
 
     def _fp_appstream_details(self, app_id: str) -> dict:
         return self._fp_appstream_catalog().get(app_id, {})

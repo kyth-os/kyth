@@ -872,15 +872,10 @@ class UpdatePage(Page):
             self._au_flatpak_lbl.setText("Up to date")
             self._au_flatpak_lbl.setStyleSheet("color: #4caf50;")
 
+from .services.dbus_utils import is_systemd_unit_enabled
+
         # Reflect timer enabled state
-        try:
-            r = subprocess.run(
-                ["systemctl", "is-enabled", "kyth-update-watcher.timer"],
-                capture_output=True, text=True, timeout=3, check=False,
-            )
-            enabled = r.stdout.strip() in ("enabled", "static")
-        except Exception:
-            enabled = True
+        enabled = is_systemd_unit_enabled("kyth-update-watcher.timer")
         self._au_enable_toggle.blockSignals(True)
         self._au_enable_toggle.setChecked(enabled)
         self._au_enable_toggle.blockSignals(False)

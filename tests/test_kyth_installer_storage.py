@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -727,6 +728,33 @@ class InstallerSystemTests(unittest.TestCase):
         mock_run.return_value = MagicMock(returncode=0, stdout="invalidhash\n")
         with self.assertRaisesRegex(RuntimeError, "invalid SHA-512 crypt value"):
             system._hash_password("mypassword")
+
+    def test_write_lines_creates_file_with_correct_permissions(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "test_file"
+            system._write_lines(test_file, ["line1", "line2"], 0o644)
+            self.assertEqual(test_file.read_text(), "line1\nline2\n")
+            mode = test_file.stat().st_mode & 0o777
+            self.assertEqual(mode, 0o644)
+
+    def test_write_lines_creates_sensitive_file_with_restricted_permissions(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "sensitive_file"
+            try:
+                system._write_lines(test_file, ["secret1", "secret2"], 0o000)
+                mode = test_file.stat().st_mode & 0o777
+                self.assertEqual(mode, 0o000)
+                os.chmod(test_file, 0o600)
+                self.assertEqual(test_file.read_text(), "secret1\nsecret2\n")
+            finally:
+                try:
+                    os.chmod(test_file, 0o600)
+                except Exception:
+                    pass
 
 
 class InstallerGptDiskTests(unittest.TestCase):

@@ -6,11 +6,13 @@ with SIGSEGV in OpenconnectAuthWorkerThread when authenticating GlobalProtect.
 This app runs openconnect directly via sudo, bypassing the broken plugin.
 """
 
+import atexit
 import configparser
 import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, unquote, urlparse
 from urllib.request import Request, urlopen
@@ -715,7 +717,40 @@ def _save_config(gateway: str, protocol: str, os_emul: str, username: str) -> No
         cfg.write(f)
 
 
-class _VpnWorker(QThread):
+_ACTIVE_THREADS: set = set()
+
+
+class TrackedThread(QThread):
+    BLOCKS_CLOSE = False
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        _ACTIVE_THREADS.add(self)
+        self.finished.connect(lambda: _ACTIVE_THREADS.discard(self))
+
+
+def _running_threads() -> list[TrackedThread]:
+    return [t for t in _ACTIVE_THREADS if t.isRunning()]
+
+
+def _shutdown_threads(timeout_ms: int = 15000) -> None:
+    for t in list(_ACTIVE_THREADS):
+        stop = getattr(t, "cancel", None) or getattr(t, "stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:
+                pass
+    deadline = time.monotonic() + timeout_ms / 1000
+    for t in list(_ACTIVE_THREADS):
+        remaining_ms = max(100, int((deadline - time.monotonic()) * 1000))
+        t.wait(remaining_ms)
+
+
+atexit.register(_shutdown_threads)
+
+
+class _VpnWorker(TrackedThread):
     line = pyqtSignal(str)
     done = pyqtSignal(int)
 
@@ -896,6 +931,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(row)
 
         self._log = QTextEdit()
+        self._log.document().setMaximumBlockCount(5000)
         self._log.setReadOnly(True)
         self._log.setFont(QFont("monospace", 9))
         layout.addWidget(self._log)
@@ -1196,6 +1232,7 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
+    app.aboutToQuit.connect(_shutdown_threads)
     app.setApplicationName("kyth-vpn-connect")
     app.setDesktopFileName("kyth-vpn-connect")
     app.setWindowIcon(QIcon.fromTheme(_APP_ICON_NAME))
