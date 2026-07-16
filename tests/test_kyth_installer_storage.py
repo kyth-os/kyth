@@ -648,6 +648,7 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_erase": False,
         })
         with patch.object(server, "list_disks", return_value=disks), \
+             patch.object(server, "_validate_storage_intent"), \
              patch.object(install, "_run_install") as run_install:
             handler.do_POST()
 
@@ -669,6 +670,7 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_erase": True,
         })
         with patch.object(server, "list_disks", return_value=disks), \
+             patch.object(server, "_validate_storage_intent"), \
              patch.object(server, "list_timezones", return_value=["UTC"]), \
              patch.object(install, "_run_install"):
             handler.do_POST()
@@ -695,6 +697,7 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_erase": True,
         })
         with patch.object(server, "list_disks", return_value=disks), \
+             patch.object(server, "_validate_storage_intent"), \
              patch.object(server, "list_timezones", return_value=["UTC"]), \
              patch.object(install, "_run_install"):
             handler.do_POST()
