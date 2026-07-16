@@ -65,15 +65,15 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
-from kyth_welcome import core, page_vpn  # noqa: E402
+from kyth_welcome import core_base, page_vpn  # noqa: E402
 from kyth_welcome.services import hardware, gaming  # noqa: E402
 
 
 class CoreParserTests(unittest.TestCase):
     def test_parse_size_bytes(self):
-        self.assertEqual(core._parse_size_bytes("1 KB"), 1024)
-        self.assertEqual(core._parse_size_bytes("1.5 GB"), int(1.5 * 1024**3))
-        self.assertEqual(core._parse_size_bytes("not a size"), 0)
+        self.assertEqual(core_base._parse_size_bytes("1 KB"), 1024)
+        self.assertEqual(core_base._parse_size_bytes("1.5 GB"), int(1.5 * 1024**3))
+        self.assertEqual(core_base._parse_size_bytes("not a size"), 0)
 
     def test_parse_steam_acf_text(self):
         acf = gaming._parse_steam_acf_text(
