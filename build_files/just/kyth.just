@@ -373,9 +373,12 @@ nvidia-status:
     set -euo pipefail
     /usr/bin/kyth-nvidia-status
 
-# Install LACT from Flathub on an immutable system.
+# Install a Flatpak app from Flathub, adding the remote first if needed. Internal helper
+# shared by the install-* recipes below — keeps the remote-add/install/message boilerplate
+# in one place instead of copy-pasted per app.
 [group('KythOS')]
-install-lact:
+[private]
+_install-flatpak id name:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v flatpak >/dev/null 2>&1; then
@@ -383,53 +386,32 @@ install-lact:
         exit 1
     fi
     flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub io.github.ilya_zlobintsev.LACT
+    flatpak install -y flathub {{ id }}
     echo
-    echo "LACT installed."
-    echo "Launch it from the app launcher."
-    echo "If you want overclocking/undervolting on AMD, review the official LACT Atomic guidance first."
+    echo "{{ name }} installed. Launch it from the app menu."
+
+# Install LACT from Flathub on an immutable system.
+[group('KythOS')]
+install-lact: (_install-flatpak "io.github.ilya_zlobintsev.LACT" "LACT")
+    @echo "If you want overclocking/undervolting on AMD, review the official LACT Atomic guidance first."
 
 # Install GPU Screen Recorder from Flathub — near-zero overhead capture and instant replay
 # using AMD/NVIDIA GPU hardware encoding. Select the GPU Screen Recorder UI or Tray from
 # the app menu; configure a replay buffer key in preferences for ShadowPlay-style highlights.
 [group('KythOS')]
-install-gpu-screen-recorder:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub com.dec05eba.gpu_screen_recorder
-    echo
-    echo "GPU Screen Recorder installed. Launch it from the app menu."
+install-gpu-screen-recorder: (_install-flatpak "com.dec05eba.gpu_screen_recorder" "GPU Screen Recorder")
 
 # Install Vesktop from Flathub — Discord with native Wayland, better screenshare, and Vencord.
 [group('KythOS')]
-install-vesktop:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub dev.vencord.Vesktop
-    echo
-    echo "Vesktop installed. Launch it from the app menu."
+install-vesktop: (_install-flatpak "dev.vencord.Vesktop" "Vesktop")
 
 # Install GOverlay from Flathub for MangoHud and vkBasalt configuration.
 [group('KythOS')]
-install-goverlay:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub io.github.benjamimgois.goverlay
-    echo
-    echo "GOverlay installed. Launch it from the app menu."
+install-goverlay: (_install-flatpak "io.github.benjamimgois.goverlay" "GOverlay")
 
 # Install MangoJuice from Flathub for lightweight MangoHud configuration.
 [group('KythOS')]
-install-mangojuice:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub io.github.radiolamp.mangojuice
-    echo
-    echo "MangoJuice installed. Launch it from the app menu."
+install-mangojuice: (_install-flatpak "io.github.radiolamp.mangojuice" "MangoJuice")
 
 # Launch CoreCtrl if the image includes it.
 [group('KythOS')]
@@ -445,17 +427,8 @@ corectrl:
 
 # Install BoxBuddy (distrobox GUI) from Flathub.
 [group('KythOS')]
-install-boxbuddy:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! command -v flatpak >/dev/null 2>&1; then
-        echo "flatpak is not available on this system." >&2
-        exit 1
-    fi
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub io.github.dvlv.boxbuddyrs
-    echo
-    echo "BoxBuddy installed. Launch it from the app launcher to manage your distrobox containers."
+install-boxbuddy: (_install-flatpak "io.github.dvlv.boxbuddyrs" "BoxBuddy")
+    @echo "Use it to manage your distrobox containers."
 
 # Set up a Kali Linux security toolbox via distrobox.
 #
@@ -1514,15 +1487,9 @@ deploy-opticscaler gamedir="":
 
 # Install OBS Studio — screen recording and live streaming.
 [group('KythOS')]
-install-obs:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub com.obsproject.Studio
-    flatpak override --user --env=OBS_VKCAPTURE=1 com.obsproject.Studio || true
-    echo
-    echo "OBS Studio installed. Launch it from the app menu."
-    echo "obs-vkcapture is enabled for Vulkan/OpenGL game capture."
+install-obs: (_install-flatpak "com.obsproject.Studio" "OBS Studio")
+    @flatpak override --user --env=OBS_VKCAPTURE=1 com.obsproject.Studio || true
+    @echo "obs-vkcapture is enabled for Vulkan/OpenGL game capture."
 
 # Enable OBS game capture (obs-vkcapture) system-wide for the current user.
 # Use this if you run OBS outside Flatpak (e.g. a native build).
@@ -1540,36 +1507,18 @@ enable-obs-capture:
 
 # Install the Itch.io desktop app — indie game store and library manager.
 [group('KythOS')]
-install-itch:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub io.itch.itch
-    echo
-    echo "Itch.io installed. Launch it from the app menu."
+install-itch: (_install-flatpak "io.itch.itch" "Itch.io")
 
 # Install RetroArch — multi-system emulator frontend (NES, SNES, PS1, N64, ...).
 [group('KythOS')]
-install-retroarch:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub org.libretro.RetroArch
-    echo
-    echo "RetroArch installed. Launch it from the app menu."
-    echo "Tip: download cores from inside RetroArch: Main Menu → Load Core → Download a Core."
+install-retroarch: (_install-flatpak "org.libretro.RetroArch" "RetroArch")
+    @echo "Tip: download cores from inside RetroArch: Main Menu → Load Core → Download a Core."
 
 # Install Piper — GUI for configuring gaming mice (DPI, buttons, LEDs).
 
 # Uses the Flatpak which bundles ratbagd — no rpm-ostree layering required.
 [group('KythOS')]
-install-piper:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub org.freedesktop.Piper
-    echo
-    echo "Piper installed. Launch it from the app menu."
+install-piper: (_install-flatpak "org.freedesktop.Piper" "Piper")
 
 # Install OpenRGB — unified RGB lighting control for motherboards, RAM, GPUs,
 # fans and peripherals. Uses the Flatpak with --device=all for hardware access.
@@ -1578,17 +1527,10 @@ install-piper:
 
 # sudo modprobe i2c-dev i2c-piix4    (or the appropriate module for your board)
 [group('KythOS')]
-install-openrgb:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub org.openrgb.OpenRGB
-    # Grant access to USB and i2c/SMBus devices
-    flatpak override --user --device=all org.openrgb.OpenRGB
-    echo
-    echo "OpenRGB installed. Launch it from the app menu."
-    echo "If RGB RAM or motherboard headers are missing, load i2c kernel modules:"
-    echo "  sudo modprobe i2c-dev i2c-piix4"
+install-openrgb: (_install-flatpak "org.openrgb.OpenRGB" "OpenRGB")
+    @flatpak override --user --device=all org.openrgb.OpenRGB
+    @echo "If RGB RAM or motherboard headers are missing, load i2c kernel modules:"
+    @echo "  sudo modprobe i2c-dev i2c-piix4"
 
 # Show the current KythOS Secure Boot enrollment state.
 #
