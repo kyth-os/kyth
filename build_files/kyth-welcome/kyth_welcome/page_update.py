@@ -16,6 +16,7 @@ from .services.software import (
 from .services.updates import (
     FirmwareCheckWorker, UpdateCheckWorker, _current_branch, FlatpakCheckWorker, ChangelogWorker,
 )
+from .services.dbus_utils import is_systemd_unit_enabled
 from .qt import (  # noqa: E501
     QCheckBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QTimer, QVBoxLayout, Qt,
 )
@@ -871,8 +872,6 @@ class UpdatePage(Page):
         else:
             self._au_flatpak_lbl.setText("Up to date")
             self._au_flatpak_lbl.setStyleSheet("color: #4caf50;")
-
-from .services.dbus_utils import is_systemd_unit_enabled
 
         # Reflect timer enabled state
         enabled = is_systemd_unit_enabled("kyth-update-watcher.timer")
