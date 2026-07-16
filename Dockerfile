@@ -51,6 +51,7 @@ RUN --mount=type=bind,source=build_files/scripts/headroom.sh,target=/ctx/headroo
 # system library dependencies, so ordering before the upgrade is safe.
 ARG PROTON_CACHYOS_VER=
 RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/proton-cachyos.sh \
+    --mount=type=bind,source=build_files/scripts/lib/curl-common.sh,target=/ctx/lib/curl-common.sh \
     --mount=type=tmpfs,dst=/tmp \
     --mount=type=secret,id=github_token \
     PROTON_CACHYOS_VER=${PROTON_CACHYOS_VER} bash /ctx/proton-cachyos.sh
@@ -63,6 +64,7 @@ RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/p
 # have no dependency on daily-upgraded RPMs, so ordering before the upgrade is safe.
 ARG THIRDPARTY_VERSIONS_HASH=unset
 RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/thirdparty.sh \
+    --mount=type=bind,source=build_files/scripts/lib/curl-common.sh,target=/ctx/lib/curl-common.sh \
     --mount=type=tmpfs,dst=/tmp \
     --mount=type=secret,id=github_token \
     : "cache-bust=${THIRDPARTY_VERSIONS_HASH}" && \
@@ -110,6 +112,8 @@ ARG BUILD_DATE=unset
 # Layers after this one are re-run on every daily build; layers before it are
 # cached until their scripts or the base image change.
 RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-git.sh \
+    --mount=type=bind,source=build_files/scripts/kernel-repair.sh,target=/ctx/kernel-repair.sh \
+    --mount=type=bind,source=build_files/scripts/lib/find-kver.sh,target=/ctx/lib/find-kver.sh \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=tmpfs,dst=/tmp \
     : "cache-bust=${BUILD_DATE}" && \
@@ -119,67 +123,7 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
         --disablerepo='fedora-multimedia' \
         --exclude='gstreamer1-plugins-bad' \
         --exclude='gstreamer1-plugins-bad.i686' && \
-    : "── Ensure active kernel has vmlinuz + initramfs for bootc ─────────────────" && \
-    : "Pick the newest modules dir that contains a real kernel. The upstream base" && \
-    : "image can ship kernel-less debris dirs (kmods prebuilt for a kernel it does" && \
-    : "not ship yet, e.g. /usr/lib/modules/<newer-kver>/ with modules but no" && \
-    : "vmlinuz), so the highest-versioned dir is not necessarily the kernel." && \
-    KVER=""; \
-    for _kdir in $(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V); do \
-        if [ -s "/usr/lib/modules/${_kdir}/vmlinuz" ]; then KVER="${_kdir}"; fi; \
-    done; \
-    if [ -z "${KVER}" ]; then \
-        KVER="$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n 1)"; \
-    fi && \
-    test -n "${KVER}" \
-        || { echo "ERROR: no kernel found in /usr/lib/modules after upgrade; contents: $(ls /usr/lib/modules/ 2>&1)" >&2; exit 1; } && \
-    echo "==> kernel: ${KVER}" && \
-    for _kdir in /usr/lib/modules/*/; do \
-        _kbase="$(basename "${_kdir}")"; \
-        if [ "${_kbase}" != "${KVER}" ] && [ ! -s "${_kdir}vmlinuz" ]; then \
-            echo "  Pruning kernel-less module dir: ${_kbase}"; \
-            rm -rf "${_kdir}"; \
-        fi; \
-    done && \
-    if [ ! -s "/usr/lib/modules/${KVER}/vmlinuz" ]; then \
-        _src=$(find /boot -name "vmlinuz-${KVER}" 2>/dev/null | head -1); \
-        if [ -n "${_src}" ] && [ -s "${_src}" ]; then \
-            echo "  Found vmlinuz at ${_src}, copying..."; \
-            cp --no-preserve=all "${_src}" "/usr/lib/modules/${KVER}/vmlinuz"; \
-        else \
-            echo "  vmlinuz not found in /boot, checking /usr/lib/kernel..."; \
-            _src=$(find /usr/lib/kernel -name "vmlinuz*" 2>/dev/null | head -1); \
-            if [ -n "${_src}" ] && [ -s "${_src}" ]; then \
-                echo "  Found vmlinuz at ${_src}, copying..."; \
-                cp --no-preserve=all "${_src}" "/usr/lib/modules/${KVER}/vmlinuz"; \
-            fi; \
-        fi; \
-    fi && \
-    { depmod -a "${KVER}" 2>/dev/null || true; } && \
-    if [ ! -s "/usr/lib/modules/${KVER}/initramfs" ]; then \
-        if [ -s "/boot/initramfs-${KVER}.img" ]; then \
-            cp --no-preserve=all "/boot/initramfs-${KVER}.img" "/usr/lib/modules/${KVER}/initramfs"; \
-        else \
-            TMPDIR=/var/tmp dracut \
-                --no-hostonly \
-                --compress "zstd -3" \
-                --kver "${KVER}" \
-                --force \
-                "/usr/lib/modules/${KVER}/initramfs" \
-                2> >(grep -Ev 'xattr|fail to copy' >&2); \
-        fi; \
-    fi && \
-    if [ ! -s "/usr/lib/modules/${KVER}/vmlinuz" ]; then \
-        echo "ERROR: vmlinuz missing/empty for ${KVER}"; \
-        echo "  Available files in /boot:"; \
-        ls -la /boot/vmlinuz* 2>/dev/null || echo "    (none)"; \
-        echo "  Contents of /usr/lib/modules/${KVER}:"; \
-        ls -la "/usr/lib/modules/${KVER}/" 2>&1 | head -20; \
-        exit 1; \
-    fi && \
-    test -s "/usr/lib/modules/${KVER}/initramfs" \
-        || { echo "ERROR: initramfs missing/empty for ${KVER}" >&2; exit 1; } && \
-    echo "==> kernel OK: vmlinuz $(du -h "/usr/lib/modules/${KVER}/vmlinuz" | cut -f1), initramfs $(du -h "/usr/lib/modules/${KVER}/initramfs" | cut -f1)" && \
+    bash /ctx/kernel-repair.sh && \
     ENABLE_MESA_GIT=${ENABLE_MESA_GIT} bash /ctx/mesa-git.sh
 
 # Layer 5: Post-upgrade service wiring and account repair (~few KB).
@@ -202,53 +146,4 @@ RUN --mount=type=bind,source=build_files,target=/ctx \
     --mount=type=secret,id=mok_key \
     SECUREBOOT_SIGNING_REQUESTED=${SECUREBOOT_SIGNING_REQUESTED} bash /ctx/scripts/secureboot.sh && \
     bash /ctx/scripts/branding.sh && \
-    : "── Rebuild boot splash initramfs after final branding ───────────────────" && \
-    /usr/libexec/kyth-plymouth-branding-guard /ctx/branding/transparent-watermark.svg && \
-    KVER=""; \
-    for _kdir in $(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V); do \
-        if [ -s "/usr/lib/modules/${_kdir}/vmlinuz" ]; then KVER="${_kdir}"; fi; \
-    done && \
-    test -n "${KVER}" \
-        || { echo "ERROR: no kernel with vmlinuz found in /usr/lib/modules for branded initramfs rebuild" >&2; exit 1; } && \
-    mkdir -p /etc/plymouth /usr/share/plymouth && \
-    printf '[Daemon]\nTheme=kyth\nShowDelay=0\nDeviceTimeout=8\nUseFirmwareBackground=false\n' > /etc/plymouth/plymouthd.conf && \
-    install -m 0644 /etc/plymouth/plymouthd.conf /usr/share/plymouth/plymouthd.defaults && \
-    TMPDIR=/var/tmp dracut \
-        --no-hostonly \
-        --compress "zstd -3" \
-        --kver "${KVER}" \
-        --force \
-        --add kyth-plymouth \
-        "/usr/lib/modules/${KVER}/initramfs" \
-        2> >(grep -Ev 'xattr|fail to copy' >&2) && \
-    echo "=== POST-DRACUT: plymouthd.defaults from initramfs ===" >&2 && \
-    (lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" 2>/dev/null || echo "MISSING") >&2 && \
-    if command -v lsinitrd >/dev/null 2>&1; then \
-        _initrd_listing="$(mktemp)" && \
-        lsinitrd "/usr/lib/modules/${KVER}/initramfs" > "${_initrd_listing}" && \
-        grep -q 'usr/share/plymouth/themes/kyth/kyth.plymouth' "${_initrd_listing}" \
-            || { echo "ERROR: branded initramfs does not contain KythOS Plymouth theme" >&2; exit 1; } && \
-        grep -q 'usr/share/plymouth/themes/kyth/kyth.script' "${_initrd_listing}" \
-            || { echo "ERROR: branded initramfs does not contain KythOS Plymouth script" >&2; exit 1; } && \
-        grep -q 'usr/share/plymouth/themes/kyth/kyth-logo.png' "${_initrd_listing}" \
-            || { echo "ERROR: branded initramfs does not contain KythOS Plymouth logo" >&2; exit 1; } && \
-        lsinitrd -f /usr/share/pixmaps/system-logo-white.png "/usr/lib/modules/${KVER}/initramfs" | cmp -s - /usr/share/kyth/branding/transparent-watermark.png \
-            || { echo "ERROR: branded initramfs still contains distro Plymouth system logo" >&2; exit 1; } && \
-        grep -q 'usr/share/plymouth/themes/default.plymouth' "${_initrd_listing}" \
-            || { echo "ERROR: branded initramfs does not force the KythOS Plymouth default theme" >&2; exit 1; } && \
-        lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" | grep -q '^Theme=kyth$' \
-            || { echo "ERROR: branded initramfs Plymouth defaults do not force Theme=kyth" >&2; exit 1; } && \
-        lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" | grep -q '^ShowDelay=0$' \
-            || { echo "ERROR: branded initramfs Plymouth defaults do not draw immediately" >&2; exit 1; } && \
-        lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" | grep -q '^DeviceTimeout=8$' \
-            || { echo "ERROR: branded initramfs Plymouth defaults are missing DeviceTimeout=8" >&2; exit 1; } && \
-        lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" | grep -q '^UseFirmwareBackground=false$' \
-            || { echo "ERROR: branded initramfs Plymouth defaults do not suppress BGRT firmware background" >&2; exit 1; } && \
-        grep -Eq 'usr/(lib64|lib)/plymouth/script\.so' "${_initrd_listing}" \
-            || { echo "ERROR: branded initramfs does not contain plymouth/script.so — kyth script theme will silently fail and fall back to BGRT firmware logo" >&2; exit 1; } && \
-        if grep -Ei 'usr/share/plymouth/themes/(bgrt-fedora|bgrt|spinner)(/|$)' "${_initrd_listing}" >&2; then \
-            echo "ERROR: Plymouth fallback theme leaked into branded initramfs" >&2; \
-            exit 1; \
-        fi && \
-        rm -f "${_initrd_listing}"; \
-    fi
+    bash /ctx/scripts/plymouth-initramfs.sh

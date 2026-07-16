@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-CURL_COMMON_ARGS=(--retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 --max-time 3600)
+# shellcheck source=lib/curl-common.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/curl-common.sh"
+CURL_COMMON_ARGS+=(--max-time 3600)
 
 # ── Proton-CachyOS ───────────────────────────────────────────────────────────
 # Installed system-wide so Steam picks it up for all users without manual setup.
@@ -22,10 +24,6 @@ else
 fi
 
 release_json="${TMPDIR_PC}/release.json"
-CURL_AUTH_ARGS=()
-if [[ -f /run/secrets/github_token ]]; then
-	CURL_AUTH_ARGS=(-H "Authorization: token $(cat /run/secrets/github_token)")
-fi
 if ! curl -fsSL "${CURL_COMMON_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" "${release_api}" -o "${release_json}"; then
 	echo "Failed to fetch Proton-CachyOS release info from ${release_api}" >&2
 	exit 1
