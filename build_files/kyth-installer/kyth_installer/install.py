@@ -328,6 +328,11 @@ def _prepare_install_storage(
             "--target-imgref", tgt_ref,
             "--acknowledge-destructive",
             "--karg=rootflags=subvol=@",
+            # By default bootc "finalizes" the target at the end of the
+            # install (fstrim + remount read-only), which would break the
+            # Phase 2 mkdir/mount/fstab edits below — config_root is this
+            # same mount, not a fresh one like the to-disk path uses.
+            "--skip-finalize",
         ]
         if SKIP_FETCH_CHECK:
             install_cmd.append("--skip-fetch-check")
