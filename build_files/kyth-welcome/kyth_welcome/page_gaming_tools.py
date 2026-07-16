@@ -777,7 +777,7 @@ class _ToolsMixin:
         self._scx_log_toggle.show()
         _set_log_panel(self._scx_log_toggle, self._scx_log, False)
         self._scx_progress.show()
-        self._scx_status_lbl.setText(f"{label}…")
+        self._scx_status_lbl.setText(f"Setting scheduler: {scheduler}…")
         self._scx_status_lbl.setObjectName("subheading")
         _restyle(self._scx_status_lbl)
 
