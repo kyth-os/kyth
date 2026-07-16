@@ -40,7 +40,7 @@ build_files/            # Layer 2+: packages, gaming tweaks, branding
   kyth-launch-installer # Desktop launcher for the installer
   branding/             # KythOS logos and branding CSS
   scripts/              # Build layers: packages, thirdparty, sysconfig, branding, proton-cachyos, mesa-git
-  just/kyth.just        # ujust recipes shipped in the OS
+  just/kyth.just        # ujust recipes shipped in the OS (imports kyth/*.just by domain)
   kyth-welcome/         # First-boot welcome app
 disk_config/            # Bootc Image Builder configs
 installer/              # Bazzite-style live payload customization

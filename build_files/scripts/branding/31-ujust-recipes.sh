@@ -3,6 +3,10 @@
 # Install KythOS-specific ujust recipes so users can run e.g. "ujust rebase kyth:stable".
 mkdir -p /usr/share/ublue-os/just
 cp /ctx/just/kyth.just /usr/share/ublue-os/just/75-kyth.just
+# kyth.just imports its per-domain recipe files from kyth/ next to itself
+# (just resolves imports relative to the importing file), so that directory
+# ships alongside it here.
+cp -r /ctx/just/kyth /usr/share/ublue-os/just/kyth
 # The upstream justfile only imports up to 60-custom.just; wire in our file.
 printf '\nimport? "/usr/share/ublue-os/just/75-kyth.just"\n' >>/usr/share/ublue-os/justfile
 systemctl enable kyth-local-bin-migrate.service 2>/dev/null || true
