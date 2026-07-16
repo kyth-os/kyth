@@ -369,6 +369,7 @@ jobs:
           rechunk: ghcr.io/mrtrick37/legacy-rechunk@sha256:ed2e0c0749cae465284b14c61c2106d7d929d5f270b838f27a251d31fcacf800
           ref: ${{ steps.build_final.outputs.raw_ref }}
           prev-ref: ${{ steps.build_final.outputs.image }}:${{ steps.prep.outputs.default_tag }}
+          meta: build_files/rechunk-meta.json
           max-layers: '64'
           skip_compression: true
           version: ${{ steps.checkout_sha.outputs.image_version }}
@@ -396,11 +397,22 @@ jobs:
           VERSION="$(sudo podman image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${IMAGE_ID}")"
           REVISION="$(sudo podman image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${IMAGE_ID}")"
           BOOTC_LABEL="$(sudo podman image inspect --format '{{ index .Config.Labels "containers.bootc" }}' "${IMAGE_ID}")"
+          RECHUNK_INFO="$(sudo podman image inspect --format '{{ index .Config.Labels "dev.hhd.rechunk.info" }}' "${IMAGE_ID}")"
           echo "Candidate image: ${LAYERS} layers"
           test "${LAYERS}" -le 128
           test "${VERSION}" = "${EXPECTED_VERSION}"
           test "${REVISION}" = "${EXPECTED_REVISION}"
           test "${BOOTC_LABEL}" = 1
+          NORMALIZED_GROUPS="$(
+            jq -r '.layers[][] | sub("^dedi:"; "") | sub("^meta:"; "")' \
+              <<<"${RECHUNK_INFO}"
+          )"
+          for group in kyth-initramfs proton-cachyos headroom rpmdb kyth; do
+            grep -Fxq "${group}" <<<"${NORMALIZED_GROUPS}" || {
+              echo "Missing required rechunk group: ${group}" >&2
+              exit 1
+            }
+          done
           sudo podman run --rm --entrypoint /usr/bin/bootc "${IMAGE_ID}" container lint
 
       - name: Remove temporary raw image tag

@@ -844,5 +844,6 @@ dnf5 install -y tailscale
 systemctl disable tailscaled.service 2>/dev/null || true
 dnf5 config-manager setopt tailscale-stable.enabled=0
 
-# Keep downloaded metadata and RPMs in Docker's /var/cache mount. The cache is
-# excluded from the image layer automatically and speeds up later rebuilds.
+# Keep downloads in Docker's /var/cache mount to speed up later rebuilds.
+# bootc maps persistent /var defaults through /usr/share/factory/var, so the
+# final Dockerfile stage explicitly removes any libdnf5 metadata copied there.

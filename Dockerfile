@@ -20,8 +20,9 @@ ARG ENABLE_ANANICY=1
 ARG ENABLE_SCX=1
 ARG ENABLE_MESA_GIT=0
 
-# Layer 1: All RPM package installs (~2-3 GB).
+# Build cache boundary: all RPM package installs (~2-3 GB).
 # Stable — only re-run when packages.sh changes or the base image is updated.
+# Published layer boundaries are defined later by legacy-rechunk metadata.
 RUN --mount=type=bind,source=build_files/scripts/packages.sh,target=/ctx/packages.sh \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-microsoft,target=/ctx/RPM-GPG-KEY-microsoft \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-google-antigravity,target=/ctx/RPM-GPG-KEY-google-antigravity \
@@ -44,7 +45,7 @@ RUN --mount=type=bind,source=build_files/scripts/headroom.sh,target=/ctx/headroo
     HEADROOM_EXTRAS=${HEADROOM_EXTRAS} \
     bash /ctx/headroom.sh
 
-# Layer 2: Proton-CachyOS (~700 MB).
+# Build cache boundary: Proton-CachyOS (~700 MB).
 # Placed before the daily upgrade layer so its cache is only busted when
 # proton-cachyos.sh changes or PROTON_CACHYOS_VER changes — not on every daily
 # dnf upgrade run. Proton-CachyOS is a fully self-contained wine bundle with no
@@ -106,7 +107,7 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx
 # Pass as: --build-arg BUILD_DATE="$(date +%Y-%m-%d)"
 ARG BUILD_DATE=unset
 
-# Layer 3: Upstream RPM upgrades + optional Mesa-git COPR drivers (~50-500 MB daily delta).
+# Build cache boundary: upstream RPM upgrades and optional Mesa-git drivers.
 # Mesa-git is folded into this layer instead of a standalone RUN so the no-op
 # ENABLE_MESA_GIT=0 case does not add a separate empty layer to the manifest chain.
 # Layers after this one are re-run on every daily build; layers before it are
@@ -126,7 +127,7 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
     bash /ctx/kernel-repair.sh && \
     ENABLE_MESA_GIT=${ENABLE_MESA_GIT} bash /ctx/mesa-git.sh
 
-# Layer 5: Post-upgrade service wiring and account repair (~few KB).
+# Build cache boundary: post-upgrade service wiring and account repair.
 # Re-enforces display-manager symlinks that dnf5 upgrade can reset, and enables/
 # disables runtime services after the upgrade has settled the unit file set.
 RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/sysconfig.sh \
@@ -135,15 +136,18 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/syscon
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig.sh
 
-# Layer 6: Secure Boot signing + branding, theming, helper app, Plymouth (~10-40 MB).
-# Merged into one layer (was two) to halve the manifest entries that change every
-# daily build, reducing the number of layer pulls for users running bootc upgrade.
+# Build cache boundary: Secure Boot signing, branding, helper app, and Plymouth.
+# These operations share one raw BuildKit layer; legacy-rechunk repartitions the
+# finished filesystem into update-efficient published OCI layers.
 # Skipped gracefully when MOK_KEY is not set (local builds without a signing key).
 # Pass the private key via: --secret id=mok_key,env=MOK_KEY
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \
     --mount=type=tmpfs,dst=/tmp \
     --mount=type=secret,id=mok_key \
+    if [ -d /usr/share/factory/var/cache/libdnf5 ]; then \
+        find /usr/share/factory/var/cache/libdnf5 -mindepth 1 -delete; \
+    fi && \
     SECUREBOOT_SIGNING_REQUESTED=${SECUREBOOT_SIGNING_REQUESTED} bash /ctx/scripts/secureboot.sh && \
     bash /ctx/scripts/branding.sh && \
     bash /ctx/scripts/plymouth-initramfs.sh

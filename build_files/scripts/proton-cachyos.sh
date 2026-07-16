@@ -8,8 +8,8 @@ CURL_COMMON_ARGS+=(--max-time 3600)
 # ── Proton-CachyOS ───────────────────────────────────────────────────────────
 # Installed system-wide so Steam picks it up for all users without manual setup.
 # Steam looks in /usr/share/steam/compatibilitytools.d/ in addition to ~/.steam.
-# This lives in its own image layer so Proton-CachyOS refreshes only re-download
-# this layer (~700 MB), not the full 3+ GB package layer.
+# Custom rechunk metadata places this payload in its own published image layer,
+# so a Proton refresh does not invalidate the full package or Kyth payload.
 # Standard x86_64 build (not the _v3 microarch variant) to avoid crashing on
 # CPUs without AVX2/BMI2/FMA.
 PROTON_CACHYOS_REPO_API="https://api.github.com/repos/CachyOS/proton-cachyos/releases"
