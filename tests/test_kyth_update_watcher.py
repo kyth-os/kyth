@@ -121,6 +121,7 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
         with patch.object(self.watcher, "write_status") as mock_write_status, \
              patch.object(self.watcher, "_notify_updates") as mock_notify, \
              patch.object(self.watcher, "check_startup_grace", return_value=None), \
+             patch.object(self.watcher, "check_quiet_hours", return_value=None), \
              patch.object(self.watcher, "os") as mock_os:
             mock_os.geteuid.return_value = 0
             with self.assertRaises(SystemExit):
@@ -157,6 +158,7 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
         with patch.object(self.watcher, "write_status") as mock_write_status, \
              patch.object(self.watcher, "_notify_updates") as mock_notify, \
              patch.object(self.watcher, "check_startup_grace", return_value=None), \
+             patch.object(self.watcher, "check_quiet_hours", return_value=None), \
              patch.object(self.watcher, "os") as mock_os:
             mock_os.geteuid.return_value = 0
             with self.assertRaises(SystemExit):
