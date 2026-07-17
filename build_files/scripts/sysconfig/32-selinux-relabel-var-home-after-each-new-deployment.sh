@@ -64,7 +64,7 @@ if [ -r "$STAMP_FILE" ] && [ "$(cat "$STAMP_FILE")" = "$deployment_id" ]; then
 fi
 
 echo "kyth-selinux-relabel-home: relabeling /var/home for deployment ${deployment_id}"
-/sbin/restorecon -RF /var/home
+/sbin/restorecon -RF -T0 /var/home
 
 mkdir -p "$STAMP_DIR"
 printf '%s' "$deployment_id" > "$STAMP_FILE"
