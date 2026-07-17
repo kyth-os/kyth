@@ -1,3 +1,7 @@
+# Shared helpers (e.g. _install-flatpak). `just` deduplicates repeated imports,
+# so this stays valid both standalone and when pulled in via kyth.just.
+import 'common.just'
+
 # Install BoxBuddy (distrobox GUI) from Flathub.
 [group('KythOS')]
 install-boxbuddy: (_install-flatpak "io.github.dvlv.boxbuddyrs" "BoxBuddy")

@@ -1,3 +1,7 @@
+# Shared helpers (e.g. _install-flatpak). `just` deduplicates repeated imports,
+# so this stays valid both standalone and when pulled in via kyth.just.
+import 'common.just'
+
 # Export Steam Flatpak game shortcuts into the host application menu.
 [group('KythOS')]
 export-steam-games:
