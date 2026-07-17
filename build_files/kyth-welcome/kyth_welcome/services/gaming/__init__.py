@@ -57,9 +57,8 @@ from .compat import (
 from .gamenight import GameNightManager, _cleanup_game_night
 from .windows_partitions import _probe_windows_partitions
 
-# Historical re-exports: many pages imported these via gaming
+# Pure re-export (no Qt)
 from ..hardware import _find_ntfs_drives  # noqa: F401
-from ..runtime import DataWorker, TrackedThread, Worker  # noqa: F401
 
 __all__ = [
     "GAMING_TOOLS",
@@ -71,6 +70,7 @@ __all__ = [
     "_ProtonDbBatchWorker",
     "_collect_gaming_dashboard",
     "_detect_installed_games",
+    "_find_ntfs_drives",
     "_gaming_health_items",
     "_gaming_migration_checklist_items",
     "_load_protondb_cache",
@@ -90,3 +90,16 @@ __all__ = [
     "recommended_profile_for_game",
     "scx_scheduler_command",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy re-export of Qt worker types so pure gaming imports stay Qt-free."""
+    if name in {"DataWorker", "TrackedThread", "Worker"}:
+        from ..runtime import DataWorker, TrackedThread, Worker
+        mapping = {
+            "DataWorker": DataWorker,
+            "TrackedThread": TrackedThread,
+            "Worker": Worker,
+        }
+        return mapping[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

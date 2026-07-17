@@ -11,9 +11,17 @@ from .process import (
     _probe_cached,
     _run_command,
 )
-from .runtime import Worker, _finish_worker  # re-exported for page imports
 
 _IS_LIVE = _is_live_session()
+
+
+def __getattr__(name: str):
+    """Lazy re-export of Qt worker types (pages import Worker from software)."""
+    if name in {"Worker", "_finish_worker"}:
+        from .runtime import Worker, _finish_worker
+        return {"Worker": Worker, "_finish_worker": _finish_worker}[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 _CHROMIUM_APP_ID_PREFIX = {
     "chromium-browser": "chromium",

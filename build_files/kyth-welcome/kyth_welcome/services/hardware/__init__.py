@@ -41,12 +41,12 @@ from .codec import (
 from .collect import HardwareProbeWorker, _collect_hardware_probes
 from .drives import _detect_controllers, _find_ntfs_drives
 
-# Re-export runtime types that some pages historically imported via gaming
-from ..runtime import DataWorker, TrackedThread, Worker  # noqa: F401
-
 __all__ = [
     "HardwareProbe",
     "HardwareProbeWorker",
+    "DataWorker",
+    "TrackedThread",
+    "Worker",
     "_akmod_nvidia_built",
     "_akmod_nvidia_installed",
     "_audio_probe",
@@ -75,3 +75,16 @@ __all__ = [
     "_strip_ansi",
     "_thermal_probe",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy re-export of Qt worker types so pure probe imports stay Qt-free."""
+    if name in {"DataWorker", "TrackedThread", "Worker"}:
+        from ..runtime import DataWorker, TrackedThread, Worker
+        mapping = {
+            "DataWorker": DataWorker,
+            "TrackedThread": TrackedThread,
+            "Worker": Worker,
+        }
+        return mapping[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

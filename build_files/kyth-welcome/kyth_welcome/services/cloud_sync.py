@@ -1,15 +1,13 @@
-"""Cloud sync workers (rclone authorize/sync, steam library copy).
+"""Cloud sync helpers and optional Qt workers.
 
-Command construction and process workers; Qt UI stays in the cloud storage page.
+Pure command/token helpers import without Qt (CI unit tests). Worker classes
+are defined only when Qt bindings are available (desktop image).
 """
 from __future__ import annotations
 
 import os
 import re
 import subprocess
-
-from ..qt import Signal
-from .runtime import TrackedThread
 
 
 def extract_rclone_token(text: str) -> str | None:
@@ -46,116 +44,130 @@ def rsync_copy_command(src: str, dst: str) -> list[str]:
     ]
 
 
-class SteamCopyWorker(TrackedThread):
-    """Copies a steamapps directory using rsync, streaming output line-by-line."""
-    BLOCKS_CLOSE = True
-    line = Signal(str)
-    done = Signal(int)
-
-    def __init__(self, src: str, dst: str):
-        super().__init__()
-        self._src = src
-        self._dst = dst
-        self._proc = None
-
-    def stop(self):
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
-
-    def run(self):
-        try:
-            os.makedirs(self._dst, exist_ok=True)
-        except OSError as exc:
-            self.line.emit(f"Error creating destination: {exc}")
-            self.done.emit(1)
-            return
-        cmd = rsync_copy_command(self._src, self._dst)
-        self.line.emit(f"→ {' '.join(cmd)}\n")
-        try:
-            self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
-            )
-            for ln in self._proc.stdout:
-                self.line.emit(ln.rstrip())
-            self._proc.wait()
-            self.done.emit(self._proc.returncode)
-        except Exception as exc:
-            self.line.emit(f"Error: {exc}")
-            self.done.emit(1)
+try:
+    from ..qt import Signal
+    from .runtime import TrackedThread
+except ImportError:  # pragma: no cover - CI / headless unit tests without Qt
+    Signal = None  # type: ignore[assignment,misc]
+    TrackedThread = object  # type: ignore[assignment,misc]
+    _HAS_QT = False
+else:
+    _HAS_QT = True
 
 
-class RcloneAuthorizeWorker(TrackedThread):
-    """Runs `rclone authorize <type>` in the background; emits the token JSON on success."""
-    token_ready = Signal(str)
-    failed = Signal(str)
+if _HAS_QT:
+    class SteamCopyWorker(TrackedThread):
+        """Copies a steamapps directory using rsync, streaming output line-by-line."""
+        BLOCKS_CLOSE = True
+        line = Signal(str)
+        done = Signal(int)
 
-    def __init__(self, remote_type: str):
-        super().__init__()
-        self._remote_type = remote_type
-        self._proc = None
+        def __init__(self, src: str, dst: str):
+            super().__init__()
+            self._src = src
+            self._dst = dst
+            self._proc = None
 
-    def run(self):
-        try:
-            self._proc = subprocess.Popen(
-                ["rclone", "authorize", self._remote_type],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.DEVNULL,  # prevent rclone blocking on interactive prompts
-                text=True,
-            )
-            stdout, stderr = self._proc.communicate(timeout=300)
-            if self._proc.returncode != 0 and not stdout.strip():
-                self.failed.emit(
-                    f"rclone authorize exited with code {self._proc.returncode}.\n\n"
-                    f"{stderr.strip()[:400]}"
-                )
+        def stop(self):
+            if self._proc and self._proc.poll() is None:
+                self._proc.terminate()
+
+        def run(self):
+            try:
+                os.makedirs(self._dst, exist_ok=True)
+            except OSError as exc:
+                self.line.emit(f"Error creating destination: {exc}")
+                self.done.emit(1)
                 return
-            token = extract_rclone_token(stdout) or extract_rclone_token(stderr)
-            if token:
-                self.token_ready.emit(token)
-            else:
-                combined = (stdout + stderr).strip()
-                self.failed.emit(
-                    "Authorization completed but could not parse the token.\n\n"
-                    f"Output:\n{combined[:600]}"
+            cmd = rsync_copy_command(self._src, self._dst)
+            self.line.emit(f"→ {' '.join(cmd)}\n")
+            try:
+                self._proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1,
                 )
-        except subprocess.TimeoutExpired:
-            if self._proc:
-                self._proc.kill()
-            self.failed.emit("Authorization timed out after 5 minutes.")
-        except Exception as exc:
-            self.failed.emit(str(exc))
+                for ln in self._proc.stdout:
+                    self.line.emit(ln.rstrip())
+                self._proc.wait()
+                self.done.emit(self._proc.returncode)
+            except Exception as exc:
+                self.line.emit(f"Error: {exc}")
+                self.done.emit(1)
 
-    def cancel(self):
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+    class RcloneAuthorizeWorker(TrackedThread):
+        """Runs `rclone authorize <type>`; emits the token JSON on success."""
+        token_ready = Signal(str)
+        failed = Signal(str)
 
+        def __init__(self, remote_type: str):
+            super().__init__()
+            self._remote_type = remote_type
+            self._proc = None
 
-class RcloneSyncWorker(TrackedThread):
-    """Runs `rclone sync remote: folder --progress` and streams output lines."""
-    BLOCKS_CLOSE = True
-    line = Signal(str)
-    done = Signal(int)
+        def run(self):
+            try:
+                self._proc = subprocess.Popen(
+                    ["rclone", "authorize", self._remote_type],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.DEVNULL,
+                    text=True,
+                )
+                stdout, stderr = self._proc.communicate(timeout=300)
+                if self._proc.returncode != 0 and not stdout.strip():
+                    self.failed.emit(
+                        f"rclone authorize exited with code {self._proc.returncode}.\n\n"
+                        f"{stderr.strip()[:400]}"
+                    )
+                    return
+                token = extract_rclone_token(stdout) or extract_rclone_token(stderr)
+                if token:
+                    self.token_ready.emit(token)
+                else:
+                    combined = (stdout + stderr).strip()
+                    self.failed.emit(
+                        "Authorization completed but could not parse the token.\n\n"
+                        f"Output:\n{combined[:600]}"
+                    )
+            except subprocess.TimeoutExpired:
+                if self._proc:
+                    self._proc.kill()
+                self.failed.emit("Authorization timed out after 5 minutes.")
+            except Exception as exc:
+                self.failed.emit(str(exc))
 
-    def __init__(self, remote: str, folder: str):
-        super().__init__()
-        self._remote = remote
-        self._folder = folder
+        def cancel(self):
+            if self._proc and self._proc.poll() is None:
+                self._proc.terminate()
 
-    def run(self):
-        try:
-            proc = subprocess.Popen(
-                rclone_sync_command(self._remote, self._folder),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            for ln in proc.stdout:
-                self.line.emit(ln.rstrip())
-            proc.wait()
-            self.done.emit(proc.returncode)
-        except Exception as exc:
-            self.line.emit(f"Error: {exc}")
-            self.done.emit(1)
+    class RcloneSyncWorker(TrackedThread):
+        """Runs `rclone sync remote: folder --progress` and streams output lines."""
+        BLOCKS_CLOSE = True
+        line = Signal(str)
+        done = Signal(int)
+
+        def __init__(self, remote: str, folder: str):
+            super().__init__()
+            self._remote = remote
+            self._folder = folder
+
+        def run(self):
+            try:
+                proc = subprocess.Popen(
+                    rclone_sync_command(self._remote, self._folder),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                for ln in proc.stdout:
+                    self.line.emit(ln.rstrip())
+                proc.wait()
+                self.done.emit(proc.returncode)
+            except Exception as exc:
+                self.line.emit(f"Error: {exc}")
+                self.done.emit(1)
+else:  # pragma: no cover
+    SteamCopyWorker = None  # type: ignore[assignment,misc]
+    RcloneAuthorizeWorker = None  # type: ignore[assignment,misc]
+    RcloneSyncWorker = None  # type: ignore[assignment,misc]

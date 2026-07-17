@@ -1,7 +1,6 @@
-"""Aggregate hardware probes and background worker."""
+"""Aggregate hardware probes and optional Qt worker."""
 from __future__ import annotations
 
-from ...qt import Signal
 from .types import HardwareProbe
 from .nvidia import _gpu_probe
 from .io import (
@@ -22,18 +21,6 @@ from .system import (
 )
 from .codec import _codec_probe
 from ..process import _command_stdout, _probe_cached
-from ..runtime import TrackedThread
-
-
-class HardwareProbeWorker(TrackedThread):
-    done = Signal(object)
-    failed = Signal(str)
-
-    def run(self):
-        try:
-            self.done.emit(_collect_hardware_probes())
-        except Exception as exc:
-            self.failed.emit(str(exc))
 
 
 def _collect_hardware_probes() -> list[HardwareProbe]:
@@ -63,3 +50,28 @@ def _collect_hardware_probes() -> list[HardwareProbe]:
             _system_hub_probe(),
         ]
     return _probe_cached("hardware-probes", 5.0, fetch)
+
+
+try:
+    from ...qt import Signal
+    from ..runtime import TrackedThread
+except ImportError:  # pragma: no cover - CI without Qt
+    Signal = None  # type: ignore[assignment,misc]
+    TrackedThread = object  # type: ignore[assignment,misc]
+    _HAS_QT = False
+else:
+    _HAS_QT = True
+
+
+if _HAS_QT:
+    class HardwareProbeWorker(TrackedThread):
+        done = Signal(object)
+        failed = Signal(str)
+
+        def run(self):
+            try:
+                self.done.emit(_collect_hardware_probes())
+            except Exception as exc:
+                self.failed.emit(str(exc))
+else:  # pragma: no cover
+    HardwareProbeWorker = None  # type: ignore[assignment,misc]

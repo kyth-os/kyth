@@ -35,7 +35,6 @@ class GamingPackageTests(unittest.TestCase):
         self.assertTrue(callable(gaming._gaming_health_items))
         self.assertTrue(callable(gaming._probe_windows_partitions))
         self.assertTrue(callable(gaming._find_ntfs_drives))  # re-export
-        self.assertIsNotNone(gaming.TrackedThread)
 
     def test_parse_steam_acf_text(self):
         text = (
