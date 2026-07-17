@@ -1,4 +1,3 @@
-import configparser
 import os
 import re
 import subprocess
@@ -7,86 +6,26 @@ from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
-from .services.gaming import TrackedThread
+from .services.vpn import (
+    VPN_OS_OPTIONS as _VPN_OS_OPTIONS,
+    VPN_PROTOCOLS as _VPN_PROTOCOLS,
+    VpnConnectWorker as _VpnConnectWorker,
+    _GP_PRELOGIN_IFACE_RE,
+    _GP_SAML_FIELDS,
+    _load_vpn_config,
+    _parse_gp_saml_cookie,
+    _redact_vpn_log_line,
+    _save_vpn_config,
+    _vpn_line_is_connected,
+)
 from .qt import (  # noqa: E501
-    QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QTextEdit, QThread, QTimer, QUrl, QVBoxLayout, QWebEnginePage, QWebEngineProfile, QWebEngineUrlRequestJob, QWebEngineUrlSchemeHandler, QWebEngineView, Signal, _WEBENGINE_AVAILABLE,
+    QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QTextEdit, QTimer, QUrl, QVBoxLayout, QWebEnginePage, QWebEngineProfile, QWebEngineUrlRequestJob, QWebEngineUrlSchemeHandler, QWebEngineView, Signal, _WEBENGINE_AVAILABLE,
 )
 from .widgets import (  # noqa: E501
     Page, _make_card, _set_log_panel,
 )
 
 # ── VPN page ──────────────────────────────────────────────────────────────────
-_VPN_CONFIG = os.path.expanduser("~/.config/kyth-vpn-connect")
-_VPN_PROTOCOLS = ["gp", "anyconnect", "pulse", "nc", "f5", "fortinet", "array"]
-_VPN_OS_OPTIONS = ["win", "linux", "mac"]
-
-
-def _load_vpn_config() -> dict:
-    cfg = configparser.ConfigParser()
-    if os.path.exists(_VPN_CONFIG):
-        cfg.read(_VPN_CONFIG)
-    return dict(cfg["vpn"]) if "vpn" in cfg else {}
-
-
-def _save_vpn_config(gateway: str, protocol: str, os_emul: str, username: str) -> None:
-    cfg = configparser.ConfigParser()
-    cfg["vpn"] = {"gateway": gateway, "protocol": protocol, "os": os_emul, "username": username}
-    with open(_VPN_CONFIG, "w") as f:
-        cfg.write(f)
-
-
-_SAML_URL_RE = re.compile(r"SAML REDIRECT.*?via (https?://\S+)")
-# Which GP interface openconnect was probing when SAML was requested.
-# A prelogin-cookie is only valid on the interface that issued it, so the
-# reconnect must use portal:<field> vs gateway:<field> accordingly.
-_GP_PRELOGIN_IFACE_RE = re.compile(r"POST https?://[^/]+/(global-protect|ssl-vpn)/prelogin\.esp")
-_GP_SAML_FIELDS = frozenset({
-    "preloginuserauthcookie",
-    "portal-userauthcookie",
-    "cas",
-    "prelogin-cookie",
-})
-
-
-def _parse_gp_saml_cookie(cookie: str) -> tuple[str, str, str]:
-    raw = cookie.strip()
-    if not raw:
-        return "", "", ""
-    params = parse_qs(raw, keep_blank_values=True)
-    username = params.get("saml-username", [""])[0]
-    for name in _GP_SAML_FIELDS:
-        if name in params and params[name]:
-            return name, params[name][0], username
-    if "=" in raw:
-        name, value = raw.split("=", 1)
-        name = name.strip()
-        if name in _GP_SAML_FIELDS and value:
-            return name, value, ""
-    return "prelogin-cookie", raw, ""
-
-
-def _redact_vpn_log_line(line: str) -> str:
-    return re.sub(
-        r"(GlobalProtect login returned (?:portal-userauthcookie|portal-prelogonuserauthcookie|prelogin-cookie|preloginuserauthcookie|cas)=).*",
-        r"\1<redacted>",
-        line,
-    )
-
-
-def _vpn_line_is_connected(line: str) -> bool:
-    lo = line.lower()
-    return any(
-        marker in lo
-        for marker in (
-            "connected as",
-            "established dtls",
-            "established cstp",
-            "esp session established",
-            "esp tunnel connected",
-            "configured as",
-        )
-    )
-
 if _WEBENGINE_AVAILABLE:
     class _GpCallbackHandler(QWebEngineUrlSchemeHandler):
         """Catches GlobalProtect callback URLs regardless of how they're triggered."""
@@ -608,54 +547,6 @@ QPushButton#saml-cancel:pressed {
         def reject(self) -> None:
             self._teardown_webengine()
             super().reject()
-
-
-class _VpnConnectWorker(TrackedThread):
-    line = Signal(str)
-    done = Signal(int)
-    saml_required = Signal(str)
-
-    def __init__(self, cmd: list[str], password: str = ""):
-        super().__init__()
-        self._cmd = cmd
-        self._password = password
-        self._proc: subprocess.Popen | None = None
-
-    def run(self) -> None:
-        env = os.environ.copy()
-        env.setdefault("SUDO_ASKPASS", "/usr/bin/ksshaskpass")
-        env.setdefault("SUDO_PROMPT", "Password:")
-        stdin_pipe = subprocess.PIPE if self._password else subprocess.DEVNULL
-        try:
-            self._proc = subprocess.Popen(
-                self._cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=stdin_pipe,
-                text=True,
-                bufsize=1,
-                env=env,
-                cwd="/tmp",
-            )
-            if self._password and self._proc.stdin:
-                self._proc.stdin.write(self._password + "\n")
-                self._proc.stdin.close()
-            assert self._proc.stdout
-            for ln in self._proc.stdout:
-                clean = ln.rstrip()
-                self.line.emit(clean)
-                m = _SAML_URL_RE.search(clean)
-                if m:
-                    self.saml_required.emit(m.group(1))
-            self._proc.wait()
-            self.done.emit(self._proc.returncode)
-        except Exception as exc:
-            self.line.emit(f"Error: {exc}")
-            self.done.emit(1)
-
-    def stop(self) -> None:
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
 
 
 class VpnPage(Page):

@@ -7,7 +7,11 @@ from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
-from .services.gaming import TrackedThread
+from .services.cloud_sync import (
+    RcloneAuthorizeWorker,
+    RcloneSyncWorker,
+    SteamCopyWorker,
+)
 from .services.network import (
     _load_sync_config, _rclone_available, _rclone_list_remotes, _save_sync_config,
 )
@@ -15,172 +19,12 @@ from .services.software import (
     Worker, _finish_worker, _is_flatpak_installed,
 )
 from .qt import (  # noqa: E501
-    QApplication, QComboBox, QDesktopServices, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QTextEdit, QThread, QTimer, QUrl, QVBoxLayout, QWidget, Qt, Signal,
+    QApplication, QComboBox, QDesktopServices, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QTextEdit, QTimer, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )
 from .widgets import (  # noqa: E501
-    Page, _make_card,
+    Page, _copy_text, _launch_opt_label, _launch_opt_value, _make_card,
 )
 
-class SteamCopyWorker(TrackedThread):
-    """Copies a steamapps directory using rsync, streaming output line-by-line."""
-    BLOCKS_CLOSE = True
-    line = Signal(str)
-    done = Signal(int)
-
-    def __init__(self, src: str, dst: str):
-        super().__init__()
-        self._src = src
-        self._dst = dst
-        self._proc = None
-
-    def stop(self):
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
-
-    def run(self):
-        try:
-            os.makedirs(self._dst, exist_ok=True)
-        except OSError as exc:
-            self.line.emit(f"Error creating destination: {exc}")
-            self.done.emit(1)
-            return
-        cmd = [
-            "rsync", "-a", "--info=name1,progress2", "--no-inc-recursive",
-            self._src.rstrip("/") + "/",
-            self._dst.rstrip("/") + "/",
-        ]
-        self.line.emit(f"→ {' '.join(cmd)}\n")
-        try:
-            self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
-            )
-            for ln in self._proc.stdout:
-                self.line.emit(ln.rstrip())
-            self._proc.wait()
-            self.done.emit(self._proc.returncode)
-        except Exception as exc:
-            self.line.emit(f"Error: {exc}")
-            self.done.emit(1)
-
-
-def _launch_opt_label(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet("font-size: 12px; color: #888888; min-width: 130px;")
-    return lbl
-
-
-def _launch_opt_value(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-    lbl.setStyleSheet(
-        "font-family: 'Noto Mono', 'Cascadia Code', monospace; "
-        "font-size: 12px; color: #c0c0c0; "
-        "background: #060606; border: 1px solid #1e1e1e; "
-        "border-radius: 4px; padding: 3px 8px;"
-    )
-    return lbl
-
-
-def _copy_text(text: str):
-    QApplication.clipboard().setText(text)
-
-
-# ── rclone OAuth authorization worker ────────────────────────────────────────
-class RcloneAuthorizeWorker(TrackedThread):
-    """Runs `rclone authorize <type>` in the background; emits the token JSON on success."""
-    token_ready = Signal(str)
-    failed = Signal(str)
-
-    def __init__(self, remote_type: str):
-        super().__init__()
-        self._remote_type = remote_type
-        self._proc = None
-
-    def run(self):
-        try:
-            self._proc = subprocess.Popen(
-                ["rclone", "authorize", self._remote_type],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.DEVNULL,  # prevent rclone blocking on interactive prompts
-                text=True,
-            )
-            stdout, stderr = self._proc.communicate(timeout=300)
-            if self._proc.returncode != 0 and not stdout.strip():
-                self.failed.emit(
-                    f"rclone authorize exited with code {self._proc.returncode}.\n\n"
-                    f"{stderr.strip()[:400]}"
-                )
-                return
-            token = self._extract_token(stdout) or self._extract_token(stderr)
-            if token:
-                self.token_ready.emit(token)
-            else:
-                combined = (stdout + stderr).strip()
-                self.failed.emit(
-                    "Authorization completed but could not parse the token.\n\n"
-                    f"Output:\n{combined[:600]}"
-                )
-        except subprocess.TimeoutExpired:
-            if self._proc:
-                self._proc.kill()
-            self.failed.emit("Authorization timed out after 5 minutes.")
-        except Exception as exc:
-            self.failed.emit(str(exc))
-
-    @staticmethod
-    def _extract_token(text: str) -> str | None:
-        start_marker = "Paste the following into your remote machine --->"
-        end_marker = "<---End paste"
-        if start_marker in text and end_marker in text:
-            start = text.index(start_marker) + len(start_marker)
-            end = text.index(end_marker, start)
-            candidate = text[start:end].strip()
-            if candidate.startswith("{"):
-                return candidate
-        m = re.search(r'\{"access_token"[^<>]*\}', text, re.DOTALL)
-        if m:
-            return m.group(0)
-        return None
-
-    def cancel(self):
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
-
-
-# ── rclone background sync worker ─────────────────────────────────────────────
-class RcloneSyncWorker(TrackedThread):
-    """Runs `rclone sync remote: folder --progress` and streams output lines."""
-    BLOCKS_CLOSE = True
-    line = Signal(str)
-    done = Signal(int)
-
-    def __init__(self, remote: str, folder: str):
-        super().__init__()
-        self._remote = remote
-        self._folder = folder
-
-    def run(self):
-        try:
-            proc = subprocess.Popen(
-                ["rclone", "sync", f"{self._remote}:", self._folder,
-                 "--progress", "--stats-one-line", "--stats=2s"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            for ln in proc.stdout:
-                self.line.emit(ln.rstrip())
-            proc.wait()
-            self.done.emit(proc.returncode)
-        except Exception as exc:
-            self.line.emit(f"Error: {exc}")
-            self.done.emit(1)
-
-
-# ── rclone setup wizard dialog ────────────────────────────────────────────────
 class RcloneSetupWizard(QDialog):
     """Four-step wizard: choose service → name/folder → browser OAuth → done."""
 

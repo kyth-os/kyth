@@ -1,15 +1,19 @@
 import glob
 import os
-import re
 import shlex
 import shutil
 from urllib.parse import urlsplit
 
-from ..qt import Signal, QPushButton
-from ..core_base import (
-    Worker, _probe_cached, _run_command, _finish_worker,
-    _IS_LIVE, _command_stdout
+from .process import (
+    _FLATPAK_CACHE_TTL,
+    _command_stdout,
+    _is_live_session,
+    _probe_cached,
+    _run_command,
 )
+from .runtime import Worker, _finish_worker  # re-exported for page imports
+
+_IS_LIVE = _is_live_session()
 
 _CHROMIUM_APP_ID_PREFIX = {
     "chromium-browser": "chromium",
@@ -33,8 +37,6 @@ _DEFAULT_FIRST_RUN_APPS = (
     ("io.github.benjamimgois.goverlay", "GOverlay"),
     ("dev.vencord.Vesktop", "Vesktop"),
 )
-
-_FLATPAK_CACHE_TTL = 10.0
 
 def _installed_flatpak_ids() -> frozenset | None:
     """One `flatpak list` snapshot instead of a `flatpak info` spawn per app.
@@ -94,45 +96,24 @@ def _chromium_app_window_cmd(url: str) -> tuple[list[str], str] | None:
     return None
  # _chromium_app_window_cmd
 
-def _install_flatpak_inline(owner: object, btn: QPushButton, app_id: str, name: str,
-                            extra_cmd: str = "", done_cb=None) -> None:
-    """Install a Flathub app on a Worker thread, driving the button state.
-
-    In-app replacement for terminal-popping installs: the button itself shows
-    progress and outcome, and polkit/askpass handles any elevation. extra_cmd
-    is shell appended after a successful install (e.g. a flatpak override).
-    One worker per app id, kept on `owner` so concurrent clicks are ignored.
-    """
-    attr = "_inline_install_" + re.sub(r"\W", "_", app_id)
-    existing = getattr(owner, attr, None)
-    if existing is not None and existing.isRunning():
-        return
-    orig = btn.text()
-    btn.setEnabled(False)
-    btn.setText("Installing…")
+def flatpak_install_shell_command(app_id: str, extra_cmd: str = "") -> str:
+    """Shell command that ensures Flathub exists then installs *app_id*."""
     cmd = (
         "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
         f" && flatpak install -y --or-update flathub {shlex.quote(app_id)}"
     )
     if extra_cmd:
         cmd += f" && {extra_cmd}"
-    worker = Worker(["bash", "-c", cmd])
+    return cmd
+ # flatpak_install_shell_command
 
-    def _done(code: int):
-        _finish_worker(owner, attr=attr)
-        if code == 0:
-            btn.setText("✓ Installed")
-            btn.setToolTip(f"{name} is installed. Find it in the app launcher.")
-        else:
-            btn.setText(orig)
-            btn.setEnabled(True)
-            btn.setToolTip(f"Install failed (exit {code}). Check your network connection and try again.")
-        if done_cb:
-            done_cb(code)
 
-    worker.done.connect(_done)
-    setattr(owner, attr, worker)
-    worker.start()
+def _install_flatpak_inline(owner: object, btn, app_id: str, name: str,
+                            extra_cmd: str = "", done_cb=None) -> None:
+    """Compat wrapper — UI implementation lives in ``kyth_welcome.actions``."""
+    from ..actions import _install_flatpak_inline as _ui_install
+
+    return _ui_install(owner, btn, app_id, name, extra_cmd=extra_cmd, done_cb=done_cb)
  # _install_flatpak_inline
 
 def _first_run_app_setup_state() -> tuple[str, str, list[str]]:

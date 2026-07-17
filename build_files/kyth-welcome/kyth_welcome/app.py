@@ -36,9 +36,9 @@ from .qt import (  # noqa: E501
 from .theme import (  # noqa: E501
     QSS,
 )
-from .windows import (  # noqa: E501
-    MainWindow, WizardWindow,
-)
+from .windows import MainWindow
+from .wizard import WizardWindow
+
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main():

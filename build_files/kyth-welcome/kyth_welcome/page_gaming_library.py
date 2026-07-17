@@ -6,10 +6,9 @@ from .services.gaming import (  # noqa: E501
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _detect_installed_games, _load_protondb_cache,
     _save_protondb_cache, find_compat_game, recommended_launcher_for_game, recommended_profile_for_game
 )
-from .page_cloud_storage import _copy_text
 from .page_compatibility import _COMPAT_GAMES
 from .qt import QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, Qt
-from .widgets import _make_card
+from .widgets import _copy_text, _make_card
 
 
 class _LibraryMixin:

@@ -5,11 +5,14 @@ import shutil
 import subprocess
 from datetime import datetime
 
-from ..core_base import (
-    _run_command, _command_stdout, _branch_display_name, _current_branch,
-    _has_rollback_deployment, _has_staged_update
+from .bootc import (
+    _branch_display_name,
+    _current_branch,
+    _has_rollback_deployment,
+    _has_staged_update,
 )
-from .hardware import _collect_hardware_probes, HardwareProbe
+from .hardware import HardwareProbe, _collect_hardware_probes
+from .process import _command_stdout, _run_command
 
 def _tail_file(path: str, max_lines: int = 80) -> str:
     try:

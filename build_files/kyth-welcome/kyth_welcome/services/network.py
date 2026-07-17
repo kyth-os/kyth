@@ -4,8 +4,8 @@ import shlex
 import shutil
 import subprocess
 
-from ..core_base import _run_command, _command_stdout
 from .config import load_json_config, save_json_config
+from .process import _command_stdout, _run_command
 
 _CLOUD_SYNC_CONFIG = os.path.expanduser("~/.config/kyth-cloud-sync.json")
 _SMB_CONFIG = os.path.expanduser("~/.config/kyth-smb-shares.json")

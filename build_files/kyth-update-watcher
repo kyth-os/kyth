@@ -14,12 +14,10 @@ Design: oneshot script — examine conditions, run or skip, write status, exit.
 """
 from __future__ import annotations
 
-import grp
 import json
 import logging
 import os
 import pwd
-import re
 import subprocess
 import sys
 import threading
@@ -27,6 +25,32 @@ import time
 import tomllib
 from datetime import datetime, time as dtime
 from pathlib import Path
+
+# Shared pure helpers live in the System Hub package (no Qt on this import path).
+def _ensure_kyth_welcome_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidates = (
+        here / "kyth-welcome",                 # repo: build_files/kyth-welcome
+        Path("/usr/lib/kyth-welcome"),        # installed image layout
+    )
+    for candidate in candidates:
+        if (candidate / "kyth_welcome").is_dir():
+            path = str(candidate)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            return
+
+
+_ensure_kyth_welcome_path()
+
+from kyth_welcome.services.bootc import (  # noqa: E402
+    fetch_bootc_status_data_uncached,
+    image_digest_from_status,
+    image_reference_from_status,
+)
+from kyth_welcome.services.registry import (  # noqa: E402
+    remote_digest_for_ref,
+)
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -325,83 +349,25 @@ def run_bootc_upgrade(timeout: int) -> tuple[bool, str]:
 
 
 def get_bootc_status() -> dict | None:
+    """Return bootc status JSON, uncached (root timer path)."""
     try:
-        r = subprocess.run(["bootc", "status", "--json"], capture_output=True, text=True, timeout=15)
-        if r.returncode == 0:
-            return json.loads(r.stdout)
+        return fetch_bootc_status_data_uncached()
     except Exception as exc:
         LOG.warning("Could not get bootc status: %s", exc)
-    return None
-
-
-def get_nested(data: dict, path: tuple[str, ...]) -> Any:
-    current = data
-    for key in path:
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    return current
+        return None
 
 
 def get_bootc_image_reference(status_data: dict) -> str | None:
-    candidates = (
-        ("status", "booted", "image", "reference"),
-        ("status", "booted", "image", "image", "reference"),
-        ("status", "booted", "image", "image", "image"),
-        ("status", "booted", "image", "image"),
-        ("status", "booted", "image"),
-        ("spec", "image", "image"),
-        ("spec", "image", "reference"),
-    )
-    for path in candidates:
-        val = get_nested(status_data, path)
-        if isinstance(val, str) and val.strip():
-            return val.strip()
-    return None
+    """Compat wrapper around shared bootc.image_reference_from_status."""
+    return image_reference_from_status(status_data)
 
 
 def get_remote_digest(ref: str) -> str | None:
-    try:
-        r = subprocess.run(
-            ["skopeo", "inspect", "--raw", "--no-creds", f"docker://{ref}"],
-            capture_output=True, timeout=30,
-        )
-        if r.returncode != 0:
-            LOG.warning("skopeo inspect failed: %s", r.stderr.decode(errors="replace").strip())
-            return None
-        
-        manifest = json.loads(r.stdout)
-        remote_digest = None
-        
-        if manifest.get("mediaType", "").endswith("manifest.v1+json"):
-            import hashlib
-            remote_digest = "sha256:" + hashlib.sha256(r.stdout).hexdigest()
-        else:
-            manifests = manifest.get("manifests")
-            if isinstance(manifests, list):
-                for entry in manifests:
-                    plat = entry.get("platform", {})
-                    digest = entry.get("digest")
-                    if (
-                        plat.get("architecture") == "amd64"
-                        and plat.get("os") == "linux"
-                        and isinstance(digest, str)
-                        and digest.startswith("sha256:")
-                    ):
-                        remote_digest = digest
-                        break
-            elif manifest.get("config") and manifest.get("layers"):
-                import hashlib
-                remote_digest = "sha256:" + hashlib.sha256(r.stdout).hexdigest()
-                
-        if remote_digest is None:
-            import hashlib
-            remote_digest = "sha256:" + hashlib.sha256(r.stdout).hexdigest()
-            
-        return remote_digest
-    except Exception as exc:
-        LOG.warning("Could not check remote digest: %s", exc)
-    return None
+    """Compat wrapper around shared registry.remote_digest_for_ref."""
+    digest = remote_digest_for_ref(ref)
+    if digest is None:
+        LOG.warning("Could not check remote digest for %s", ref)
+    return digest
 
 
 # ---------------------------------------------------------------------------
@@ -472,24 +438,13 @@ def main() -> None:
     flatpak_count = check_flatpak_updates()
     LOG.info("Flatpak updates pending: %d", flatpak_count)
 
-    # Check digests before downloading
+    # Check digests before downloading (shared bootc + registry helpers)
     status_data = get_bootc_status()
     if status_data:
         ref = get_bootc_image_reference(status_data)
         if ref:
-            booted = status_data.get("status", {}).get("booted", {}) or {}
-            booted_digest = None
-            if isinstance(booted, dict):
-                image_info = booted.get("image", {})
-                if isinstance(image_info, dict):
-                    booted_digest = image_info.get("imageDigest") or image_info.get("digest")
-
-            staged = status_data.get("status", {}).get("staged", {}) or {}
-            staged_digest = None
-            if isinstance(staged, dict):
-                image_info = staged.get("image", {})
-                if isinstance(image_info, dict):
-                    staged_digest = image_info.get("imageDigest") or image_info.get("digest")
+            booted_digest = image_digest_from_status(status_data, "booted")
+            staged_digest = image_digest_from_status(status_data, "staged")
 
             LOG.info("Booted digest: %s, Staged digest: %s", booted_digest, staged_digest)
 

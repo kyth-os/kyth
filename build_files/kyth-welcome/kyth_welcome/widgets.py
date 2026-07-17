@@ -34,6 +34,28 @@ def _make_card(name: str = "card") -> tuple[QFrame, QVBoxLayout]:
     return card, layout
 
 
+def _launch_opt_label(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet("font-size: 12px; color: #888888; min-width: 130px;")
+    return lbl
+
+
+def _launch_opt_value(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    lbl.setStyleSheet(
+        "font-family: 'Noto Mono', 'Cascadia Code', monospace; "
+        "font-size: 12px; color: #c0c0c0; "
+        "background: #060606; border: 1px solid #1e1e1e; "
+        "border-radius: 4px; padding: 3px 8px;"
+    )
+    return lbl
+
+
+def _copy_text(text: str):
+    QApplication.clipboard().setText(text)
+
+
 class StatusBadge(QLabel):
     """Compact shared status label for page and task feedback."""
     _STATE_NAMES = {

@@ -11,12 +11,14 @@ from .services.gaming import (  # noqa: E501
     scx_scheduler_command
 )
 from .services.software import Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed
-from .page_cloud_storage import _copy_text, _launch_opt_label, _launch_opt_value
 from .qt import (  # noqa: E501
     QComboBox, QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar,
     QPushButton, QTextEdit, QTimer, QUrl, QVBoxLayout, Qt
 )
-from .widgets import ActionRow, CommandResultPanel, _make_card, _set_log_panel
+from .widgets import (
+    ActionRow, CommandResultPanel, _copy_text, _launch_opt_label, _launch_opt_value,
+    _make_card, _set_log_panel,
+)
 
 
 class _ToolsMixin:

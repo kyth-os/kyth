@@ -1,11 +1,12 @@
-import glob
-import os
-import json
-import sqlite3
-import subprocess
-from datetime import datetime
-
 # __KYTH_GENERATED_IMPORTS__
+from .services.sched import (
+    apply_scheduler,
+    is_sched_daemon_active,
+    list_schedulers,
+    read_sched_status,
+    set_sched_daemon_enabled,
+)
+from .services.telem import recent_sessions
 from .qt import (  # noqa: E501
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt,
 )
@@ -114,44 +115,18 @@ class PerformancePage(Page):
         QTimer.singleShot(150, self._perf_refresh)
 
     def _populate_sched_combo(self) -> None:
-        try:
-            r = subprocess.run(
-                ["kyth-scx", "list"], capture_output=True, text=True, timeout=5, check=False,
-            )
-            schedulers = [s.strip() for s in r.stdout.splitlines() if s.strip()]
-        except Exception:
-            schedulers = []
-        if not schedulers:
-            try:
-                schedulers = sorted(
-                    os.path.basename(p) for p in glob.glob("/usr/bin/scx_*")
-                    if os.path.isfile(p) and not p.endswith("scx_loader")
-                )
-            except Exception:
-                pass
         self._perf_sched_combo.clear()
-        self._perf_sched_combo.addItems(schedulers or ["scx_lavd", "scx_bpfland", "scx_rusty"])
+        self._perf_sched_combo.addItems(list_schedulers())
 
     def _perf_refresh(self) -> None:
         self._refresh_sched_status()
         self._refresh_session_history()
 
     def _refresh_sched_status(self) -> None:
-        uid = os.getuid()
-        status_file = os.path.join(
-            os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{uid}"),
-            "kyth-sched-status.json",
-        )
-        status = {}
-        try:
-            with open(status_file) as f:
-                status = json.load(f)
-        except Exception:
-            pass
-
+        status = read_sched_status()
         profile = status.get("profile", "")
-        sched   = status.get("scheduler", "")
-        gaming  = status.get("gaming_active", False)
+        sched = status.get("scheduler", "")
+        gaming = status.get("gaming_active", False)
         override = status.get("manual_override", False)
 
         prof_text = profile.title() if profile else "—"
@@ -167,34 +142,13 @@ class PerformancePage(Page):
             self._perf_gaming_lbl.setText("Not detected")
             self._perf_gaming_lbl.setStyleSheet("color: #b0bccf;")
 
-        try:
-            r = subprocess.run(
-                ["systemctl", "--user", "is-active", "kyth-sched.service"],
-                capture_output=True, text=True, timeout=3, check=False,
-            )
-            self._perf_auto_toggle.blockSignals(True)
-            self._perf_auto_toggle.setChecked(r.stdout.strip() == "active")
-            self._perf_auto_toggle.blockSignals(False)
-        except Exception:
-            pass
+        self._perf_auto_toggle.blockSignals(True)
+        self._perf_auto_toggle.setChecked(is_sched_daemon_active())
+        self._perf_auto_toggle.blockSignals(False)
 
     def _refresh_session_history(self) -> None:
-        db_path = os.path.join(
-            os.path.expanduser("~"), ".local", "share", "kyth", "telemetry.db",
-        )
-        if not os.path.exists(db_path):
-            return
-        try:
-            conn = sqlite3.connect(db_path, timeout=3)
-            rows = conn.execute(
-                "SELECT game_name, started_at, duration_s, avg_fps, p1_low_fps, "
-                "stutter_count, scheduler FROM sessions ORDER BY started_at DESC LIMIT 15"
-            ).fetchall()
-            conn.close()
-        except Exception:
-            return
+        rows = recent_sessions(limit=15)
 
-        # Clear old rows
         while self._perf_sessions_layout.count():
             item = self._perf_sessions_layout.takeAt(0)
             if item.widget():
@@ -205,73 +159,46 @@ class PerformancePage(Page):
             return
 
         self._perf_no_data_lbl.hide()
-        for (game, started, duration, avg_fps, p1, stutters, sched) in rows:
+        for session in rows:
             row_w = QWidget()
             row_l = QHBoxLayout(row_w)
             row_l.setContentsMargins(0, 3, 0, 3)
             row_l.setSpacing(16)
 
-            name_lbl = QLabel(game or "Unknown")
+            name_lbl = QLabel(session.game_name)
             name_lbl.setObjectName("prop-val")
             name_lbl.setMinimumWidth(160)
             row_l.addWidget(name_lbl)
 
-            date_str = ""
-            if started:
-                try:
-                    date_str = datetime.fromtimestamp(started).strftime("%b %d %H:%M")
-                except Exception:
-                    pass
-            date_lbl = QLabel(date_str or "—")
+            date_lbl = QLabel(session.date_label)
             date_lbl.setObjectName("prop-val-dim")
             date_lbl.setMinimumWidth(88)
             row_l.addWidget(date_lbl)
 
-            dur_str = "—"
-            if duration:
-                m, s = divmod(int(duration), 60)
-                dur_str = f"{m}m {s:02d}s"
-            dur_lbl = QLabel(dur_str)
+            dur_lbl = QLabel(session.duration_label)
             dur_lbl.setObjectName("prop-val")
             dur_lbl.setMinimumWidth(72)
             row_l.addWidget(dur_lbl)
 
-            fps_text = f"{avg_fps:.0f} / {p1:.0f} 1%" if avg_fps else "—"
-            fps_lbl = QLabel(fps_text)
+            fps_lbl = QLabel(session.fps_label)
             fps_lbl.setObjectName("prop-val-blue")
             fps_lbl.setMinimumWidth(120)
             row_l.addWidget(fps_lbl)
 
-            sc = stutters or 0
+            sc = session.stutter_count
             stutter_lbl = QLabel(f"{sc} stutter{'s' if sc != 1 else ''}")
             stutter_lbl.setObjectName("prop-val-red" if sc > 20 else "prop-val")
             stutter_lbl.setMinimumWidth(88)
             row_l.addWidget(stutter_lbl)
 
-            sched_lbl = QLabel(sched or "")
+            sched_lbl = QLabel(session.scheduler)
             sched_lbl.setObjectName("prop-val-dim")
             row_l.addWidget(sched_lbl, 1)
 
             self._perf_sessions_layout.addWidget(row_w)
 
     def _apply_scheduler(self) -> None:
-        sched = self._perf_sched_combo.currentText()
-        if not sched:
-            return
-        try:
-            subprocess.Popen(
-                ["sudo", "-n", "/usr/bin/kyth-scx", "set", sched],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
+        apply_scheduler(self._perf_sched_combo.currentText())
 
     def _toggle_sched_daemon(self, state: int) -> None:
-        cmd = "start" if state else "stop"
-        try:
-            subprocess.Popen(
-                ["systemctl", "--user", cmd, "kyth-sched.service"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
+        set_sched_daemon_enabled(bool(state))

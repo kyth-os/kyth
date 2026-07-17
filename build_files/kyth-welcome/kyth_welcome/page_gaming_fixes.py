@@ -6,9 +6,8 @@ from .services.gaming import (  # noqa: E501
     _streaming_health_items, command_details, discord_screenshare_fix_command, obs_pipewire_fix_command
 )
 from .services.software import _install_flatpak_inline
-from .page_cloud_storage import _copy_text, _launch_opt_label, _launch_opt_value
 from .qt import QDesktopServices, QHBoxLayout, QLabel, QPushButton, QUrl
-from .widgets import ActionRow, _make_card
+from .widgets import ActionRow, _copy_text, _launch_opt_label, _launch_opt_value, _make_card
 
 
 class _FixesMixin:
