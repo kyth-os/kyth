@@ -2,6 +2,7 @@ import glob
 import os
 import shlex
 import shutil
+import subprocess
 from urllib.parse import urlsplit
 
 from .process import (
@@ -48,15 +49,92 @@ _DEFAULT_FIRST_RUN_APPS = (
 
 def _installed_flatpak_ids() -> frozenset | None:
     """One `flatpak list` snapshot instead of a `flatpak info` spawn per app.
-    Returns None when the listing itself fails (flatpak missing/broken)."""
-    def fetch() -> frozenset | None:
+    Returns None when the listing itself fails (flatpak missing/broken).
+
+    Disk cache (kyth-probe) stores a JSON list; normalize to frozenset here.
+    """
+    def fetch() -> list[str] | None:
         result = _run_command(["flatpak", "list", "--app", "--columns=application"], timeout=10)
         if result is None or result.returncode != 0:
             return None
-        return frozenset(ln.strip() for ln in result.stdout.splitlines() if ln.strip())
+        return sorted({ln.strip() for ln in result.stdout.splitlines() if ln.strip()})
 
-    return _probe_cached("flatpak-apps", _FLATPAK_CACHE_TTL, fetch)
+    raw = _probe_cached("flatpak-apps", _FLATPAK_CACHE_TTL, fetch)
+    if raw is None:
+        return None
+    if isinstance(raw, frozenset):
+        return raw
+    if isinstance(raw, (list, set, tuple)):
+        return frozenset(raw)
+    return None
  # _installed_flatpak_ids
+
+
+def list_installed_flatpak_apps() -> list[dict[str, str]]:
+    """Return installed flatpak apps as dicts with app_id/name/origin/installation."""
+    import os
+
+    if not shutil.which("flatpak"):
+        return []
+    env = {**os.environ, "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"}
+    try:
+        result = subprocess.run(
+            ["flatpak", "list", "--app", "--columns=application,name,origin,installation"],
+            capture_output=True, text=True, timeout=12, check=False, env=env,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+    apps: list[dict[str, str]] = []
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 4:
+            continue
+        app_id, name, origin, installation = (part.strip() for part in parts[:4])
+        if not app_id:
+            continue
+        apps.append({
+            "kind": "flatpak",
+            "app_id": app_id,
+            "name": name or app_id,
+            "origin": origin or "unknown",
+            "installation": installation or "system",
+        })
+    return apps
+
+
+_list_installed_flatpak_apps = list_installed_flatpak_apps
+
+
+def is_distrobox_container(name: str) -> bool:
+    result = _run_command(["distrobox", "list", "--no-color"], timeout=10)
+    if result is None or result.returncode != 0:
+        return False
+    return name in result.stdout
+
+
+_is_distrobox_container = is_distrobox_container
+
+
+def refresh_desktop_database(desktop_dir: str) -> None:
+    for cmd in (
+        ["update-desktop-database", desktop_dir],
+        ["kbuildsycoca6", "--noincremental"],
+    ):
+        _run_command(cmd, timeout=5)
+
+
+_refresh_desktop_database = refresh_desktop_database
+
+
+def _pending_flatpak_update_count() -> int | None:
+    """Pending Flatpak updates (system + user). None if flatpak is unavailable."""
+    def fetch() -> int | None:
+        from .probe import _count_flatpak_updates
+        return _count_flatpak_updates()
+
+    return _probe_cached("flatpak-updates", _FLATPAK_CACHE_TTL, fetch)
 
 def _is_flatpak_installed(app_id: str) -> bool:
     ids = _installed_flatpak_ids()

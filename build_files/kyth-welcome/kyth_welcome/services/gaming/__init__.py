@@ -37,7 +37,6 @@ from .steam import (
     _steam_library_roots,
 )
 from .protondb import (
-    _ProtonDbBatchWorker,
     _load_protondb_cache,
     _save_protondb_cache,
 )
@@ -54,6 +53,18 @@ from .compat import (
     recommended_launcher_for_game,
     recommended_profile_for_game,
 )
+from .compat_data import (
+    CompatGame,
+    _COMPAT_CACHE_PATH,
+    _COMPAT_DATA_UPDATED,
+    _COMPAT_GAMES,
+    _COMPAT_REMOTE_URL,
+    _COMPAT_STALE_DAYS,
+    _load_compat_games,
+    _parse_compat_payload,
+    load_compat_games,
+    replace_compat_games,
+)
 from .gamenight import GameNightManager, _cleanup_game_night
 from .windows_partitions import _probe_windows_partitions
 
@@ -61,11 +72,17 @@ from .windows_partitions import _probe_windows_partitions
 from ..hardware import _find_ntfs_drives  # noqa: F401
 
 __all__ = [
+    "CompatGame",
     "GAMING_TOOLS",
     "GameNightManager",
     "TrackedThread",
     "Worker",
     "DataWorker",
+    "_COMPAT_CACHE_PATH",
+    "_COMPAT_DATA_UPDATED",
+    "_COMPAT_GAMES",
+    "_COMPAT_REMOTE_URL",
+    "_COMPAT_STALE_DAYS",
     "_PROTONDB_TIER_STYLE",
     "_ProtonDbBatchWorker",
     "_collect_gaming_dashboard",
@@ -73,7 +90,9 @@ __all__ = [
     "_find_ntfs_drives",
     "_gaming_health_items",
     "_gaming_migration_checklist_items",
+    "_load_compat_games",
     "_load_protondb_cache",
+    "_parse_compat_payload",
     "_probe_windows_partitions",
     "_save_protondb_cache",
     "_steam_libraries_on_ntfs",
@@ -83,11 +102,13 @@ __all__ = [
     "discord_screenshare_fix_command",
     "find_compat_game",
     "heroic_epic_launcher_command",
+    "load_compat_games",
     "lutris_installer_command",
     "obs_pipewire_fix_command",
     "opticscaler_deploy_command",
     "recommended_launcher_for_game",
     "recommended_profile_for_game",
+    "replace_compat_games",
     "scx_scheduler_command",
 ]
 
@@ -102,4 +123,7 @@ def __getattr__(name: str):
             "Worker": Worker,
         }
         return mapping[name]
+    if name == "_ProtonDbBatchWorker":
+        from ..workers.protondb import ProtonDbBatchWorker
+        return ProtonDbBatchWorker
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

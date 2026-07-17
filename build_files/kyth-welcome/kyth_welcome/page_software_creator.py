@@ -1,8 +1,6 @@
 import os
 import shutil
-import subprocess
-
-# __KYTH_GENERATED_IMPORTS__
+from .services.launch import flatpak_run, popen
 from .core_base import _apply_install_badge, _restyle
 from .services.software import (
     Worker, _davinci_download_dir, _davinci_flatpak_app_id, _davinci_zip_candidates, _finish_worker,
@@ -147,7 +145,7 @@ class _CreatorTabMixin:
         launch_btn = QPushButton("Launch")
         launch_btn.hide()
         launch_btn.clicked.connect(
-            lambda _=False, cmd=tool["launch"]: subprocess.Popen(cmd)
+            lambda _=False, cmd=tool["launch"]: popen(cmd)
         )
         btn_row.addWidget(launch_btn)
         uninstall_btn = QPushButton("Uninstall")
@@ -356,7 +354,7 @@ class _CreatorTabMixin:
         if not app_id:
             QMessageBox.warning(self, "DaVinci Resolve", "DaVinci Resolve is not installed yet.")
             return
-        subprocess.Popen(["flatpak", "run", app_id])
+        flatpak_run(app_id)
 
     def _install_davinci(self):
         if self._dv_worker and self._dv_worker.isRunning():

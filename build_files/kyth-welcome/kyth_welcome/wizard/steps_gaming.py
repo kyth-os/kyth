@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..core_base import _IS_LIVE
-from ..services.gaming import _find_ntfs_drives
+from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives
 from ..qt import QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget
 from ..widgets import _make_card
 

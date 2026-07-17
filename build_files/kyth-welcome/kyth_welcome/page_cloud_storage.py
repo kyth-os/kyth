@@ -1,7 +1,6 @@
 import os
 import re
 import shutil
-import subprocess
 import time
 from datetime import datetime
 
@@ -11,7 +10,11 @@ from .services.cloud_sync import (
     RcloneAuthorizeWorker,
     RcloneSyncWorker,
     SteamCopyWorker,
+    rclone_create_remote,
+    rclone_usage_hints,
+    rclone_verify_remote,
 )
+from .services.launch import flatpak_run, popen
 from .services.network import (
     _load_sync_config, _rclone_available, _rclone_list_remotes, _save_sync_config,
 )
@@ -477,40 +480,15 @@ class RcloneSetupWizard(QDialog):
         if svc == "onedrive":
             extra_params = ["drive_type", "personal"]
 
-        try:
-            result = subprocess.run(
-                ["rclone", "config", "create", name, svc,
-                 "token", self._token, *extra_params, "--non-interactive"],
-                capture_output=True, text=True, timeout=30,
-                stdin=subprocess.DEVNULL,
-            )
-        except FileNotFoundError:
-            QMessageBox.critical(self, "rclone Not Found",
-                                 "rclone is not installed or not on PATH.")
-            return
-        except subprocess.TimeoutExpired:
-            QMessageBox.critical(self, "Config Timeout",
-                                 "rclone config create timed out. "
-                                 "Check that rclone is working correctly.")
-            return
-        except Exception as exc:
-            QMessageBox.critical(self, "Config Error",
-                                 f"Unexpected error running rclone:\n{exc}")
-            return
-        if result.returncode != 0:
-            QMessageBox.critical(
-                self, "Config Error",
-                f"Failed to write rclone config:\n{result.stderr.strip()[:300]}"
-            )
+        ok, err = rclone_create_remote(
+            name, svc, self._token, extra_params=extra_params or None,
+        )
+        if not ok:
+            title = "rclone Not Found" if "not installed" in err.lower() else "Config Error"
+            QMessageBox.critical(self, title, f"Failed to write rclone config:\n{err}")
             return
 
-        # Verify the remote actually works by listing the root
-        verify = subprocess.run(
-            ["rclone", "lsd", f"{name}:", "--max-depth", "0"],
-            capture_output=True, text=True, timeout=20,
-            stdin=subprocess.DEVNULL,
-        )
-        conn_ok = verify.returncode == 0
+        conn_ok, err_hint = rclone_verify_remote(name)
 
         info = self._SERVICES[svc]
         if conn_ok:
@@ -518,7 +496,6 @@ class RcloneSetupWizard(QDialog):
                 f"Your {info['label']} is configured and the connection was verified."
             )
         else:
-            err_hint = verify.stderr.strip()[:200]
             self._done_sub.setText(
                 f"Your {info['label']} was configured, but the connection test failed.\n\n"
                 f"You may need to re-run the wizard or check your account permissions.\n"
@@ -529,12 +506,7 @@ class RcloneSetupWizard(QDialog):
             f"Service:            {info['label']}\n"
             f"Local folder:    {folder}"
         )
-        self._done_cmds.setPlainText(
-            f"# Sync cloud → local (one-shot):\n"
-            f"rclone sync {name}: {folder} --progress\n\n"
-            f"# Mount as a virtual drive (stays open until unmounted):\n"
-            f"rclone mount {name}: {folder} --daemon --vfs-cache-mode full"
-        )
+        self._done_cmds.setPlainText(rclone_usage_hints(name, folder))
         self._local_folder_for_open = folder
         self._stack.setCurrentIndex(3)
         self._update_nav()
@@ -1185,7 +1157,7 @@ class CloudStoragePage(Page):
     def _open_folder_in_dolphin(self, folder: str):
         os.makedirs(folder, exist_ok=True)
         try:
-            subprocess.Popen(["dolphin", folder])
+            popen(["dolphin", folder])
         except Exception:
             QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
@@ -1299,9 +1271,9 @@ class CloudStoragePage(Page):
 
     def _launch_dropbox(self):
         if shutil.which("dropbox"):
-            subprocess.Popen(["dropbox"])
+            popen(["dropbox"])
         else:
-            subprocess.Popen(["flatpak", "run", "com.dropbox.Client"])
+            flatpak_run("com.dropbox.Client")
 
     def _on_line(self, text: str):
         self._log.append(text)

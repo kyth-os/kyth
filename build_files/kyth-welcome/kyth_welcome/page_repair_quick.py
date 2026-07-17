@@ -1,13 +1,14 @@
 """Repair page — quick fixes, sleep, desktop helpers."""
 from __future__ import annotations
 
-import shlex
 import shutil
-import subprocess
 
 from .core_base import _restyle
+from .services.launch import flatpak_run, kcmshell, popen, systemsettings
 from .services.repair import (
-    force_deep_sleep_command,
+    enable_clipboard_history,
+    force_deep_sleep,
+    set_exe_mime_defaults,
     wakeup_sources_text,
 )
 from .services.software import Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed
@@ -17,26 +18,18 @@ from .widgets import _set_log_panel
 
 class _QuickFixMixin:
     def _force_deep_sleep(self):
-        try:
-            result = subprocess.run(
-                force_deep_sleep_command(),
-                timeout=8, capture_output=True,
+        ok, err = force_deep_sleep()
+        if ok:
+            self._sleep_fix_status.setText(
+                "Deep sleep (S3) forced for this session. Put the system to sleep and wake it — "
+                "if it works correctly, the fix is working. Add mem_sleep_default=deep to your "
+                "kernel arguments to make this permanent."
             )
-            if result.returncode == 0:
-                self._sleep_fix_status.setText(
-                    "Deep sleep (S3) forced for this session. Put the system to sleep and wake it — "
-                    "if it works correctly, the fix is working. Add mem_sleep_default=deep to your "
-                    "kernel arguments to make this permanent."
-                )
-                self._sleep_fix_status.setObjectName("status-ok")
-            else:
-                err = result.stderr.decode("utf-8", errors="replace").strip()
-                self._sleep_fix_status.setText(
-                    f"Could not set sleep mode (may not be supported on this platform): {err}"
-                )
-                self._sleep_fix_status.setObjectName("status-err")
-        except Exception as exc:
-            self._sleep_fix_status.setText(f"Error: {exc}")
+            self._sleep_fix_status.setObjectName("status-ok")
+        else:
+            self._sleep_fix_status.setText(
+                f"Could not set sleep mode (may not be supported on this platform): {err}"
+            )
             self._sleep_fix_status.setObjectName("status-err")
         _restyle(self._sleep_fix_status)
 
@@ -51,10 +44,7 @@ class _QuickFixMixin:
 
     def _on_file_history(self):
         if _is_flatpak_installed("org.gnome.World.PikaBackup"):
-            try:
-                subprocess.Popen(["flatpak", "run", "org.gnome.World.PikaBackup"])
-            except OSError:
-                pass
+            flatpak_run("org.gnome.World.PikaBackup")
             return
         def _launch_after_install(code: int):
             if code == 0:
@@ -67,36 +57,24 @@ class _QuickFixMixin:
 
     def _open_task_manager(self):
         if _is_flatpak_installed("io.missioncenter.MissionCenter"):
-            try:
-                subprocess.Popen(["flatpak", "run", "io.missioncenter.MissionCenter"])
+            if flatpak_run("io.missioncenter.MissionCenter"):
                 return
-            except OSError:
-                pass
         for cmd in (["plasma-systemmonitor"], ["ksysguard"], ["konsole", "-e", "btop"], ["konsole", "-e", "top"]):
-            if shutil.which(cmd[0]):
-                subprocess.Popen(cmd)
+            if popen(cmd):
                 return
         QMessageBox.warning(self, "Task Manager not found", "Could not find System Monitor or a terminal task viewer.")
 
     def _open_printer_setup(self):
-        subprocess.Popen(
-            ["sudo", "systemctl", "enable", "--now", "cups"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        for cmd in (["kcmshell6", "kcm_printer_manager"], ["systemsettings"]):
-            if shutil.which(cmd[0]):
-                subprocess.Popen(cmd)
-                return
+        popen(["sudo", "systemctl", "enable", "--now", "cups"])
+        if kcmshell("kcm_printer_manager") or systemsettings():
+            return
         QDesktopServices.openUrl(QUrl("http://localhost:631"))
 
     def _open_volume_mixer(self):
         for cmd in (["pavucontrol-qt"], ["pavucontrol"], ["plasma-pa"]):
-            if shutil.which(cmd[0]):
-                subprocess.Popen(cmd)
+            if popen(cmd):
                 return
-        # Fall back to the KDE audio KCM
-        if shutil.which("kcmshell6"):
-            subprocess.Popen(["kcmshell6", "kcm_pulseaudio"])
+        if kcmshell("kcm_pulseaudio"):
             return
         QMessageBox.information(
             self, "Volume Mixer",
@@ -105,11 +83,8 @@ class _QuickFixMixin:
         )
 
     def _fix_exe_association(self):
-        mimes = ["application/x-ms-dos-executable", "application/x-msdos-program", "application/x-msi"]
-        bottles_desktop = "com.usebottles.bottles.desktop"
         try:
-            for mime in mimes:
-                subprocess.run(["xdg-mime", "default", bottles_desktop, mime], timeout=5, check=False)
+            set_exe_mime_defaults()
             QMessageBox.information(
                 self, "Fix .exe Files",
                 "Done. Double-clicking .exe and .msi files will now open Bottles.\n"
@@ -120,18 +95,7 @@ class _QuickFixMixin:
 
     def _enable_clipboard_history(self):
         try:
-            subprocess.run(
-                ["kwriteconfig6", "--file", "klipperrc",
-                 "--group", "General", "--key", "KeepClipboardContents", "true"],
-                timeout=5, check=False,
-            )
-            subprocess.run(
-                ["kwriteconfig6", "--file", "klipperrc",
-                 "--group", "General", "--key", "MaxClipItems", "25"],
-                timeout=5, check=False,
-            )
-            subprocess.run(["systemctl", "--user", "restart", "plasma-klipper.service"],
-                           timeout=5, check=False)
+            enable_clipboard_history(max_items=25)
             QMessageBox.information(
                 self, "Clipboard History",
                 "Clipboard history enabled (25 items).\n"
@@ -141,9 +105,7 @@ class _QuickFixMixin:
             QMessageBox.warning(self, "Clipboard History", f"Could not enable clipboard history: {exc}")
 
     def _open_night_light(self):
-        if shutil.which("kcmshell6"):
-            subprocess.Popen(["kcmshell6", "kcm_nightcolor"])
-        else:
+        if not kcmshell("kcm_nightcolor"):
             QDesktopServices.openUrl(QUrl("settings://kcm_nightcolor"))
 
     def _run_quick_fix(self, label: str, cmd: list[str]):

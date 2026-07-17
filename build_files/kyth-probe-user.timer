@@ -1,0 +1,14 @@
+[Unit]
+Description=KythOS user probe cache refresh
+Documentation=https://github.com/mrtrick37/kyth
+PartOf=graphical-session.target
+
+[Timer]
+# Shortly after login, then every few minutes while the session is up.
+OnStartupSec=20s
+OnUnitActiveSec=3min
+AccuracySec=15s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

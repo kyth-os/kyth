@@ -1,13 +1,10 @@
-"""Cloud sync helpers and optional Qt workers.
+"""Cloud sync helpers (rclone / rsync command builders).
 
-Pure command/token helpers import without Qt (CI unit tests). Worker classes
-are defined only when Qt bindings are available (desktop image).
+Pure stdlib — no Qt. Workers live in ``services.workers.cloud_sync``.
 """
 from __future__ import annotations
 
-import os
 import re
-import subprocess
 
 
 def extract_rclone_token(text: str) -> str | None:
@@ -44,130 +41,73 @@ def rsync_copy_command(src: str, dst: str) -> list[str]:
     ]
 
 
-try:
-    from ..qt import Signal
-    from .runtime import TrackedThread
-except ImportError:  # pragma: no cover - CI / headless unit tests without Qt
-    Signal = None  # type: ignore[assignment,misc]
-    TrackedThread = object  # type: ignore[assignment,misc]
-    _HAS_QT = False
-else:
-    _HAS_QT = True
+def rclone_config_create_command(
+    name: str,
+    service: str,
+    token: str,
+    *,
+    extra_params: list[str] | None = None,
+) -> list[str]:
+    """Build ``rclone config create`` for OAuth remotes (drive/onedrive)."""
+    cmd = [
+        "rclone", "config", "create", name, service,
+        "token", token,
+    ]
+    if extra_params:
+        cmd.extend(extra_params)
+    cmd.append("--non-interactive")
+    return cmd
 
 
-if _HAS_QT:
-    class SteamCopyWorker(TrackedThread):
-        """Copies a steamapps directory using rsync, streaming output line-by-line."""
-        BLOCKS_CLOSE = True
-        line = Signal(str)
-        done = Signal(int)
+def rclone_create_remote(
+    name: str,
+    service: str,
+    token: str,
+    *,
+    extra_params: list[str] | None = None,
+    timeout: int = 30,
+) -> tuple[bool, str]:
+    """Create an rclone remote. Returns (ok, error_or_empty)."""
+    from .process import _run_command
 
-        def __init__(self, src: str, dst: str):
-            super().__init__()
-            self._src = src
-            self._dst = dst
-            self._proc = None
+    result = _run_command(
+        rclone_config_create_command(name, service, token, extra_params=extra_params),
+        timeout=timeout,
+    )
+    if result is None:
+        return False, "rclone is not installed or not on PATH."
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "").strip()
+        return False, err[:300] or f"rclone config create failed ({result.returncode})"
+    return True, ""
 
-        def stop(self):
-            if self._proc and self._proc.poll() is None:
-                self._proc.terminate()
 
-        def run(self):
-            try:
-                os.makedirs(self._dst, exist_ok=True)
-            except OSError as exc:
-                self.line.emit(f"Error creating destination: {exc}")
-                self.done.emit(1)
-                return
-            cmd = rsync_copy_command(self._src, self._dst)
-            self.line.emit(f"→ {' '.join(cmd)}\n")
-            try:
-                self._proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1,
-                )
-                for ln in self._proc.stdout:
-                    self.line.emit(ln.rstrip())
-                self._proc.wait()
-                self.done.emit(self._proc.returncode)
-            except Exception as exc:
-                self.line.emit(f"Error: {exc}")
-                self.done.emit(1)
+def rclone_verify_remote(name: str, *, timeout: int = 20) -> tuple[bool, str]:
+    """List remote root; returns (ok, error_hint)."""
+    from .process import _run_command
 
-    class RcloneAuthorizeWorker(TrackedThread):
-        """Runs `rclone authorize <type>`; emits the token JSON on success."""
-        token_ready = Signal(str)
-        failed = Signal(str)
+    result = _run_command(
+        ["rclone", "lsd", f"{name}:", "--max-depth", "0"],
+        timeout=timeout,
+    )
+    if result is None:
+        return False, "rclone is not installed or not on PATH."
+    if result.returncode != 0:
+        return False, (result.stderr or result.stdout or "").strip()[:200]
+    return True, ""
 
-        def __init__(self, remote_type: str):
-            super().__init__()
-            self._remote_type = remote_type
-            self._proc = None
 
-        def run(self):
-            try:
-                self._proc = subprocess.Popen(
-                    ["rclone", "authorize", self._remote_type],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.DEVNULL,
-                    text=True,
-                )
-                stdout, stderr = self._proc.communicate(timeout=300)
-                if self._proc.returncode != 0 and not stdout.strip():
-                    self.failed.emit(
-                        f"rclone authorize exited with code {self._proc.returncode}.\n\n"
-                        f"{stderr.strip()[:400]}"
-                    )
-                    return
-                token = extract_rclone_token(stdout) or extract_rclone_token(stderr)
-                if token:
-                    self.token_ready.emit(token)
-                else:
-                    combined = (stdout + stderr).strip()
-                    self.failed.emit(
-                        "Authorization completed but could not parse the token.\n\n"
-                        f"Output:\n{combined[:600]}"
-                    )
-            except subprocess.TimeoutExpired:
-                if self._proc:
-                    self._proc.kill()
-                self.failed.emit("Authorization timed out after 5 minutes.")
-            except Exception as exc:
-                self.failed.emit(str(exc))
+def rclone_usage_hints(name: str, folder: str) -> str:
+    return (
+        f"# Sync cloud → local (one-shot):\n"
+        f"rclone sync {name}: {folder} --progress\n\n"
+        f"# Mount as a virtual drive (stays open until unmounted):\n"
+        f"rclone mount {name}: {folder} --daemon --vfs-cache-mode full"
+    )
 
-        def cancel(self):
-            if self._proc and self._proc.poll() is None:
-                self._proc.terminate()
 
-    class RcloneSyncWorker(TrackedThread):
-        """Runs `rclone sync remote: folder --progress` and streams output lines."""
-        BLOCKS_CLOSE = True
-        line = Signal(str)
-        done = Signal(int)
-
-        def __init__(self, remote: str, folder: str):
-            super().__init__()
-            self._remote = remote
-            self._folder = folder
-
-        def run(self):
-            try:
-                proc = subprocess.Popen(
-                    rclone_sync_command(self._remote, self._folder),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                )
-                for ln in proc.stdout:
-                    self.line.emit(ln.rstrip())
-                proc.wait()
-                self.done.emit(proc.returncode)
-            except Exception as exc:
-                self.line.emit(f"Error: {exc}")
-                self.done.emit(1)
-else:  # pragma: no cover
-    SteamCopyWorker = None  # type: ignore[assignment,misc]
-    RcloneAuthorizeWorker = None  # type: ignore[assignment,misc]
-    RcloneSyncWorker = None  # type: ignore[assignment,misc]
+def __getattr__(name: str):
+    if name in {"SteamCopyWorker", "RcloneAuthorizeWorker", "RcloneSyncWorker"}:
+        from .workers import cloud_sync as m
+        return getattr(m, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,6 +1,9 @@
 """Game compatibility helpers and recommendations."""
 from __future__ import annotations
 
+import re
+
+
 def find_compat_game(compat_games, query: str):
     needle = query.strip().lower()
     if not needle:

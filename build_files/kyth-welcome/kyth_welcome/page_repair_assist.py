@@ -1,9 +1,9 @@
+from .services.launch import flatpak_run, popen
 """Repair page — remote assist, setup transfer, session snapshot."""
 from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 
 from .services.repair import (
     session_snapshot_command,
@@ -25,7 +25,7 @@ class _AssistMixin:
         app_id = "com.rustdesk.RustDesk"
         if _is_flatpak_installed(app_id):
             try:
-                subprocess.Popen(["flatpak", "run", app_id])
+                flatpak_run(app_id)
                 self._assist_status.setText(
                     "Share only the temporary ID and one-time password with someone you trust. "
                     "Close RustDesk when the support session is finished."
@@ -47,7 +47,7 @@ class _AssistMixin:
     def _open_krdc(self):
         if shutil.which("krdc"):
             try:
-                subprocess.Popen(["krdc"])
+                popen(["krdc"])
                 self._assist_status.setText("KRDC opened — enter an rdp:// or vnc:// address to help another PC.")
             except OSError as exc:
                 self._assist_status.setText(f"Could not open KRDC: {exc}")
@@ -113,12 +113,10 @@ class _AssistMixin:
         if not os.path.exists(helper):
             self._setup_status.setText("Setup transfer is available after the next KythOS update and restart.")
             return
-        try:
-            result = subprocess.run(
-                setup_summary_command(archive), capture_output=True, text=True, timeout=15,
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, "Could not inspect archive", str(exc))
+        from .services.process import _run_command
+        result = _run_command(setup_summary_command(archive), timeout=15)
+        if result is None:
+            QMessageBox.warning(self, "Could not inspect archive", "command failed to start")
             return
         if result.returncode != 0:
             QMessageBox.warning(

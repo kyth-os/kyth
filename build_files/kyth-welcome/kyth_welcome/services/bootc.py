@@ -254,21 +254,27 @@ def _branch_display_name(tag: str | None) -> str:
 
 
 def _current_branch() -> str | None:
-    return _branch_from_ref(_bootc_image_reference())
+    def fetch() -> str | None:
+        return _branch_from_ref(_bootc_image_reference())
+
+    return _probe_cached("bootc-branch", _BOOTC_CACHE_TTL, fetch)
 
 
 def _current_kernel_flavor() -> str:
-    try:
-        with open("/usr/share/kyth/kernel-flavor") as fh:
-            flavor = fh.read().strip().lower()
-            if flavor in {"fedora", "cachy"}:
-                return flavor
-    except OSError:
-        pass
-    kernel = _command_stdout(["uname", "-r"]).lower()
-    if "cachy" in kernel:
-        return "cachy"
-    return "fedora"
+    def fetch() -> str:
+        try:
+            with open("/usr/share/kyth/kernel-flavor") as fh:
+                flavor = fh.read().strip().lower()
+                if flavor in {"fedora", "cachy"}:
+                    return flavor
+        except OSError:
+            pass
+        kernel = _command_stdout(["uname", "-r"]).lower()
+        if "cachy" in kernel:
+            return "cachy"
+        return "fedora"
+
+    return _probe_cached("kernel-flavor", 60.0, fetch)
 
 
 def _image_tag_for_channel(channel: str, flavor: str | None = None) -> str:

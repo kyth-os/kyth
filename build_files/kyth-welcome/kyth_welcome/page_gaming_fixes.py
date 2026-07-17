@@ -1,7 +1,7 @@
 import os
-import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
+from .services.process import _run_command
 from .services.gaming import (  # noqa: E501
     _streaming_health_items, command_details, discord_screenshare_fix_command, obs_pipewire_fix_command
 )
@@ -74,8 +74,6 @@ class _FixesMixin:
         fix_layout.addWidget(fix_actions)
         self._add(fix_card)
 
-        self._active_gaming_section = "setup"
-
     def _copy_option_row(self, label: str, opt: str) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(10)
@@ -101,58 +99,54 @@ class _FixesMixin:
         cmd = discord_screenshare_fix_command()
         self._discord_fix_status.hide()
         self._discord_fix_result.set_running("Applying Discord screen share repair…", command_details(cmd))
-        try:
-            result = subprocess.run(cmd, timeout=10, capture_output=True)
-            if result.returncode == 0:
-                self._discord_fix_result.set_result(
-                    "ok",
-                    "Applied. Restart Discord to take effect.",
-                    command_details(cmd, result),
-                )
-            else:
-                err = result.stderr.decode("utf-8", errors="replace").strip()
-                self._discord_fix_result.set_result(
-                    "err",
-                    f"Could not repair Discord screen share: {err or 'unknown error'}.",
-                    command_details(cmd, result),
-                )
-        except Exception as exc:
+        result = _run_command(cmd, timeout=10)
+        if result is not None and result.returncode == 0:
+            self._discord_fix_result.set_result(
+                "ok",
+                "Applied. Restart Discord to take effect.",
+                command_details(cmd, result),
+            )
+        elif result is not None:
+            err = (result.stderr or result.stdout or "").strip()
             self._discord_fix_result.set_result(
                 "err",
-                f"Could not repair Discord screen share: {exc}.",
-                command_details(cmd, exc=exc),
+                f"Could not repair Discord screen share: {err or 'unknown error'}.",
+                command_details(cmd, result),
             )
-        finally:
-            self._discord_fix_btn.setEnabled(True)
+        else:
+            self._discord_fix_result.set_result(
+                "err",
+                "Could not repair Discord screen share: command failed to start.",
+                command_details(cmd),
+            )
+        self._discord_fix_btn.setEnabled(True)
 
     def _fix_obs_pipewire(self):
         self._obs_fix_btn.setEnabled(False)
         cmd = obs_pipewire_fix_command()
         self._obs_fix_status.hide()
         self._obs_fix_result.set_running("Applying OBS capture repair…", command_details(cmd))
-        try:
-            result = subprocess.run(cmd, timeout=10, capture_output=True)
-            if result.returncode == 0:
-                self._obs_fix_result.set_result(
-                    "ok",
-                    "Applied. Restart OBS to take effect.",
-                    command_details(cmd, result),
-                )
-            else:
-                err = result.stderr.decode("utf-8", errors="replace").strip()
-                self._obs_fix_result.set_result(
-                    "err",
-                    f"Could not repair OBS capture: {err or 'unknown error'}.",
-                    command_details(cmd, result),
-                )
-        except Exception as exc:
+        result = _run_command(cmd, timeout=10)
+        if result is not None and result.returncode == 0:
+            self._obs_fix_result.set_result(
+                "ok",
+                "Applied. Restart OBS to take effect.",
+                command_details(cmd, result),
+            )
+        elif result is not None:
+            err = (result.stderr or result.stdout or "").strip()
             self._obs_fix_result.set_result(
                 "err",
-                f"Could not repair OBS capture: {exc}.",
-                command_details(cmd, exc=exc),
+                f"Could not repair OBS capture: {err or 'unknown error'}.",
+                command_details(cmd, result),
             )
-        finally:
-            self._obs_fix_btn.setEnabled(True)
+        else:
+            self._obs_fix_result.set_result(
+                "err",
+                "Could not repair OBS capture: command failed to start.",
+                command_details(cmd),
+            )
+        self._obs_fix_btn.setEnabled(True)
 
     def _open_user_path(self, path: str):
         expanded = os.path.abspath(os.path.expanduser(path))

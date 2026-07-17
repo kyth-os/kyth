@@ -1,4 +1,4 @@
-"""Aggregate hardware probes and optional Qt worker."""
+"""Aggregate hardware probes (pure). Qt worker: services.workers.hardware."""
 from __future__ import annotations
 
 from .types import HardwareProbe
@@ -52,26 +52,8 @@ def _collect_hardware_probes() -> list[HardwareProbe]:
     return _probe_cached("hardware-probes", 5.0, fetch)
 
 
-try:
-    from ...qt import Signal
-    from ..runtime import TrackedThread
-except ImportError:  # pragma: no cover - CI without Qt
-    Signal = None  # type: ignore[assignment,misc]
-    TrackedThread = object  # type: ignore[assignment,misc]
-    _HAS_QT = False
-else:
-    _HAS_QT = True
-
-
-if _HAS_QT:
-    class HardwareProbeWorker(TrackedThread):
-        done = Signal(object)
-        failed = Signal(str)
-
-        def run(self):
-            try:
-                self.done.emit(_collect_hardware_probes())
-            except Exception as exc:
-                self.failed.emit(str(exc))
-else:  # pragma: no cover
-    HardwareProbeWorker = None  # type: ignore[assignment,misc]
+def __getattr__(name: str):
+    if name == "HardwareProbeWorker":
+        from ..workers.hardware import HardwareProbeWorker
+        return HardwareProbeWorker
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

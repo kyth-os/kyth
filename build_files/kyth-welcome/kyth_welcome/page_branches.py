@@ -1,7 +1,7 @@
-import subprocess
 import time
 
 # __KYTH_GENERATED_IMPORTS__
+from .services.launch import reboot
 from .core_base import (
     DownloadMonitor, _bootc_image_timestamp, _branch_display_name, _get_rx_bytes, _human_bytes, _human_bytes_pair,
     _image_tag_for_channel, _parse_size_bytes, _restyle, _set_session_inhibit, _with_idle_inhibit,
@@ -158,7 +158,7 @@ class BranchesPage(Page):
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
         self._reboot_btn.hide()
-        self._reboot_btn.clicked.connect(lambda: subprocess.Popen(["systemctl", "reboot"]))
+        self._reboot_btn.clicked.connect(lambda: reboot())
         self._add(self._reboot_btn)
         self._stretch()
 

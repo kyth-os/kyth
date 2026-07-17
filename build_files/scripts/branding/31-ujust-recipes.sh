@@ -21,6 +21,8 @@ systemctl enable kyth-flathub-setup.service 2>/dev/null || true
 systemctl enable kyth-default-flatpaks.service 2>/dev/null || true
 systemctl enable kyth-hw-setup.service 2>/dev/null || true
 systemctl enable kyth-update-watcher.timer 2>/dev/null || true
+systemctl enable kyth-probe.timer 2>/dev/null || true
 systemctl --global enable kyth-sched.service 2>/dev/null || true
 systemctl --global enable kyth-telem.service 2>/dev/null || true
+systemctl --global enable kyth-probe.timer 2>/dev/null || true
 

@@ -1,18 +1,19 @@
 import os
 import re
-import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _release_worker_when_finished, _restyle
+from .services.launch import flatpak_run
+from .services.process import _run_command
 from .services.gaming import (  # noqa: E501
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _find_ntfs_drives, _find_steam_libraries,
     _load_protondb_cache, _ludusavi_backup_summary, _save_protondb_cache, _scan_steamapps_manifests,
     blocked_compat_lookup
 )
 from .services.software import _install_flatpak_inline
-from .page_cloud_storage import SteamCopyWorker
-from .page_compatibility import _COMPAT_GAMES
-from .page_windows_migration import WindowsLibraryWorker
+from .services.cloud_sync import SteamCopyWorker
+from .services.gaming import _COMPAT_GAMES
+from .services.workers.windows_migration import WindowsLibraryWorker
 from .qt import (  # noqa: E501
     QApplication, QComboBox, QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QProgressBar, QPushButton, QTextEdit, QTimer, QUrl, QVBoxLayout
@@ -189,7 +190,7 @@ class _MigrationMixin:
             self, b, "com.github.mtkennerly.ludusavi", "Ludusavi"))
         saves_btns.addWidget(ludusavi_btn)
         ludusavi_open_btn = QPushButton("Open Ludusavi")
-        ludusavi_open_btn.clicked.connect(lambda _=False: subprocess.Popen(["flatpak", "run", "com.github.mtkennerly.ludusavi"]))
+        ludusavi_open_btn.clicked.connect(lambda _=False: flatpak_run("com.github.mtkennerly.ludusavi"))
         saves_btns.addWidget(ludusavi_open_btn)
         saves_refresh_btn = QPushButton("Refresh Status")
         saves_refresh_btn.clicked.connect(self._refresh_gaming_dashboard)
@@ -348,19 +349,19 @@ class _MigrationMixin:
                 # the FUSE ntfs-3g default for the multi-hundred-GB copies this
                 # page encourages. Read-only either way; fall back to the stock
                 # driver when udisks or the kernel rejects ntfs3.
-                r = subprocess.run(
+                r = _run_command(
                     ["udisksctl", "mount", "-b", drive["dev"], "-t", "ntfs3",
                      "--options", "ro", "--no-user-interaction"],
-                    capture_output=True, text=True, timeout=15,
+                    timeout=15,
                 )
-                if r.returncode != 0:
-                    r = subprocess.run(
+                if r is None or r.returncode != 0:
+                    r = _run_command(
                         ["udisksctl", "mount", "-b", drive["dev"],
                          "--options", "ro", "--no-user-interaction"],
-                        capture_output=True, text=True, timeout=15,
+                        timeout=15,
                     )
-                if r.returncode != 0:
-                    err = r.stderr.strip()
+                if r is None or r.returncode != 0:
+                    err = (r.stderr if r else "").strip()
                     if "hibernate" in err.lower() or "windows" in err.lower():
                         self._migrate_status.setText(
                             "Mount blocked: The other system did not shut down cleanly (Fast Startup / hibernate). "

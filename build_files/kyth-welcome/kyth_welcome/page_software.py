@@ -1,28 +1,34 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
-from .page_software_appimages import _AppImageTabMixin
-from .page_software_creator import _CreatorTabMixin
-from .page_software_developer import _DeveloperTabMixin
-from .page_software_flatpak import _FlatpakStoreTabMixin
-from .page_software_installed import _InstalledTabMixin
-from .page_software_security import _SecurityTabMixin
-from .page_software_starter import _StarterPackTabMixin
+from .lazy_page import compose_on_first_init
 from .services.software import Worker
 from .qt import QHBoxLayout, QPushButton, QWidget
 from .widgets import Page, _divider
 
 
+def _load_software_mixins() -> tuple[type, ...]:
+    from .page_software_appimages import _AppImageTabMixin
+    from .page_software_creator import _CreatorTabMixin
+    from .page_software_developer import _DeveloperTabMixin
+    from .page_software_flatpak import _FlatpakStoreTabMixin
+    from .page_software_installed import _InstalledTabMixin
+    from .page_software_security import _SecurityTabMixin
+    from .page_software_starter import _StarterPackTabMixin
+    return (
+        _StarterPackTabMixin,
+        _FlatpakStoreTabMixin,
+        _AppImageTabMixin,
+        _InstalledTabMixin,
+        _DeveloperTabMixin,
+        _SecurityTabMixin,
+        _CreatorTabMixin,
+    )
+
+
 # ── Page: Software ────────────────────────────────────────────────────────────
-class SoftwarePage(
-    Page,
-    _StarterPackTabMixin,
-    _FlatpakStoreTabMixin,
-    _AppImageTabMixin,
-    _InstalledTabMixin,
-    _DeveloperTabMixin,
-    _SecurityTabMixin,
-    _CreatorTabMixin,
-):
+# Tab mixins load on first construction; individual tabs build on first visit.
+@compose_on_first_init(_load_software_mixins)
+class SoftwarePage(Page):
     """App store — Starter Packs | Store | AppImages | Installed."""
 
     _STARTER_PACKS = [
@@ -347,10 +353,7 @@ class SoftwarePage(
         self._outer.insertWidget(3, _divider())
 
         self._current_tab = self._initial_tab
-
-        # Build each tab widget and add to the scroll area
-        self._tab_widgets: list[QWidget] = []
-        for builder in (
+        self._tab_builders = (
             self._build_starter_tab,
             self._build_creator_tab,
             self._build_developer_tab,
@@ -358,26 +361,36 @@ class SoftwarePage(
             self._build_flatpak_tab,
             self._build_appimage_tab,
             self._build_installed_tab,
-        ):
-            tab_widget = builder()
-            self._add(tab_widget)
-            self._tab_widgets.append(tab_widget)
-
-        for i, tab in enumerate(self._tab_widgets):
-            tab.setVisible(i == self._current_tab)
-
+        )
+        # Build only the initial tab; other tabs on first visit.
+        self._tab_widgets: list[QWidget | None] = [None] * len(self._tab_builders)
+        self._ensure_tab(self._current_tab)
         self._stretch()
+
+    def _ensure_tab(self, idx: int) -> QWidget:
+        """Build tab *idx* on first visit and return its widget."""
+        existing = self._tab_widgets[idx]
+        if existing is not None:
+            return existing
+        tab_widget = self._tab_builders[idx]()
+        self._add(tab_widget)
+        tab_widget.setVisible(idx == self._current_tab)
+        self._tab_widgets[idx] = tab_widget
+        return tab_widget
 
     # ── Tab switching ──────────────────────────────────────────────────────────
 
     def _switch_tab(self, idx: int):
         if idx == self._current_tab:
             return
-        for i, (btn, widget) in enumerate(zip(self._tab_btns, self._tab_widgets)):
+        self._ensure_tab(idx)
+        for i, btn in enumerate(self._tab_btns):
             active = i == idx
             btn.setObjectName("sw-tab-active" if active else "sw-tab")
             _restyle(btn)
-            widget.setVisible(active)
+            widget = self._tab_widgets[i]
+            if widget is not None:
+                widget.setVisible(active)
         self._current_tab = idx
         if idx == 3:
             self._refresh_sec_status()

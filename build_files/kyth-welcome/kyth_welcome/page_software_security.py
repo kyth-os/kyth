@@ -1,9 +1,15 @@
 import re
 import shutil
-import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _apply_install_badge, _restyle
+from .services.launch import popen
+from .services.security import (
+    DEFAULT_KALI_BOX,
+    DEFAULT_KALI_IMAGE,
+    SEC_HOST_TOOLS,
+    _is_socket_capable_kali_box,
+)
 from .services.software import Worker, _finish_worker, _is_flatpak_installed
 from .qt import (  # noqa: E501
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QRadioButton,
@@ -12,29 +18,11 @@ from .qt import (  # noqa: E501
 from .widgets import _make_card, _set_log_panel
 
 
-def _is_socket_capable_kali_box(name: str) -> bool:
-    """Return True when Kali is rootful, privileged, and outside SELinux container_t."""
-    try:
-        result = subprocess.run(
-            [
-                "sudo", "-n", "podman", "inspect", name,
-                "--format",
-                "{{.ImageName}}\n{{.HostConfig.Privileged}}\n{{range .HostConfig.SecurityOpt}}{{.}} {{end}}",
-            ],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode != 0:
-            return False
-        lines = result.stdout.splitlines()
-        image = lines[0] if len(lines) > 0 else ""
-        privileged = lines[1] if len(lines) > 1 else ""
-        security_opts = lines[2] if len(lines) > 2 else ""
-        return "kali" in image and privileged == "true" and "label=disable" in security_opts
-    except Exception:
-        return False
-
-
 class _SecurityTabMixin:
+    # Class-level defaults (also on SoftwarePage shell for early access).
+    _SEC_BOX_NAME = DEFAULT_KALI_BOX
+    _SEC_BOX_IMAGE = DEFAULT_KALI_IMAGE
+    _SEC_HOST_TOOLS = SEC_HOST_TOOLS
     # ── Tab 6: Security ───────────────────────────────────────────────────────
 
     def _build_security_tab(self) -> QWidget:
@@ -552,9 +540,9 @@ class _SecurityTabMixin:
                                 "Could not find a terminal emulator to open.")
             return
         if terminal == "konsole":
-            subprocess.Popen(["konsole", "-e", "distrobox", "enter", "--root", self._SEC_BOX_NAME])
+            popen(["konsole", "-e", "distrobox", "enter", "--root", self._SEC_BOX_NAME])
         else:
-            subprocess.Popen([terminal, "--", "distrobox", "enter", "--root", self._SEC_BOX_NAME])
+            popen([terminal, "--", "distrobox", "enter", "--root", self._SEC_BOX_NAME])
 
     def _sec_export_apps(self):
         if self._sec_worker and self._sec_worker.isRunning():
@@ -804,7 +792,7 @@ echo "Kali box is stopped and removed."
         launch_btn = QPushButton("Launch")
         launch_btn.hide()
         launch_btn.clicked.connect(
-            lambda _=False, cmd=tool["launch"]: subprocess.Popen(cmd)
+            lambda _=False, cmd=tool["launch"]: popen(cmd)
         )
         btn_row.addWidget(launch_btn)
         uninstall_btn = QPushButton("Uninstall")

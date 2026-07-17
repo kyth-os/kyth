@@ -38,7 +38,12 @@ from .codec import (
     _vaapi_failure_summary,
     _vaapi_profiles,
 )
-from .collect import HardwareProbeWorker, _collect_hardware_probes
+from .bluetooth_audio import (
+    bt_audio_device_summary,
+    force_ldac_reconnect,
+    switch_to_bt_audio_output,
+)
+from .collect import _collect_hardware_probes
 from .drives import _detect_controllers, _find_ntfs_drives
 
 __all__ = [
@@ -57,6 +62,9 @@ __all__ = [
     "_cpu_probe",
     "_detect_controllers",
     "_detect_nvidia",
+    "bt_audio_device_summary",
+    "force_ldac_reconnect",
+    "switch_to_bt_audio_output",
     "_display_probe",
     "_displaylink_probe",
     "_find_ntfs_drives",
@@ -87,4 +95,7 @@ def __getattr__(name: str):
             "Worker": Worker,
         }
         return mapping[name]
+    if name == "HardwareProbeWorker":
+        from ..workers.hardware import HardwareProbeWorker
+        return HardwareProbeWorker
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

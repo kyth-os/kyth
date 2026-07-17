@@ -3,9 +3,7 @@ import glob
 import os
 import shlex
 import shutil
-import subprocess
-
-# __KYTH_GENERATED_IMPORTS__
+from .services.launch import flatpak_run, popen
 from .core_base import _restyle
 from .services.software import Worker, _finish_worker
 from .qt import (  # noqa: E501
@@ -252,32 +250,8 @@ class _InstalledTabMixin:
     # ── Shared helpers ────────────────────────────────────────────────────────
 
     def _installed_flatpak_apps(self) -> list[dict[str, str]]:
-        if not shutil.which("flatpak"):
-            return []
-        try:
-            _en_env = {**os.environ, "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"}
-            result = subprocess.run(
-                ["flatpak", "list", "--app", "--columns=application,name,origin,installation"],
-                capture_output=True, text=True, timeout=12, check=False,
-                env=_en_env,
-            )
-        except Exception:
-            return []
-        apps: list[dict[str, str]] = []
-        for line in result.stdout.splitlines():
-            parts = line.split("\t")
-            if len(parts) < 4:
-                continue
-            app_id, name, origin, installation = (part.strip() for part in parts[:4])
-            if not app_id:
-                continue
-            apps.append({
-                "kind": "flatpak",
-                "app_id": app_id,
-                "name": name or app_id,
-                "origin": origin or "unknown",
-                "installation": installation or "default",
-            })
+        from .services.software import list_installed_flatpak_apps
+        apps = list_installed_flatpak_apps()
         return sorted(apps, key=lambda app: app["name"].casefold())
 
     def _appimage_search_dirs(self) -> list[str]:
@@ -375,7 +349,7 @@ class _InstalledTabMixin:
         for cmd in (["xdg-terminal-exec"], ["konsole"], ["xterm"]):
             if shutil.which(cmd[0]):
                 try:
-                    subprocess.Popen(cmd)
+                    popen(cmd)
                     return
                 except OSError:
                     pass

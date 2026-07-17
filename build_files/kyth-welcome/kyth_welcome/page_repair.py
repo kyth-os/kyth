@@ -1,13 +1,13 @@
 import os
 import shlex
 import shutil
-import subprocess
 from pathlib import Path
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
     _bootc_image_timestamp, _has_rollback_deployment, _restyle,
 )
+from .services.launch import kcmshell, popen, systemsettings
 from .services.hardware import _detect_nvidia
 from .services.repair import _read_sys_text
 from .services.software import (
@@ -207,12 +207,12 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         quick_btns.addWidget(mixer_btn)
         defaults_btn = QPushButton("Manage Default Apps")
         defaults_btn.setToolTip("Choose which app opens PDFs, images, video, email, and other file types.")
-        defaults_btn.clicked.connect(lambda _=False: subprocess.Popen(["kcmshell6", "filetypes"])
+        defaults_btn.clicked.connect(lambda _=False: kcmshell("filetypes")
             if shutil.which("kcmshell6") else QDesktopServices.openUrl(QUrl("settings://filetypes")))
         quick_btns.addWidget(defaults_btn)
         startup_btn = QPushButton("Manage Startup Apps")
         startup_btn.setToolTip("Control which apps launch at login — for familiar startup-app management.")
-        startup_btn.clicked.connect(lambda _=False: subprocess.Popen(["kcmshell6", "autostart"])
+        startup_btn.clicked.connect(lambda _=False: kcmshell("autostart")
             if shutil.which("kcmshell6") else None)
         quick_btns.addWidget(startup_btn)
         exe_fix_btn = QPushButton("Fix .exe Files")
@@ -297,8 +297,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         cups_btn = QPushButton("Open CUPS Web Interface")
         cups_btn.setToolTip("Advanced printer management at http://localhost:631")
         cups_btn.clicked.connect(lambda _=False: (
-            subprocess.Popen(["sudo", "systemctl", "enable", "--now", "cups"],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
+            popen(["sudo", "systemctl", "enable", "--now", "cups"]),
             QDesktopServices.openUrl(QUrl("http://localhost:631"))
         ))
         printer_btns.addWidget(cups_btn)

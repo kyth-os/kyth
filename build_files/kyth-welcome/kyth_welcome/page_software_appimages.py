@@ -1,9 +1,6 @@
 import os
 import re
 import shutil
-import subprocess
-
-# __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
 from .qt import (  # noqa: E501
     QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QUrl,
@@ -232,11 +229,5 @@ class _AppImageTabMixin:
             os.chmod(desktop_path, 0o600)
         except OSError:
             return
-        for cmd in (
-            ["update-desktop-database", desktop_dir],
-            ["kbuildsycoca6", "--noincremental"],
-        ):
-            try:
-                subprocess.run(cmd, capture_output=True, timeout=5, check=False)
-            except Exception:
-                pass
+        from .services.software import refresh_desktop_database
+        refresh_desktop_database(desktop_dir)

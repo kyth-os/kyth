@@ -441,6 +441,12 @@ def main() -> None:
     # Check digests before downloading (shared bootc + registry helpers)
     status_data = get_bootc_status()
     if status_data:
+        try:
+            from kyth_welcome.services.probe import update_sections
+            update_sections({"bootc-status-data": status_data}, system=True)
+        except Exception as exc:
+            LOG.debug("Could not warm system probe cache: %s", exc)
+    if status_data:
         ref = get_bootc_image_reference(status_data)
         if ref:
             booted_digest = image_digest_from_status(status_data, "booted")
@@ -476,6 +482,12 @@ def main() -> None:
             LOG.info("Upgrade staged successfully")
             write_status("upgraded", None, output, start_ts, flatpak_count)
             _notify_updates(os_staged=True, flatpak_count=flatpak_count)
+            try:
+                from kyth_welcome.services.probe import invalidate_after_bootc_change, refresh_cache
+                invalidate_after_bootc_change()
+                refresh_cache(system=True)
+            except Exception as exc:
+                LOG.debug("probe refresh after upgrade failed: %s", exc)
     else:
         LOG.error("bootc upgrade failed: %s", output[:500])
         write_status("error", output[:500], output, start_ts, flatpak_count)

@@ -55,6 +55,52 @@ def force_deep_sleep_command() -> list[str]:
     return ["sudo", "-A", "bash", "-c", "echo deep > /sys/power/mem_sleep"]
 
 
+def force_deep_sleep() -> tuple[bool, str]:
+    """Apply deep sleep for this session. Returns (ok, error_text)."""
+    from .process import _run_command
+
+    result = _run_command(force_deep_sleep_command(), timeout=8)
+    if result is None:
+        return False, "command failed to start"
+    if result.returncode != 0:
+        return False, (result.stderr or result.stdout or "").strip() or "unknown error"
+    return True, ""
+
+
+def set_exe_mime_defaults(bottles_desktop: str = "com.usebottles.bottles.desktop") -> None:
+    from .process import _run_command
+
+    for mime in (
+        "application/x-ms-dos-executable",
+        "application/x-msdos-program",
+        "application/x-msi",
+    ):
+        _run_command(["xdg-mime", "default", bottles_desktop, mime], timeout=5)
+
+
+def enable_clipboard_history(*, max_items: int = 25) -> None:
+    from .process import _run_command
+
+    _run_command(
+        [
+            "kwriteconfig6", "--file", "klipperrc",
+            "--group", "General", "--key", "KeepClipboardContents", "true",
+        ],
+        timeout=5,
+    )
+    _run_command(
+        [
+            "kwriteconfig6", "--file", "klipperrc",
+            "--group", "General", "--key", "MaxClipItems", str(max_items),
+        ],
+        timeout=5,
+    )
+    _run_command(
+        ["systemctl", "--user", "restart", "plasma-klipper.service"],
+        timeout=5,
+    )
+
+
 def wakeup_sources_text(timeout: int = 5) -> str:
     return _command_stdout(
         [

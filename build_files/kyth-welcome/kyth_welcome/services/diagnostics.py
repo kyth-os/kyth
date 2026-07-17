@@ -223,3 +223,186 @@ def _health_recommendations(report: str) -> str:
     lines.append("")
     return "\n".join(lines)
  # _health_recommendations
+
+
+def storage_sense_enabled() -> bool:
+    result = _run_command(
+        ["systemctl", "--user", "is-enabled", "kyth-storage-sense.timer"],
+        timeout=5,
+    )
+    return bool(result and result.stdout.strip() == "enabled")
+
+
+_storage_sense_enabled = storage_sense_enabled
+
+
+def storage_sense_set(enable: bool) -> tuple[bool, str]:
+    action = "enable" if enable else "disable"
+    result = _run_command(
+        ["systemctl", "--user", action, "--now", "kyth-storage-sense.timer"],
+        timeout=15,
+    )
+    if result is None:
+        return False, "systemctl not available"
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        return False, detail or f"Could not {action} timer"
+    return True, ""
+
+
+def storage_sense_run_now() -> tuple[bool, str]:
+    try:
+        subprocess.Popen(
+            ["systemd-run", "--user", "--collect", "/usr/bin/kyth-storage-sense"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return True, ""
+    except OSError as exc:
+        return False, str(exc)
+
+
+def collect_security_status() -> list[tuple[str, str, str]]:
+    """Security overview rows: (status, area, text)."""
+    rows: list[tuple[str, str, str]] = []
+
+    result = _run_command(["systemctl", "is-active", "firewalld"], timeout=5)
+    fw_on = bool(result and result.stdout.strip() == "active")
+    rows.append((
+        "ok" if fw_on else "warn", "Firewall",
+        "firewalld is running — inbound connections are filtered."
+        if fw_on else "firewalld is not running — check Repair if you didn't disable it yourself.",
+    ))
+
+    enforce = (_command_stdout(["getenforce"], timeout=5) or "").strip()
+    rows.append((
+        "ok" if enforce == "Enforcing" else "warn", "Access control",
+        "SELinux is enforcing — system files and services are isolated."
+        if enforce == "Enforcing" else f"SELinux is {enforce or 'unavailable'} (expected: Enforcing).",
+    ))
+
+    sb = (_command_stdout(["mokutil", "--sb-state"], timeout=5) or "").lower()
+    if "enabled" in sb:
+        rows.append(("ok", "Secure Boot", "Firmware verifies the boot chain before KythOS starts."))
+    elif "disabled" in sb:
+        rows.append(("warn", "Secure Boot", "Disabled. Optional — enable in firmware and run 'ujust enroll-secureboot'."))
+    else:
+        rows.append(("dim", "Secure Boot", "State unknown (no EFI variables — likely a VM or legacy BIOS boot)."))
+
+    rows.append((
+        "ok", "App sandboxing",
+        "Store apps run as Flatpaks in sandboxes — permissions are reviewable in Flatseal.",
+    ))
+
+    staged = _has_staged_update()
+    rows.append((
+        "ok", "Updates",
+        "An update is downloaded and staged — it applies on the next restart."
+        if staged else "OS updates download automatically in the background and apply on restart.",
+    ))
+
+    rows.append((
+        "ok" if _has_rollback_deployment() else "dim", "Recovery",
+        "The previous OS version is kept — one-click rollback from Repair."
+        if _has_rollback_deployment() else "A rollback point appears automatically after your first update.",
+    ))
+
+    rows.append((
+        "ok", "Antivirus",
+        "No Defender needed: the OS is read-only and cryptographically verified on "
+        "every update, and apps are sandboxed. There is nothing to subscribe to.",
+    ))
+    return rows
+
+
+_collect_security_status = collect_security_status
+
+
+def collect_signin_status() -> list[tuple[str, str, str]]:
+    """Account and sign-in overview (fingerprint, lock, autologin)."""
+    import configparser
+    import getpass
+    import glob
+
+    rows: list[tuple[str, str, str]] = []
+    user = getpass.getuser()
+
+    try:
+        result = subprocess.run(
+            ["fprintd-list", user], capture_output=True, text=True, timeout=12,
+        )
+        detail = (result.stdout + result.stderr).strip()
+    except FileNotFoundError:
+        result = None
+        detail = "fprintd is not installed"
+    except Exception as exc:
+        result = None
+        detail = str(exc)
+    lower = detail.lower()
+    if result is not None and result.returncode == 0 and "finger" in lower:
+        rows.append(("ok", "Fingerprint", "A fingerprint is enrolled for this account."))
+    elif "no devices available" in lower or "no devices" in lower:
+        rows.append(("dim", "Fingerprint", "No supported fingerprint reader was detected."))
+    elif "no fingerprints" in lower or "not enrolled" in lower:
+        rows.append(("warn", "Fingerprint", "Reader detected, but no fingerprint is enrolled yet."))
+    else:
+        rows.append(("dim", "Fingerprint", f"Fingerprint state unavailable: {detail or 'unknown state'}."))
+
+    autolock = (_command_stdout([
+        "kreadconfig6", "--file", "kscreenlockerrc", "--group", "Daemon", "--key", "Autolock",
+    ], timeout=5) or "true").lower()
+    lock_resume = (_command_stdout([
+        "kreadconfig6", "--file", "kscreenlockerrc", "--group", "Daemon", "--key", "LockOnResume",
+    ], timeout=5) or "true").lower()
+    lock_ok = autolock not in ("false", "0") and lock_resume not in ("false", "0")
+    rows.append((
+        "ok" if lock_ok else "warn", "Screen lock",
+        "Automatic locking and lock-on-resume are enabled."
+        if lock_ok else "Automatic locking or lock-on-resume is disabled; review Screen Lock settings.",
+    ))
+
+    config = configparser.ConfigParser(interpolation=None, strict=False)
+    config.optionxform = str
+    sddm_files = ["/etc/sddm.conf", *sorted(glob.glob("/etc/sddm.conf.d/*.conf"))]
+    try:
+        config.read(sddm_files)
+        autologin_user = config.get("Autologin", "User", fallback="").strip()
+    except (configparser.Error, OSError):
+        autologin_user = ""
+    autologin = autologin_user == user
+    rows.append((
+        "warn" if autologin else "ok", "Automatic login",
+        "Enabled for this account — convenient, but anyone with the PC can enter the desktop."
+        if autologin else "Off for this account; a sign-in is required after startup.",
+    ))
+
+    wallet_enabled = (_command_stdout([
+        "kreadconfig6", "--file", "kwalletrc", "--group", "Wallet", "--key", "Enabled",
+    ], timeout=5) or "true").lower() not in ("false", "0")
+    rows.append((
+        "ok" if wallet_enabled else "warn", "Credential vault",
+        "KWallet is enabled for saved app and network credentials."
+        if wallet_enabled else "KWallet is disabled; apps may store credentials less conveniently.",
+    ))
+
+    rows.append((
+        "ok", "Passkeys",
+        "Passkeys are managed by your browser or password manager and protected by its sign-in controls.",
+    ))
+    return rows
+
+
+_collect_signin_status = collect_signin_status
+
+
+def fingerprint_enroll_shell_command() -> str:
+    import getpass
+
+    user = shlex.quote(getpass.getuser())
+    return (
+        f"fprintd-enroll {user}; code=$?; echo; "
+        "if [ $code -eq 0 ]; then echo 'Fingerprint enrollment complete.'; "
+        "else echo 'Fingerprint enrollment did not complete.'; fi; "
+        "read -rp 'Press Enter to close…'"
+    )

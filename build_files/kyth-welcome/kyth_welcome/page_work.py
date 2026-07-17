@@ -1,8 +1,5 @@
-import glob
 import os
-import shlex
 import shutil
-import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _release_worker_when_finished
@@ -12,158 +9,26 @@ from .services.gaming import (
 from .services.software import (
     Worker, _chromium_app_window_cmd, _install_flatpak_inline, _is_flatpak_installed,
 )
+from .services.work import (
+    _M365_APPS,
+    _MS_FONTS_DIR,
+    _PST_IMPORT_DIR,
+    _WORK_APPS,
+    _convert_pst,
+    _create_m365_shortcuts,
+    _m365_icon,
+    _m365_shortcuts_present,
+    _ms_fonts_installed,
+    _refresh_m365_shortcuts,
+    _scan_for_pst_files,
+)
+from .services.launch import kcmshell, popen, systemsettings
 from .qt import (  # noqa: E501
     QApplication, QCheckBox, QComboBox, QDBusConnection, QDBusInterface, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTimer,
 )
 from .widgets import (  # noqa: E501
     Page, _make_card,
 )
-
-# Work-bundle apps offered on this page (and pre-selected by the first-run
-# wizard when the user picks the Work or Both profile).
-_WORK_APPS = [
-    ("org.libreoffice.LibreOffice", "LibreOffice",
-     "Writer, Calc, and Impress — opens and saves Word, Excel, and PowerPoint files."),
-    ("eu.betterbird.Betterbird", "Betterbird",
-     "Desktop email, calendar, and contacts — connects to Microsoft 365, Gmail, and IMAP accounts."),
-]
-
-_M365_APPS = [
-    ("Outlook",    "https://outlook.office.com/mail/",               "Email and calendar"),
-    ("Word",       "https://office.live.com/start/Word.aspx",       "Documents"),
-    ("Excel",      "https://office.live.com/start/Excel.aspx",      "Spreadsheets"),
-    ("PowerPoint", "https://office.live.com/start/PowerPoint.aspx", "Presentations"),
-    ("OneNote",    "https://www.onenote.com/notebooks",              "Notes"),
-    ("Teams",      "https://teams.microsoft.com/",                   "Chat and meetings"),
-]
-
-_MS_FONTS_DIR = os.path.expanduser("~/.local/share/fonts/msttcorefonts")
-
-
-def _ms_fonts_installed() -> bool:
-    try:
-        return any(entry.lower().endswith(".ttf") for entry in os.listdir(_MS_FONTS_DIR))
-    except OSError:
-        return False
-
-
-def _m365_icon(name: str) -> str:
-    icon = f"kyth-m365-{name.lower()}"
-    if os.path.exists(f"/usr/share/icons/hicolor/scalable/apps/{icon}.svg"):
-        return icon
-    # Older images don't ship the per-app icons yet.
-    return "internet-web-browser"
-
-
-def _m365_desktop_entry(name: str, url: str, comment: str) -> str | None:
-    launch = _chromium_app_window_cmd(url)
-    if launch is None:
-        return None
-    cmd, wm_class = launch
-    return (
-        "[Desktop Entry]\n"
-        "Type=Application\n"
-        f"Name={name} (Microsoft 365)\n"
-        f"Comment={comment}\n"
-        f"Exec={shlex.join(cmd)}\n"
-        f"Icon={_m365_icon(name)}\n"
-        "Categories=Office;\n"
-        f"StartupWMClass={wm_class}\n"
-    )
-
-
-def _create_m365_shortcuts() -> int:
-    """Write launcher .desktop entries for the Microsoft 365 web apps.
-
-    Returns the number of shortcuts written."""
-    apps_dir = os.path.expanduser("~/.local/share/applications")
-    written = 0
-    try:
-        os.makedirs(apps_dir, exist_ok=True)
-    except OSError:
-        return 0
-    for name, url, comment in _M365_APPS:
-        entry = _m365_desktop_entry(name, url, comment)
-        if entry is None:
-            continue
-        path = os.path.join(apps_dir, f"kyth-m365-{name.lower()}.desktop")
-        try:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(entry)
-            written += 1
-        except OSError:
-            pass
-    return written
-
-
-# ── Outlook PST archives ──────────────────────────────────────────────────────
-
-_PST_IMPORT_DIR = os.path.expanduser("~/Documents/Outlook Import")
-
-
-def _scan_for_pst_files() -> list[str]:
-    """Look for Outlook .pst archives in the usual profile locations."""
-    found: list[str] = []
-    roots = [d.get("mount") for d in _find_ntfs_drives() if d.get("mount")]
-    roots.append(os.path.expanduser("~"))
-    for root in roots:
-        for pattern in (
-            "Users/*/Documents/Outlook Files/*.pst",
-            "Users/*/Documents/*.pst",
-            "Users/*/AppData/Local/Microsoft/Outlook/*.pst",
-            "Documents/*.pst",
-            "Downloads/*.pst",
-        ):
-            found.extend(glob.glob(os.path.join(root, pattern)))
-    return sorted(set(found))
-
-
-def _convert_pst(path: str) -> tuple[bool, str]:
-    """Convert a .pst to mbox folders under ~/Documents/Outlook Import."""
-    name = os.path.splitext(os.path.basename(path))[0]
-    dest = os.path.join(_PST_IMPORT_DIR, name)
-    try:
-        os.makedirs(dest, exist_ok=True)
-        r = subprocess.run(
-            ["readpst", "-r", "-o", dest, path],
-            capture_output=True, text=True, timeout=3600,
-        )
-    except FileNotFoundError:
-        return False, "readpst is not installed — update KythOS to the latest image."
-    except Exception as exc:
-        return False, str(exc)
-    if r.returncode != 0:
-        return False, (r.stderr or r.stdout).strip() or "Conversion failed."
-    return True, dest
-
-
-def _refresh_m365_shortcuts() -> None:
-    """Rewrite existing shortcuts whose generated content changed — e.g. the
-    pre-icon entries that left every web app with a generic globe."""
-    apps_dir = os.path.expanduser("~/.local/share/applications")
-    for name, url, comment in _M365_APPS:
-        path = os.path.join(apps_dir, f"kyth-m365-{name.lower()}.desktop")
-        if not os.path.exists(path):
-            continue
-        entry = _m365_desktop_entry(name, url, comment)
-        if entry is None:
-            continue
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                current = fh.read()
-            if current != entry:
-                with open(path, "w", encoding="utf-8") as fh:
-                    fh.write(entry)
-        except OSError:
-            pass
-
-
-def _m365_shortcuts_present() -> bool:
-    apps_dir = os.path.expanduser("~/.local/share/applications")
-    return all(
-        os.path.exists(os.path.join(apps_dir, f"kyth-m365-{name.lower()}.desktop"))
-        for name, _, _ in _M365_APPS
-    )
 
 
 # ── Page: Work Setup ──────────────────────────────────────────────────────────
@@ -180,7 +45,7 @@ class WorkSetupPage(Page):
         self._focus_remaining = 0
         self._focus_warnings: list[str] = []
         self._focus_notification_cookie: int | None = None
-        self._focus_inhibit_proc: subprocess.Popen | None = None
+        self._focus_inhibit_proc = None  # Popen | None from launch.popen
         self._focus_timer = QTimer(self)
         self._focus_timer.setInterval(1000)
         self._focus_timer.timeout.connect(self._focus_tick)
@@ -284,7 +149,7 @@ class WorkSetupPage(Page):
             )
             return
         try:
-            subprocess.Popen(launch[0])
+            popen(launch[0])
         except OSError as exc:
             QMessageBox.warning(self, "Could not open web app", str(exc))
 
@@ -562,7 +427,7 @@ class WorkSetupPage(Page):
                 launches.append(launch[0])
         for cmd in launches:
             try:
-                subprocess.Popen(cmd)
+                popen(cmd)
             except OSError:
                 continue
 
@@ -578,11 +443,13 @@ class WorkSetupPage(Page):
                 warnings.append("sleep inhibition was unavailable")
             else:
                 try:
-                    self._focus_inhibit_proc = subprocess.Popen([
+                    self._focus_inhibit_proc = popen([
                         "systemd-inhibit", "--what=idle:sleep",
                         "--why=KythOS Focus Session", "--mode=block",
                         "sleep", str(minutes * 60 + 60),
                     ])
+                    if self._focus_inhibit_proc is None:
+                        warnings.append("sleep inhibition was unavailable")
                 except OSError:
                     warnings.append("sleep inhibition was unavailable")
         self._launch_focus_apps()
@@ -632,7 +499,7 @@ class WorkSetupPage(Page):
             if completed else "Focus session ended. Notifications and normal power behavior are restored."
         )
         if completed and was_active and shutil.which("notify-send"):
-            subprocess.Popen([
+            popen([
                 "notify-send", "Focus session complete",
                 "Take a short break before starting another block.",
             ])
@@ -672,7 +539,5 @@ class WorkSetupPage(Page):
 
     @staticmethod
     def _open_printer_settings():
-        if shutil.which("kcmshell6"):
-            subprocess.Popen(["kcmshell6", "kcm_printer_manager"])
-        else:
-            subprocess.Popen(["systemsettings", "kcm_printer_manager"])
+        if not kcmshell("kcm_printer_manager"):
+            systemsettings("kcm_printer_manager")

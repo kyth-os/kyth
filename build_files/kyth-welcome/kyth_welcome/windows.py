@@ -15,13 +15,9 @@ from .services.software import (
     Worker, _finish_worker, _is_flatpak_installed,
 )
 from .services.updates import _current_branch
-from .page_compatibility import _COMPAT_GAMES
-from .page_gaming import GamingPage
-from .page_hardware import HardwarePage
 from .page_registry import (
     PROBLEM_ROUTES, SEARCH_ALIASES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups,
 )
-from .page_update import UpdatePage
 from .qt import (  # noqa: E501
     QCheckBox, QCompleter, QDesktopServices, QFrame, QHBoxLayout, QIcon, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QShortcut, QSize, QSizePolicy, QStackedWidget, QTextEdit, QTimer, QUrl, QVBoxLayout, QWidget, Qt,
 )

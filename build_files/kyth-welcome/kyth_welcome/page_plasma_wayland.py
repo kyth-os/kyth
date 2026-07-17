@@ -1,193 +1,31 @@
 import os
 import shutil
-import subprocess  # nosec B404 # nosemgrep
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _release_worker_when_finished
 from .services.gaming import DataWorker
 from .services.hardware import HardwareProbe
+from .services.launch import open_settings_module, popen
+from .services.plasma import (
+    QDBUS_CANDIDATES,
+    KDE_PORTAL_UNITS,
+    _collect_wayland_probes,
+    _first_available_binary,
+    _kread,
+    _run_text,
+    _session_kind,
+    _user_unit_active,
+    gpu_lspci_summary,
+    kscreen_doctor_output,
+    run_shell_script,
+)
+from .services.process import _run_command
 from .qt import (  # noqa: E501
     QFrame, QHBoxLayout, QLabel, QTimer, QVBoxLayout, Qt,
 )
 from .widgets import (  # noqa: E501
     ActionRow, CommandResultPanel, HardwareCard, Page, _make_card,
 )
-
-QDBUS_CANDIDATES = ("qdbus6", "qdbus-qt6", "qdbus")
-KDE_PORTAL_UNITS = ("plasma-xdg-desktop-portal-kde.service", "xdg-desktop-portal-kde.service")
-
-
-def _run_text(cmd: list[str], timeout: int = 5) -> tuple[int, str, str]:
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)  # nosec B603 # nosemgrep
-        return result.returncode, result.stdout.strip(), result.stderr.strip()
-    except Exception as exc:
-        return 1, "", str(exc)
-
-
-def _user_unit_active(unit: str) -> bool:
-    code, out, _ = _run_text(["systemctl", "--user", "is-active", unit])
-    return code == 0 and out == "active"
-
-
-def _first_active_user_unit(units: tuple[str, ...]) -> str:
-    for unit in units:
-        if _user_unit_active(unit):
-            return unit
-    return ""
-
-
-def _first_available_binary(names: tuple[str, ...]) -> str:
-    for name in names:
-        if shutil.which(name):
-            return name
-    return ""
-
-
-def _user_bus_name_available(name: str) -> bool:
-    code, out, _ = _run_text(["busctl", "--user", "--no-pager", "list"])
-    if code != 0:
-        return False
-    return any(line.split(maxsplit=1)[0] == name for line in out.splitlines() if line.strip())
-
-
-def _session_kind() -> str:
-    return os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
-
-
-def _desktop_name() -> str:
-    return (
-        os.environ.get("XDG_CURRENT_DESKTOP", "")
-        or os.environ.get("DESKTOP_SESSION", "")
-        or os.environ.get("KDE_SESSION_VERSION", "")
-    ).strip()
-
-
-def _kread(file_name: str, group: str, key: str) -> str:
-    code, out, _ = _run_text([
-        "kreadconfig6", "--file", file_name, "--group", group, "--key", key,
-    ])
-    return out if code == 0 else ""
-
-
-def _collect_wayland_probes() -> list[HardwareProbe]:
-    probes: list[HardwareProbe] = []
-
-    session = _session_kind()
-    session_status = "ok" if session == "wayland" else ("dim" if session == "x11" else "warn")
-    session_summary = (
-        "Wayland session active" if session == "wayland"
-        else "X11 session active (VM detected — Wayland enabled automatically on bare metal)"
-        if session == "x11"
-        else "Session type could not be identified"
-    )
-    probes.append(HardwareProbe(
-        "Session",
-        session_status,
-        session_summary,
-        f"XDG_SESSION_TYPE={session or 'unknown'}",
-    ))
-
-    desktop = _desktop_name()
-    is_plasma = "kde" in desktop.lower() or "plasma" in desktop.lower()
-    probes.append(HardwareProbe(
-        "Plasma desktop",
-        "ok" if is_plasma else "dim",
-        "Plasma session detected" if is_plasma else "Plasma session not detected from environment",
-        f"XDG_CURRENT_DESKTOP={desktop or 'unknown'}",
-    ))
-
-    pipewire = _user_unit_active("pipewire.service") or _user_unit_active("pipewire.socket")
-    wireplumber = _user_unit_active("wireplumber.service")
-    probes.append(HardwareProbe(
-        "PipeWire",
-        "ok" if pipewire and wireplumber else "warn",
-        "Audio and capture session services are active" if pipewire and wireplumber else "PipeWire or WirePlumber is not active",
-        f"pipewire={'active' if pipewire else 'inactive'}, wireplumber={'active' if wireplumber else 'inactive'}",
-    ))
-
-    portal = _user_unit_active("xdg-desktop-portal.service") or _user_bus_name_available("org.freedesktop.portal.Desktop")
-    portal_kde_unit = _first_active_user_unit(KDE_PORTAL_UNITS)
-    portal_kde = bool(portal_kde_unit) or _user_bus_name_available("org.freedesktop.impl.portal.desktop.kde")
-    portal_details = [
-        f"Desktop portal: {'active' if portal else 'not running'}",
-        f"KDE backend: {'active' if portal_kde else 'not running'}",
-    ]
-    if portal_kde_unit:
-        portal_details.append(f"KDE backend unit: {portal_kde_unit}")
-    probes.append(HardwareProbe(
-        "Desktop portals",
-        "ok" if portal and portal_kde else "warn",
-        "KDE portal services are ready for file pickers, permissions, and screen sharing"
-        if portal and portal_kde else "Restart the capture stack if screen sharing or file pickers misbehave",
-        "\n".join(portal_details),
-    ))
-
-    has_busctl = bool(shutil.which("busctl"))
-    qdbus_binary = _first_available_binary(QDBUS_CANDIDATES)
-    has_qdbus = bool(qdbus_binary)
-    probes.append(HardwareProbe(
-        "Portal diagnostics",
-        "ok" if has_busctl or has_qdbus else "dim",
-        "Portal diagnostic tools are available" if has_busctl or has_qdbus else "Portal diagnostic tools are not installed",
-        f"busctl: {'available' if has_busctl else 'not found'}\nqdbus: {qdbus_binary or 'not found'}",
-    ))
-
-    vrr = os.environ.get("KWIN_DRM_ALLOW_VRR", "").strip()
-    probes.append(HardwareProbe(
-        "Display tuning",
-        "dim" if not vrr else "ok",
-        "Display Settings controls VRR, HDR, scale, refresh rate, and monitor layout",
-        f"KWin VRR environment policy: {vrr or 'not set; using Plasma defaults'}",
-    ))
-
-    color_scheme = _kread("kdeglobals", "General", "ColorScheme")
-    ui_font = _kread("kdeglobals", "General", "font")
-    fixed_font = _kread("kdeglobals", "General", "fixed")
-    icon_theme = _kread("kdeglobals", "Icons", "Theme")
-    plasma_theme = _kread("plasmarc", "Theme", "name")
-    visual_ok = (
-        color_scheme == "KythDark"
-        and plasma_theme == "kyth-dark"
-        and icon_theme == "Papirus-Dark"
-        and ui_font.startswith("Inter,")
-        and fixed_font.startswith("Cascadia Code,")
-    )
-    probes.append(HardwareProbe(
-        "KythOS theme layer",
-        "ok" if visual_ok else "dim",
-        "KythOS color, icon, font, and panel theme are active"
-        if visual_ok else "KythOS visual polish is not fully applied; restore it below when wanted",
-        "\n".join((
-            f"Color scheme: {color_scheme or 'unset'}",
-            f"Plasma theme: {plasma_theme or 'unset'}",
-            f"Icon theme: {icon_theme or 'unset'}",
-            f"UI font: {ui_font or 'unset'}",
-            f"Fixed font: {fixed_font or 'unset'}",
-        )),
-    ))
-
-    single_click = _kread("kdeglobals", "KDE", "SingleClick").lower()
-    clip_items = _kread("klipperrc", "General", "MaxClipItems")
-    probes.append(HardwareProbe(
-        "Desktop comfort defaults",
-        "ok" if single_click == "false" and clip_items == "25" else "dim",
-        "Comfortable double-click and clipboard history defaults are configured"
-        if single_click == "false" and clip_items == "25" else "Comfort defaults are not fully applied; restore them below when wanted",
-        f"Single-click open: {single_click or 'unset'}\nClipboard history size: {clip_items or 'unset'}",
-    ))
-
-    layout_marker = _kread("plasma-org.kde.plasma.desktop-appletsrc", "KythOS", "KythComfortLayout")
-    legacy_layout_marker = _kread("plasma-org.kde.plasma.desktop-appletsrc", "KythOS", "WindowsFamiliarLayout")
-    layout_ok = layout_marker in ("kyth-comfort-v2", "kyth-comfort-v3") or legacy_layout_marker == "windows-familiar-v1"
-    probes.append(HardwareProbe(
-        "KythOS default layout",
-        "ok" if layout_ok else "dim",
-        "KythOS bottom taskbar and pinned launcher layout are active"
-        if layout_ok else "Standard KythOS layout is not marked active; restore it below when wanted",
-        f"KythOS layout marker: {layout_marker or 'unset'}\nLegacy layout marker: {legacy_layout_marker or 'unset'}",
-    ))
-    return probes
 
 
 
@@ -499,16 +337,12 @@ class PlasmaWaylandPage(Page):
         profile = DESKTOP_PROFILES[profile_key]
         self._profile_result.set_running(f"Applying {profile['title']} mode", "Writing Plasma and KWin defaults...")
         script = self._desktop_profile_command(profile_key, profile)
-        try:
-            result = subprocess.run(["bash", "-lc", script], capture_output=True, text=True, timeout=20)  # nosec B603 # nosemgrep
-        except Exception as exc:
-            self._profile_result.set_result("error", f"Could not apply {profile['title']} mode", str(exc))
-            return
-        details = (result.stdout or "") + (result.stderr or "")
-        if result.returncode == 0:
+        code, out, err = run_shell_script(script, timeout=20)
+        details = (out or "") + (err or "")
+        if code == 0:
             self._profile_result.set_result("ok", f"Applied {profile['title']} mode", details.strip() or "KWin settings refreshed.")
         else:
-            self._profile_result.set_result("error", f"Failed to apply {profile['title']} mode", details.strip())
+            self._profile_result.set_result("error", f"Failed to apply {profile['title']} mode", details.strip() or f"exit {code}")
 
     def _desktop_profile_command(self, profile_key: str, profile: dict[str, object]) -> str:
         snap = int(profile["snap"])
@@ -568,32 +402,25 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
         return f"{session} session, {display}"
 
     def _gpu_status(self) -> str:
-        try:
-            out = subprocess.run(["bash", "-lc", "lspci | grep -Ei 'vga|3d|display' | head -2"], capture_output=True, text=True, timeout=4).stdout.strip()  # nosec B603 # nosemgrep
-        except Exception:
-            out = ""
-        return out or "GPU probe unavailable"
+        return gpu_lspci_summary() or "GPU probe unavailable"
 
     def _portal_status(self) -> str:
         checks = [
-            ("portal", "systemctl --user is-active xdg-desktop-portal.service"),
-            ("kde", "systemctl --user is-active xdg-desktop-portal-kde.service"),
-            ("pipewire", "systemctl --user is-active pipewire.service"),
+            ("portal", "xdg-desktop-portal.service"),
+            ("kde", "xdg-desktop-portal-kde.service"),
+            ("pipewire", "pipewire.service"),
         ]
         states = []
-        for name, cmd in checks:
-            result = subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True, timeout=3)  # nosec B603 # nosemgrep
-            states.append(f"{name}:{(result.stdout or 'inactive').strip()}")
+        for name, unit in checks:
+            code, out, _ = _run_text(["systemctl", "--user", "is-active", unit], timeout=3)
+            states.append(f"{name}:{(out or 'inactive').strip()}")
         return ", ".join(states)
 
     def _screen_share_status(self) -> str:
         return "Ready when PipeWire and xdg-desktop-portal-kde are active"
 
     def _kscreen_status(self, feature: str) -> str:
-        try:
-            out = subprocess.run(["bash", "-lc", "kscreen-doctor -o 2>/dev/null | head -40"], capture_output=True, text=True, timeout=4).stdout.lower()  # nosec B603 # nosemgrep
-        except Exception:
-            out = ""
+        out = kscreen_doctor_output().lower()
         if not out:
             return "Install/run kscreen-doctor to probe display capabilities"
         if feature in out:
@@ -679,10 +506,9 @@ fi
     def _apply_plasma_polish(self):
         cmd = self._plasma_polish_command()
         self._polish_result.set_running("Restoring the KythOS default layout...", self._command_details(cmd))
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20, check=False)  # nosec B603 # nosemgrep
-        except Exception as exc:
-            self._polish_result.set_result("err", f"Could not apply KythOS polish: {exc}", self._command_details(cmd, exc=exc))
+        result = _run_command(cmd, timeout=20)
+        if result is None:
+            self._polish_result.set_result("err", "Could not apply KythOS polish: command failed to start", self._command_details(cmd))
             return
         if result.returncode == 0:
             self._polish_result.set_result(
@@ -735,14 +561,8 @@ fi
                         child.widget().deleteLater()
 
     def _open_kcm(self, label: str, module: str):
-        for cmd in (["kcmshell6", module], ["systemsettings", module], ["systemsettings"]):
-            if not shutil.which(cmd[0]):
-                continue
-            try:
-                subprocess.Popen(cmd)  # nosec B603 # nosemgrep
-                return
-            except OSError:
-                continue
+        if open_settings_module(module):
+            return
         self._repair_result.set_result("err", f"Could not open {label}.", f"Tried: kcmshell6 {module}, systemsettings {module}")
 
     @staticmethod
@@ -762,10 +582,9 @@ fi
 
     def _run_repair_command(self, label: str, success: str, cmd: list[str]):
         self._repair_result.set_running(label, self._command_details(cmd))
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20, check=False)  # nosec B603 # nosemgrep
-        except Exception as exc:
-            self._repair_result.set_result("err", f"{label} failed: {exc}", self._command_details(cmd, exc=exc))
+        result = _run_command(cmd, timeout=20)
+        if result is None:
+            self._repair_result.set_result("err", f"{label} failed: command failed to start", self._command_details(cmd))
             return
         if result.returncode == 0:
             self._repair_result.set_result("ok", success, self._command_details(cmd, result))

@@ -1,9 +1,7 @@
 import json
 import os
 import shlex
-import subprocess
-
-# __KYTH_GENERATED_IMPORTS__
+from .services.launch import flatpak_run, popen
 from .core_base import _restyle
 from .services.software import Worker, _finish_worker, _is_flatpak_installed, load_appstream_catalog
 from .qt import (  # noqa: E501
@@ -672,7 +670,7 @@ class _FlatpakStoreTabMixin:
         _restyle(action_btn)
 
     def _open_fp_app(self, app_id: str) -> None:
-        subprocess.Popen(["flatpak", "run", app_id])
+        flatpak_run(app_id)
 
     def _set_fp_task_state(self, message: str, state: str) -> None:
         styles = {

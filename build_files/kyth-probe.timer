@@ -1,0 +1,14 @@
+[Unit]
+Description=KythOS system probe cache refresh
+Documentation=https://github.com/mrtrick37/kyth
+
+[Timer]
+# Warm cache early so first System Hub open is cheap.
+OnBootSec=45s
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

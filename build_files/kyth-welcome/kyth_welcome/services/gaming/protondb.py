@@ -1,10 +1,8 @@
-"""ProtonDB cache helpers and optional batch-fetch worker."""
+"""ProtonDB cache helpers (pure). Batch worker: services.workers.protondb."""
 from __future__ import annotations
 
 import json
 import os
-import time
-from urllib.request import Request, urlopen
 
 from .constants import _PROTONDB_CACHE_PATH
 
@@ -30,47 +28,8 @@ def _save_protondb_cache(cache: dict[str, str]) -> None:
  # _save_protondb_cache
 
 
-try:
-    from ...qt import Signal
-    from ..runtime import TrackedThread
-except ImportError:  # pragma: no cover - CI without Qt
-    Signal = None  # type: ignore[assignment,misc]
-    TrackedThread = object  # type: ignore[assignment,misc]
-    _HAS_QT = False
-else:
-    _HAS_QT = True
-
-
-if _HAS_QT:
-    class _ProtonDbBatchWorker(TrackedThread):
-        """Fetches ProtonDB tiers for a list of Steam appids, skipping already-cached ones."""
-        tier_fetched = Signal(str, str)   # (appid, tier)
-        finished_all = Signal(dict)       # full {appid: tier} map
-
-        def __init__(self, appids: list[str], existing: dict[str, str]):
-            super().__init__()
-            self._appids = appids
-            self._existing = dict(existing)
-
-        def run(self):
-            result = dict(self._existing)
-            for appid in self._appids:
-                if not appid or appid in result:
-                    continue
-                try:
-                    req = Request(
-                        f"https://www.protondb.com/api/v1/reports/summaries/{appid}.json",
-                        headers={"User-Agent": "KythOS-GameCheck/1.0"},
-                    )
-                    with urlopen(req, timeout=8) as resp:
-                        data = json.loads(resp.read().decode("utf-8"))
-                        tier = data.get("tier") or "pending"
-                        result[appid] = tier
-                        self.tier_fetched.emit(appid, tier)
-                except Exception:
-                    result[appid] = "pending"
-                time.sleep(0.06)
-            self.finished_all.emit(result)
-     # _ProtonDbBatchWorker
-else:  # pragma: no cover
-    _ProtonDbBatchWorker = None  # type: ignore[assignment,misc]
+def __getattr__(name: str):
+    if name == "_ProtonDbBatchWorker":
+        from ..workers.protondb import ProtonDbBatchWorker
+        return ProtonDbBatchWorker
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

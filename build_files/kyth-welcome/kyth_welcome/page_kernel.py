@@ -1,6 +1,6 @@
-import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
+from .services.launch import reboot
 from .core_base import (
     _bootc_cancel_block_reason, _branch_display_name, _current_kernel_flavor, _image_tag_for_kernel,
     _parse_update_phase, _restyle, _set_session_inhibit, _with_idle_inhibit,
@@ -131,7 +131,7 @@ class KernelPage(Page):
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
         self._reboot_btn.hide()
-        self._reboot_btn.clicked.connect(lambda: subprocess.Popen(["systemctl", "reboot"]))
+        self._reboot_btn.clicked.connect(lambda: reboot())
         self._add(self._reboot_btn)
         self._stretch()
     def showEvent(self, event):

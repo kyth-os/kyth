@@ -1,0 +1,18 @@
+[Unit]
+Description=KythOS user probe cache refresh (oneshot)
+Documentation=https://github.com/mrtrick37/kyth
+After=graphical-session-pre.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/kyth-probe
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kyth-probe
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=120
+
+[Install]
+WantedBy=graphical-session.target

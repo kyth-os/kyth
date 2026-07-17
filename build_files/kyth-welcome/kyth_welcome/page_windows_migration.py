@@ -1,8 +1,5 @@
 import os
 import shutil
-import subprocess
-
-# __KYTH_GENERATED_IMPORTS__
 from .core_base import (
     _human_bytes, _release_worker_when_finished, _restyle,
 )
@@ -20,6 +17,7 @@ from .services.runtime import DataWorker
 from .services.software import (
     Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
 )
+from .services.launch import flatpak_run, popen, systemsettings, kcmshell
 from .services.windows_migration import (
     UserFilesCopyWorker,
     WindowsLibraryWorker,
@@ -98,7 +96,7 @@ class WindowsMigrationPage(Page):
             if page:
                 btn.clicked.connect(lambda _=False, key=page: self._navigate(key))
             else:
-                btn.clicked.connect(lambda _=False: subprocess.Popen(["dolphin", os.path.expanduser("~")]) if shutil.which("dolphin") else QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.expanduser("~"))))
+                btn.clicked.connect(lambda _=False: popen(["dolphin", os.path.expanduser("~")]) or QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.expanduser("~"))))
             intro_btns.addWidget(btn)
         intro_btns.addStretch()
         intro_layout.addLayout(intro_btns)
@@ -775,7 +773,7 @@ class WindowsMigrationPage(Page):
         self._rdp_open_btn = QPushButton("Open KRDC")
         self._rdp_open_btn.hide()
         self._rdp_open_btn.clicked.connect(
-            lambda _=False: subprocess.Popen(["krdc"]) if shutil.which("krdc") else None)
+            lambda _=False: popen(["krdc"]))
         rdp_btns.addWidget(self._rdp_open_btn)
         rdp_btns.addStretch()
         rdp_layout.addLayout(rdp_btns)
@@ -860,36 +858,12 @@ class WindowsMigrationPage(Page):
         layout.addWidget(summary_lbl, 1)
         return row
 
-    # kglobalshortcutsrc writes: (group path, key, value). Non-service entries
-    # use the "active,default,description" triple format.
-    _WINDOWS_SHORTCUT_KEYS = (
-        (("services", "org.kde.dolphin.desktop"), "_launch", "Meta+E"),
-        (("org.kde.spectacle.desktop",), "RectangularRegionScreenShot",
-         "Meta+Shift+S,Meta+Shift+S,Capture Rectangular Region"),
-        (("klipper",), "show-on-mouse-pos",
-         "Meta+V,Meta+V,Show Clipboard Items at Mouse Position"),
-    )
-
     def _run_shortcut_change(self, delete: bool) -> bool:
-        if not shutil.which("kwriteconfig6"):
-            self._shortcuts_status.setText("kwriteconfig6 not found — is this a KDE session?")
+        from .services.plasma import apply_windows_shortcuts
+        ok, err = apply_windows_shortcuts(delete=delete)
+        if not ok and err:
+            self._shortcuts_status.setText(err)
             return False
-        ok = True
-        for groups, key, value in self._WINDOWS_SHORTCUT_KEYS:
-            cmd = ["kwriteconfig6", "--file", "kglobalshortcutsrc"]
-            for group in groups:
-                cmd += ["--group", group]
-            cmd += ["--key", key]
-            cmd += ["--delete"] if delete else [value]
-            try:
-                ok = subprocess.run(cmd, capture_output=True, timeout=10).returncode == 0 and ok
-            except Exception:
-                ok = False
-        # kglobalaccel only rereads the file on restart.
-        subprocess.run(
-            ["systemctl", "--user", "restart", "plasma-kglobalaccel.service"],
-            capture_output=True, timeout=10,
-        )
         return ok
 
     def _apply_windows_shortcuts(self):
@@ -903,11 +877,9 @@ class WindowsMigrationPage(Page):
             self._shortcuts_status.setText("✓ KDE default shortcuts restored.")
 
     def _open_kde_connect(self):
-        for cmd in (["kdeconnect-app"], ["kcmshell6", "kcm_kdeconnect"], ["systemsettings", "kcm_kdeconnect"]):
-            if shutil.which(cmd[0]):
-                subprocess.Popen(cmd)
-                self._phone_status.setText("")
-                return
+        if popen(["kdeconnect-app"]) or kcmshell("kcm_kdeconnect") or systemsettings("kcm_kdeconnect"):
+            self._phone_status.setText("")
+            return
         self._phone_status.setText(
             "KDE Connect isn't available in this session — install it from the App Store, "
             "or check System Settings → Connected Devices."
@@ -1091,7 +1063,7 @@ class WindowsMigrationPage(Page):
         app_id = "org.localsend.localsend_app"
         if _is_flatpak_installed(app_id):
             try:
-                subprocess.Popen(["flatpak", "run", app_id])
+                flatpak_run(app_id)
                 self._nearby_status.setText("LocalSend opened. Devices on the same network appear automatically.")
             except OSError as exc:
                 self._nearby_status.setText(f"Could not open LocalSend: {exc}")
@@ -1120,7 +1092,7 @@ class WindowsMigrationPage(Page):
             )
             return
         try:
-            subprocess.Popen([helper, *paths])
+            popen([helper, *paths])
             self._nearby_status.setText("Choose the destination device in the Nearby Sharing prompt.")
         except OSError as exc:
             self._nearby_status.setText(f"Could not start Nearby Sharing: {exc}")
@@ -1132,24 +1104,15 @@ class WindowsMigrationPage(Page):
             ["qdbus-qt6", "org.kde.krunner", "/App", "display"],
             ["qdbus", "org.kde.krunner", "/App", "display"],
         ):
-            if shutil.which(cmd[0]):
-                try:
-                    subprocess.Popen(cmd)
-                    self._powertoys_status.setText("")
-                    return
-                except OSError:
-                    continue
+            if popen(cmd):
+                self._powertoys_status.setText("")
+                return
         self._powertoys_status.setText("KRunner is not available in this session. Press Alt+Space after signing into Plasma.")
 
     def _open_settings_module(self, module: str, label: str):
-        for cmd in (["kcmshell6", module], ["systemsettings", module], ["systemsettings"]):
-            if shutil.which(cmd[0]):
-                try:
-                    subprocess.Popen(cmd)
-                    self._powertoys_status.setText("")
-                    return
-                except OSError:
-                    continue
+        if kcmshell(module) or systemsettings(module) or systemsettings():
+            self._powertoys_status.setText("")
+            return
         self._powertoys_status.setText(f"Could not open {label} in this session.")
 
     # ── Hardware sanity ───────────────────────────────────────────────────────
@@ -1633,7 +1596,7 @@ class WindowsMigrationPage(Page):
         if not shutil.which("konsole"):
             self._wsl_status.setText("Konsole is not available in this session.")
             return
-        subprocess.Popen(["konsole", "-e", "distrobox", "enter", "ubuntu"])
+        popen(["konsole", "-e", "distrobox", "enter", "ubuntu"])
         self._wsl_status.setText(
             "If the box doesn't exist yet, the terminal will say so — use Create Ubuntu Box first."
         )

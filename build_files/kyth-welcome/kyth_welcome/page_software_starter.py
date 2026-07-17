@@ -1,7 +1,5 @@
 import shlex
-import subprocess
-
-# __KYTH_GENERATED_IMPORTS__
+from .services.launch import flatpak_run, popen
 from .core_base import _restyle
 from .services.software import (
     Worker, _chromium_app_window_cmd, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
@@ -174,7 +172,7 @@ class _StarterPackTabMixin:
             )
             return
         try:
-            subprocess.Popen(launch[0])
+            popen(launch[0])
         except OSError as exc:
             QMessageBox.warning(self, "Could not open web app", str(exc))
 

@@ -10,6 +10,17 @@ install -m 0755 /ctx/kyth-update-watcher /usr/bin/kyth-update-watcher
 install -m 0644 /ctx/kyth-update-watcher.service /usr/lib/systemd/system/kyth-update-watcher.service
 install -m 0644 /ctx/kyth-update-watcher.timer /usr/lib/systemd/system/kyth-update-watcher.timer
 
+# Shared probe cache — warms bootc/flatpak/nvidia for System Hub cold starts.
+install -m 0755 /ctx/kyth-probe /usr/bin/kyth-probe
+install -m 0644 /ctx/kyth-probe.service /usr/lib/systemd/system/kyth-probe.service
+install -m 0644 /ctx/kyth-probe.timer /usr/lib/systemd/system/kyth-probe.timer
+install -m 0644 /ctx/kyth-probe-user.service /usr/lib/systemd/user/kyth-probe.service
+install -m 0644 /ctx/kyth-probe-user.timer /usr/lib/systemd/user/kyth-probe.timer
+# tmpfs + persistent system cache dir
+mkdir -p /var/cache/kyth
+# Ensure unit names match WantedBy installs (user units ship as kyth-probe.*)
+# (files above already use kyth-probe.service / .timer under user/)
+
 # Zero-Python update escape hatch — works even when KythOS Hub is broken.
 install -m 0755 /ctx/kyth-apply-update /usr/bin/kyth-apply-update
 install -m 0644 /ctx/kyth-apply-update.desktop /usr/share/applications/kyth-apply-update.desktop

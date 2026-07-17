@@ -5,7 +5,7 @@ from ..core_base import _IS_LIVE, _has_rollback_deployment, _restyle, _save_prof
 from ..services.gaming import _find_ntfs_drives, _proton_cachyos_version
 from ..services.hardware import _detect_nvidia
 from ..services.updates import _current_branch
-from ..page_compatibility import _COMPAT_GAMES
+from ..services.gaming import _COMPAT_GAMES
 from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt
 from ..widgets import _make_card
 

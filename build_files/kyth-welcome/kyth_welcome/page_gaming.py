@@ -1,7 +1,6 @@
 import glob
 import os
 import shutil
-import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _apply_install_badge, _restyle
@@ -11,20 +10,29 @@ from .services.gaming import (  # noqa: E501
     _find_ntfs_drives, _gamescope_installed, _gaming_health_items, _gaming_migration_checklist_items,
     _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed
 )
+from .services.launch import flatpak_run, popen
 from .services.software import _install_flatpak_inline, _is_flatpak_installed
-from .page_windows_migration import WindowsLibraryWorker
+from .services.workers.windows_migration import WindowsLibraryWorker
 from .qt import (  # noqa: E501
     QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTimer, QVBoxLayout, QWidget, Qt
 )
+from .lazy_page import compose_on_first_init
 from .widgets import ActionRow, Page, StatusBadge, _make_card
-from .page_gaming_library import _LibraryMixin
-from .page_gaming_fixes import _FixesMixin
-from .page_gaming_tools import _ToolsMixin
-from .page_gaming_migration import _MigrationMixin
+
+
+def _load_gaming_mixins() -> tuple[type, ...]:
+    from .page_gaming_library import _LibraryMixin
+    from .page_gaming_fixes import _FixesMixin
+    from .page_gaming_tools import _ToolsMixin
+    from .page_gaming_migration import _MigrationMixin
+    return (_LibraryMixin, _FixesMixin, _ToolsMixin, _MigrationMixin)
 
 
 # ── Page: Gaming ─────────────────────────────────────────────────────────────
-class GamingPage(Page, _LibraryMixin, _FixesMixin, _ToolsMixin, _MigrationMixin):
+# Mixins load on first construction so opening System Hub does not import tools/
+# migration modules until the user navigates here.
+@compose_on_first_init(_load_gaming_mixins)
+class GamingPage(Page):
     _SECTION_LABELS = {
         "all": "All",
         "setup": "Setup",
@@ -82,6 +90,13 @@ class GamingPage(Page, _LibraryMixin, _FixesMixin, _ToolsMixin, _MigrationMixin)
 
     def _switch_gaming_section(self, active: str) -> None:
         self._current_gaming_section = active
+        # Build on demand (dashboard/"all" seeds setup for health refresh).
+        if active == "all":
+            self._ensure_gaming_section("setup")
+        else:
+            self._ensure_gaming_section(active)
+            self._kick_section_refresh(active)
+
         for key, btn in self._gaming_section_buttons.items():
             selected = key == active
             btn.setChecked(selected)
@@ -335,32 +350,80 @@ class GamingPage(Page, _LibraryMixin, _FixesMixin, _ToolsMixin, _MigrationMixin)
         else:
             self._dashboard_widgets = []
 
-        self._active_gaming_section = "setup"
+        # Build section cards on first visit (setup always built for dashboard refresh).
+        self._sections_built: set[str] = set()
+        self._stretch()
+        seed = "setup" if self._current_gaming_section == "all" else self._current_gaming_section
+        self._ensure_gaming_section(seed)
+        self._switch_gaming_section(self._current_gaming_section)
+        self._kick_section_refresh(seed)
+        QTimer.singleShot(80, self._refresh_status)
+        self._refresh_ntfs_drives()
+
+    def _ensure_gaming_section(self, key: str) -> None:
+        """Build widgets for a gaming hub section the first time it is shown."""
+        if key == "all":
+            # Dashboard only needs setup for background health refresh.
+            key = "setup"
+        if key in self._sections_built:
+            return
+        builders = {
+            "setup": self._build_setup_section,
+            "library": self._build_library_section,
+            "fixes": self._build_fixes_section,
+            "tuning": self._build_tuning_section,
+            "migration": self._build_migration_section,
+        }
+        builder = builders.get(key)
+        if builder is None:
+            return
+        self._active_gaming_section = key
+        builder()
+        self._active_gaming_section = None
+        self._sections_built.add(key)
+
+    def _build_setup_section(self) -> None:
         self._add(self._make_gaming_ready_panel())
         self._build_xbox_game_bar_card()
         self._build_pc_game_library_card()
         self._build_game_night_card()
         self._build_gaming_health_card()
         self._build_migration_checklist_card()
+
+    def _build_library_section(self) -> None:
         self._build_game_readiness_card()
         self._build_my_games_card()
+
+    def _build_fixes_section(self) -> None:
         self._build_first_failure_playbook_card()
         self._build_fix_my_game_card()
+
+    def _build_tuning_section(self) -> None:
         self._build_gaming_tools_section()
+
+    def _build_migration_section(self) -> None:
         self._build_steam_library_migration_card()
         self._build_save_backup_card()
         self._build_modding_migration_card()
-        self._active_gaming_section = None
-        self._stretch()
-        self._switch_gaming_section(self._current_gaming_section)
-        self._update_profile_builder()
-        self._set_rows_loading(self._checklist_rows_layout, "Checking first-week setup items…")
-        self._set_rows_loading(self._health_rows_layout, "Checking launchers, Vulkan, Proton, controllers, and game drives…")
-        self._set_rows_loading(self._streaming_rows_layout, "Checking Discord, OBS, capture, audio, and camera tools…")
-        self._saves_status_lbl.setText("Scanning save backup tools…")
-        QTimer.singleShot(0, self._refresh_gaming_dashboard)
-        QTimer.singleShot(80, self._refresh_status)
-        self._refresh_ntfs_drives()
+
+    def _kick_section_refresh(self, key: str) -> None:
+        """Start async probes only for sections that are already built."""
+        if key in ("setup", "all") and hasattr(self, "_checklist_rows_layout"):
+            self._set_rows_loading(self._checklist_rows_layout, "Checking first-week setup items…")
+            self._set_rows_loading(
+                self._health_rows_layout,
+                "Checking launchers, Vulkan, Proton, controllers, and game drives…",
+            )
+            QTimer.singleShot(0, self._refresh_gaming_dashboard)
+        if key == "fixes" and hasattr(self, "_streaming_rows_layout"):
+            self._set_rows_loading(
+                self._streaming_rows_layout,
+                "Checking Discord, OBS, capture, audio, and camera tools…",
+            )
+        if key == "migration" and hasattr(self, "_saves_status_lbl"):
+            self._saves_status_lbl.setText("Scanning save backup tools…")
+        if key == "tuning":
+            self._update_profile_builder()
 
     def _build_xbox_game_bar_card(self):
         # ── Xbox Game Bar parity ─────────────────────────────────────────────
@@ -418,7 +481,7 @@ class GamingPage(Page, _LibraryMixin, _FixesMixin, _ToolsMixin, _MigrationMixin)
             ("Open Discord", ["flatpak", "run", "com.discordapp.Discord"]),
             ("Open OBS", ["flatpak", "run", "com.obsproject.Studio"]),
         ):
-            night_actions.add_button(label, lambda _=False, c=cmd: subprocess.Popen(c))  # nosec B603 # nosemgrep
+            night_actions.add_button(label, lambda _=False, c=cmd: popen(c))
         night_actions.finish()
         self._game_night_status = night_actions.status
         night_layout.addWidget(night_actions)
@@ -473,8 +536,6 @@ class GamingPage(Page, _LibraryMixin, _FixesMixin, _ToolsMixin, _MigrationMixin)
         self._checklist_rows_layout.setSpacing(8)
         checklist_layout.addLayout(self._checklist_rows_layout)
         self._add(checklist_card)
-
-        self._active_gaming_section = "library"
 
     def _start_game_night(self):
         if not GameNightManager.start():
@@ -726,7 +787,7 @@ class GamingPage(Page, _LibraryMixin, _FixesMixin, _ToolsMixin, _MigrationMixin)
         app_id = "com.dec05eba.gpu_screen_recorder"
         if _is_flatpak_installed(app_id):
             try:
-                subprocess.Popen(["flatpak", "run", app_id])
+                flatpak_run(app_id)
                 self._set_status_badge(self._game_bar_status, "ok", "Opening GPU Screen Recorder.")
             except OSError as exc:
                 self._set_status_badge(self._game_bar_status, "err", f"Could not open GPU Screen Recorder: {exc}")

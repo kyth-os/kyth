@@ -235,8 +235,16 @@ def command_details(cmd: list[str], result=None, exc: Exception | None = None) -
     if result is None:
         return "\n".join(lines)
     lines.extend(["", f"Exit code: {result.returncode}"])
-    stdout = result.stdout.decode("utf-8", errors="replace").strip() if result.stdout else ""
-    stderr = result.stderr.decode("utf-8", errors="replace").strip() if result.stderr else ""
+
+    def _as_text(value) -> str:
+        if not value:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace").strip()
+        return str(value).strip()
+
+    stdout = _as_text(getattr(result, "stdout", None))
+    stderr = _as_text(getattr(result, "stderr", None))
     if stdout:
         lines.extend(["", "stdout:", stdout])
     if stderr:

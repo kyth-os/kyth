@@ -1,11 +1,20 @@
 import json
 import os
-from dataclasses import dataclass
 from datetime import datetime
 from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.gaming import TrackedThread
+from .services.gaming.compat_data import (
+    CompatGame,
+    _COMPAT_CACHE_PATH,
+    _COMPAT_DATA_UPDATED,
+    _COMPAT_GAMES,
+    _COMPAT_REMOTE_URL,
+    _COMPAT_STALE_DAYS,
+    _parse_compat_payload,
+    replace_compat_games,
+)
 from .qt import (  # noqa: E501
     QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QThread, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )
@@ -13,78 +22,13 @@ from .widgets import (  # noqa: E501
     Page, _make_card,
 )
 
-@dataclass(frozen=True)
-class CompatGame:
-    name: str
-    anticheat: str
-    status: str
-    note: str
-    checked: str
-    source: str
-    source_url: str
-
-
-# ── Game compatibility data ────────────────────────────────────────────────────
-# Status values: "native" | "proton" | "tweaks" | "blocked"
-# Anti-cheat values used as display tags. Every entry carries a date/source so
-# stale anti-cheat claims are easy to audit during release validation.
-#
-# The data lives in compat_games.json (bundled with this package) so it can be
-# refreshed at runtime from the repo's main branch — anti-cheat status is the
-# most volatile fact in Linux gaming and must not be frozen into an OS image.
-_COMPAT_BUNDLED_PATH = os.path.join(os.path.dirname(__file__), "compat_games.json")
-_COMPAT_CACHE_PATH = os.path.expanduser("~/.cache/kyth-compat-games.json")
-_COMPAT_REMOTE_URL = (
-    "https://raw.githubusercontent.com/mrtrick37/kyth/main/"
-    "build_files/kyth-welcome/kyth_welcome/compat_games.json"
-)
-_COMPAT_STALE_DAYS = 45
-
-
-def _parse_compat_payload(data: object) -> tuple[str, list[CompatGame]]:
-    if not isinstance(data, dict):
-        return "", []
-    games: list[CompatGame] = []
-    for entry in data.get("games", []):
-        if not isinstance(entry, dict) or not entry.get("name"):
-            continue
-        status = str(entry.get("status", ""))
-        if status not in ("native", "proton", "tweaks", "blocked"):
-            continue
-        games.append(CompatGame(
-            name=str(entry.get("name", "")),
-            anticheat=str(entry.get("anticheat", "None")),
-            status=status,
-            note=str(entry.get("note", "")),
-            checked=str(entry.get("checked", "")),
-            source=str(entry.get("source", "")),
-            source_url=str(entry.get("source_url", "")),
-        ))
-    return str(data.get("updated", "")), games
-
-
-def _load_compat_games() -> tuple[str, list[CompatGame]]:
-    """Return the newest of the image-bundled data and the runtime cache."""
-    best_date, best_games = "", []
-    for path in (_COMPAT_BUNDLED_PATH, _COMPAT_CACHE_PATH):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                updated, games = _parse_compat_payload(json.load(fh))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if games and updated >= best_date:
-            best_date, best_games = updated, games
-    return best_date, best_games
-
-
-_COMPAT_DATA_UPDATED, _COMPAT_GAMES = _load_compat_games()
-
 
 def _adopt_compat_data(updated: str, games: list[CompatGame]) -> None:
-    # Mutate the list in place so modules that imported _COMPAT_GAMES see it too.
+    # Mutate the shared service list so all importers see the refresh.
+    replace_compat_games(updated, games)
+    # Keep page-local name bound for age checks that read this module's global.
     global _COMPAT_DATA_UPDATED
     _COMPAT_DATA_UPDATED = updated
-    _COMPAT_GAMES[:] = games
 
 
 def _compat_data_age_days() -> int | None:

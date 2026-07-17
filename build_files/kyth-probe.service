@@ -1,0 +1,19 @@
+[Unit]
+Description=KythOS system probe cache refresh (oneshot)
+Documentation=https://github.com/mrtrick37/kyth
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/kyth-probe --system
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kyth-probe
+# Read-only probes; keep impact low.
+Nice=10
+IOSchedulingClass=idle
+# bootc/flatpak can be slow on cold cache
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

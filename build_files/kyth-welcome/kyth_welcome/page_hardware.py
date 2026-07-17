@@ -1,14 +1,14 @@
-import shutil
-import subprocess
-import time
-
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
-from .services.diagnostics import _command_stdout
 from .services.gaming import DataWorker
 from .services.hardware import (
-    HardwareProbe, HardwareProbeWorker,
+    HardwareProbe,
+    HardwareProbeWorker,
+    bt_audio_device_summary,
+    force_ldac_reconnect,
+    switch_to_bt_audio_output,
 )
+from .services.launch import kcmshell, popen
 from .services.software import _finish_worker
 from .qt import (  # noqa: E501
     QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer, QUrl, QVBoxLayout, QWidget, Signal,
@@ -179,16 +179,12 @@ class HardwarePage(Page):
         display_btn.setObjectName("primary")
         display_btn.setToolTip("Open KDE Display Settings — HDR, VRR, refresh rate, and multi-monitor layout.")
         display_btn.clicked.connect(
-            lambda _=False: subprocess.Popen(["kcmshell6", "kcm_kscreen"])
-            if shutil.which("kcmshell6") else QDesktopServices.openUrl(QUrl("settings://display"))
+            lambda _=False: kcmshell("kcm_kscreen") or QDesktopServices.openUrl(QUrl("settings://display"))
         )
         btns.addWidget(display_btn)
         color_btn = QPushButton("Color & Night Light")
         color_btn.setToolTip("Color profiles and Night Light blue-light filter settings.")
-        color_btn.clicked.connect(
-            lambda _=False: subprocess.Popen(["kcmshell6", "kcm_nightcolor"])
-            if shutil.which("kcmshell6") else None
-        )
+        color_btn.clicked.connect(lambda _=False: kcmshell("kcm_nightcolor"))
         btns.addWidget(color_btn)
         btns.addStretch()
         layout.addLayout(btns)
@@ -232,8 +228,7 @@ class HardwarePage(Page):
         btns.addWidget(ldac_btn)
         bt_settings_btn = QPushButton("Bluetooth Settings")
         bt_settings_btn.clicked.connect(
-            lambda: subprocess.Popen(["kcmshell6", "kcm_bluetooth"])
-            if shutil.which("kcmshell6") else QDesktopServices.openUrl(QUrl("settings://bluetooth"))
+            lambda: kcmshell("kcm_bluetooth") or QDesktopServices.openUrl(QUrl("settings://bluetooth"))
         )
         btns.addWidget(bt_settings_btn)
         btns.addStretch()
@@ -253,78 +248,28 @@ class HardwarePage(Page):
     def _refresh_bt_audio(self):
         self._bt_status_lbl.setText("Scanning Bluetooth devices…")
 
-        def _collect() -> str:
-            paired = _command_stdout(["bluetoothctl", "devices", "Paired"], timeout=5)
-            connected = _command_stdout(["bluetoothctl", "devices", "Connected"], timeout=5)
-            connected_addrs = {
-                line.split()[1] for line in connected.splitlines()
-                if len(line.split()) >= 2
-            }
-            sinks_raw = _command_stdout(
-                ["bash", "-c", "wpctl status 2>/dev/null | grep -E 'bluez_output' | head -8"],
-                timeout=5,
-            )
-            lines: list[str] = []
-            for line in paired.splitlines():
-                parts = line.split(" ", 2)
-                if len(parts) < 3:
-                    continue
-                addr, name = parts[1], parts[2]
-                state = "Connected" if addr in connected_addrs else "Paired (not connected)"
-                lines.append(f"{name}  [{addr}]  —  {state}")
-            if sinks_raw.strip():
-                lines.append(f"\nWirePlumber BT sinks:\n{sinks_raw.strip()}")
-            return "\n".join(lines) if lines else "No paired Bluetooth devices found. Pair a headset via Bluetooth Settings."
-
-        self._start_bt_worker("bt-refresh", _collect,
-                              lambda _k, text: self._bt_status_lbl.setText(str(text)))
+        self._start_bt_worker(
+            "bt-refresh",
+            bt_audio_device_summary,
+            lambda _k, text: self._bt_status_lbl.setText(str(text)),
+        )
 
     def _switch_to_bt_audio(self):
         self._bt_status_lbl.setText("Switching audio output to Bluetooth…")
-
-        def _do_switch() -> str:
-            result = subprocess.run(
-                ["bash", "-c",
-                 "wpctl status 2>/dev/null | grep -E '\\bbluez_output' | head -1"
-                 " | awk '{print $1}' | tr -d '.*'"],
-                capture_output=True, text=True, timeout=5,
-            )
-            sink_id = result.stdout.strip()
-            if sink_id:
-                subprocess.run(["wpctl", "set-default", sink_id], timeout=5, check=False)
-                return (
-                    f"Audio output switched to Bluetooth device (WirePlumber ID: {sink_id}). "
-                    "If the change doesn't take effect, log out and back in."
-                )
-            return "No Bluetooth audio output found. Make sure your headset is connected, then refresh."
-
-        self._start_bt_worker("bt-switch", _do_switch,
-                              lambda _k, text: self._bt_status_lbl.setText(str(text)))
+        self._start_bt_worker(
+            "bt-switch",
+            switch_to_bt_audio_output,
+            lambda _k, text: self._bt_status_lbl.setText(str(text)),
+        )
 
     def _force_ldac_reconnect(self):
         self._bt_status_lbl.setText("Looking for connected Bluetooth device…")
-
-        def _do_reconnect() -> str:
-            connected = _command_stdout(["bluetoothctl", "devices", "Connected"], timeout=5)
-            for line in connected.splitlines():
-                parts = line.split(" ", 2)
-                if len(parts) < 2:
-                    continue
-                addr = parts[1]
-                subprocess.run(["bluetoothctl", "disconnect", addr], timeout=6, check=False)
-                time.sleep(1.5)
-                subprocess.run(["bluetoothctl", "connect", addr], timeout=12, check=False)
-                return (
-                    f"Reconnected {addr}. LDAC should now be active if your device supports it. "
-                    "Refresh Devices to confirm the WirePlumber sink is present."
-                )
-            return ""
 
         def _on_done(_key: str, msg: object) -> None:
             text = str(msg) if msg else "No connected Bluetooth device found. Connect your headset first."
             self._bt_status_lbl.setText(text)
 
-        self._start_bt_worker("ldac-reconnect", _do_reconnect, _on_done)
+        self._start_bt_worker("ldac-reconnect", force_ldac_reconnect, _on_done)
 
     def refresh(self):
         self._refresh_btn.setEnabled(False)
@@ -403,10 +348,7 @@ class HardwarePage(Page):
                 card.expand()
 
     def _run_inline_cmd(self, cmd: list[str]):
-        try:
-            subprocess.Popen(cmd)
-        except OSError:
-            pass
+        popen(cmd)
         QTimer.singleShot(1500, self.refresh)
 
     def _on_failed(self, message: str):

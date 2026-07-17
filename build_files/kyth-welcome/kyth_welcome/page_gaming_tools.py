@@ -1,6 +1,5 @@
 import os
 import shutil
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +9,7 @@ from .services.gaming import (  # noqa: E501
     GAMING_TOOLS, heroic_epic_launcher_command, lutris_installer_command, opticscaler_deploy_command,
     scx_scheduler_command
 )
+from .services.launch import flatpak_run, popen
 from .services.software import Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed
 from .qt import (  # noqa: E501
     QComboBox, QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar,
@@ -285,7 +285,6 @@ class _ToolsMixin:
         self._tool_worker = None
         self._active_tool_refs = None
 
-        self._active_gaming_section = "tuning"
         self._divider()
 
         # ── MangoHud ──────────────────────────────────────────────────────────
@@ -610,8 +609,6 @@ class _ToolsMixin:
             )
             self._add(combo_txt)
 
-        self._active_gaming_section = "migration"
-
     def _update_profile_builder(self):
         if not hasattr(self, "_profile_launch_value"):
             return
@@ -650,7 +647,7 @@ class _ToolsMixin:
         launch_btn = QPushButton("Launch")
         launch_btn.hide()
         launch_btn.clicked.connect(
-            lambda _=False, cmd=tool["launch"]: subprocess.Popen(cmd)
+            lambda _=False, cmd=tool["launch"]: popen(cmd)
         )
         btn_row.addWidget(launch_btn)
         uninstall_btn = QPushButton("Uninstall")
@@ -699,7 +696,7 @@ class _ToolsMixin:
 
     def _open_protonupqt(self):
         if _is_flatpak_installed("net.davidotek.pupgui2"):
-            subprocess.Popen(["flatpak", "run", "net.davidotek.pupgui2"])
+            flatpak_run("net.davidotek.pupgui2")
             return
         btn = self.sender()
         if not isinstance(btn, QPushButton):
@@ -707,7 +704,7 @@ class _ToolsMixin:
 
         def _launch_when_done(code: int):
             if code == 0:
-                subprocess.Popen(["flatpak", "run", "net.davidotek.pupgui2"])
+                flatpak_run("net.davidotek.pupgui2")
 
         _install_flatpak_inline(
             self, btn, "net.davidotek.pupgui2", "ProtonUp-Qt", done_cb=_launch_when_done,
@@ -715,7 +712,7 @@ class _ToolsMixin:
 
     def _open_corectrl(self):
         if shutil.which("corectrl"):
-            subprocess.Popen(["corectrl"])
+            popen(["corectrl"])
             return
         QMessageBox.information(
             self,
@@ -818,7 +815,7 @@ class _ToolsMixin:
         _restyle(self._tool_op_status)
 
         try:
-            subprocess.Popen(cmd)
+            popen(cmd)
             self._tool_op_status.setText("Heroic opened for Epic sign-in.")
             self._tool_op_status.setObjectName("status-ok")
             _restyle(self._tool_op_status)
@@ -963,7 +960,7 @@ class _ToolsMixin:
         _restyle(self._tool_op_status)
 
         try:
-            subprocess.Popen(cmd)
+            popen(cmd)
             self._tool_op_status.setText(f"{name} installer opened in Lutris.")
             self._tool_op_status.setObjectName("status-ok")
             _restyle(self._tool_op_status)

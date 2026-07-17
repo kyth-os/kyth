@@ -1,26 +1,14 @@
 import shutil
-import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
-from .services.software import Worker, _finish_worker
+from .services.launch import open_terminal_command, popen
+from .services.software import Worker, _finish_worker, is_distrobox_container as _is_distrobox_container
 from .qt import (  # noqa: E501
     QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
     QTextEdit, QVBoxLayout, QWidget,
 )
 from .widgets import _make_card, _set_log_panel
-
-
-def _is_distrobox_container(name: str) -> bool:
-    """Return True if a distrobox container with the given name exists."""
-    try:
-        result = subprocess.run(
-            ["distrobox", "list", "--no-color"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return name in result.stdout
-    except Exception:
-        return False
 
 
 _INSTALL_VSCODE_CMD = [
@@ -343,9 +331,9 @@ class _DeveloperTabMixin:
                                 "Could not find a terminal emulator to open.")
             return
         if terminal == "konsole":
-            subprocess.Popen(["konsole", "-e", "distrobox", "enter", "kyth-dev"])
+            popen(["konsole", "-e", "distrobox", "enter", "kyth-dev"])
         else:
-            subprocess.Popen([terminal, "--", "distrobox", "enter", "kyth-dev"])
+            popen([terminal, "--", "distrobox", "enter", "kyth-dev"])
 
     def _ai_buttons(self):
         return tuple(
@@ -408,6 +396,6 @@ class _DeveloperTabMixin:
 
     def _ai_enter_box(self):
         try:
-            subprocess.Popen(["konsole", "-e", "/usr/bin/kyth-ai-dev", "enter"])
+            popen(["konsole", "-e", "/usr/bin/kyth-ai-dev", "enter"])
         except Exception as exc:
             QMessageBox.warning(self, "AI Dev Environment", f"Could not open the AI dev shell:\n{exc}")

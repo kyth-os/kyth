@@ -1,6 +1,5 @@
 import os
 import re
-import subprocess
 from urllib.parse import parse_qs, urlencode, unquote, urlparse
 from urllib.request import Request, urlopen
 

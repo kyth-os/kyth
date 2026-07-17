@@ -1,5 +1,4 @@
 import json
-import subprocess
 import time
 from datetime import datetime
 
@@ -13,6 +12,7 @@ from .core_base import (
 from .services.software import (
     Worker, _finish_worker,
 )
+from .services.launch import reboot, popen
 from .services.updates import (
     FirmwareCheckWorker, UpdateCheckWorker, _current_branch, FlatpakCheckWorker, ChangelogWorker,
 )
@@ -98,7 +98,7 @@ class UpdatePage(Page):
         self._restart_now_btn.setObjectName("primary")
         self._restart_now_btn.setMinimumWidth(120)
         self._restart_now_btn.hide()
-        self._restart_now_btn.clicked.connect(lambda: subprocess.Popen(["systemctl", "reboot"]))
+        self._restart_now_btn.clicked.connect(lambda: reboot())
         avail_btn_col.addWidget(self._restart_now_btn)
         self._check_btn = QPushButton("Check Now")
         self._check_btn.setEnabled(False)
@@ -224,7 +224,7 @@ class UpdatePage(Page):
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
         self._reboot_btn.hide()
-        self._reboot_btn.clicked.connect(lambda: subprocess.Popen(["systemctl", "reboot"]))
+        self._reboot_btn.clicked.connect(lambda: reboot())
         self._add(self._reboot_btn)
 
         # ── Firmware updates ──────────────────────────────────────────────────
@@ -881,22 +881,10 @@ class UpdatePage(Page):
 
     def _toggle_auto_update(self, state: int) -> None:
         cmd = "enable" if state else "disable"
-        try:
-            subprocess.Popen(
-                ["pkexec", "systemctl", cmd, "--now", "kyth-update-watcher.timer"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
+        popen(["pkexec", "systemctl", cmd, "--now", "kyth-update-watcher.timer"])
 
     def _run_auto_update_now(self) -> None:
-        try:
-            subprocess.Popen(
-                ["pkexec", "systemctl", "start", "kyth-update-watcher.service"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
+        popen(["pkexec", "systemctl", "start", "kyth-update-watcher.service"])
 
     # ── Firmware update ───────────────────────────────────────────────────────
 

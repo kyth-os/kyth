@@ -40,8 +40,6 @@ from .hardware_sanity import (
     hw_display_row,
 )
 from .storage import (
-    UserFilesCopyWorker,
-    WindowsLibraryWorker,
     _folder_sizes_calc,
     _unlock_bitlocker_drive,
     _windows_folder_dest,
@@ -74,3 +72,14 @@ __all__ = [
     "windows_folder_dest",
     "write_bookmarks_html",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy re-export of Qt workers (pure package import stays Qt-free)."""
+    if name in {"WindowsLibraryWorker", "UserFilesCopyWorker"}:
+        from ..workers.windows_migration import UserFilesCopyWorker, WindowsLibraryWorker
+        return {
+            "WindowsLibraryWorker": WindowsLibraryWorker,
+            "UserFilesCopyWorker": UserFilesCopyWorker,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

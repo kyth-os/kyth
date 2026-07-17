@@ -128,6 +128,19 @@ class Worker(TrackedThread):
             self._proc = None
             # The command may have installed apps or staged a deployment.
             _invalidate_probe_caches()
+            # Targeted disk-section drops for common mutation commands.
+            try:
+                cmd0 = " ".join(self._cmd[:4])
+                from .probe import (
+                    invalidate_after_bootc_change,
+                    invalidate_after_flatpak_change,
+                )
+                if "flatpak" in cmd0:
+                    invalidate_after_flatpak_change()
+                if "bootc" in cmd0:
+                    invalidate_after_bootc_change()
+            except Exception:
+                pass
 
 
 class DownloadMonitor(TrackedThread):

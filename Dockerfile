@@ -96,6 +96,7 @@ RUN bash /tmp/plymouth-setup.sh && \
 # not on every daily dnf5 upgrade. This keeps the post-upgrade layer chain
 # short and avoids users pulling a new sysconfig layer when only packages changed.
 RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx/sysconfig-static.sh \
+    --mount=type=bind,source=build_files/scripts/sysconfig,target=/ctx/sysconfig \
     --mount=type=bind,source=build_files/kyth-vscode-wallet,target=/ctx/kyth-vscode-wallet \
     --mount=type=bind,source=build_files/kyth-ai-dev,target=/ctx/kyth-ai-dev \
     --mount=type=tmpfs,dst=/tmp \

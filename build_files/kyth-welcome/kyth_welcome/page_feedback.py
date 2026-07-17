@@ -1,6 +1,5 @@
 import os
 import json
-import subprocess
 from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
