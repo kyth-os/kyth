@@ -396,6 +396,11 @@ if rpm -q ksmtuned >/dev/null 2>&1; then
 	systemctl enable ksm.service ksmtuned.service 2>/dev/null || true
 fi
 
+# ── mimalloc high-performance allocator ──────────────────────────────────────
+# Microsoft's mimalloc is a general-purpose allocator with excellent performance.
+# We install both 64-bit and 32-bit versions so it can be preloaded for both.
+dnf5 install -y --skip-unavailable mimalloc mimalloc.i686 || true
+
 # ── VRAM foreground prioritization + Vulkan low-latency layer ────────────────
 # dmemcg-booster (Valve, gitlab.steamos.cloud/holo/dmemcg-booster) enables the
 # kernel dmem cgroup controller across the systemd hierarchy and sets dmem.low
