@@ -1,0 +1,55 @@
+# Add a 'Boot Windows' entry to Steam as a non-Steam game.
+# Clicking it from within Steam reboots directly into Windows via EFI firmware.
+# Requires a dual-boot setup with Windows on a separate EFI entry.
+[group('KythOS')]
+setup-boot-windows-steam:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Find the Windows EFI boot entry
+    windows_entry=$(sudo efibootmgr -v 2>/dev/null \
+        | grep -i "windows\|Windows Boot Manager" \
+        | grep -oP '(?<=Boot)[0-9A-F]{4}' | head -n1)
+
+    if [[ -z "${windows_entry}" ]]; then
+        echo "ERROR: No Windows EFI boot entry found." >&2
+        echo "Run 'sudo efibootmgr -v' to list available entries." >&2
+        exit 1
+    fi
+
+    # Install the helper script
+    tmpscript=$(mktemp)
+    printf '#!/bin/bash\nexec sudo efibootmgr -n %s && sudo systemctl reboot\n' \
+        "${windows_entry}" > "${tmpscript}"
+    sudo install -Dm 0755 "${tmpscript}" /usr/local/bin/boot-windows
+    rm -f "${tmpscript}"
+
+    # Add sudo rule for boot-windows (passwordless reboot + efibootmgr)
+    printf '%%wheel ALL=(root) NOPASSWD: /usr/sbin/efibootmgr -n *, /usr/bin/systemctl reboot\n' \
+        | sudo tee /etc/sudoers.d/kyth-boot-windows >/dev/null
+    sudo chmod 0440 /etc/sudoers.d/kyth-boot-windows
+
+    echo "boot-windows helper installed."
+    echo
+    echo "Add it to Steam:"
+    echo "  Steam → Add a game → Add a Non-Steam Game → Browse → /usr/local/bin/boot-windows"
+
+# Fix the clock skew between KythOS and a dual-booted Windows install.
+#
+# Windows stores the hardware clock as local time; Linux stores it as UTC.
+# After booting KythOS, Windows sees the RTC in UTC and shows the wrong time.
+# This tells KythOS to treat the RTC as local time — matching Windows' expectation.
+# NTP sync continues working normally; only the RTC interpretation changes.
+# Run once. No reboot required.
+[group('KythOS')]
+fix-dualboot-clock:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ KythOS Dual-Boot Clock Fix ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Setting hardware clock to local time (Windows-compatible mode)..."
+    sudo timedatectl set-local-rtc 1 --adjust-system-clock
+    echo
+    timedatectl | grep -E "Local time|RTC time|RTC in local TZ|NTP"
+    echo
+    echo "  ✓ Done. Windows will now show the correct time after booting from KythOS."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
