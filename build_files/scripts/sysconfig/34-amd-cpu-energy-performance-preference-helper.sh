@@ -26,4 +26,3 @@ for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
 done
 [[ $changed -eq 1 ]] || echo "kyth-set-epp: no EPP sysfs nodes found (non-AMD or pstate inactive)" >&2
 EPPEOF
-

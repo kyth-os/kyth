@@ -7,4 +7,3 @@ set -euo pipefail
 # KWallet PAM unlock is fragile across autologin/session restore paths; the
 # local encrypted-at-rest desktop is less annoying when apps do not wake KWallet.
 HOME=/etc/skel /ctx/kyth-vscode-wallet
-

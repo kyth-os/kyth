@@ -18,4 +18,3 @@ Close When Idle=false
 Close on Screensaver=false
 Leave Open=true
 KWALLETRCEOF
-

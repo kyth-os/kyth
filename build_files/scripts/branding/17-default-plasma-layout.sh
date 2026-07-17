@@ -218,4 +218,3 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
 fi
 LAYOUTEOF
 chmod +x /usr/bin/kyth-apply-desktop-layout
-

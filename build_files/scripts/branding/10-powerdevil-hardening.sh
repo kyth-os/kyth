@@ -23,4 +23,3 @@ cat >/etc/xdg/ddcutil/ddcutilrc <<'DDCUTILRCEOF'
 [libddcutil]
 options: --disable-watch-displays
 DDCUTILRCEOF
-

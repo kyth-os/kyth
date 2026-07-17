@@ -11,4 +11,3 @@ echo '[Manager]
 DefaultLimitNOFILE=1048576' >/etc/systemd/system.conf.d/99-kyth-limits.conf
 echo '[Manager]
 DefaultLimitNOFILE=1048576' >/etc/systemd/user.conf.d/99-kyth-limits.conf
-

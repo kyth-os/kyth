@@ -36,4 +36,3 @@ if [ -f "${SDDM_PAM}" ]; then
         } { print }' "${SDDM_PAM}" >/tmp/kyth-sddm.tmp && mv /tmp/kyth-sddm.tmp "${SDDM_PAM}"
 	fi
 fi
-

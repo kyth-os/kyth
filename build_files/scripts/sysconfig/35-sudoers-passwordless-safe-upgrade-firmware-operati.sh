@@ -31,4 +31,3 @@ install -m 0440 /dev/stdin /etc/sudoers.d/kyth-upgrade <<'SUDOEOF'
 # full sudo access — it only removes the interactive prompt for GUI launches.
 %wheel ALL=(root) NOPASSWD: /usr/bin/podman
 SUDOEOF
-

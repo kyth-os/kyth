@@ -12,4 +12,3 @@ casSharpness = 0.4
 # Toggle the effect on/off in-game
 toggleKey = Home
 VKBASALTEOF
-

@@ -23,4 +23,3 @@ cat >/etc/fonts/local.conf <<'FONTCONFIGEOF'
   </match>
 </fontconfig>
 FONTCONFIGEOF
-

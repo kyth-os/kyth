@@ -41,4 +41,3 @@ IWLMVMEOF
 cat >/etc/modprobe.d/btusb-kyth.conf <<'BTUSBEOF'
 options btusb enable_autosuspend=0
 BTUSBEOF
-

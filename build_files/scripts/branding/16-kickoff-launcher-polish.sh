@@ -69,4 +69,3 @@ AUTOSTARTEOF
 mkdir -p /etc/xdg/autostart
 install -m 0644 /etc/skel/.config/autostart/kyth-set-kickoff-icon.desktop \
 	/etc/xdg/autostart/kyth-set-kickoff-icon.desktop
-

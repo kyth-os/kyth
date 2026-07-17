@@ -106,4 +106,3 @@ rm -f /usr/share/icons/breeze-dark/icon-theme.cache
 gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true
 gtk-update-icon-cache -f /usr/share/icons/breeze/ 2>/dev/null || true
 gtk-update-icon-cache -f /usr/share/icons/breeze-dark/ 2>/dev/null || true
-

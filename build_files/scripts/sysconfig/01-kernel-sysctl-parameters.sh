@@ -132,4 +132,3 @@ SYSCTLEOF
 
 # Load tcp_bbr module at boot so the BBRv3 sysctl takes effect
 echo 'tcp_bbr' >/etc/modules-load.d/bbr.conf
-

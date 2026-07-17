@@ -17,4 +17,3 @@ KERNEL=="hidraw*", ATTRS{idVendor}=="28bd", TAG+="uaccess"
 # Gaomon tablets
 KERNEL=="hidraw*", ATTRS{idVendor}=="201a", TAG+="uaccess"
 TABLETEOF
-

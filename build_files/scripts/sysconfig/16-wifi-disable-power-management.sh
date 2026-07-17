@@ -184,4 +184,3 @@ esac
 exit 0
 NMWIREDEOF
 chmod 0755 /etc/NetworkManager/dispatcher.d/80-kyth-wired-or-wireless
-

@@ -48,4 +48,3 @@ cat >/usr/share/plasma/desktoptheme/kyth-dark/widgets/panel-background.svg <<'KY
   <rect id="bottomright" x="96" y="96" width="4"  height="4"  fill="#0c0e16" fill-opacity="0.9"/>
 </svg>
 KYTHPANELSVGEOF
-

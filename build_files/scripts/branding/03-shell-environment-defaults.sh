@@ -103,4 +103,3 @@ cat >/etc/gitconfig <<'GITCONFIGEOF'
 [diff]
     colorMoved = default
 GITCONFIGEOF
-

@@ -21,4 +21,3 @@ context.properties = {
     default.clock.allowed-rates = [ 44100 48000 ]
 }
 PWEOF
-

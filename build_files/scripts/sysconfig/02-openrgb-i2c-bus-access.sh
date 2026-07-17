@@ -9,4 +9,3 @@ set -euo pipefail
 # FCH/SB southbridge found on virtually all Ryzen gaming motherboards and many
 # Intel boards. Without it OpenRGB cannot enumerate most onboard RGB zones.
 printf 'i2c-dev\ni2c-piix4\n' >/etc/modules-load.d/openrgb.conf
-

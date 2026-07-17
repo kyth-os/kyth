@@ -27,4 +27,3 @@ application/rtf=org.libreoffice.LibreOffice.writer.desktop
 text/rtf=org.libreoffice.LibreOffice.writer.desktop
 text/csv=org.libreoffice.LibreOffice.calc.desktop
 MIMEAPPSEOF
-

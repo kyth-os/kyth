@@ -18,4 +18,3 @@ ACTION=="add|change", KERNEL=="sd[a-z]*", ATTR{queue/rotational}=="1", ATTR{queu
 # VirtIO block (QEMU/KVM VMs): mq-deadline — BFQ can stall under heavy sequential I/O
 ACTION=="add|change", KERNEL=="vd[a-z]*", ATTR{queue/scheduler}="mq-deadline"
 IOEOF
-

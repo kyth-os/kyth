@@ -23,4 +23,3 @@ options amdgpu gttsize=4096
 # which are rare during normal rendering.
 options amdgpu noretry=0
 AMDGPUEOF
-

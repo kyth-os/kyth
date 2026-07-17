@@ -40,4 +40,3 @@ L /srv - - - - var/srv
 HOMETMPFILEEOF
 sed -i 's|^d- /root .*|L /root - - - - var/roothome|' /usr/lib/tmpfiles.d/provision.conf
 grep -q '^L /root ' /usr/lib/tmpfiles.d/provision.conf
-

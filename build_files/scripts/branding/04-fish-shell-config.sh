@@ -48,4 +48,3 @@ set -U fish_history_size 100000
 # Suppress the fish greeting
 set -U fish_greeting ""
 FISHCONFIGEOF
-

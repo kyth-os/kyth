@@ -23,4 +23,3 @@ zram-size = ram
 compression-algorithm = zstd
 swap-priority = 100
 ZRAMEOF
-

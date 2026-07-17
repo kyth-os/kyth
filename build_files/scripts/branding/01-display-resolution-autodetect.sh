@@ -80,4 +80,3 @@ EOF
 write_kyth_os_release /usr/lib/os-release
 rm -f /etc/os-release
 write_kyth_os_release /etc/os-release
-

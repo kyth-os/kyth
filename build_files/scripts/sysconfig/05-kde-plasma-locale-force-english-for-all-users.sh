@@ -18,4 +18,3 @@ LC_TIME=en_US.UTF-8
 LANGUAGE=en_US
 PLASMALOCALEEOF
 cp /etc/xdg/plasma-localerc /etc/skel/.config/plasma-localerc
-

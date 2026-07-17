@@ -50,4 +50,3 @@ SDDMEOF
 if command -v authselect >/dev/null 2>&1 && authselect current >/dev/null 2>&1; then
 	authselect enable-feature with-fingerprint
 fi
-

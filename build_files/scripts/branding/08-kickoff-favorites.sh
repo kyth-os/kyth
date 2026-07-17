@@ -14,4 +14,3 @@ highlightNewlyInstalledApps=false
 KICKOFFEOF
 mkdir -p /etc/xdg
 install -m 0644 /etc/skel/.config/kickoffrc /etc/xdg/kickoffrc
-

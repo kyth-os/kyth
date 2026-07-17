@@ -495,4 +495,3 @@ POLISHDESKTOPEOF
 # OS update too; the version stamp above prevents repeated preference churn.
 install -m 0644 /etc/skel/.config/autostart/kyth-user-polish.desktop \
 	/etc/xdg/autostart/kyth-user-polish.desktop
-

@@ -21,4 +21,3 @@ AllowHybridSleep=no
 AllowSuspendThenHibernate=no
 SuspendState=mem standby freeze
 SLEEPEOF
-

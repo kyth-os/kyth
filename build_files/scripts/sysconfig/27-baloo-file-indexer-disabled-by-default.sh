@@ -11,4 +11,3 @@ cat >/etc/skel/.config/baloofilerc <<'BALOOEOF'
 [Basic Settings]
 Indexing-Enabled=false
 BALOOEOF
-

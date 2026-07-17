@@ -19,4 +19,3 @@ Icon=openrgb
 Terminal=false
 X-KDE-autostart-condition=false
 ORGBEOF
-

@@ -22,4 +22,3 @@ disable = ["system", "distrobox", "containers", "toolbx"]
 "KythOS system update" = "sudo -n bootc upgrade"
 "KythOS rclone update" = "sudo -n /usr/bin/kyth-rclone-update"
 TOPGRADEEOF
-

@@ -90,4 +90,3 @@ systemctl enable kyth-bluetooth-enable.service 2>/dev/null || true
 systemctl enable cups-browsed.service 2>/dev/null || true
 systemctl enable avahi-daemon.service 2>/dev/null || true
 # input-remapper.service is enabled later in this script alongside rtkit-daemon
-

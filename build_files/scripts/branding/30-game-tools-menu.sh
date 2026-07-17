@@ -86,4 +86,3 @@ cat >/etc/xdg/menus/applications-merged/kyth-libreoffice.menu <<'LIBREOFFICEMENU
   </Menu>
 </Menu>
 LIBREOFFICEMENUEOF
-

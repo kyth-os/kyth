@@ -489,4 +489,3 @@ ExecStart=/usr/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/first-
 WantedBy=basic.target
 FBOOTEOF
 systemctl enable kyth-firstboot-notice.service 2>/dev/null || true
-

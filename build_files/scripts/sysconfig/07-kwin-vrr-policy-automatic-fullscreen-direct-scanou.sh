@@ -27,4 +27,3 @@ theme=Breeze
 [Wayland]
 VrrPolicy=1
 KWINRCEOF
-

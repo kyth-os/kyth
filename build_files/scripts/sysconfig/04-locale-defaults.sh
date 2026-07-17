@@ -10,4 +10,3 @@ cat >/etc/locale.conf <<'LOCALEEOF'
 LANG=en_US.UTF-8
 LC_TIME=en_US.UTF-8
 LOCALEEOF
-

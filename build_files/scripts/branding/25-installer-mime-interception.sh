@@ -96,4 +96,3 @@ Name=Open Terminal Here
 Icon=utilities-terminal
 Exec=konsole --workdir %f
 TERMHEREDESKTOPEOF
-

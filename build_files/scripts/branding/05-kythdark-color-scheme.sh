@@ -131,4 +131,3 @@ shadeSortColumn=true
 [KDE]
 contrast=4
 KYTHCOLORSEOF
-

@@ -130,4 +130,3 @@ cat >/etc/skel/.config/plasmarc <<'PLASMAEOF'
 [Theme]
 name=kyth-dark
 PLASMAEOF
-

@@ -39,4 +39,3 @@ for desktop in \
 		sed -i 's|^Exec=/usr/bin/steam|Exec=/usr/bin/kyth-steam|g' "${desktop}"
 	fi
 done
-

@@ -41,4 +41,3 @@ X-KDE-autostart-after=panel
 Hidden=false
 NoDisplay=true
 WELCOMEEOF
-

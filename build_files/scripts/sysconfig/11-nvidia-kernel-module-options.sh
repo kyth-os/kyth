@@ -17,4 +17,3 @@ options nvidia-drm modeset=1
 options nvidia NVreg_PreserveVideoMemoryAllocations=1
 options nvidia NVreg_TemporaryFilePath=/var/tmp
 NVEOF
-

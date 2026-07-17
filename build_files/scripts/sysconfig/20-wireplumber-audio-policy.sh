@@ -66,4 +66,3 @@ mkdir -p /etc/environment.d
 cat >/etc/environment.d/obs-vkcapture.conf <<'OBSVKCAPTUREEOF'
 # OBS_VKCAPTURE intentionally left unset globally.
 OBSVKCAPTUREEOF
-

@@ -19,4 +19,3 @@ if [[ -f "${_kickoff_cfg}" ]]; then
         }' \
 		"${_kickoff_cfg}"
 fi
-

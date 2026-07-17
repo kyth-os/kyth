@@ -62,4 +62,3 @@ present_mode
 wine
 engine_version
 MANGOHUDEOF
-

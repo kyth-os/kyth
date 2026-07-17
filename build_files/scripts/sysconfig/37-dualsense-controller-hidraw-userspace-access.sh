@@ -21,4 +21,3 @@ KERNEL=="hidraw*", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0df2", SUBSYSTEM=
 KERNEL=="hidraw*", KERNELS=="*054C:0CE6*", TAG+="uaccess"
 KERNEL=="hidraw*", KERNELS=="*054C:0DF2*", TAG+="uaccess"
 DSEOF
-

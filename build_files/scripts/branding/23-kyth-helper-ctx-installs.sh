@@ -46,4 +46,3 @@ Icon=user-trash
 TRASHEOF
 install -m 0644 /usr/share/kyth/kyth-recycle-bin.desktop \
 	/etc/skel/Desktop/kyth-recycle-bin.desktop
-

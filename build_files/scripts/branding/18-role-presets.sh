@@ -152,4 +152,3 @@ fi
 echo "Applied ${profile} preset."
 ROLEPRESETEOF
 chmod +x /usr/bin/kyth-apply-role-preset
-

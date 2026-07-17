@@ -33,4 +33,3 @@ if lspci -d ::0300 2>/dev/null | grep -qi nvidia || \
     echo "NVD_BACKEND=direct"
 fi
 NVAPIEOF
-

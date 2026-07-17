@@ -4,4 +4,3 @@
 # Users can override in ~/.config/MangoHud/MangoHud.conf or per-app.
 mkdir -p /etc/MangoHud
 install -m 0644 /ctx/MangoHud.conf /etc/MangoHud/MangoHud.conf
-

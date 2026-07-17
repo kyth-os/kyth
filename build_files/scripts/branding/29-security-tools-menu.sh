@@ -57,4 +57,3 @@ SECMENUEOF
 
 install -m 0644 /ctx/kyth-web-apps.menu \
 	/etc/xdg/menus/applications-merged/kyth-web-apps.menu
-

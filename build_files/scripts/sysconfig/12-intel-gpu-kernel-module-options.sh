@@ -13,4 +13,3 @@ set -euo pipefail
 cat >/etc/modprobe.d/i915-kyth.conf <<'I915EOF'
 options i915 enable_guc=3 enable_huc=2
 I915EOF
-

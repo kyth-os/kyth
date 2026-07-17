@@ -95,4 +95,3 @@ wallpaperplugin=org.kde.image
 [Containments][1][Wallpaper][org.kde.image][General]
 Image=/usr/share/wallpapers/kyth/contents/images/1920x1080.svg
 PLASMADESKTOPEOF
-

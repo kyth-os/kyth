@@ -25,4 +25,3 @@ systemctl enable kyth-probe.timer 2>/dev/null || true
 systemctl --global enable kyth-sched.service 2>/dev/null || true
 systemctl --global enable kyth-telem.service 2>/dev/null || true
 systemctl --global enable kyth-probe.timer 2>/dev/null || true
-

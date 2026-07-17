@@ -25,4 +25,3 @@ install -m 0440 /ctx/kyth-bootc-sudo /etc/sudoers.d/kyth-bootc
 install -m 0440 /ctx/kyth-sched-sudo /etc/sudoers.d/kyth-sched
 install -m 0755 /ctx/kyth-hw-setup /usr/bin/kyth-hw-setup
 install -m 0644 /ctx/kyth-hw-setup.service /usr/lib/systemd/system/kyth-hw-setup.service
-

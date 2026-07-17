@@ -4,4 +4,3 @@
 # Ship a default config (CAS sharpening) so it works correctly when enabled.
 # Users can override with ~/.config/vkBasalt/vkBasalt.conf
 install -m 0644 /ctx/vkBasalt.conf /etc/vkBasalt.conf
-

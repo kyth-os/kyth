@@ -29,4 +29,3 @@ cat >/usr/lib/systemd/system/sddm.service.d/10-kyth-detect-session.conf <<'SDDMD
 [Service]
 ExecStartPre=/usr/bin/kyth-configure-session
 SDDMDROPINEOF
-

@@ -47,4 +47,3 @@ MimeType=x-scheme-handler/nxm;x-scheme-handler/nxm-protocol;
 NoDisplay=true
 Terminal=false
 NXMDESKEOF
-

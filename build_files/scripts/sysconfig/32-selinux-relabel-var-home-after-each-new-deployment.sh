@@ -72,4 +72,3 @@ SCRIPTEOF
 chmod 0755 /usr/libexec/kyth-selinux-relabel-home
 
 systemctl enable kyth-selinux-relabel-home.service 2>/dev/null || true
-

@@ -30,4 +30,3 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 FIRSTBOOTEOF
 systemctl enable kyth-first-boot-message.service 2>/dev/null || true
-

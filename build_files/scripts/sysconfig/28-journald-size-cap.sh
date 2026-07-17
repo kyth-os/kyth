@@ -12,4 +12,3 @@ cat >/etc/systemd/journald.conf.d/99-kyth.conf <<'JOURNALDEOF'
 SystemMaxUse=500M
 RuntimeMaxUse=128M
 JOURNALDEOF
-
