@@ -457,7 +457,14 @@ chmod 0755 /usr/libexec/kyth-refresh-boot-splash-initramfs
 cat >/usr/lib/systemd/system/kyth-boot-splash-initramfs.service <<'SPLASHINITRDEOF'
 [Unit]
 Description=Refresh KythOS boot splash initramfs
-After=local-fs.target
+# This only affects the *next* boot's splash image, never the current
+# session, so it must not hold up login. DefaultDependencies=no drops the
+# implicit Before=multi-user.target that WantedBy=multi-user.target
+# otherwise adds; ostree-remount.service is what makes /var writable on
+# ostree, needed explicitly here since default deps no longer supply it
+# (see kyth-firstboot-notice.service below for the same gotcha).
+After=local-fs.target ostree-remount.service
+DefaultDependencies=no
 
 [Service]
 Type=oneshot
