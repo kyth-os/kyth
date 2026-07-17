@@ -24,6 +24,7 @@ ARG ENABLE_MESA_GIT=0
 # Stable — only re-run when packages.sh changes or the base image is updated.
 # Published layer boundaries are defined later by legacy-rechunk metadata.
 RUN --mount=type=bind,source=build_files/scripts/packages.sh,target=/ctx/packages.sh \
+    --mount=type=bind,source=build_files/scripts/lib/check-multilib.sh,target=/ctx/lib/check-multilib.sh \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-microsoft,target=/ctx/RPM-GPG-KEY-microsoft \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-google-antigravity,target=/ctx/RPM-GPG-KEY-google-antigravity \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
@@ -116,6 +117,7 @@ ARG BUILD_DATE=unset
 RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-git.sh \
     --mount=type=bind,source=build_files/scripts/kernel-repair.sh,target=/ctx/kernel-repair.sh \
     --mount=type=bind,source=build_files/scripts/lib/find-kver.sh,target=/ctx/lib/find-kver.sh \
+    --mount=type=bind,source=build_files/scripts/lib/check-multilib.sh,target=/ctx/lib/check-multilib.sh \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=tmpfs,dst=/tmp \
     : "cache-bust=${BUILD_DATE}" && \
@@ -126,7 +128,10 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
         --exclude='gstreamer1-plugins-bad' \
         --exclude='gstreamer1-plugins-bad.i686' && \
     bash /ctx/kernel-repair.sh && \
-    ENABLE_MESA_GIT=${ENABLE_MESA_GIT} bash /ctx/mesa-git.sh
+    ENABLE_MESA_GIT=${ENABLE_MESA_GIT} bash /ctx/mesa-git.sh && \
+    . /ctx/lib/check-multilib.sh && \
+    check_multilib_pairs "${KYTH_MULTILIB_PAIRS[@]}" && \
+    scan_multilib_orphans
 
 # Build cache boundary: post-upgrade service wiring and account repair.
 # Re-enforces display-manager symlinks that dnf5 upgrade can reset, and enables/

@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# shellcheck source=lib/check-multilib.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/check-multilib.sh"
+
 if [[ -f /ctx/kyth-ai-dev ]]; then
 	install -Dm 0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
 fi
@@ -249,6 +252,11 @@ dnf5 install -y --skip-unavailable --exclude=libde265.i686 \
 	input-remapper \
 	libxcrypt-compat
 
+# Guards against a package landing in only one of x86_64/i686 (see
+# lib/check-multilib.sh for why). The install above uses --skip-unavailable,
+# so a mirror/COPR desync on any of these can silently drop just one arch.
+check_multilib_pairs "${KYTH_MULTILIB_PAIRS[@]}"
+
 # ── Optional PC gaming peripheral stack ──────────────────────────────────────
 # Keep these out of the core gaming transaction. They come from a mix of Fedora,
 # RPM Fusion, COPRs, and fast-moving driver packages; if one has a temporary
@@ -399,7 +407,11 @@ fi
 # ── mimalloc high-performance allocator ──────────────────────────────────────
 # Microsoft's mimalloc is a general-purpose allocator with excellent performance.
 # We install both 64-bit and 32-bit versions so it can be preloaded for both.
-dnf5 install -y --skip-unavailable mimalloc mimalloc.i686 || true
+# No --skip-unavailable / || true here: sysconfig/46-mimalloc-preload.sh sets
+# LD_PRELOAD=libmimalloc.so unconditionally for every desktop session, so a
+# missing arch must fail the build loudly, not ship a silent crash-on-login.
+dnf5 install -y mimalloc mimalloc.i686
+check_multilib_pairs mimalloc
 
 # ── VRAM foreground prioritization + Vulkan low-latency layer ────────────────
 # dmemcg-booster (Valve, gitlab.steamos.cloud/holo/dmemcg-booster) enables the
@@ -860,3 +872,7 @@ dnf5 config-manager setopt tailscale-stable.enabled=0
 # Keep downloads in Docker's /var/cache mount to speed up later rebuilds.
 # bootc maps persistent /var defaults through /usr/share/factory/var, so the
 # final Dockerfile stage explicitly removes any libdnf5 metadata copied there.
+
+# Report-only sweep of the full package set installed above — see
+# scan_multilib_orphans in lib/check-multilib.sh.
+scan_multilib_orphans
