@@ -3,8 +3,17 @@
 # The gaming-stack packages installed with explicit x86_64+i686 pairs in
 # packages.sh. Kept here, not re-listed at each call site, so the install-time
 # and upgrade-time guard calls can't drift out of sync with each other.
+#
+# libobs_vkcapture/libobs_glcapture are deliberately NOT in this list: as of
+# 2026-07-17 the ublue-os/obs-vkcapture COPR's fedora-44-i386 (and f43/rawhide
+# i386) build is broken upstream — only f42-i386 still succeeds — so the i686
+# package genuinely does not exist to install, not a mirror desync. Hard-
+# failing the build over it would be wrong: unlike mimalloc (unconditional
+# global LD_PRELOAD, boot-critical), a missing i686 capture layer only means
+# OBS can't game-capture 32-bit titles — a degraded feature, not a crash.
+# Revisit and re-add once ublue-os/obs-vkcapture's i386 chroot builds again.
 KYTH_MULTILIB_PAIRS=(
-	mangohud vkBasalt libFAudio libobs_vkcapture libobs_glcapture
+	mangohud vkBasalt libFAudio
 	gamemode libXScrnSaver libatomic nss mimalloc
 )
 
