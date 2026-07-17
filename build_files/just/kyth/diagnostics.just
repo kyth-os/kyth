@@ -32,3 +32,10 @@ resume-check:
     #!/usr/bin/env bash
     set -euo pipefail
     /usr/bin/kyth-resume-check
+
+# Measure boot time and app-launch latency, tracked over time.
+[group('KythOS')]
+snappy-bench *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-snappy-bench {{ args }}

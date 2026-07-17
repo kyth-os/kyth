@@ -48,4 +48,5 @@ dnf5 install -y --skip-unavailable \
 	tmux \
 	gh \
 	openssl \
-	fwupd
+	fwupd \
+	hyperfine
