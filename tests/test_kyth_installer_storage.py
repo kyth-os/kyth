@@ -734,7 +734,9 @@ class InstallerSystemTests(unittest.TestCase):
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             test_file = Path(tmpdir) / "test_file"
-            system._write_lines(test_file, ["line1", "line2"], 0o644)
+            # Simulate the elevated process (launcher always runs as root).
+            with patch.object(system.os, "geteuid", return_value=0):
+                system._write_lines(test_file, ["line1", "line2"], 0o644)
             self.assertEqual(test_file.read_text(), "line1\nline2\n")
             mode = test_file.stat().st_mode & 0o777
             self.assertEqual(mode, 0o644)
@@ -745,7 +747,8 @@ class InstallerSystemTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             test_file = Path(tmpdir) / "sensitive_file"
             try:
-                system._write_lines(test_file, ["secret1", "secret2"], 0o000)
+                with patch.object(system.os, "geteuid", return_value=0):
+                    system._write_lines(test_file, ["secret1", "secret2"], 0o000)
                 mode = test_file.stat().st_mode & 0o777
                 self.assertEqual(mode, 0o000)
                 os.chmod(test_file, 0o600)
@@ -755,6 +758,51 @@ class InstallerSystemTests(unittest.TestCase):
                     os.chmod(test_file, 0o600)
                 except Exception:
                     pass
+
+    def test_write_lines_uses_elevated_mkdir_tee_chmod(self):
+        """Account DB writes must go through _as_root, not bare open()."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch, call
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "subdir" / "passwd"
+            with patch.object(system, "run_command") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+                system._write_lines(test_file, ["user:x:1000:1000::/home/user:"], 0o644)
+
+            cmds = [c.args[0] for c in mock_run.call_args_list]
+            # First arg is the argv list (possibly with sudo -n prefix when non-root).
+            flat = [" ".join(str(p) for p in cmd) for cmd in cmds]
+            self.assertTrue(any("mkdir" in s and "subdir" in s for s in flat), flat)
+            self.assertTrue(any("tee" in s and "passwd" in s for s in flat), flat)
+            self.assertTrue(any("chmod" in s and "644" in s for s in flat), flat)
+
+    def test_require_root_rejects_non_root(self):
+        with patch.object(system.os, "geteuid", return_value=1000):
+            with self.assertRaisesRegex(RuntimeError, "must run as root"):
+                system.require_root()
+
+    def test_require_root_accepts_root(self):
+        with patch.object(system.os, "geteuid", return_value=0):
+            system.require_root()  # does not raise
+
+    def test_format_os_error_includes_path_and_errno(self):
+        err = OSError(13, "Permission denied")
+        err.filename = "/target/etc/shadow"
+        text = system.format_os_error(err)
+        self.assertIn("Permission denied", text)
+        self.assertIn("path=/target/etc/shadow", text)
+        self.assertIn("errno=13", text)
+        self.assertIn("EACCES", text)
+
+    def test_format_install_error_wraps_permission_error(self):
+        err = PermissionError(30, "Read-only file system")
+        err.filename = "/var/tmp/kyth-install-root"
+        text = system.format_install_error(err)
+        self.assertIn("PermissionError", text)
+        self.assertIn("Read-only file system", text)
+        self.assertIn("/var/tmp/kyth-install-root", text)
 
 
 class InstallerGptDiskTests(unittest.TestCase):

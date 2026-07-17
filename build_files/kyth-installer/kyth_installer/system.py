@@ -17,6 +17,59 @@ def _as_root(cmd: list[str]) -> list[str]:
     return cmd if os.geteuid() == 0 else ["sudo", "-n", *cmd]
 
 
+def require_root() -> None:
+    """Refuse to continue unless the process is already privileged.
+
+    The desktop launcher elevates via sudo/pkexec before starting the installer.
+    Install mutations (bootc, mkfs, account databases) must not rely on a later
+    best-effort `sudo -n` that may be missing a TTY or policy.
+    """
+    if os.geteuid() != 0:
+        raise RuntimeError(
+            "The KythOS installer must run as root.\n\n"
+            "Launch it from the desktop Install KythOS tile, or run:\n"
+            "  sudo kyth-installer\n\n"
+            f"Current euid={os.geteuid()}."
+        )
+
+
+def format_os_error(exc: BaseException, *, path: str | Path | None = None) -> str:
+    """Human-readable OSError/PermissionError with path and errno when available."""
+    if not isinstance(exc, OSError):
+        return str(exc)
+
+    parts: list[str] = []
+    msg = (exc.strerror or str(exc) or exc.__class__.__name__).strip()
+    if msg:
+        parts.append(msg)
+
+    filename = path if path is not None else getattr(exc, "filename", None)
+    if filename:
+        parts.append(f"path={filename}")
+    filename2 = getattr(exc, "filename2", None)
+    if filename2:
+        parts.append(f"path2={filename2}")
+
+    err = getattr(exc, "errno", None)
+    if err is not None:
+        try:
+            import errno as errno_mod
+            name = errno_mod.errorcode.get(err, "UNKNOWN")
+        except Exception:
+            name = "UNKNOWN"
+        parts.append(f"errno={err} ({name})")
+
+    return "; ".join(parts) if parts else exc.__class__.__name__
+
+
+def format_install_error(exc: BaseException) -> str:
+    """SSE/log message for install failures, preserving OSError detail."""
+    if isinstance(exc, OSError):
+        detail = format_os_error(exc)
+        return f"{exc.__class__.__name__}: {detail}"
+    return str(exc) or exc.__class__.__name__
+
+
 def list_timezones() -> list[str]:
     try:
         out = subprocess.check_output(
@@ -62,21 +115,63 @@ SYSTEM_PASSWD_FALLBACKS = {
 
 
 def _read_lines(path: Path) -> list[str]:
+    """Read a target-tree file via elevated cat (never host open())."""
     try:
-        return path.read_text(errors="ignore").splitlines()
-    except FileNotFoundError:
+        result = run_command(
+            _as_root(["cat", str(path)]),
+            capture_output=True, text=True, check=False,
+        )
+    except Exception as exc:
+        raise type(exc)(
+            f"{format_os_error(exc, path=path) if isinstance(exc, OSError) else exc}"
+        ) from exc
+    if result.returncode != 0:
         return []
+    return result.stdout.splitlines()
 
 
 def _write_lines(path: Path, lines: list[str], mode: int) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # passwd uses the literal "x" placeholder; shadow records contain hashes.
-    # Open the file with restrictive permissions at creation time to prevent
-    # race conditions and avoid creating world/group-readable files.
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, mode & 0o600)
-    with os.fdopen(fd, 'w') as f:
-        f.write("\n".join(lines) + "\n")
-    os.chmod(path, mode)
+    """Write a target-tree file via elevated mkdir/tee/chmod (shell-installer parity).
+
+    passwd uses the literal "x" placeholder; shadow records contain hashes.
+    Always go through _as_root so account databases never depend on the Python
+    process being able to open the mounted deploy tree itself.
+    """
+    path_str = str(path)
+    parent = str(path.parent)
+    content = "\n".join(lines) + "\n"
+    try:
+        run_command(_as_root(["mkdir", "-p", parent]), check=True)
+        run_command(
+            _as_root(["tee", path_str]),
+            input=content,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
+        # mode is an integer permission (e.g. 0o644); chmod wants octal digits.
+        run_command(_as_root(["chmod", f"{mode:o}", path_str]), check=True)
+    except OSError as exc:
+        raise OSError(format_os_error(exc, path=path_str)) from exc
+    except Exception as exc:
+        # run_command raises RuntimeError with command detail; annotate path.
+        raise RuntimeError(f"Could not write {path_str}: {exc}") from exc
+
+
+def _path_exists(path: Path) -> bool:
+    result = run_command(
+        _as_root(["test", "-e", str(path)]),
+        check=False, capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _chmod_path(path: Path, mode: int) -> None:
+    path_str = str(path)
+    try:
+        run_command(_as_root(["chmod", f"{mode:o}", path_str]), check=True)
+    except OSError as exc:
+        raise OSError(format_os_error(exc, path=path_str)) from exc
 
 
 def _append_missing_records(dest: Path, sources: list[Path], fallbacks: dict[str, str]) -> bool:
@@ -140,12 +235,18 @@ def ensure_system_accounts(deploy_root: str, log) -> None:
         shadow_changed = True
     if shadow_changed:
         _write_lines(shadow, shadow_lines, 0o000)
-    elif shadow.exists():
-        os.chmod(shadow, 0o000)
+    elif _path_exists(shadow):
+        _chmod_path(shadow, 0o000)
 
     sddm_home = root / "var/lib/sddm"
-    run_command(_as_root(["mkdir", "-p", str(sddm_home)]), check=True)
-    
+    try:
+        run_command(_as_root(["mkdir", "-p", str(sddm_home)]), check=True)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not create SDDM home directory {sddm_home}: "
+            f"{format_os_error(exc, path=sddm_home) if isinstance(exc, OSError) else exc}"
+        ) from exc
+
     # Read the actual sddm UID/GID from target's etc/passwd to support dynamic allocation
     # and ensure numeric chown works even if the host environment has no sddm user/group.
     sddm_uid, sddm_gid = "959", "959"

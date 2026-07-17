@@ -223,8 +223,8 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             install,
             "unmount_target_disk",
         ), mock.patch.object(
-            install.Path,
-            "mkdir",
+            install,
+            "require_root",
         ):
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
@@ -283,8 +283,8 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             install,
             "unmount_target_disk",
         ), mock.patch.object(
-            install.Path,
-            "mkdir",
+            install,
+            "require_root",
         ):
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
@@ -297,6 +297,14 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         ]
         self.assertTrue(cleanup_calls)
         self.assertTrue([event for event in install._events if event.get("type") == "error"])
+
+    def test_worker_fails_closed_when_not_root(self):
+        install._events.clear()
+        with mock.patch.object(install, "require_root", side_effect=RuntimeError("must run as root")):
+            install._run_install_worker(lambda _msg: None, lambda _pct: None, "")
+        errors = [e for e in install._events if e.get("type") == "error"]
+        self.assertTrue(errors)
+        self.assertIn("root", errors[0].get("message", "").lower())
 
 
 if __name__ == "__main__":

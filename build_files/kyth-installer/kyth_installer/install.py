@@ -27,6 +27,9 @@ from .system import (
     _try_stage_mok_enrollment,
     ensure_system_accounts,
     find_deploy_etc,
+    format_install_error,
+    format_os_error,
+    require_root,
     unmount_target_disk,
 )
 
@@ -282,7 +285,7 @@ def _prepare_install_storage(
         log("Creating Btrfs subvolumes @ and @home ...")
         btrfs_temp_root = "/var/tmp/kyth-btrfs-root"
         run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=False, capture_output=True)
-        Path(btrfs_temp_root).mkdir(parents=True, exist_ok=True)
+        run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
         run_command(_as_root(["mount", target_part, btrfs_temp_root]), check=True)
         try:
             run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
@@ -292,13 +295,13 @@ def _prepare_install_storage(
         finally:
             run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=True)
 
-        Path(alongside_mount).mkdir(parents=True, exist_ok=True)
+        run_command(_as_root(["mkdir", "-p", alongside_mount]), check=True)
         run_command(_as_root(["mount", "-o", "subvol=@", target_part, alongside_mount]), check=True)
         progress(11)
 
         if efi_part:
             efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
-            efi_mountpoint.mkdir(parents=True, exist_ok=True)
+            run_command(_as_root(["mkdir", "-p", str(efi_mountpoint)]), check=True)
             try:
                 current_efi_mnt = subprocess.check_output(
                     ["findmnt", "-n", "-o", "MOUNTPOINT", efi_part],
@@ -357,7 +360,7 @@ def _configure_installed_system(
         if etc:
             if install_mode == "alongside":
                 target_home = Path(config_root) / "ostree/deploy/default/var/home"
-                target_home.mkdir(parents=True, exist_ok=True)
+                run_command(_as_root(["mkdir", "-p", str(target_home)]), check=True)
                 run_command(_as_root(["umount", "-l", str(target_home)]), check=False, capture_output=True)
                 run_command(_as_root(["mount", "-o", "subvol=@home", target_part, str(target_home)]), check=True)
 
@@ -372,21 +375,34 @@ def _configure_installed_system(
                             stdout=subprocess.DEVNULL, check=True
                         )
                         log(f"Fstab updated with Btrfs subvolume @home: {fstab_line.strip()}")
+                except OSError as fe:
+                    log(
+                        "Warning: failed to update fstab with @home subvolume: "
+                        f"{format_os_error(fe, path=Path(etc, 'fstab'))}"
+                    )
                 except Exception as fe:
                     log(f"Warning: failed to update fstab with @home subvolume: {fe}")
-            run_command(
-                _as_root(["/usr/bin/tee", str(Path(etc, "hostname"))]),
-                input=f"{_state['hostname']}\n", text=True,
-                stdout=subprocess.DEVNULL, check=True,
-            )
+            hostname_path = str(Path(etc, "hostname"))
+            try:
+                run_command(
+                    _as_root(["/usr/bin/tee", hostname_path]),
+                    input=f"{_state['hostname']}\n", text=True,
+                    stdout=subprocess.DEVNULL, check=True,
+                )
+            except OSError as exc:
+                raise OSError(format_os_error(exc, path=hostname_path)) from exc
             log(f"Hostname : {_state['hostname']}")
 
-            run_command(
-                _as_root(["ln", "-snf",
-                          f"/usr/share/zoneinfo/{_state['timezone']}",
-                          str(Path(etc, "localtime"))]),
-                check=True,
-            )
+            localtime_path = str(Path(etc, "localtime"))
+            try:
+                run_command(
+                    _as_root(["ln", "-snf",
+                              f"/usr/share/zoneinfo/{_state['timezone']}",
+                              localtime_path]),
+                    check=True,
+                )
+            except OSError as exc:
+                raise OSError(format_os_error(exc, path=localtime_path)) from exc
             log(f"Timezone : {_state['timezone']}")
             progress(95)
 
@@ -450,8 +466,13 @@ def _configure_installed_system(
                     run_command(_as_root(["chown", f"{uid}:{gid}", str(var_home)]), check=True)
                     run_command(_as_root(["chmod", "700", str(var_home)]), check=True)
 
+                    # skel may be under deploy root; test via elevated path.
                     skel = Path(deploy_root) / "etc/skel"
-                    if skel.exists():
+                    skel_check = run_command(
+                        _as_root(["test", "-d", str(skel)]),
+                        check=False, capture_output=True,
+                    )
+                    if skel_check.returncode == 0:
                         run_command(
                             _as_root(["cp", "-rT", str(skel), str(var_home)]),
                             check=True,
@@ -468,6 +489,12 @@ def _configure_installed_system(
                     log(f"User '{username}' created (uid={uid})")
                     ensure_system_accounts(deploy_root, log)
                     progress(97)
+                except OSError as ue:
+                    log(
+                        "Warning: user creation failed: "
+                        f"{format_os_error(ue)}"
+                    )
+                    log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
                 except Exception as ue:
                     log(f"Warning: user creation failed: {ue}")
                     log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
@@ -485,6 +512,7 @@ def _configure_installed_system(
 
 def _run_install_worker(log, progress, alongside_mount):
     try:
+        require_root()
         disk, install_mode, kernel, src_ref, tgt_ref = _prepare_install_context(log)
 
         target_part, root_part, alongside_mount = _prepare_install_storage(
@@ -498,7 +526,7 @@ def _run_install_worker(log, progress, alongside_mount):
             config_root = alongside_mount
         else:
             config_root = "/var/tmp/kyth-install-root"
-            Path(config_root).mkdir(parents=True, exist_ok=True)
+            run_command(_as_root(["mkdir", "-p", config_root]), check=True)
             # Detach any stale mount left by a previously crashed install attempt.
             run_command(_as_root(["umount", "-l", config_root]), check=False, capture_output=True)
             run_command(_as_root(["mount", root_part, config_root]), check=True)
@@ -516,12 +544,21 @@ def _run_install_worker(log, progress, alongside_mount):
         _push({"type": "done", "mok_state": mok_state})
 
     except Exception as exc:
+        message = format_install_error(exc)
         try:
             with LOG_FILE.open("a") as f:
                 f.write(traceback.format_exc())
-        except Exception:
-            pass
-        _push({"type": "error", "message": str(exc)})
+                f.write(f"\n# install error: {message}\n")
+        except OSError as log_exc:
+            message = (
+                f"{message} "
+                f"(also failed writing installer log {LOG_FILE}: "
+                f"{format_os_error(log_exc, path=LOG_FILE)})"
+            )
+        except Exception as log_exc:
+            message = f"{message} (also failed writing installer log {LOG_FILE}: {log_exc})"
+        log(f"ERROR: {message}")
+        _push({"type": "error", "message": message})
     finally:
         _state["password_hash"] = ""
         _state["mok_password"] = ""
@@ -533,18 +570,34 @@ def _run_install_worker(log, progress, alongside_mount):
 def _run_install() -> None:
     with _events_lock:
         _events.clear()
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LOG_FILE.write_text("")
-    os.chmod(LOG_FILE, 0o600)
 
     def log(msg: str) -> None:
         _push({"type": "log", "text": msg})
-        with LOG_FILE.open("a") as f:
-            f.write(msg + "\n")
+        try:
+            with LOG_FILE.open("a") as f:
+                f.write(msg + "\n")
+        except OSError as exc:
+            # Still surface progress over SSE even if the log file is unusable.
+            _push({
+                "type": "log",
+                "text": (
+                    f"(installer log write failed for {LOG_FILE}: "
+                    f"{format_os_error(exc, path=LOG_FILE)})"
+                ),
+            })
 
     def progress(pct: int) -> None:
         _push({"type": "progress", "value": pct})
 
+    try:
+        require_root()
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LOG_FILE.write_text("")
+        os.chmod(LOG_FILE, 0o600)
+    except Exception as exc:
+        message = format_install_error(exc)
+        _push({"type": "error", "message": message})
+        return
 
     alongside_mount = ""
 
