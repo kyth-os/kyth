@@ -8,8 +8,8 @@ from .services.software import Worker
 from .qt import (  # noqa: E501
     QHBoxLayout, QLabel, QMessageBox, QPushButton, QThread, Signal,
 )
-from .widgets import (  # noqa: E501
 from .services.launch import flatpak_run, popen, systemsettings
+from .widgets import (  # noqa: E501
     Page, _make_card,
 )
 
