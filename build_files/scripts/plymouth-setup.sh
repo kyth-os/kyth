@@ -57,14 +57,14 @@ install -m 0644 /etc/plymouth/plymouthd.conf /usr/share/plymouth/plymouthd.defau
 
 mkdir -p /etc/dracut.conf.d
 if [[ -f /etc/dracut.conf.d/99-kyth.conf ]]; then
-	grep -q 'add_dracutmodules=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.conf ||
+	grep -q 'add_dracutmodules+=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.conf ||
 		printf '\nadd_dracutmodules+=" kyth-plymouth "\n' >>/etc/dracut.conf.d/99-kyth.conf
 else
 	cat >/etc/dracut.conf.d/99-kyth.conf <<'DRACUTEOF'
 add_dracutmodules+=" ostree drm plymouth kyth-plymouth "
 DRACUTEOF
 fi
-grep -q 'force_add_dracutmodules=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.conf ||
+grep -q 'force_add_dracutmodules+=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.conf ||
 	printf 'force_add_dracutmodules+=" kyth-plymouth "\n' >>/etc/dracut.conf.d/99-kyth.conf
 
 plymouth-set-default-theme kyth
