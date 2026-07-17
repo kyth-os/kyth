@@ -5,7 +5,24 @@ const S = { disk: null, install_mode: 'wipe', target_partition: null,
   hostname: 'kyth', timezone: 'UTC', username: '', password: '', kernel: 'fedora', isLive: true };
 let SESSION_TOKEN = 'SESSION_TOKEN_PLACEHOLDER';
 const STEPS = ['welcome','disk','kernel','config','review','install'];
-const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// Build DOM nodes directly instead of assembling HTML strings — keeps
+// backend-provided values (disk models, labels, …) out of markup entirely.
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === 'class') node.className = v;
+    else if (k === 'text') node.textContent = v;
+    else if (k === 'dataset') Object.assign(node.dataset, v);
+    else if (k === 'style') node.style.cssText = v;
+    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c !== null && c !== undefined) node.append(c.nodeType ? c : String(c));
+  }
+  return node;
+}
 
 function apiFetch(url, opts={}) {
   const o = {...opts, credentials:'same-origin'};
@@ -56,15 +73,14 @@ function loadDisks(attempt) {
       }
       return;
     }
-    grid.innerHTML = disks.map((d, i) => `
-      <div class="disk-card" id="dcard-${i}" onclick="selectDisk(${i})">
-        <div class="disk-icon">${d.rota ? '💿' : '💾'}</div>
-        <div class="disk-info">
-          <div class="disk-name">${esc(d.name)}</div>
-          <div class="disk-detail">${esc(d.model)}${d.tran ? ' · '+esc(d.tran.toUpperCase()) : ''}${d.usb ? ' · USB storage' : ''}${d.current ? ' · current system disk' : ''}</div>
-        </div>
-        <div class="disk-size">${esc(d.size)}</div>
-      </div>`).join('');
+    grid.replaceChildren(...disks.map((d, i) =>
+      el('div', { class: 'disk-card', id: `dcard-${i}`, onclick: () => selectDisk(i) },
+        el('div', { class: 'disk-icon', text: d.rota ? '💿' : '💾' }),
+        el('div', { class: 'disk-info' },
+          el('div', { class: 'disk-name', text: d.name }),
+          el('div', { class: 'disk-detail',
+            text: `${d.model}${d.tran ? ' · ' + d.tran.toUpperCase() : ''}${d.usb ? ' · USB storage' : ''}${d.current ? ' · current system disk' : ''}` })),
+        el('div', { class: 'disk-size', text: d.size }))));
   }).catch(() => {
     document.getElementById('disk-grid').innerHTML = '<div class="status-box status-err">Failed to load disk list.</div>';
   });
@@ -161,21 +177,21 @@ function loadPartitions() {
     const mResize = document.getElementById('mcard-resize_ntfs');
     mResize.style.opacity = hasNtfsCandidate ? '1' : '0.4';
     mResize.style.pointerEvents = hasNtfsCandidate ? 'auto' : 'none';
-    mResize.querySelector('.mode-desc').innerHTML = hasNtfsCandidate 
+    mResize.querySelector('.mode-desc').textContent = hasNtfsCandidate 
       ? 'Shrink an existing Windows/NTFS partition to make room for KythOS.'
       : 'Shrink Alongside (Unavailable: no NTFS partition >= 96 GiB found)';
 
     const mFree = document.getElementById('mcard-free_space');
     mFree.style.opacity = hasFreeCandidate ? '1' : '0.4';
     mFree.style.pointerEvents = hasFreeCandidate ? 'auto' : 'none';
-    mFree.querySelector('.mode-desc').innerHTML = hasFreeCandidate
+    mFree.querySelector('.mode-desc').textContent = hasFreeCandidate
       ? 'Install KythOS into unallocated free space on the disk.'
       : 'Use Free Space (Unavailable: no free space >= 32 GiB found)';
 
     const mReplace = document.getElementById('mcard-alongside');
     mReplace.style.opacity = hasReplaceCandidate ? '1' : '0.4';
     mReplace.style.pointerEvents = hasReplaceCandidate ? 'auto' : 'none';
-    mReplace.querySelector('.mode-desc').innerHTML = hasReplaceCandidate
+    mReplace.querySelector('.mode-desc').textContent = hasReplaceCandidate
       ? 'Overwrite an existing partition with KythOS.'
       : 'Replace a Partition (Unavailable: no partitions >= 32 GiB found)';
     
@@ -232,7 +248,7 @@ function getDiskBlocks(parts, diskSize) {
   return blocks;
 }
 
-function blockToHtml(block, isProposed = false) {
+function blockToNode(block, isProposed = false) {
   let label = block.name ? block.name.replace('/dev/', '') : (block.type === 'free' ? 'Free' : 'KythOS');
   let typeStr = block.fstype ? block.fstype.toUpperCase() : (block.type === 'free' ? 'FREE' : '');
   if (block.efi) typeStr = 'EFI';
@@ -260,35 +276,39 @@ function blockToHtml(block, isProposed = false) {
     klass += ' part-other';
   }
   
-  let clickAttr = '';
+  let onclick = null;
   if (!isProposed) {
     if (S.install_mode === 'alongside' && _replaceAllowed && block.type === 'part' && !block.efi && !block.current && !block.ref.in_use && block.size_bytes >= 32 * 1024**3) {
       klass += ' clickable';
       if (S.target_partition === block.name) klass += ' selected-target';
-      clickAttr = `onclick="selectPartitionByName('${block.name}')"`;
+      onclick = () => selectPartitionByName(block.name);
     } else if (S.install_mode === 'resize_ntfs' && block.type === 'part' && ['ntfs', 'ntfs3'].includes(block.fstype) && block.size_bytes >= 96 * 1024**3) {
       klass += ' clickable';
       if (S.resize_partition === block.name) klass += ' selected-target';
-      clickAttr = `onclick="selectResizePartitionByName('${block.name}')"`;
+      onclick = () => selectResizePartitionByName(block.name);
     } else if (S.install_mode === 'free_space' && block.type === 'free' && block.size_bytes >= _minGuidedGiB * 1024**3) {
       klass += ' clickable';
       if (S.free_region_start === block.start_bytes) klass += ' selected-target';
-      clickAttr = `onclick="selectFreeRegionByStart(${block.start_bytes})"`;
+      onclick = () => selectFreeRegionByStart(block.start_bytes);
     }
   } else {
     if (block.isKythos) {
       klass += ' selected-target';
     }
   }
-  
+
   const isSmall = block.size_bytes < (S.disk.size_bytes * 0.08);
-  const content = isSmall 
-    ? `<span class="part-name-lbl" title="${esc(label)} ${esc(sizeStr)}">${esc(label)}</span>`
-    : `<span class="part-name-lbl">${esc(label)}</span><span class="part-size-lbl">${esc(typeStr)} · ${esc(sizeStr)}</span>`;
-    
-  return `<div class="${klass}" style="flex-grow: ${block.size_bytes}; min-width: 45px;" ${clickAttr} title="${esc(label)} (${esc(typeStr)}) - ${esc(sizeStr)}">
-    ${content}
-  </div>`;
+  const content = isSmall
+    ? [el('span', { class: 'part-name-lbl', title: `${label} ${sizeStr}`, text: label })]
+    : [el('span', { class: 'part-name-lbl', text: label }),
+       el('span', { class: 'part-size-lbl', text: `${typeStr} · ${sizeStr}` })];
+
+  return el('div', {
+    class: klass,
+    style: `flex-grow: ${block.size_bytes}; min-width: 45px;`,
+    title: `${label} (${typeStr}) - ${sizeStr}`,
+    onclick,
+  }, content);
 }
 
 function renderDiskLayouts() {
@@ -300,7 +320,7 @@ function renderDiskLayouts() {
   
   // Render Current Layout
   const currentBar = document.getElementById('current-layout-bar');
-  currentBar.innerHTML = blocks.map(b => blockToHtml(b, false)).join('');
+  currentBar.replaceChildren(...blocks.map(b => blockToNode(b, false)));
   
   // Render Proposed Layout
   const proposedBar = document.getElementById('proposed-layout-bar');
@@ -362,7 +382,7 @@ function renderDiskLayouts() {
     }
   }
   
-  proposedBar.innerHTML = proposedBlocks.map(b => blockToHtml(b, true)).join('');
+  proposedBar.replaceChildren(...proposedBlocks.map(b => blockToNode(b, true)));
 }
 
 function selectPartitionByName(name) {
@@ -388,7 +408,7 @@ function selectResizePartitionByName(name) {
     slider.value = defaultVal;
     S.resize_gib = defaultVal;
     
-    document.getElementById('shrink-label-old').textContent = `${esc(p.name.replace('/dev/', ''))} (shrunk): ${Math.floor(p.size_bytes / 1024**3) - S.resize_gib} GiB`;
+    document.getElementById('shrink-label-old').textContent = `${p.name.replace('/dev/', '')} (shrunk): ${Math.floor(p.size_bytes / 1024**3) - S.resize_gib} GiB`;
     document.getElementById('shrink-label-new').textContent = `KythOS: ${S.resize_gib} GiB`;
   }
   renderDiskLayouts();
@@ -416,17 +436,19 @@ function populateReplacementList() {
     container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">No partitions available to replace.</div>';
     return;
   }
-  container.innerHTML = replaceable.map(p => {
+  container.replaceChildren(...replaceable.map(p => {
     const isSelected = S.target_partition === p.name;
     const desc = `${p.fstype || 'unknown'} partition ${p.label ? ' · ' + p.label : ''}`;
-    return `<div class="part-selector-card${isSelected ? ' selected' : ''}" data-name="${p.name}" onclick="selectPartitionByName('${p.name}')">
-      <div class="part-meta-info">
-        <span class="part-meta-name">${esc(p.name)}</span>
-        <span class="part-meta-desc">${esc(desc)}</span>
-      </div>
-      <span class="part-meta-size">${esc(p.size)}</span>
-    </div>`;
-  }).join('');
+    return el('div', {
+      class: `part-selector-card${isSelected ? ' selected' : ''}`,
+      dataset: { name: p.name },
+      onclick: () => selectPartitionByName(p.name),
+    },
+      el('div', { class: 'part-meta-info' },
+        el('span', { class: 'part-meta-name', text: p.name }),
+        el('span', { class: 'part-meta-desc', text: desc })),
+      el('span', { class: 'part-meta-size', text: p.size }));
+  }));
 }
 
 function populateFreeSpaceList() {
@@ -436,23 +458,25 @@ function populateFreeSpaceList() {
     container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">No free space gaps available.</div>';
     return;
   }
-  container.innerHTML = freeGaps.map(r => {
+  container.replaceChildren(...freeGaps.map(r => {
     const isSelected = S.free_region_start === r.start_bytes;
-    return `<div class="part-selector-card${isSelected ? ' selected' : ''}" data-start="${r.start_bytes}" onclick="selectFreeRegionByStart(${r.start_bytes})">
-      <div class="part-meta-info">
-        <span class="part-meta-name">Unallocated Space</span>
-        <span class="part-meta-desc">At byte offset ${r.start_bytes}</span>
-      </div>
-      <span class="part-meta-size">${esc(r.size)}</span>
-    </div>`;
-  }).join('');
+    return el('div', {
+      class: `part-selector-card${isSelected ? ' selected' : ''}`,
+      dataset: { start: r.start_bytes },
+      onclick: () => selectFreeRegionByStart(r.start_bytes),
+    },
+      el('div', { class: 'part-meta-info' },
+        el('span', { class: 'part-meta-name', text: 'Unallocated Space' }),
+        el('span', { class: 'part-meta-desc', text: `At byte offset ${r.start_bytes}` })),
+      el('span', { class: 'part-meta-size', text: r.size }));
+  }));
 }
 
 function onSliderMove(val) {
   S.resize_gib = parseInt(val, 10);
   const p = _partitions.find(part => part.name === S.resize_partition);
   if (p) {
-    document.getElementById('shrink-label-old').textContent = `${esc(p.name.replace('/dev/', ''))} (shrunk): ${Math.floor(p.size_bytes / 1024**3) - S.resize_gib} GiB`;
+    document.getElementById('shrink-label-old').textContent = `${p.name.replace('/dev/', '')} (shrunk): ${Math.floor(p.size_bytes / 1024**3) - S.resize_gib} GiB`;
     document.getElementById('shrink-label-new').textContent = `KythOS: ${S.resize_gib} GiB`;
   }
   renderDiskLayouts();
@@ -473,25 +497,38 @@ function updateDiskNext() {
 // ── Kernel ────────────────────────────────────────────────────────────────────
 const KERNELS = [
   { id: 'fedora', icon: '🐧', name: 'KythOS Standard',
-    desc: 'Standard KythOS kernel &middot; Works with Secure Boot out of the box',
+    desc: 'Standard KythOS kernel · Works with Secure Boot out of the box',
     badge: 'Default' },
   { id: 'cachy',  icon: '⚡', name: 'KythOS Performance',
-    desc: 'BORE scheduler &middot; sched-ext &middot; BBRv3 &middot; NTSYNC &middot; Optimized for gaming &amp; low-latency workloads',
+    desc: 'BORE scheduler · sched-ext · BBRv3 · NTSYNC · Optimized for gaming & low-latency workloads',
     note: 'Secure Boot: the installer stages the KythOS signing key and you confirm enrollment on first boot' },
 ];
 
 function initKernel() {
   const grid = document.getElementById('kernel-grid');
   if (grid.children.length) return;
-  grid.innerHTML = KERNELS.map(k => `
-    <div class="kernel-card${k.id === S.kernel ? ' selected' : ''}" id="kcard-${k.id}" role="button" tabindex="0" aria-pressed="${k.id === S.kernel ? 'true' : 'false'}" onclick="selectKernel('${k.id}')" onkeydown="if(event.key === 'Enter' || event.key === ' '){event.preventDefault();selectKernel('${k.id}')}">
-      <div class="kernel-icon">${k.icon}</div>
-      <div class="kernel-body">
-        <div class="kernel-name">${k.name}${k.badge ? ` <span class="kernel-badge">${k.badge}</span>` : ''}</div>
-        <div class="kernel-desc">${k.desc}</div>
-        ${k.note ? `<div class="kernel-note">⚠ ${k.note}</div>` : ''}
-      </div>
-    </div>`).join('');
+  grid.replaceChildren(...KERNELS.map(k => {
+    const selected = k.id === S.kernel;
+    return el('div', {
+      class: `kernel-card${selected ? ' selected' : ''}`,
+      id: `kcard-${k.id}`,
+      role: 'button',
+      tabindex: '0',
+      'aria-pressed': selected ? 'true' : 'false',
+      onclick: () => selectKernel(k.id),
+      onkeydown: (event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectKernel(k.id); }
+      },
+    },
+      el('div', { class: 'kernel-icon', text: k.icon }),
+      el('div', { class: 'kernel-body' },
+        el('div', { class: 'kernel-name' },
+          k.name,
+          k.badge ? ' ' : null,
+          k.badge ? el('span', { class: 'kernel-badge', text: k.badge }) : null),
+        el('div', { class: 'kernel-desc', text: k.desc }),
+        k.note ? el('div', { class: 'kernel-note', text: `⚠ ${k.note}` }) : null));
+  }));
 }
 
 function selectKernel(id) {
@@ -582,8 +619,8 @@ function buildReview() {
     ['Kernel',   kernelLabels[S.kernel] || S.kernel],
     ['Image',    targetImage],
   );
-  document.getElementById('review-table').innerHTML =
-    rows.map(([k,v]) => `<tr><td>${k}</td><td>${esc(v)}</td></tr>`).join('');
+  document.getElementById('review-table').replaceChildren(
+    ...rows.map(([k, v]) => el('tr', {}, el('td', { text: k }), el('td', { text: String(v) }))));
   document.getElementById('confirm-backup').checked = false;
   document.getElementById('confirm-erase').checked = false;
   document.getElementById('confirm-current').checked = false;
