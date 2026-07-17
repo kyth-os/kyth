@@ -21,17 +21,19 @@ ARG ENABLE_SCX=1
 ARG ENABLE_MESA_GIT=0
 
 # Build cache boundary: all RPM package installs (~2-3 GB).
-# Stable — only re-run when packages.sh changes or the base image is updated.
+# Stable — only re-run when packages-static.sh or packages/*.sh fragments
+# change or the base image is updated.
 # Published layer boundaries are defined later by legacy-rechunk metadata.
-RUN --mount=type=bind,source=build_files/scripts/packages.sh,target=/ctx/packages.sh \
-    --mount=type=bind,source=build_files/scripts/lib/check-multilib.sh,target=/ctx/lib/check-multilib.sh \
+RUN --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/packages-static.sh \
+    --mount=type=bind,source=build_files/scripts/packages,target=/ctx/packages \
+    --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-microsoft,target=/ctx/RPM-GPG-KEY-microsoft \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-google-antigravity,target=/ctx/RPM-GPG-KEY-google-antigravity \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
     ENABLE_ANANICY=${ENABLE_ANANICY} \
-    bash /ctx/packages.sh
+    bash /ctx/packages-static.sh
 
 # Headroom context compression CLI/proxy for AI coding workflows.
 # Installed into its own virtualenv so PyPI dependencies do not modify Fedora's
