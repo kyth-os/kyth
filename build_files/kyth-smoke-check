@@ -454,6 +454,8 @@ check_file_contains /usr/bin/kyth-apply-desktop-layout "hiddenItems" "KythOS cur
 check_file_contains /usr/bin/kyth-apply-desktop-layout "org.kde.plasma.clipboard" "KythOS tray clipboard" "clipboard history is visible in the curated tray"
 check_file_contains /usr/bin/kyth-apply-desktop-layout "org.kde.kdeconnect" "KythOS tray KDE Connect" "phone pairing status is visible in the curated tray"
 check_file_contains /usr/bin/kyth-apply-desktop-layout "desktop_exists" "KythOS pin availability filter" "missing Flatpak launchers are not pinned as dead taskbar icons"
+check_file_contains /usr/bin/kyth-apply-desktop-layout "com.valvesoftware.Steam.desktop" "Steam pin uses the Flatpak id" "the Steam taskbar pin resolves instead of being a dead icon"
+check_file_contains /usr/bin/kyth-apply-desktop-layout "chromium-browser.desktop" "Live browser pin fallback" "the live ISO pins Chromium where the installed system pins Brave"
 check_file /usr/bin/kyth-refresh-taskbar-pins "KythOS taskbar pin refresh"
 check_file_contains /usr/bin/kyth-refresh-taskbar-pins "org.kde.plasma.icontasks" "Pin refresh targets the taskbar" "refresh updates pins without rebuilding the panel"
 check_file /etc/systemd/user/kyth-refresh-taskbar-pins.path "Taskbar pin refresh trigger"

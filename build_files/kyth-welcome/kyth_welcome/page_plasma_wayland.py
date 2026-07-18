@@ -448,7 +448,7 @@ kwriteconfig6 --file kdeglobals --group Icons --key Theme Papirus-Dark
 kwriteconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage org.kde.breezedark.desktop
 kwriteconfig6 --file kdeglobals --group KDE --key SingleClick --type bool false
 kwriteconfig6 --file plasmarc --group Theme --key name kyth-dark
-kwriteconfig6 --file kickoffrc --group Favorites --key FavoriteURLs 'applications:kyth-welcome.desktop,applications:kyth-app-store.desktop,applications:steam.desktop,applications:com.brave.Browser.desktop,applications:com.discordapp.Discord.desktop,applications:org.kde.konsole.desktop'
+kwriteconfig6 --file kickoffrc --group Favorites --key FavoriteURLs 'applications:kyth-welcome.desktop,applications:kyth-app-store.desktop,applications:com.valvesoftware.Steam.desktop,applications:com.brave.Browser.desktop,applications:chromium-browser.desktop,applications:dev.vencord.Vesktop.desktop,applications:org.kde.konsole.desktop'
 kwriteconfig6 --file kickoffrc --group General --key highlightNewlyInstalledApps --type bool false
 
 kwriteconfig6 --file klipperrc --group General --key KeepClipboardContents --type bool true

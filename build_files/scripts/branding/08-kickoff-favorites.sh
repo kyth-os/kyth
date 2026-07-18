@@ -7,7 +7,7 @@
 # flatpak finishes installing.
 cat >/etc/skel/.config/kickoffrc <<'KICKOFFEOF'
 [Favorites]
-FavoriteURLs=applications:kyth-welcome.desktop,applications:kyth-app-store.desktop,applications:steam.desktop,applications:com.brave.Browser.desktop,applications:com.discordapp.Discord.desktop,applications:org.kde.konsole.desktop
+FavoriteURLs=applications:kyth-welcome.desktop,applications:kyth-app-store.desktop,applications:com.valvesoftware.Steam.desktop,applications:com.brave.Browser.desktop,applications:chromium-browser.desktop,applications:dev.vencord.Vesktop.desktop,applications:org.kde.konsole.desktop
 
 [General]
 highlightNewlyInstalledApps=false

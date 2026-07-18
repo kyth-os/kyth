@@ -274,7 +274,7 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
     fi
     if [[ "${force}" == "1" || -z "${current_favorites}" ]]; then
         kwriteconfig6 --file kickoffrc --group Favorites --key FavoriteURLs \
-            'applications:kyth-welcome.desktop,applications:kyth-app-store.desktop,applications:steam.desktop,applications:com.brave.Browser.desktop,applications:com.discordapp.Discord.desktop,applications:org.kde.konsole.desktop'
+            'applications:kyth-welcome.desktop,applications:kyth-app-store.desktop,applications:com.valvesoftware.Steam.desktop,applications:com.brave.Browser.desktop,applications:chromium-browser.desktop,applications:dev.vencord.Vesktop.desktop,applications:org.kde.konsole.desktop'
     fi
 
     # Ctrl+Shift+Esc opens Mission Center when installed, with KDE System
