@@ -46,6 +46,10 @@ from .bluetooth_audio import (
 from .collect import _collect_hardware_probes
 from .drives import _detect_controllers, _find_ntfs_drives
 
+# pylint: disable=undefined-all-variable
+# HardwareProbeWorker/DataWorker/TrackedThread/Worker resolve lazily via
+# __getattr__ below (Qt-free import path) — pylint's static __all__ checker
+# doesn't follow PEP 562 module __getattr__.
 __all__ = [
     "HardwareProbe",
     "HardwareProbeWorker",
@@ -83,6 +87,7 @@ __all__ = [
     "_strip_ansi",
     "_thermal_probe",
 ]
+# pylint: enable=undefined-all-variable
 
 
 def __getattr__(name: str):

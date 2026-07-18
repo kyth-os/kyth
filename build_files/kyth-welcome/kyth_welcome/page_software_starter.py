@@ -1,5 +1,5 @@
 import shlex
-from .services.launch import flatpak_run, popen
+from .services.launch import popen
 from .core_base import _restyle
 from .services.software import (
     Worker, _chromium_app_window_cmd, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,

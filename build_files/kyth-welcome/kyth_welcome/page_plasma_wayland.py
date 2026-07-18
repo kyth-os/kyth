@@ -1,20 +1,13 @@
 import os
-import shutil
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _release_worker_when_finished
 from .services.gaming import DataWorker
 from .services.hardware import HardwareProbe
-from .services.launch import open_settings_module, popen
+from .services.launch import open_settings_module
 from .services.plasma import (
-    QDBUS_CANDIDATES,
-    KDE_PORTAL_UNITS,
     _collect_wayland_probes,
-    _first_available_binary,
-    _kread,
     _run_text,
-    _session_kind,
-    _user_unit_active,
     gpu_lspci_summary,
     kscreen_doctor_output,
     run_shell_script,
@@ -412,7 +405,7 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
         ]
         states = []
         for name, unit in checks:
-            code, out, _ = _run_text(["systemctl", "--user", "is-active", unit], timeout=3)
+            _, out, _ = _run_text(["systemctl", "--user", "is-active", unit], timeout=3)
             states.append(f"{name}:{(out or 'inactive').strip()}")
         return ", ".join(states)
 

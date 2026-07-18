@@ -61,7 +61,6 @@ class ChangelogWorker(TrackedThread):
         self._remote_manifest = remote_manifest
 
     def _fetch_annotations(self, ref: str) -> dict:
-        global _BOOTED_ANNOTATIONS_CACHE
         if "@sha256:" in ref and ref in _BOOTED_ANNOTATIONS_CACHE:
             return _BOOTED_ANNOTATIONS_CACHE[ref]
         try:

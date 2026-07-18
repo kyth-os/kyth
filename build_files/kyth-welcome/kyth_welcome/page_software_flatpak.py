@@ -1,7 +1,7 @@
 import json
 import os
 import shlex
-from .services.launch import flatpak_run, popen
+from .services.launch import flatpak_run
 from .core_base import _restyle
 from .services.software import Worker, _finish_worker, _is_flatpak_installed, load_appstream_catalog
 from .qt import (  # noqa: E501

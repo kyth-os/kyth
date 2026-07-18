@@ -1,8 +1,6 @@
 """Repair page — quick fixes, sleep, desktop helpers."""
 from __future__ import annotations
 
-import shutil
-
 from .core_base import _restyle
 from .services.launch import flatpak_run, kcmshell, popen, systemsettings
 from .services.repair import (

@@ -7,6 +7,7 @@ per-run session token, and disk/partition sizing constants).
 
 import os
 import secrets
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,7 @@ LOG_FILE     = Path(os.environ.get("KYTH_INSTALLER_LOG", "/tmp/kyth-installer.lo
 PORT         = 7777
 SESSION_TOKEN = secrets.token_urlsafe(32)
 _bootstrap_token: Optional[str] = None
+_bootstrap_lock = threading.Lock()
 SKIP_FETCH_CHECK = os.environ.get("KYTH_INSTALL_SKIP_FETCH_CHECK", "0").lower() in (
     "1", "true", "yes", "on"
 )

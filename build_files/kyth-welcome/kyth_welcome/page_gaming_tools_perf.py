@@ -216,7 +216,7 @@ class _PerfTuningMixin:
             self._scx_log.append(ln),
             self._scx_log.ensureCursorVisible(),
         ))
-        self._scx_worker.done.connect(lambda code: self._on_scx_done(code))
+        self._scx_worker.done.connect(self._on_scx_done)
         self._scx_worker.start()
 
     def _on_scx_done(self, code: int):

@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import subprocess
 
-from ..core_base import _mark_wizard_done
 from ..qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
-from ..widgets import _make_card
 
 
 class _FinishStepMixin:

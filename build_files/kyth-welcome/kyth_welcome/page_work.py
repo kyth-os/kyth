@@ -4,19 +4,16 @@ import shutil
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _release_worker_when_finished
 from .services.gaming import (
-    DataWorker, _find_ntfs_drives,
+    DataWorker,
 )
 from .services.software import (
     Worker, _chromium_app_window_cmd, _install_flatpak_inline, _is_flatpak_installed,
 )
 from .services.work import (
     _M365_APPS,
-    _MS_FONTS_DIR,
-    _PST_IMPORT_DIR,
     _WORK_APPS,
     _convert_pst,
     _create_m365_shortcuts,
-    _m365_icon,
     _m365_shortcuts_present,
     _ms_fonts_installed,
     _refresh_m365_shortcuts,

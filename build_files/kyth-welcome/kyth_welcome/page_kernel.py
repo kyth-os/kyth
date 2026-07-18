@@ -131,7 +131,7 @@ class KernelPage(Page):
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
         self._reboot_btn.hide()
-        self._reboot_btn.clicked.connect(lambda: reboot())
+        self._reboot_btn.clicked.connect(reboot)
         self._add(self._reboot_btn)
         self._stretch()
     def showEvent(self, event):

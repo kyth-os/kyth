@@ -11,7 +11,7 @@ from .bootc import (
     _has_rollback_deployment,
     _has_staged_update,
 )
-from .hardware import HardwareProbe, _collect_hardware_probes
+from .hardware import HardwareProbe
 from .process import _command_stdout, _run_command
 
 def _tail_file(path: str, max_lines: int = 80) -> str:

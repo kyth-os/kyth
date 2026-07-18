@@ -51,7 +51,7 @@ class _UpdateAvailabilityMixin:
         self._restart_now_btn.setObjectName("primary")
         self._restart_now_btn.setMinimumWidth(120)
         self._restart_now_btn.hide()
-        self._restart_now_btn.clicked.connect(lambda: reboot())
+        self._restart_now_btn.clicked.connect(reboot)
         avail_btn_col.addWidget(self._restart_now_btn)
         self._check_btn = QPushButton("Check Now")
         self._check_btn.setEnabled(False)

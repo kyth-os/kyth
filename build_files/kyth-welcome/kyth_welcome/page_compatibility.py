@@ -16,7 +16,7 @@ from .services.gaming.compat_data import (
     replace_compat_games,
 )
 from .qt import (  # noqa: E501
-    QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QThread, QUrl, QVBoxLayout, QWidget, Qt, Signal,
+    QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )
 from .widgets import (  # noqa: E501
     Page, _make_card,

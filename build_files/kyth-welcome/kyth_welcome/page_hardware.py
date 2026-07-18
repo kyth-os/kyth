@@ -25,7 +25,7 @@ class HardwarePage(Page):
         super().__init__()
         self._worker = None
         self._wizard_mode = wizard_mode
-        self._navigate = navigate or (lambda key: self.action_requested.emit(key))
+        self._navigate = navigate or self.action_requested.emit
         self._cards: list[HardwareCard] = []
         self._last_probes: list[HardwareProbe] = []
         self._initial_refresh_started = False

@@ -1,7 +1,6 @@
 import importlib.util
 from importlib.machinery import SourceFileLoader
 import json
-import os
 import subprocess  # nosec B404
 import unittest
 from pathlib import Path

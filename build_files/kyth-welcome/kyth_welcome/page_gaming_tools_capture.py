@@ -9,7 +9,7 @@ from .services.software import Worker, _finish_worker, _install_flatpak_inline
 from .qt import (  # noqa: E501
     QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit, QTimer, QVBoxLayout, Qt,
 )
-from .widgets import ActionRow, CommandResultPanel, _copy_text, _make_card, _set_log_panel
+from .widgets import ActionRow, CommandResultPanel, _copy_text, _make_card
 
 
 class _CaptureToolsMixin:

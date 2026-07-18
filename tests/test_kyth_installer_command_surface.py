@@ -26,12 +26,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             with self.subTest(filename=filename):
                 tree = ast.parse((INSTALLER / filename).read_text())
                 calls = []
-                imports_runner = False
                 for node in ast.walk(tree):
-                    if isinstance(node, ast.ImportFrom) and node.module == "runner":
-                        imports_runner = True
-                    if isinstance(node, ast.ImportFrom) and node.module == ".runner":
-                        imports_runner = True
                     if (
                         isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Attribute)
@@ -90,8 +85,8 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         logs = []
         progress = []
 
-        with mock.patch.object(install, "_run_cmd") as run_cmd, \
-             mock.patch.object(install, "run_command") as run_command, \
+        with mock.patch.object(install, "_run_cmd"), \
+             mock.patch.object(install, "run_command"), \
              mock.patch.object(install, "unmount_target_disk") as unmount_target_disk, \
              mock.patch.object(install, "get_root_partition", return_value="/dev/sda3"):
             target_part, root_part, alongside_mount = install._prepare_install_storage(
@@ -170,7 +165,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             "efi_partition": "",
             "hostname": "kyth",
             "install_mode": "wipe",
-            "kernel": "/dev/sda2",
+            "kernel": "fedora",
             "mok_password": "",
             "password_hash": "$6$hash",
             "target_partition": "",
@@ -240,7 +235,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             "efi_partition": "",
             "hostname": "kyth",
             "install_mode": "alongside",
-            "kernel": "/dev/sda2",
+            "kernel": "fedora",
             "mok_password": "",
             "password_hash": "$6$hash",
             "target_partition": "/dev/sda2",

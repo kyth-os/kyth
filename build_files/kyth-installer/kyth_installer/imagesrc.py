@@ -2,9 +2,7 @@
 reachability preflight, and kernel-flavor image derivation.
 """
 
-import re
 import socket
-import subprocess
 
 from .config import SOURCE_IMAGE, TARGET_IMAGE
 from .runner import run_command

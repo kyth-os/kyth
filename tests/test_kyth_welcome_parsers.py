@@ -160,7 +160,6 @@ class VpnParserTests(unittest.TestCase):
 class AppStreamCatalogTests(unittest.TestCase):
     def test_as_localized(self):
         import xml.etree.ElementTree as ET
-        from kyth_welcome.services import software
         xml_str = """
         <component>
             <name xml:lang="en">English App</name>
@@ -174,7 +173,6 @@ class AppStreamCatalogTests(unittest.TestCase):
 
     def test_as_localized_desc(self):
         import xml.etree.ElementTree as ET
-        from kyth_welcome.services import software
         xml_str = """
         <component>
             <description xml:lang="en">

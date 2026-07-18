@@ -731,7 +731,6 @@ class InstallerSystemTests(unittest.TestCase):
 
     def test_write_lines_creates_file_with_correct_permissions(self):
         import tempfile
-        from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             test_file = Path(tmpdir) / "test_file"
             # Simulate the elevated process (launcher always runs as root).
@@ -743,7 +742,6 @@ class InstallerSystemTests(unittest.TestCase):
 
     def test_write_lines_creates_sensitive_file_with_restricted_permissions(self):
         import tempfile
-        from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             test_file = Path(tmpdir) / "sensitive_file"
             try:
@@ -762,8 +760,6 @@ class InstallerSystemTests(unittest.TestCase):
     def test_write_lines_uses_elevated_mkdir_tee_chmod(self):
         """Account DB writes must go through _as_root, not bare open()."""
         import tempfile
-        from pathlib import Path
-        from unittest.mock import patch, call
 
         with tempfile.TemporaryDirectory() as tmpdir:
             test_file = Path(tmpdir) / "subdir" / "passwd"

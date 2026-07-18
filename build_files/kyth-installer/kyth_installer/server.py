@@ -100,10 +100,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if cookies.get("bootstrap_auth") == SESSION_TOKEN:
             is_authenticated = True
-        elif config._bootstrap_token and qs.get("bootstrap_token") == [config._bootstrap_token]:
-            is_authenticated = True
-            # Consume the one-time token
-            config._bootstrap_token = None
+        elif qs.get("bootstrap_token") and config._bootstrap_token is not None:
+            with config._bootstrap_lock:
+                if config._bootstrap_token is not None and qs.get("bootstrap_token") == [config._bootstrap_token]:
+                    is_authenticated = True
+                    config._bootstrap_token = None
 
         if path == "/":
             if not is_authenticated:
@@ -320,7 +321,13 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == ROUTES["reboot"]:
-            subprocess.Popen(_as_root(["systemctl", "reboot"]))
+            result = subprocess.run(
+                _as_root(["systemctl", "reboot"]),
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                self._json({"ok": False, "error": result.stderr.strip() or "reboot command failed"}, status=500)
+                return
             self._json({"ok": True})
             return
 

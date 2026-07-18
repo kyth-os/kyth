@@ -25,10 +25,10 @@ from .services.welcome import (
     _printer_configured,
 )
 from .qt import (  # noqa: E501
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QSizePolicy, QTimer, QVBoxLayout, QWidget, Qt, Signal,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QTimer, QVBoxLayout, QWidget, Qt, Signal,
 )
 from .widgets import (  # noqa: E501
-    Page, StatTile, _make_card, _theme_icon,
+    Page, _make_card, _theme_icon,
 )
 
 # ── First-week follow-up ──────────────────────────────────────────────────────

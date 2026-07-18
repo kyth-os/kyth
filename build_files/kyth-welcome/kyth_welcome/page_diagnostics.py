@@ -22,12 +22,10 @@ from .services.hardware import (
     HardwareProbe, HardwareProbeWorker,
 )
 from .services.launch import (
-    kcmshell,
     open_first,
     open_settings_module,
     open_terminal_command,
     popen,
-    systemsettings,
 )
 from .services.software import _finish_worker
 from .qt import (  # noqa: E501

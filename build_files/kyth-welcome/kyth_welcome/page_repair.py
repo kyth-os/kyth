@@ -1,17 +1,15 @@
 import os
-import shlex
 import shutil
-from pathlib import Path
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
-    _bootc_image_timestamp, _has_rollback_deployment, _restyle,
+    _bootc_image_timestamp, _has_rollback_deployment,
 )
-from .services.launch import kcmshell, popen, systemsettings
+from .services.launch import kcmshell, popen
 from .services.hardware import _detect_nvidia
 from .services.repair import _read_sys_text
 from .services.software import (
-    Worker, _is_flatpak_installed,
+    _is_flatpak_installed,
 )
 from .page_repair_assist import _AssistMixin
 from .page_repair_quick import _QuickFixMixin

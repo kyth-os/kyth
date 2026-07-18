@@ -3,7 +3,7 @@ import glob
 import os
 import shlex
 import shutil
-from .services.launch import flatpak_run, popen
+from .services.launch import popen
 from .core_base import _restyle
 from .services.software import Worker, _finish_worker
 from .qt import (  # noqa: E501

@@ -51,7 +51,9 @@ class _GoogleDriveMixin:
         gd_sync_btns = QHBoxLayout()
         gd_sync_btns.setSpacing(10)
         self._gd_sync_btn = QPushButton("Sync Now")
-        self._gd_sync_btn.clicked.connect(lambda: self._start_gd_sync())
+        # _start_gd_sync's (remote, folder) are optional, not required — a
+        # direct connect would bind the button's `checked` bool to `remote`.
+        self._gd_sync_btn.clicked.connect(lambda: self._start_gd_sync())  # pylint: disable=unnecessary-lambda
         self._gd_sync_btn.hide()
         gd_sync_btns.addWidget(self._gd_sync_btn)
         self._gd_open_btn = QPushButton("Open Local Folder")
@@ -109,7 +111,7 @@ class _GoogleDriveMixin:
         # Periodic GD sync timer — interval loaded from config (default 5 min)
         _startup_mins = self._sync_config.get("_sync_interval_min", 5)
         self._gd_sync_timer = QTimer(self)
-        self._gd_sync_timer.timeout.connect(lambda: self._start_gd_sync())
+        self._gd_sync_timer.timeout.connect(self._start_gd_sync)
         if _startup_mins > 0:
             self._gd_sync_timer.setInterval(_startup_mins * 60 * 1000)
             self._gd_sync_timer.start()
@@ -126,7 +128,7 @@ class _GoogleDriveMixin:
         else:
             interval_str = "every hour"
 
-        for name, info in self._sync_config.items():
+        for info in self._sync_config.values():
             if info.get("service") != "drive":
                 continue
             last = info.get("last_sync")
@@ -202,8 +204,7 @@ class _GoogleDriveMixin:
         self._gd_sync_btn.setEnabled(True)
         self._update_gd_sync_label()
         if self._gd_sync_log_visible:
-            from datetime import datetime as _dt
-            ts = _dt.now().strftime("%H:%M:%S")
+            ts = datetime.now().strftime("%H:%M:%S")
             self._gd_sync_log.append(
                 f"\n[{ts}] Sync {'completed' if ok else 'FAILED'} (exit {code})"
             )

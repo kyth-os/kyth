@@ -71,6 +71,10 @@ from .windows_partitions import _probe_windows_partitions
 # Pure re-export (no Qt)
 from ..hardware import _find_ntfs_drives  # noqa: F401
 
+# pylint: disable=undefined-all-variable
+# TrackedThread/Worker/DataWorker/_ProtonDbBatchWorker resolve lazily via
+# __getattr__ below (Qt-free import path) — pylint's static __all__ checker
+# doesn't follow PEP 562 module __getattr__.
 __all__ = [
     "CompatGame",
     "GAMING_TOOLS",
@@ -111,6 +115,7 @@ __all__ = [
     "replace_compat_games",
     "scx_scheduler_command",
 ]
+# pylint: enable=undefined-all-variable
 
 
 def __getattr__(name: str):

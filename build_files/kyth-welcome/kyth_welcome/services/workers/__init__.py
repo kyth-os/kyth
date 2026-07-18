@@ -5,6 +5,10 @@ from here, or via lazy re-exports on the domain modules for compatibility.
 """
 from __future__ import annotations
 
+# pylint: disable=undefined-all-variable
+# Every name here resolves lazily via __getattr__ below (Qt adapters stay
+# unimported until actually requested) — pylint's static __all__ checker
+# doesn't follow PEP 562 module __getattr__.
 __all__ = [
     "ChangelogWorker",
     "FirmwareCheckWorker",
@@ -20,6 +24,7 @@ __all__ = [
     "_ProtonDbBatchWorker",
     "_VpnConnectWorker",
 ]
+# pylint: enable=undefined-all-variable
 
 
 def __getattr__(name: str):

@@ -53,7 +53,9 @@ class _OneDriveMixin:
         od_sync_btns = QHBoxLayout()
         od_sync_btns.setSpacing(10)
         self._od_sync_btn = QPushButton("Sync Now")
-        self._od_sync_btn.clicked.connect(lambda: self._start_od_sync())
+        # _start_od_sync's (remote, folder) are optional, not required — a
+        # direct connect would bind the button's `checked` bool to `remote`.
+        self._od_sync_btn.clicked.connect(lambda: self._start_od_sync())  # pylint: disable=unnecessary-lambda
         self._od_sync_btn.hide()
         od_sync_btns.addWidget(self._od_sync_btn)
         self._od_open_btn = QPushButton("Open Local Folder")
@@ -111,7 +113,7 @@ class _OneDriveMixin:
         # Periodic OneDrive sync timer
         _od_startup_mins = self._sync_config.get("_od_sync_interval_min", 5)
         self._od_sync_timer = QTimer(self)
-        self._od_sync_timer.timeout.connect(lambda: self._start_od_sync())
+        self._od_sync_timer.timeout.connect(self._start_od_sync)
         if _od_startup_mins > 0:
             self._od_sync_timer.setInterval(_od_startup_mins * 60 * 1000)
             self._od_sync_timer.start()
@@ -128,7 +130,7 @@ class _OneDriveMixin:
         else:
             interval_str = "every hour"
 
-        for name, info in self._sync_config.items():
+        for info in self._sync_config.values():
             if info.get("service") != "onedrive":
                 continue
             last = info.get("last_sync")
@@ -200,8 +202,7 @@ class _OneDriveMixin:
         self._od_sync_btn.setEnabled(True)
         self._update_od_sync_label()
         if self._od_sync_log_visible:
-            from datetime import datetime as _dt
-            ts = _dt.now().strftime("%H:%M:%S")
+            ts = datetime.now().strftime("%H:%M:%S")
             self._od_sync_log.append(
                 f"\n[{ts}] Sync {'completed' if ok else 'FAILED'} (exit {code})"
             )

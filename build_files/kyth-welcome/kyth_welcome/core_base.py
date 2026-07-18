@@ -9,6 +9,10 @@ Domain logic lives under ``services/``:
 This module re-exports those APIs under the historical underscore names and
 keeps UI/session helpers that pages still import from here.
 """
+# pylint: disable=unused-import
+# Most imports below are deliberate re-exports under the historical
+# underscore names described above, not used directly in this file.
+
 from __future__ import annotations
 
 import os

@@ -6,7 +6,7 @@ from .services.gaming import TrackedThread
 from .services.hardware import _detect_controllers
 from .services.software import Worker
 from .qt import (  # noqa: E501
-    QHBoxLayout, QLabel, QMessageBox, QPushButton, QThread, Signal,
+    QHBoxLayout, QLabel, QMessageBox, QPushButton, Signal,
 )
 from .services.launch import flatpak_run, popen, systemsettings
 from .widgets import (  # noqa: E501
@@ -284,7 +284,7 @@ class ControllerPage(Page):
         self._xone_btn.setEnabled(False)
         self._xone_status_lbl.setText("Flashing firmware…")
         worker = Worker(["pkexec", cmd])
-        worker.done.connect(lambda code: self._on_xone_done(code))
+        worker.done.connect(self._on_xone_done)
         worker.start()
         self._xone_worker = worker
 

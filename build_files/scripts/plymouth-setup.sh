@@ -9,27 +9,6 @@ set -euo pipefail
 PLYMOUTH_THEME_DIR=/usr/share/plymouth/themes/kyth
 mkdir -p "${PLYMOUTH_THEME_DIR}"
 
-write_kyth_os_release() {
-	local target=$1
-	mkdir -p "$(dirname "${target}")"
-	cat >"${target}" <<'EOF'
-NAME="KythOS"
-PRETTY_NAME="KythOS 44"
-ID=kythos
-VERSION="44"
-VERSION_ID="44"
-ANSI_COLOR="0;34"
-LOGO=kyth
-HOME_URL="https://github.com/mrtrick37/kyth"
-SUPPORT_URL="https://github.com/mrtrick37/kyth/discussions"
-BUG_REPORT_URL="https://github.com/mrtrick37/kyth/issues"
-EOF
-}
-
-write_kyth_os_release /usr/lib/os-release
-rm -f /etc/os-release
-write_kyth_os_release /etc/os-release
-
 rsvg-convert -w 256 /tmp/kyth-branding/kyth-logo-transparent.svg \
 	-o "${PLYMOUTH_THEME_DIR}/kyth-logo.png"
 install -m 0644 /tmp/kyth-plymouth/kyth.plymouth "${PLYMOUTH_THEME_DIR}/"

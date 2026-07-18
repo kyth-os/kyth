@@ -221,10 +221,7 @@ def lutris_installer_command(lutris_target):
 def scx_scheduler_command(scheduler):
     if scheduler == "stop":
         return ["kyth-scx", "stop"]
-        label = "Stopping sched-ext loader"
-    else:
-        return ["kyth-scx", "set", scheduler]
-        label = f"Switching sched-ext scheduler to {scheduler}"
+    return ["kyth-scx", "set", scheduler]
 
 # Page-level gaming helpers extracted from GamingPage.
 def command_details(cmd: list[str], result=None, exc: Exception | None = None) -> str:

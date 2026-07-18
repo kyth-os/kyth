@@ -73,8 +73,6 @@ def _installed_flatpak_ids() -> frozenset | None:
 
 def list_installed_flatpak_apps() -> list[dict[str, str]]:
     """Return installed flatpak apps as dicts with app_id/name/origin/installation."""
-    import os
-
     if not shutil.which("flatpak"):
         return []
     env = {**os.environ, "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"}
@@ -310,7 +308,6 @@ def _ui_lang() -> str:
 
 
 def _as_localized(parent, tag: str, lang: str) -> str:
-    import xml.etree.ElementTree as ET
     if parent is None:
         return ""
     exact = None
@@ -336,7 +333,6 @@ def _as_localized(parent, tag: str, lang: str) -> str:
 
 
 def _as_localized_desc(component, lang: str) -> str:
-    import xml.etree.ElementTree as ET
     desc_node = component.find("description")
     if desc_node is None:
         return ""
@@ -381,8 +377,9 @@ def _fp_component_url(component, url_type: str) -> str:
 
 
 def load_appstream_catalog() -> dict[str, dict]:
-    import xml.etree.ElementTree as ET
-    import glob
+    # defusedxml, not stdlib xml.etree — appstream.xml is written by the
+    # flatpak/flathub tooling, not fully trusted input.
+    import defusedxml.ElementTree as ET
     from .config import load_json_config, save_json_config
 
     xml_path = "/var/lib/flatpak/appstream/flathub/x86_64/active/appstream.xml"

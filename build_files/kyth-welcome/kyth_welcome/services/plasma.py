@@ -241,8 +241,6 @@ def kwriteconfig_command(file_name: str, groups: tuple[str, ...], key: str, valu
 
 def apply_windows_shortcuts(*, delete: bool = False) -> tuple[bool, str]:
     """Write or remove Win+E / Win+Shift+S / Win+V shortcuts. Restarts kglobalaccel."""
-    import shutil
-
     if not shutil.which("kwriteconfig6"):
         return False, "kwriteconfig6 not found — is this a KDE session?"
     ok = True

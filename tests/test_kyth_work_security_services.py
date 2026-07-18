@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pathlib
 import sys
-import tempfile
 import unittest
 from unittest import mock
 

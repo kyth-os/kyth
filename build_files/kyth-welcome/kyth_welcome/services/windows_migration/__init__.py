@@ -48,6 +48,10 @@ from .storage import (
     windows_folder_dest,
 )
 
+# pylint: disable=undefined-all-variable
+# UserFilesCopyWorker/WindowsLibraryWorker resolve lazily via __getattr__
+# below (Qt-free import path) — pylint's static __all__ checker doesn't
+# follow PEP 562 module __getattr__.
 __all__ = [
     "UserFilesCopyWorker",
     "WindowsLibraryWorker",
@@ -72,6 +76,7 @@ __all__ = [
     "windows_folder_dest",
     "write_bookmarks_html",
 ]
+# pylint: enable=undefined-all-variable
 
 
 def __getattr__(name: str):

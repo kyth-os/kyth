@@ -1,7 +1,6 @@
 """kyth-telem session history helpers (no Qt)."""
 from __future__ import annotations
 
-import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime

@@ -10,7 +10,7 @@ from .core_base import (
 from .services.launch import reboot
 from .services.software import Worker, _finish_worker
 from .services.updates import _current_branch
-from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, Qt
+from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
 from .widgets import _make_card, _set_log_panel
 
 
@@ -116,7 +116,7 @@ class _UpdateOpsMixin:
         self._log_toggle = QPushButton("Show details")
         self._log_toggle.setCheckable(True)
         self._log_toggle.setToolTip("Show or hide the update log output")
-        self._log_toggle.clicked.connect(lambda checked: self._set_log_expanded(checked))
+        self._log_toggle.clicked.connect(self._set_log_expanded)
         self._log_toggle.hide()
         self._add(self._log_toggle)
 
@@ -132,7 +132,7 @@ class _UpdateOpsMixin:
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
         self._reboot_btn.hide()
-        self._reboot_btn.clicked.connect(lambda: reboot())
+        self._reboot_btn.clicked.connect(reboot)
         self._add(self._reboot_btn)
 
     def _set_buttons_enabled(self, enabled: bool):

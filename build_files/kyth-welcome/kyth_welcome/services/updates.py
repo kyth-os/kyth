@@ -5,6 +5,7 @@ Pure API imports without Qt. Worker classes live in ``services.workers.updates``
 from __future__ import annotations
 
 from .bootc import REGISTRY, _bootc_image_digest, _bootc_status_data, _current_branch
+# pylint: disable=unused-import
 from .registry import (  # noqa: F401 — re-export pure API for existing imports
     InspectRunner,
     UpdateCheckResult,
@@ -14,6 +15,7 @@ from .registry import (  # noqa: F401 — re-export pure API for existing import
     nested_get,
     remote_digest_and_timestamp,
 )
+# pylint: enable=unused-import
 
 
 def firmware_check_commands(refresh: bool = True) -> list[list[str]]:

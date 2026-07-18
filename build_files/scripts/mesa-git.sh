@@ -39,6 +39,7 @@ if [[ "${ENABLE_MESA_GIT:-0}" == "0" ]]; then
 	fi
 else
 	dnf5 copr enable -y xxmitsu/mesa-git
+	trap 'echo "COPR xxmitsu/mesa-git was enabled when this layer failed" >&2' ERR
 	trap 'dnf5 copr disable -y xxmitsu/mesa-git >/dev/null 2>&1 || true' EXIT
 
 	mesa_git_repo="copr:copr.fedorainfracloud.org:xxmitsu:mesa-git"

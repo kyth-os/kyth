@@ -1,3 +1,4 @@
+/* global document, fetch, Headers, setTimeout, setInterval, clearInterval, Intl, EventSource, navigator */
 const S = { disk: null, install_mode: 'wipe', target_partition: null,
   resize_partition: null,
   resize_gib: 64,
@@ -472,6 +473,8 @@ function populateFreeSpaceList() {
   }));
 }
 
+// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
+// eslint-disable-next-line no-unused-vars
 function onSliderMove(val) {
   S.resize_gib = parseInt(val, 10);
   const p = _partitions.find(part => part.name === S.resize_partition);
@@ -562,6 +565,8 @@ function initConfig() {
     });
   }
 }
+// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
+// eslint-disable-next-line no-unused-vars
 function saveConfig() {
   const hostname = document.getElementById('inp-hostname').value.trim();
   const username = document.getElementById('inp-username').value.trim();
@@ -570,7 +575,7 @@ function saveConfig() {
   const errEl    = document.getElementById('user-error');
   errEl.textContent = '';
 
-  if (!/^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$/.test(hostname)) {
+  if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(hostname)) {
     errEl.textContent = 'Hostname must contain only letters, digits, and hyphens.'; return;
   }
   if (!/^[a-z_][a-z0-9_-]{0,30}$/.test(username)) {
@@ -676,6 +681,8 @@ function updateInstallReady() {
 let _startTime = 0;
 let _elapsedTimer = null;
 
+// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
+// eslint-disable-next-line no-unused-vars
 function startInstall() {
   const btn = document.getElementById('install-now');
   if (btn.disabled) return;
@@ -796,6 +803,8 @@ function copyVisibleLog() {
   copyText(document.getElementById('log-wrap').innerText || '');
 }
 
+// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
+// eslint-disable-next-line no-unused-vars
 function copyFullLog() {
   apiFetch('/api/log')
     .then(r => r.text())
@@ -803,6 +812,8 @@ function copyFullLog() {
     .catch(() => copyVisibleLog());
 }
 
+// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
+// eslint-disable-next-line no-unused-vars
 function toggleLog() {
   const wrap  = document.getElementById('log-wrap');
   const arrow = document.getElementById('log-arrow');
@@ -828,6 +839,8 @@ function showError(msg) {
   goto('error');
 }
 
+// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
+// eslint-disable-next-line no-unused-vars
 function backFromError() {
   // S.password is wiped once an install starts, so a retry straight from the
   // review page would POST an empty password. Route through Configure to make
@@ -835,6 +848,8 @@ function backFromError() {
   goto(S.password ? 'review' : 'config');
 }
 
+// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
+// eslint-disable-next-line no-unused-vars
 function reboot() {
   document.body.innerHTML = '<div id="main" style="display:flex;align-items:center;justify-content:center"><div class="card" style="text-align:center;padding:48px 40px"><div class="done-title">Restarting</div><p class="hero-body">Remove the installation media when your computer begins to restart.</p></div></div>';
   apiFetch('/api/reboot', {method:'POST'}).catch(()=>{});

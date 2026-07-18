@@ -93,8 +93,7 @@ for image in "${images[@]}"; do
 		--include "${include_root}/etc/plymouth" /etc/plymouth \
 		--include "${include_root}/usr/share/plymouth" /usr/share/plymouth \
 		--include "${include_root}/usr/share/pixmaps/system-logo-white.png" /usr/share/pixmaps/system-logo-white.png \
-		"${image}" \
-		"${kernel}"
+		"${image}"
 
 	defaults="$(mktemp /tmp/kyth-plymouth-defaults.XXXXXX)"
 	listing="$(mktemp /tmp/kyth-plymouth-listing.XXXXXX)"

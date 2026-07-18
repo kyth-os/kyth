@@ -124,7 +124,7 @@ def _ludusavi_backup_summary() -> tuple[str, str, str]:
     ]
     existing = [path for path in candidates if os.path.exists(path)]
     if ludusavi_ok and existing:
-        newest = max(existing, key=lambda path: os.path.getmtime(path))
+        newest = max(existing, key=os.path.getmtime)
         return "ok", "Save backups", f"Ludusavi installed; backup/config path found: {newest}"
     if ludusavi_ok:
         return "warn", "Save backups", "Ludusavi installed; run a backup before migration or modding."

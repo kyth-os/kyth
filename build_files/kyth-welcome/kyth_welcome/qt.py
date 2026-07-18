@@ -5,6 +5,10 @@ rest of the package is binding-agnostic and the binding can be swapped by
 changing the image's installed RPM, not the code.
 """
 
+# pylint: disable=unused-import
+# Every symbol below is a deliberate re-export for the rest of the package
+# to import from `.qt` — this module has no internal users of its own.
+
 import os
 
 # Must be set before any Qt WebEngine module is imported or initialized.

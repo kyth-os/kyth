@@ -1,4 +1,3 @@
-import os
 import json
 from urllib.request import Request, urlopen
 
@@ -12,7 +11,7 @@ from .services.updates import (
     _bootc_image_digest, _current_branch,
 )
 from .qt import (  # noqa: E501
-    QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QThread, QUrl, Signal,
+    QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl, Signal,
 )
 from .widgets import (  # noqa: E501
     Page, _make_card,

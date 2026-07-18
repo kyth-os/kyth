@@ -5,10 +5,8 @@ import glob
 import json
 import os
 import re
-import time
 
 from .constants import _PROC_MOUNT_ESCAPE_RE, _STEAM_NON_GAME_PATTERNS
-from ..process import _command_stdout
 
 
 def _parse_steam_acf(path: str) -> dict:

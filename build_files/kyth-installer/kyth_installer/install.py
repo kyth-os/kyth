@@ -76,6 +76,7 @@ def _parse_size_bytes(size_str: str) -> int:
         parts = size_str.strip().split()
         value = float(parts[0])
         unit  = parts[1].upper().rstrip("B") if len(parts) > 1 else ""
+        unit  = unit.replace("I", "")  # normalize GiB/MiB → GB/MB
         mult  = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
         return int(value * mult.get(unit, 0))
     except Exception:

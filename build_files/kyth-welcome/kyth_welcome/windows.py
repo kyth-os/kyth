@@ -1,29 +1,19 @@
-import shlex
 import subprocess  # nosec B404 # nosemgrep
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
-    _IS_LIVE, _cancel_worker, _has_rollback_deployment, _load_profile, _mark_wizard_done, _restyle,
-    _running_threads, _save_profile,
-)
-from .services.diagnostics import _command_stdout
-from .services.gaming import (
-    _find_ntfs_drives, _proton_cachyos_version,
-)
-from .services.hardware import _detect_nvidia
-from .services.software import (
-    Worker, _finish_worker, _is_flatpak_installed,
+    _IS_LIVE, _load_profile, _restyle,
+    _running_threads,
 )
 from .services.updates import _current_branch
 from .page_registry import (
     PROBLEM_ROUTES, SEARCH_ALIASES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups,
 )
 from .qt import (  # noqa: E501
-    QCheckBox, QCompleter, QDesktopServices, QFrame, QHBoxLayout, QIcon, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QShortcut, QSize, QSizePolicy, QStackedWidget, QTextEdit, QTimer, QUrl, QVBoxLayout, QWidget, Qt,
+    QCompleter, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
 )
-from .ui_tokens import accent_line_style
 from .widgets import (  # noqa: E501
-    _divider, _make_card, _set_log_panel, _theme_icon,
+    _divider, _theme_icon,
 )
 
 # ── Sidebar nav button ─────────────────────────────────────────────────────────

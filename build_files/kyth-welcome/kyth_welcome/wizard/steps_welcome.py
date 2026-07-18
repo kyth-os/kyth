@@ -1,12 +1,11 @@
 """Wizard step builders — _WelcomeStepMixin."""
 from __future__ import annotations
 
-from ..core_base import _IS_LIVE, _has_rollback_deployment, _restyle, _save_profile
+from ..core_base import _IS_LIVE, _has_rollback_deployment
 from ..services.gaming import _find_ntfs_drives, _proton_cachyos_version
 from ..services.hardware import _detect_nvidia
-from ..services.updates import _current_branch
 from ..services.gaming import _COMPAT_GAMES
-from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt
+from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from ..widgets import _make_card
 
 
