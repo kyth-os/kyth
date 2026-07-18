@@ -8,8 +8,16 @@ Requires=network-online.target kyth-flathub-setup.service
 # Sentinel is VERSIONED — bump the filename (v2 → v3, etc.) any time the app
 # list changes. The old sentinel survives OS upgrades (it lives in /var which
 # bootc never touches), so without versioning existing users never see new apps.
+<<<<<<< HEAD
 # Current version: v10 (added Brave to first-run defaults)
 ConditionPathExists=!/var/lib/kyth/default-flatpaks-v10-done
+||||||| parent of 0cc32c3 (Fix live ISO panel layout and default Flatpaks)
+# Current version: v6 (added Mission Center — Task Manager equivalent)
+ConditionPathExists=!/var/lib/kyth/default-flatpaks-v8-done
+=======
+# Current version: v9 (added Brave, LibreOffice, and Betterbird)
+ConditionPathExists=!/var/lib/kyth/default-flatpaks-v9-done
+>>>>>>> 0cc32c3 (Fix live ISO panel layout and default Flatpaks)
 
 [Service]
 Type=oneshot
@@ -32,11 +40,26 @@ ExecStart=/usr/bin/flatpak install -y --noninteractive --system --or-update flat
     dev.vencord.Vesktop \
     io.missioncenter.MissionCenter \
     org.videolan.VLC \
+<<<<<<< HEAD
     com.obsproject.Studio \
     io.github.wivrn.wivrn \
     com.brave.Browser
+||||||| parent of 0cc32c3 (Fix live ISO panel layout and default Flatpaks)
+    com.obsproject.Studio
+=======
+    com.brave.Browser \
+    org.libreoffice.LibreOffice \
+    eu.betterbird.Betterbird \
+    com.obsproject.Studio
+>>>>>>> 0cc32c3 (Fix live ISO panel layout and default Flatpaks)
 ExecStartPost=/bin/mkdir -p /var/lib/kyth
+<<<<<<< HEAD
 ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v10-done
+||||||| parent of 0cc32c3 (Fix live ISO panel layout and default Flatpaks)
+ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v8-done
+=======
+ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v9-done
+>>>>>>> 0cc32c3 (Fix live ISO panel layout and default Flatpaks)
 RemainAfterExit=yes
 Nice=10
 IOSchedulingClass=idle
