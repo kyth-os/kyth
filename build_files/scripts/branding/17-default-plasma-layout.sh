@@ -10,7 +10,7 @@ set -euo pipefail
 
 force=0
 initial=0
-layout_version="kyth-comfort-v3"
+layout_version="kyth-comfort-v4"
 config_file="plasma-org.kde.plasma.desktop-appletsrc"
 
 for arg in "$@"; do

@@ -38,11 +38,13 @@ def compose_on_first_init(load_mixins: Callable[[], tuple[type, ...]]):
             else:
                 target = cls
 
+            # Qt/Shiboken's __new__ only allocates the C++-backed instance and
+            # does not accept the __init__ arguments (e.g. wizard_mode=True) —
+            # forwarding them here raised TypeError on every construction, and
+            # falling back to object.__new__ is itself rejected by Shiboken for
+            # QObject-derived types, turning that into an unconditional crash.
             base_cls = shell_cls.__mro__[1] if len(shell_cls.__mro__) > 1 else object
-            try:
-                return base_cls.__new__(target, *args, **kwargs)
-            except TypeError:
-                return object.__new__(target)
+            return base_cls.__new__(target)
 
         shell_cls.__new__ = staticmethod(__new__)  # type: ignore[method-assign, assignment]
         return shell_cls
