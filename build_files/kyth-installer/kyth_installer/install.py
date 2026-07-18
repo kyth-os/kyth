@@ -20,7 +20,7 @@ from pathlib import Path
 from .config import LOG_FILE, SKIP_FETCH_CHECK
 from .disk import get_root_partition
 from .imagesrc import _friendly_network_error, _install_images, _network_preflight
-from .plan import _prepare_install_plan, _validate_install_target, _validate_storage_intent
+from .plan import _get_manual_mounts, _prepare_install_plan, _validate_install_target, _validate_storage_intent
 from .runner import run_command
 from .system import (
     _as_root,
@@ -268,7 +268,7 @@ def _prepare_install_storage(
 ):
     target_part = ""
     root_part = ""
-    if install_mode == "alongside":
+    if install_mode in ("alongside", "manual"):
         target_part = _state.get("target_partition", "")
         efi_part    = _state.get("efi_partition", "")
         alongside_mount = "/var/tmp/kyth-alongside-target"
@@ -388,6 +388,52 @@ def _configure_installed_system(
                     )
                 except Exception as fe:
                     log(f"Warning: failed to update fstab with @home subvolume: {fe}")
+
+            # Manual partition mode: mount additional partitions and update fstab
+            if install_mode == "manual":
+                manual_mounts = _get_manual_mounts()
+                for mnt in manual_mounts:
+                    part = mnt["partition"]
+                    mp = mnt["mountpoint"]
+                    fs = mnt["fstype"]
+                    try:
+                        uuid_out = subprocess.check_output(
+                            ["blkid", "-s", "UUID", "-o", "value", part],
+                            text=True, timeout=5
+                        ).strip()
+                        if not uuid_out:
+                            log(f"Warning: could not get UUID for {part}, skipping fstab entry for {mp}")
+                            continue
+                        # Map /home to /var/home in ostree layout
+                        fstab_mp = "/var/home" if mp == "/home" else mp
+                        target_path = Path(config_root) / fstab_mp.lstrip("/")
+                        if fs == "linux-swap":
+                            fstab_line = f"UUID={uuid_out} none swap defaults 0 0\n"
+                        else:
+                            fstab_line = f"UUID={uuid_out} {fstab_mp} {fs} defaults,compress=zstd:1 0 2\n"
+                            run_command(
+                                _as_root(["mkdir", "-p", str(target_path)]),
+                                check=False,
+                            )
+                            # Unmount any existing mount at this path (e.g. @home subvolume)
+                            run_command(
+                                _as_root(["umount", "-l", str(target_path)]),
+                                check=False, capture_output=True,
+                            )
+                        run_command(
+                            _as_root(["/usr/bin/tee", "-a", str(Path(etc, "fstab"))]),
+                            input=fstab_line, text=True,
+                            stdout=subprocess.DEVNULL, check=True,
+                        )
+                        if fs != "linux-swap":
+                            run_command(
+                                _as_root(["mount", part, str(target_path)]),
+                                check=False,
+                            )
+                        log(f"Manual mount: {part} at {mp} ({fs})")
+                    except Exception as me:
+                        log(f"Warning: failed to configure manual mount {part} at {mp}: {me}")
+
             hostname_path = str(Path(etc, "hostname"))
             try:
                 run_command(

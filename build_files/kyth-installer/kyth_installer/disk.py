@@ -386,6 +386,27 @@ def _partition_start_bytes(partition: str) -> int:
     return start * 512
 
 
+def list_filesystems() -> list[dict]:
+    return [
+        {"id": "btrfs", "name": "Btrfs", "root_ok": True, "efi_ok": False},
+        {"id": "ext4", "name": "ext4", "root_ok": False, "efi_ok": False},
+        {"id": "xfs", "name": "XFS", "root_ok": False, "efi_ok": False},
+        {"id": "fat32", "name": "FAT32", "root_ok": False, "efi_ok": True},
+        {"id": "linux-swap", "name": "Swap", "root_ok": False, "efi_ok": False},
+    ]
+
+
+def partition_has_active_mount(partition: str) -> bool:
+    try:
+        out = subprocess.check_output(
+            ["findmnt", "-n", "-o", "TARGET", partition],
+            text=True, stderr=subprocess.DEVNULL, timeout=5,
+        )
+        return bool(out.strip())
+    except Exception:
+        return False
+
+
 def _block_size_bytes(device: str) -> int:
     try:
         out = subprocess.check_output(["blockdev", "--getss", device], text=True, stderr=subprocess.DEVNULL, timeout=5).strip()

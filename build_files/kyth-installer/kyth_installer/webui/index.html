@@ -102,6 +102,13 @@
               <div class="mode-desc">Install KythOS into unallocated free space on the disk. Leaving all existing partitions untouched.</div>
             </div>
           </div>
+          <div class="mode-card" id="mcard-manual" onclick="selectMode('manual')">
+            <div class="mode-icon">🔧</div>
+            <div>
+              <div class="mode-name">Manual Partitioning</div>
+              <div class="mode-desc">Create, delete, resize and format partitions manually. Choose filesystem types and mount points.</div>
+            </div>
+          </div>
         </div>
 
         <!-- Visual Partition Layout Bars -->
@@ -146,6 +153,32 @@
           <div id="free-space-controls" style="display:none; margin: 18px 0 14px;">
             <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Select unallocated free space region to use:</div>
             <div id="free-space-list" class="part-selector-grid"></div>
+          </div>
+
+          <!-- Manual partition controls -->
+          <div id="manual-controls" style="display:none">
+            <hr class="divider" style="margin:22px 0 18px">
+            <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Partition Editor</div>
+            <div class="toolbar-row">
+              <button onclick="showNewTableDialog()">New Table</button>
+              <button onclick="showCreateDialog()">Create</button>
+              <button onclick="showDeleteDialog()">Delete</button>
+              <button onclick="showResizeDialog()">Resize</button>
+              <button onclick="showFormatDialog()">Format</button>
+              <button onclick="showMountDialog()">Mount Point</button>
+            </div>
+            <div id="pending-ops" style="margin:16px 0">
+              <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">
+                Pending Operations (<span id="pending-count">0</span>)
+              </div>
+              <div id="pending-list">
+                <div style="color:var(--muted2);font-size:12px;padding:12px 0;">No pending operations.</div>
+              </div>
+            </div>
+            <div class="btn-row" style="margin-top:8px">
+              <button onclick="rollbackPartitions()" id="btn-rollback" disabled>Undo All</button>
+              <button class="primary" onclick="commitPartitions()" id="btn-commit" disabled>Apply Changes</button>
+            </div>
           </div>
 
           <div class="warn-box" id="part-warn" style="display:none"></div>
@@ -322,6 +355,11 @@
   </div>
 
 </div><!-- #main -->
+
+<!-- Modal overlay for manual partition dialogs -->
+<div id="modal-overlay" class="modal-overlay" style="display:none">
+  <div class="modal-card" id="modal-content"></div>
+</div>
 
 <script src="app.js"></script>
 </body>

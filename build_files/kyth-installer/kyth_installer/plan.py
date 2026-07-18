@@ -54,6 +54,7 @@ from .disk import (
     list_free_space,
     list_partitions,
 )
+from .partition_ops import get_journal, reset_journal
 from .system import _as_root, unmount_target_disk
 from .runner import run_command
 
@@ -84,6 +85,17 @@ ROUTES = {
     "timezones": RouteSpec("GET", "/api/timezones"),
     "start": RouteSpec("POST", "/api/start", requires_same_origin=True),
     "reboot": RouteSpec("POST", "/api/reboot", requires_same_origin=True),
+    # Manual partition management
+    "partition_pending": RouteSpec("GET", "/api/disk/pending"),
+    "filesystems": RouteSpec("GET", "/api/disk/filesystems"),
+    "new_table": RouteSpec("POST", "/api/disk/new-table", requires_same_origin=True),
+    "create_partition": RouteSpec("POST", "/api/disk/create", requires_same_origin=True),
+    "delete_partition": RouteSpec("POST", "/api/disk/delete", requires_same_origin=True),
+    "resize_partition": RouteSpec("POST", "/api/disk/resize", requires_same_origin=True),
+    "format_partition": RouteSpec("POST", "/api/disk/format", requires_same_origin=True),
+    "set_mountpoint": RouteSpec("POST", "/api/disk/set-mountpoint", requires_same_origin=True),
+    "commit_partitions": RouteSpec("POST", "/api/disk/commit", requires_same_origin=True),
+    "rollback_partitions": RouteSpec("POST", "/api/disk/rollback", requires_same_origin=True),
 }
 
 
@@ -146,6 +158,19 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
             )
         if not find_efi_partition(disk):
             raise RuntimeError("Alongside installation requires an EFI system partition on the system.")
+        return disk, target
+
+    if mode == "manual":
+        journal = get_journal()
+        if not journal or not journal.committed:
+            raise RuntimeError("Partition changes have not been committed. Return to the disk step and apply your partition layout.")
+        target = _normal_device_path(journal.root_partition or config.get("target_partition"))
+        if not target:
+            raise RuntimeError("No root partition (/) found in the committed partition layout.")
+        if _parent_disk(target) != disk:
+            raise RuntimeError("The root partition does not belong to the selected disk.")
+        if not find_efi_partition(disk):
+            raise RuntimeError("Manual installation requires an EFI system partition on the system. Create one in the partition editor.")
         return disk, target
 
     raise RuntimeError(f"Unsupported install mode: {mode}")
@@ -414,6 +439,37 @@ def _prepare_install_plan(state: dict, log) -> InstallPlan:
     return plan
 
 
+def _get_manual_mounts() -> list[dict]:
+    """Return non-root partition mount assignments from the committed journal."""
+    journal = get_journal()
+    if not journal or not journal.committed:
+        return []
+    mounts: list[dict] = []
+    for op in journal.ops:
+        if op["kind"] == "set_mountpoint":
+            mountpoint = op["params"].get("mountpoint", "").strip()
+            partition = op["params"].get("partition", "")
+            if mountpoint and mountpoint != "/" and partition:
+                fs_type = ""
+                for fmt_op in journal.ops:
+                    if (fmt_op["kind"] == "format" and
+                        fmt_op["params"].get("partition") == partition):
+                        fs_type = fmt_op["params"].get("fs_type", "")
+                        break
+                if not fs_type:
+                    parts = list_partitions(journal.disk)
+                    for p in parts:
+                        if p.get("name") == partition:
+                            fs_type = p.get("fstype", "")
+                            break
+                mounts.append({
+                    "partition": partition,
+                    "mountpoint": mountpoint,
+                    "fstype": fs_type or "btrfs",
+                })
+    return mounts
+
+
 def _validate_storage_intent(state: dict) -> None:
     """Validate a review-page storage choice without changing the machine."""
     mode = _normalized_install_mode(state)
@@ -421,5 +477,7 @@ def _validate_storage_intent(state: dict) -> None:
         _validate_resize_ntfs_target(state)
     elif mode == "free_space":
         _validate_free_space_target(state)
+    elif mode == "manual":
+        _validate_install_target(state)
     else:
         _validate_install_target(state)

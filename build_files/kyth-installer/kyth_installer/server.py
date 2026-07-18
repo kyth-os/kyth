@@ -17,7 +17,10 @@ from urllib.parse import urlparse
 
 from . import config, install
 from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, _IS_LIVE_SESSION
-from .disk import _safe_int, find_efi_partition, list_disks, list_partitions, list_free_space
+from .disk import _normal_device_path, _safe_int, find_efi_partition, list_disks, list_partitions, list_free_space
+from .partition_ops import (
+    FILESYSTEM_OPTIONS, Journal, get_journal, init_journal, reset_journal,
+)
 from .plan import ROUTES, RouteSpec, _validate_storage_intent
 from .system import _as_root, _hash_password, list_timezones
 
@@ -159,6 +162,11 @@ class Handler(BaseHTTPRequestHandler):
         elif route == ROUTES["free_space"]:
             disk = (qs.get("disk") or [""])[0]
             self._json(list_free_space(disk) if disk else [])
+        elif route == ROUTES["partition_pending"]:
+            journal = get_journal()
+            self._json(journal.pending() if journal else [])
+        elif route == ROUTES["filesystems"]:
+            self._json(FILESYSTEM_OPTIONS)
         elif route == ROUTES["stream"]:
             self._sse()
         elif route == ROUTES["log"]:
@@ -189,6 +197,174 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(400, "Invalid JSON")
             return
 
+        # ── Partition operation handlers ──────────────────────────────────
+        if route == ROUTES["new_table"]:
+            disk = _normal_device_path(body.get("disk", ""))
+            if not disk:
+                self._json({"ok": False, "message": "No disk specified."}, status=400)
+                return
+            disks = {d["name"]: d for d in list_disks()}
+            if disk not in disks:
+                self._json({"ok": False, "message": "Invalid or unsafe disk."}, status=400)
+                return
+            table_type = body.get("table_type", "gpt")
+            if table_type not in ("gpt", "msdos"):
+                self._json({"ok": False, "message": "Table type must be 'gpt' or 'msdos'."}, status=400)
+                return
+            journal = init_journal(disk)
+            journal.add_op("new_table", {"table_type": table_type})
+            self._json({"ok": True, "pending": len(journal.ops)})
+            return
+
+        if route == ROUTES["create_partition"]:
+            disk = _normal_device_path(body.get("disk", ""))
+            if not disk:
+                self._json({"ok": False, "message": "No disk specified."}, status=400)
+                return
+            journal = get_journal()
+            if not journal or journal.disk != disk:
+                self._json({"ok": False, "message": "No active partition journal for this disk. Create a new partition table first."}, status=400)
+                return
+            start = _safe_int(body.get("start_bytes"), -1)
+            size = _safe_int(body.get("size_bytes"), -1)
+            if start < 0 or size < 1:
+                self._json({"ok": False, "message": "Invalid start offset or size."}, status=400)
+                return
+            fs_type = body.get("fs_type", "btrfs")
+            if not any(f["id"] == fs_type for f in FILESYSTEM_OPTIONS):
+                self._json({"ok": False, "message": f"Unsupported filesystem: {fs_type}"}, status=400)
+                return
+            label = body.get("label", "")
+            mountpoint = body.get("mountpoint", "")
+            journal.add_op("create", {
+                "start_bytes": start, "size_bytes": size,
+                "fs_type": fs_type, "label": label, "mountpoint": mountpoint,
+            })
+            errors = journal.validate()
+            self._json({"ok": not bool(errors), "pending": len(journal.ops), "errors": errors})
+            return
+
+        if route == ROUTES["delete_partition"]:
+            disk = _normal_device_path(body.get("disk", ""))
+            partition = _normal_device_path(body.get("partition", ""))
+            if not disk or not partition:
+                self._json({"ok": False, "message": "Disk and partition are required."}, status=400)
+                return
+            journal = get_journal()
+            if not journal or journal.disk != disk:
+                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
+                return
+            parts = {p["name"]: p for p in list_partitions(disk)}
+            if partition not in parts:
+                self._json({"ok": False, "message": f"Partition {partition} not found."}, status=400)
+                return
+            if parts[partition].get("current") or parts[partition].get("in_use"):
+                self._json({"ok": False, "message": "Cannot delete a mounted or in-use partition."}, status=400)
+                return
+            journal.add_op("delete", {"partition": partition})
+            self._json({"ok": True, "pending": len(journal.ops)})
+            return
+
+        if route == ROUTES["resize_partition"]:
+            disk = _normal_device_path(body.get("disk", ""))
+            partition = _normal_device_path(body.get("partition", ""))
+            new_size = _safe_int(body.get("new_size_bytes"), -1)
+            if not disk or not partition or new_size < 1:
+                self._json({"ok": False, "message": "Disk, partition, and new size are required."}, status=400)
+                return
+            journal = get_journal()
+            if not journal or journal.disk != disk:
+                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
+                return
+            parts = {p["name"]: p for p in list_partitions(disk)}
+            if partition not in parts:
+                self._json({"ok": False, "message": f"Partition {partition} not found."}, status=400)
+                return
+            current_size = _safe_int(parts[partition].get("size_bytes"))
+            if new_size >= current_size:
+                self._json({"ok": False, "message": "New size must be smaller than current size for resize."}, status=400)
+                return
+            journal.add_op("resize", {"partition": partition, "new_size_bytes": new_size})
+            self._json({"ok": True, "pending": len(journal.ops)})
+            return
+
+        if route == ROUTES["format_partition"]:
+            disk = _normal_device_path(body.get("disk", ""))
+            partition = _normal_device_path(body.get("partition", ""))
+            fs_type = body.get("fs_type", "btrfs")
+            if not disk or not partition:
+                self._json({"ok": False, "message": "Disk and partition are required."}, status=400)
+                return
+            if not any(f["id"] == fs_type for f in FILESYSTEM_OPTIONS):
+                self._json({"ok": False, "message": f"Unsupported filesystem: {fs_type}"}, status=400)
+                return
+            journal = get_journal()
+            if not journal or journal.disk != disk:
+                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
+                return
+            label = body.get("label", "")
+            journal.add_op("format", {"partition": partition, "fs_type": fs_type, "label": label})
+            self._json({"ok": True, "pending": len(journal.ops)})
+            return
+
+        if route == ROUTES["set_mountpoint"]:
+            disk = _normal_device_path(body.get("disk", ""))
+            partition = _normal_device_path(body.get("partition", ""))
+            mountpoint = body.get("mountpoint", "").strip()
+            if not disk or not partition:
+                self._json({"ok": False, "message": "Disk and partition are required."}, status=400)
+                return
+            if mountpoint and not mountpoint.startswith("/"):
+                self._json({"ok": False, "message": "Mount point must be an absolute path (e.g. /, /home)."}, status=400)
+                return
+            journal = get_journal()
+            if not journal or journal.disk != disk:
+                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
+                return
+            journal.add_op("set_mountpoint", {"partition": partition, "mountpoint": mountpoint})
+            self._json({"ok": True, "pending": len(journal.ops)})
+            return
+
+        if route == ROUTES["commit_partitions"]:
+            disk = _normal_device_path(body.get("disk", ""))
+            if not disk:
+                self._json({"ok": False, "message": "No disk specified."}, status=400)
+                return
+            journal = get_journal()
+            if not journal or journal.disk != disk:
+                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
+                return
+            errors = journal.validate()
+            if errors:
+                self._json({"ok": False, "message": "Validation failed.", "errors": errors}, status=400)
+                return
+            try:
+                def log(msg):
+                    install._push({"type": "log", "text": f"[partition] {msg}"})
+                root_part = journal.commit(log)
+                self._json({"ok": True, "root_partition": root_part})
+            except RuntimeError as exc:
+                journal.rollback(lambda msg: None)
+                self._json({"ok": False, "message": str(exc)}, status=500)
+            return
+
+        if route == ROUTES["rollback_partitions"]:
+            disk = _normal_device_path(body.get("disk", ""))
+            if not disk:
+                self._json({"ok": False, "message": "No disk specified."}, status=400)
+                return
+            journal = get_journal()
+            if not journal or journal.disk != disk:
+                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
+                return
+            try:
+                journal.rollback(lambda msg: None)
+                reset_journal()
+                self._json({"ok": True})
+            except RuntimeError as exc:
+                self._json({"ok": False, "message": str(exc)}, status=500)
+            return
+
         if route == ROUTES["start"]:
             disk = body.get("disk", "")
             disks = {d["name"]: d for d in list_disks()}
@@ -197,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             install_mode = body.get("install_mode", "wipe")
-            if install_mode not in ("wipe", "alongside", "resize_ntfs", "free_space"):
+            if install_mode not in ("wipe", "alongside", "resize_ntfs", "free_space", "manual"):
                 install_mode = "wipe"
 
             target_partition = ""
@@ -229,6 +405,22 @@ class Handler(BaseHTTPRequestHandler):
                     r["start_bytes"] <= free_region_start and r["end_bytes"] >= free_region_end for r in regions
                 ):
                     self._json({"started": False, "message": "Invalid free space region."}, status=400)
+                    return
+                efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
+            elif install_mode == "manual":
+                journal = get_journal()
+                if not journal or not journal.committed:
+                    self._json({
+                        "started": False,
+                        "message": "Partition changes must be committed before starting the install."
+                    }, status=400)
+                    return
+                target_partition = journal.root_partition or ""
+                if not target_partition:
+                    self._json({
+                        "started": False,
+                        "message": "No root partition (/) configured in the manual partition layout."
+                    }, status=400)
                     return
                 efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
             elif disks[disk].get("current") and not _IS_LIVE_SESSION:

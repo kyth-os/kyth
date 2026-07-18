@@ -1037,7 +1037,123 @@ pre.log {
   color: var(--accent-teal);
 }
 
-/* Responsive */
+/* ── Manual Partition Toolbar ────────────────────────────────────────────── */
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.toolbar-row button {
+  padding: 8px 14px;
+  font-size: 12px;
+  background: var(--surface2);
+  border-color: var(--border);
+  font-weight: 600;
+}
+.toolbar-row button:hover:not(:disabled) {
+  background: var(--surface3);
+  border-color: var(--accent-blue);
+}
+
+/* ── Pending Operations List ─────────────────────────────────────────────── */
+.pending-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: all 0.15s ease;
+}
+.pending-item:hover {
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.04);
+}
+.pending-item .undo-btn {
+  background: none;
+  border: none;
+  color: var(--red);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+.pending-item .undo-btn:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ff6b6b;
+  transform: none !important;
+}
+
+/* ── Modal Overlay ───────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  max-width: 500px;
+  width: 92%;
+  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.modal-title {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 20px;
+  color: #ffffff;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+.modal-card .field-label {
+  margin-top: 14px;
+}
+.modal-card select,
+.modal-card input {
+  margin-top: 4px;
+}
+
+/* ── Validation Errors ───────────────────────────────────────────────────── */
+.validation-errors {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--red);
+  padding: 14px 16px;
+  border-radius: var(--radius-inner);
+  margin: 14px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 860px) {
   body {
     display: block;
