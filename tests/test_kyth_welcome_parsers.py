@@ -1,3 +1,4 @@
+import importlib
 import pathlib
 import sys
 import types
@@ -99,6 +100,39 @@ class CoreParserTests(unittest.TestCase):
         self.assertEqual(display.status, "warn")
         self.assertIn("HDMI-A-1", display.summary)
         self.assertIn("VRR/FreeSync", display.details)
+
+
+class AppDefaultsTests(unittest.TestCase):
+    def test_brave_is_in_default_first_run_apps(self):
+        self.assertIn(
+            ("com.brave.Browser", "Brave"),
+            core._DEFAULT_FIRST_RUN_APPS,
+        )
+
+
+class LazyPageTests(unittest.TestCase):
+    def test_lazy_page_uses_page_new_for_qt_style_objects(self):
+        widgets_module = types.ModuleType("kyth_welcome.widgets")
+
+        class DummyPage:
+            new_calls = 0
+
+            def __new__(cls, *args, **kwargs):
+                cls.new_calls += 1
+                return super().__new__(cls)
+
+        widgets_module.Page = DummyPage
+        sys.modules["kyth_welcome.widgets"] = widgets_module
+        sys.modules.pop("kyth_welcome.lazy_page", None)
+
+        lazy_page = importlib.import_module("kyth_welcome.lazy_page")
+
+        @lazy_page.compose_on_first_init(lambda: ())
+        class Shell(DummyPage):
+            pass
+
+        instance = Shell()
+        self.assertIsInstance(instance, DummyPage)
 
 
 class VpnParserTests(unittest.TestCase):

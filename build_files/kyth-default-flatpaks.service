@@ -9,7 +9,7 @@ Requires=network-online.target kyth-flathub-setup.service
 # list changes. The old sentinel survives OS upgrades (it lives in /var which
 # bootc never touches), so without versioning existing users never see new apps.
 # Current version: v6 (added Mission Center — Task Manager equivalent)
-ConditionPathExists=!/var/lib/kyth/default-flatpaks-v8-done
+ConditionPathExists=!/var/lib/kyth/default-flatpaks-v9-done
 
 [Service]
 Type=oneshot
@@ -32,9 +32,10 @@ ExecStart=/usr/bin/flatpak install -y --noninteractive --system --or-update flat
     dev.vencord.Vesktop \
     io.missioncenter.MissionCenter \
     org.videolan.VLC \
-    com.obsproject.Studio
+    com.obsproject.Studio \
+    com.brave.Browser
 ExecStartPost=/bin/mkdir -p /var/lib/kyth
-ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v8-done
+ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v9-done
 RemainAfterExit=yes
 Nice=10
 IOSchedulingClass=idle
