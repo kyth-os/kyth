@@ -1,9 +1,10 @@
-from .services.launch import flatpak_run, popen
 """Repair page — remote assist, setup transfer, session snapshot."""
 from __future__ import annotations
 
 import os
 import shutil
+
+from .services.launch import flatpak_run, popen
 
 from .services.repair import (
     session_snapshot_command,

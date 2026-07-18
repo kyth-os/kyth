@@ -1,7 +1,7 @@
-from .services.launch import reboot
 """Repair page — rollback and destructive OS reset."""
 from __future__ import annotations
 
+from .services.launch import reboot
 
 from .core_base import (
     _has_rollback_deployment, _restyle, _set_session_inhibit,
