@@ -484,7 +484,7 @@ check_file_contains /usr/lib/kyth-welcome/kyth_welcome/page_welcome.py "finish s
 check_file_contains /usr/lib/kyth-welcome/kyth_welcome/page_welcome.py "Cloud storage" "First-week cloud setup" "cloud storage is part of the first-week setup checklist"
 check_file_contains /usr/lib/kyth-welcome/kyth_welcome/page_welcome.py "Browser integration" "First-week browser integration" "native browser integration is part of the first-week setup checklist"
 check_file_contains /usr/lib/kyth-welcome/kyth_welcome/page_welcome.py "Apply Preset" "Home role presets" "System Hub can apply Everyday/Gaming presets"
-check_file_contains /usr/lib/kyth-welcome/kyth_welcome/core.py '_VALID_PROFILES = ("everyday", "gaming")' "Two role presets" "profile model exposes Everyday and Gaming presets"
+check_file_contains /usr/lib/kyth-welcome/kyth_welcome/core_base.py '_VALID_PROFILES = ("everyday", "gaming")' "Two role presets" "profile model exposes Everyday and Gaming presets"
 check_file_contains /usr/bin/kyth-user-polish "folder-templates" "Dolphin Places essentials" "Templates folder is seeded into Dolphin Places"
 check_file_contains /usr/bin/kyth-user-polish "Screenshots" "Screenshots folder default" "screenshots have a visible home in Dolphin Places"
 check_file_contains /usr/bin/kyth-user-polish "defaultSaveLocation" "Spectacle save location" "screenshots default to the Screenshots folder"
