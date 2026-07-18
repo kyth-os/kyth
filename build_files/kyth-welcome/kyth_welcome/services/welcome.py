@@ -9,7 +9,7 @@ from .software import _is_flatpak_installed
 
 _FIRST_WEEK_DISMISS = os.path.expanduser("~/.config/kyth-first-week-done")
 _FIRST_BOOT_MARKERS = (
-    "/var/lib/kyth/default-flatpaks-v8-done",
+    "/var/lib/kyth/default-flatpaks-v10-done",
     os.path.expanduser("~/.config/kyth-welcome-done"),
 )
 FIRST_WEEK_MIN_DAYS = 2

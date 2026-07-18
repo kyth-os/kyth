@@ -31,6 +31,87 @@ from .widgets import (  # noqa: E501
     Page, StatTile, _make_card, _theme_icon,
 )
 
+# ── First-week follow-up ──────────────────────────────────────────────────────
+# Anchored to markers that only exist once per install (first-boot flatpak setup
+# and the welcome wizard), so installs older than the window never see the card.
+_FIRST_WEEK_DISMISS = os.path.expanduser("~/.config/kyth-first-week-done")
+_FIRST_BOOT_MARKERS = (
+    "/var/lib/kyth/default-flatpaks-v10-done",
+    os.path.expanduser("~/.config/kyth-welcome-done"),
+)
+_FIRST_WEEK_MIN_DAYS = 2   # let the first-boot banner have the spotlight first
+_FIRST_WEEK_MAX_DAYS = 30
+
+
+def _path_exists(path: str) -> bool:
+    return os.path.exists(os.path.expanduser(path))
+
+
+def _cmd_ok(cmd: list[str], timeout: int = 5) -> bool:
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)  # nosec B603 # nosemgrep
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _flatpak_installed(app_id: str) -> bool:
+    return _cmd_ok(["flatpak", "info", app_id], timeout=5)
+
+
+def _controller_seen() -> bool:
+    for path in ("/dev/input/by-id", "/dev/input/by-path"):
+        try:
+            names = os.listdir(path)
+        except OSError:
+            continue
+        if any(token in name.lower() for name in names for token in ("joystick", "gamepad", "controller")):
+            return True
+    return False
+
+
+def _kdeconnect_configured() -> bool:
+    if _path_exists("~/.config/kdeconnect"):
+        return True
+    try:
+        result = subprocess.run(["kdeconnect-cli", "--list-devices"], capture_output=True, text=True, timeout=6, check=False)  # nosec B603 # nosemgrep
+        return result.returncode == 0 and bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _cloud_storage_configured() -> bool:
+    return _path_exists("~/.config/kyth-cloud-sync.json") or _path_exists("~/.config/rclone/rclone.conf")
+
+
+def _printer_configured() -> bool:
+    try:
+        result = subprocess.run(["lpstat", "-v"], capture_output=True, text=True, timeout=5, check=False)  # nosec B603 # nosemgrep
+        return result.returncode == 0 and bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _browser_integration_native_ready() -> bool:
+    return (
+        _cmd_ok(["rpm", "-q", "plasma-browser-integration"], timeout=5)
+        or _path_exists("/usr/bin/plasma-browser-integration-host")
+    )
+
+
+def _first_week_days() -> int | None:
+    """Days since first boot, or None when unknown or already dismissed."""
+    if os.path.exists(_FIRST_WEEK_DISMISS):
+        return None
+    stamps = []
+    for marker in _FIRST_BOOT_MARKERS:
+        try:
+            stamps.append(os.stat(marker).st_mtime)
+        except OSError:
+            continue
+    if not stamps:
+        return None
+    return int((time.time() - min(stamps)) / 86400)
 
 # ── Page: Welcome (Control Panel-style home) ──────────────────────────────────
 class WelcomePage(Page):
@@ -358,7 +439,7 @@ class WelcomePage(Page):
         body.setWordWrap(True)
         layout.addWidget(body)
 
-        app_setup_done = os.path.exists("/var/lib/kyth/default-flatpaks-v8-done")
+        app_setup_done = os.path.exists("/var/lib/kyth/default-flatpaks-v10-done")
         checklist = [
             (app_setup_done, "Default Apps", "Steam, bottles, and flatpaks installed.", "App Store"),
             (_flatpak_installed("com.brave.Browser"), "Browser", "Brave browser set up.", "App Store"),

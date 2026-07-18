@@ -34,8 +34,15 @@ def compose_on_first_init(load_mixins: Callable[[], tuple[type, ...]]):
                     mixins = load_mixins()
                     impl = type(shell_cls.__name__, (shell_cls, *mixins), {})
                     state["impl"] = impl
-                return object.__new__(impl)
-            return object.__new__(cls)
+                target = impl
+            else:
+                target = cls
+
+            base_cls = shell_cls.__mro__[1] if len(shell_cls.__mro__) > 1 else object
+            try:
+                return base_cls.__new__(target, *args, **kwargs)
+            except TypeError:
+                return object.__new__(target)
 
         shell_cls.__new__ = staticmethod(__new__)  # type: ignore[method-assign, assignment]
         return shell_cls
