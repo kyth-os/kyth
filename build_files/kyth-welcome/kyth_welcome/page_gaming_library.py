@@ -183,6 +183,8 @@ class _LibraryMixin:
 
     def _render_my_games(self, games: list[dict], cache: dict[str, str] | None = None):
         self._last_detected_games = games
+        if not hasattr(self, "_my_games_rows_layout"):
+            return
         self._clear_rows(self._my_games_rows_layout)
         if not games:
             self._my_games_summary_lbl.setText(

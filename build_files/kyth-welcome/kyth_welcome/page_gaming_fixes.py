@@ -90,6 +90,8 @@ class _FixesMixin:
         self._start_data_worker("streaming", _streaming_health_items)
 
     def _render_streaming_health(self, items: list[tuple[str, str, str]]):
+        if not hasattr(self, "_streaming_rows_layout"):
+            return
         self._clear_rows(self._streaming_rows_layout)
         for status, title, summary in items:
             self._streaming_rows_layout.addWidget(self._make_health_row(status, title, summary))

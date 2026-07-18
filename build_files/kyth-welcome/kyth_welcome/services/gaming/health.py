@@ -15,6 +15,7 @@ from .tools import (
 )
 from ..bootc import _has_staged_update
 from ..hardware import _detect_controllers, _find_ntfs_drives
+from ..process import _run_command
 from ..software import _is_flatpak_installed
 
 

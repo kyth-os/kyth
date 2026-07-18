@@ -358,7 +358,6 @@ class GamingPage(Page):
         self._switch_gaming_section(self._current_gaming_section)
         self._kick_section_refresh(seed)
         QTimer.singleShot(80, self._refresh_status)
-        self._refresh_ntfs_drives()
 
     def _ensure_gaming_section(self, key: str) -> None:
         """Build widgets for a gaming hub section the first time it is shown."""
@@ -422,6 +421,8 @@ class GamingPage(Page):
             )
         if key == "migration" and hasattr(self, "_saves_status_lbl"):
             self._saves_status_lbl.setText("Scanning save backup tools…")
+        if key == "migration" and hasattr(self, "_drive_combo"):
+            self._refresh_ntfs_drives()
         if key == "tuning":
             self._update_profile_builder()
 
@@ -643,7 +644,7 @@ class GamingPage(Page):
             "dashboard": self._health_rows_layout,
             "health": self._health_rows_layout,
             "checklist": self._checklist_rows_layout,
-            "streaming": self._streaming_rows_layout,
+            "streaming": getattr(self, "_streaming_rows_layout", None),
         }.get(key)
         if target is not None:
             self._clear_rows(target)
@@ -674,8 +675,10 @@ class GamingPage(Page):
     def _refresh_gaming_dashboard(self):
         self._set_rows_loading(self._health_rows_layout, "Checking launchers, Vulkan, Proton, controllers, and game drives…")
         self._set_rows_loading(self._checklist_rows_layout, "Checking first-week setup items…")
-        self._set_rows_loading(self._streaming_rows_layout, "Checking Discord, OBS, capture, audio, and camera tools…")
-        self._my_games_summary_lbl.setText("Scanning installed game libraries…")
+        if hasattr(self, "_streaming_rows_layout"):
+            self._set_rows_loading(self._streaming_rows_layout, "Checking Discord, OBS, capture, audio, and camera tools…")
+        if hasattr(self, "_my_games_summary_lbl"):
+            self._my_games_summary_lbl.setText("Scanning installed game libraries…")
         if hasattr(self, "_saves_status_lbl"):
             self._saves_status_lbl.setText("Scanning save backup tools…")
         self._start_data_worker("dashboard", _collect_gaming_dashboard)
@@ -699,7 +702,8 @@ class GamingPage(Page):
             self._checklist_rows_layout.addWidget(self._make_health_row(status, title, summary))
 
     def _refresh_status(self):
-        _apply_install_badge(self._mh_badge, _mangohud_installed())
+        if hasattr(self, "_mh_badge"):
+            _apply_install_badge(self._mh_badge, _mangohud_installed())
         if hasattr(self, "_gs_badge"):
             _apply_install_badge(self._gs_badge, _gamescope_installed())
         if hasattr(self, "_vk_badge"):
@@ -718,12 +722,13 @@ class GamingPage(Page):
             else:
                 self._scx_status_lbl.setText("sched-ext status unavailable.")
 
-        pc_ver = _proton_cachyos_version()
-        _apply_install_badge(self._pc_badge, bool(pc_ver), ok_text=pc_ver or "Installed")
-        self._pc_version_lbl.setText(
-            f"Installed: {pc_ver}" if pc_ver
-            else "Proton-CachyOS not found in compatibilitytools.d"
-        )
+        if hasattr(self, "_pc_badge"):
+            pc_ver = _proton_cachyos_version()
+            _apply_install_badge(self._pc_badge, bool(pc_ver), ok_text=pc_ver or "Installed")
+            self._pc_version_lbl.setText(
+                f"Installed: {pc_ver}" if pc_ver
+                else "Proton-CachyOS not found in compatibilitytools.d"
+            )
 
         if hasattr(self, "_ge_badge"):
             ge_ver = _compat_tool_version("GE-Proton")
@@ -733,7 +738,7 @@ class GamingPage(Page):
                 else "Not installed. Optional fallback runner; Proton-CachyOS remains the recommended default."
             )
 
-        for refs in self._tool_refs:
+        for refs in getattr(self, "_tool_refs", []):
             installed = _is_flatpak_installed(refs["tool"]["flatpak"])
             refs["install"].setVisible(not installed)
             refs["launch"].setVisible(installed)

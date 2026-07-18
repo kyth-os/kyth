@@ -10,7 +10,7 @@ from .services.gaming import (
 )
 from .services.hardware import _detect_nvidia
 from .services.launch import reboot
-from .services.process import _run_command
+from .services.process import _command_stdout, _run_command
 from .services.software import _is_flatpak_installed as _flatpak_installed
 from .services.updates import _current_branch
 from .services.welcome import (
