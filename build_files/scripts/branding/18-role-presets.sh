@@ -34,7 +34,7 @@ case "${profile}" in
         launchers=(
             "applications:kyth-welcome.desktop"
             "applications:kyth-app-store.desktop"
-            "applications:steam.desktop"
+            "applications:com.valvesoftware.Steam.desktop"
             "applications:com.brave.Browser.desktop"
             "applications:dev.vencord.Vesktop.desktop"
             "applications:org.kde.dolphin.desktop"
@@ -43,7 +43,7 @@ case "${profile}" in
         favorites=(
             "applications:kyth-welcome.desktop"
             "applications:kyth-app-store.desktop"
-            "applications:steam.desktop"
+            "applications:com.valvesoftware.Steam.desktop"
             "applications:com.brave.Browser.desktop"
             "applications:dev.vencord.Vesktop.desktop"
             "applications:org.kde.dolphin.desktop"
