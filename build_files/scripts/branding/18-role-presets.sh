@@ -64,6 +64,43 @@ join_by_comma() {
     local IFS=,
     printf '%s' "$*"
 }
+
+desktop_exists() {
+    local desktop="$1"
+    local path
+    for path in \
+        "/usr/share/applications/${desktop}" \
+        "/var/lib/flatpak/exports/share/applications/${desktop}" \
+        "${HOME}/.local/share/applications/${desktop}" \
+        "${HOME}/.local/share/flatpak/exports/share/applications/${desktop}"; do
+        if [[ -f "${path}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+append_if_available() {
+    local -n target_ref=$1
+    local launcher="$2"
+    local desktop="${launcher#applications:}"
+    if desktop_exists "${desktop}"; then
+        target_ref+=("${launcher}")
+    fi
+}
+
+filtered_launchers=()
+for launcher in "${launchers[@]}"; do
+    append_if_available filtered_launchers "${launcher}"
+done
+launchers=("${filtered_launchers[@]}")
+
+filtered_favorites=()
+for launcher in "${favorites[@]}"; do
+    append_if_available filtered_favorites "${launcher}"
+done
+favorites=("${filtered_favorites[@]}")
+
 launcher_csv="$(join_by_comma "${launchers[@]}")"
 favorite_csv="$(join_by_comma "${favorites[@]}")"
 tray_csv="org.kde.plasma.networkmanagement,org.kde.plasma.volume,org.kde.plasma.bluetooth,org.kde.plasma.battery,org.kde.plasma.notifications,org.kde.plasma.clipboard,org.kde.plasma.devicenotifier,org.kde.plasma.printmanager,org.kde.kdeconnect"

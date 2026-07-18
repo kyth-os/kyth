@@ -154,7 +154,7 @@ function addKythDefaultPanel(screen) {
     safeSet(panel, "screen", screen);
     panel.location = "bottom";
     panel.height = 42;
-    safeSet(panel, "alignment", "center");
+    safeSet(panel, "alignment", "left");
     safeSet(panel, "floating", false);
     safeSet(panel, "floatingApplets", false);
 
@@ -183,6 +183,8 @@ function addKythDefaultPanel(screen) {
 
     panel.addWidget("org.kde.plasma.marginsseparator");
 
+    panel.addWidget("org.kde.plasma.panelspacer");
+
     var tray = panel.addWidget("org.kde.plasma.systemtray");
     writeConfig(tray, ["General"], {
         "extraItems": trayItems,
@@ -190,8 +192,6 @@ function addKythDefaultPanel(screen) {
         "knownItems": trayItems + "," + hiddenTrayItems,
         "showAllItems": false
     });
-
-    panel.addWidget("org.kde.plasma.panelspacer");
 
     var clock = panel.addWidget("org.kde.plasma.digitalclock");
     writeConfig(clock, ["Appearance"], {
