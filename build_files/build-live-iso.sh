@@ -45,7 +45,14 @@ if [[ "$(git -C "${TITANOBOA_DIR}" rev-parse HEAD 2>/dev/null || true)" != "${TI
 fi
 
 echo "==> Building KythOS live payload from ${BASE_IMAGE}"
+# --pull=newer: re-fetch the base image when the registry has a newer digest.
+# Without it, a stale cached ${BASE_IMAGE} layer is silently reused, so a rebuild
+# after CI publishes fresh bits produces an ISO from the old OS. Skipped for
+# localhost/* images, which are loaded from Docker above and have no registry.
+pull_flag=(--pull=newer)
+[[ "${BASE_IMAGE}" == localhost/* ]] && pull_flag=()
 sudo podman build \
+	"${pull_flag[@]}" \
 	--cap-add SYS_ADMIN \
 	--security-opt label=disable \
 	--network host \
