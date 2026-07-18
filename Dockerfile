@@ -42,10 +42,11 @@ ARG HEADROOM_VERSION=0.26.0
 ARG HEADROOM_EXTRAS=proxy,code,relevance
 RUN --mount=type=bind,source=build_files/scripts/headroom.sh,target=/ctx/headroom.sh \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
-    --mount=type=cache,id=kyth-pip-cache,target=/root/.cache/pip \
+    --mount=type=cache,id=kyth-pip-cache,target=/var/cache/kyth-pip \
     --mount=type=tmpfs,dst=/tmp \
     HEADROOM_VERSION=${HEADROOM_VERSION} \
     HEADROOM_EXTRAS=${HEADROOM_EXTRAS} \
+    PIP_CACHE_DIR=/var/cache/kyth-pip \
     bash /ctx/headroom.sh
 
 # Build cache boundary: Proton-CachyOS (~700 MB).
