@@ -75,7 +75,7 @@ def list_timezones() -> list[str]:
         out = subprocess.check_output(
             ["timedatectl", "list-timezones"], text=True, timeout=5
         )
-        zones = [l.strip() for l in out.splitlines() if l.strip()]
+        zones = [ln.strip() for ln in out.splitlines() if ln.strip()]
         if zones:
             return zones
     except Exception:

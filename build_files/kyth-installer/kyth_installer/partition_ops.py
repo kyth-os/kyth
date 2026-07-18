@@ -5,19 +5,14 @@ transaction journal. Operations are validated before commit and the original
 partition table is backed up for rollback via sgdisk.
 """
 
-import json
-import os
 import shutil
 import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from .disk import (
-    _normal_device_path, list_partitions, list_free_space,
-    _safe_int, _block_size_bytes, _partition_number,
-    _partition_start_bytes, _partition_size_bytes,
-    _human_size, _latest_partition_on_disk,
+    _normal_device_path, list_partitions, _safe_int, _block_size_bytes, _partition_number,
+    _partition_start_bytes, _human_size, _latest_partition_on_disk,
 )
 from .runner import run_command
 from .system import _as_root
@@ -71,9 +66,10 @@ class Journal:
     """Transaction journal for partition operations on a single disk."""
 
     def __init__(self, disk: str):
-        self.disk = _normal_device_path(disk)
-        if not self.disk:
+        resolved = _normal_device_path(disk)
+        if not resolved:
             raise RuntimeError("Invalid disk path for journal.")
+        self.disk: str = resolved
         self.ops: list[dict] = []
         self._snapshot_saved = False
         self._committed = False
@@ -193,13 +189,8 @@ class Journal:
                     pass
 
             elif kind == "delete":
-                part_name = p.get("partition", "")
-                if part_name:
-                    existing = [x for x in list_partitions(self.disk) if x.get("name") == part_name]
-                    if existing and existing[0].get("efi"):
-                        pass
-                    part_num = _partition_number(part_name)
-                    allocated = [(s, e, n) for s, e, n in allocated if False]
+                # Deletion removes the need to track this partition's overlap
+                pass
 
         current_parts = list_partitions(self.disk)
         for part in current_parts:
@@ -247,7 +238,6 @@ class Journal:
                 size = _safe_int(p.get("size_bytes"), 0)
                 fs = p.get("fs_type", "btrfs")
                 label = p.get("label", "")
-                mount = p.get("mountpoint", "")
 
                 if start <= 0 or size <= 0:
                     raise RuntimeError(f"Create partition: invalid start {start} or size {size}.")

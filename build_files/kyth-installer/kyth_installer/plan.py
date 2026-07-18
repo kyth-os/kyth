@@ -54,7 +54,7 @@ from .disk import (
     list_free_space,
     list_partitions,
 )
-from .partition_ops import get_journal, reset_journal
+from .partition_ops import get_journal
 from .system import _as_root, unmount_target_disk
 from .runner import run_command
 

@@ -19,7 +19,7 @@ from . import config, install
 from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, _IS_LIVE_SESSION
 from .disk import _normal_device_path, _safe_int, find_efi_partition, list_disks, list_partitions, list_free_space
 from .partition_ops import (
-    FILESYSTEM_OPTIONS, Journal, get_journal, init_journal, reset_journal,
+    FILESYSTEM_OPTIONS, get_journal, init_journal, reset_journal,
 )
 from .plan import ROUTES, RouteSpec, _validate_storage_intent
 from .system import _as_root, _hash_password, list_timezones
