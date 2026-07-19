@@ -1,7 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _release_worker_when_finished, _restyle
-from ..qt import QHBoxLayout, QLabel, QVBoxLayout
-from ..widgets import _make_card
+from ..core_base import _restyle
+from ..qt import QLabel
 
 
 class _WinLibMixin:

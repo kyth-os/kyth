@@ -10,7 +10,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from .config import FILESYSTEM_OPTIONS, _FILESYSTEM
+# pylint: disable-next=unused-import
+from .config import FILESYSTEM_OPTIONS, _FILESYSTEM  # noqa: F401 — re-exported for server.py
 from .disk import (
     _normal_device_path, list_partitions, _safe_int, _block_size_bytes, _partition_number,
     _partition_start_bytes, _human_size, _latest_partition_on_disk,

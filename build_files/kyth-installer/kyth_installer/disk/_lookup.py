@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
-import sys
-from typing import Optional
 
 import kyth_installer.disk as _disk
 subprocess = _disk.subprocess
-
-from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES, _IS_LIVE_SESSION
 
 def find_efi_partition(disk: str) -> str:
     """Return the EFI partition path on disk, or on another safe disk as fallback, or ''."""

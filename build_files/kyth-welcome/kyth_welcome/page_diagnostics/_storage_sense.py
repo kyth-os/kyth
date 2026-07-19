@@ -5,13 +5,12 @@ from ..services.diagnostics import (
     storage_sense_run_now,
     storage_sense_set,
 )
-from ..qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton
 from ..widgets import _make_card
 
 
 class _StorageSenseMixin:
     def _make_storage_sense_card(self) -> QFrame:
-        from ..qt import QFrame
         card, layout = _make_card()
         title = QLabel("Storage Sense \u2014 automatic cleanup")
         title.setObjectName("card-title")

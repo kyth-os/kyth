@@ -1,11 +1,9 @@
 # __KYTH_GENERATED_IMPORTS__
 from ..core_base import _restyle
-from ..services.launch import flatpak_run
 from ..services.software import _is_flatpak_installed
 from ..qt import (  # noqa: E501
     QDesktopServices, QDialog, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QTextEdit, QUrl, QVBoxLayout,
 )
-from ..widgets import _make_card
 
 
 class _DetailsMixin:

@@ -4,7 +4,7 @@ import shutil
 from ..services.launch import popen
 from ..services.software import _chromium_app_window_cmd, _is_flatpak_installed
 from ..qt import (  # noqa: E501
-    QApplication, QCheckBox, QComboBox, QDBusConnection, QDBusInterface, QHBoxLayout, QLabel, QPushButton, QTimer,
+    QCheckBox, QComboBox, QDBusConnection, QDBusInterface, QHBoxLayout, QLabel, QPushButton,
 )
 from ..widgets import _make_card
 

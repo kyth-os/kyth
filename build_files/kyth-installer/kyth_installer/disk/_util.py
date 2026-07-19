@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import os
-import sys
-from typing import Optional
 
 import kyth_installer.disk as _disk
 subprocess = _disk.subprocess
-
-from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES, _IS_LIVE_SESSION
 
 def _safe_int(value, default: int = 0) -> int:
     try:
