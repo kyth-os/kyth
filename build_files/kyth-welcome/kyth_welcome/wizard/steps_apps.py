@@ -6,8 +6,9 @@ import shlex
 from ..core_base import _cancel_worker, _restyle
 from ..services.software import Worker, _finish_worker, _is_flatpak_installed
 from ..qt import (
-    QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QMessageBox, QProgressBar,
-    QPushButton, QTextEdit, QUrl, QVBoxLayout, QWidget,
+    QCheckBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QMessageBox,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QUrl,
+    QVBoxLayout, QWidget, Qt,
 )
 from ..widgets import _make_card, _set_log_panel
 
@@ -316,5 +317,4 @@ class _AppsStepMixin:
         self._wizard_install_btn.setEnabled(True)
         _restyle(self._wizard_install_status)
         self._update_nav()
-
 

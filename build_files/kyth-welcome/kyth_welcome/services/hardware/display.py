@@ -6,7 +6,7 @@ import os
 import re
 
 from .types import HardwareProbe
-from ..process import _command_stdout
+from ..process import _command_stdout, _run_command
 
 
 def _strip_ansi(text: str) -> str:
@@ -295,4 +295,3 @@ def _parse_kscreen_output(raw: str) -> HardwareProbe:
 
     return HardwareProbe("Display", "ok", summary, details)
  # _parse_kscreen_output
-

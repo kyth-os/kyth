@@ -1,6 +1,8 @@
 """Repair page — quick fixes, sleep, desktop helpers."""
 from __future__ import annotations
 
+import shlex
+
 from .core_base import _restyle
 from .services.launch import flatpak_run, kcmshell, popen, systemsettings
 from .services.repair import (
@@ -139,5 +141,4 @@ class _QuickFixMixin:
             self._status_lbl.setObjectName("status-err")
             _set_log_panel(self._log_toggle, self._log, True)
         _restyle(self._status_lbl)
-
 
