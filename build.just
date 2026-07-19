@@ -1,5 +1,7 @@
 # ── Build recipes ────────────────────────────────────────────────────────────
 # Imported by Justfile. Requires _internal.just for _build-bib and _rootful_load_image.
+import "_vars.just"
+import "_internal.just"
 
 # Build the base image from build_base/.
 [group('Build')]

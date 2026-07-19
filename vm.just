@@ -1,5 +1,6 @@
 # ── VM / QEMU recipes ───────────────────────────────────────────────────────
 # Imported by Justfile.
+import "_vars.just"
 
 # Run a virtual machine with the specified image type and configuration
 [private]

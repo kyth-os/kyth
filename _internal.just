@@ -1,5 +1,6 @@
 # ── Private helpers ──────────────────────────────────────────────────────────
 # Imported by Justfile. Not intended for direct invocation.
+import "_vars.just"
 
 # sudoif bash function
 [private]
