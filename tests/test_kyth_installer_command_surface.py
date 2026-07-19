@@ -293,6 +293,24 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         self.assertTrue(cleanup_calls)
         self.assertTrue([event for event in install._events if event.get("type") == "error"])
 
+    def test_bootc_to_disk_command_omits_acknowledge_destructive(self):
+        # bootc's `install to-disk` subcommand has no --acknowledge-destructive
+        # flag at all (only `to-filesystem` does) — passing it is a hard CLI
+        # parse error ("unexpected argument"), so every wipe install fails.
+        cmd = install._build_bootc_install_cmd(
+            "to-disk", "src", "tgt", "/dev/sda",
+            extra_flags=["--filesystem", "btrfs", "--wipe"],
+        )
+        self.assertNotIn("--acknowledge-destructive", cmd)
+        self.assertIn("--wipe", cmd)
+
+    def test_bootc_to_filesystem_command_keeps_acknowledge_destructive(self):
+        cmd = install._build_bootc_install_cmd(
+            "to-filesystem", "src", "tgt", "/mnt/target",
+            extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@"],
+        )
+        self.assertIn("--acknowledge-destructive", cmd)
+
     def test_worker_fails_closed_when_not_root(self):
         install._events.clear()
         with mock.patch.object(install, "require_root", side_effect=RuntimeError("must run as root")):

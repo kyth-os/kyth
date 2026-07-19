@@ -68,8 +68,13 @@ def _build_bootc_install_cmd(
         "bootc", "install", subcmd,
         "--source-imgref", src_ref,
         "--target-imgref", tgt_ref,
-        "--acknowledge-destructive",
     ]
+    # --acknowledge-destructive only exists on `to-filesystem` (it silences the
+    # warning when the target is the running system's root). `to-disk` has no
+    # such flag at all — bootc rejects it with "unexpected argument" — and
+    # relies solely on --wipe to confirm the destructive intent.
+    if subcmd == "to-filesystem":
+        cmd.append("--acknowledge-destructive")
     if extra_flags:
         cmd.extend(extra_flags)
     if SKIP_FETCH_CHECK:
