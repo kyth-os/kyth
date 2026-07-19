@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 
 LogFn = Callable[[str], None]
+_SAFE_DEVICE_ARG_RE = re.compile(r"^/dev/[A-Za-z0-9._/+:-]+$")
 
 
 @dataclass(frozen=True)
@@ -19,6 +22,21 @@ def _format_command(argv: Sequence[object]) -> str:
     return " ".join(str(part) for part in argv)
 
 
+def _validate_command_arg(arg: str) -> str:
+    if not arg:
+        raise RuntimeError("Refusing to execute command with empty argument.")
+    if "\x00" in arg or "\n" in arg or "\r" in arg:
+        raise RuntimeError("Refusing to execute command with control characters in arguments.")
+
+    if arg.startswith("/dev/"):
+        real = os.path.realpath(arg)
+        if not real.startswith("/dev/") or not _SAFE_DEVICE_ARG_RE.fullmatch(real):
+            raise RuntimeError(f"Refusing unsafe device path argument: {arg}")
+        return real
+
+    return arg
+
+
 def run_command(
     argv: Sequence[object],
     *,
@@ -27,7 +45,7 @@ def run_command(
     timeout: int | None = None,
     **kwargs,
 ):
-    command = [str(part) for part in argv]
+    command = [_validate_command_arg(str(part)) for part in argv]
     label = description or _format_command(command)
     if log is not None:
         log(f"$ {_format_command(command)}")
