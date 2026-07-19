@@ -6,10 +6,13 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 
-from kyth_welcome.services import gaming, hardware  # noqa: E402
-from kyth_welcome.services.gaming.steam import _parse_steam_acf_text  # noqa: E402
-from kyth_welcome.services.hardware.display import _format_display_mode, _strip_ansi  # noqa: E402
-from kyth_welcome.services.hardware.types import HardwareProbe  # noqa: E402
+try:
+    from kyth_welcome.services import gaming, hardware  # noqa: E402
+    from kyth_welcome.services.gaming.steam import _parse_steam_acf_text  # noqa: E402
+    from kyth_welcome.services.hardware.display import _format_display_mode, _strip_ansi  # noqa: E402
+    from kyth_welcome.services.hardware.types import HardwareProbe  # noqa: E402
+except ImportError:
+    raise unittest.SkipTest("PyQt6/PySide6 required by kyth_welcome.core_base → qt imports")
 
 
 class HardwarePackageTests(unittest.TestCase):
