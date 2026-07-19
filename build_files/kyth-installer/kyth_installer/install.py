@@ -105,6 +105,7 @@ def _run_cmd(
     monitor_stop = threading.Event()
     recent_output: deque[str] = deque(maxlen=30)
     tracker: _NetStatsTracker | None = None
+    output_state: dict = {}
 
     def _net_monitor() -> None:
         nonlocal tracker

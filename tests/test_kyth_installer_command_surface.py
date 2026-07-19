@@ -311,6 +311,40 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         )
         self.assertIn("--acknowledge-destructive", cmd)
 
+    def test_run_cmd_net_monitor_survives_layers_needed_line(self):
+        # output_state was referenced by _net_monitor and emit_line but never
+        # assigned anywhere in _run_cmd's scope. emit_line's write hit a bare
+        # `except Exception: pass`; _net_monitor's read crashed the daemon
+        # thread on its very first loop tick with an unhandled NameError —
+        # silently, since nothing joins or checks daemon thread health. The
+        # actual bootc install kept running fine; progress/stats just froze
+        # at 0 forever with no error anywhere to reveal why. Exercises the
+        # real thread (not mocked) so a regression here reproduces the bug.
+        logs = []
+        progress_values = []
+        pushed = []
+        cmd = [
+            sys.executable, "-c",
+            "print('layers already present: 0; layers needed: 1 (1 MB)', flush=True); "
+            "import time; time.sleep(1.5)",
+        ]
+        with mock.patch.object(install, "_as_root", side_effect=lambda c: c), \
+             mock.patch.object(install, "_push", side_effect=pushed.append):
+            install._run_cmd(
+                cmd, 5, 90, logs.append, progress_values.append,
+                stall_timeout=10, absolute_timeout=10,
+            )
+
+        stats_events = [e for e in pushed if e.get("type") == "stats"]
+        self.assertTrue(
+            stats_events,
+            "net monitor never pushed a stats event — output_state is likely undefined again",
+        )
+        # Exact fraction is environment-dependent (real /proc/net/dev rx bytes
+        # may tick slightly between rx_start capture and the first sample) —
+        # what matters is the monitor thread ran at all, not the precise value.
+        self.assertTrue(any(5 <= v <= 90 for v in progress_values))
+
     def test_worker_fails_closed_when_not_root(self):
         install._events.clear()
         with mock.patch.object(install, "require_root", side_effect=RuntimeError("must run as root")):
