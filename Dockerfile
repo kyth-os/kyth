@@ -38,7 +38,7 @@ RUN --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/
 # Headroom context compression CLI/proxy for AI coding workflows.
 # Installed into its own virtualenv so PyPI dependencies do not modify Fedora's
 # system Python. Bump HEADROOM_VERSION when KythOS intentionally updates it.
-ARG HEADROOM_VERSION=0.26.0
+ARG HEADROOM_VERSION=0.27.0
 ARG HEADROOM_EXTRAS=proxy,code,relevance
 RUN --mount=type=bind,source=build_files/scripts/headroom.sh,target=/ctx/headroom.sh \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
@@ -107,6 +107,7 @@ COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev /ctx/
 RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx/sysconfig-static.sh \
     --mount=type=bind,source=build_files/scripts/sysconfig,target=/ctx/sysconfig \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
+    --mount=type=bind,source=build_files/data,target=/ctx/data \
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig-static.sh
 
