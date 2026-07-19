@@ -22,6 +22,8 @@ from .disk import get_root_partition
 from .imagesrc import _friendly_network_error, _install_images, _network_preflight
 from .plan import _get_manual_mounts, _prepare_install_plan, _validate_install_target, _validate_storage_intent
 from .runner import run_command
+from kyth_shared import _NetStatsTracker, _get_rx_bytes, _parse_size_bytes  # noqa: F401
+
 from .system import (
     _as_root,
     _try_stage_mok_enrollment,
@@ -55,32 +57,25 @@ def _push(event: dict) -> None:
         _new_event.notify_all()
 
 
-def _get_rx_bytes() -> int:
-    try:
-        total = 0
-        with open("/proc/net/dev") as f:
-            for line in f:
-                if ":" not in line:
-                    continue
-                iface, data = line.split(":", 1)
-                if iface.strip() == "lo":
-                    continue
-                total += int(data.split()[0])
-        return total
-    except Exception:
-        return 0
-
-
-def _parse_size_bytes(size_str: str) -> int:
-    try:
-        parts = size_str.strip().split()
-        value = float(parts[0])
-        unit  = parts[1].upper().rstrip("B") if len(parts) > 1 else ""
-        unit  = unit.replace("I", "")  # normalize GiB/MiB → GB/MB
-        mult  = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
-        return int(value * mult.get(unit, 0))
-    except Exception:
-        return 0
+def _build_bootc_install_cmd(
+    subcmd: str,
+    src_ref: str,
+    tgt_ref: str,
+    target: str,
+    extra_flags: list[str] | None = None,
+) -> list[str]:
+    cmd: list[str] = [
+        "bootc", "install", subcmd,
+        "--source-imgref", src_ref,
+        "--target-imgref", tgt_ref,
+        "--acknowledge-destructive",
+    ]
+    if extra_flags:
+        cmd.extend(extra_flags)
+    if SKIP_FETCH_CHECK:
+        cmd.append("--skip-fetch-check")
+    cmd.append(target)
+    return cmd
 
 
 def _run_cmd(
@@ -104,34 +99,26 @@ def _run_cmd(
 
     monitor_stop = threading.Event()
     recent_output: deque[str] = deque(maxlen=30)
-    output_state = {"total": 0, "rx_start": 0}
+    tracker: _NetStatsTracker | None = None
 
     def _net_monitor() -> None:
-        rx_prev = 0
-        t_prev  = time.monotonic()
-        speed_samples: deque[float] = deque(maxlen=5)
+        nonlocal tracker
         while not monitor_stop.wait(1):
-            if output_state["total"] <= 0 or output_state["rx_start"] <= 0:
+            total = output_state.get("total", 0)
+            rx_start = output_state.get("rx_start", 0)
+            if total <= 0 or rx_start <= 0:
+                tracker = None
                 continue
-            rx_now     = _get_rx_bytes()
-            t_now      = time.monotonic()
-            downloaded = min(output_state["total"], max(0, rx_now - output_state["rx_start"]))
-            frac       = min(0.95, downloaded / output_state["total"])
+            if tracker is None:
+                tracker = _NetStatsTracker(total, rx_start)
+            stats = tracker.tick(_get_rx_bytes())
+            frac = min(0.95, stats["downloaded"] / total)
             progress(int(pct_start + frac * (pct_end - pct_start)))
-            dt = t_now - t_prev
-            delta = max(0, rx_now - rx_prev)
-            if dt > 0 and rx_prev > 0 and delta > 0:
-                speed_samples.append(delta / dt)
-            rx_prev = rx_now
-            t_prev  = t_now
-            if speed_samples:
-                avg_speed = sum(speed_samples) / len(speed_samples)
-                remaining = max(0, output_state["total"] - downloaded)
-                _push({"type": "stats",
-                       "downloaded": downloaded,
-                       "total":      output_state["total"],
-                       "speed":      int(avg_speed),
-                       "eta_sec":    int(remaining / avg_speed) if avg_speed > 0 else 0})
+            _push({"type": "stats",
+                   "downloaded": stats["downloaded"],
+                   "total":      total,
+                   "speed":      stats["speed"],
+                   "eta_sec":    stats["eta_sec"]})
 
     monitor_thread = threading.Thread(target=_net_monitor, daemon=True)
     monitor_thread.start()
@@ -323,37 +310,20 @@ def _prepare_install_storage(
                 )
                 log(f"EFI mounted from {efi_part}")
 
-        install_cmd = [
-            "bootc", "install", "to-filesystem",
-            "--source-imgref", src_ref,
-            "--target-imgref", tgt_ref,
-            "--acknowledge-destructive",
-            "--karg=rootflags=subvol=@",
-            # By default bootc "finalizes" the target at the end of the
-            # install (fstrim + remount read-only), which would break the
-            # Phase 2 mkdir/mount/fstab edits below — config_root is this
-            # same mount, not a fresh one like the to-disk path uses.
-            "--skip-finalize",
-        ]
-        if SKIP_FETCH_CHECK:
-            install_cmd.append("--skip-fetch-check")
-        install_cmd.append(alongside_mount)
+        install_cmd = _build_bootc_install_cmd(
+            "to-filesystem", src_ref, tgt_ref, alongside_mount,
+            extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@"],
+        )
         _run_cmd(install_cmd, 12, 90, log, progress, stall_timeout=3600, absolute_timeout=None)
 
         root_part = target_part
 
     else:
         unmount_target_disk(disk, log)
-        install_cmd = [
-            "bootc", "install", "to-disk",
-            "--source-imgref", src_ref,
-            "--target-imgref", tgt_ref,
-            "--filesystem", "btrfs",
-            "--wipe",
-        ]
-        if SKIP_FETCH_CHECK:
-            install_cmd.append("--skip-fetch-check")
-        install_cmd.append(disk)
+        install_cmd = _build_bootc_install_cmd(
+            "to-disk", src_ref, tgt_ref, disk,
+            extra_flags=["--filesystem", "btrfs", "--wipe"],
+        )
         _run_cmd(install_cmd, 5, 90, log, progress, stall_timeout=3600, absolute_timeout=None)
         root_part = get_root_partition(disk)
     return target_part, root_part, alongside_mount

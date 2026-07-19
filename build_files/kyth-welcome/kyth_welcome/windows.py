@@ -5,7 +5,7 @@ from .core_base import (
     _IS_LIVE, _load_profile, _restyle,
     _running_threads,
 )
-from .services.updates import _current_branch
+from .core_base import _current_branch
 from .page_registry import (
     PROBLEM_ROUTES, SEARCH_ALIASES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups,
 )

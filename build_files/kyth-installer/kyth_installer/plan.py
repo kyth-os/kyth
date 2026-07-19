@@ -55,7 +55,7 @@ from .disk import (
     list_partitions,
 )
 from .partition_ops import get_journal
-from .system import _as_root, unmount_target_disk
+from .system import _as_root, _settle, unmount_target_disk
 from .runner import run_command
 
 
@@ -176,11 +176,6 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
     raise RuntimeError(f"Unsupported install mode: {mode}")
 
 
-def _settle_block_devices():
-    run_command(_as_root(["partprobe"]), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-    run_command(["udevadm", "settle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-
-
 def _is_gpt_disk(disk: str) -> bool:
     try:
         out = subprocess.check_output(
@@ -234,12 +229,12 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     bios_end = gap_start + BIOS_BOOT_BYTES - sector
     log("Creating BIOS boot partition for GRUB...")
     run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "biosboot", f"{gap_start}B", f"{bios_end}B"]), check=True, timeout=120)
-    _settle_block_devices()
+    _settle()
     created = _latest_partition_on_disk(disk, before)
     if not created:
         raise RuntimeError("The installer could not find the new BIOS boot partition after partitioning.")
     run_command(_as_root(["parted", "-s", disk, "set", str(_partition_number(created)), "bios_grub", "on"]), check=True, timeout=120)
-    _settle_block_devices()
+    _settle()
     return bios_end + sector
 
 
@@ -349,14 +344,14 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
         _as_root(["parted", "---pretend-input-tty", disk, "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
         input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True, timeout=120,
     )
-    _settle_block_devices()
+    _settle()
 
     btrfs_start = _ensure_bios_boot_partition(disk, new_end + sector, log)
     before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
     log("Creating KythOS Btrfs partition in freed space...")
     run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{old_end}B"]), check=True, timeout=120)
-    _settle_block_devices()
+    _settle()
 
     created = _latest_partition_on_disk(disk, before)
     if not created:
@@ -412,7 +407,7 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     log(f"Creating KythOS Btrfs partition in {_human_size(end - start)} of free space...")
     sector = _block_size_bytes(disk)
     run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{start}B", f"{end - sector}B"]), check=True, timeout=120)
-    _settle_block_devices()
+    _settle()
 
     created = _latest_partition_on_disk(disk, before)
     if not created:

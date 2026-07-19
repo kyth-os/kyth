@@ -11,7 +11,8 @@ import subprocess
 import time
 
 from ..qt import QThread, Signal
-from .process import _get_rx_bytes, _invalidate_probe_caches
+from kyth_shared import _NetStatsTracker, _get_rx_bytes
+from .process import _invalidate_probe_caches
 
 _ACTIVE_THREADS: set = set()
 
@@ -150,36 +151,17 @@ class DownloadMonitor(TrackedThread):
 
     def __init__(self, total_bytes: int, rx_start: int):
         super().__init__()
-        self._total = total_bytes
-        self._rx_start = rx_start
+        self._tracker = _NetStatsTracker(total_bytes, rx_start)
         self._stop = False
 
     def stop(self):
         self._stop = True
 
     def run(self):
-        rx_prev = 0
-        t_prev = time.monotonic()
-        speed_samples: list[float] = []
-
         while not self._stop:
             time.sleep(1)
-            rx_now = _get_rx_bytes()
-            t_now = time.monotonic()
-            downloaded = min(self._total, max(0, rx_now - self._rx_start))
-
-            dt = t_now - t_prev
-            if dt > 0 and rx_prev > 0:
-                speed_samples.append((rx_now - rx_prev) / dt)
-                if len(speed_samples) > 5:
-                    speed_samples.pop(0)
-            rx_prev = rx_now
-            t_prev = t_now
-
-            avg_speed = int(sum(speed_samples) / len(speed_samples)) if speed_samples else 0
-            remaining = max(0, self._total - downloaded)
-            eta_sec = int(remaining / avg_speed) if avg_speed > 0 else 0
-            self.stats.emit(downloaded, self._total, avg_speed, eta_sec)
+            stats = self._tracker.tick(_get_rx_bytes())
+            self.stats.emit(stats["downloaded"], stats["total"], stats["speed"], stats["eta_sec"])
 
 
 class DataWorker(TrackedThread):

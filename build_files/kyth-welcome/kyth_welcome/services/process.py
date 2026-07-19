@@ -130,23 +130,6 @@ def _probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
     return value
 
 
-def _get_rx_bytes() -> int:
-    """Sum RX bytes across all non-loopback interfaces from /proc/net/dev."""
-    try:
-        total = 0
-        with open("/proc/net/dev") as f:
-            for line in f:
-                if ":" not in line:
-                    continue
-                iface, data = line.split(":", 1)
-                if iface.strip() == "lo":
-                    continue
-                total += int(data.split()[0])
-        return total
-    except Exception:
-        return 0
-
-
 def _get_disk_write_bytes() -> int:
     """Sum write bytes across all block devices from /proc/diskstats."""
     try:
@@ -161,29 +144,4 @@ def _get_disk_write_bytes() -> int:
         return 0
 
 
-def _parse_size_bytes(size_str: str) -> int:
-    """Parse '8.3 GB' or '500 MB' to bytes. Returns 0 on failure."""
-    try:
-        parts = size_str.strip().split()
-        value = float(parts[0])
-        unit = parts[1].upper().rstrip("B") if len(parts) > 1 else ""
-        mult = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
-        return int(value * mult.get(unit, 0))
-    except Exception:
-        return 0
-
-
-def _human_bytes(n: int) -> str:
-    """Format bytes as a human-readable string."""
-    for unit, threshold in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
-        if abs(n) >= threshold:
-            return f"{n / threshold:.1f} {unit}"
-    return f"{n} B"
-
-
-def _human_bytes_pair(downloaded: int, total: int) -> tuple[str, str]:
-    """Format a downloaded/total pair using the same unit, anchored to total."""
-    for unit, threshold in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
-        if abs(total) >= threshold:
-            return f"{downloaded / threshold:.1f}", f"{total / threshold:.1f} {unit}"
-    return str(downloaded), f"{total} B"
+from kyth_shared import _get_rx_bytes, _human_bytes, _human_bytes_pair, _parse_size_bytes  # noqa: F401

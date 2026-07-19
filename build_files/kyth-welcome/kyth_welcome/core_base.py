@@ -87,15 +87,6 @@ _SYNC_INTERVAL_MS = 5 * 60 * 1000  # 5 minutes
 _WIZARD_SENTINEL = os.path.expanduser("~/.config/kyth-welcome-done")
 _SMB_CONFIG = os.path.expanduser("~/.config/kyth-smb-shares.json")
 _SMB_CREDS_DIR = "/etc/kyth-smb-creds"
-_PROTONDB_CACHE_PATH = os.path.expanduser("~/.cache/kyth-protondb.json")
-_PROTONDB_TIER_STYLE: dict[str, tuple[str, str]] = {
-    "platinum": ("#102010", "#7ee8a2"),
-    "gold":     ("#2b2410", "#d4a843"),
-    "silver":   ("#181e2b", "#8cadcf"),
-    "bronze":   ("#2b1a10", "#c47c4a"),
-    "borked":   ("#3a1010", "#f48771"),
-    "pending":  ("#252526", "#858585"),
-}
 
 
 _IS_LIVE = _is_live_session()

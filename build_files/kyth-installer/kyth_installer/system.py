@@ -17,6 +17,11 @@ def _as_root(cmd: list[str]) -> list[str]:
     return cmd if os.geteuid() == 0 else ["sudo", "-n", *cmd]
 
 
+def _settle():
+    run_command(_as_root(["partprobe"]), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+    run_command(["udevadm", "settle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+
+
 def require_root() -> None:
     """Refuse to continue unless the process is already privileged.
 

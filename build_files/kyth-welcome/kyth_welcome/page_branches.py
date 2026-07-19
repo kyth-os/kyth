@@ -9,9 +9,7 @@ from .core_base import (
 from .services.software import (
     Worker, _finish_worker,
 )
-from .services.updates import (
-    REGISTRY, _bootc_image_digest, _current_branch,
-)
+from .core_base import REGISTRY, _bootc_image_digest, _current_branch
 from .qt import (  # noqa: E501
     QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,
 )

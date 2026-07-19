@@ -5,15 +5,13 @@ import shutil
 import subprocess
 from urllib.parse import urlsplit
 
+from ..core_base import _IS_LIVE
 from .process import (
     _FLATPAK_CACHE_TTL,
     _command_stdout,
-    _is_live_session,
     _probe_cached,
     _run_command,
 )
-
-_IS_LIVE = _is_live_session()
 
 
 def __getattr__(name: str):

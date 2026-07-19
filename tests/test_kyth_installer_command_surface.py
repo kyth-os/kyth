@@ -43,7 +43,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 )
 
     def test_discovery_modules_keep_subprocess_boundary_explicit(self):
-        discovery_modules = {"disk.py"}
+        discovery_modules = {"disk/__init__.py"}
         for filename in discovery_modules:
             with self.subTest(filename=filename):
                 text = (INSTALLER / filename).read_text()

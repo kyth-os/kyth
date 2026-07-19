@@ -7,9 +7,7 @@ from .core_base import (
 )
 from .services.diagnostics import _command_stdout
 from .services.gaming import TrackedThread
-from .services.updates import (
-    _bootc_image_digest, _current_branch,
-)
+from .core_base import _bootc_image_digest, _current_branch
 from .qt import (  # noqa: E501
     QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl, Signal,
 )

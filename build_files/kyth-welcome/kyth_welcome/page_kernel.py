@@ -9,9 +9,7 @@ from .services.diagnostics import _command_stdout
 from .services.software import (
     Worker, _finish_worker,
 )
-from .services.updates import (
-    REGISTRY, _current_branch,
-)
+from .core_base import REGISTRY, _current_branch
 from .qt import (  # noqa: E501
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QTimer,
 )

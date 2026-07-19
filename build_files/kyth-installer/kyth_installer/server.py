@@ -51,6 +51,21 @@ def _route_for(method: str, path: str) -> RouteSpec | None:
     return None
 
 
+def _journal_for(body: dict) -> tuple[str | None, object | None, dict | None]:
+    """Validate ``body`` has a disk and return (disk, journal, error)."""
+    disk = _normal_device_path(body.get("disk", ""))
+    if not disk:
+        return None, None, {"ok": False, "message": "No disk specified."}
+    journal = get_journal()
+    if not journal or journal.disk != disk:
+        return None, None, {
+            "ok": False,
+            "message": "No active partition journal for this disk. "
+            "Create a new partition table first.",
+        }
+    return disk, journal, None
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
@@ -217,13 +232,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == ROUTES["create_partition"]:
-            disk = _normal_device_path(body.get("disk", ""))
-            if not disk:
-                self._json({"ok": False, "message": "No disk specified."}, status=400)
-                return
-            journal = get_journal()
-            if not journal or journal.disk != disk:
-                self._json({"ok": False, "message": "No active partition journal for this disk. Create a new partition table first."}, status=400)
+            disk, journal, err = _journal_for(body)
+            if err:
+                self._json(err, status=400)
                 return
             start = _safe_int(body.get("start_bytes"), -1)
             size = _safe_int(body.get("size_bytes"), -1)
@@ -245,14 +256,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == ROUTES["delete_partition"]:
-            disk = _normal_device_path(body.get("disk", ""))
+            disk, journal, err = _journal_for(body)
             partition = _normal_device_path(body.get("partition", ""))
-            if not disk or not partition:
+            if err or not partition:
                 self._json({"ok": False, "message": "Disk and partition are required."}, status=400)
-                return
-            journal = get_journal()
-            if not journal or journal.disk != disk:
-                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
                 return
             parts = {p["name"]: p for p in list_partitions(disk)}
             if partition not in parts:
@@ -266,15 +273,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == ROUTES["resize_partition"]:
-            disk = _normal_device_path(body.get("disk", ""))
+            disk, journal, err = _journal_for(body)
             partition = _normal_device_path(body.get("partition", ""))
             new_size = _safe_int(body.get("new_size_bytes"), -1)
-            if not disk or not partition or new_size < 1:
+            if err or not partition or new_size < 1:
                 self._json({"ok": False, "message": "Disk, partition, and new size are required."}, status=400)
-                return
-            journal = get_journal()
-            if not journal or journal.disk != disk:
-                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
                 return
             parts = {p["name"]: p for p in list_partitions(disk)}
             if partition not in parts:
@@ -289,18 +292,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == ROUTES["format_partition"]:
-            disk = _normal_device_path(body.get("disk", ""))
+            disk, journal, err = _journal_for(body)
             partition = _normal_device_path(body.get("partition", ""))
             fs_type = body.get("fs_type", "btrfs")
-            if not disk or not partition:
+            if err or not partition:
                 self._json({"ok": False, "message": "Disk and partition are required."}, status=400)
                 return
             if not any(f["id"] == fs_type for f in FILESYSTEM_OPTIONS):
                 self._json({"ok": False, "message": f"Unsupported filesystem: {fs_type}"}, status=400)
-                return
-            journal = get_journal()
-            if not journal or journal.disk != disk:
-                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
                 return
             label = body.get("label", "")
             journal.add_op("format", {"partition": partition, "fs_type": fs_type, "label": label})
@@ -308,31 +307,23 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == ROUTES["set_mountpoint"]:
-            disk = _normal_device_path(body.get("disk", ""))
+            disk, journal, err = _journal_for(body)
             partition = _normal_device_path(body.get("partition", ""))
             mountpoint = body.get("mountpoint", "").strip()
-            if not disk or not partition:
+            if err or not partition:
                 self._json({"ok": False, "message": "Disk and partition are required."}, status=400)
                 return
             if mountpoint and not mountpoint.startswith("/"):
                 self._json({"ok": False, "message": "Mount point must be an absolute path (e.g. /, /home)."}, status=400)
-                return
-            journal = get_journal()
-            if not journal or journal.disk != disk:
-                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
                 return
             journal.add_op("set_mountpoint", {"partition": partition, "mountpoint": mountpoint})
             self._json({"ok": True, "pending": len(journal.ops)})
             return
 
         if route == ROUTES["commit_partitions"]:
-            disk = _normal_device_path(body.get("disk", ""))
-            if not disk:
-                self._json({"ok": False, "message": "No disk specified."}, status=400)
-                return
-            journal = get_journal()
-            if not journal or journal.disk != disk:
-                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
+            disk, journal, err = _journal_for(body)
+            if err:
+                self._json(err, status=400)
                 return
             errors = journal.validate()
             if errors:
@@ -349,13 +340,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == ROUTES["rollback_partitions"]:
-            disk = _normal_device_path(body.get("disk", ""))
-            if not disk:
-                self._json({"ok": False, "message": "No disk specified."}, status=400)
-                return
-            journal = get_journal()
-            if not journal or journal.disk != disk:
-                self._json({"ok": False, "message": "No active journal for this disk."}, status=400)
+            disk, journal, err = _journal_for(body)
+            if err:
+                self._json(err, status=400)
                 return
             try:
                 journal.rollback(lambda msg: None)

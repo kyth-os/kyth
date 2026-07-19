@@ -1,8 +1,8 @@
-/* KythOS — Cockpit WebUI branding
- * Tokyo Night color palette */
+/* Graffiti OS — Cockpit WebUI branding
+ * Classic spray palette */
 
 :root {
-    --ct-color-host-accent: #7aa2f7;
+    --ct-color-host-accent: #e12c2c;
 }
 
 /* Login page (if ever shown) */

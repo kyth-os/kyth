@@ -10,20 +10,13 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from .config import FILESYSTEM_OPTIONS, _FILESYSTEM
 from .disk import (
     _normal_device_path, list_partitions, _safe_int, _block_size_bytes, _partition_number,
     _partition_start_bytes, _human_size, _latest_partition_on_disk,
 )
 from .runner import run_command
-from .system import _as_root
-
-FILESYSTEM_OPTIONS = [
-    {"id": "btrfs", "name": "Btrfs", "root_ok": True, "efi_ok": False},
-    {"id": "ext4", "name": "ext4", "root_ok": False, "efi_ok": False},
-    {"id": "xfs", "name": "XFS", "root_ok": False, "efi_ok": False},
-    {"id": "fat32", "name": "FAT32", "root_ok": False, "efi_ok": True},
-    {"id": "linux-swap", "name": "Swap", "root_ok": False, "efi_ok": False},
-]
+from .system import _as_root, _settle
 
 _BACKUP_PATH = Path("/tmp/kyth-partition-backup")
 _current_journal: Optional["Journal"] = None
@@ -40,26 +33,14 @@ def _require_parted(log=None):
 
 
 def _require_mkfs(fstype: str, log=None):
-    mapper = {
-        "btrfs": "mkfs.btrfs",
-        "ext4": "mkfs.ext4",
-        "xfs": "mkfs.xfs",
-        "fat32": "mkfs.fat",
-        "linux-swap": "mkswap",
-    }
-    binary = mapper.get(fstype)
-    if not binary:
+    info = _FILESYSTEM.get(fstype)
+    if not info:
         raise RuntimeError(f"Unsupported filesystem type: {fstype}")
-    if not shutil.which(binary):
+    if not shutil.which(info["binary"]):
         raise RuntimeError(
-            f"{binary} is not available in the live environment. "
+            f"{info['binary']} is not available in the live environment. "
             f"Cannot create {fstype} filesystems."
         )
-
-
-def _settle():
-    run_command(_as_root(["partprobe"]), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-    run_command(["udevadm", "settle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
 
 
 class Journal:
@@ -335,14 +316,10 @@ class Journal:
 
 
 def _mkfs_cmd(fstype: str, device: str, label: str = "") -> list[str]:
-    mapper = {
-        "btrfs": ["mkfs.btrfs", "-f"],
-        "ext4": ["mkfs.ext4", "-F"],
-        "xfs": ["mkfs.xfs", "-f"],
-        "fat32": ["mkfs.fat", "-F32"],
-        "linux-swap": ["mkswap"],
-    }
-    cmd = list(mapper.get(fstype, []))
+    info = _FILESYSTEM.get(fstype)
+    if not info:
+        return []
+    cmd = list(info["args"])
     if label:
         if fstype == "fat32":
             cmd.extend(["-n", label])

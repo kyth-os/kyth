@@ -32,3 +32,19 @@ BIOS_BOOT_GUID = "21686148-6449-6e6f-744e-656564454649"
 MIN_KYTHOS_GIB = 32
 MIN_KYTHOS_BYTES = MIN_KYTHOS_GIB * 1024**3
 BIOS_BOOT_BYTES = 1024**2
+
+# ── Canonical filesystem metadata ──────────────────────────────────────
+# Single source of truth consumed by partition_ops (mkfs, validation) and
+# server (GET /filesystems).  Keep these in sync — no parallel dicts.
+_FILESYSTEM = {
+    "btrfs":      {"binary": "mkfs.btrfs", "args": ["-f"],     "name": "Btrfs", "root_ok": True,  "efi_ok": False},
+    "ext4":       {"binary": "mkfs.ext4",  "args": ["-F"],     "name": "ext4",  "root_ok": False, "efi_ok": False},
+    "xfs":        {"binary": "mkfs.xfs",   "args": ["-f"],     "name": "XFS",   "root_ok": False, "efi_ok": False},
+    "fat32":      {"binary": "mkfs.fat",   "args": ["-F32"],   "name": "FAT32", "root_ok": False, "efi_ok": True},
+    "linux-swap": {"binary": "mkswap",     "args": [],         "name": "Swap",  "root_ok": False, "efi_ok": False},
+}
+
+FILESYSTEM_OPTIONS = [
+    {"id": k, "name": v["name"], "root_ok": v["root_ok"], "efi_ok": v["efi_ok"]}
+    for k, v in _FILESYSTEM.items()
+]

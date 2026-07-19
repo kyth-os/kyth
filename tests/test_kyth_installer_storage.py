@@ -439,7 +439,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "_block_size_bytes", return_value=512), \
              patch.object(self.plan, "list_partitions", list_partitions_mock), \
              patch.object(disk, "list_partitions", list_partitions_mock), \
-             patch.object(self.plan, "_settle_block_devices"), \
+             patch.object(self.plan, "_settle"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan, "run_command", side_effect=fake_run):
             created = self.plan._prepare_ntfs_resize_target(
@@ -487,7 +487,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/sda2"), \
              patch.object(self.plan, "_partition_number", return_value=2), \
              patch.object(self.plan, "_block_size_bytes", return_value=512), \
-             patch.object(self.plan, "_settle_block_devices"), \
+             patch.object(self.plan, "_settle"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan, "run_command", side_effect=fake_run):
             btrfs_start = self.plan._ensure_bios_boot_partition("/dev/sda", gap_start, lambda _msg: None)
@@ -593,7 +593,7 @@ class InstallerPlanTests(unittest.TestCase):
              ]), \
              patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/nvme0n1p2"), \
              patch.object(self.plan, "_block_size_bytes", return_value=512), \
-             patch.object(self.plan, "_settle_block_devices"), \
+             patch.object(self.plan, "_settle"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan, "run_command", side_effect=fake_run):
             created = self.plan._prepare_free_space_target(

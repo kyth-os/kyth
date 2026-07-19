@@ -3,12 +3,9 @@ import shlex
 import shutil
 import subprocess
 
+from ..core_base import _CLOUD_SYNC_CONFIG, _SMB_CONFIG, _SMB_CREDS_DIR
 from .config import load_json_config, save_json_config
 from .process import _run_command
-
-_CLOUD_SYNC_CONFIG = os.path.expanduser("~/.config/kyth-cloud-sync.json")
-_SMB_CONFIG = os.path.expanduser("~/.config/kyth-smb-shares.json")
-_SMB_CREDS_DIR = "/etc/kyth-smb-creds"
 
 def _rclone_available() -> bool:
     return shutil.which("rclone") is not None
