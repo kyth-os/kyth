@@ -69,7 +69,8 @@ RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/p
 # have no dependency on daily-upgraded RPMs, so ordering before the upgrade is safe.
 ARG THIRDPARTY_VERSIONS_HASH=unset
 RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/thirdparty.sh \
-    --mount=type=bind,source=build_files/scripts/lib/curl-common.sh,target=/ctx/lib/curl-common.sh \
+    --mount=type=bind,source=build_files/scripts/thirdparty,target=/ctx/thirdparty \
+    --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=tmpfs,dst=/tmp \
     --mount=type=secret,id=github_token \
     : "cache-bust=${THIRDPARTY_VERSIONS_HASH}" && \
@@ -94,6 +95,10 @@ COPY build_files/scripts/plymouth-branding-guard.sh /tmp/plymouth-branding-guard
 RUN bash /tmp/plymouth-setup.sh && \
     rm -rf /tmp/kyth-plymouth /tmp/kyth-branding /tmp/plymouth-setup.sh /tmp/plymouth-branding-guard.sh
 
+# kyth-vscode-wallet and kyth-ai-dev are needed by both sysconfig-static and
+# sysconfig layers. COPY once so neither layer needs a redundant bind-mount.
+COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev /ctx/
+
 # Static system configuration — sysctl, kernel modules, PipeWire, Proton env
 # vars, gamemode, MangoHud, vkBasalt, bluetooth, and kyth-* service units.
 # Stable — only re-runs when sysconfig-static.sh or config defaults change,
@@ -101,8 +106,7 @@ RUN bash /tmp/plymouth-setup.sh && \
 # short and avoids users pulling a new sysconfig layer when only packages changed.
 RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx/sysconfig-static.sh \
     --mount=type=bind,source=build_files/scripts/sysconfig,target=/ctx/sysconfig \
-    --mount=type=bind,source=build_files/kyth-vscode-wallet,target=/ctx/kyth-vscode-wallet \
-    --mount=type=bind,source=build_files/kyth-ai-dev,target=/ctx/kyth-ai-dev \
+    --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig-static.sh
 
@@ -140,8 +144,6 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
 # Re-enforces display-manager symlinks that dnf5 upgrade can reset, and enables/
 # disables runtime services after the upgrade has settled the unit file set.
 RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/sysconfig.sh \
-    --mount=type=bind,source=build_files/kyth-vscode-wallet,target=/ctx/kyth-vscode-wallet \
-    --mount=type=bind,source=build_files/kyth-ai-dev,target=/ctx/kyth-ai-dev \
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig.sh
 

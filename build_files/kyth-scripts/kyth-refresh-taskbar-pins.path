@@ -1,0 +1,6 @@
+[Unit]
+Description=Watch for newly installed Flatpak launchers
+
+[Path]
+PathChanged=/var/lib/flatpak/exports/share/applications
+Unit=kyth-refresh-taskbar-pins.service

@@ -1,42 +1,10 @@
 # shellcheck shell=bash
-# ── Default KDE theme for all new users via /etc/skel ─────────────────────────
-mkdir -p /etc/skel/.config
-mkdir -p /etc/skel/Screenshots
-cat >/etc/skel/Screenshots/.directory <<'SKELSHOTSDIREEOF'
-[Desktop Entry]
-Icon=folder-pictures
-Name=Screenshots
-SKELSHOTSDIREEOF
+mkdir -p /etc/skel/.config /etc/skel/Screenshots
+cp /ctx/data/skel/Screenshots/.directory /etc/skel/Screenshots/.directory
+cp /ctx/data/skel/.config/kdeglobals /etc/skel/.config/kdeglobals
+cp /ctx/data/skel/.config/kwinrc /etc/skel/.config/kwinrc
+cp /ctx/data/skel/.config/plasmarc /etc/skel/.config/plasmarc
 
-cat >/etc/skel/.config/kdeglobals <<'KDEEOF'
-[General]
-ColorScheme=KythDark
-font=Inter,10,-1,5,400,0,0,0,0,0,Regular
-fixed=Cascadia Code,10,-1,5,400,0,0,0,0,0,Regular
-smallestReadableFont=Inter,8,-1,5,400,0,0,0,0,0,Regular
-toolBarFont=Inter,9,-1,5,400,0,0,0,0,0,Regular
-menuFont=Inter,10,-1,5,400,0,0,0,0,0,Regular
-
-[Icons]
-Theme=Papirus-Dark
-
-[KDE]
-LookAndFeelPackage=org.kde.breezedark.desktop
-KDEEOF
-
-# Keep server-side titlebars on the familiar minimize, maximize, close trio.
-# IAX is KWin's button code sequence for underscore, box, and X.
-cat >/etc/skel/.config/kwinrc <<'KWINDECORATIONEOF'
-[org.kde.kdecoration2]
-ButtonsOnLeft=
-ButtonsOnRight=IAX
-library=org.kde.breeze
-theme=Breeze
-KWINDECORATIONEOF
-
-# Breeze GTK normally renders minimize/maximize as down/up chevrons. Replace
-# both the GTK 3/4 symbolic assets and Chromium compatibility PNGs so
-# client-side titlebars use the same underscore, box, and X as KWin.
 window_control_src=/ctx/branding/window-controls
 window_control_css=/tmp/kyth-window-controls.css
 
@@ -125,8 +93,3 @@ for gtk_theme in Breeze Breeze-Dark; do
 	done
 done
 rm -f "${window_control_css}"
-
-cat >/etc/skel/.config/plasmarc <<'PLASMAEOF'
-[Theme]
-name=kyth-dark
-PLASMAEOF

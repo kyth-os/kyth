@@ -4,35 +4,7 @@
 # classify those launchers and drops them into Lost and Found. Add a custom
 # category only when the browser did not provide one, preserving any category a
 # user assigns later with the menu editor.
-cat >/usr/bin/kyth-web-app-categorize <<'WEBAPPCATEGORIZEEOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-app_dir="${HOME}/.local/share/applications"
-[[ -d "${app_dir}" ]] || exit 0
-
-changed=0
-shopt -s nullglob
-for launcher in \
-    "${app_dir}"/chrome-*.desktop \
-    "${app_dir}"/chromium-*.desktop \
-    "${app_dir}"/brave-*.desktop \
-    "${app_dir}"/msedge-*.desktop \
-    "${app_dir}"/com.google.Chrome.flextop.*.desktop \
-    "${app_dir}"/org.chromium.Chromium.flextop.*.desktop \
-    "${app_dir}"/com.brave.Browser.flextop.*.desktop \
-    "${app_dir}"/com.microsoft.Edge.flextop.*.desktop; do
-    grep -Eq -- '--app(-id)?=' "${launcher}" || continue
-    grep -q '^Categories=' "${launcher}" && continue
-    sed -i '/^\[Desktop Entry\]$/a Categories=X-KythWebApp;' "${launcher}"
-    changed=1
-done
-
-if (( changed )) && command -v kbuildsycoca6 >/dev/null 2>&1; then
-    kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
-fi
-WEBAPPCATEGORIZEEOF
-chmod +x /usr/bin/kyth-web-app-categorize
+install -m 0755 /ctx/kyth-web-app-categorize /usr/bin/kyth-web-app-categorize
 
 mkdir -p /etc/systemd/user/default.target.wants
 cat >/etc/systemd/user/kyth-web-app-categorize.service <<'WEBAPPSERVICEEOF'
@@ -58,8 +30,6 @@ WEBAPPPATHEOF
 ln -sf /etc/systemd/user/kyth-web-app-categorize.path \
 	/etc/systemd/user/default.target.wants/kyth-web-app-categorize.path
 
-# Seed the same familiar folder layout into fresh homes. The autostart helper
-# repairs these for existing users and for accounts created by unusual tools.
 mkdir -p \
 	/etc/skel/Desktop \
 	/etc/skel/Documents \

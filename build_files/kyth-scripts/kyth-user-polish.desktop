@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=KythOS: User Comfort Polish
+Exec=/usr/bin/kyth-user-polish
+X-KDE-autostart-after=panel
+Hidden=false
+NoDisplay=true
