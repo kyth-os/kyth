@@ -1,4 +1,5 @@
 """Cloud sync pure helpers."""
+import importlib.util
 import pathlib
 import subprocess
 import sys
@@ -13,10 +14,12 @@ from kyth_welcome.services.cloud_sync import (  # noqa: E402
     rclone_sync_command,
     rsync_copy_command,
 )
-from kyth_welcome.services.workers.cloud_sync import (  # noqa: E402
-    RcloneAuthorizeWorker,
-    RcloneSyncWorker,
-)
+HAS_QT = any(importlib.util.find_spec(binding) for binding in ("PySide6", "PyQt6"))
+if HAS_QT:
+    from kyth_welcome.services.workers.cloud_sync import (  # noqa: E402
+        RcloneAuthorizeWorker,
+        RcloneSyncWorker,
+    )
 
 
 class CloudSyncHelperTests(unittest.TestCase):
@@ -47,6 +50,7 @@ Paste the following into your remote machine --->
         self.assertTrue(copy[-2].endswith("/"))
         self.assertTrue(copy[-1].endswith("/"))
 
+    @unittest.skipUnless(HAS_QT, "PySide6/PyQt6 is not installed on this validation runner")
     def test_sync_worker_stop_terminates_retained_process(self):
         worker = RcloneSyncWorker("gdrive", "/tmp/drive")
         proc = MagicMock()
@@ -57,6 +61,7 @@ Paste the following into your remote machine --->
 
         proc.terminate.assert_called_once_with()
 
+    @unittest.skipUnless(HAS_QT, "PySide6/PyQt6 is not installed on this validation runner")
     def test_authorize_timeout_kills_and_reaps_process(self):
         proc = MagicMock()
         proc.communicate.side_effect = subprocess.TimeoutExpired("rclone", 300)
