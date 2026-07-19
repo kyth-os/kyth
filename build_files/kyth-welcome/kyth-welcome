@@ -16,6 +16,14 @@ for _candidate in (_here, "/usr/lib/kyth-welcome"):
             sys.path.insert(0, _candidate)
         break
 
+# kyth_shared lives next to the kyth-welcome source tree, or at
+# /usr/kyth_shared in the installed container image.
+_shared_dir = os.path.join(os.path.dirname(_here), "kyth_shared")
+if not os.path.isdir(os.path.join(_shared_dir, "kyth_shared")):
+    _shared_dir = "/usr/kyth_shared"
+if os.path.isdir(os.path.join(_shared_dir, "kyth_shared")) and _shared_dir not in sys.path:
+    sys.path.insert(0, _shared_dir)
+
 from kyth_welcome.app import main
 
 if __name__ == "__main__":
