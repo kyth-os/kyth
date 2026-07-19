@@ -5,6 +5,11 @@ install -m 0755 /ctx/kyth-welcome/kyth-welcome /usr/bin/kyth-welcome
 mkdir -p /usr/lib/kyth-welcome
 cp -a /ctx/kyth-welcome/kyth_welcome /usr/lib/kyth-welcome/
 rm -rf /usr/lib/kyth-welcome/kyth_welcome/__pycache__
+# kyth_welcome.__init__ resolves kyth_shared via sys.path at
+# (file parent).parent.parent / "kyth_shared" → /usr/kyth_shared.
+mkdir -p /usr/kyth_shared
+cp -a /ctx/kyth_shared/kyth_shared /usr/kyth_shared/
+rm -rf /usr/kyth_shared/kyth_shared/__pycache__
 find /usr/lib/kyth-welcome -type d -exec chmod 0755 {} +
 find /usr/lib/kyth-welcome -type f -exec chmod 0644 {} +
 install -m 0755 /ctx/kyth-welcome/kyth-welcome-launch /usr/bin/kyth-welcome-launch
