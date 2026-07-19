@@ -38,5 +38,5 @@ cat >/usr/lib/tmpfiles.d/home.conf <<'HOMETMPFILEEOF'
 L /home - - - - var/home
 L /srv - - - - var/srv
 HOMETMPFILEEOF
-sed -i 's|^d- /root .*|L /root - - - - var/roothome|' /usr/lib/tmpfiles.d/provision.conf
+sed -i 's|^d- /root .*|d /var/roothome 0700 root root -\nL /root - - - - var/roothome|' /usr/lib/tmpfiles.d/provision.conf
 grep -q '^L /root ' /usr/lib/tmpfiles.d/provision.conf

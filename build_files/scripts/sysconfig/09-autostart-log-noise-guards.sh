@@ -3,6 +3,11 @@
 set -euo pipefail
 
 # ── Autostart log-noise guards ────────────────────────────────────────────────
+# Fedora does not define Debian's plugdev group, but several third-party udev
+# rules installed below reference it. Seed new deployments at image build time;
+# kyth-system-accounts.service performs the equivalent repair after upgrades.
+getent group plugdev >/dev/null 2>&1 || groupadd --system plugdev
+
 # nvidia-settings ships an unconditional autostart entry that fails every
 # login on AMD-only systems with "ERROR: NVIDIA driver is not loaded".
 # Run it only when the NVIDIA kernel module is actually loaded.
@@ -34,8 +39,7 @@ cat >/usr/lib/systemd/system/kyth-system-accounts.service <<'SYSACCOUNTUNITEOF'
 [Unit]
 Description=Ensure KythOS system accounts are visible in /etc
 DefaultDependencies=no
-After=local-fs.target
-Before=dbus.socket dbus-broker.service sockets.target sddm.service
+Before=dbus.socket dbus-broker.service sockets.target sddm.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
 
 [Service]
 Type=oneshot
@@ -49,6 +53,22 @@ SYSACCOUNTUNITEOF
 install -d -m 0755 /usr/libexec
 install -m 0755 /ctx/sysconfig/kyth-fix-system-accounts /usr/libexec/kyth-fix-system-accounts
 systemctl enable kyth-system-accounts.service 2>/dev/null || true
+
+# input-remapper.service is the single owner of preset autoloading. The RPM's
+# per-event udev rule races the daemon and launches one process for every input
+# node during boot, all before the service is ready.
+ln -sf /dev/null /etc/udev/rules.d/99-input-remapper.rules
+
+# ublue-os-udev-rules uses negative TEST expressions, so it tries to chmod
+# battery attributes specifically when they do not exist. Replace it with
+# positive relative sysfs existence tests.
+cat >/etc/udev/rules.d/99-thinkpad-thresholds-udev.rules <<'BATTERYRULESEOF'
+# KythOS override: expose only threshold attributes provided by this battery.
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_control_start_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_control_start_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_control_start_threshold"
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_control_end_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_control_end_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_control_end_threshold"
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_start_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_start_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_start_threshold"
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_stop_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_stop_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_stop_threshold"
+BATTERYRULESEOF
 
 mkdir -p /etc/asusd
 

@@ -24,11 +24,18 @@ dnf5 install -y antigravity
 # self-updates are not meaningful in an immutable image.
 dnf5 config-manager setopt antigravity-rpm.enabled=0
 
-# Workaround for Electron's node.mojom.NodeService crashing on exit.
-# Since these SIGSEGVs are benign but clutter systemd-coredump, we set the core
-# dump limit (RLIMIT_CORE) to 0 for Antigravity IDE and its children.
+# Workaround for Electron's node.mojom.NodeService crashing on exit. Keep shell
+# quoting out of Desktop Entry Exec fields: backslash-escaped quotes are not a
+# valid desktop-entry escape and make KDE repeatedly reject/reparse the files.
+install -d -m 0755 /usr/libexec
+cat >/usr/libexec/kyth-antigravity <<'ANTIGRAVITYWRAPPEREOF'
+#!/usr/bin/bash
+ulimit -c 0
+exec /usr/share/antigravity/antigravity "$@"
+ANTIGRAVITYWRAPPEREOF
+chmod 0755 /usr/libexec/kyth-antigravity
 if [ -f /usr/share/applications/antigravity.desktop ]; then
-	sed -i -E 's|^(Exec=/usr/share/antigravity/antigravity)(.*)$|Exec=sh -c "ulimit -c 0 \&\& exec /usr/share/antigravity/antigravity \\"\$@\\"" dummy\2|' /usr/share/applications/antigravity*.desktop
+	sed -i -E 's|^Exec=/usr/share/antigravity/antigravity|Exec=/usr/libexec/kyth-antigravity|' /usr/share/applications/antigravity*.desktop
 fi
 if [ -f /usr/share/antigravity/bin/antigravity ]; then
 	# Insert 'ulimit -c 0' right after the shebang line.

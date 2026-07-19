@@ -40,6 +40,13 @@ ensure_passwd_line() {
 append_missing_name /usr/lib/group /etc/group
 append_missing_name /usr/lib/passwd /etc/passwd
 
+# Third-party peripheral rules use Debian's plugdev group, which Fedora does
+# not normally ship. Create it before udev parses those rules. Avoid assigning a
+# fixed GID because mutable /etc databases may already use any chosen number.
+if ! getent group plugdev >/dev/null 2>&1; then
+    groupadd --system plugdev
+fi
+
 ensure_group_line sddm "sddm:x:959:"
 ensure_passwd_line sddm "sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin"
 
