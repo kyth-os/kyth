@@ -352,3 +352,16 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 **KythOS just wants your games to have a good home.**
 
 </div>
+
+<!-- AUTO-README-START -->
+## Auto Project Snapshot
+
+- Last refreshed (UTC): 2026-07-19 19:19:29 UTC
+- Current branch: testing
+- HEAD commit: 7ab4163
+- Last commit title: Fix ISO runner disk guard and CI portability
+- Last commit date: 2026-07-19T15:00:20-04:00
+- CI workflow files: 8
+- Build script files: 19
+
+<!-- AUTO-README-END -->

@@ -38,6 +38,11 @@ check-dockerfile check_base_image="ghcr.io/ublue-os/kinoite-main:44":
 test:
     python3 -m unittest discover -s tests
 
+# Run the complete validation suite used by GitHub Actions and pre-push.
+[group('Quality')]
+validate:
+    ./build_files/scripts/validate.sh
+
 # Fix Just Syntax
 [group('Just')]
 fix:
@@ -108,7 +113,7 @@ install-git-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
     git config core.hooksPath .githooks
-    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/update-readme-snapshot.sh
+    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/update-readme-snapshot.sh build_files/scripts/install-validation-tools.sh build_files/scripts/validate.sh
     echo "Git hooks installed via core.hooksPath=.githooks"
 
 # Remove old output ISOs — keeps only the current live ISO and current BIB ISO.

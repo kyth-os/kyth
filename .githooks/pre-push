@@ -1,3 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# README snapshot is kept current by the pre-commit hook — no action needed here.
+
+if [[ "${KYTH_SKIP_PRE_PUSH_VALIDATION:-0}" == "1" ]]; then
+	echo "[pre-push] Validation bypassed with KYTH_SKIP_PRE_PUSH_VALIDATION=1."
+	exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+echo "[pre-push] Running the same validation suite used by GitHub Actions..."
+"${repo_root}/build_files/scripts/validate.sh"

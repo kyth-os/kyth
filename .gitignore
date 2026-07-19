@@ -26,3 +26,6 @@ _build-*/**
 .claude/settings.json
 .claude/settings.local.json
 mrtrick/
+
+# Pinned validators downloaded by local/CI validation.
+.cache/kyth-ci-tools/
