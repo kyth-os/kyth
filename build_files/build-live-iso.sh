@@ -28,6 +28,24 @@ if [[ "${BASE_IMAGE}" == localhost/* ]] &&
 	docker save "${BASE_IMAGE}" | sudo podman load
 fi
 
+# installer/build.sh always bakes KYTH_SOURCE_IMAGE=ghcr.io/mrtrick37/kyth:${SOURCE_TAG}
+# into the live ISO, regardless of where the live payload itself was built from.
+# The booted live VM is a separate environment with no access to this host's
+# local image storage, so a local BASE_IMAGE must be published under that exact
+# ref or the installer's `bootc install` will fail with "manifest unknown".
+#
+# Pushed with `docker`, not `podman`: this image shares many blobs with the
+# public ghcr.io/ublue-os/kinoite-main base it's built FROM, and podman's push
+# reproducibly fails those blobs with "trying to reuse blob ... 403 Forbidden"
+# — a cross-repository blob-mount that GHCR rejects and podman doesn't fall
+# back from. `docker push` uploads them directly and does not hit this.
+if [[ "${BASE_IMAGE}" == localhost/* ]] && command -v docker >/dev/null; then
+	GHCR_REF="ghcr.io/mrtrick37/kyth:${SOURCE_TAG}"
+	echo "==> Publishing local build to ${GHCR_REF} so the installer can fetch it from inside the live VM"
+	docker tag "${BASE_IMAGE}" "${GHCR_REF}"
+	docker push "${GHCR_REF}"
+fi
+
 echo "==> Fetching Titanoboa (background) and building KythOS live payload (foreground) in parallel"
 
 # Titanoboa fetch is independent of the podman build — run it in the background.
