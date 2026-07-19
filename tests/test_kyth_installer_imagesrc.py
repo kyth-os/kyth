@@ -2,6 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,7 +35,8 @@ class InstallerImageSourceTests(unittest.TestCase):
             src, tgt = imagesrc._install_images("ghcr.io/mrtrick37/kyth:testing")
 
         self.assertTrue(src.startswith("docker://"))
-        self.assertTrue(tgt.startswith("ghcr.io/"))
+        parsed = urlparse(f"docker://{tgt}")
+        self.assertEqual(parsed.hostname, "ghcr.io")
         self.assertEqual(src, f"docker://{tgt}")
         run_command.assert_not_called()
 
