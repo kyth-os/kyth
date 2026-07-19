@@ -8,6 +8,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "build_files" / "scripts"
 FRAG_DIR = SCRIPTS / "sysconfig"
 RUNNER = SCRIPTS / "sysconfig-static.sh"
+SYSCTL_DATA = ROOT / "build_files" / "data" / "sysctl.d" / "99-kyth.conf"
 
 
 class SysconfigFragmentTests(unittest.TestCase):
@@ -29,11 +30,16 @@ class SysconfigFragmentTests(unittest.TestCase):
             self.assertIn("set -euo pipefail", body)
 
     def test_kernel_sysctl_fragment(self):
+        # The fragment copies the sysctl values from a data file (build_files/data/)
+        # instead of embedding them in a heredoc — same pattern as every other
+        # extracted config in this refactor. The values themselves are checked
+        # against that data file, not the fragment script.
         path = FRAG_DIR / "01-kernel-sysctl-parameters.sh"
         self.assertTrue(path.is_file())
         body = path.read_text(encoding="utf-8")
-        self.assertIn("vm.swappiness", body)
         self.assertIn("99-kyth.conf", body)
+        self.assertTrue(SYSCTL_DATA.is_file())
+        self.assertIn("vm.swappiness", SYSCTL_DATA.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
