@@ -4,13 +4,28 @@
 
 set -exo pipefail
 
+# Tools required by the live installer's NTFS shrink-and-install path.
+if command -v dnf5 >/dev/null 2>&1; then
+	dnf5 install -y ntfs-3g parted btrfs-progs
+	dnf5 clean all
+else
+	dnf install -y ntfs-3g parted btrfs-progs
+	dnf clean all
+fi
+
 SOURCE_TAG=${SOURCE_TAG:?}
 
 # bwrap tries to write /proc/sys/user/max_user_namespaces which is mounted as ro
 mount -o remount,rw /proc/sys
 
 # ── KythOS installer binaries ─────────────────────────────────────────────────
-install -Dm755 /src/build_files/kyth-installer /usr/bin/kyth-installer
+install -Dm755 /src/build_files/kyth-installer/kyth-installer /usr/bin/kyth-installer
+# /usr/bin/kyth-installer is a thin shim; the application package lives here.
+mkdir -p /usr/lib/kyth-installer
+cp -a /src/build_files/kyth-installer/kyth_installer /usr/lib/kyth-installer/
+rm -rf /usr/lib/kyth-installer/kyth_installer/__pycache__
+find /usr/lib/kyth-installer -type d -exec chmod 0755 {} +
+find /usr/lib/kyth-installer -type f -exec chmod 0644 {} +
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
 install -Dm755 /src/build_files/kyth-partition-install.sh /usr/bin/kyth-partition-install
 install -Dm755 /src/build_files/scripts/plymouth-branding-guard.sh \
@@ -390,6 +405,13 @@ sed -i 's/^livesys_session=.*/livesys_session="kde"/' /etc/sysconfig/livesys
 systemctl enable livesys.service livesys-late.service
 
 # ── Log straight into the live desktop ────────────────────────────────────────
+# Unlike the installed system (kyth-configure-session picks Wayland on bare
+# metal, X11 only inside VMs), the live session always forces X11 + llvmpipe
+# software rendering (see the plasma-workspace/env/live.sh skel above). Live
+# media boots on hardware that has never run this OS and whose GPU/DRM/KMS
+# support is unverified, so we trade rendering performance/theme fidelity for
+# a login that is guaranteed to come up everywhere. This is intentional, not
+# an oversight.
 mkdir -p /etc/sddm.conf.d
 cat >/etc/sddm.conf.d/20-kyth-live-autologin.conf <<'EOF'
 [Autologin]
@@ -405,7 +427,7 @@ for unit in \
 	bootc-fetch-apply-updates.service bootc-fetch-apply-updates.timer \
 	systemd-firstboot.service systemd-oomd.service \
 	kyth-default-flatpaks.service kyth-flathub-setup.service \
-	kyth-ge-proton-update.service kyth-ge-proton-update.timer \
+	kyth-proton-cachyos-update.service kyth-proton-cachyos-update.timer \
 	kyth-hw-setup.service kyth-local-bin-migrate.service \
 	kyth-topgrade-migrate.service kyth-duperemove.service kyth-duperemove.timer \
 	kyth-enroll-mok.service plasmalogin.service akmods.service \

@@ -1,0 +1,388 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080" role="img" aria-label="Graffiti OS mural wallpaper">
+  <defs>
+    <linearGradient id="g-red" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e62020"/>
+      <stop offset="100%" stop-color="#990000"/>
+    </linearGradient>
+    <linearGradient id="r-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3d8bff"/>
+      <stop offset="100%" stop-color="#1a4c99"/>
+    </linearGradient>
+    <linearGradient id="a-yellow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd700"/>
+      <stop offset="100%" stop-color="#b8860b"/>
+    </linearGradient>
+    <linearGradient id="f-green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2ed62e"/>
+      <stop offset="100%" stop-color="#147014"/>
+    </linearGradient>
+    <linearGradient id="f-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b84cff"/>
+      <stop offset="100%" stop-color="#6b1a99"/>
+    </linearGradient>
+    <linearGradient id="o-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3d8bff"/>
+      <stop offset="100%" stop-color="#1a4c99"/>
+    </linearGradient>
+    <linearGradient id="s-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b84cff"/>
+      <stop offset="100%" stop-color="#6b1a99"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd700"/>
+      <stop offset="100%" stop-color="#b8860b"/>
+    </linearGradient>
+    <radialGradient id="wall-bg" cx="50%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#141414"/>
+      <stop offset="40%" stop-color="#0d0d0d"/>
+      <stop offset="100%" stop-color="#030303"/>
+    </radialGradient>
+
+    <filter id="outline" x="-20%" y="-20%" width="140%" height="140%">
+      <feMorphology operator="dilate" radius="1.2" in="SourceAlpha" result="expand"/>
+      <feFlood flood-color="#ffffff" flood-opacity="1" result="color"/>
+      <feComposite in="color" in2="expand" operator="in" result="outline"/>
+      <feMerge>
+        <feMergeNode in="outline"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="outline-thin" x="-20%" y="-20%" width="140%" height="140%">
+      <feMorphology operator="dilate" radius="0.8" in="SourceAlpha" result="expand"/>
+      <feFlood flood-color="#ffffff" flood-opacity="1" result="color"/>
+      <feComposite in="color" in2="expand" operator="in" result="outline"/>
+      <feMerge>
+        <feMergeNode in="outline"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Main graffiti tag as reusable piece -->
+    <g id="graffiti-piece">
+      <!-- G (red) -->
+      <g transform="translate(0,0)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <polygon points="0,0 10,0 12,44 0,40"/>
+          <rect x="0" y="0" width="30" height="14"/>
+          <rect x="10" y="14" width="14" height="14"/>
+          <rect x="16" y="0" width="14" height="28"/>
+          <polygon points="0,30 30,30 30,44 18,44 14,48 10,44"/>
+        </g>
+        <g filter="url(#outline)">
+          <polygon points="0,0 10,0 12,44 0,40" fill="url(#g-red)"/>
+          <rect x="0" y="0" width="30" height="14" fill="url(#g-red)"/>
+          <rect x="10" y="14" width="14" height="14" fill="url(#g-red)"/>
+          <rect x="16" y="0" width="14" height="28" fill="url(#g-red)"/>
+          <polygon points="0,30 30,30 30,44 18,44 14,48 10,44" fill="url(#g-red)"/>
+        </g>
+      </g>
+      <!-- R (blue) -->
+      <g transform="translate(34,0)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <polygon points="0,0 10,0 12,44 0,40"/>
+          <rect x="0" y="0" width="30" height="24"/>
+          <polygon points="10,24 30,24 30,44 22,44 10,30"/>
+        </g>
+        <g filter="url(#outline)">
+          <polygon points="0,0 10,0 12,44 0,40" fill="url(#r-blue)"/>
+          <rect x="0" y="0" width="30" height="24" fill="url(#r-blue)"/>
+          <polygon points="10,24 30,24 30,44 22,44 10,30" fill="url(#r-blue)"/>
+        </g>
+      </g>
+      <!-- A (yellow) -->
+      <g transform="translate(68,0)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <polygon points="15,0 30,44 20,44"/>
+          <polygon points="15,0 10,44 0,44"/>
+          <rect x="11" y="22" width="8" height="6"/>
+        </g>
+        <g filter="url(#outline)">
+          <polygon points="15,0 30,44 20,44" fill="url(#a-yellow)"/>
+          <polygon points="15,0 10,44 0,44" fill="url(#a-yellow)"/>
+          <rect x="11" y="22" width="8" height="6" fill="url(#a-yellow)"/>
+        </g>
+      </g>
+      <!-- F (green) -->
+      <g transform="translate(102,0)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <rect x="0" y="0" width="10" height="44"/>
+          <rect x="0" y="0" width="30" height="12"/>
+          <rect x="0" y="18" width="26" height="10"/>
+        </g>
+        <g filter="url(#outline)">
+          <rect x="0" y="0" width="10" height="44" fill="url(#f-green)"/>
+          <rect x="0" y="0" width="30" height="12" fill="url(#f-green)"/>
+          <rect x="0" y="18" width="26" height="10" fill="url(#f-green)"/>
+        </g>
+      </g>
+      <!-- F (purple) -->
+      <g transform="translate(136,0)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <rect x="0" y="0" width="10" height="44"/>
+          <rect x="0" y="0" width="30" height="12"/>
+          <rect x="0" y="18" width="26" height="10"/>
+        </g>
+        <g filter="url(#outline)">
+          <rect x="0" y="0" width="10" height="44" fill="url(#f-purple)"/>
+          <rect x="0" y="0" width="30" height="12" fill="url(#f-purple)"/>
+          <rect x="0" y="18" width="26" height="10" fill="url(#f-purple)"/>
+        </g>
+      </g>
+      <!-- I (red) -->
+      <g transform="translate(170,0)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <rect x="0" y="0" width="10" height="44"/>
+        </g>
+        <g filter="url(#outline)">
+          <rect x="0" y="0" width="10" height="44" fill="url(#g-red)"/>
+        </g>
+      </g>
+      <!-- T (blue) -->
+      <g transform="translate(184,0)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <rect x="0" y="0" width="30" height="12"/>
+          <rect x="10" y="0" width="10" height="44"/>
+        </g>
+        <g filter="url(#outline)">
+          <rect x="0" y="0" width="30" height="12" fill="url(#r-blue)"/>
+          <rect x="10" y="0" width="10" height="44" fill="url(#r-blue)"/>
+        </g>
+      </g>
+      <!-- I (yellow) -->
+      <g transform="translate(218,0)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <rect x="0" y="0" width="10" height="44"/>
+        </g>
+        <g filter="url(#outline)">
+          <rect x="0" y="0" width="10" height="44" fill="url(#a-yellow)"/>
+        </g>
+      </g>
+      <!-- O (blue) -->
+      <g transform="translate(96,52)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <rect x="0" y="0" width="32" height="6"/>
+          <rect x="0" y="26" width="32" height="6"/>
+          <rect x="0" y="0" width="6" height="32"/>
+          <rect x="26" y="0" width="6" height="32"/>
+        </g>
+        <g filter="url(#outline)">
+          <rect x="0" y="0" width="32" height="6" fill="url(#o-blue)"/>
+          <rect x="0" y="26" width="32" height="6" fill="url(#o-blue)"/>
+          <rect x="0" y="0" width="6" height="32" fill="url(#o-blue)"/>
+          <rect x="26" y="0" width="6" height="32" fill="url(#o-blue)"/>
+        </g>
+      </g>
+      <!-- S (purple) -->
+      <g transform="translate(136,52)">
+        <g transform="translate(2,2)" opacity="0.85">
+          <rect x="0" y="0" width="26" height="8"/>
+          <rect x="18" y="8" width="8" height="8"/>
+          <rect x="0" y="16" width="26" height="8"/>
+          <rect x="0" y="24" width="8" height="8"/>
+          <rect x="0" y="32" width="26" height="10"/>
+        </g>
+        <g filter="url(#outline)">
+          <rect x="0" y="0" width="26" height="8" fill="url(#s-purple)"/>
+          <rect x="18" y="8" width="8" height="8" fill="url(#s-purple)"/>
+          <rect x="0" y="16" width="26" height="8" fill="url(#s-purple)"/>
+          <rect x="0" y="24" width="8" height="8" fill="url(#s-purple)"/>
+          <rect x="0" y="32" width="26" height="10" fill="url(#s-purple)"/>
+        </g>
+      </g>
+    </g>
+
+    <!-- Simplified corner throw-up G -->
+    <g id="corner-g">
+      <g filter="url(#outline)">
+        <polygon points="0,0 22,0 24,40 0,36"/>
+        <rect x="0" y="0" width="40" height="12"/>
+        <rect x="12" y="12" width="18" height="12"/>
+        <rect x="22" y="0" width="18" height="24"/>
+        <polygon points="0,28 40,28 40,40 24,40 20,44 16,40"/>
+      </g>
+    </g>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1920" height="1080" fill="url(#wall-bg)"/>
+
+  <!-- Wall texture lines (subtle concrete scratches) -->
+  <g stroke="#ffffff" stroke-width="0.5" opacity="0.02">
+    <line x1="100" y1="0" x2="150" y2="1080"/>
+    <line x1="500" y1="0" x2="520" y2="1080"/>
+    <line x1="1200" y1="0" x2="1180" y2="1080"/>
+    <line x1="1700" y1="0" x2="1750" y2="1080"/>
+    <line x1="0" y1="300" x2="1920" y2="320"/>
+    <line x1="0" y1="700" x2="1920" y2="680"/>
+  </g>
+
+  <!-- === LARGE HALO GLOWS === -->
+  <ellipse cx="960" cy="440" rx="600" ry="280" fill="#ffd700" opacity="0.025"/>
+  <ellipse cx="960" cy="440" rx="450" ry="200" fill="#e62020" opacity="0.015"/>
+  <ellipse cx="960" cy="440" rx="300" ry="140" fill="#ffffff" opacity="0.02"/>
+
+  <!-- === MAIN TAG (centered, scaled up 3.5×) === -->
+  <g transform="translate(435, 220) scale(3.5)">
+    <use href="#graffiti-piece"/>
+  </g>
+
+  <!-- Drips from main tag -->
+  <g filter="url(#outline-thin)">
+    <path d="M 580,415 Q 580,435 576,440 Q 572,435 572,415 Z" fill="url(#g-red)"/>
+    <path d="M 700,415 Q 700,430 697,433 Q 694,430 694,415 Z" fill="url(#r-blue)"/>
+    <path d="M 840,415 Q 840,420 838,422 Q 836,420 836,415 Z" fill="url(#f-green)"/>
+    <path d="M 980,415 Q 980,445 976,452 Q 972,445 972,415 Z" fill="url(#f-purple)"/>
+    <path d="M 1150,415 Q 1150,425 1148,428 Q 1146,425 1146,415 Z" fill="url(#r-blue)"/>
+    <path d="M 1280,415 Q 1280,440 1276,448 Q 1272,440 1272,415 Z" fill="url(#a-yellow)"/>
+  </g>
+
+  <!-- === CORNER TAGS === -->
+
+  <!-- Top-left: red throw-up -->
+  <g transform="translate(60, 60) scale(0.8)" opacity="0.35">
+    <use href="#corner-g" fill="url(#g-red)"/>
+  </g>
+
+  <!-- Top-right: blue throw-up -->
+  <g transform="translate(1800, 60) scale(0.8)" opacity="0.3">
+    <use href="#corner-g" fill="url(#r-blue)"/>
+  </g>
+
+  <!-- Bottom-left: green throw-up -->
+  <g transform="translate(60, 920) scale(0.8)" opacity="0.3">
+    <use href="#corner-g" fill="url(#f-green)"/>
+  </g>
+
+  <!-- Bottom-right: purple throw-up -->
+  <g transform="translate(1800, 920) scale(0.8)" opacity="0.3">
+    <use href="#corner-g" fill="url(#f-purple)"/>
+  </g>
+
+  <!-- === SPLATTER (bottom band) === -->
+
+  <!-- Bottom-left splatter -->
+  <g opacity="0.35">
+    <circle cx="150" cy="950" r="18" fill="#e62020"/>
+    <circle cx="120" cy="980" r="12" fill="#e62020"/>
+    <circle cx="180" cy="1000" r="20" fill="#3d8bff"/>
+    <circle cx="100" cy="1020" r="8" fill="#e62020"/>
+    <circle cx="200" cy="1030" r="14" fill="#3d8bff"/>
+    <circle cx="80" cy="1045" r="6" fill="#2ed62e"/>
+    <circle cx="170" cy="1055" r="10" fill="#ffd700"/>
+    <circle cx="130" cy="1065" r="5" fill="#b84cff"/>
+    <circle cx="220" cy="1070" r="8" fill="#e62020"/>
+    <circle cx="250" cy="1050" r="6" fill="#3d8bff"/>
+  </g>
+
+  <!-- Center-left splatter -->
+  <g opacity="0.3">
+    <circle cx="400" cy="970" r="22" fill="#2ed62e"/>
+    <circle cx="370" cy="1000" r="14" fill="#2ed62e"/>
+    <circle cx="440" cy="1020" r="10" fill="#ffd700"/>
+    <circle cx="480" cy="1040" r="18" fill="#2ed62e"/>
+    <circle cx="350" cy="1050" r="8" fill="#b84cff"/>
+    <circle cx="420" cy="1060" r="6" fill="#3d8bff"/>
+    <circle cx="460" cy="1070" r="12" fill="#e62020"/>
+    <circle cx="340" cy="1070" r="5" fill="#ffd700"/>
+    <circle cx="390" cy="1035" r="4" fill="#2ed62e"/>
+    <circle cx="500" cy="1060" r="15" fill="#ffd700"/>
+  </g>
+
+  <!-- Center splatter -->
+  <g opacity="0.25">
+    <circle cx="700" cy="960" r="16" fill="#b84cff"/>
+    <circle cx="680" cy="990" r="10" fill="#3d8bff"/>
+    <circle cx="730" cy="1010" r="24" fill="#e62020"/>
+    <circle cx="710" cy="1040" r="12" fill="#ffd700"/>
+    <circle cx="750" cy="1055" r="8" fill="#2ed62e"/>
+    <circle cx="660" cy="1045" r="6" fill="#b84cff"/>
+    <circle cx="770" cy="1065" r="14" fill="#e62020"/>
+    <circle cx="690" cy="1070" r="5" fill="#3d8bff"/>
+    <circle cx="800" cy="1050" r="10" fill="#b84cff"/>
+  </g>
+
+  <!-- Center-right splatter -->
+  <g opacity="0.3">
+    <circle cx="1100" cy="980" r="20" fill="#3d8bff"/>
+    <circle cx="1070" cy="1010" r="12" fill="#e62020"/>
+    <circle cx="1130" cy="1030" r="16" fill="#b84cff"/>
+    <circle cx="1050" cy="1045" r="8" fill="#3d8bff"/>
+    <circle cx="1150" cy="1055" r="14" fill="#ffd700"/>
+    <circle cx="1090" cy="1065" r="6" fill="#2ed62e"/>
+    <circle cx="1170" cy="1070" r="10" fill="#b84cff"/>
+    <circle cx="1030" cy="1070" r="5" fill="#e62020"/>
+    <circle cx="1120" cy="1050" r="4" fill="#3d8bff"/>
+  </g>
+
+  <!-- Bottom-right splatter -->
+  <g opacity="0.35">
+    <circle cx="1600" cy="955" r="15" fill="#e62020"/>
+    <circle cx="1570" cy="985" r="22" fill="#ffd700"/>
+    <circle cx="1640" cy="1010" r="12" fill="#e62020"/>
+    <circle cx="1690" cy="1025" r="18" fill="#ffd700"/>
+    <circle cx="1550" cy="1045" r="10" fill="#3d8bff"/>
+    <circle cx="1660" cy="1060" r="8" fill="#2ed62e"/>
+    <circle cx="1710" cy="1070" r="14" fill="#e62020"/>
+    <circle cx="1530" cy="1065" r="6" fill="#b84cff"/>
+    <circle cx="1630" cy="1075" r="5" fill="#ffd700"/>
+    <circle cx="1740" cy="1065" r="8" fill="#3d8bff"/>
+    <circle cx="1590" cy="1070" r="4" fill="#2ed62e"/>
+  </g>
+
+  <!-- === SCATTERED OVERSPRAY (mid-canvas) === -->
+  <g opacity="0.12">
+    <circle cx="200" cy="350" r="3" fill="#e62020"/>
+    <circle cx="450" cy="250" r="2.5" fill="#3d8bff"/>
+    <circle cx="850" cy="180" r="3.5" fill="#2ed62e"/>
+    <circle cx="1200" cy="200" r="2.8" fill="#b84cff"/>
+    <circle cx="1500" cy="280" r="3" fill="#ffd700"/>
+    <circle cx="1750" cy="250" r="2.5" fill="#e62020"/>
+    <circle cx="400" cy="600" r="2" fill="#3d8bff"/>
+    <circle cx="1550" cy="550" r="2.8" fill="#2ed62e"/>
+    <circle cx="550" cy="750" r="3" fill="#b84cff"/>
+    <circle cx="1650" cy="700" r="2.5" fill="#ffd700"/>
+    <circle cx="250" cy="800" r="2" fill="#e62020"/>
+    <circle cx="800" cy="850" r="2.5" fill="#3d8bff"/>
+    <circle cx="1250" cy="780" r="3" fill="#2ed62e"/>
+    <circle cx="1850" cy="500" r="2" fill="#b84cff"/>
+    <circle cx="150" cy="550" r="2.2" fill="#ffd700"/>
+    <circle cx="950" cy="650" r="1.8" fill="#e62020"/>
+    <circle cx="600" cy="300" r="1.5" fill="#b84cff"/>
+    <circle cx="1300" cy="350" r="2" fill="#ffd700"/>
+  </g>
+
+  <!-- === SPIKED CROWN above main tag === -->
+  <g transform="translate(860, 186) scale(3.5)">
+    <g transform="translate(1,1)" opacity="0.7">
+      <polygon points="6,0 10,-10 14,0 20,-12 26,0 32,-10 38,0 42,-8 46,4" fill="#1a1a1a"/>
+    </g>
+    <g filter="url(#outline-thin)">
+      <polygon points="6,0 10,-10 14,0 20,-12 26,0 32,-10 38,0 42,-8 46,4" fill="url(#gold)"/>
+    </g>
+  </g>
+
+  <!-- Connecting arrow (scaled) -->
+  <g transform="translate(1350, 370) scale(3.5)">
+    <g filter="url(#outline-thin)">
+      <polygon points="0,0 15,0 13,10 25,22 13,18 11,24 -5,12" fill="url(#r-blue)"/>
+    </g>
+  </g>
+
+  <!-- === TAGLINE === -->
+  <text x="960" y="980"
+        font-family="'DejaVu Sans', 'Liberation Sans', sans-serif"
+        font-size="14"
+        font-weight="300"
+        fill="#444444"
+        text-anchor="middle"
+        letter-spacing="4">something beautiful made out of nothing</text>
+
+  <!-- === X MARKS (sign-off) === -->
+  <g stroke="#ffffff" stroke-width="1.5" opacity="0.08" stroke-linecap="round">
+    <line x1="1870" y1="1030" x2="1895" y2="1055"/>
+    <line x1="1895" y1="1030" x2="1870" y2="1055"/>
+    <line x1="25" y1="1030" x2="50" y2="1055"/>
+    <line x1="50" y1="1030" x2="25" y2="1055"/>
+  </g>
+</svg>

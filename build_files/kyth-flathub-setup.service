@@ -9,18 +9,17 @@ Requires=network-online.target
 # Flatpak remotes live in /var — only configurable at runtime, not build time.
 # This service is idempotent: --if-not-exists means it exits immediately if
 # Flathub is already configured (e.g. after the first successful run).
-# Retry limit for DNS-not-ready races at first boot.
-StartLimitIntervalSec=120
-StartLimitBurst=5
 
 [Service]
-Type=simple
-ExecStart=flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+# oneshot (not simple) so kyth-default-flatpaks.service, ordered After= this
+# unit, waits for the Flathub remote to actually exist. With Type=simple,
+# "started" means "exec'd", and both units raced DNS at boot and failed.
+Type=oneshot
 RemainAfterExit=yes
-# Retry on DNS-not-ready races at first boot (network-online fires before
-# resolver is actually usable on some systems/boot paths).
-Restart=on-failure
-RestartSec=10s
+# Retry inside ExecStart: DNS can lag network-online at first boot, and
+# Restart= is not allowed on oneshot units with RemainAfterExit=yes.
+ExecStart=/bin/sh -c 'for i in $(seq 1 18); do flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo && exit 0; sleep 10; done; exit 1'
+TimeoutStartSec=300
 
 [Install]
 WantedBy=multi-user.target

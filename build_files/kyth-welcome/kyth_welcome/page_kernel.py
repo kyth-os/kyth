@@ -1,9 +1,15 @@
-import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    REGISTRY, Worker, _bootc_cancel_block_reason, _branch_display_name, _command_stdout, _current_branch, _current_kernel_flavor, _finish_worker, _image_tag_for_kernel, _parse_update_phase, _restyle, _set_session_inhibit, _with_idle_inhibit,
+from .services.launch import reboot
+from .core_base import (
+    _bootc_cancel_block_reason, _branch_display_name, _current_kernel_flavor, _image_tag_for_kernel,
+    _parse_update_phase, _restyle, _set_session_inhibit, _with_idle_inhibit,
 )
+from .services.diagnostics import _command_stdout
+from .services.software import (
+    Worker, _finish_worker,
+)
+from .core_base import REGISTRY, _current_branch
 from .qt import (  # noqa: E501
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QTimer,
 )
@@ -114,6 +120,7 @@ class KernelPage(Page):
         self._add(self._log_toggle)
 
         self._log = QTextEdit()
+        self._log.document().setMaximumBlockCount(5000)
         self._log.setReadOnly(True)
         self._log.setMinimumHeight(140)
         self._log.hide()
@@ -122,7 +129,7 @@ class KernelPage(Page):
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
         self._reboot_btn.hide()
-        self._reboot_btn.clicked.connect(lambda: subprocess.Popen(["systemctl", "reboot"]))
+        self._reboot_btn.clicked.connect(reboot)
         self._add(self._reboot_btn)
         self._stretch()
     def showEvent(self, event):

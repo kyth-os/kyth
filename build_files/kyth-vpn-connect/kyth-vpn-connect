@@ -6,11 +6,13 @@ with SIGSEGV in OpenconnectAuthWorkerThread when authenticating GlobalProtect.
 This app runs openconnect directly via sudo, bypassing the broken plugin.
 """
 
+import atexit
 import configparser
 import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, unquote, urlparse
 from urllib.request import Request, urlopen
@@ -178,7 +180,6 @@ if _WEBENGINE_AVAILABLE:
 
         def __init__(self, profile, parent=None):
             super().__init__(profile, parent)
-            self.navigationRequested.connect(self._on_nav)
 
         def javaScriptConsoleMessage(self, level, message, line, source):
             print(f"[JS console] {message} ({source}:{line})")
@@ -193,12 +194,6 @@ if _WEBENGINE_AVAILABLE:
                 self.callback_received.emit(url_str)
                 return False
             return True
-
-        def _on_nav(self, request):
-            url = request.url().toString()
-            if url.startswith("globalprotectcallback:") or url.startswith("gc:"):
-                self.callback_received.emit(url)
-                request.reject()
 
     _GP_AUTH_COOKIES = _GP_SAML_FIELDS
         # SESSID is NOT included: it is set by the GP portal's SAML ACS endpoint
@@ -689,15 +684,25 @@ QPushButton#saml-cancel:pressed {
             self._info.setText("SAML completed, but the VPN portal did not return a GP auth token.")
             self._status_msg.setText("VPN token not received")
 
-        def _emit_cookie(self, cookie_str: str) -> None:
+        def _teardown_webengine(self) -> None:
             if self._done:
                 return
             self._done = True
-            self._status_msg.setText("Sign-in complete")
             self._view.setPage(None)
             self._page.deleteLater()
+            self._profile.deleteLater()
+
+        def _emit_cookie(self, cookie_str: str) -> None:
+            if self._done:
+                return
+            self._teardown_webengine()
+            self._status_msg.setText("Sign-in complete")
             self.cookie_ready.emit(cookie_str)
             self.accept()
+
+        def reject(self) -> None:
+            self._teardown_webengine()
+            super().reject()
 
 _PROTOCOLS = ["gp", "anyconnect", "pulse", "nc", "f5", "fortinet", "array"]
 _OS_OPTIONS = ["win", "linux", "mac"]
@@ -722,7 +727,40 @@ def _save_config(gateway: str, protocol: str, os_emul: str, username: str) -> No
         cfg.write(f)
 
 
-class _VpnWorker(QThread):
+_ACTIVE_THREADS: set = set()
+
+
+class TrackedThread(QThread):
+    BLOCKS_CLOSE = False
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        _ACTIVE_THREADS.add(self)
+        self.finished.connect(lambda: _ACTIVE_THREADS.discard(self))
+
+
+def _running_threads() -> list[TrackedThread]:
+    return [t for t in _ACTIVE_THREADS if t.isRunning()]
+
+
+def _shutdown_threads(timeout_ms: int = 15000) -> None:
+    for t in list(_ACTIVE_THREADS):
+        stop = getattr(t, "cancel", None) or getattr(t, "stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:
+                pass
+    deadline = time.monotonic() + timeout_ms / 1000
+    for t in list(_ACTIVE_THREADS):
+        remaining_ms = max(100, int((deadline - time.monotonic()) * 1000))
+        t.wait(remaining_ms)
+
+
+atexit.register(_shutdown_threads)
+
+
+class _VpnWorker(TrackedThread):
     line = pyqtSignal(str)
     done = pyqtSignal(int)
 
@@ -903,6 +941,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(row)
 
         self._log = QTextEdit()
+        self._log.document().setMaximumBlockCount(5000)
         self._log.setReadOnly(True)
         self._log.setFont(QFont("monospace", 9))
         layout.addWidget(self._log)
@@ -1015,8 +1054,10 @@ class MainWindow(QMainWindow):
             dlg = SamlBrowserDialog(saml_url, self)
             dlg.cookie_ready.connect(self._on_saml_cookie)
             dlg.exec()
+            res = dlg.result()
+            dlg.deleteLater()
             self._saml_in_progress = False
-            if dlg.result() != QDialog.DialogCode.Accepted:
+            if res != QDialog.DialogCode.Accepted:
                 self._log.append("[SAML] Authentication cancelled.")
                 self._set_status("disconnected")
                 self._connect_btn.setEnabled(True)
@@ -1203,11 +1244,43 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
+    app.aboutToQuit.connect(_shutdown_threads)
     app.setApplicationName("kyth-vpn-connect")
     app.setDesktopFileName("kyth-vpn-connect")
     app.setWindowIcon(QIcon.fromTheme(_APP_ICON_NAME))
     app.setQuitOnLastWindowClosed(False)
+
+    # Single instance check
+    from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+    socket_name = f"kyth-vpn-connect-{os.getuid()}"
+    socket = QLocalSocket()
+    socket.connectToServer(socket_name)
+    if socket.waitForConnected(500):
+        socket.write(b"show")
+        socket.waitForBytesWritten(500)
+        return
+
+    server = QLocalServer()
+    server.removeServer(socket_name)
+    if not server.listen(socket_name):
+        print(f"Warning: Could not start single-instance listener: {server.errorString()}")
+
     win = MainWindow()
+
+    def handle_new_connection():
+        conn = server.nextPendingConnection()
+        if conn and conn.waitForReadyRead(500):
+            msg = bytes(conn.readAll()).decode("utf-8", errors="replace")
+            if msg == "show":
+                win.show()
+                win.raise_()
+                win.activateWindow()
+        if conn:
+            conn.close()
+
+    server.newConnection.connect(handle_new_connection)
+    app._instance_server = server  # type: ignore[attr-defined]
+
     win.show()
     sys.exit(app.exec())
 

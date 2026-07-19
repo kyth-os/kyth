@@ -1,12 +1,12 @@
 import re
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    HardwareProbe, _restyle,
-)
+from .core_base import _restyle
+from .services.hardware import HardwareProbe
 from .qt import (  # noqa: E501
     QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QTimer, QVBoxLayout, QWidget, Qt,
 )
+from .ui_tokens import STATUS_ERROR, STATUS_OK, STATUS_WARN
 
 def _theme_icon(*names: str) -> QIcon:
     """Return the first available system theme icon, or a null icon."""
@@ -34,6 +34,28 @@ def _make_card(name: str = "card") -> tuple[QFrame, QVBoxLayout]:
     return card, layout
 
 
+def _launch_opt_label(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet("font-size: 12px; color: #888888; min-width: 130px;")
+    return lbl
+
+
+def _launch_opt_value(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    lbl.setStyleSheet(
+        "font-family: 'Noto Mono', 'Cascadia Code', monospace; "
+        "font-size: 12px; color: #c0c0c0; "
+        "background: #060606; border: 1px solid #1e1e1e; "
+        "border-radius: 4px; padding: 3px 8px;"
+    )
+    return lbl
+
+
+def _copy_text(text: str):
+    QApplication.clipboard().setText(text)
+
+
 class StatusBadge(QLabel):
     """Compact shared status label for page and task feedback."""
     _STATE_NAMES = {
@@ -48,6 +70,7 @@ class StatusBadge(QLabel):
         super().__init__()
         self.setWordWrap(True)
         self.setMinimumWidth(220)
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.set_state(state, text)
 
@@ -55,6 +78,17 @@ class StatusBadge(QLabel):
         self.setText(text)
         self.setObjectName(self._STATE_NAMES.get(state, "task-status-idle"))
         _restyle(self)
+
+
+def status_color(state: str) -> str:
+    return {
+        "ok": STATUS_OK,
+        "success": STATUS_OK,
+        "warn": STATUS_WARN,
+        "warning": STATUS_WARN,
+        "error": STATUS_ERROR,
+        "failed": STATUS_ERROR,
+    }.get(state, STATUS_WARN)
 
 
 class ActionRow(QFrame):
@@ -142,6 +176,7 @@ class CommandResultPanel(QFrame):
         layout.addLayout(row)
 
         self._details = QTextEdit()
+        self._details.document().setMaximumBlockCount(5000)
         self._details.setReadOnly(True)
         self._details.setMaximumHeight(120)
         self._details.hide()
@@ -277,10 +312,10 @@ class HardwareCard(QFrame):
         "dim":  "hw-card-dim",
     }
     _BADGE_STYLE = {
-        "ok":   ("background: #1e2b24; color: #5fb88a; border: 1px solid #3f7a5c;",  "OK"),
-        "warn": ("background: #2e2417; color: #d6a35c; border: 1px solid #8a6534;",  "Warning"),
-        "err":  ("background: #35262a; color: #ff99a4; border: 1px solid #5e3338;",  "Issue"),
-        "dim":  ("background: #2b2b2b; color: #a6a6a6; border: 1px solid #3a3a3a;",  "Info"),
+        "ok":   ("background: #0e2218; color: #34d399; border: 1px solid #10b981;",  "OK"),
+        "warn": ("background: #241808; color: #fbbf24; border: 1px solid #d97706;",  "Warning"),
+        "err":  ("background: #2d1418; color: #f87171; border: 1px solid #ef4444;",  "Issue"),
+        "dim":  ("background: #1a1e29; color: #9ca3af; border: 1px solid #4b5563;",  "Info"),
     }
 
     def __init__(self, probe: HardwareProbe):

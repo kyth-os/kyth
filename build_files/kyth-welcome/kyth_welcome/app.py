@@ -26,8 +26,9 @@ def _acquire_lock() -> bool:
         return True  # can't lock → allow launch
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    _IS_LIVE, _is_first_run, _prefer_xwayland_if_wayland_plugin_missing, _remove_autostart, _wait_for_display_setup,
+from .core_base import (
+    _IS_LIVE, _is_first_run, _prefer_xwayland_if_wayland_plugin_missing, _remove_autostart, _shutdown_threads,
+    _wait_for_display_setup,
 )
 from .qt import (  # noqa: E501
     QApplication, QIcon,
@@ -35,9 +36,9 @@ from .qt import (  # noqa: E501
 from .theme import (  # noqa: E501
     QSS,
 )
-from .windows import (  # noqa: E501
-    MainWindow, WizardWindow,
-)
+from .windows import MainWindow
+from .wizard import WizardWindow
+
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main():
@@ -61,6 +62,9 @@ def main():
     sys.excepthook = _log_uncaught
 
     app = QApplication(sys.argv)
+    # Join background probe threads before Qt tears down: destroying a running
+    # QThread aborts the process, turning a normal quit into a crash.
+    app.aboutToQuit.connect(_shutdown_threads)
     app.setApplicationName("kyth-welcome")
     app.setDesktopFileName("kyth-welcome")
     app.setWindowIcon(QIcon.fromTheme("kyth"))

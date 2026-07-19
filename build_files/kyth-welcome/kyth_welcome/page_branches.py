@@ -1,10 +1,15 @@
-import subprocess
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    DownloadMonitor, REGISTRY, Worker, _bootc_image_digest, _bootc_image_timestamp, _branch_display_name, _current_branch, _finish_worker, _get_rx_bytes, _human_bytes, _human_bytes_pair, _image_tag_for_channel, _parse_size_bytes, _restyle, _set_session_inhibit, _with_idle_inhibit,
+from .services.launch import reboot
+from .core_base import (
+    DownloadMonitor, _bootc_image_timestamp, _branch_display_name, _get_rx_bytes, _human_bytes, _human_bytes_pair,
+    _image_tag_for_channel, _parse_size_bytes, _restyle, _set_session_inhibit, _with_idle_inhibit,
 )
+from .services.software import (
+    Worker, _finish_worker,
+)
+from .core_base import REGISTRY, _bootc_image_digest, _current_branch
 from .qt import (  # noqa: E501
     QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,
 )
@@ -142,6 +147,7 @@ class BranchesPage(Page):
         self._add(self._log_toggle)
 
         self._log = QTextEdit()
+        self._log.document().setMaximumBlockCount(5000)
         self._log.setReadOnly(True)
         self._log.setMinimumHeight(120)
         self._log.hide()
@@ -150,7 +156,7 @@ class BranchesPage(Page):
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
         self._reboot_btn.hide()
-        self._reboot_btn.clicked.connect(lambda: subprocess.Popen(["systemctl", "reboot"]))
+        self._reboot_btn.clicked.connect(reboot)
         self._add(self._reboot_btn)
         self._stretch()
 

@@ -2,16 +2,9 @@
 
 set -euo pipefail
 
-CURL_COMMON_ARGS=(--retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 --max-time 300)
-
-# Authenticated GitHub API calls — avoids the 60 req/hr unauthenticated rate limit
-# on shared GitHub Actions runner IP ranges. Token is injected via BuildKit secret
-# and never written to any image layer. Falls back gracefully to unauthenticated
-# calls when building locally without the secret.
-CURL_AUTH_ARGS=()
-if [[ -f /run/secrets/github_token ]]; then
-	CURL_AUTH_ARGS=(-H "Authorization: token $(cat /run/secrets/github_token)")
-fi
+# shellcheck source=lib/curl-common.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/curl-common.sh"
+CURL_COMMON_ARGS+=(--max-time 300)
 
 is_enabled() {
 	case "${1,,}" in
@@ -553,7 +546,6 @@ install_msfonts() {
 	rm -rf "$tmp"
 	echo "msfonts: installed ${count} TrueType fonts"
 }
-
 
 install_opticscaler() {
 	# OptiScaler — universal upscaling intermediary that lets any game use FSR2/3,

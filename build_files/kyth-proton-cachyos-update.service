@@ -1,0 +1,10 @@
+[Unit]
+Description=Update Proton-CachyOS compatibility layer
+Documentation=https://github.com/mrtrick37/kyth
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/kyth-proton-cachyos-update
+Nice=10
+IOSchedulingClass=idle

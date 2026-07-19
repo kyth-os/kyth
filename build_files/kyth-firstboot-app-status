@@ -6,7 +6,7 @@ set -uo pipefail
 STAMP_DIR="${HOME}/.local/share/kyth"
 STAMP="${STAMP_DIR}/firstboot-app-status-v1"
 STATUS="${STAMP_DIR}/first-run-apps.status"
-DEFAULT_DONE="/var/lib/kyth/default-flatpaks-v8-done"
+DEFAULT_DONE="/var/lib/kyth/default-flatpaks-v10-done"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 

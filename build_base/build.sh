@@ -230,15 +230,6 @@ install -m 0644 /etc/plymouth/plymouthd.conf /usr/share/plymouth/plymouthd.defau
 # the upstream base image already ships a valid initramfs; bootc regenerates
 # it on first deployment using the dracut.conf.d above.
 if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
-	mkdir -p /etc/plymouth /usr/share/plymouth
-	cat >/etc/plymouth/plymouthd.conf <<'PLYMOUTHCONF'
-[Daemon]
-Theme=kyth
-ShowDelay=0
-DeviceTimeout=8
-UseFirmwareBackground=false
-PLYMOUTHCONF
-	install -m 0644 /etc/plymouth/plymouthd.conf /usr/share/plymouth/plymouthd.defaults
 	_kyth_plymouth_include_root="$(mktemp -d)"
 	mkdir -p \
 		"${_kyth_plymouth_include_root}/etc/plymouth" \
@@ -302,7 +293,7 @@ fi
 # ── Kernel args (bootc kargs.d) ───────────────────────────────────────────────
 mkdir -p /usr/lib/bootc/kargs.d
 cat >/usr/lib/bootc/kargs.d/99-kyth.toml <<'KARGSEOF'
-kargs = ["quiet", "rhgb", "splash", "rd.plymouth=1", "plymouth.enable=1", "plymouth.ignore-serial-consoles", "systemd.show_status=false", "rd.systemd.show_status=false", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0", "threadirqs"]
+kargs = ["quiet", "rhgb", "splash", "rd.plymouth=1", "plymouth.enable=1", "plymouth.ignore-serial-consoles", "systemd.show_status=false", "rd.systemd.show_status=false", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0", "threadirqs", "split_lock_detect=off", "rootflags=noatime,compress=zstd:1,ssd,discard=async,commit=30", "amdgpu.ppfeaturemask=0xffffffff", "pcie_aspm=performance"]
 KARGSEOF
 
 # ── SDDM — ensure graphical target ───────────────────────────────────────────

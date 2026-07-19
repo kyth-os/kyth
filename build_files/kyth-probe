@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""
+kyth-probe — oneshot refresh of expensive System Hub probes.
+
+Writes a JSON cache that Hub services (bootc, software, nvidia) read before
+spawning bootc/flatpak/lspci. Intended to run:
+
+* as a user oneshot/timer shortly after login and every few minutes
+* as a system oneshot/timer (root) so bootc status is warm for all sessions
+
+Usage:
+  kyth-probe                 # user cache under $XDG_RUNTIME_DIR/kyth/
+  kyth-probe --system        # /var/cache/kyth/probe-cache.json
+  kyth-probe --print         # collect and print JSON to stdout (still writes)
+  kyth-probe --print-only    # collect only, no write
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+from pathlib import Path
+
+LOG = logging.getLogger("kyth-probe")
+
+
+def _ensure_kyth_welcome_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidates = (
+        here / "kyth-welcome",
+        Path("/usr/lib/kyth-welcome"),
+    )
+    for candidate in candidates:
+        if (candidate / "kyth_welcome").is_dir():
+            path = str(candidate)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            return
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Refresh KythOS probe cache")
+    parser.add_argument(
+        "--system",
+        action="store_true",
+        help="Write system cache at /var/cache/kyth/probe-cache.json (root)",
+    )
+    parser.add_argument(
+        "--print",
+        dest="print_json",
+        action="store_true",
+        help="Print collected sections as JSON",
+    )
+    parser.add_argument(
+        "--print-only",
+        action="store_true",
+        help="Collect and print without writing cache",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Debug logging to stderr",
+    )
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s: %(message)s",
+        stream=sys.stderr,
+    )
+
+    _ensure_kyth_welcome_path()
+    from kyth_welcome.services.probe import (  # noqa: E402
+        collect_snapshot,
+        refresh_cache,
+    )
+
+    if args.print_only:
+        sections = collect_snapshot()
+        print(json.dumps(sections, indent=2, default=str))
+        return 0
+
+    path, sections = refresh_cache(system=args.system)
+    LOG.info("Wrote probe cache to %s (%d sections)", path, len(sections))
+    if args.print_json:
+        print(json.dumps({"path": str(path), "sections": sections}, indent=2, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

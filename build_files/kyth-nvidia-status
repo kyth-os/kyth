@@ -56,13 +56,12 @@ if have systemctl; then
 fi
 
 if have nvidia-smi; then
-    if nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null | sed -n '1p' >/tmp/kyth-nvidia-smi.$$; then
-        smi="$(cat /tmp/kyth-nvidia-smi.$$)"
-        [[ -n "$smi" ]] && pass "nvidia-smi" "$smi" || warn "nvidia-smi" "no GPU output"
+    smi="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null | sed -n '1p' || true)"
+    if [[ -n "$smi" ]]; then
+        pass "nvidia-smi" "$smi"
     else
-        warn "nvidia-smi" "command failed"
+        warn "nvidia-smi" "command failed or no GPU output"
     fi
-    rm -f /tmp/kyth-nvidia-smi.$$
 else
     warn "nvidia-smi" "not available until proprietary driver is active"
 fi

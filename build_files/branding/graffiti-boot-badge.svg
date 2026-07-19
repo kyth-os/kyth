@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 180" width="420" height="180" role="img" aria-label="Graffiti OS boot badge">
+  <defs>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd700"/>
+      <stop offset="100%" stop-color="#b8860b"/>
+    </linearGradient>
+    <filter id="badge-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="outline" x="-20%" y="-20%" width="140%" height="140%">
+      <feMorphology operator="dilate" radius="1" in="SourceAlpha" result="expand"/>
+      <feFlood flood-color="#ffffff" flood-opacity="0.8" result="color"/>
+      <feComposite in="color" in2="expand" operator="in" result="outline"/>
+      <feMerge>
+        <feMergeNode in="outline"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- G mark with glow -->
+  <g transform="translate(60,40)" filter="url(#badge-glow)" opacity="0.3">
+    <g transform="translate(2,2)">
+      <polygon points="0,0 26,0 28,50 0,46"/>
+      <rect x="0" y="0" width="56" height="16"/>
+      <rect x="16" y="16" width="24" height="16"/>
+      <rect x="30" y="0" width="26" height="32"/>
+      <polygon points="0,34 56,34 56,50 34,50 28,56 22,50"/>
+    </g>
+  </g>
+
+  <g transform="translate(60,40)">
+    <!-- Shadow -->
+    <g transform="translate(2,2)" opacity="0.85">
+      <polygon points="0,0 26,0 28,50 0,46"/>
+      <rect x="0" y="0" width="56" height="16"/>
+      <rect x="16" y="16" width="24" height="16"/>
+      <rect x="30" y="0" width="26" height="32"/>
+      <polygon points="0,34 56,34 56,50 34,50 28,56 22,50"/>
+    </g>
+    <!-- Main G -->
+    <g filter="url(#outline)">
+      <polygon points="0,0 26,0 28,50 0,46" fill="#e62020"/>
+      <rect x="0" y="0" width="56" height="16" fill="#e62020"/>
+      <rect x="16" y="16" width="24" height="16" fill="#e62020"/>
+      <rect x="30" y="0" width="26" height="32" fill="#e62020"/>
+      <polygon points="0,34 56,34 56,50 34,50 28,56 22,50" fill="#e62020"/>
+    </g>
+
+    <!-- Crown -->
+    <g transform="translate(4,-12)" filter="url(#outline)">
+      <polygon points="6,0 10,-12 14,0 20,-14 26,0 32,-12 38,0 42,-10 46,4" fill="url(#gold)"/>
+    </g>
+  </g>
+
+  <!-- "Graffiti OS" text -->
+  <text x="260" y="68"
+        font-family="'DejaVu Sans', 'Liberation Sans', sans-serif"
+        font-size="30"
+        font-weight="700"
+        fill="#ffffff"
+        text-anchor="middle"
+        filter="url(#badge-glow)">Graffiti OS</text>
+
+  <!-- Underline with attitude: 3 slanted strokes of different colors -->
+  <g opacity="0.7">
+    <line x1="195" y1="80" x2="325" y2="76" stroke="#e62020" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="198" y1="84" x2="320" y2="80" stroke="#3d8bff" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="200" y1="88" x2="315" y2="84" stroke="#2ed62e" stroke-width="1.2" stroke-linecap="round"/>
+  </g>
+
+  <!-- Spray accent dots -->
+  <g opacity="0.4">
+    <circle cx="180" cy="100" r="2.5" fill="#e62020"/>
+    <circle cx="340" cy="95" r="2" fill="#3d8bff"/>
+    <circle cx="355" cy="105" r="1.5" fill="#ffd700"/>
+    <circle cx="170" cy="108" r="1.5" fill="#2ed62e"/>
+    <circle cx="345" cy="115" r="1" fill="#b84cff"/>
+  </g>
+</svg>

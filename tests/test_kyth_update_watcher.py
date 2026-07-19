@@ -39,5 +39,141 @@ class UpdateWatcherMeteredTests(unittest.TestCase):
         self.assertIsNone(self._check_metered_for_nm_value(4))
 
 
+class UpdateWatcherOptimizationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.watcher = _load_update_watcher()
+
+    def test_get_bootc_image_reference(self):
+        status_data = {
+            "status": {
+                "booted": {
+                    "image": {
+                        "reference": "ghcr.io/mrtrick37/kyth:latest"
+                    }
+                }
+            }
+        }
+        self.assertEqual(
+            self.watcher.get_bootc_image_reference(status_data),
+            "ghcr.io/mrtrick37/kyth:latest"
+        )
+
+    def test_get_bootc_image_reference_spec_fallback(self):
+        status_data = {
+            "spec": {
+                "image": {
+                    "image": "ghcr.io/mrtrick37/kyth:testing"
+                }
+            }
+        }
+        self.assertEqual(
+            self.watcher.get_bootc_image_reference(status_data),
+            "ghcr.io/mrtrick37/kyth:testing"
+        )
+
+    @patch("subprocess.run")
+    def test_get_remote_digest_v1(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=b'{"mediaType": "application/vnd.oci.image.manifest.v1+json", "annotations": {"foo": "bar"}}',
+            stderr=b""
+        )
+        import hashlib
+        expected = "sha256:" + hashlib.sha256(mock_run.return_value.stdout).hexdigest()
+        self.assertEqual(
+            self.watcher.get_remote_digest("ghcr.io/mrtrick37/kyth:latest"),
+            expected
+        )
+
+    @patch("subprocess.run")
+    def test_get_remote_digest_multiarch(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=b'{"manifests": [{"platform": {"architecture": "amd64", "os": "linux"}, "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}',
+            stderr=b""
+        )
+        self.assertEqual(
+            self.watcher.get_remote_digest("ghcr.io/mrtrick37/kyth:latest"),
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        )
+
+    @patch("subprocess.run")
+    @patch("sys.exit")
+    def test_main_skips_when_staged_matches_remote(self, mock_exit, mock_run):
+        status_json = b'{"status": {"booted": {"image": {"reference": "ghcr.io/mrtrick37/kyth:latest", "imageDigest": "sha256:booted"}}, "staged": {"image": {"imageDigest": "sha256:latest"}}}}'
+        manifest_json = b'{"manifests": [{"platform": {"architecture": "amd64", "os": "linux"}, "digest": "sha256:latest"}]}'
+        
+        def run_side_effect(args, **kwargs):
+            if "bootc" in args and "status" in args:
+                return subprocess.CompletedProcess(args, 0, status_json, b"")
+            if "skopeo" in args:
+                return subprocess.CompletedProcess(args, 0, manifest_json, b"")
+            if "flatpak" in args:
+                return subprocess.CompletedProcess(args, 0, b"", b"")
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+            
+        mock_run.side_effect = run_side_effect
+        mock_exit.side_effect = SystemExit
+        
+        with patch.object(self.watcher, "write_status") as mock_write_status, \
+             patch.object(self.watcher, "_notify_updates") as mock_notify, \
+             patch.object(self.watcher, "check_startup_grace", return_value=None), \
+             patch.object(self.watcher, "check_quiet_hours", return_value=None), \
+             patch.object(self.watcher, "os") as mock_os:
+            mock_os.geteuid.return_value = 0
+            with self.assertRaises(SystemExit):
+                self.watcher.main()
+
+            mock_write_status.assert_called_once_with(
+                "no_change",
+                "Update already staged and matches latest registry version",
+                "",
+                unittest.mock.ANY,
+                0
+            )
+            mock_notify.assert_called_once_with(os_staged=True, flatpak_count=0)
+            mock_exit.assert_called_once_with(0)
+
+    @patch("subprocess.run")
+    @patch("sys.exit")
+    def test_main_skips_when_booted_matches_remote(self, mock_exit, mock_run):
+        status_json = b'{"status": {"booted": {"image": {"reference": "ghcr.io/mrtrick37/kyth:latest", "imageDigest": "sha256:latest"}}}}'
+        manifest_json = b'{"manifests": [{"platform": {"architecture": "amd64", "os": "linux"}, "digest": "sha256:latest"}]}'
+        
+        def run_side_effect(args, **kwargs):
+            if "bootc" in args and "status" in args:
+                return subprocess.CompletedProcess(args, 0, status_json, b"")
+            if "skopeo" in args:
+                return subprocess.CompletedProcess(args, 0, manifest_json, b"")
+            if "flatpak" in args:
+                return subprocess.CompletedProcess(args, 0, b"", b"")
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+            
+        mock_run.side_effect = run_side_effect
+        mock_exit.side_effect = SystemExit
+        
+        with patch.object(self.watcher, "write_status") as mock_write_status, \
+             patch.object(self.watcher, "_notify_updates") as mock_notify, \
+             patch.object(self.watcher, "check_startup_grace", return_value=None), \
+             patch.object(self.watcher, "check_quiet_hours", return_value=None), \
+             patch.object(self.watcher, "os") as mock_os:
+            mock_os.geteuid.return_value = 0
+            with self.assertRaises(SystemExit):
+                self.watcher.main()
+
+            mock_write_status.assert_called_once_with(
+                "no_change",
+                None,
+                "Already up to date",
+                unittest.mock.ANY,
+                0
+            )
+            mock_notify.assert_not_called()
+            mock_exit.assert_called_once_with(0)
+
+
 if __name__ == "__main__":
     unittest.main()

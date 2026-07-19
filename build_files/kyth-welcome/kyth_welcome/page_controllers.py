@@ -1,18 +1,19 @@
 import shutil
-import subprocess
 
 # __KYTH_GENERATED_IMPORTS__
-from .core import (  # noqa: E501
-    Worker, _detect_controllers, _release_worker_when_finished,
-)
+from .core_base import _release_worker_when_finished
+from .services.gaming import TrackedThread
+from .services.hardware import _detect_controllers
+from .services.software import Worker
 from .qt import (  # noqa: E501
-    QHBoxLayout, QLabel, QMessageBox, QPushButton, QThread, Signal,
+    QHBoxLayout, QLabel, QMessageBox, QPushButton, Signal,
 )
+from .services.launch import flatpak_run, popen, systemsettings
 from .widgets import (  # noqa: E501
     Page, _make_card,
 )
 
-class ControllerProbeWorker(QThread):
+class ControllerProbeWorker(TrackedThread):
     result = Signal(dict)
 
     def run(self) -> None:
@@ -83,7 +84,7 @@ class ControllerPage(Page):
         xbox_layout.addWidget(xbox_bt_steps)
 
         xbox_bt_btn = QPushButton("Open Bluetooth Settings")
-        xbox_bt_btn.clicked.connect(lambda: subprocess.Popen(["systemsettings", "kcm_bluetooth"]))
+        xbox_bt_btn.clicked.connect(lambda: systemsettings("kcm_bluetooth"))
         xbox_layout.addWidget(xbox_bt_btn)
         self._add(xbox_card)
 
@@ -123,13 +124,15 @@ class ControllerPage(Page):
         ps_btns = QHBoxLayout()
         ps_btns.setSpacing(8)
         ps_bt_btn = QPushButton("Open Bluetooth Settings")
-        ps_bt_btn.clicked.connect(lambda: subprocess.Popen(["systemsettings", "kcm_bluetooth"]))
+        ps_bt_btn.clicked.connect(lambda: systemsettings("kcm_bluetooth"))
         ps_btns.addWidget(ps_bt_btn)
         steam_ctrl_btn = QPushButton("Open Steam Controller Settings")
         steam_ctrl_btn.setToolTip("Opens Steam to the Controller settings page where you enable DualSense support.")
         steam_ctrl_btn.clicked.connect(
-            lambda: subprocess.Popen(["flatpak", "run", "--command=steam", "com.valvesoftware.Steam",
-                                      "steam://open/controllersettings"])
+            lambda: flatpak_run(
+                "com.valvesoftware.Steam",
+                "steam://open/controllersettings",
+            )
         )
         ps_btns.addWidget(steam_ctrl_btn)
         ps_btns.addStretch()
@@ -154,7 +157,7 @@ class ControllerPage(Page):
         other_layout.addWidget(other_steps)
 
         other_bt_btn = QPushButton("Open Bluetooth Settings")
-        other_bt_btn.clicked.connect(lambda: subprocess.Popen(["systemsettings", "kcm_bluetooth"]))
+        other_bt_btn.clicked.connect(lambda: systemsettings("kcm_bluetooth"))
         other_layout.addWidget(other_bt_btn)
         self._add(other_card)
 
@@ -172,7 +175,7 @@ class ControllerPage(Page):
         test_layout.addWidget(test_desc)
         self._test_btn = QPushButton("Open Controller Tester")
         self._test_btn.setObjectName("primary")
-        self._test_btn.clicked.connect(lambda: subprocess.Popen(["jstest-gtk"]))
+        self._test_btn.clicked.connect(lambda: popen(["jstest-gtk"]))
         test_layout.addWidget(self._test_btn)
         self._add(test_card)
 
@@ -281,7 +284,7 @@ class ControllerPage(Page):
         self._xone_btn.setEnabled(False)
         self._xone_status_lbl.setText("Flashing firmware…")
         worker = Worker(["pkexec", cmd])
-        worker.done.connect(lambda code: self._on_xone_done(code))
+        worker.done.connect(self._on_xone_done)
         worker.start()
         self._xone_worker = worker
 

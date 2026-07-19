@@ -322,7 +322,7 @@ build-base base_image="ghcr.io/ublue-os/kinoite-main:44" kernel_flavor="fedora":
         --tag localhost/kyth-base:stable \
         build_base/
 
-# Build the full KythOS image (packages → GE-Proton → upgrades → Mesa → thirdparty → sysconfig → Secure Boot → branding).
+# Build the full KythOS image (packages → Proton-CachyOS → upgrades → Mesa → thirdparty → sysconfig → Secure Boot → branding).
 # Requires build-base to have run first.
 # Uses --cache-from the CI registry cache if credentials are available (silently ignored if not).
 #
@@ -343,16 +343,16 @@ build: build-base
     BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
 
-    # Fetch GE-Proton and the five thirdparty tool versions in parallel so the
-    # total wait is the slowest single request instead of the sum of all requests.
-    # resolve-versions.sh is shared with CI (.github/workflows/build.yml).
-    _ge_tmp=$(mktemp) _tp_tmp=$(mktemp)
-    ( ./build_files/scripts/resolve-versions.sh ge-proton > "${_ge_tmp}" ) &
+    # Fetch Proton-CachyOS and the five thirdparty tool versions in parallel so
+    # the total wait is the slowest single request instead of the sum of all
+    # requests. resolve-versions.sh is shared with CI (.github/workflows/build.yml).
+    _pc_tmp=$(mktemp) _tp_tmp=$(mktemp)
+    ( ./build_files/scripts/resolve-versions.sh proton-cachyos > "${_pc_tmp}" ) &
     ( ./build_files/scripts/resolve-versions.sh thirdparty-hash > "${_tp_tmp}" ) &
     wait
-    GE_PROTON_VER=$(cat "${_ge_tmp}"); rm -f "${_ge_tmp}"
+    PROTON_CACHYOS_VER=$(cat "${_pc_tmp}"); rm -f "${_pc_tmp}"
     THIRDPARTY_VERSIONS_HASH=$(cat "${_tp_tmp}"); rm -f "${_tp_tmp}"
-    echo "GE-Proton: ${GE_PROTON_VER:-latest}"
+    echo "Proton-CachyOS: ${PROTON_CACHYOS_VER:-latest}"
     echo "Thirdparty hash: ${THIRDPARTY_VERSIONS_HASH}"
     MOK_SECRET_ARG=()
     SECUREBOOT_SIGNING_REQUESTED=0
@@ -374,7 +374,7 @@ build: build-base
     docker buildx build \
         --build-arg ENABLE_ANANICY="${ENABLE_ANANICY:-1}" \
         --build-arg ENABLE_SCX="${ENABLE_SCX:-1}" \
-        --build-arg GE_PROTON_VER="${GE_PROTON_VER}" \
+        --build-arg PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" \
         --build-arg THIRDPARTY_VERSIONS_HASH="${THIRDPARTY_VERSIONS_HASH}" \
         --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
         --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
@@ -499,6 +499,7 @@ _build-bib $target_image $tag $type $config: (_rootful_load_image target_image t
         docker tag "${target_image}:${tag}" "${BIB_IMAGE_REF}"
         docker push "${BIB_IMAGE_REF}"
 
+        mkdir -p "${BUILDTMP}/containers"
         sudo docker run \
             --rm \
             --privileged \
@@ -508,6 +509,7 @@ _build-bib $target_image $tag $type $config: (_rootful_load_image target_image t
             $KEY_MOUNT \
             -v $(pwd)/${config}:/config.toml:ro \
             -v $BUILDTMP:/output \
+            -v "${BUILDTMP}/containers:/var/lib/containers" \
             "${bib_image}" \
             ${args} \
             "${BIB_IMAGE_REF}"
@@ -950,7 +952,7 @@ format:
     set -eoux pipefail
     # Check if shfmt is installed
     if ! command -v shfmt &> /dev/null; then
-        echo "shellcheck could not be found. Please install it."
+        echo "shfmt could not be found. Please install it."
         exit 1
     fi
     # Run shfmt on all Bash scripts
@@ -960,8 +962,9 @@ format:
 [group('Utility')]
 preview-installer:
     #!/usr/bin/env python3
-    exec(open("build_files/kyth-installer").read())
-    import threading, time
+    import sys, threading, time
+    sys.path.insert(0, "build_files/kyth-installer")
+    from kyth_installer.server import Handler, _Server
     server = _Server(("127.0.0.1", 7777), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print("Installer UI → http://127.0.0.1:7777  (Ctrl-C to stop)")

@@ -70,19 +70,20 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
-from kyth_welcome import core, page_vpn  # noqa: E402
+from kyth_welcome import page_vpn  # noqa: E402
+from kyth_welcome.services import gaming, hardware  # noqa: E402
 
 
 def _exercise(text: str) -> None:
-    display = core._parse_kscreen_output(text)
+    display = hardware._parse_kscreen_output(text)
     assert isinstance(display.summary, str)
     assert isinstance(display.details, str)
     assert isinstance(display.status, str)
 
-    mode = core._format_display_mode(text)
+    mode = hardware._format_display_mode(text)
     assert isinstance(mode, str)
 
-    acf = core._parse_steam_acf_text(text)
+    acf = gaming._parse_steam_acf_text(text)
     assert isinstance(acf, dict)
 
     field, value, username = page_vpn._parse_gp_saml_cookie(text)

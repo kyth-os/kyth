@@ -1,3 +1,4 @@
+import importlib
 import pathlib
 import sys
 import types
@@ -65,17 +66,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
-from kyth_welcome import core, page_vpn  # noqa: E402
+from kyth_welcome import core_base, page_vpn  # noqa: E402
+from kyth_welcome.services import gaming, hardware, software  # noqa: E402
 
 
 class CoreParserTests(unittest.TestCase):
     def test_parse_size_bytes(self):
-        self.assertEqual(core._parse_size_bytes("1 KB"), 1024)
-        self.assertEqual(core._parse_size_bytes("1.5 GB"), int(1.5 * 1024**3))
-        self.assertEqual(core._parse_size_bytes("not a size"), 0)
+        self.assertEqual(core_base._parse_size_bytes("1 KB"), 1024)
+        self.assertEqual(core_base._parse_size_bytes("1.5 GB"), int(1.5 * 1024**3))
+        self.assertEqual(core_base._parse_size_bytes("not a size"), 0)
 
     def test_parse_steam_acf_text(self):
-        acf = core._parse_steam_acf_text(
+        acf = gaming._parse_steam_acf_text(
             '"appid" "620"\n"name" "Portal 2"\n"installdir" "Portal 2"\n'
         )
         self.assertEqual(acf["appid"], "620")
@@ -83,11 +85,11 @@ class CoreParserTests(unittest.TestCase):
         self.assertEqual(acf["installdir"], "Portal 2")
 
     def test_format_display_mode(self):
-        self.assertEqual(core._format_display_mode("1920x1080@143.98"), "1920\u00d71080 @ 144Hz")
-        self.assertEqual(core._format_display_mode("bad-mode"), "bad-mode")
+        self.assertEqual(hardware._format_display_mode("1920x1080@143.98"), "1920\u00d71080 @ 144Hz")
+        self.assertEqual(hardware._format_display_mode("bad-mode"), "bad-mode")
 
     def test_parse_kscreen_output(self):
-        display = core._parse_kscreen_output(
+        display = hardware._parse_kscreen_output(
             "Output: 1 HDMI-A-1\n"
             "connected\n"
             "enabled\n"
@@ -99,6 +101,39 @@ class CoreParserTests(unittest.TestCase):
         self.assertEqual(display.status, "warn")
         self.assertIn("HDMI-A-1", display.summary)
         self.assertIn("VRR/FreeSync", display.details)
+
+
+class AppDefaultsTests(unittest.TestCase):
+    def test_brave_is_in_default_first_run_apps(self):
+        self.assertIn(
+            ("com.brave.Browser", "Brave"),
+            software._DEFAULT_FIRST_RUN_APPS,
+        )
+
+
+class LazyPageTests(unittest.TestCase):
+    def test_lazy_page_uses_page_new_for_qt_style_objects(self):
+        widgets_module = types.ModuleType("kyth_welcome.widgets")
+
+        class DummyPage:
+            new_calls = 0
+
+            def __new__(cls, *args, **kwargs):
+                cls.new_calls += 1
+                return super().__new__(cls)
+
+        widgets_module.Page = DummyPage
+        sys.modules["kyth_welcome.widgets"] = widgets_module
+        sys.modules.pop("kyth_welcome.lazy_page", None)
+
+        lazy_page = importlib.import_module("kyth_welcome.lazy_page")
+
+        @lazy_page.compose_on_first_init(lambda: ())
+        class Shell(DummyPage):
+            pass
+
+        instance = Shell()
+        self.assertIsInstance(instance, DummyPage)
 
 
 class VpnParserTests(unittest.TestCase):
@@ -120,6 +155,33 @@ class VpnParserTests(unittest.TestCase):
     def test_vpn_line_is_connected(self):
         self.assertTrue(page_vpn._vpn_line_is_connected("Established DTLS connection"))
         self.assertFalse(page_vpn._vpn_line_is_connected("Authentication failed"))
+
+
+class AppStreamCatalogTests(unittest.TestCase):
+    def test_as_localized(self):
+        import xml.etree.ElementTree as ET
+        xml_str = """
+        <component>
+            <name xml:lang="en">English App</name>
+            <name xml:lang="de">Deutsches App</name>
+            <name>Default App</name>
+        </component>
+        """
+        elem = ET.fromstring(xml_str)
+        self.assertEqual(software._as_localized(elem, "name", "de"), "Deutsches App")
+        self.assertEqual(software._as_localized(elem, "name", "en"), "English App")
+
+    def test_as_localized_desc(self):
+        import xml.etree.ElementTree as ET
+        xml_str = """
+        <component>
+            <description xml:lang="en">
+                <p>Hello world</p>
+            </description>
+        </component>
+        """
+        elem = ET.fromstring(xml_str)
+        self.assertEqual(software._as_localized_desc(elem, "en"), "Hello world")
 
 
 if __name__ == "__main__":

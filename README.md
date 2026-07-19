@@ -78,7 +78,7 @@ KythOS doesn't promise every game works on Linux. It makes the games that can wo
 | | What's included |
 |---|---|
 | **Launchers** | Steam, Lutris, Heroic Games Launcher |
-| **Proton** | ProtonUp-Qt, GE-Proton, protontricks, winetricks, umu-launcher, libFAudio |
+| **Proton** | Proton-CachyOS, ProtonUp-Qt, GE-Proton, protontricks, winetricks, umu-launcher, libFAudio |
 | **Overlay & capture** | MangoHud (pre-configured overlay), vkBasalt (sharpening on by default), obs-vkcapture |
 | **Performance** | GameMode, Gamescope presets, sched-ext, ananicy-cpp, system76-scheduler |
 | **Controllers** | steam-devices, xpadneo, xone, OpenRazer, OpenTabletDriver, Piper, OpenRGB, input-remapper |
@@ -102,7 +102,7 @@ Gaming-first doesn't mean gaming-only.
 - **Video & streaming:** OBS Studio (pre-installed Flatpak with Vulkan/OpenGL `OBS_VKCAPTURE=1` capture enabled), Kdenlive, DaVinci Resolve helper
 - **Audio:** Audacity, PipeWire tuned for low latency
 - **Graphics:** GIMP, full media codec stack including thumbnails
-- **Dev tools:** Google Antigravity IDE (native RPM with full host filesystem access), VS Code, docker-compose, direnv, jq, yq, GitHub CLI, GitKraken, Docker, Homebrew, Distrobox, QEMU/libvirt, Incus/LXC
+- **Dev tools:** Google Antigravity IDE (native RPM with full host filesystem access), VS Code, docker-compose, direnv, jq, yq, GitHub CLI, Docker, Homebrew, Distrobox, QEMU/libvirt, Incus/LXC
 - **Productivity:** Brave, KDE Connect, OpenDeck, rclone cloud storage mounts, Mission Center (Task Manager)
 - **Security:** Optional Kali Linux toolbox container, Wireshark, Burp Suite Community
 - **VPN:** Standalone VPN Connect app with GlobalProtect SAML flow

@@ -396,7 +396,11 @@ def ingest_csv(conn: sqlite3.Connection, path: Path) -> bool:
 
         if session_id and frame_data:
             # Insert frames in bulk (skip if very long session; store at most 36000 frames ~10 min @60fps)
-            sample = frame_data if len(frame_data) <= 36000 else frame_data[::len(frame_data)//36000]
+            if len(frame_data) <= 36000:
+                sample = frame_data
+            else:
+                step = (len(frame_data) + 35999) // 36000
+                sample = frame_data[::step]
             conn.executemany(
                 """
                 INSERT INTO frames (session_id, ts, fps, frametime, cpu_load, gpu_load, cpu_temp, gpu_temp, vram_mb)

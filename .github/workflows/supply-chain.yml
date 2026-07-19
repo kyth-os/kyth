@@ -27,6 +27,14 @@ on:
         description: Triggering GITHUB_SHA from the build workflow. May differ from source_sha for schedule-triggered builds of non-default branches.
         required: false
         type: string
+      original_event:
+        description: Event that triggered the build workflow. Schedule-triggered stable publishes keep the manual approval gate.
+        required: false
+        type: string
+      original_actor:
+        description: Actor who triggered the build workflow. Repository-owner pushes skip the stable approval gate.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -52,10 +60,14 @@ jobs:
           SOURCE_DIGEST: ${{ inputs.source_digest }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_GITHUB_SHA: ${{ inputs.source_github_sha }}
+          ORIGINAL_EVENT: ${{ inputs.original_event }}
+          ORIGINAL_ACTOR: ${{ inputs.original_actor }}
         run: |
           [[ "${SOURCE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ -z "${SOURCE_GITHUB_SHA}" || "${SOURCE_GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${ORIGINAL_EVENT}" =~ ^[a-z_]*$ ]]
+          [[ "${ORIGINAL_ACTOR}" =~ ^[A-Za-z0-9-]*$ ]]
 
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -122,7 +134,7 @@ jobs:
           BASE_NAME="$(jq -r '."org.opencontainers.image.base.name"' <<< "${LABELS_JSON}")"
           BASE_DIGEST="$(jq -r '."org.opencontainers.image.base.digest"' <<< "${LABELS_JSON}")"
           UPSTREAM_BASE="$(jq -r '."org.kyth.build.upstream-base"' <<< "${LABELS_JSON}")"
-          GE_PROTON_VERSION="$(jq -r '."org.kyth.build.ge-proton-version"' <<< "${LABELS_JSON}")"
+          PROTON_CACHYOS_VERSION="$(jq -r '."org.kyth.build.proton-cachyos-version"' <<< "${LABELS_JSON}")"
           THIRDPARTY_HASH="$(jq -r '."org.kyth.build.thirdparty-versions-hash"' <<< "${LABELS_JSON}")"
           KERNEL_FLAVOR="$(jq -r '."org.kyth.build.kernel-flavor"' <<< "${LABELS_JSON}")"
           test "${ACTUAL_REVISION}" = "${SOURCE_SHA}"
@@ -132,7 +144,7 @@ jobs:
           [[ "${BASE_NAME}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+$ ]]
           [[ "${BASE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "${UPSTREAM_BASE}" =~ ^ghcr\.io/ublue-os/kinoite-main:44@sha256:[0-9a-f]{64}$ ]]
-          test -n "${GE_PROTON_VERSION}"
+          test -n "${PROTON_CACHYOS_VERSION}"
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
           test "${KERNEL_FLAVOR}" = fedora
 
@@ -153,7 +165,7 @@ jobs:
           echo "base_name=${BASE_NAME}" >> "$GITHUB_OUTPUT"
           echo "base_digest=${BASE_DIGEST}" >> "$GITHUB_OUTPUT"
           echo "upstream_base=${UPSTREAM_BASE}" >> "$GITHUB_OUTPUT"
-          echo "ge_proton_version=${GE_PROTON_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "proton_cachyos_version=${PROTON_CACHYOS_VERSION}" >> "$GITHUB_OUTPUT"
           echo "thirdparty_hash=${THIRDPARTY_HASH}" >> "$GITHUB_OUTPUT"
           echo "kernel_flavor=${KERNEL_FLAVOR}" >> "$GITHUB_OUTPUT"
 
@@ -352,7 +364,7 @@ jobs:
           BASE_NAME: ${{ steps.image.outputs.base_name }}
           BASE_DIGEST: ${{ steps.image.outputs.base_digest }}
           UPSTREAM_BASE: ${{ steps.image.outputs.upstream_base }}
-          GE_PROTON_VERSION: ${{ steps.image.outputs.ge_proton_version }}
+          PROTON_CACHYOS_VERSION: ${{ steps.image.outputs.proton_cachyos_version }}
           THIRDPARTY_HASH: ${{ steps.image.outputs.thirdparty_hash }}
           KERNEL_FLAVOR: ${{ steps.image.outputs.kernel_flavor }}
           RPM_MANIFEST: ${{ steps.rpm_manifest.outputs.path }}
@@ -381,7 +393,7 @@ jobs:
               "materials": {
                   "build_base": os.environ["BASE_NAME"] + "@" + os.environ["BASE_DIGEST"],
                   "upstream_base": os.environ["UPSTREAM_BASE"],
-                  "ge_proton_version": os.environ["GE_PROTON_VERSION"],
+                  "proton_cachyos_version": os.environ["PROTON_CACHYOS_VERSION"],
                   "thirdparty_versions_hash": os.environ["THIRDPARTY_HASH"],
                   "kernel_flavor": os.environ["KERNEL_FLAVOR"],
               },
@@ -407,7 +419,12 @@ jobs:
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || 'stable-release' }}
+    # Stable publishes from scheduled rebuilds or the repository owner (push
+    # or manual dispatch) go through the reviewer-free stable-release-auto
+    # environment; only builds triggered by anyone else keep the manual
+    # approval gate on stable-release. Manual dispatches carry no original_*
+    # inputs, so fall back to the actor who dispatched this run.
+    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || (inputs.original_event == 'schedule' || (inputs.original_actor || github.actor) == github.repository_owner) && 'stable-release-auto' || 'stable-release' }}
     permissions:
       actions: write
       contents: write
@@ -437,7 +454,7 @@ jobs:
           VERSION="$(jq -r .current_version "${METADATA}")"
           BUILD_BASE="$(jq -r .materials.build_base "${METADATA}")"
           UPSTREAM_BASE="$(jq -r .materials.upstream_base "${METADATA}")"
-          GE_PROTON_VERSION="$(jq -r .materials.ge_proton_version "${METADATA}")"
+          PROTON_CACHYOS_VERSION="$(jq -r .materials.proton_cachyos_version "${METADATA}")"
           THIRDPARTY_HASH="$(jq -r .materials.thirdparty_versions_hash "${METADATA}")"
           KERNEL_FLAVOR="$(jq -r .materials.kernel_flavor "${METADATA}")"
           SBOM="$(jq -r .sbom "${METADATA}")"
@@ -452,7 +469,7 @@ jobs:
           [[ "${VERSION}" =~ ^[a-z0-9._-]+$ ]]
           [[ "${BUILD_BASE}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+@sha256:[0-9a-f]{64}$ ]]
           [[ "${UPSTREAM_BASE}" =~ ^ghcr\.io/ublue-os/kinoite-main:44@sha256:[0-9a-f]{64}$ ]]
-          test -n "${GE_PROTON_VERSION}"
+          test -n "${PROTON_CACHYOS_VERSION}"
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
           test "${KERNEL_FLAVOR}" = fedora
           [[ "${SBOM}" == "$(basename "${SBOM}")" && -s "output/supply-chain/${SBOM}" ]]

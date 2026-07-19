@@ -1,0 +1,74 @@
+"""lookup — find_efi_partition, get_root_partition"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from typing import Optional
+
+import kyth_installer.disk as _disk
+subprocess = _disk.subprocess
+
+from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES, _IS_LIVE_SESSION
+
+def find_efi_partition(disk: str) -> str:
+    """Return the EFI partition path on disk, or on another safe disk as fallback, or ''."""
+    for part in _disk.list_partitions(disk):
+        if part.get("efi"):
+            return part["name"]
+    try:
+        for d in _disk.list_disks():
+            other_disk = d.get("name")
+            if other_disk and other_disk != disk:
+                for part in _disk.list_partitions(other_disk):
+                    if part.get("efi"):
+                        return part["name"]
+    except Exception:
+        pass
+    for mount in ("/boot/efi", "/efi"):
+        try:
+            out = subprocess.check_output(
+                ["findmnt", "-n", "-o", "SOURCE", mount],
+                text=True, stderr=subprocess.DEVNULL, timeout=5,
+            ).strip()
+            if out and out.startswith("/dev/"):
+                return out
+        except Exception:
+            pass
+    return ""
+
+
+
+def get_root_partition(disk: str) -> str:
+    try:
+        out = subprocess.check_output(
+            ["lsblk", "--json", "--bytes", "--output", "NAME,SIZE,TYPE", disk],
+            text=True, stderr=subprocess.DEVNULL,
+        )
+        parts = []
+        for d in json.loads(out).get("blockdevices", []):
+            for c in d.get("children", []):
+                if c.get("type") == "part":
+                    parts.append((int(c.get("size", 0)), c["name"]))
+        if parts:
+            return "/dev/" + sorted(parts, reverse=True)[0][1]
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(
+            ["blkid", "--output", "device", "--match-types", "btrfs"],
+            text=True, stderr=subprocess.DEVNULL,
+        )
+        for dev in out.splitlines():
+            dev = dev.strip()
+            if dev and dev.startswith(disk):
+                return dev
+    except Exception:
+        pass
+    raise RuntimeError(
+        f"Cannot determine root partition on {disk}. "
+        "lsblk and blkid both failed — check that the disk completed writing."
+    )
+
+

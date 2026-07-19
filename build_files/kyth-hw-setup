@@ -24,7 +24,7 @@ log() { echo "kyth-hw-setup: $*"; }
 # ── SCX scheduler selection ───────────────────────────────────────────────────
 # Only attempt if scx_loader is installed and the kernel exposes sched_ext.
 if command -v scx_loader >/dev/null 2>&1 && [[ -d /sys/kernel/sched_ext ]]; then
-    vendor_id=$(grep "^vendor_id" /proc/cpuinfo | head -1 | awk -F': ' '{print $2}' | tr -d ' ')
+    vendor_id=$(awk -F': ' '/^vendor_id/ {print $2; exit}' /proc/cpuinfo | tr -d ' ')
 
     case "$vendor_id" in
         AuthenticAMD)
@@ -72,10 +72,15 @@ fi
 if lspci 2>/dev/null | grep -qi nvidia; then
     KARGS="rd.driver.blacklist=nouveau,nova_core modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1"
 
-    if modinfo nvidia &>/dev/null; then
-        log "NVIDIA kernel module already built — enabling it for the next boot"
+    configure_nvidia_boot() {
         grubby --update-kernel=ALL --args="${KARGS}" 2>/dev/null \
             || log "grubby could not update kernel args (non-fatal — kargs.d applies on next deployment)"
+        systemctl enable nvidia-suspend.service nvidia-resume.service nvidia-hibernate.service >/dev/null 2>&1 || true
+    }
+
+    if modinfo nvidia &>/dev/null; then
+        log "NVIDIA kernel module already built — enabling it for the next boot"
+        configure_nvidia_boot
         touch "${FLAG}"
         exit 0
     fi
@@ -93,8 +98,7 @@ if lspci 2>/dev/null | grep -qi nvidia; then
 
     # Keep nouveau available if akmods fails. Only switch the next boot to the
     # proprietary driver after its module has compiled successfully.
-    grubby --update-kernel=ALL --args="${KARGS}" 2>/dev/null \
-        || log "grubby could not update kernel args (non-fatal — kargs.d applies on next deployment)"
+    configure_nvidia_boot
 
     touch "${FLAG}"
     log "NVIDIA setup complete — reboot to activate drivers"
