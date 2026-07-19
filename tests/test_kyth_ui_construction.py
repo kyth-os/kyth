@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import os
+import importlib.util
 import pathlib
 import subprocess
+import sys
 import unittest
 
 
@@ -33,6 +35,8 @@ hub.close()
 
 class UiConstructionTests(unittest.TestCase):
     def test_first_run_wizard_and_every_hub_page_construct(self):
+        if not any(importlib.util.find_spec(binding) for binding in ("PySide6", "PyQt6")):
+            self.skipTest("PySide6/PyQt6 is not installed on this validation runner")
         env = os.environ.copy()
         env["QT_QPA_PLATFORM"] = "offscreen"
         env["PYTHONPATH"] = os.pathsep.join(
@@ -42,7 +46,7 @@ class UiConstructionTests(unittest.TestCase):
             ]
         )
         subprocess.run(
-            ["python", "-c", SMOKE_SCRIPT],
+            [sys.executable, "-c", SMOKE_SCRIPT],
             cwd=ROOT,
             env=env,
             check=True,
