@@ -176,6 +176,11 @@ class _FocusMixin:
         self._focus_inhibit_proc = None
         if proc is not None and proc.poll() is None:
             proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+                proc.wait()
 
     def _end_focus_session(self, completed: bool):
         was_active = self._focus_timer.isActive()

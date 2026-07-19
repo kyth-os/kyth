@@ -3,15 +3,50 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 
 from kyth_welcome.services import gaming  # noqa: E402
+from kyth_welcome.services.gaming import gamenight  # noqa: E402
 
 
 class GamingServiceTests(unittest.TestCase):
+    def setUp(self):
+        gaming.GameNightManager._started = False
+        gaming.GameNightManager._inhibit_proc = None
+        gaming.GameNightManager._action_procs.clear()
+
+    def tearDown(self):
+        gaming.GameNightManager._started = False
+        gaming.GameNightManager._inhibit_proc = None
+        gaming.GameNightManager._action_procs.clear()
+
+    def test_game_night_cleanup_is_inert_until_started(self):
+        with patch.object(gamenight.subprocess, "Popen") as popen:
+            gaming._cleanup_game_night()
+
+        popen.assert_not_called()
+
+    def test_game_night_retains_and_reaps_helper_processes(self):
+        processes = [MagicMock(), MagicMock(), MagicMock()]
+        for proc in processes:
+            proc.poll.return_value = None
+        with (
+            patch.object(gamenight.subprocess, "Popen", side_effect=processes) as popen,
+            patch.object(gamenight.shutil, "which", return_value=None),
+        ):
+            self.assertTrue(gaming.GameNightManager.start())
+            self.assertFalse(gaming.GameNightManager.start())
+            gaming._cleanup_game_night()
+
+        self.assertEqual(popen.call_count, 3)
+        self.assertIn("restore", popen.call_args_list[-1].args[0])
+        for proc in processes:
+            proc.wait.assert_called_once_with(timeout=15)
+
     def test_gaming_tools_are_static_tool_definitions(self):
         self.assertGreaterEqual(len(gaming.GAMING_TOOLS), 10)
         for tool in gaming.GAMING_TOOLS:

@@ -11,7 +11,12 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SMOKE_SCRIPT = r"""
-from kyth_welcome.qt import QApplication
+import ast
+import inspect
+from unittest.mock import patch
+
+from kyth_welcome.qt import QApplication, QPushButton
+from kyth_welcome.services.runtime import _shutdown_threads
 from kyth_welcome.windows import MainWindow
 from kyth_welcome.wizard import WizardWindow
 
@@ -22,14 +27,51 @@ assert wizard.windowTitle() == "Welcome to KythOS"
 wizard.close()
 
 hub = MainWindow()
-constructed = {
-    key: type(hub._ensure_page(index)).__name__
+pages = {
+    key: hub._ensure_page(index)
     for key, index in hub._page_index_by_key.items()
 }
+constructed = {key: type(page).__name__ for key, page in pages.items()}
 assert len(constructed) == 19
 assert constructed["Welcome"] == "WelcomePage"
 assert constructed["Hardware"] == "HardwarePage"
+
+# Deferred signal callbacks are not exercised by construction. Verify that
+# every self.method(...) call surviving the refactor resolves on the concrete
+# page instance after lazy mixins have loaded.
+missing_methods = {}
+for key, page in pages.items():
+    referenced = set()
+    for base in type(page).__mro__:
+        try:
+            tree = ast.parse(inspect.getsource(base))
+        except (OSError, TypeError, IndentationError):
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "self"
+            ):
+                referenced.add(node.func.attr)
+    absent = sorted(name for name in referenced if not hasattr(page, name))
+    if absent:
+        missing_methods[key] = absent
+assert not missing_methods, missing_methods
+
+move_page = pages["Move Files"]
+terminal_buttons = [
+    button
+    for button in move_page.findChildren(QPushButton)
+    if button.text() == "Open Terminal"
+]
+assert len(terminal_buttons) == 1
+with patch("kyth_welcome.page_windows_migration.popen") as launch:
+    terminal_buttons[0].click()
+launch.assert_called_once_with(["konsole"])
 hub.close()
+_shutdown_threads()
 """
 
 

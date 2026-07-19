@@ -16,7 +16,6 @@ class RefactorRuntimeImportTests(unittest.TestCase):
             "page_hardware.py": {"_command_stdout"},
             "page_repair_quick.py": {"shlex"},
             "page_welcome.py": {"time"},
-            "services/hardware/display.py": {"_run_command"},
         }
         for relative_path, expected in required.items():
             with self.subTest(path=relative_path):

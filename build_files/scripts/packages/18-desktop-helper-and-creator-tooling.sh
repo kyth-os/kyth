@@ -39,6 +39,14 @@ dnf5 install -y --skip-unavailable \
 	plasma-browser-integration \
 	cups-browsed
 
+# Atomic systems map /usr/local to the root-owned /var/usrlocal.  npm's
+# system default therefore makes `npm install -g` fail for desktop users.
+# npmrc supports environment expansion, and ~/.local/bin is already on the
+# Fedora user PATH, so global CLI tools belong in the user's home directory.
+cat >/etc/npmrc <<'EOF'
+prefix=${HOME}/.local
+EOF
+
 # Fedora has historically moved between versioned and unversioned Python tool
 # entrypoints. Keep the familiar `pip` command present on PATH for users while
 # leaving the RPM-owned pip3 binary untouched.

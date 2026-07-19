@@ -86,6 +86,7 @@ class RcloneAuthorizeWorker(TrackedThread):
         except subprocess.TimeoutExpired:
             if self._proc:
                 self._proc.kill()
+                self._proc.wait()
             self.failed.emit("Authorization timed out after 5 minutes.")
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -105,20 +106,26 @@ class RcloneSyncWorker(TrackedThread):
         super().__init__()
         self._remote = remote
         self._folder = folder
+        self._proc: subprocess.Popen[str] | None = None
+
+    def stop(self) -> None:
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
 
     def run(self):
         try:
-            proc = subprocess.Popen(
+            self._proc = subprocess.Popen(
                 rclone_sync_command(self._remote, self._folder),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
             )
-            for ln in proc.stdout:
+            assert self._proc.stdout
+            for ln in self._proc.stdout:
                 self.line.emit(ln.rstrip())
-            proc.wait()
-            self.done.emit(proc.returncode)
+            self._proc.wait()
+            self.done.emit(self._proc.returncode)
         except Exception as exc:
             self.line.emit(f"Error: {exc}")
             self.done.emit(1)
