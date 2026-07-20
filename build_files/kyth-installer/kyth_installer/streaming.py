@@ -5,7 +5,7 @@ from __future__ import annotations
 import codecs
 import os
 import select
-import subprocess
+import subprocess  # nosec B404 # nosemgrep
 import threading
 import time
 from collections import deque
@@ -54,7 +54,7 @@ class StreamingCommandRunner:
     ) -> None:
         argv = list(command)
         log(f"$ {' '.join(argv)}")
-        proc = subprocess.Popen(
+        proc = subprocess.Popen(  # nosec B603 # nosemgrep
             argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0,
         )
         if proc.stdout is None:

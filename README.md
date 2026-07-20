@@ -356,11 +356,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 01:43:50 UTC
+- Last refreshed (UTC): 2026-07-20 02:02:39 UTC
 - Current branch: testing
-- HEAD commit: 90f0ccf
-- Last commit title: Split installer server/install state into an explicit InstallerContext
-- Last commit date: 2026-07-19T21:42:39-04:00
+- HEAD commit: 4e14b32
+- Last commit title: Suppress false-positive security lint findings in installer code
+- Last commit date: 2026-07-19T22:00:56-04:00
 - CI workflow files: 8
 - Build script files: 20
 

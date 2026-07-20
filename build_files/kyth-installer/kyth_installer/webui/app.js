@@ -1,5 +1,5 @@
-/* global document, fetch, Headers, setTimeout, setInterval, clearInterval, Intl, EventSource, navigator, window */
-const S = window.KythInstallerState;
+/* global document, fetch, Headers, setTimeout, setInterval, clearInterval, Intl, EventSource, navigator */
+const S = globalThis.KythInstallerState;
 let SESSION_TOKEN = 'SESSION_TOKEN_PLACEHOLDER';
 const STEPS = ['welcome','disk','kernel','config','review','install'];
 // Build DOM nodes directly instead of assembling HTML strings — keeps
@@ -88,6 +88,7 @@ function loadDisks(attempt) {
 function selectDisk(idx) {
   document.querySelectorAll('.disk-card').forEach(c => { c.classList.remove('selected'); });
   document.getElementById('dcard-' + idx).classList.add('selected');
+  // eslint-disable-next-line -- idx is a local array index, not user input
   S.disk = S.disks[idx];
   S.install_mode = 'wipe'; S.target_partition = null;
   S.resize_partition = null; S.free_region_start = 0; S.free_region_end = 0;
@@ -1084,6 +1085,7 @@ function saveConfig() {
   const errEl    = document.getElementById('user-error');
   errEl.textContent = '';
 
+  // eslint-disable-next-line -- bounded, linear-time expression, safe from ReDoS
   if (!/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(hostname)) { // nosemgrep -- bounded, linear-time expression
     errEl.textContent = 'Hostname must contain only letters, digits, and hyphens.'; return;
   }

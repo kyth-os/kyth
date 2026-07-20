@@ -477,8 +477,8 @@ def _run_install_worker(
         log(f"ERROR: {message}")
         _push({"type": "error", "message": message}, context)
     finally:
-        state["password_hash"] = ""
-        state["mok_password"] = ""
+        state["password_hash"] = ""  # nosec B105 # nosemgrep -- clearing, not a hardcoded secret
+        state["mok_password"] = ""  # nosec B105 # nosemgrep -- clearing, not a hardcoded secret
         # Guard against orphaned mounts when Phase 1 fails before the inner
         # try/finally (which holds the normal umount) is ever entered.
         if alongside_mount:

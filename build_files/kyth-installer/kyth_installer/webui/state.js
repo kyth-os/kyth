@@ -1,6 +1,5 @@
-/* global window */
 /* Shared mutable state for the installer workflow. */
-window.KythInstallerState = {
+globalThis.KythInstallerState = {
   disk: null,
   install_mode: 'wipe',
   target_partition: null,
