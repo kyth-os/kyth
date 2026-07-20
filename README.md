@@ -356,11 +356,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 14:30:16 UTC
-- Current branch: promote-testing-to-main
-- HEAD commit: 4e7a796
-- Last commit title: Fix Tier 1-3 findings from a full-repo Python QA audit
-- Last commit date: 2026-07-20T09:59:41-04:00
+- Last refreshed (UTC): 2026-07-20 14:32:05 UTC
+- Current branch: testing
+- HEAD commit: 772951f
+- Last commit title: Add unit test suites for kyth_welcome services and fix RDP bookmark XML import bug
+- Last commit date: 2026-07-20T10:30:15-04:00
 - CI workflow files: 8
 - Build script files: 20
 

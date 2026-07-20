@@ -60,7 +60,7 @@ class SoftwareServiceTests(unittest.TestCase):
             patch("kyth_welcome.services.software._IS_LIVE", False),
             patch("kyth_welcome.services.software._is_flatpak_installed", return_value=True),
         ):
-            state, msg, missing = software._first_run_app_setup_state()
+            state, _msg, missing = software._first_run_app_setup_state()
 
         self.assertEqual(state, "ready")
         self.assertEqual(missing, [])
