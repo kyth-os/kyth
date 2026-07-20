@@ -1,0 +1,15 @@
+#!/bin/bash
+mkdir -p /etc/sddm.conf.d
+if systemd-detect-virt -q 2>/dev/null; then
+    cat >/etc/sddm.conf.d/11-kyth-session.conf <<'EOF'
+[General]
+DisplayServer=x11
+DefaultSession=plasmax11.desktop
+EOF
+else
+    cat >/etc/sddm.conf.d/11-kyth-session.conf <<'EOF'
+[General]
+DisplayServer=wayland
+DefaultSession=plasma.desktop
+EOF
+fi

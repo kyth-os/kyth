@@ -32,43 +32,6 @@ WantedBy=multi-user.target
 RELABELEOF
 
 install -d -m 0755 /usr/libexec
-cat >/usr/libexec/kyth-selinux-relabel-home <<'SCRIPTEOF'
-#!/usr/bin/bash
-# Relabel /var/home only once per ostree/bootc deployment.
-# Keyed on the booted deployment checksum so a fresh deployment triggers one
-# relabel, then all subsequent reboots of the same deployment skip it.
-set -euo pipefail
-
-STAMP_DIR=/var/lib/kyth
-STAMP_FILE="${STAMP_DIR}/selinux-relabel-home.stamp"
-
-# Derive a stable deployment identifier. Prefer `ostree admin status --json`
-# if available; fall back to parsing the booted checksum from plain output;
-# finally fall back to the kernel cmdline ostree= argument.
-deployment_id=""
-if command -v ostree >/dev/null 2>&1; then
-    deployment_id="$(ostree admin status 2>/dev/null \
-        | awk '/^\* /{print $2" "$3; exit}')"
-fi
-if [ -z "$deployment_id" ] && [ -r /proc/cmdline ]; then
-    deployment_id="$(tr ' ' '\n' < /proc/cmdline | grep '^ostree=' || true)"
-fi
-# Last-resort fingerprint: mtime of the active deployment root.
-if [ -z "$deployment_id" ]; then
-    deployment_id="fallback-$(stat -c %Y /usr 2>/dev/null || echo 0)"
-fi
-
-if [ -r "$STAMP_FILE" ] && [ "$(cat "$STAMP_FILE")" = "$deployment_id" ]; then
-    echo "kyth-selinux-relabel-home: already relabeled for this deployment, skipping"
-    exit 0
-fi
-
-echo "kyth-selinux-relabel-home: relabeling /var/home for deployment ${deployment_id}"
-/sbin/restorecon -RF -T0 /var/home
-
-mkdir -p "$STAMP_DIR"
-printf '%s' "$deployment_id" > "$STAMP_FILE"
-SCRIPTEOF
-chmod 0755 /usr/libexec/kyth-selinux-relabel-home
+install -m 0755 /ctx/sysconfig/kyth-selinux-relabel-home /usr/libexec/kyth-selinux-relabel-home
 
 systemctl enable kyth-selinux-relabel-home.service 2>/dev/null || true

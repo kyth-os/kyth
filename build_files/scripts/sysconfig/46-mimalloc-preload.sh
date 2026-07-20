@@ -14,7 +14,15 @@ set -euo pipefail
 # cannot be preloaded ... ignored") — non-fatal per-process, but confirmed on
 # a live system running the arch-split fix, so that fix alone doesn't cover
 # this. Bump the ".2" here if a future mimalloc bump changes the soname.
+#
+# Uses the absolute path, not just the versioned soname: glibc's dynamic
+# linker only resolves a bare LD_PRELOAD soname via ld.so.cache for normal
+# unprivileged processes. Under secure-execution mode — sudo, or rootless
+# podman/docker's setuid newuidmap/newgidmap helpers — it refuses to resolve
+# bare names at all and prints the same "cannot be preloaded (cannot open
+# shared object file)" warning on every such invocation. An absolute path in
+# a trusted directory (/usr/lib64) is honored in both modes.
 mkdir -p /etc/environment.d
 cat >/etc/environment.d/20-mimalloc.conf <<'EOF'
-LD_PRELOAD=libmimalloc.so.2
+LD_PRELOAD=/usr/lib64/libmimalloc.so.2
 EOF

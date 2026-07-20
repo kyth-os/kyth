@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -u
+
+command -v nmcli >/dev/null 2>&1 || exit 0
+
+nmcli -t -f TYPE device status 2>/dev/null | grep -qx wifi || exit 0
+
+connected() {
+    nmcli -t -f TYPE,STATE device status 2>/dev/null |
+        awk -F: '($1 == "ethernet" || $1 == "wifi") && $2 == "connected" { found = 1 } END { exit !found }'
+}
+connecting() {
+    nmcli -t -f TYPE,STATE device status 2>/dev/null |
+        awk -F: '$2 ~ /^connecting/ { found = 1 } END { exit !found }'
+}
+
+for ((i = 0; i < 22; i++)); do
+    connected && exit 0
+    sleep 2
+done
+
+connecting && exit 0
+
+[[ "$(nmcli -g WIFI radio 2>/dev/null)" == "enabled" ]] || exit 0
+
+if command -v plasmawindowed >/dev/null 2>&1; then
+    exec plasmawindowed org.kde.plasma.networkmanagement
+elif command -v kcmshell6 >/dev/null 2>&1; then
+    exec kcmshell6 kcm_networkmanagement
+fi
+exit 0

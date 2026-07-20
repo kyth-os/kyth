@@ -121,27 +121,25 @@ jobs:
 
           show_space "before cleanup"
 
-          # The live ISO job uses rootful Podman writing to a btrfs image on /mnt,
-          # not Docker. Prune the large hosted-runner directories that eat root-disk
-          # space, but skip docker image prune — Docker images live on the root disk
-          # and don't affect /mnt free space, so pruning them buys nothing here
-          # and costs ~45 seconds.
+          # /, /mnt, Docker, and rootful Podman all share /dev/root on GitHub's
+          # hosted runner. Reclaim both preinstalled tool payloads and Docker data
+          # before allocating the sparse btrfs image used by the ISO build.
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+          sudo docker system prune --all --force --volumes || true
           sudo swapoff -a || true
           sudo rm -f /mnt/swapfile || true
 
           show_space "after cleanup"
 
           available_kb="$(df --output=avail /mnt | awk 'NR == 2 {print $1}')"
-          # podman-storage.img is intentionally sparse: the btrfs filesystem
-          # needs a 65G logical size, but the runner only needs enough backing
-          # space for the blocks the ISO build actually writes. GitHub's
-          # ubuntu-24.04 runners can now expose about 63 GiB free on /mnt after
-          # cleanup, so requiring the full logical size rejects otherwise usable
-          # runners before the build starts.
-          required_kb=$((58 * 1024 * 1024))
+          # podman-storage.img is intentionally sparse: its 65 GiB logical size
+          # does not need 65 GiB of physical backing. Successful builds produce
+          # roughly 7 GiB ISOs; 28 GiB leaves room for the pulled image, payload
+          # layers, Titanoboa workspace, and final artifact on current 72 GiB
+          # hosted runners.
+          required_kb=$((28 * 1024 * 1024))
           if (( available_kb < required_kb )); then
-            echo "::error::Need at least 58 GiB free on /mnt for the live ISO build; found $((available_kb / 1024 / 1024)) GiB."
+            echo "::error::Need at least 28 GiB free on /mnt for the live ISO build; found $((available_kb / 1024 / 1024)) GiB."
             exit 1
           fi
 
@@ -223,6 +221,11 @@ jobs:
             -f installer/Containerfile \
             .
 
+      - name: Report disk usage after payload build
+        run: |
+          df -h / /mnt /var/lib/containers
+          sudo du -sh /mnt/podman-storage.img
+
       - name: Prepare ISO output directory
         run: mkdir -p output/live-iso
 
@@ -233,6 +236,15 @@ jobs:
         with:
           image-ref: localhost/payload:latest
           iso-dest: ${{ runner.temp }}/kyth-live-${{ inputs.source_tag }}.iso
+
+      - name: Report disk usage after ISO build
+        run: |
+          df -h / /mnt /var/lib/containers
+          sudo du -sh /mnt/podman-storage.img
+          du -h "${RUNNER_TEMP}/kyth-live-${SOURCE_TAG}.iso"
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
 
       - name: Move and verify ISO
         run: |

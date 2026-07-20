@@ -22,7 +22,14 @@ class InstallerRunnerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         mock_run.assert_called_once()
         self.assertEqual(mock_run.call_args.args[0], ["echo", "/tmp/example"])
+        self.assertFalse(mock_run.call_args.kwargs["shell"])
         self.assertEqual(messages, ["$ echo /tmp/example"])
+
+    def test_run_command_rejects_shell_strings_and_shell_execution(self):
+        with self.assertRaises(TypeError):
+            run_command("echo unsafe")
+        with self.assertRaisesRegex(ValueError, "shell execution is forbidden"):
+            run_command(["echo", "safe"], shell=True)
 
     @mock.patch("kyth_installer.runner.subprocess.run")
     def test_run_installer_command_forwards_timeout(self, mock_run):
@@ -54,7 +61,7 @@ class InstallerRunnerTests(unittest.TestCase):
         result = run_command(["false"])
 
         self.assertEqual(result.returncode, 1)
-        mock_run.assert_called_once_with(["false"], timeout=None)
+        mock_run.assert_called_once_with(["false"], timeout=None, shell=False)
 
     @mock.patch("kyth_installer.runner.subprocess.run")
     def test_timeout_gets_context(self, mock_run):

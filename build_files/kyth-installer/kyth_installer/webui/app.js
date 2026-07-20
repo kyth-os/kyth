@@ -1,9 +1,5 @@
 /* global document, fetch, Headers, setTimeout, setInterval, clearInterval, Intl, EventSource, navigator */
-const S = { disk: null, install_mode: 'wipe', target_partition: null,
-  resize_partition: null,
-  resize_gib: 64,
-  free_region_start: 0, free_region_end: 0,
-  hostname: 'kyth', timezone: 'UTC', username: '', password: '', kernel: 'fedora', isLive: true };
+const S = globalThis.KythInstallerState;
 let SESSION_TOKEN = 'SESSION_TOKEN_PLACEHOLDER';
 const STEPS = ['welcome','disk','kernel','config','review','install'];
 // Build DOM nodes directly instead of assembling HTML strings — keeps
@@ -26,16 +22,19 @@ function el(tag, attrs = {}, ...children) {
 }
 
 function apiFetch(url, opts={}) {
+  if (typeof url !== 'string' || !url.startsWith('/api/')) {
+    throw new TypeError('API requests must use a same-origin /api/ route');
+  }
   const o = {...opts, credentials:'same-origin'};
   const h = new Headers(o.headers || {});
   if (SESSION_TOKEN) h.set('X-Kyth-Session-Token', SESSION_TOKEN);
   o.headers = h;
-  return fetch(url, o);
+  return fetch(url, o); // nosemgrep -- url is constrained to a same-origin API route above
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function goto(name) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => { p.classList.remove('active'); });
   document.getElementById('page-' + name).classList.add('active');
   document.querySelectorAll('.step').forEach(el => {
     const si = STEPS.indexOf(el.dataset.step), ai = STEPS.indexOf(name);
@@ -52,7 +51,6 @@ function goto(name) {
 }
 
 // ── Disk ──────────────────────────────────────────────────────────────────────
-let _disks = [];
 function loadDisks(attempt) {
   attempt = attempt || 0;
   document.getElementById('disk-grid').innerHTML = '<div class="status-box status-info">Scanning for disks…</div>';
@@ -64,7 +62,7 @@ function loadDisks(attempt) {
   S.disk = null; S.install_mode = 'wipe'; S.target_partition = null;
   S.resize_partition = null; S.free_region_start = 0; S.free_region_end = 0;
   apiFetch('/api/disks').then(r=>r.json()).then(disks => {
-    _disks = disks;
+    S.disks = disks;
     const grid = document.getElementById('disk-grid');
     if (!disks.length) {
       if (attempt < 4) {
@@ -88,12 +86,13 @@ function loadDisks(attempt) {
 }
 
 function selectDisk(idx) {
-  document.querySelectorAll('.disk-card').forEach(c => c.classList.remove('selected'));
+  document.querySelectorAll('.disk-card').forEach(c => { c.classList.remove('selected'); });
   document.getElementById('dcard-' + idx).classList.add('selected');
-  S.disk = _disks[idx];
+  // eslint-disable-next-line -- idx is a local array index, not user input
+  S.disk = S.disks[idx];
   S.install_mode = 'wipe'; S.target_partition = null;
   S.resize_partition = null; S.free_region_start = 0; S.free_region_end = 0;
-  document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
+  document.querySelectorAll('.mode-card').forEach(c => { c.classList.remove('selected'); });
   document.getElementById('mcard-wipe').classList.add('selected');
   
   const warn = document.getElementById('disk-warn');
@@ -116,7 +115,7 @@ function selectMode(id) {
   S.free_region_start = 0; 
   S.free_region_end = 0;
   
-  document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
+  document.querySelectorAll('.mode-card').forEach(c => { c.classList.remove('selected'); });
   const card = document.getElementById('mcard-' + id);
   if (card) card.classList.add('selected');
   
@@ -132,13 +131,13 @@ function selectMode(id) {
   
   // Auto-select defaults
   if (id === 'resize_ntfs') {
-    const defaultNtfs = _partitions.find(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= 96 * 1024**3);
+    const defaultNtfs = S.partitions.find(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= 96 * 1024**3);
     if (defaultNtfs) selectResizePartitionByName(defaultNtfs.name);
   } else if (id === 'alongside') {
-    const defaultReplace = _partitions.find(p => !p.efi && !p.current && p.size_bytes >= 32 * 1024**3);
+    const defaultReplace = S.partitions.find(p => !p.efi && !p.current && p.size_bytes >= 32 * 1024**3);
     if (defaultReplace) selectPartitionByName(defaultReplace.name);
   } else if (id === 'free_space') {
-    const defaultFree = _freeRegions.find(r => r.size_bytes >= 32 * 1024**3);
+    const defaultFree = S.freeRegions.find(r => r.size_bytes >= 32 * 1024**3);
     if (defaultFree) selectFreeRegionByStart(defaultFree.start_bytes);
   }
   
@@ -146,10 +145,6 @@ function selectMode(id) {
   updateDiskNext();
 }
 
-let _partitions = [];
-let _freeRegions = [];
-let _minGuidedGiB = 32;
-let _replaceAllowed = true;
 
 function loadPartitions() {
   if (!S.disk) return;
@@ -162,23 +157,23 @@ function loadPartitions() {
     apiFetch('/api/partitions?disk=' + encodeURIComponent(S.disk.name)).then(r=>r.json()),
     apiFetch('/api/free-space?disk=' + encodeURIComponent(S.disk.name)).then(r=>r.json()),
   ]).then(([parts, regions])=>{
-    _partitions = parts;
-    _freeRegions = regions;
+    S.partitions = parts;
+    S.freeRegions = regions;
     
     const hasEfi = parts.some(p => p.efi);
     const hasBiosBoot = parts.some(p => (p.parttype || '').toLowerCase() === '21686148-6449-6e6f-744e-656564454649');
     const needsBiosBoot = (S.disk.partition_table || '').toLowerCase() === 'gpt' && !hasBiosBoot;
-    _minGuidedGiB = needsBiosBoot ? 33 : 32;
-    _replaceAllowed = !needsBiosBoot;
+    S.minGuidedGiB = needsBiosBoot ? 33 : 32;
+    S.replaceAllowed = !needsBiosBoot;
     document.getElementById('efi-info').style.display = hasEfi ? 'none' : 'block';
     if (!hasEfi) {
       document.getElementById('efi-info').innerHTML = '<strong>No EFI System Partition found on this disk.</strong> KythOS installation requires an EFI partition. The Erase Disk mode will automatically create one, but Alongside, Replace, and Free Space modes require an existing EFI partition to configure boot files.';
     }
     
     // Enable/Disable mode cards based on candidates
-    const hasNtfsCandidate = parts.some(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= (64 + _minGuidedGiB) * 1024**3);
-    const hasFreeCandidate = regions.some(r => r.size_bytes >= _minGuidedGiB * 1024**3);
-    const hasReplaceCandidate = _replaceAllowed && parts.some(p => !p.efi && !p.current && !p.in_use && p.size_bytes >= 32 * 1024**3);
+    const hasNtfsCandidate = parts.some(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= (64 + S.minGuidedGiB) * 1024**3);
+    const hasFreeCandidate = regions.some(r => r.size_bytes >= S.minGuidedGiB * 1024**3);
+    const hasReplaceCandidate = S.replaceAllowed && parts.some(p => !p.efi && !p.current && !p.in_use && p.size_bytes >= 32 * 1024**3);
     
     const mResize = document.getElementById('mcard-resize_ntfs');
     mResize.style.opacity = hasNtfsCandidate ? '1' : '0.4';
@@ -201,7 +196,6 @@ function loadPartitions() {
       ? 'Overwrite an existing partition with KythOS.'
       : 'Replace a Partition (Unavailable: no partitions >= 32 GiB found)';
 
-    const mManual = document.getElementById('mcard-manual');
     // Manual mode always available (always needs user interaction)
     
     document.getElementById('mode-section').style.display = '';
@@ -287,7 +281,7 @@ function blockToNode(block, isProposed = false) {
   
   let onclick = null;
   if (!isProposed) {
-    if (S.install_mode === 'alongside' && _replaceAllowed && block.type === 'part' && !block.efi && !block.current && !block.ref.in_use && block.size_bytes >= 32 * 1024**3) {
+    if (S.install_mode === 'alongside' && S.replaceAllowed && block.type === 'part' && !block.efi && !block.current && !block.ref.in_use && block.size_bytes >= 32 * 1024**3) {
       klass += ' clickable';
       if (S.target_partition === block.name) klass += ' selected-target';
       onclick = () => selectPartitionByName(block.name);
@@ -295,7 +289,7 @@ function blockToNode(block, isProposed = false) {
       klass += ' clickable';
       if (S.resize_partition === block.name) klass += ' selected-target';
       onclick = () => selectResizePartitionByName(block.name);
-    } else if (S.install_mode === 'free_space' && block.type === 'free' && block.size_bytes >= _minGuidedGiB * 1024**3) {
+    } else if (S.install_mode === 'free_space' && block.type === 'free' && block.size_bytes >= S.minGuidedGiB * 1024**3) {
       klass += ' clickable';
       if (S.free_region_start === block.start_bytes) klass += ' selected-target';
       onclick = () => selectFreeRegionByStart(block.start_bytes);
@@ -325,7 +319,7 @@ function renderDiskLayouts() {
   document.getElementById('visual-layout-section').style.display = 'block';
   
   const diskSize = S.disk.size_bytes;
-  const blocks = getDiskBlocks(_partitions, diskSize);
+  const blocks = getDiskBlocks(S.partitions, diskSize);
   
   // Render Current Layout
   const currentBar = document.getElementById('current-layout-bar');
@@ -337,9 +331,9 @@ function renderDiskLayouts() {
   
   if (S.install_mode === 'manual') {
     // For manual mode, reflect pending operations in the proposed layout
-    const pendingCreates = _pendingOps.filter(o => o.kind === 'create');
-    const pendingDeletes = _pendingOps.filter(o => o.kind === 'delete');
-    const pendingResizes = _pendingOps.filter(o => o.kind === 'resize');
+    const pendingCreates = S.pendingOps.filter(o => o.kind === 'create');
+    const pendingDeletes = S.pendingOps.filter(o => o.kind === 'delete');
+    const pendingResizes = S.pendingOps.filter(o => o.kind === 'resize');
     const deletedNames = new Set(pendingDeletes.map(o => o.params.partition));
     const resizedSizes = {};
     pendingResizes.forEach(o => { resizedSizes[o.params.partition] = o.params.new_size_bytes; });
@@ -439,10 +433,10 @@ function renderDiskLayouts() {
 
 function selectPartitionByName(name) {
   S.target_partition = name;
-  const pIdx = _partitions.findIndex(p => p.name === name);
+  const pIdx = S.partitions.findIndex(p => p.name === name);
   if (pIdx >= 0) {
     const cards = document.querySelectorAll('#replace-list .part-selector-card');
-    cards.forEach(c => c.classList.toggle('selected', c.dataset.name === name));
+    cards.forEach(c => { c.classList.toggle('selected', c.dataset.name === name); });
   }
   renderDiskLayouts();
   updateDiskNext();
@@ -450,13 +444,13 @@ function selectPartitionByName(name) {
 
 function selectResizePartitionByName(name) {
   S.resize_partition = name;
-  const p = _partitions.find(part => part.name === name);
+  const p = S.partitions.find(part => part.name === name);
   if (p) {
     const maxShrinkGib = Math.floor((p.size_bytes - 64 * 1024**3) / 1024**3);
     const slider = document.getElementById('shrink-slider');
     slider.max = maxShrinkGib;
-    slider.min = _minGuidedGiB;
-    const defaultVal = Math.min(maxShrinkGib, Math.max(_minGuidedGiB, Math.floor(p.size_bytes / 2 / 1024**3)));
+    slider.min = S.minGuidedGiB;
+    const defaultVal = Math.min(maxShrinkGib, Math.max(S.minGuidedGiB, Math.floor(p.size_bytes / 2 / 1024**3)));
     slider.value = defaultVal;
     S.resize_gib = defaultVal;
     
@@ -468,12 +462,12 @@ function selectResizePartitionByName(name) {
 }
 
 function selectFreeRegionByStart(start) {
-  const r = _freeRegions.find(region => region.start_bytes === start);
+  const r = S.freeRegions.find(region => region.start_bytes === start);
   if (r) {
     S.free_region_start = r.start_bytes;
     S.free_region_end = r.end_bytes;
     const cards = document.querySelectorAll('#free-space-list .part-selector-card');
-    cards.forEach(c => c.classList.toggle('selected', parseInt(c.dataset.start) === start));
+    cards.forEach(c => { c.classList.toggle('selected', parseInt(c.dataset.start) === start); });
   }
   renderDiskLayouts();
   updateDiskNext();
@@ -481,8 +475,8 @@ function selectFreeRegionByStart(start) {
 
 function populateReplacementList() {
   const container = document.getElementById('replace-list');
-  const replaceable = _replaceAllowed
-    ? _partitions.filter(p => !p.efi && !p.current && !p.in_use && p.size_bytes >= 32 * 1024**3)
+  const replaceable = S.replaceAllowed
+    ? S.partitions.filter(p => !p.efi && !p.current && !p.in_use && p.size_bytes >= 32 * 1024**3)
     : [];
   if (!replaceable.length) {
     container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">No partitions available to replace.</div>';
@@ -505,7 +499,7 @@ function populateReplacementList() {
 
 function populateFreeSpaceList() {
   const container = document.getElementById('free-space-list');
-  const freeGaps = _freeRegions.filter(r => r.size_bytes >= _minGuidedGiB * 1024**3);
+  const freeGaps = S.freeRegions.filter(r => r.size_bytes >= S.minGuidedGiB * 1024**3);
   if (!freeGaps.length) {
     container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">No free space gaps available.</div>';
     return;
@@ -528,7 +522,7 @@ function populateFreeSpaceList() {
 // eslint-disable-next-line no-unused-vars
 function onSliderMove(val) {
   S.resize_gib = parseInt(val, 10);
-  const p = _partitions.find(part => part.name === S.resize_partition);
+  const p = S.partitions.find(part => part.name === S.resize_partition);
   if (p) {
     document.getElementById('shrink-label-old').textContent = `${p.name.replace('/dev/', '')} (shrunk): ${Math.floor(p.size_bytes / 1024**3) - S.resize_gib} GiB`;
     document.getElementById('shrink-label-new').textContent = `KythOS: ${S.resize_gib} GiB`;
@@ -541,24 +535,21 @@ function updateDiskNext() {
   let ok = !!S.disk;
   if (ok && S.install_mode === 'wipe' && S.disk.current && !S.isLive) ok = false;
   if (S.install_mode === 'alongside') ok = ok && !!S.target_partition;
-  if (S.install_mode === 'resize_ntfs') ok = ok && !!S.resize_partition && Number(S.resize_gib || 0) >= _minGuidedGiB;
+  if (S.install_mode === 'resize_ntfs') ok = ok && !!S.resize_partition && Number(S.resize_gib || 0) >= S.minGuidedGiB;
   if (S.install_mode === 'free_space') ok = ok && Number(S.free_region_end || 0) > Number(S.free_region_start || 0);
-  if (S.install_mode === 'manual') ok = ok && _manualCommitted;
+  if (S.install_mode === 'manual') ok = ok && S.manualCommitted;
   const btn = document.getElementById('disk-next');
   if (btn) btn.disabled = !ok;
 }
 
 
 // ── Manual Partitioning ───────────────────────────────────────────────────
-let _pendingOps = [];
-let _supportedFilesystems = [];
-let _manualCommitted = false;
 
 function showManualControls() {
   document.getElementById('manual-controls').style.display = 'block';
   document.getElementById('visual-layout-section').style.display = 'block';
-  _manualCommitted = false;
-  _pendingOps = [];
+  S.manualCommitted = false;
+  S.pendingOps = [];
   loadFilesystems();
   loadPendingOps();
   updateManualButtons();
@@ -567,8 +558,8 @@ function showManualControls() {
 function loadFilesystems() {
   apiFetch('/api/disk/filesystems')
     .then(r => r.json())
-    .then(fs => { _supportedFilesystems = fs; })
-    .catch(() => { _supportedFilesystems = [
+    .then(fs => { S.supportedFilesystems = fs; })
+    .catch(() => { S.supportedFilesystems = [
       {id:'btrfs',name:'Btrfs',root_ok:true,efi_ok:false},
       {id:'ext4',name:'ext4',root_ok:false,efi_ok:false},
       {id:'xfs',name:'XFS',root_ok:false,efi_ok:false},
@@ -581,7 +572,7 @@ function loadPendingOps() {
   apiFetch('/api/disk/pending')
     .then(r => r.json())
     .then(ops => {
-      _pendingOps = ops;
+      S.pendingOps = ops;
       renderPendingOps();
       updateManualButtons();
     })
@@ -591,12 +582,12 @@ function loadPendingOps() {
 function renderPendingOps() {
   const list = document.getElementById('pending-list');
   const count = document.getElementById('pending-count');
-  if (count) count.textContent = _pendingOps.length;
-  if (!_pendingOps.length) {
+  if (count) count.textContent = S.pendingOps.length;
+  if (!S.pendingOps.length) {
     list.innerHTML = '<div style="color:var(--muted2);font-size:12px;padding:12px 0;">No pending partition operations. Use the toolbar above to modify the partition layout.</div>';
     return;
   }
-  list.replaceChildren(..._pendingOps.map((op, i) => {
+  list.replaceChildren(...S.pendingOps.map((op, i) => {
     const desc = describeOp(op);
     return el('div', { class: 'pending-item' },
       el('span', { style: 'flex:1;font-size:13px;', text: desc }),
@@ -613,8 +604,8 @@ function describeOp(op) {
   const p = op.params || {};
   switch (op.kind) {
     case 'new_table':    return `📋 New partition table: ${(p.table_type || 'gpt').toUpperCase()}`;
-    case 'create':       return `➕ Create ${fmtBytes(p.size_bytes || 0)} ${p.fs_type || ''} partition${p.mountpoint ? ' at ' + p.mountpoint : ''}`;
-    case 'delete':       return `🗑  Delete ${p.partition || 'partition'}`;
+    case 'create':       return `➕ Add ${fmtBytes(p.size_bytes || 0)} ${p.fs_type || ''} partition${p.mountpoint ? ' at ' + p.mountpoint : ''}`;
+    case 'delete':       return `🗑  Remove ${p.partition || 'partition'}`;
     case 'resize':       return `↔  Resize ${p.partition || ''} to ${fmtBytes(p.new_size_bytes || 0)}`;
     case 'format':       return `🔧 Format ${p.partition || ''} as ${p.fs_type || ''}`;
     case 'set_mountpoint': return `📂 Mount ${p.partition || ''} at ${p.mountpoint || '(none)'}`;
@@ -622,7 +613,7 @@ function describeOp(op) {
   }
 }
 
-function removePendingOp(index) {
+function removePendingOp() {
   // Remove from local state and force a re-fetch from server
   // The server may not support individual removal, so we reload
   showOverlay('Removing operation...', '', null);
@@ -631,16 +622,16 @@ function removePendingOp(index) {
 }
 
 function updateManualButtons() {
-  const hasRoot = _pendingOps.some(op =>
+  const hasRoot = S.pendingOps.some(op =>
     op.kind === 'set_mountpoint' && op.params.mountpoint === '/'
-  ) || _pendingOps.some(op =>
+  ) || S.pendingOps.some(op =>
     op.kind === 'create' && op.params.mountpoint === '/'
   );
-  const hasOps = _pendingOps.length > 0;
+  const hasOps = S.pendingOps.length > 0;
   const commitBtn = document.getElementById('btn-commit');
-  if (commitBtn) commitBtn.disabled = !hasOps || !hasRoot || _manualCommitted;
+  if (commitBtn) commitBtn.disabled = !hasOps || !hasRoot || S.manualCommitted;
   const rollbackBtn = document.getElementById('btn-rollback');
-  if (rollbackBtn) rollbackBtn.disabled = !hasOps || _manualCommitted;
+  if (rollbackBtn) rollbackBtn.disabled = !hasOps || S.manualCommitted;
 }
 
 function showNewTableDialog() {
@@ -662,12 +653,12 @@ function showNewTableDialog() {
       body: JSON.stringify({ disk: S.disk.name, table_type: tableType }),
     }).then(r => r.json()).then(j => {
       if (j.ok) {
-        _pendingOps = [];
-        if (_freeRegions) {
+        S.pendingOps = [];
+        if (S.freeRegions) {
           // After new table, the whole disk is free space
           const diskSize = S.disk.size_bytes;
           const reserve = 1024 * 1024;
-          _freeRegions = [{
+          S.freeRegions = [{
             start_bytes: reserve,
             end_bytes: diskSize - reserve,
             size_bytes: diskSize - 2 * reserve,
@@ -698,7 +689,7 @@ function showCreateDialog() {
   ];
 
   // Populate free space regions for start offset picker
-  const freeRegions = _freeRegions || [];
+  const freeRegions = S.freeRegions || [];
   const startOpts = freeRegions.length
     ? freeRegions.map(r => el('option', { value: r.start_bytes, text: `At ${r.start_bytes} (${r.size})` }))
     : [el('option', { value: sectors, text: `After 1 MiB gap (${fmtBytes(diskSize - 2*sectors)})` })];
@@ -711,8 +702,8 @@ function showCreateDialog() {
     el('input', { type: 'number', id: 'dlg-size', value: Math.floor(defaultSize / 1024**3), min: 1, max: Math.floor(diskSize / 1024**3) }),
     el('div', { class: 'field-label', text: 'Filesystem Type' }),
     el('select', { id: 'dlg-fs' },
-      ...(_supportedFilesystems.length
-        ? _supportedFilesystems.map(f => el('option', { value: f.id, text: f.name }))
+      ...(S.supportedFilesystems.length
+        ? S.supportedFilesystems.map(f => el('option', { value: f.id, text: f.name }))
         : [el('option', { value: 'btrfs', text: 'Btrfs' }),
            el('option', { value: 'ext4', text: 'ext4' }),
            el('option', { value: 'xfs', text: 'XFS' }),
@@ -745,7 +736,6 @@ function showCreateDialog() {
       if (j.ok) {
         if (mountpoint) {
           // Also set the mountpoint after creation
-          const lastCreateIdx = _pendingOps.length;
           apiFetch('/api/disk/set-mountpoint', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -765,7 +755,7 @@ function showCreateDialog() {
 }
 
 function showDeleteDialog() {
-  const parts = _partitions || [];
+  const parts = S.partitions || [];
   const selectable = parts.filter(p => !p.current && !p.in_use && !p.efi);
   if (!selectable.length) {
     showOverlay('No Removable Partitions',
@@ -798,7 +788,7 @@ function showDeleteDialog() {
 }
 
 function showResizeDialog() {
-  const parts = _partitions || [];
+  const parts = S.partitions || [];
   const selectable = parts.filter(p => !p.current && !p.in_use && !p.efi && p.size_bytes >= 40 * 1024**3);
   if (!selectable.length) {
     showOverlay('No Resizable Partitions',
@@ -835,7 +825,7 @@ function showResizeDialog() {
 }
 
 function showFormatDialog() {
-  const parts = _partitions || [];
+  const parts = S.partitions || [];
   const selectable = parts.filter(p => !p.current && !p.in_use);
   if (!selectable.length) {
     showOverlay('No Formattable Partitions',
@@ -849,8 +839,8 @@ function showFormatDialog() {
       ...selectable.map(p => el('option', { value: p.name, text: `${p.name} (${p.size}) - ${p.fstype || 'unknown'}` }))),
     el('div', { class: 'field-label', text: 'Filesystem' }),
     el('select', { id: 'dlg-fmt-fs' },
-      ...(_supportedFilesystems.length
-        ? _supportedFilesystems.map(f => el('option', { value: f.id, text: f.name }))
+      ...(S.supportedFilesystems.length
+        ? S.supportedFilesystems.map(f => el('option', { value: f.id, text: f.name }))
         : [el('option', { value: 'btrfs', text: 'Btrfs' }),
            el('option', { value: 'ext4', text: 'ext4' })])),
     el('div', { class: 'field-label', text: 'Label (optional)' }),
@@ -880,7 +870,7 @@ function showFormatDialog() {
 }
 
 function showMountDialog() {
-  const parts = _partitions || [];
+  const parts = S.partitions || [];
   const content = el('div', {},
     el('div', { class: 'modal-title', text: 'Set Mount Point' }),
     el('div', { class: 'field-label', text: 'Select Partition' }),
@@ -935,8 +925,8 @@ function commitPartitions() {
   }).then(r => r.json()).then(j => {
     hideOverlay();
     if (j.ok) {
-      _manualCommitted = true;
-      _pendingOps = [];
+      S.manualCommitted = true;
+      S.pendingOps = [];
       renderPendingOps();
       updateManualButtons();
       // Reload the partition list to reflect the changes
@@ -968,8 +958,8 @@ function rollbackPartitions() {
   }).then(r => r.json()).then(j => {
     hideOverlay();
     if (j.ok) {
-      _manualCommitted = false;
-      _pendingOps = [];
+      S.manualCommitted = false;
+      S.pendingOps = [];
       renderPendingOps();
       updateManualButtons();
       loadPartitions();
@@ -1056,8 +1046,8 @@ function initKernel() {
 
 function selectKernel(id) {
   S.kernel = id;
-  document.querySelectorAll('.kernel-card').forEach(c => c.classList.remove('selected'));
-  document.querySelectorAll('.kernel-card').forEach(c => c.setAttribute('aria-pressed', 'false'));
+  document.querySelectorAll('.kernel-card').forEach(c => { c.classList.remove('selected'); });
+  document.querySelectorAll('.kernel-card').forEach(c => { c.setAttribute('aria-pressed', 'false'); });
   const card = document.getElementById('kcard-' + id);
   if (card) {
     card.classList.add('selected');
@@ -1095,7 +1085,8 @@ function saveConfig() {
   const errEl    = document.getElementById('user-error');
   errEl.textContent = '';
 
-  if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(hostname)) {
+  // eslint-disable-next-line -- bounded, linear-time expression, safe from ReDoS
+  if (!/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(hostname)) { // nosemgrep -- bounded, linear-time expression
     errEl.textContent = 'Hostname must contain only letters, digits, and hyphens.'; return;
   }
   if (!/^[a-z_][a-z0-9_-]{0,30}$/.test(username)) {
@@ -1129,18 +1120,18 @@ function buildReview() {
     ['Model',         S.disk ? S.disk.model : '—'],
     ['Install Mode',  modeLabels[S.install_mode] || S.install_mode],
     ...(S.install_mode === 'resize_ntfs' ? [['Shrink NTFS', `${S.resize_partition} by ${S.resize_gib} GiB`]] : []),
-    ...(S.install_mode === 'free_space' ? [['Free Space Region', (_freeRegions.find(r => r.start_bytes === S.free_region_start && r.end_bytes === S.free_region_end) || {}).size || '—']] : []),
+    ...(S.install_mode === 'free_space' ? [['Free Space Region', (S.freeRegions.find(r => r.start_bytes === S.free_region_start && r.end_bytes === S.free_region_end) || {}).size || '—']] : []),
   ];
   if (S.install_mode === 'manual') {
     rows.push(['Partition Layout', 'Manual — see partition table']);
-    const manualMounts = _pendingOps.filter(o => o.kind === 'set_mountpoint' && o.params.mountpoint);
+    const manualMounts = S.pendingOps.filter(o => o.kind === 'set_mountpoint' && o.params.mountpoint);
     for (const m of manualMounts.slice(0, 5)) {
       rows.push([`  ${m.params.partition || ''}`, m.params.mountpoint || '']);
     }
   }
   if (S.install_mode === 'alongside' && S.target_partition) {
     rows.push(['Target Partition', S.target_partition]);
-    const targetPart = _partitions.find(p => p.name === S.target_partition);
+    const targetPart = S.partitions.find(p => p.name === S.target_partition);
     if (targetPart && targetPart.fstype) rows.push(['Partition FS', targetPart.fstype]);
   }
   rows.push(
@@ -1206,8 +1197,6 @@ function updateInstallReady() {
 }
 
 // ── Install ───────────────────────────────────────────────────────────────────
-let _startTime = 0;
-let _elapsedTimer = null;
 
 // Called from index.html's inline onclick/oninput handlers, not referenced within this file.
 // eslint-disable-next-line no-unused-vars
@@ -1247,9 +1236,9 @@ function startInstall() {
     S.password = '';
     document.getElementById('inp-password').value = '';
     document.getElementById('inp-password2').value = '';
-    _startTime = Date.now();
-    _elapsedTimer = setInterval(() => {
-      const s = Math.floor((Date.now() - _startTime) / 1000);
+    S.startTime = Date.now();
+    S.elapsedTimer = setInterval(() => {
+      const s = Math.floor((Date.now() - S.startTime) / 1000);
       const m = Math.floor(s / 60), sec = s % 60;
       document.getElementById('install-elapsed').textContent =
         m > 0 ? `${m}m ${sec}s` : `${sec}s`;
@@ -1345,12 +1334,17 @@ function copyFullLog() {
 function toggleLog() {
   const wrap  = document.getElementById('log-wrap');
   const arrow = document.getElementById('log-arrow');
+  const toggle = document.getElementById('log-toggle');
+  const label = document.getElementById('log-toggle-label');
   const open  = wrap.classList.toggle('open');
   arrow.classList.toggle('open', open);
+  wrap.setAttribute('aria-hidden', String(!open));
+  toggle.setAttribute('aria-expanded', String(open));
+  label.textContent = open ? 'Hide install log' : 'Show install log';
 }
 
 function onDone(mokState) {
-  clearInterval(_elapsedTimer);
+  clearInterval(S.elapsedTimer);
   if (mokState === 'staged' || mokState === 'pending') {
     document.getElementById('done-sb-notice').style.display = '';
   }
@@ -1362,7 +1356,7 @@ function onDone(mokState) {
 }
 
 function showError(msg) {
-  clearInterval(_elapsedTimer);
+  clearInterval(S.elapsedTimer);
   document.getElementById('err-msg').textContent = msg;
   goto('error');
 }
@@ -1382,6 +1376,16 @@ function reboot() {
   document.body.innerHTML = '<div id="main" style="display:flex;align-items:center;justify-content:center"><div class="card" style="text-align:center;padding:48px 40px"><div class="done-title">Restarting</div><p class="hero-body">Remove the installation media when your computer begins to restart.</p></div></div>';
   apiFetch('/api/reboot', {method:'POST'}).catch(()=>{});
 }
+
+// These handlers are referenced by inline event attributes in index.html.
+// Keeping an explicit reference list lets standalone JS analyzers see the
+// cross-file usage without changing the browser-facing API.
+void [
+  onSliderMove, showNewTableDialog, showCreateDialog, showDeleteDialog,
+  showResizeDialog, showFormatDialog, showMountDialog, commitPartitions,
+  rollbackPartitions, saveConfig, startInstall, copyFullLog, toggleLog,
+  backFromError, reboot,
+];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 apiFetch('/api/config').then(r=>r.json()).then(cfg => {

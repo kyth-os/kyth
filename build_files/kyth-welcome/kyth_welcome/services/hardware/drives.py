@@ -110,7 +110,8 @@ def _detect_controllers() -> dict:
         try:
             for ef in os.listdir("/sys/firmware/efi/efivars"):
                 if ef.startswith("SecureBoot-"):
-                    data = open(f"/sys/firmware/efi/efivars/{ef}", "rb").read()
+                    with open(f"/sys/firmware/efi/efivars/{ef}", "rb") as fh:
+                        data = fh.read()
                     secure_boot = len(data) >= 5 and data[4] == 1
                     break
         except OSError:

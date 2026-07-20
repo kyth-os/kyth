@@ -13,8 +13,8 @@ from ..services.gaming import DataWorker
 from ..services.hardware import HardwareProbeWorker
 from ..services.launch import popen
 from ..services.software import _finish_worker
-from ..qt import QApplication, QFileDialog, QLabel, QProgressBar, QPushButton, QTextEdit, QVBoxLayout
-from ..widgets import ActionRow, HardwareCard, _make_card
+from ..qt import QApplication, QFileDialog
+from ..widgets import HardwareCard
 
 
 class _HealthMixin:

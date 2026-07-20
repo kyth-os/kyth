@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import os
-import sys
 from typing import Optional
 
 import kyth_installer.disk as _disk
 subprocess = _disk.subprocess
 
-from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES, _IS_LIVE_SESSION
+from ..config import _IS_LIVE_SESSION
 
 def _running_system_disk() -> str:
     # Returns the raw mount SOURCE for "/" (which may be a partition, an LVM

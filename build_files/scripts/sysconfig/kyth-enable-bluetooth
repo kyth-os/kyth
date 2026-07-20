@@ -1,0 +1,23 @@
+#!/usr/bin/bash
+set -uo pipefail
+
+find /var/lib/systemd/rfkill -name "*bluetooth*" -delete 2>/dev/null || true
+
+_wifi_was_soft_blocked=0
+if rfkill list wifi 2>/dev/null | grep -q 'Soft blocked: yes'; then
+    _wifi_was_soft_blocked=1
+fi
+
+if command -v rfkill >/dev/null 2>&1; then
+    rfkill unblock bluetooth >/dev/null 2>&1 || true
+fi
+
+if [[ "${_wifi_was_soft_blocked}" -eq 1 ]]; then
+    rfkill block wifi >/dev/null 2>&1 || true
+fi
+
+if command -v bluetoothctl >/dev/null 2>&1; then
+    bluetoothctl power on >/dev/null 2>&1 || true
+fi
+
+exit 0

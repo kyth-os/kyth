@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import _command_stdout, _restyle
 from .services.gaming import DataWorker
 from .services.hardware import (
     HardwareProbe,

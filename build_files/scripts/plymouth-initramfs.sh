@@ -86,6 +86,13 @@ if command -v lsinitrd >/dev/null 2>&1; then
 			echo "ERROR: branded initramfs does not contain plymouth/script.so — kyth script theme will silently fail and fall back to BGRT firmware logo" >&2
 			exit 1
 		}
+	for account_file in etc/passwd etc/group; do
+		grep -Eq "(^|[[:space:]])${account_file}$" "${initrd_listing}" ||
+			{
+				echo "ERROR: branded initramfs is missing /${account_file}; early udev/tmpfiles account lookup will fail" >&2
+				exit 1
+			}
+	done
 	if grep -Ei 'usr/share/plymouth/themes/(bgrt-fedora|bgrt|spinner)(/|$)' "${initrd_listing}" >&2; then
 		echo "ERROR: Plymouth fallback theme leaked into branded initramfs" >&2
 		exit 1

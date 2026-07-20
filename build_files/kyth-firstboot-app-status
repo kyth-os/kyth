@@ -40,16 +40,16 @@ flatpak_ok() {
 }
 
 missing_apps() {
-    local missing=()
+    local missing_ids=()
     for app in \
         com.valvesoftware.Steam \
         net.lutris.Lutris \
         com.heroicgameslauncher.hgl \
         com.usebottles.bottles \
         com.github.mtkennerly.ludusavi; do
-        flatpak_ok "$app" || missing+=("$app")
+        flatpak_ok "$app" || missing_ids+=("$app")
     done
-    printf '%s\n' "${missing[@]}"
+    printf '%s\n' "${missing_ids[@]}"
 }
 
 mkdir -p "${STAMP_DIR}"
@@ -65,8 +65,8 @@ if ! have flatpak; then
     exit 2
 fi
 
-missing="$(missing_apps)"
-if [[ -z "${missing}" ]]; then
+missing_output="$(missing_apps)"
+if [[ -z "${missing_output}" ]]; then
     write_status "ready" "Steam, launchers, Bottles, and save backup tools are installed."
     if [[ "${1:-}" == "--force" || "${KYTH_APP_STATUS_NOTIFY_READY:-0}" == "1" ]]; then
         notify "KythOS apps are ready" "Steam, launchers, Bottles, and save backup tools are installed."
@@ -96,4 +96,7 @@ case "${service_state}" in
         ;;
 esac
 
-exit 1
+# Missing applications are a handled first-boot state, not a notifier failure.
+# The status file and notification carry the actionable result; returning
+# nonzero makes systemd report a failed desktop-autostart unit on normal boots.
+exit 0

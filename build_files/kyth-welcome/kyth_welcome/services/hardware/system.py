@@ -47,14 +47,16 @@ def _cpu_probe() -> HardwareProbe:
 
     gov_path = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
     try:
-        governor = open(gov_path).read().strip()
+        with open(gov_path, encoding="utf-8") as fh:
+            governor = fh.read().strip()
     except OSError:
         governor = None
 
     # sched-ext state
     scx_state: str | None = None
     try:
-        scx_state = open("/sys/kernel/sched_ext/state").read().strip()
+        with open("/sys/kernel/sched_ext/state", encoding="utf-8") as fh:
+            scx_state = fh.read().strip()
     except OSError:
         pass
 
@@ -152,7 +154,8 @@ def _thermal_probe() -> HardwareProbe:
 
     for hwmon_dir in sorted(glob.glob("/sys/class/hwmon/hwmon*")):
         try:
-            name = open(os.path.join(hwmon_dir, "name")).read().strip()
+            with open(os.path.join(hwmon_dir, "name"), encoding="utf-8") as fh:
+                name = fh.read().strip()
         except OSError:
             continue
 
@@ -166,11 +169,13 @@ def _thermal_probe() -> HardwareProbe:
             label = ""
             try:
                 if os.path.exists(label_file):
-                    label = open(label_file).read().strip()
+                    with open(label_file, encoding="utf-8") as fh:
+                        label = fh.read().strip()
             except OSError:
                 pass
             try:
-                temp_c = int(open(temp_input).read().strip()) / 1000.0
+                with open(temp_input, encoding="utf-8") as fh:
+                    temp_c = int(fh.read().strip()) / 1000.0
             except (OSError, ValueError):
                 continue
             if not (1 < temp_c < 130):
@@ -261,7 +266,8 @@ def _platform_probe() -> HardwareProbe:
     _SB_VAR = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
     secure_boot: bool | None = None
     try:
-        data = open(_SB_VAR, "rb").read()
+        with open(_SB_VAR, "rb") as fh:
+            data = fh.read()
         if len(data) >= 5:
             secure_boot = (data[4] == 1)
     except OSError:
@@ -301,4 +307,3 @@ def _platform_probe() -> HardwareProbe:
 
     return HardwareProbe("Platform", "ok", "Bare-metal environment detected.", details)
  # _platform_probe
-

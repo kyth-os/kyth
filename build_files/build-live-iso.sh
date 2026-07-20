@@ -28,27 +28,51 @@ if [[ "${BASE_IMAGE}" == localhost/* ]] &&
 	docker save "${BASE_IMAGE}" | sudo podman load
 fi
 
-if [[ ! -d "${TITANOBOA_DIR}/.git" ]]; then
-	echo "==> Initializing Titanoboa cache"
-	mkdir -p "$(dirname "${TITANOBOA_DIR}")"
-	git init "${TITANOBOA_DIR}"
-	git -C "${TITANOBOA_DIR}" remote add origin https://github.com/Zeglius/titanoboa.git
+# installer/build.sh always bakes KYTH_SOURCE_IMAGE=ghcr.io/mrtrick37/kyth:${SOURCE_TAG}
+# into the live ISO, regardless of where the live payload itself was built from.
+# The booted live VM is a separate environment with no access to this host's
+# local image storage, so a local BASE_IMAGE must be published under that exact
+# ref or the installer's `bootc install` will fail with "manifest unknown".
+#
+# Pushed with `docker`, not `podman`: this image shares many blobs with the
+# public ghcr.io/ublue-os/kinoite-main base it's built FROM, and podman's push
+# reproducibly fails those blobs with "trying to reuse blob ... 403 Forbidden"
+# — a cross-repository blob-mount that GHCR rejects and podman doesn't fall
+# back from. `docker push` uploads them directly and does not hit this.
+if [[ "${BASE_IMAGE}" == localhost/* ]] && command -v docker >/dev/null; then
+	GHCR_REF="ghcr.io/mrtrick37/kyth:${SOURCE_TAG}"
+	echo "==> Publishing local build to ${GHCR_REF} so the installer can fetch it from inside the live VM"
+	docker tag "${BASE_IMAGE}" "${GHCR_REF}"
+	docker push "${GHCR_REF}"
 fi
 
-if ! git -C "${TITANOBOA_DIR}" cat-file -e "${TITANOBOA_REF}^{commit}" 2>/dev/null; then
-	echo "==> Fetching Titanoboa ${TITANOBOA_REF}"
-	git -C "${TITANOBOA_DIR}" fetch --depth 1 origin "${TITANOBOA_REF}"
-fi
-if [[ "$(git -C "${TITANOBOA_DIR}" rev-parse HEAD 2>/dev/null || true)" != "${TITANOBOA_REF}" ]]; then
-	echo "==> Checking out Titanoboa ${TITANOBOA_REF}"
-	git -C "${TITANOBOA_DIR}" checkout --detach "${TITANOBOA_REF}"
-fi
+echo "==> Fetching Titanoboa (background) and building KythOS live payload (foreground) in parallel"
 
-echo "==> Building KythOS live payload from ${BASE_IMAGE}"
+# Titanoboa fetch is independent of the podman build — run it in the background.
+_titanoboa_ok="/tmp/kyth-titanoboa-ok.$$"
+(
+	if [[ ! -d "${TITANOBOA_DIR}/.git" ]]; then
+		echo "==> Initializing Titanoboa cache"
+		mkdir -p "$(dirname "${TITANOBOA_DIR}")"
+		git init "${TITANOBOA_DIR}"
+		git -C "${TITANOBOA_DIR}" remote add origin https://github.com/Zeglius/titanoboa.git
+	fi
+	if ! git -C "${TITANOBOA_DIR}" cat-file -e "${TITANOBOA_REF}^{commit}" 2>/dev/null; then
+		echo "==> Fetching Titanoboa ${TITANOBOA_REF}"
+		git -C "${TITANOBOA_DIR}" fetch --depth 1 origin "${TITANOBOA_REF}"
+	fi
+	if [[ "$(git -C "${TITANOBOA_DIR}" rev-parse HEAD 2>/dev/null || true)" != "${TITANOBOA_REF}" ]]; then
+		echo "==> Checking out Titanoboa ${TITANOBOA_REF}"
+		git -C "${TITANOBOA_DIR}" checkout --detach "${TITANOBOA_REF}"
+	fi
+	touch "${_titanoboa_ok}"
+) &
+
 # --pull=newer: re-fetch the base image when the registry has a newer digest.
 # Without it, a stale cached ${BASE_IMAGE} layer is silently reused, so a rebuild
 # after CI publishes fresh bits produces an ISO from the old OS. Skipped for
 # localhost/* images, which are loaded from Docker above and have no registry.
+echo "==> Building KythOS live payload from ${BASE_IMAGE}"
 pull_flag=(--pull=newer)
 [[ "${BASE_IMAGE}" == localhost/* ]] && pull_flag=()
 sudo podman build \
@@ -61,6 +85,13 @@ sudo podman build \
 	--tag "${LIVE_TAG}" \
 	-f installer/Containerfile \
 	"${REPO_ROOT}"
+
+wait
+if [[ ! -f "${_titanoboa_ok}" ]]; then
+	echo "ERROR: Titanoboa fetch failed" >&2
+	exit 1
+fi
+rm -f "${_titanoboa_ok}"
 
 mkdir -p "${OUTPUT_DIR}"
 WORK="$(mktemp -d -p "${TMPDIR:-/var/tmp}" kyth-titanoboa.XXXXXXXXXX)"

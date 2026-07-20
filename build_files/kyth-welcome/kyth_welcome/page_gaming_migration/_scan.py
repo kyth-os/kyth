@@ -1,4 +1,3 @@
-import os
 import re
 
 # __KYTH_GENERATED_IMPORTS__
@@ -8,13 +7,12 @@ from ..services.gaming import (  # noqa: E501
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _find_ntfs_drives, _find_steam_libraries,
     _load_protondb_cache, _save_protondb_cache, _scan_steamapps_manifests, blocked_compat_lookup,
 )
-from ..services.software import _install_flatpak_inline
 from ..services.cloud_sync import SteamCopyWorker
 from ..services.gaming import _COMPAT_GAMES
 from ..qt import (  # noqa: E501
-    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
+    QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel,
 )
-from ..widgets import _make_card, _set_log_panel
+from ..widgets import _set_log_panel
 
 
 class _ScanMixin:

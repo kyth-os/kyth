@@ -30,11 +30,14 @@ class InstallerImageSourceTests(unittest.TestCase):
         self.assertIn("Connect", result)
 
     def test_install_images_returns_source_and_target_refs(self):
-        with mock.patch.object(imagesrc, "run_command") as run_command:
-            src, tgt = imagesrc._install_images("ghcr.io/mrtrick37/kyth:testing")
+        image = "ghcr.io/mrtrick37/kyth:testing"
+        with mock.patch.object(imagesrc, "run_command") as run_command, \
+             mock.patch.object(imagesrc, "SOURCE_IMAGE", image), \
+             mock.patch.object(imagesrc, "TARGET_IMAGE", image):
+            src, tgt = imagesrc._install_images("fedora")
 
         self.assertTrue(src.startswith("docker://"))
-        self.assertTrue(tgt.startswith("ghcr.io/"))
+        self.assertEqual(tgt, "ghcr.io/mrtrick37/kyth:testing")
         self.assertEqual(src, f"docker://{tgt}")
         run_command.assert_not_called()
 

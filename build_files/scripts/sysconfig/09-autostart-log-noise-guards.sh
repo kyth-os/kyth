@@ -3,6 +3,11 @@
 set -euo pipefail
 
 # ── Autostart log-noise guards ────────────────────────────────────────────────
+# Fedora does not define Debian's plugdev group, but several third-party udev
+# rules installed below reference it. Seed new deployments at image build time;
+# kyth-system-accounts.service performs the equivalent repair after upgrades.
+getent group plugdev >/dev/null 2>&1 || groupadd --system plugdev
+
 # nvidia-settings ships an unconditional autostart entry that fails every
 # login on AMD-only systems with "ERROR: NVIDIA driver is not loaded".
 # Run it only when the NVIDIA kernel module is actually loaded.
@@ -17,13 +22,8 @@ if [ -f /etc/xdg/autostart/nvidia-settings-user.desktop ]; then
 	sed -i 's|^Exec=.*|Exec=/usr/libexec/kyth-nvidia-settings-autostart|' /etc/xdg/autostart/nvidia-settings-user.desktop
 fi
 
-# input-remapper-control shells out to `systemd-analyze` without capturing
-# stderr, which logs "Bootup is not yet finished" at error priority on every
-# login that beats bootup completion. Wait for bootup quietly, then hand off
-# to the original autoload command.
 cat >/usr/libexec/kyth-input-remapper-autoload <<'IRAUTOSTARTEOF'
 #!/usr/bin/bash
-# Give up after ~10 min and hand off anyway — autoload has its own wait loop.
 for _ in $(seq 1 120); do
 	systemd-analyze time >/dev/null 2>&1 && break
 	sleep 5
@@ -35,17 +35,11 @@ if [ -f /etc/xdg/autostart/input-remapper-autoload.desktop ]; then
 	sed -i 's|^Exec=.*|Exec=/usr/libexec/kyth-input-remapper-autoload|' /etc/xdg/autostart/input-remapper-autoload.desktop
 fi
 
-# bootc/ostree images keep several package-owned system accounts in
-# /usr/lib/passwd and /usr/lib/group, while booted installations and useradd
-# operate against the mutable /etc databases. If the installed /etc lacks those
-# accounts, dbus-broker cannot build its NSS cache and SDDM cannot resolve the
-# sddm greeter user, leaving QEMU at a black cursor after X starts.
 cat >/usr/lib/systemd/system/kyth-system-accounts.service <<'SYSACCOUNTUNITEOF'
 [Unit]
 Description=Ensure KythOS system accounts are visible in /etc
 DefaultDependencies=no
-After=local-fs.target
-Before=dbus.socket dbus-broker.service sockets.target sddm.service
+Before=dbus.socket dbus-broker.service sockets.target sddm.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
 
 [Service]
 Type=oneshot
@@ -57,66 +51,24 @@ WantedBy=sysinit.target
 SYSACCOUNTUNITEOF
 
 install -d -m 0755 /usr/libexec
-cat >/usr/libexec/kyth-fix-system-accounts <<'SYSACCOUNTSCRIPTEOF'
-#!/usr/bin/bash
-set -euo pipefail
-
-append_missing_name() {
-    local src="$1"
-    local dest="$2"
-    local name
-
-    [ -r "$src" ] || return 0
-    touch "$dest"
-    while IFS= read -r line || [ -n "$line" ]; do
-        [ -n "$line" ] || continue
-        name="${line%%:*}"
-        [ -n "$name" ] || continue
-        if ! grep -q "^${name}:" "$dest"; then
-            printf '%s\n' "$line" >> "$dest"
-        fi
-    done < "$src"
-}
-
-ensure_group_line() {
-    local name="$1"
-    local line="$2"
-    if ! grep -q "^${name}:" /etc/group; then
-        printf '%s\n' "$line" >> /etc/group
-    fi
-}
-
-ensure_passwd_line() {
-    local name="$1"
-    local line="$2"
-    if ! grep -q "^${name}:" /etc/passwd; then
-        printf '%s\n' "$line" >> /etc/passwd
-    fi
-    if [ -e /etc/shadow ] && ! grep -q "^${name}:" /etc/shadow; then
-        printf '%s:!*:19700:0:99999:7:::\n' "$name" >> /etc/shadow
-    fi
-}
-
-append_missing_name /usr/lib/group /etc/group
-append_missing_name /usr/lib/passwd /etc/passwd
-
-# SDDM is commonly created by package scriptlets into /etc rather than shipped
-# in /usr/lib/passwd, so keep an explicit fallback for installed deployments.
-ensure_group_line sddm "sddm:x:959:"
-ensure_passwd_line sddm "sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin"
-
-chmod 0644 /etc/passwd /etc/group
-if [ -e /etc/shadow ]; then
-    chmod 0000 /etc/shadow 2>/dev/null || chmod 0600 /etc/shadow
-fi
-mkdir -p /var/lib/sddm
-chown sddm:sddm /var/lib/sddm 2>/dev/null || true
-if command -v restorecon >/dev/null 2>&1; then
-    restorecon /etc/passwd /etc/group /etc/shadow /var/lib/sddm 2>/dev/null || true
-fi
-SYSACCOUNTSCRIPTEOF
-chmod 0755 /usr/libexec/kyth-fix-system-accounts
+install -m 0755 /ctx/sysconfig/kyth-fix-system-accounts /usr/libexec/kyth-fix-system-accounts
 systemctl enable kyth-system-accounts.service 2>/dev/null || true
+
+# input-remapper.service is the single owner of preset autoloading. The RPM's
+# per-event udev rule races the daemon and launches one process for every input
+# node during boot, all before the service is ready.
+ln -sf /dev/null /etc/udev/rules.d/99-input-remapper.rules
+
+# ublue-os-udev-rules uses negative TEST expressions, so it tries to chmod
+# battery attributes specifically when they do not exist. Replace it with
+# positive relative sysfs existence tests.
+cat >/etc/udev/rules.d/99-thinkpad-thresholds-udev.rules <<'BATTERYRULESEOF'
+# KythOS override: expose only threshold attributes provided by this battery.
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_control_start_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_control_start_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_control_start_threshold"
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_control_end_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_control_end_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_control_end_threshold"
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_start_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_start_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_start_threshold"
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_stop_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_stop_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_stop_threshold"
+BATTERYRULESEOF
 
 mkdir -p /etc/asusd
 
@@ -138,10 +90,6 @@ WantedBy=sysinit.target
 DBUSRUNDIREOF
 systemctl enable kyth-dbus-runtime-dir.service 2>/dev/null || true
 
-# The system bus is foundational for logind, polkit, NetworkManager, and SDDM.
-# On local QEMU boots dbus-broker repeatedly failed before the greeter started;
-# remove audit integration from broker launch so lack of usable audit plumbing
-# cannot take down the desktop.
 mkdir -p /etc/systemd/system/dbus-broker.service.d
 cat >/etc/systemd/system/dbus-broker.service.d/10-kyth-no-audit.conf <<'DBUSBROKEREOF'
 [Service]

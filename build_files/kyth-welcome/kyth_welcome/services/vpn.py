@@ -117,10 +117,3 @@ def saml_url_from_log_line(line: str) -> str | None:
     m = _SAML_URL_RE.search(line)
     return m.group(1) if m else None
 
-
-def __getattr__(name: str):
-    """Lazy re-export of Qt worker (pages still import from this module)."""
-    if name in {"VpnConnectWorker", "_VpnConnectWorker"}:
-        from .workers.vpn import VpnConnectWorker
-        return VpnConnectWorker
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

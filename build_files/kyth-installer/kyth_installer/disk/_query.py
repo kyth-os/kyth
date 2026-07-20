@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
-from typing import Optional
 
 import kyth_installer.disk as _disk
 subprocess = _disk.subprocess
 
-from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES, _IS_LIVE_SESSION
-from kyth_shared import _human_bytes as _human_size  # noqa: F401
+from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES
+from kyth_shared import _human_bytes as _human_size
 
 def _partition_mountpoints(child: dict) -> list[str]:
     mounts = child.get("mountpoints")

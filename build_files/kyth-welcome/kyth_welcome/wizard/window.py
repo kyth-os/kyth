@@ -4,13 +4,14 @@ from __future__ import annotations
 import subprocess
 
 from ..core_base import (
-    _load_profile, _mark_wizard_done, _restyle, _running_threads,
+    _load_profile, _mark_wizard_done, _restyle, _running_threads, _save_profile,
 )
 from ..qt import (  # noqa: E501
-    QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
+    QFrame, QHBoxLayout, QIcon, QLabel, QMainWindow, QMessageBox, QPushButton,
     QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
 )
 from ..ui_tokens import accent_line_style
+from ..widgets import _divider
 from .steps_apps import _AppsStepMixin
 from .steps_finish import _FinishStepMixin
 from .steps_gaming import _GamingStepMixin

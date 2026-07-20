@@ -1,0 +1,13 @@
+[General]
+ColorScheme=KythDark
+font=Inter,10,-1,5,400,0,0,0,0,0,Regular
+fixed=Cascadia Code,10,-1,5,400,0,0,0,0,0,Regular
+smallestReadableFont=Inter,8,-1,5,400,0,0,0,0,0,Regular
+toolBarFont=Inter,9,-1,5,400,0,0,0,0,0,Regular
+menuFont=Inter,10,-1,5,400,0,0,0,0,0,Regular
+
+[Icons]
+Theme=Papirus-Dark
+
+[KDE]
+LookAndFeelPackage=org.kde.breezedark.desktop

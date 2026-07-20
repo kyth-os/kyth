@@ -2,13 +2,12 @@
 from ..core_base import _release_worker_when_finished
 from ..services.diagnostics import _collect_security_status
 from ..services.gaming import DataWorker
-from ..qt import QHBoxLayout, QLabel, QVBoxLayout
+from ..qt import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 from ..widgets import _make_card
 
 
 class _SecurityMixin:
     def _make_security_card(self) -> QFrame:
-        from ..qt import QFrame
         card, layout = _make_card()
         title = QLabel("Security at a glance")
         title.setObjectName("card-title")

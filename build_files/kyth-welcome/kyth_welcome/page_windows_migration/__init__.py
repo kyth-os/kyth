@@ -190,7 +190,7 @@ class WindowsMigrationPage(
         shell_btns.setSpacing(8)
         open_konsole_btn = QPushButton("Open Terminal")
         open_konsole_btn.clicked.connect(
-            lambda _=False: self._run_background(["konsole"])
+            lambda _=False: popen(["konsole"])
         )
         shell_btns.addWidget(open_konsole_btn)
         shell_btns.addStretch()
@@ -281,4 +281,3 @@ class WindowsMigrationPage(
         worker.done.connect(_done)
         worker.start()
         self._worker = worker
-

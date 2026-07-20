@@ -1,4 +1,5 @@
 import os
+import time
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (

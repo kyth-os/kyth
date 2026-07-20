@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,10 +13,23 @@ WEBUI_DIR = INSTALLER_ROOT / "kyth_installer/webui"
 if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
-from kyth_installer import disk, install, plan, server, system  # noqa: E402
+from kyth_installer import disk, install, plan, post_routes, server, system  # noqa: E402
+from kyth_installer.context import InstallerContext  # noqa: E402
 
 
 class InstallerWebuiTests(unittest.TestCase):
+    def test_install_log_is_collapsed_until_toggle_opens_it(self):
+        html = (WEBUI_DIR / "index.html").read_text()
+        css = (WEBUI_DIR / "style.css").read_text()
+        js = (WEBUI_DIR / "app.js").read_text()
+
+        self.assertIn('id="log-toggle"', html)
+        self.assertIn('aria-expanded="false"', html)
+        self.assertIn('id="log-wrap" aria-hidden="true"', html)
+        self.assertRegex(css, r"\.log-wrap\s*\{[^}]*display:\s*none;")
+        self.assertRegex(css, r"\.log-wrap\.open\s*\{[^}]*display:\s*block;")
+        self.assertIn("label.textContent = open ? 'Hide install log' : 'Show install log'", js)
+
     def test_disk_continue_button_id_matches_updater(self):
         html = (WEBUI_DIR / "index.html").read_text()
         js = (WEBUI_DIR / "app.js").read_text()
@@ -636,6 +650,7 @@ class InstallerServerConfirmationTests(unittest.TestCase):
         handler.send_header = MagicMock()
         handler.end_headers = MagicMock()
         handler.send_error = MagicMock()
+        handler.server = SimpleNamespace(context=InstallerContext())
         return handler
 
     @patch.object(server.Handler, "_require_same_origin_context", return_value=True)
@@ -648,8 +663,8 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_backup": True,
             "confirm_erase": False,
         })
-        with patch.object(server, "list_disks", return_value=disks), \
-             patch.object(server, "_validate_storage_intent"), \
+        with patch.object(post_routes, "list_disks", return_value=disks), \
+             patch.object(post_routes, "_validate_storage_intent"), \
              patch.object(install, "_run_install") as run_install:
             handler.do_POST()
 
@@ -670,20 +685,20 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_backup": True,
             "confirm_erase": True,
         })
-        with patch.object(server, "list_disks", return_value=disks), \
-             patch.object(server, "_validate_storage_intent"), \
-             patch.object(server, "list_timezones", return_value=["UTC"]), \
+        with patch.object(post_routes, "list_disks", return_value=disks), \
+             patch.object(post_routes, "_validate_storage_intent"), \
+             patch.object(post_routes, "list_timezones", return_value=["UTC"]), \
              patch.object(install, "_run_install"):
             handler.do_POST()
 
         handler.send_error.assert_not_called()
         written = handler.wfile.getvalue().decode().lower()
         self.assertIn('"started": true', written)
-        self.assertEqual(install._state["disk"], "/dev/sda")
-        self.assertEqual(install._state["install_mode"], "wipe")
-        self.assertEqual(install._state["username"], "user")
-        self.assertEqual(install._state["timezone"], "UTC")
-        self.assertTrue(install._state["password_hash"].startswith("$6$"))
+        self.assertEqual(handler.context.state["disk"], "/dev/sda")
+        self.assertEqual(handler.context.state["install_mode"], "wipe")
+        self.assertEqual(handler.context.state["username"], "user")
+        self.assertEqual(handler.context.state["timezone"], "UTC")
+        self.assertTrue(handler.context.state["password_hash"].startswith("$6$"))
 
     @patch.object(server.Handler, "_require_same_origin_context", return_value=True)
     @patch.object(server.Handler, "_require_auth", return_value=True)
@@ -697,9 +712,9 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_backup": True,
             "confirm_erase": True,
         })
-        with patch.object(server, "list_disks", return_value=disks), \
-             patch.object(server, "_validate_storage_intent"), \
-             patch.object(server, "list_timezones", return_value=["UTC"]), \
+        with patch.object(post_routes, "list_disks", return_value=disks), \
+             patch.object(post_routes, "_validate_storage_intent"), \
+             patch.object(post_routes, "list_timezones", return_value=["UTC"]), \
              patch.object(install, "_run_install"):
             handler.do_POST()
 

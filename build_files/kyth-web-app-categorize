@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+app_dir="${HOME}/.local/share/applications"
+[[ -d "${app_dir}" ]] || exit 0
+
+changed=0
+shopt -s nullglob
+for launcher in \
+    "${app_dir}"/chrome-*.desktop \
+    "${app_dir}"/chromium-*.desktop \
+    "${app_dir}"/brave-*.desktop \
+    "${app_dir}"/msedge-*.desktop \
+    "${app_dir}"/com.google.Chrome.flextop.*.desktop \
+    "${app_dir}"/org.chromium.Chromium.flextop.*.desktop \
+    "${app_dir}"/com.brave.Browser.flextop.*.desktop \
+    "${app_dir}"/com.microsoft.Edge.flextop.*.desktop; do
+    grep -Eq -- '--app(-id)?=' "${launcher}" || continue
+    grep -q '^Categories=' "${launcher}" && continue
+    sed -i '/^\[Desktop Entry\]$/a Categories=X-KythWebApp;' "${launcher}"
+    changed=1
+done
+
+if (( changed )) && command -v kbuildsycoca6 >/dev/null 2>&1; then
+    kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+fi

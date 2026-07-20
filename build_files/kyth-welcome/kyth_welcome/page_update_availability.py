@@ -3,7 +3,7 @@ from datetime import datetime
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _bootc_image_timestamp, _has_staged_update, _release_worker_when_finished, _restyle
 from .services.launch import reboot
-from .services.updates import FlatpakCheckWorker, UpdateCheckWorker
+from .services.workers.updates import FlatpakCheckWorker, UpdateCheckWorker
 from .qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt
 from .widgets import _make_card
 

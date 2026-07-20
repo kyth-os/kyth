@@ -4,7 +4,7 @@ import shutil
 from ..services.launch import popen
 from ..services.software import _chromium_app_window_cmd, _is_flatpak_installed
 from ..qt import (  # noqa: E501
-    QApplication, QCheckBox, QComboBox, QDBusConnection, QDBusInterface, QHBoxLayout, QLabel, QPushButton, QTimer,
+    QCheckBox, QComboBox, QDBusConnection, QDBusInterface, QHBoxLayout, QLabel, QPushButton,
 )
 from ..widgets import _make_card
 
@@ -176,6 +176,11 @@ class _FocusMixin:
         self._focus_inhibit_proc = None
         if proc is not None and proc.poll() is None:
             proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+                proc.wait()
 
     def _end_focus_session(self, completed: bool):
         was_active = self._focus_timer.isActive()

@@ -53,9 +53,17 @@ def _shutdown_threads(timeout_ms: int = 15000) -> None:
             except Exception:
                 pass
     deadline = time.monotonic() + timeout_ms / 1000
-    for t in list(_ACTIVE_THREADS):
-        remaining_ms = max(100, int((deadline - time.monotonic()) * 1000))
-        t.wait(remaining_ms)
+    while running := _running_threads():
+        remaining_ms = int((deadline - time.monotonic()) * 1000)
+        if remaining_ms <= 0:
+            break
+        # Wait in short slices so all workers get a chance to finish rather
+        # than spending the whole shared budget on the first registry entry.
+        slice_ms = max(1, min(250, remaining_ms))
+        for thread in running:
+            thread.wait(slice_ms)
+            if time.monotonic() >= deadline:
+                break
 
 
 # aboutToQuit only fires when an event loop exits, so also join at interpreter

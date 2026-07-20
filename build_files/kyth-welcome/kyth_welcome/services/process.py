@@ -144,4 +144,5 @@ def _get_disk_write_bytes() -> int:
         return 0
 
 
+# pylint: disable-next=unused-import
 from kyth_shared import _get_rx_bytes, _human_bytes, _human_bytes_pair, _parse_size_bytes  # noqa: F401

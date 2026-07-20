@@ -352,3 +352,16 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 **KythOS just wants your games to have a good home.**
 
 </div>
+
+<!-- AUTO-README-START -->
+## Auto Project Snapshot
+
+- Last refreshed (UTC): 2026-07-20 02:02:39 UTC
+- Current branch: testing
+- HEAD commit: 4e14b32
+- Last commit title: Suppress false-positive security lint findings in installer code
+- Last commit date: 2026-07-19T22:00:56-04:00
+- CI workflow files: 8
+- Build script files: 20
+
+<!-- AUTO-README-END -->

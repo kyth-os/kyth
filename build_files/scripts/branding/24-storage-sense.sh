@@ -3,35 +3,7 @@
 # Automatic housekeeping: empty Recycle Bin items older than 30 days, drop unused
 # Flatpak runtimes, vacuum the user journal. Opt-in: the timer ships disabled and
 # System Hub -> Health Report has the on/off switch.
-cat >/usr/bin/kyth-storage-sense <<'STORAGESENSEEOF'
-#!/usr/bin/env bash
-# KythOS Storage Sense — enable/disable from System Hub → Health Report.
-set -uo pipefail
-
-days=30
-info_dir="${HOME}/.local/share/Trash/info"
-files_dir="${HOME}/.local/share/Trash/files"
-now=$(date +%s)
-
-# Trash entries record their deletion time in .trashinfo (XDG trash spec);
-# only entries older than the cutoff are removed, never the whole bin.
-if [[ -d "${info_dir}" ]]; then
-    for info in "${info_dir}"/*.trashinfo; do
-        [[ -e "${info}" ]] || continue
-        deleted=$(sed -n 's/^DeletionDate=//p' "${info}" | head -1)
-        [[ -n "${deleted}" ]] || continue
-        ts=$(date -d "${deleted}" +%s 2>/dev/null) || continue
-        if (( now - ts > days * 86400 )); then
-            name=$(basename "${info}" .trashinfo)
-            rm -rf -- "${files_dir:?}/${name}" "${info}" 2>/dev/null || true
-        fi
-    done
-fi
-
-flatpak uninstall --unused -y --noninteractive >/dev/null 2>&1 || true
-journalctl --user --vacuum-time=30d >/dev/null 2>&1 || true
-STORAGESENSEEOF
-chmod +x /usr/bin/kyth-storage-sense
+install -m 0755 /ctx/kyth-storage-sense /usr/bin/kyth-storage-sense
 
 cat >/usr/lib/systemd/user/kyth-storage-sense.service <<'STORAGESENSESVCEOF'
 [Unit]
@@ -58,13 +30,10 @@ STORAGESENSETIMEREOF
 install -m 0755 /ctx/kyth-welcome/kyth-update-notifier /usr/bin/kyth-update-notifier
 install -m 0644 /ctx/kyth-welcome/kyth-update-notifier.desktop \
 	/usr/share/applications/kyth-update-notifier.desktop
-# Autostart the notifier for new user accounts
 mkdir -p /etc/skel/.config/autostart
 install -m 0644 /ctx/kyth-welcome/kyth-update-notifier.desktop \
 	/etc/skel/.config/autostart/kyth-update-notifier.desktop
 
-# User-session confidence checks. These show friendly notifications and are
-# version/deployment-gated so they do not nag on every login.
 mkdir -p /etc/xdg/autostart
 cat >/etc/xdg/autostart/kyth-post-update-check.desktop <<'POSTUPDATEAUTOSTARTEOF'
 [Desktop Entry]
@@ -84,8 +53,6 @@ NoDisplay=true
 X-KDE-autostart-after=panel
 APPSTATUSAUTOSTARTEOF
 
-# Steam Flatpak writes game shortcuts inside its sandbox. Refresh host menu
-# exports quietly at login so installed games appear under Games in KDE.
 mkdir -p /etc/xdg/autostart
 cat >/etc/xdg/autostart/kyth-steam-game-export.desktop <<'STEAMEXPORTAUTOSTARTEOF'
 [Desktop Entry]
@@ -96,9 +63,6 @@ NoDisplay=true
 X-KDE-autostart-after=panel
 STEAMEXPORTAUTOSTARTEOF
 
-# Import-smoke the helper during the build so syntax errors, missing Python
-# dependencies, and top-level failures fail the image without running slow
-# desktop and hardware probes inside the build container.
 python3 -c '
 import importlib.machinery, importlib.util, pathlib
 path = pathlib.Path("/usr/bin/kyth-welcome")

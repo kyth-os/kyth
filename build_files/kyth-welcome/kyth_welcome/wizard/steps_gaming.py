@@ -4,7 +4,7 @@ from __future__ import annotations
 from ..core_base import _IS_LIVE
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives
 from ..qt import QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget
-from ..widgets import _make_card
+from ..widgets import _divider, _make_card
 
 
 class _GamingStepMixin:
@@ -153,5 +153,4 @@ class _GamingStepMixin:
         # ── Launcher grid (full GamingPage) ───────────────────────────────────
         outer.addWidget(self._gaming_page, 1)
         return container
-
 

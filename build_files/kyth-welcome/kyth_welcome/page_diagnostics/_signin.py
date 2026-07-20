@@ -5,13 +5,12 @@ from ..core_base import _release_worker_when_finished
 from ..services.diagnostics import _collect_signin_status, fingerprint_enroll_shell_command
 from ..services.gaming import DataWorker
 from ..services.launch import open_first, open_settings_module, open_terminal_command
-from ..qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 from ..widgets import _make_card
 
 
 class _SigninMixin:
     def _make_signin_card(self) -> QFrame:
-        from ..qt import QFrame
         card, layout = _make_card()
         title = QLabel("Sign-in options")
         title.setObjectName("card-title")
