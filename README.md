@@ -356,11 +356,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 13:59:41 UTC
+- Last refreshed (UTC): 2026-07-20 14:30:16 UTC
 - Current branch: promote-testing-to-main
-- HEAD commit: 6504c0b
-- Last commit title: Fix SIGSEGV from QTimer.singleShot(callable) across PyQt6 apps
-- Last commit date: 2026-07-20T07:54:26-04:00
+- HEAD commit: 4e7a796
+- Last commit title: Fix Tier 1-3 findings from a full-repo Python QA audit
+- Last commit date: 2026-07-20T09:59:41-04:00
 - CI workflow files: 8
 - Build script files: 20
 

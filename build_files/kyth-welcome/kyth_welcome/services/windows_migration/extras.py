@@ -352,6 +352,7 @@ _export_sticky_notes = export_sticky_notes
 
 def import_rdp_bookmarks(connections: list[dict]) -> tuple[int, int]:
     """Add rdp:// bookmarks to KRDC's bookmarks.xbel; returns (added, dupes)."""
+    import xml.etree.ElementTree as std_ET
     import defusedxml.ElementTree as ET
     path = os.path.expanduser("~/.local/share/krdc/bookmarks.xbel")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -359,8 +360,8 @@ def import_rdp_bookmarks(connections: list[dict]) -> tuple[int, int]:
         tree = ET.parse(path)
         root = tree.getroot()
     else:
-        root = ET.Element("xbel", {"folded": "no"})
-        tree = ET.ElementTree(root)
+        root = std_ET.Element("xbel", {"folded": "no"})
+        tree = std_ET.ElementTree(root)
     existing = {bm.get("href") for bm in root.iter("bookmark")}
     added = dupes = 0
     for conn in connections:
@@ -369,8 +370,8 @@ def import_rdp_bookmarks(connections: list[dict]) -> tuple[int, int]:
         if href in existing:
             dupes += 1
             continue
-        bm = ET.SubElement(root, "bookmark", {"href": href})
-        title = ET.SubElement(bm, "title")
+        bm = std_ET.SubElement(root, "bookmark", {"href": href})
+        title = std_ET.SubElement(bm, "title")
         title.text = conn["name"]
         existing.add(href)
         added += 1
