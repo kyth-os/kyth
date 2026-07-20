@@ -2,9 +2,8 @@ import os
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import (
-    _bootc_image_timestamp, _has_rollback_deployment,
-)
+from .core_base import _has_rollback_deployment
+from .page_repair_components import repair_overview_cards, rollback_card
 from .services.launch import kcmshell, popen
 from .services.hardware import _detect_nvidia
 from .services.repair import _read_sys_text
@@ -18,7 +17,7 @@ from .qt import (  # noqa: E501
     QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QTextEdit, QUrl,
 )
 from .widgets import (  # noqa: E501
-    Page, _make_card, _make_flow_step, _set_log_panel,
+    Page, _make_card, _set_log_panel,
 )
 
 
@@ -39,97 +38,11 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             "Reset the OS back to a clean KythOS state. Your personal files in /home are never touched.",
         )
 
-        # Info card
-        info, info_layout = _make_card()
-        info_title = QLabel("What repair changes and what it preserves")
-        info_title.setObjectName("card-title")
-        info_layout.addWidget(info_title)
-        info_body = QLabel(
-            "Repair resets layered packages, system configuration, and the OS image to KythOS defaults. "
-            "It does not replace a proper backup. Files in /home are left in place, so this is "
-            "a safe way to recover a broken OS — but keep your saves, projects, and documents "
-            "backed up somewhere external."
+        for card in repair_overview_cards(self._navigate):
+            self._add(card)
+        rollback, self._rollback_repair_btn = rollback_card(
+            self._has_rollback, self._run_rollback, self._navigate
         )
-        info_body.setObjectName("card-copy")
-        info_body.setWordWrap(True)
-        info_layout.addWidget(info_body)
-        self._add(info)
-
-        order_card, order_layout = _make_card("card-accent-ok")
-        order_title = QLabel("Best repair order")
-        order_title.setObjectName("card-title")
-        order_layout.addWidget(order_title)
-        for i, (title, copy) in enumerate((
-            ("Quick fixes", "Refresh menus, repair Flatpaks, restart audio or Bluetooth, and collect a snapshot first."),
-            ("Roll back", "If trouble started after an update, stage the previous image before changing anything else."),
-            ("Repair install", "Use the destructive OS reset only after quick fixes and rollback do not match the problem."),
-        ), 1):
-            order_layout.addWidget(_make_flow_step(i, title, copy))
-        self._add(order_card)
-
-        immutable, immutable_layout = _make_card("card-accent-ok")
-        immutable_title = QLabel("Why system files are read-only")
-        immutable_title.setObjectName("card-title")
-        immutable_layout.addWidget(immutable_title)
-        immutable_body = QLabel(
-            "KythOS protects the base OS like a game console image: /usr is read-only while "
-            "you are using the system, and OS changes arrive as a new bootable deployment. "
-            "That is why updates can be rolled back cleanly. Install apps with Flatpak, use "
-            "Distrobox for development tools, keep personal files in /home, and let KythOS "
-            "updates replace the base system instead of editing it by hand."
-        )
-        immutable_body.setObjectName("card-copy")
-        immutable_body.setWordWrap(True)
-        immutable_layout.addWidget(immutable_body)
-        immutable_btns = QHBoxLayout()
-        immutable_btns.setSpacing(8)
-        update_help_btn = QPushButton("Open Update Page")
-        update_help_btn.setToolTip("Open the Update page to run a system update or roll back to the previous image.")
-        update_help_btn.clicked.connect(lambda _=False: self._navigate("Update"))
-        immutable_btns.addWidget(update_help_btn)
-        software_help_btn = QPushButton("Open App Store")
-        software_help_btn.setToolTip("Open the App Store to browse Flatpak apps and curated Kyth picks.")
-        software_help_btn.clicked.connect(lambda _=False: self._navigate("App Store"))
-        immutable_btns.addWidget(software_help_btn)
-        immutable_btns.addStretch()
-        immutable_layout.addLayout(immutable_btns)
-        self._add(immutable)
-
-        # Undo last update
-        rollback, rollback_layout = _make_card("card-accent-warn" if self._has_rollback else None)
-        rollback_title = QLabel("Undo last update")
-        rollback_title.setObjectName("card-title")
-        rollback_layout.addWidget(rollback_title)
-        rollback_ts = _bootc_image_timestamp("rollback")
-        rollback_body = QLabel(
-            (
-                "A previous system image is available. Rollback restores that image on the next boot; "
-                "your files, saves, and projects in /home stay in place."
-                + (f"\n\nPrevious image built: {rollback_ts}" if rollback_ts else "")
-            )
-            if self._has_rollback
-            else (
-                "No previous system image is available right now. After the next OS update, "
-                "KythOS will keep a rollback target here so you can undo a bad update."
-            )
-        )
-        rollback_body.setObjectName("card-copy")
-        rollback_body.setWordWrap(True)
-        rollback_layout.addWidget(rollback_body)
-        rollback_btns = QHBoxLayout()
-        rollback_btns.setSpacing(8)
-        self._rollback_repair_btn = QPushButton("Rollback and Reboot")
-        self._rollback_repair_btn.setObjectName("primary")
-        self._rollback_repair_btn.setToolTip("Activate the previous OS image on the next boot. Your files in /home stay untouched.")
-        self._rollback_repair_btn.setEnabled(self._has_rollback)
-        self._rollback_repair_btn.clicked.connect(self._run_rollback)
-        rollback_btns.addWidget(self._rollback_repair_btn)
-        update_btn = QPushButton("Open Update Page")
-        update_btn.setToolTip("Open the Update page to run a system update or roll back to the previous image.")
-        update_btn.clicked.connect(lambda _=False: self._navigate("Update"))
-        rollback_btns.addWidget(update_btn)
-        rollback_btns.addStretch()
-        rollback_layout.addLayout(rollback_btns)
         self._add(rollback)
 
         # Quick fixes
@@ -523,5 +436,3 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._add(sleep_card)
 
         self._stretch()
-
-

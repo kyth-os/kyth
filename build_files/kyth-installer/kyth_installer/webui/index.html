@@ -291,10 +291,12 @@
       <div class="progress-bar"><div class="progress-fill pulsing" id="progress-fill" style="width:0%"></div></div>
         <div class="stats-row" id="stats-row"></div>
       </div>
-      <button class="log-toggle" onclick="toggleLog()">
-        <span class="log-arrow" id="log-arrow">▶</span> Show install log
+      <button class="log-toggle" id="log-toggle" type="button"
+              aria-controls="log-wrap" aria-expanded="false" onclick="toggleLog()">
+        <span class="log-arrow" id="log-arrow">▶</span>
+        <span id="log-toggle-label">Show install log</span>
       </button>
-      <div class="log-wrap" id="log-wrap"></div>
+      <div class="log-wrap" id="log-wrap" aria-hidden="true"></div>
       <div class="mini-actions">
         <button onclick="copyVisibleLog()">Copy Visible Log</button>
         <button onclick="copyFullLog()">Copy Full Log</button>
@@ -361,6 +363,7 @@
   <div class="modal-card" id="modal-content"></div>
 </div>
 
+<script src="state.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

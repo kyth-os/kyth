@@ -3,7 +3,6 @@ from .core_base import _restyle
 from .services.vpn import (
     VPN_OS_OPTIONS as _VPN_OS_OPTIONS,
     VPN_PROTOCOLS as _VPN_PROTOCOLS,
-    VpnConnectWorker as _VpnConnectWorker,
     _GP_PRELOGIN_IFACE_RE,
     _load_vpn_config,
     _parse_gp_saml_cookie,
@@ -11,6 +10,7 @@ from .services.vpn import (
     _save_vpn_config,
     _vpn_line_is_connected,
 )
+from .services.workers.vpn import VpnConnectWorker as _VpnConnectWorker
 from .qt import (  # noqa: E501
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QTimer, QVBoxLayout, _WEBENGINE_AVAILABLE,
 )

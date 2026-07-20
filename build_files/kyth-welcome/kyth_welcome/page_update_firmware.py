@@ -1,6 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _release_worker_when_finished
-from .services.updates import FirmwareCheckWorker
+from .services.workers.updates import FirmwareCheckWorker
 from .qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 from .widgets import _make_card
 

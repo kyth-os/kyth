@@ -1,28 +1,18 @@
-"""Install orchestration: shared mutable run state, SSE event log, and the
-background worker thread that performs the actual bootc install.
+"""Install orchestration for an explicit installer runtime context."""
 
-_state/_events/_install_lock are process-wide singletons that server.py
-reads and mutates directly (module-qualified, e.g. install._state) rather
-than importing by name, since re-binding via `from .install import _state`
-would not see later mutations.
-"""
-
-import codecs
 import os
-import select
 import subprocess
-import threading
-import time
 import traceback
-from collections import deque
 from pathlib import Path
 
 from .config import LOG_FILE, SKIP_FETCH_CHECK
+from .context import DEFAULT_CONTEXT, InstallerContext
 from .disk import get_root_partition
 from .imagesrc import _friendly_network_error, _install_images, _network_preflight
 from .plan import _get_manual_mounts, _prepare_install_plan, _validate_install_target, _validate_storage_intent
 from .runner import run_command
-from kyth_shared import _NetStatsTracker, _get_rx_bytes, _parse_size_bytes  # noqa: F401
+from .streaming import StreamingCommandRunner
+from kyth_shared import _get_rx_bytes
 
 from .system import (
     _as_root,
@@ -35,26 +25,16 @@ from .system import (
     unmount_target_disk,
 )
 
-_state: dict = {
-    "disk": "",
-    "install_mode": "wipe",       # "wipe" or "alongside"
-    "target_partition": "",       # alongside only
-    "efi_partition": "",          # alongside only (may be auto-detected)
-    "hostname": "kyth", "timezone": "UTC",
-    "username": "", "password_hash": "", "kernel": "fedora",
-    "mok_password": "",
-}
-
-_events: list[dict] = []
-_events_lock = threading.Lock()
-_new_event = threading.Condition(_events_lock)
-_install_lock = threading.Lock()
+# Temporary aliases for callers migrating from the former module globals.
+_state = DEFAULT_CONTEXT.state
+_events = DEFAULT_CONTEXT.events.events
+_new_event = DEFAULT_CONTEXT.events.condition
+_events_lock = _new_event
+_install_lock = DEFAULT_CONTEXT.install_lock
 
 
-def _push(event: dict) -> None:
-    with _new_event:
-        _events.append(event)
-        _new_event.notify_all()
+def _push(event: dict, context: InstallerContext = DEFAULT_CONTEXT) -> None:
+    context.events.publish(event)
 
 
 def _build_bootc_install_cmd(
@@ -93,118 +73,7 @@ def _run_cmd(
     absolute_timeout: int | None = 3600,
 ) -> None:
     full_cmd = _as_root(cmd)
-    log(f"$ {' '.join(full_cmd)}")
-    proc = subprocess.Popen(
-        full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0,
-    )
-    if proc.stdout is None:
-        proc.kill()
-        proc.wait()
-        raise RuntimeError("Could not capture installer command output.")
-
-    monitor_stop = threading.Event()
-    recent_output: deque[str] = deque(maxlen=30)
-    tracker: _NetStatsTracker | None = None
-    output_state: dict = {}
-
-    def _net_monitor() -> None:
-        nonlocal tracker
-        while not monitor_stop.wait(1):
-            total = output_state.get("total", 0)
-            rx_start = output_state.get("rx_start", 0)
-            if total <= 0 or rx_start <= 0:
-                tracker = None
-                continue
-            if tracker is None:
-                tracker = _NetStatsTracker(total, rx_start)
-            stats = tracker.tick(_get_rx_bytes())
-            frac = min(0.95, stats["downloaded"] / total)
-            progress(int(pct_start + frac * (pct_end - pct_start)))
-            _push({"type": "stats",
-                   "downloaded": stats["downloaded"],
-                   "total":      total,
-                   "speed":      stats["speed"],
-                   "eta_sec":    stats["eta_sec"]})
-
-    monitor_thread = threading.Thread(target=_net_monitor, daemon=True)
-    monitor_thread.start()
-
-    started = time.monotonic()
-    last_activity = started
-    last_rx = _get_rx_bytes()
-    pending = ""
-    last_line = None
-    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-
-    def emit_line(line: str) -> None:
-        nonlocal last_line
-        stripped = line.strip()
-        if not stripped or stripped == last_line:
-            return
-        last_line = stripped
-        log(stripped)
-        recent_output.append(stripped)
-        if "layers needed:" in stripped:
-            try:
-                details = stripped.split("layers needed:", 1)[1]
-                size_str = details.split("(", 1)[1].rstrip(")") if "(" in details else ""
-                output_state["total"] = _parse_size_bytes(size_str)
-                output_state["rx_start"] = _get_rx_bytes()
-            except Exception:
-                pass
-
-    def consume_output(text: str, final: bool = False) -> None:
-        nonlocal pending
-        pending += text
-        while True:
-            indexes = [idx for idx in (pending.find("\n"), pending.find("\r")) if idx >= 0]
-            if not indexes:
-                break
-            split_at = min(indexes)
-            emit_line(pending[:split_at])
-            pending = pending[split_at + 1:]
-        if final and pending:
-            emit_line(pending)
-            pending = ""
-
-    try:
-        fd = proc.stdout.fileno()
-        while True:
-            ready, _, _ = select.select([fd], [], [], 1)
-            if ready:
-                chunk = os.read(fd, 64 * 1024)
-                if not chunk:
-                    break
-                last_activity = time.monotonic()
-                consume_output(decoder.decode(chunk))
-
-            now = time.monotonic()
-            rx_now = _get_rx_bytes()
-            if rx_now > last_rx:
-                last_rx = rx_now
-                last_activity = now
-            if absolute_timeout is not None and now - started > absolute_timeout:
-                raise RuntimeError(
-                    f"Command exceeded absolute timeout of {absolute_timeout // 60} min"
-                )
-            if now - last_activity > stall_timeout:
-                raise RuntimeError(
-                    "Command timed out after "
-                    f"{stall_timeout // 60} min with no output or network traffic"
-                )
-
-        consume_output(decoder.decode(b"", final=True), final=True)
-        proc.wait()
-    except Exception:
-        if proc.poll() is None:
-            proc.kill()
-        proc.wait()
-        raise
-    finally:
-        monitor_stop.set()
-        monitor_thread.join(timeout=2)
-        proc.stdout.close()
-    if proc.returncode != 0:
+    def error_factory(returncode: int, recent_output: list[str], argv: list[str]) -> Exception:
         lowered = "\n".join(recent_output).lower()
         network_tokens = (
             "network is unreachable",
@@ -219,32 +88,45 @@ def _run_cmd(
             "connection refused",
         )
         if any(token in lowered for token in network_tokens):
-            raise RuntimeError(
+            return RuntimeError(
                 _friendly_network_error(
                     "The image download lost network access before it finished."
                 )
             )
-        detail = "\n".join(list(recent_output)[-10:]) or "No command output was captured."
-        raise RuntimeError(f"Command failed (exit {proc.returncode}):\n  {' '.join(full_cmd)}\n\n{detail}")
-    progress(pct_end)
+        detail = "\n".join(recent_output[-10:]) or "No command output was captured."
+        return RuntimeError(
+            f"Command failed (exit {returncode}):\n  {' '.join(argv)}\n\n{detail}"
+        )
 
-def _prepare_install_context(log):
-    kernel = _state.get("kernel", "fedora")
+    StreamingCommandRunner(rx_bytes=_get_rx_bytes, publish=_push).run(
+        full_cmd,
+        pct_start,
+        pct_end,
+        log,
+        progress,
+        stall_timeout=stall_timeout,
+        absolute_timeout=absolute_timeout,
+        error_factory=error_factory,
+    )
+
+def _prepare_install_context(log, context: InstallerContext = DEFAULT_CONTEXT):
+    state = context.state
+    kernel = state.get("kernel", "fedora")
     src_ref, tgt_ref = _install_images(kernel)
-    _validate_storage_intent(_state)
+    _validate_storage_intent(state)
     if not SKIP_FETCH_CHECK:
         log("Running network preflight check...")
         net_err = _network_preflight(src_ref)
         if net_err:
             raise RuntimeError(net_err)
-    install_plan = _prepare_install_plan(_state, log)
-    disk, target_partition = _validate_install_target(_state)
-    _state["disk"] = disk
+    install_plan = _prepare_install_plan(state, log)
+    disk, target_partition = _validate_install_target(state)
+    state["disk"] = disk
     if target_partition:
-        _state["target_partition"] = target_partition
+        state["target_partition"] = target_partition
     else:
-        _state.pop("target_partition", None)
-    disk = _state["disk"]
+        state.pop("target_partition", None)
+    disk = state["disk"]
     install_mode = install_plan.mode
     log(f"Mode         : {install_mode}")
     log(f"Kernel       : {kernel}")
@@ -257,13 +139,15 @@ def _prepare_install_context(log):
     return disk, install_mode, kernel, src_ref, tgt_ref
 
 def _prepare_install_storage(
-    disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount
+    disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount,
+    context: InstallerContext = DEFAULT_CONTEXT,
 ):
+    state = context.state
     target_part = ""
     root_part = ""
     if install_mode in ("alongside", "manual"):
-        target_part = _state.get("target_partition", "")
-        efi_part    = _state.get("efi_partition", "")
+        target_part = state.get("target_partition", "")
+        efi_part    = state.get("efi_partition", "")
         alongside_mount = "/var/tmp/kyth-alongside-target"
 
         log(f"Target partition : {target_part}")
@@ -335,8 +219,10 @@ def _prepare_install_storage(
     return target_part, root_part, alongside_mount
 
 def _configure_installed_system(
-    root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress
+    root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress,
+    context: InstallerContext = DEFAULT_CONTEXT,
 ):
+    state = context.state
     try:
         etc = find_deploy_etc(config_root)
         if etc:
@@ -414,31 +300,31 @@ def _configure_installed_system(
             try:
                 run_command(
                     _as_root(["/usr/bin/tee", hostname_path]),
-                    input=f"{_state['hostname']}\n", text=True,
+                    input=f"{state['hostname']}\n", text=True,
                     stdout=subprocess.DEVNULL, check=True,
                 )
             except OSError as exc:
                 raise OSError(format_os_error(exc, path=hostname_path)) from exc
-            log(f"Hostname : {_state['hostname']}")
+            log(f"Hostname : {state['hostname']}")
 
             localtime_path = str(Path(etc, "localtime"))
             try:
                 run_command(
                     _as_root(["ln", "-snf",
-                              f"/usr/share/zoneinfo/{_state['timezone']}",
+                              f"/usr/share/zoneinfo/{state['timezone']}",
                               localtime_path]),
                     check=True,
                 )
             except OSError as exc:
                 raise OSError(format_os_error(exc, path=localtime_path)) from exc
-            log(f"Timezone : {_state['timezone']}")
+            log(f"Timezone : {state['timezone']}")
             progress(95)
 
             deploy_root = str(Path(etc).parent)
             ensure_system_accounts(deploy_root, log)
 
-            username = _state.get("username", "").strip()
-            password_hash = _state.get("password_hash", "")
+            username = state.get("username", "").strip()
+            password_hash = state.get("password_hash", "")
             if username and password_hash:
                 log(f"Creating user: {username}")
                 try:
@@ -538,13 +424,16 @@ def _configure_installed_system(
         else:
             run_command(_as_root(["umount", config_root]), check=False)
 
-def _run_install_worker(log, progress, alongside_mount):
+def _run_install_worker(
+    log, progress, alongside_mount, context: InstallerContext = DEFAULT_CONTEXT,
+):
+    state = context.state
     try:
         require_root()
-        disk, install_mode, kernel, src_ref, tgt_ref = _prepare_install_context(log)
+        disk, install_mode, kernel, src_ref, tgt_ref = _prepare_install_context(log, context)
 
         target_part, root_part, alongside_mount = _prepare_install_storage(
-            disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount
+            disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount, context
         )
 
         log("── Phase 2: Configuring installed system ─────────────────────────")
@@ -562,14 +451,14 @@ def _run_install_worker(log, progress, alongside_mount):
         progress(93)
 
         _configure_installed_system(
-            root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress
+            root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress, context
         )
 
         log("── Phase 3: Staging Secure Boot enrollment ───────────────────────")
-        mok_state = _try_stage_mok_enrollment(log, kernel, _state["mok_password"])
+        mok_state = _try_stage_mok_enrollment(log, kernel, state["mok_password"])
 
         progress(100)
-        _push({"type": "done", "mok_state": mok_state})
+        _push({"type": "done", "mok_state": mok_state}, context)
 
     except Exception as exc:
         message = format_install_error(exc)
@@ -586,21 +475,20 @@ def _run_install_worker(log, progress, alongside_mount):
         except Exception as log_exc:
             message = f"{message} (also failed writing installer log {LOG_FILE}: {log_exc})"
         log(f"ERROR: {message}")
-        _push({"type": "error", "message": message})
+        _push({"type": "error", "message": message}, context)
     finally:
-        _state["password_hash"] = ""
-        _state["mok_password"] = ""
+        state["password_hash"] = ""
+        state["mok_password"] = ""
         # Guard against orphaned mounts when Phase 1 fails before the inner
         # try/finally (which holds the normal umount) is ever entered.
         if alongside_mount:
             run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
 
-def _run_install() -> None:
-    with _events_lock:
-        _events.clear()
+def _run_install(context: InstallerContext = DEFAULT_CONTEXT) -> None:
+    context.events.clear()
 
     def log(msg: str) -> None:
-        _push({"type": "log", "text": msg})
+        _push({"type": "log", "text": msg}, context)
         try:
             with LOG_FILE.open("a") as f:
                 f.write(msg + "\n")
@@ -612,10 +500,10 @@ def _run_install() -> None:
                     f"(installer log write failed for {LOG_FILE}: "
                     f"{format_os_error(exc, path=LOG_FILE)})"
                 ),
-            })
+            }, context)
 
     def progress(pct: int) -> None:
-        _push({"type": "progress", "value": pct})
+        _push({"type": "progress", "value": pct}, context)
 
     try:
         require_root()
@@ -624,9 +512,9 @@ def _run_install() -> None:
         os.chmod(LOG_FILE, 0o600)
     except Exception as exc:
         message = format_install_error(exc)
-        _push({"type": "error", "message": message})
+        _push({"type": "error", "message": message}, context)
         return
 
     alongside_mount = ""
 
-    _run_install_worker(log, progress, alongside_mount)
+    _run_install_worker(log, progress, alongside_mount, context)

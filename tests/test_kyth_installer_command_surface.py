@@ -10,7 +10,9 @@ INSTALLER = ROOT / "build_files" / "kyth-installer" / "kyth_installer"
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
 from kyth_installer import install  # noqa: E402
+from kyth_installer.context import InstallerContext  # noqa: E402
 from kyth_installer.plan import InstallPlan  # noqa: E402
+from kyth_installer.streaming import StreamingCommandRunner  # noqa: E402
 
 
 class InstallerCommandSurfaceTests(unittest.TestCase):
@@ -49,37 +51,15 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 text = (INSTALLER / filename).read_text()
                 self.assertIn("subprocess", text)
 
-    def test_install_progress_runner_is_module_level(self):
-        tree = ast.parse((INSTALLER / "install.py").read_text())
-        module_functions = {
-            node.name for node in tree.body if isinstance(node, ast.FunctionDef)
-        }
-        self.assertTrue(
-            {
-                "_run_cmd",
-                "_prepare_install_context",
-                "_prepare_install_storage",
-                "_configure_installed_system",
-                "_run_install_worker",
-            }.issubset(module_functions)
-        )
+    def test_installer_contexts_do_not_share_state_or_events(self):
+        first = InstallerContext()
+        second = InstallerContext()
 
-        run_install = next(
-            node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "_run_install"
-        )
-        nested_functions = {
-            node.name for node in run_install.body if isinstance(node, ast.FunctionDef)
-        }
-        self.assertNotIn("run_cmd", nested_functions)
+        first.state["disk"] = "/dev/sda"
+        first.events.publish({"type": "progress", "value": 10})
 
-        worker = next(
-            node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "_run_install_worker"
-        )
-        self.assertLessEqual(worker.end_lineno - worker.lineno + 1, 60)
+        self.assertEqual(second.state["disk"], "")
+        self.assertEqual(second.events.events, [])
 
     def test_wipe_storage_phase_returns_root_context(self):
         logs = []
@@ -311,7 +291,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         )
         self.assertIn("--acknowledge-destructive", cmd)
 
-    def test_run_cmd_net_monitor_survives_layers_needed_line(self):
+    def test_streaming_runner_publishes_stats_with_zero_network_baseline(self):
         # output_state was referenced by _net_monitor and emit_line but never
         # assigned anywhere in _run_cmd's scope. emit_line's write hit a bare
         # `except Exception: pass`; _net_monitor's read crashed the daemon
@@ -328,12 +308,15 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             "print('layers already present: 0; layers needed: 1 (1 MB)', flush=True); "
             "import time; time.sleep(1.5)",
         ]
-        with mock.patch.object(install, "_as_root", side_effect=lambda c: c), \
-             mock.patch.object(install, "_push", side_effect=pushed.append):
-            install._run_cmd(
-                cmd, 5, 90, logs.append, progress_values.append,
-                stall_timeout=10, absolute_timeout=10,
-            )
+        runner = StreamingCommandRunner(
+            rx_bytes=lambda: 0,
+            publish=pushed.append,
+            monitor_interval=0.01,
+        )
+        runner.run(
+            cmd, 5, 90, logs.append, progress_values.append,
+            stall_timeout=10, absolute_timeout=10,
+        )
 
         stats_events = [e for e in pushed if e.get("type") == "stats"]
         self.assertTrue(

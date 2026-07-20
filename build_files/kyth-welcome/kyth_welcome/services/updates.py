@@ -24,14 +24,3 @@ def firmware_check_commands(refresh: bool = True) -> list[list[str]]:
     commands.append(["fwupdmgr", "get-updates"])
     return commands
 
-
-def __getattr__(name: str):
-    if name in {
-        "UpdateCheckWorker",
-        "FirmwareCheckWorker",
-        "ChangelogWorker",
-        "FlatpakCheckWorker",
-    }:
-        from .workers import updates as m
-        return getattr(m, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
