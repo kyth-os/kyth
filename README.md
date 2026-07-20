@@ -356,11 +356,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 02:02:39 UTC
-- Current branch: testing
-- HEAD commit: 4e14b32
-- Last commit title: Suppress false-positive security lint findings in installer code
-- Last commit date: 2026-07-19T22:00:56-04:00
+- Last refreshed (UTC): 2026-07-20 11:54:26 UTC
+- Current branch: promote-testing-to-main
+- HEAD commit: 5c25a58
+- Last commit title: Promote testing to main
+- Last commit date: 2026-07-19T22:04:22-04:00
 - CI workflow files: 8
 - Build script files: 20
 

@@ -11,7 +11,7 @@ from .services.hardware import (
 from .services.launch import kcmshell, popen
 from .services.software import _finish_worker
 from .qt import (  # noqa: E501
-    QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer, QUrl, QVBoxLayout, QWidget, Signal,
+    QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QUrl, QVBoxLayout, QWidget, Signal, single_shot,
 )
 from .widgets import (  # noqa: E501
     HardwareCard, Page, _make_card,
@@ -98,8 +98,8 @@ class HardwarePage(Page):
         if self._initial_refresh_started:
             return
         self._initial_refresh_started = True
-        QTimer.singleShot(0, self.refresh)
-        QTimer.singleShot(0, self._refresh_display_status)
+        single_shot(self, 0, self.refresh)
+        single_shot(self, 0, self._refresh_display_status)
 
     def _display_status_text(self, raw: str) -> str:
         hdr_outputs: list[tuple[str, str]] = []   # (name, hdr_state)
@@ -349,7 +349,7 @@ class HardwarePage(Page):
 
     def _run_inline_cmd(self, cmd: list[str]):
         popen(cmd)
-        QTimer.singleShot(1500, self.refresh)
+        single_shot(self, 1500, self.refresh)
 
     def _on_failed(self, message: str):
         self._progress.hide()

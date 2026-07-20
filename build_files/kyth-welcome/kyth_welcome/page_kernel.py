@@ -11,7 +11,7 @@ from .services.software import (
 )
 from .core_base import REGISTRY, _current_branch
 from .qt import (  # noqa: E501
-    QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QTimer,
+    QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, single_shot,
 )
 from .widgets import (  # noqa: E501
     Page, _make_card, _set_log_panel,
@@ -137,7 +137,7 @@ class KernelPage(Page):
         if self._initial_refresh_started:
             return
         self._initial_refresh_started = True
-        QTimer.singleShot(0, self._refresh)
+        single_shot(self, 0, self._refresh)
 
     def _refresh(self):
         flavor = _current_kernel_flavor()

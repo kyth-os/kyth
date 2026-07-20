@@ -8,7 +8,7 @@ from .services.sched import (
 )
 from .services.telem import recent_sessions
 from .qt import (  # noqa: E501
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .widgets import (  # noqa: E501
     Page, _make_card,
@@ -112,7 +112,7 @@ class PerformancePage(Page):
         self._perf_timer.setInterval(5000)
         self._perf_timer.timeout.connect(self._perf_refresh)
         self._perf_timer.start()
-        QTimer.singleShot(150, self._perf_refresh)
+        single_shot(self, 150, self._perf_refresh)
 
     def _populate_sched_combo(self) -> None:
         self._perf_sched_combo.clear()

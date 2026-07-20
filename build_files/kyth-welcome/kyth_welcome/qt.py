@@ -87,3 +87,19 @@ try:
     _WEBENGINE_AVAILABLE = True
 except ImportError:
     pass
+
+
+def single_shot(parent, ms: int, slot):
+    """QTimer.singleShot(ms, slot) that stays alive as a real, parented QTimer.
+
+    QTimer.singleShot(ms, callable) routes through PyQt6's internal
+    PyQtSlotProxy helper object, which has been observed to segfault with a
+    use-after-free (SIGSEGV in PyQtSlotProxy::qt_metacall -> QObject::deleteLater)
+    on newer CPython builds. A QTimer parented to a real, long-lived QObject
+    sidesteps that code path entirely via normal Qt ownership/signal-slot.
+    """
+    timer = QTimer(parent)
+    timer.setSingleShot(True)
+    timer.timeout.connect(slot)
+    timer.start(ms)
+    return timer

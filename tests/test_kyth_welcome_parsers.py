@@ -41,6 +41,7 @@ def _install_qt_stubs() -> None:
         "QThread",
         "QTimer",
         "QUrl",
+        "single_shot",
         "QVBoxLayout",
         "QWebEnginePage",
         "QWebEngineProfile",

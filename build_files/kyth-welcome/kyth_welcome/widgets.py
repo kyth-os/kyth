@@ -4,7 +4,7 @@ import re
 from .core_base import _restyle
 from .services.hardware import HardwareProbe
 from .qt import (  # noqa: E501
-    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QTimer, QVBoxLayout, QWidget, Qt,
+    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .ui_tokens import STATUS_ERROR, STATUS_OK, STATUS_WARN
 
@@ -205,7 +205,7 @@ class CommandResultPanel(QFrame):
     def _copy_details(self) -> None:
         QApplication.clipboard().setText(self._details_text)
         self._copy_btn.setText("Copied")
-        QTimer.singleShot(1200, lambda: self._copy_btn.setText("Copy details"))
+        single_shot(self, 1200, lambda: self._copy_btn.setText("Copy details"))
 
 
 def _make_flow_step(number: int, title: str, copy: str) -> QFrame:

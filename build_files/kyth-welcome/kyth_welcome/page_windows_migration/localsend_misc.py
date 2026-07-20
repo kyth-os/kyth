@@ -18,7 +18,7 @@ from ..services.windows_migration import (
     _collect_hw_sanity,
 )
 from ..qt import (  # noqa: E501
-    QFileDialog, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout,
+    QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, single_shot,
 )
 from ..widgets import (  # noqa: E501
     _make_card,
@@ -154,7 +154,7 @@ class _LocalSendMiscMixin:
         hw_layout.addLayout(hw_btns)
         self._add(hw_card)
         # Pages are built eagerly at startup; defer the subprocess probes.
-        QTimer.singleShot(900, self._run_hw_sanity)
+        single_shot(self, 900, self._run_hw_sanity)
 
 
 

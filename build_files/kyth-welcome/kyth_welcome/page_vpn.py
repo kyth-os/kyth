@@ -12,7 +12,7 @@ from .services.vpn import (
 )
 from .services.workers.vpn import VpnConnectWorker as _VpnConnectWorker
 from .qt import (  # noqa: E501
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QTimer, QVBoxLayout, _WEBENGINE_AVAILABLE,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, _WEBENGINE_AVAILABLE, single_shot,
 )
 from .widgets import (  # noqa: E501
     Page, _make_card, _set_log_panel,
@@ -261,7 +261,7 @@ class VpnPage(Page):
                 "[GP] Gateway requires its own SAML sign-in — restarting "
                 "authentication against the gateway interface…"
             )
-            QTimer.singleShot(500, self._start_gateway_probe)
+            single_shot(self, 500, self._start_gateway_probe)
             return
         self._set_vpn_status("disconnected")
         self._connect_btn.setEnabled(True)

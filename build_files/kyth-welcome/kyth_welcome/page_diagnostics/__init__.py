@@ -3,7 +3,7 @@ from ._security import _SecurityMixin
 from ._signin import _SigninMixin
 from ._storage_sense import _StorageSenseMixin
 from ._health import _HealthMixin
-from ..qt import QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, QVBoxLayout, QWidget
+from ..qt import QLabel, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget, single_shot
 from ..widgets import ActionRow, EmptyState, Page, _make_card, _make_flow_step
 
 
@@ -102,4 +102,4 @@ class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _H
         if self._initial_refresh_started:
             return
         self._initial_refresh_started = True
-        QTimer.singleShot(0, self.refresh)
+        single_shot(self, 0, self.refresh)

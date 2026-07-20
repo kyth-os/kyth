@@ -8,7 +8,7 @@ from .core_base import (
 )
 from .services.repair import rollback_command, reset_command
 from .services.software import Worker, _finish_worker
-from .qt import QTimer
+from .qt import single_shot
 from .widgets import _set_log_panel
 
 
@@ -48,7 +48,7 @@ class _ResetMixin:
             self._status_lbl.setText("Rollback staged — rebooting into the previous system image…")
             self._status_lbl.setObjectName("status-ok")
             self._log.append("\nDone. Rebooting now.")
-            QTimer.singleShot(2000, reboot)
+            single_shot(self, 2000, reboot)
         else:
             self._status_lbl.setText(f"Rollback failed (exit code {code}).")
             self._status_lbl.setObjectName("status-err")
@@ -88,7 +88,7 @@ class _ResetMixin:
             self._status_lbl.setObjectName("status-ok")
             self._log.append("\nDone. Rebooting now.")
             _restyle(self._status_lbl)
-            QTimer.singleShot(2000, reboot)
+            single_shot(self, 2000, reboot)
         else:
             self._status_lbl.setText(f"Reset failed (exit code {code}).")
             self._status_lbl.setObjectName("status-err")

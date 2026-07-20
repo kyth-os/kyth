@@ -26,7 +26,7 @@ from .services.welcome import (
     _printer_configured,
 )
 from .qt import (  # noqa: E501
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QTimer, QVBoxLayout, QWidget, Qt, Signal,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
 from .widgets import (  # noqa: E501
     Page, _make_card, _theme_icon,
@@ -235,7 +235,7 @@ class WelcomePage(Page):
         self._ntfs_library_insert_index = self._layout.count()
         self._ntfs_library_worker = None
         if not _IS_LIVE:
-            QTimer.singleShot(0, self._refresh_ntfs_library_warning)
+            single_shot(self, 0, self._refresh_ntfs_library_warning)
 
         # ── First-week tips ───────────────────────────────────────────────────
         days = None if _IS_LIVE else _first_week_days()

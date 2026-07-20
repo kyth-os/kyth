@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from .qt import QTimer
+from .qt import QTimer, single_shot
 from .widgets import Page
 from .page_update_auto import _AutoUpdateMixin
 from .page_update_availability import _UpdateAvailabilityMixin
@@ -53,7 +53,7 @@ class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _F
         self._build_progress_section()
         self._build_firmware_card()
         self._build_auto_update_card()
-        QTimer.singleShot(300, self._refresh_auto_update_status)
+        single_shot(self, 300, self._refresh_auto_update_status)
 
         self._stretch()
 

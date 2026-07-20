@@ -258,6 +258,16 @@ QPushButton#saml-cancel:pressed {
             # Accumulate every cookie seen during the session so the fallback
             # can find the GP token even if the cookieAdded name check misses it.
             self._all_cookies: dict[str, str] = {}
+            # Real, parented, single-shot QTimers rather than QTimer.singleShot(ms,
+            # callable): the latter goes through PyQt6's internal PyQtSlotProxy
+            # helper, which has been observed to segfault with a use-after-free
+            # on this Python/PyQt6 build (KDE bug-adjacent, not yet upstream-filed).
+            self._fallback_timer = QTimer(self)
+            self._fallback_timer.setSingleShot(True)
+            self._fallback_timer.timeout.connect(self._fallback_cookie_check)
+            self._session_cookie_timer = QTimer(self)
+            self._session_cookie_timer.setSingleShot(True)
+            self._session_cookie_timer.timeout.connect(self._try_portal_session_cookie)
             layout = QVBoxLayout(self)
             layout.setContentsMargins(14, 14, 14, 12)
             layout.setSpacing(10)
@@ -488,7 +498,7 @@ QPushButton#saml-cancel:pressed {
                 return
             if any(kw in title_str.lower() for kw in ("successful", "success", "complete", "logged in")):
                 print("[SAML dbg] success page detected — checking collected cookies in 5s")
-                QTimer.singleShot(5000, self._fallback_cookie_check)
+                self._fallback_timer.start(5000)
 
         def _on_portal_page_structure(self, result: str, url: str) -> None:
             print(f"[SAML dbg] page structure: {result}")
@@ -499,7 +509,7 @@ QPushButton#saml-cancel:pressed {
             # globalprotectcallback:// redirect.  Use the session cookie it set.
             if "scripts=0" in result and "form[" not in result:
                 print("[SAML dbg] static portal page — trying session cookies in 2s")
-                QTimer.singleShot(2000, self._try_portal_session_cookie)
+                self._session_cookie_timer.start(2000)
 
         # JS that POSTs to the portal prelogin endpoint from within the browser
         # (SESSID cookie is sent automatically since it's same-origin).
@@ -814,6 +824,14 @@ class MainWindow(QMainWindow):
         self._pending_reconnect = False
         self._pending_gateway_saml = False
         self._gateway_saml_attempted = False
+        # Real, parented, single-shot QTimers rather than QTimer.singleShot(ms,
+        # callable) — see SamlBrowserDialog.__init__ for why.
+        self._gateway_probe_timer = QTimer(self)
+        self._gateway_probe_timer.setSingleShot(True)
+        self._gateway_probe_timer.timeout.connect(self._start_gateway_probe)
+        self._reconnect_timer = QTimer(self)
+        self._reconnect_timer.setSingleShot(True)
+        self._reconnect_timer.timeout.connect(self._on_connect)
         self.setWindowTitle("VPN Connect")
         self.setWindowIcon(QIcon.fromTheme(_APP_ICON_NAME))
         self.setMinimumSize(560, 560)
@@ -1169,7 +1187,7 @@ class MainWindow(QMainWindow):
                 "[GP] Gateway requires its own SAML sign-in — restarting "
                 "authentication against the gateway interface…"
             )
-            QTimer.singleShot(500, self._start_gateway_probe)
+            self._gateway_probe_timer.start(500)
             return
         self._set_status("disconnected")
         self._connect_btn.setEnabled(True)
@@ -1178,7 +1196,7 @@ class MainWindow(QMainWindow):
             w.setEnabled(True)
         if self._pending_reconnect:
             self._pending_reconnect = False
-            QTimer.singleShot(500, self._on_connect)
+            self._reconnect_timer.start(500)
         else:
             self._show_window()
 

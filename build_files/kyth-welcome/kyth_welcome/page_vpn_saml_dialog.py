@@ -5,9 +5,9 @@ from urllib.request import Request, urlopen
 # __KYTH_GENERATED_IMPORTS__
 from .services.vpn import _GP_SAML_FIELDS
 from .qt import (  # noqa: E501
-    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QTimer, QUrl, QVBoxLayout,
+    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QUrl, QVBoxLayout,
     QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineUrlRequestJob,
-    QWebEngineUrlSchemeHandler, QWebEngineView, Signal, _WEBENGINE_AVAILABLE,
+    QWebEngineUrlSchemeHandler, QWebEngineView, Signal, _WEBENGINE_AVAILABLE, single_shot,
 )
 
 # ── VPN SAML browser dialog (GlobalProtect) ─────────────────────────────────
@@ -348,7 +348,7 @@ QPushButton#saml-cancel:pressed {
                 return
             if any(kw in title_str.lower() for kw in ("successful", "success", "complete", "logged in")):
                 print("[SAML dbg] success page detected — checking collected cookies in 5s")
-                QTimer.singleShot(5000, self._fallback_cookie_check)
+                single_shot(self, 5000, self._fallback_cookie_check)
 
         def _on_portal_page_structure(self, result: str, url: str) -> None:
             print(f"[SAML dbg] page structure: {result}")
@@ -356,7 +356,7 @@ QPushButton#saml-cancel:pressed {
                 return
             if "scripts=0" in result and "form[" not in result:
                 print("[SAML dbg] static portal page — trying session cookies in 2s")
-                QTimer.singleShot(2000, self._try_portal_session_cookie)
+                single_shot(self, 2000, self._try_portal_session_cookie)
 
         def _try_portal_session_cookie(self) -> None:
             if self._done:

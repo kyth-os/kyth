@@ -20,7 +20,7 @@ from ..services.runtime import (
 )
 from ..services.launch import popen, systemsettings, kcmshell
 from ..qt import (  # noqa: E501
-    QCheckBox, QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QTimer, QUrl,
+    QCheckBox, QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QUrl, single_shot,
 )
 from ..widgets import (  # noqa: E501
     _make_card,
@@ -172,7 +172,7 @@ class _ShortcutsPhoneMixin:
         phone_btns.addStretch()
         phone_layout.addLayout(phone_btns)
         self._add(phone_card)
-        QTimer.singleShot(0, self._refresh_phone_devices)
+        single_shot(self, 0, self._refresh_phone_devices)
 
 
 
