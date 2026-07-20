@@ -48,6 +48,21 @@ install-openrgb: (_install-flatpak "org.openrgb.OpenRGB" "OpenRGB")
     @flatpak override --user --device=all org.openrgb.OpenRGB
     @echo "If RGB RAM or motherboard headers are missing, load i2c kernel modules."
 
+# Install Solaar — GUI for Logitech Unifying/Bolt receivers and mice.
+[group('KythOS')]
+install-solaar: (_install-flatpak "io.github.pwr_solaar.solaar" "Solaar")
+
+# Install ASUS ROG/TUF Linux control tools (asusctl & supergfxctl).
+[group('KythOS')]
+install-asus-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Installing ASUS Linux hardware control tools (asusctl & supergfxctl)..."
+    sudo rpm-ostree install --idempotent asusctl supergfxctl
+    echo
+    echo "Reboot required to activate asusd system service."
+
 # Install Vesktop — Discord with native Wayland.
 [group('KythOS')]
 install-vesktop: (_install-flatpak "dev.vencord.Vesktop" "Vesktop")
+

@@ -7,16 +7,16 @@ setup-sunshine:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if ! command -v sunshine >/dev/null 2>&1; then
-        echo "Sunshine is not installed. Installing via rpm-ostree..."
-        sudo rpm-ostree install --idempotent sunshine
-        echo
-        echo "Reboot required to activate. Then run 'ujust setup-sunshine' again."
-        exit 0
+    if ! flatpak info dev.lizardbyte.app.Sunshine >/dev/null 2>&1; then
+        echo "Installing Sunshine game streaming server via Flatpak..."
+        flatpak install -y flathub dev.lizardbyte.app.Sunshine
     fi
 
-    # Enable and start Sunshine as a user service
-    systemctl --user enable --now sunshine.service
+    # Grant necessary host uinput/display permissions for Flatpak game streaming
+    flatpak override --user --filesystem=host dev.lizardbyte.app.Sunshine 2>/dev/null || true
+
+    echo "Starting Sunshine via Flatpak..."
+    flatpak run dev.lizardbyte.app.Sunshine &
 
     # Open the web UI
     echo

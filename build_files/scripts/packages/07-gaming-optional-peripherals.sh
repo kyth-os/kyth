@@ -20,8 +20,6 @@ optional_gaming_packages=(
 	jstest-gtk
 	libcec
 	cec-utils
-	openrazer-daemon
-	openrazer-meta
 	opentabletdriver
 	corectrl
 	akmod-v4l2loopback
@@ -29,21 +27,17 @@ optional_gaming_packages=(
 	v4l-utils
 	joycond
 	gamescope-session-plus
-	openrgb
 	libwacom
 	libwacom-data
 	hplip
 	ryzenadj
 	i2c-tools
 	lm_sensors
-	sunshine
 	extest
 	extest.i686
 	# Vulkan / GL debugging: vulkaninfo, glxinfo, glxgears
 	vulkan-tools
 	mesa-demos
-	# Logitech Unifying/Bolt receiver and device manager
-	solaar
 )
 
 install_available_optional_packages gaming "${optional_gaming_packages[@]}"

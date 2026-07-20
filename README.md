@@ -356,11 +356,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 16:29:48 UTC
+- Last refreshed (UTC): 2026-07-20 16:34:57 UTC
 - Current branch: testing
-- HEAD commit: 5a0278b
-- Last commit title: fix(build): resolve /usr/local dangling symlink before creating subdirectories
-- Last commit date: 2026-07-20T12:25:38-04:00
+- HEAD commit: 3db55e6
+- Last commit title: test(ci): add workflow contract assertions to prevent metadata and supply-chain desync
+- Last commit date: 2026-07-20T12:29:48-04:00
 - CI workflow files: 8
 - Build script files: 20
 
