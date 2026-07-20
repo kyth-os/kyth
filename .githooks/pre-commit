@@ -2,9 +2,49 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-"$repo_root/build_files/scripts/update-readme-snapshot.sh"
+cd "${repo_root}"
+
+"${repo_root}/build_files/scripts/update-readme-snapshot.sh"
 
 if ! git diff --quiet -- README.md; then
     git add README.md
     echo "[pre-commit] README.md snapshot refreshed and staged."
+fi
+
+# Check staged shell scripts
+staged_sh=()
+while IFS= read -r file; do
+    [[ -n "${file}" && -f "${file}" ]] && staged_sh+=("${file}")
+done < <(git diff --cached --name-only --diff-filter=ACMR '*.sh')
+
+if ((${#staged_sh[@]} > 0)); then
+    echo "[pre-commit] Validating ${#staged_sh[@]} staged shell script(s)..."
+    for file in "${staged_sh[@]}"; do
+        if ! bash -n "${file}"; then
+            echo "[pre-commit] ERROR: Syntax error in ${file}" >&2
+            exit 1
+        fi
+    done
+    if command -v shellcheck >/dev/null 2>&1; then
+        if ! shellcheck --severity=error "${staged_sh[@]}"; then
+            echo "[pre-commit] ERROR: shellcheck reported error(s) in staged shell script(s)." >&2
+            exit 1
+        fi
+    fi
+fi
+
+# Check staged Python files
+staged_py=()
+while IFS= read -r file; do
+    [[ -n "${file}" && -f "${file}" ]] && staged_py+=("${file}")
+done < <(git diff --cached --name-only --diff-filter=ACMR '*.py')
+
+if ((${#staged_py[@]} > 0)); then
+    echo "[pre-commit] Validating ${#staged_py[@]} staged Python file(s)..."
+    for file in "${staged_py[@]}"; do
+        if ! python3 -m py_compile "${file}" >/dev/null 2>&1; then
+            echo "[pre-commit] ERROR: Python syntax error in ${file}" >&2
+            exit 1
+        fi
+    done
 fi

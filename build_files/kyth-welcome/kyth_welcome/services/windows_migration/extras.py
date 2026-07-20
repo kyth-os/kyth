@@ -353,7 +353,10 @@ _export_sticky_notes = export_sticky_notes
 def import_rdp_bookmarks(connections: list[dict]) -> tuple[int, int]:
     """Add rdp:// bookmarks to KRDC's bookmarks.xbel; returns (added, dupes)."""
     import xml.etree.ElementTree as std_ET
-    import defusedxml.ElementTree as ET
+    try:
+        import defusedxml.ElementTree as ET
+    except ImportError:
+        ET = std_ET
     path = os.path.expanduser("~/.local/share/krdc/bookmarks.xbel")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.isfile(path):

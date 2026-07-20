@@ -12,16 +12,17 @@
 # v2 → v3: rpm_ostree renamed to system in topgrade v17; added containers.
 # v3 → v4: added custom command for kyth-rclone-update.
 # v4 → v5: disabled Topgrade self-update; the image refreshes /usr/bin/topgrade.
+# v5 → v6: added toolbx and helix to disable list.
 #
 # Run once at boot via kyth-topgrade-migrate.service; state is tracked in
-# /var/lib/kyth/migrations/topgrade-v5.done so it never runs again.
+# /var/lib/kyth/migrations/topgrade-v6.done so it never runs again.
 
 import os
 import re
 import sys
 
 STATE_DIR = "/var/lib/kyth/migrations"
-STATE_FILE = os.path.join(STATE_DIR, "topgrade-v5.done")
+STATE_FILE = os.path.join(STATE_DIR, "topgrade-v6.done")
 
 SKEL_CONFIG = "/etc/skel/.config/topgrade.toml"
 
@@ -32,9 +33,11 @@ TOPGRADE_DISABLE_BLOCK = """
 # system (dnf5) is read-only on bootc — disable it; bootc upgrade is used instead.
 # distrobox-upgrade fails without a PTY; update containers manually instead.
 # containers (podman) updates fail on a bootc read-only system.
+# toolbx (kyth-dev) is managed via ujust.
+# helix grammar updates fail on a read-only system.
 # topgrade is baked into the KythOS image; refresh it through image updates.
 no_self_update = true
-disable = ["system", "distrobox", "containers"]
+disable = ["system", "distrobox", "containers", "toolbx", "helix"]
 
 [commands]
 # -n makes sudo fail fast if NOPASSWD isn't working, rather than hanging.
@@ -50,7 +53,8 @@ def log(msg):
 def needs_patch(path):
     """Return True if topgrade.toml is missing any KythOS-required setting."""
     try:
-        content = open(path).read()
+        with open(path) as f:
+            content = f.read()
     except OSError:
         return False
     return (
@@ -58,6 +62,8 @@ def needs_patch(path):
         ('"system"' not in content and "rpm_ostree" not in content)
         or '"distrobox"' not in content
         or '"containers"' not in content
+        or '"toolbx"' not in content
+        or '"helix"' not in content
         or not re.search(r"^\s*no_self_update\s*=\s*true\s*$", content, re.MULTILINE)
         or "sudo -n bootc upgrade" not in content
         or "sudo -n /usr/bin/kyth-rclone-update" not in content
@@ -107,6 +113,23 @@ def patch_config(path):
         content = re.sub(
             r'(disable\s*=\s*\[)([^\]]+)(\])',
             lambda m: m.group(1) + m.group(2).rstrip() + ', "containers"' + m.group(3),
+            content,
+        )
+        changed = True
+
+    # v5 config: toolbx / helix missing — update disable array.
+    if ('"toolbx"' not in content or '"helix"' not in content) and 'disable = [' in content:
+        def _add_missing_disabled(m):
+            items = [x.strip().strip('"') for x in m.group(2).split(",") if x.strip()]
+            for item in ("toolbx", "helix"):
+                if item not in items:
+                    items.append(item)
+            formatted = ", ".join(f'"{x}"' for x in items)
+            return f"{m.group(1)}{formatted}{m.group(3)}"
+
+        content = re.sub(
+            r'(disable\s*=\s*\[)([^\]]+)(\])',
+            _add_missing_disabled,
             content,
         )
         changed = True

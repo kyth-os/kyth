@@ -173,10 +173,11 @@ class HardwareProbeTests(unittest.TestCase):
         self.assertIn("Radeon RX 7900 XTX", probe.details)
 
     def test_codec_probe_detects_vaapi(self):
-        vainfo = "VAProfileH264Main : VAEntrypointVLD\nVAProfileHEVCMain : VAEntrypointVLD\n"
+        vainfo_out = "VAProfileH264Main : VAEntrypointVLD\nVAProfileHEVCMain : VAEntrypointVLD\n"
+        proc = MagicMock(returncode=0, stdout=vainfo_out, stderr="")
         with (
             patch("shutil.which", return_value="/usr/bin/vainfo"),
-            patch("kyth_welcome.services.process._command_stdout", return_value=vainfo),
+            patch("kyth_welcome.services.hardware.codec._run_command", return_value=proc),
         ):
             probe = _codec_probe()
 

@@ -356,11 +356,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 14:32:05 UTC
+- Last refreshed (UTC): 2026-07-20 14:54:40 UTC
 - Current branch: testing
-- HEAD commit: 772951f
-- Last commit title: Add unit test suites for kyth_welcome services and fix RDP bookmark XML import bug
-- Last commit date: 2026-07-20T10:30:15-04:00
+- HEAD commit: 7452ca8
+- Last commit title: fix(sysconfig): disable helix in topgrade, fix CI defusedxml/vaapi tests, add shell script validation and git hooks
+- Last commit date: 2026-07-20T10:53:48-04:00
 - CI workflow files: 8
 - Build script files: 20
 

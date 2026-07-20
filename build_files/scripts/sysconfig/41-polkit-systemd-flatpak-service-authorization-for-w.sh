@@ -68,12 +68,6 @@ STEAM_DISABLE_BROWSER_SUBPROCESS=1
 MESA_SHADER_CACHE_MAX_SIZE=10G
 PROTONEOF
 
-mkdir -p /etc/skel/.config
-cat >/etc/skel/.config/topgrade.toml <<'TOPGRADEEOF'
-[misc]
-disable = ["system", "distrobox", "containers", "toolbx", "helix"]
-TOPGRADEEOF
-
 mkdir -p /etc/flatpak/overrides
 cat >/etc/flatpak/overrides/com.obsproject.Studio <<'OBSEOF'
 [Environment]
