@@ -11,10 +11,10 @@ from .services.vpn import (
     _vpn_line_is_connected,
 )
 from .services.workers.vpn import VpnConnectWorker as _VpnConnectWorker
-from .qt import (  # noqa: E501
+from .qt import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, _WEBENGINE_AVAILABLE, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card, _set_log_panel,
 )
 

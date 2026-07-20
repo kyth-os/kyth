@@ -470,7 +470,7 @@ class InstallerPlanTests(unittest.TestCase):
         # ---pretend-input-tty and "Yes" on stdin instead.
         shrink_calls = [
             (cmd, kwargs)
-            for cmd, kwargs in zip(flattened, run_kwargs)
+            for cmd, kwargs in zip(flattened, run_kwargs, strict=True)
             if "resizepart 3" in cmd
         ]
         self.assertEqual(len(shrink_calls), 1)
@@ -479,7 +479,7 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertNotIn(" -s ", shrink_cmd)
         self.assertEqual(shrink_kwargs.get("input"), "Yes\n")
         ntfs_shrink = next(
-            kwargs for cmd, kwargs in zip(flattened, run_kwargs)
+            kwargs for cmd, kwargs in zip(flattened, run_kwargs, strict=True)
             if "ntfsresize --size" in cmd and "--no-action" not in cmd
         )
         self.assertEqual(ntfs_shrink.get("input"), "y\n")
@@ -767,9 +767,11 @@ class InstallerSystemTests(unittest.TestCase):
                 os.chmod(test_file, 0o600)
                 self.assertEqual(test_file.read_text(), "secret1\nsecret2\n")
             finally:
+                # Best-effort so TemporaryDirectory's own cleanup can still
+                # delete the 0o000 file; nothing meaningful to log in a test.
                 try:
                     os.chmod(test_file, 0o600)
-                except Exception:
+                except Exception:  # noqa: S110
                     pass
 
     def test_write_lines_uses_elevated_mkdir_tee_chmod(self):
@@ -809,11 +811,29 @@ class InstallerSystemTests(unittest.TestCase):
 
     def test_format_install_error_wraps_permission_error(self):
         err = PermissionError(30, "Read-only file system")
-        err.filename = "/var/tmp/kyth-install-root"
+        err.filename = "/var/tmp/kyth-install-root"  # noqa: S108 — fixture string, not a real path opened on disk
         text = system.format_install_error(err)
         self.assertIn("PermissionError", text)
         self.assertIn("Read-only file system", text)
-        self.assertIn("/var/tmp/kyth-install-root", text)
+        self.assertIn("/var/tmp/kyth-install-root", text)  # noqa: S108 — fixture string, not a real path opened on disk
+
+    def test_require_no_symlink_rejects_symlink(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real = os.path.join(tmpdir, "real")
+            link = os.path.join(tmpdir, "link")
+            os.makedirs(real)
+            os.symlink(real, link)
+            with self.assertRaisesRegex(RuntimeError, "already exists as a symlink"):
+                system._require_no_symlink(link)
+
+    def test_require_no_symlink_allows_real_dir_and_missing_path(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real = os.path.join(tmpdir, "real")
+            os.makedirs(real)
+            system._require_no_symlink(real)  # does not raise
+            system._require_no_symlink(os.path.join(tmpdir, "does-not-exist"))  # does not raise
 
 
 class InstallerGptDiskTests(unittest.TestCase):

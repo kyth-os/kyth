@@ -4,7 +4,7 @@ from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.vpn import _GP_SAML_FIELDS
-from .qt import (  # noqa: E501
+from .qt import (
     QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QUrl, QVBoxLayout,
     QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineUrlRequestJob,
     QWebEngineUrlSchemeHandler, QWebEngineView, Signal, _WEBENGINE_AVAILABLE, single_shot,

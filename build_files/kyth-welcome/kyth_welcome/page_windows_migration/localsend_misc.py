@@ -17,10 +17,10 @@ from ..services.launch import flatpak_run, popen, systemsettings, kcmshell
 from ..services.windows_migration import (
     _collect_hw_sanity,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, single_shot,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 

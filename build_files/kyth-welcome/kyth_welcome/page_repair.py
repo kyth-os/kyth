@@ -13,10 +13,10 @@ from .services.software import (
 from .page_repair_assist import _AssistMixin
 from .page_repair_quick import _QuickFixMixin
 from .page_repair_reset import _ResetMixin
-from .qt import (  # noqa: E501
+from .qt import (
     QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QTextEdit, QUrl,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card, _set_log_panel,
 )
 

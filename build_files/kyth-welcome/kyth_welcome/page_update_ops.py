@@ -1,3 +1,4 @@
+import logging
 import time
 
 # __KYTH_GENERATED_IMPORTS__
@@ -12,6 +13,8 @@ from .services.software import Worker, _finish_worker
 from .core_base import _current_branch
 from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
 from .widgets import _make_card, _set_log_panel
+
+_logger = logging.getLogger(__name__)
 
 
 class _UpdateOpsMixin:
@@ -289,7 +292,7 @@ class _UpdateOpsMixin:
                         self._dl_monitor._total = total
                         self._progress.setRange(0, 1000)
             except Exception:
-                pass
+                _logger.debug("_on_line: failed to parse download size from %r", text, exc_info=True)
         self._log.append(text)
         self._log.ensureCursorVisible()
 

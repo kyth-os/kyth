@@ -1,24 +1,25 @@
 import json
 import os
 from datetime import datetime
+from typing import ClassVar
 from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.gaming import TrackedThread
+from .services.gaming import compat_data
 from .services.gaming.compat_data import (
     CompatGame,
     _COMPAT_CACHE_PATH,
-    _COMPAT_DATA_UPDATED,
     _COMPAT_GAMES,
     _COMPAT_REMOTE_URL,
     _COMPAT_STALE_DAYS,
     _parse_compat_payload,
     replace_compat_games,
 )
-from .qt import (  # noqa: E501
+from .qt import (
     QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 
@@ -26,14 +27,11 @@ from .widgets import (  # noqa: E501
 def _adopt_compat_data(updated: str, games: list[CompatGame]) -> None:
     # Mutate the shared service list so all importers see the refresh.
     replace_compat_games(updated, games)
-    # Keep page-local name bound for age checks that read this module's global.
-    global _COMPAT_DATA_UPDATED
-    _COMPAT_DATA_UPDATED = updated
 
 
 def _compat_data_age_days() -> int | None:
     try:
-        return (datetime.now() - datetime.strptime(_COMPAT_DATA_UPDATED, "%Y-%m-%d")).days
+        return (datetime.now() - datetime.strptime(compat_data._COMPAT_DATA_UPDATED, "%Y-%m-%d")).days
     except ValueError:
         return None
 
@@ -49,7 +47,7 @@ class _CompatRefreshWorker(TrackedThread):
             with urlopen(req, timeout=10) as resp:
                 raw = resp.read().decode("utf-8")
             updated, games = _parse_compat_payload(json.loads(raw))
-            if not games or updated <= _COMPAT_DATA_UPDATED:
+            if not games or updated <= compat_data._COMPAT_DATA_UPDATED:
                 self.unchanged.emit()
                 return
             os.makedirs(os.path.dirname(_COMPAT_CACHE_PATH), exist_ok=True)
@@ -84,7 +82,7 @@ _COMPAT_AC_EXPLAINERS: list[tuple[str, str, str]] = [
 # ── Page: Compatibility ───────────────────────────────────────────────────────
 class CompatibilityPage(Page):
 
-    _STATUS_STYLE: dict[str, tuple[str, str, str]] = {
+    _STATUS_STYLE: ClassVar[dict[str, tuple[str, str, str]]] = {
         # status → (badge_text, badge_css, row_left_border_color)
         "native":  ("Native",       "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
         "proton":  ("Works",        "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
@@ -354,12 +352,12 @@ class CompatibilityPage(Page):
         if age is not None and age > _COMPAT_STALE_DAYS:
             self._freshness_lbl.setStyleSheet("font-size:11px; color:#d4a843;")
             note = (
-                f"⚠ Compatibility data is {age} days old (updated {_COMPAT_DATA_UPDATED}). "
+                f"⚠ Compatibility data is {age} days old (updated {compat_data._COMPAT_DATA_UPDATED}). "
                 "Double-check ProtonDB before relying on a specific title."
             )
         else:
             self._freshness_lbl.setStyleSheet("font-size:11px; color:#858585;")
-            note = f"Compatibility data updated {_COMPAT_DATA_UPDATED or 'unknown'}."
+            note = f"Compatibility data updated {compat_data._COMPAT_DATA_UPDATED or 'unknown'}."
         if refresh_note:
             note += f"  {refresh_note}"
         self._freshness_lbl.setText(note)

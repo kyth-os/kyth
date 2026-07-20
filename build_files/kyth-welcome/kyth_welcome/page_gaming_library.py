@@ -2,7 +2,7 @@ from urllib.parse import urlencode
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _release_worker_when_finished
-from .services.gaming import (  # noqa: E501
+from .services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _detect_installed_games, _load_protondb_cache,
     _save_protondb_cache, find_compat_game, recommended_launcher_for_game, recommended_profile_for_game
 )

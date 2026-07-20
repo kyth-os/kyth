@@ -1,3 +1,4 @@
+import logging
 import os
 import shlex
 import shutil
@@ -6,6 +7,8 @@ import subprocess
 from ..core_base import _CLOUD_SYNC_CONFIG, _SMB_CONFIG, _SMB_CREDS_DIR
 from .config import load_json_config, save_json_config
 from .process import _run_command
+
+_logger = logging.getLogger(__name__)
 
 def _rclone_available() -> bool:
     return shutil.which("rclone") is not None
@@ -51,12 +54,12 @@ def _systemd_escape_mount_path(path: str) -> str:
     try:
         r = subprocess.run(
             ["systemd-escape", "--path", "--suffix=mount", path],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, check=False,
         )
         if r.returncode == 0:
             return r.stdout.strip()
     except Exception:
-        pass
+        _logger.debug("_systemd_escape_mount_path: systemd-escape probe of %s failed", path, exc_info=True)
     # Fallback: strip leading /, replace / with -, append .mount
     return path.lstrip("/").replace("/", "-") + ".mount"
  # _systemd_escape_mount_path
@@ -69,7 +72,7 @@ def _is_mounted(path: str) -> bool:
     try:
         r = subprocess.run(
             ["findmnt", "--noheadings", "--target", path],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, check=False,
         )
         return r.returncode == 0 and bool(r.stdout.strip())
     except Exception:

@@ -168,7 +168,7 @@ class AppStreamCatalogTests(unittest.TestCase):
             <name>Default App</name>
         </component>
         """
-        elem = ET.fromstring(xml_str)
+        elem = ET.fromstring(xml_str)  # noqa: S314 — literal fixture above, not untrusted input
         self.assertEqual(software._as_localized(elem, "name", "de"), "Deutsches App")
         self.assertEqual(software._as_localized(elem, "name", "en"), "English App")
 
@@ -181,7 +181,7 @@ class AppStreamCatalogTests(unittest.TestCase):
             </description>
         </component>
         """
-        elem = ET.fromstring(xml_str)
+        elem = ET.fromstring(xml_str)  # noqa: S314 — literal fixture above, not untrusted input
         self.assertEqual(software._as_localized_desc(elem, "en"), "Hello world")
 
 

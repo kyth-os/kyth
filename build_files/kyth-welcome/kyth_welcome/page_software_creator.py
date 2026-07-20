@@ -6,7 +6,7 @@ from .services.software import (
     Worker, _davinci_download_dir, _davinci_flatpak_app_id, _davinci_zip_candidates, _finish_worker,
     _is_flatpak_installed,
 )
-from .qt import (  # noqa: E501
+from .qt import (
     QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
     QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
 )

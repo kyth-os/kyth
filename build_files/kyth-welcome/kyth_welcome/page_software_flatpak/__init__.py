@@ -4,7 +4,7 @@ from ._search import _SearchMixin
 from ._catalog import _CatalogMixin
 from ._details import _DetailsMixin
 from ._lifecycle import _LifecycleMixin
-from ..qt import (  # noqa: E501
+from ..qt import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 from ..widgets import _set_log_panel

@@ -1,4 +1,5 @@
 import glob
+import logging
 import os
 import shlex
 import shutil
@@ -6,6 +7,8 @@ import subprocess
 from urllib.parse import urlsplit
 
 from ..core_base import _IS_LIVE
+
+_logger = logging.getLogger(__name__)
 from .process import (
     _FLATPAK_CACHE_TTL,
     _command_stdout,
@@ -396,7 +399,7 @@ def load_appstream_catalog() -> dict[str, dict]:
                 if cached:
                     return cached
     except Exception:
-        pass
+        _logger.debug("load_appstream_catalog: reading the cache failed — regenerating", exc_info=True)
 
     catalog: dict[str, dict] = {}
     try:

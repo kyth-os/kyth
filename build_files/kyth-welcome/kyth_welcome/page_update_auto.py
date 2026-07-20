@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
@@ -6,6 +7,8 @@ from .services.dbus_utils import is_systemd_unit_enabled
 from .services.launch import popen
 from .qt import QCheckBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt
 from .widgets import _make_card
+
+_logger = logging.getLogger(__name__)
 
 
 class _AutoUpdateMixin:
@@ -65,7 +68,7 @@ class _AutoUpdateMixin:
             with open("/var/lib/kyth/update-watcher-status.json") as f:
                 status = json.load(f)
         except Exception:
-            pass
+            _logger.debug("_refresh_auto_update_status: could not read watcher status", exc_info=True)
 
         ts = status.get("ts", 0)
         if ts:

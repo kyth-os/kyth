@@ -109,7 +109,7 @@ def _bootc_proxy_running() -> bool:
     try:
         r = subprocess.run(
             ["pgrep", "-f", "skopeo.*image-proxy"],
-            capture_output=True, timeout=2,
+            capture_output=True, timeout=2, check=False,
         )
         return r.returncode == 0
     except Exception:

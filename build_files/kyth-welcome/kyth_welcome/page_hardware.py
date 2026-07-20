@@ -10,10 +10,10 @@ from .services.hardware import (
 )
 from .services.launch import kcmshell, popen
 from .services.software import _finish_worker
-from .qt import (  # noqa: E501
+from .qt import (
     QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QUrl, QVBoxLayout, QWidget, Signal, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     HardwareCard, Page, _make_card,
 )
 
@@ -331,7 +331,7 @@ class HardwarePage(Page):
             self._wire_wizard_action_buttons(probes)
 
     def _wire_wizard_action_buttons(self, probes: list[HardwareProbe]):
-        for card, probe in zip(self._cards, probes):
+        for card, probe in zip(self._cards, probes, strict=True):
             if probe.action_page_key:
                 key = probe.action_page_key
                 card.set_action_fn(

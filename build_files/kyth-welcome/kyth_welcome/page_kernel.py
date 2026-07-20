@@ -10,10 +10,10 @@ from .services.software import (
     Worker, _finish_worker,
 )
 from .core_base import REGISTRY, _current_branch
-from .qt import (  # noqa: E501
+from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card, _set_log_panel,
 )
 

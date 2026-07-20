@@ -61,6 +61,7 @@ __all__ = [
     "_audio_probe",
     "_codec_probe",
     "_collect_hardware_probes",
+    "_compact_vaapi_failure_details",
     "_connectivity_probe",
     "_controller_probe",
     "_cpu_probe",
@@ -78,6 +79,7 @@ __all__ = [
     "_hw_setup_done",
     "_hw_setup_service_state",
     "_memory_probe",
+    "_mesa_vaapi_failure_context",
     "_nvidia_module_loaded",
     "_parse_kscreen_output",
     "_peripheral_probe",
@@ -85,7 +87,10 @@ __all__ = [
     "_status_palette",
     "_storage_probe",
     "_strip_ansi",
+    "_successful_vaapi_probe",
     "_thermal_probe",
+    "_vaapi_failure_summary",
+    "_vaapi_profiles",
 ]
 # pylint: enable=undefined-all-variable
 

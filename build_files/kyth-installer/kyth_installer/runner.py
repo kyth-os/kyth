@@ -56,12 +56,20 @@ def run_command(
     if log is not None:
         log(f"$ {_format_command(command)}")
 
+    # check is caller-controlled: most callers pass check=True/False explicitly
+    # and rely on the CalledProcessError handling below or their own returncode
+    # inspection. Default to False (subprocess.run's own default) only when a
+    # caller hasn't opted in, so this stays a no-op for every existing caller.
+    kwargs.setdefault("check", False)
+
     try:
         # Commands are assembled by trusted installer code, passed as an argv
         # vector, and never interpreted by a shell. User-controlled disk names
         # and labels can therefore only be arguments, not executable syntax.
         # codeql[py/command-line-injection]
-        return subprocess.run(command, timeout=timeout, shell=False, **kwargs)  # nosec B603 # nosemgrep
+        # check= is always present via the kwargs.setdefault above, just not
+        # visible to ruff as a literal keyword here.
+        return subprocess.run(command, timeout=timeout, shell=False, **kwargs)  # nosec B603 # nosemgrep # noqa: PLW1510
     except subprocess.CalledProcessError as exc:
         detail = f"{label} failed with exit code {exc.returncode}"
         if exc.stdout:

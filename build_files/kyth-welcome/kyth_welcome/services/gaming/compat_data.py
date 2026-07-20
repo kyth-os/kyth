@@ -74,8 +74,13 @@ _COMPAT_DATA_UPDATED, _COMPAT_GAMES = load_compat_games()
 
 
 def replace_compat_games(updated: str, games: list[CompatGame]) -> None:
-    """Update the shared in-memory list (call sites hold the same list object)."""
-    global _COMPAT_DATA_UPDATED
+    """Update the shared in-memory list (call sites hold the same list object).
+
+    This module is the single owner of _COMPAT_DATA_UPDATED — other modules
+    should read it via `compat_data._COMPAT_DATA_UPDATED`, never import the
+    name by value (which snapshots it and desyncs from this update).
+    """
+    global _COMPAT_DATA_UPDATED  # noqa: PLW0603
     _COMPAT_DATA_UPDATED = updated
     _COMPAT_GAMES[:] = games
 

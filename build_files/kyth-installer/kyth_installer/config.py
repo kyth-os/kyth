@@ -13,7 +13,7 @@ from typing import Optional
 
 SOURCE_IMAGE = os.environ.get("KYTH_SOURCE_IMAGE", "ghcr.io/mrtrick37/kyth:latest")
 TARGET_IMAGE = os.environ.get("KYTH_TARGET_IMAGE", SOURCE_IMAGE)
-LOG_FILE     = Path(os.environ.get("KYTH_INSTALLER_LOG", "/tmp/kyth-installer.log"))
+LOG_FILE     = Path(os.environ.get("KYTH_INSTALLER_LOG", "/tmp/kyth-installer.log"))  # noqa: S108 — created with O_EXCL|O_NOFOLLOW in install.py
 PORT         = 7777
 SESSION_TOKEN = secrets.token_urlsafe(32)
 _bootstrap_token: Optional[str] = None

@@ -268,7 +268,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         cleanup_calls = [
             call
             for call in run_command.call_args_list
-            if "/var/tmp/kyth-alongside-target" in repr(call)
+            if "/var/tmp/kyth-alongside-target" in repr(call)  # noqa: S108 — fixture string, not a real path opened on disk
         ]
         self.assertTrue(cleanup_calls)
         self.assertTrue([event for event in install._events if event.get("type") == "error"])

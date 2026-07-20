@@ -8,6 +8,7 @@ by ``kyth-probe`` (and write-through on live fetch) warms cold Hub starts.
 """
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import threading
@@ -15,6 +16,8 @@ import time
 from typing import Callable, TypeVar
 
 T = TypeVar("T")
+
+_logger = logging.getLogger(__name__)
 
 
 def _is_live_session() -> bool:
@@ -47,7 +50,7 @@ _DISK_BACKED_KEYS = frozenset({
 
 def _run_command(cmd: list[str], timeout: int = 5) -> subprocess.CompletedProcess[str] | None:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
     except Exception:
         return None
 
@@ -73,7 +76,7 @@ def _invalidate_probe_caches() -> None:
         from .probe import invalidate_disk_sections
         invalidate_disk_sections(_DISK_BACKED_KEYS)
     except Exception:
-        pass
+        _logger.warning("_invalidate_probe_caches: disk cache invalidation failed — stale values may be served", exc_info=True)
 
 
 def _disk_section_usable(key: str, data: object) -> bool:
@@ -111,7 +114,7 @@ def _probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
                     _PROBE_CACHE[key] = (time.monotonic(), disk_hit)
                 return disk_hit  # type: ignore[return-value]
         except Exception:
-            pass
+            _logger.debug("_probe_cached: disk cache read for %r failed", key, exc_info=True)
 
     value = fetch()
     with _PROBE_CACHE_LOCK:
@@ -126,7 +129,7 @@ def _probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
 
             update_sections({key: value})
         except Exception:
-            pass
+            _logger.debug("_probe_cached: disk cache write for %r failed", key, exc_info=True)
     return value
 
 

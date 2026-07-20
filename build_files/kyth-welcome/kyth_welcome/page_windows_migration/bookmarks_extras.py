@@ -19,10 +19,10 @@ from ..services.windows_migration import (
     _windows_folder_dest,
     _write_bookmarks_html,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QDesktopServices, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 

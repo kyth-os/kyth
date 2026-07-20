@@ -21,7 +21,7 @@ def _format_display_mode(mode: str) -> str:
         hz = float(m.group(3))
     except ValueError:
         return mode
-    return f"{m.group(1)}×{m.group(2)} @ {hz:.0f}Hz"
+    return f"{m.group(1)}×{m.group(2)} @ {hz:.0f}Hz"  # noqa: RUF001 — multiplication sign, deliberate typography
  # _format_display_mode
 
 def _display_probe() -> HardwareProbe:

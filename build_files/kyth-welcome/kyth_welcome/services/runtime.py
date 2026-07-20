@@ -5,14 +5,18 @@ Domain services should not own thread base classes — import them from here.
 from __future__ import annotations
 
 import atexit
+import logging
 import os
 import signal
 import subprocess
+import threading
 import time
 
 from ..qt import QThread, Signal
 from kyth_shared import _NetStatsTracker, _get_rx_bytes
 from .process import _invalidate_probe_caches
+
+_logger = logging.getLogger(__name__)
 
 _ACTIVE_THREADS: set = set()
 
@@ -51,7 +55,7 @@ def _shutdown_threads(timeout_ms: int = 15000) -> None:
             try:
                 stop()
             except Exception:
-                pass
+                _logger.debug("_shutdown_threads: stop() on %r failed", t, exc_info=True)
     deadline = time.monotonic() + timeout_ms / 1000
     while running := _running_threads():
         remaining_ms = int((deadline - time.monotonic()) * 1000)
@@ -119,7 +123,7 @@ class Worker(TrackedThread):
                 errors="replace",
                 bufsize=1,
                 env=env,
-                cwd="/tmp",
+                cwd="/tmp",  # noqa: S108 — subprocess cwd only, nothing opened here at a predictable path
                 start_new_session=True,
             )
             self._proc = proc
@@ -149,7 +153,7 @@ class Worker(TrackedThread):
                 if "bootc" in cmd0:
                     invalidate_after_bootc_change()
             except Exception:
-                pass
+                _logger.debug("Worker.run: targeted disk-cache invalidation failed", exc_info=True)
 
 
 class DownloadMonitor(TrackedThread):
@@ -160,14 +164,18 @@ class DownloadMonitor(TrackedThread):
     def __init__(self, total_bytes: int, rx_start: int):
         super().__init__()
         self._tracker = _NetStatsTracker(total_bytes, rx_start)
-        self._stop = False
+        # threading.Event rather than a bool flag: stop() wakes the loop
+        # immediately instead of leaving callers' unbounded .wait() blocking
+        # the GUI thread for up to the full 1s poll interval.
+        self._stop_event = threading.Event()
 
     def stop(self):
-        self._stop = True
+        self._stop_event.set()
 
     def run(self):
-        while not self._stop:
-            time.sleep(1)
+        while not self._stop_event.is_set():
+            if self._stop_event.wait(1):
+                break
             stats = self._tracker.tick(_get_rx_bytes())
             self.stats.emit(stats["downloaded"], stats["total"], stats["speed"], stats["eta_sec"])
 

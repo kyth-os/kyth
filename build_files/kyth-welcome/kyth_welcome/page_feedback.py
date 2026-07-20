@@ -8,10 +8,10 @@ from .core_base import (
 from .services.diagnostics import _command_stdout
 from .services.gaming import TrackedThread
 from .core_base import _bootc_image_digest, _current_branch
-from .qt import (  # noqa: E501
+from .qt import (
     QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl, Signal,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 

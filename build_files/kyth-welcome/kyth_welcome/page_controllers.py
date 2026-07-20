@@ -5,11 +5,11 @@ from .core_base import _release_worker_when_finished
 from .services.gaming import TrackedThread
 from .services.hardware import _detect_controllers
 from .services.software import Worker
-from .qt import (  # noqa: E501
+from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QPushButton, Signal,
 )
 from .services.launch import flatpak_run, popen, systemsettings
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 

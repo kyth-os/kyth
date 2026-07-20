@@ -7,10 +7,10 @@ from .services.sched import (
     set_sched_daemon_enabled,
 )
 from .services.telem import recent_sessions
-from .qt import (  # noqa: E501
+from .qt import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 

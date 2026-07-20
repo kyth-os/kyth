@@ -25,10 +25,10 @@ from .services.welcome import (
     _kdeconnect_configured,
     _printer_configured,
 )
-from .qt import (  # noqa: E501
+from .qt import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card, _theme_icon,
 )
 

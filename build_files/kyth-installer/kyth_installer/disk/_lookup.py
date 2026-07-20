@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import kyth_installer.disk as _disk
 subprocess = _disk.subprocess
+
+_logger = logging.getLogger(__name__)
 
 def find_efi_partition(disk: str) -> str:
     """Return the EFI partition path on disk, or on another safe disk as fallback, or ''."""
@@ -20,7 +23,7 @@ def find_efi_partition(disk: str) -> str:
                     if part.get("efi"):
                         return part["name"]
     except Exception:
-        pass
+        _logger.debug("find_efi_partition: fallback scan of other disks failed", exc_info=True)
     for mount in ("/boot/efi", "/efi"):
         try:
             out = subprocess.check_output(
@@ -30,7 +33,7 @@ def find_efi_partition(disk: str) -> str:
             if out and out.startswith("/dev/"):
                 return out
         except Exception:
-            pass
+            _logger.debug("find_efi_partition: findmnt probe of %s failed", mount, exc_info=True)
     return ""
 
 
@@ -49,18 +52,18 @@ def get_root_partition(disk: str) -> str:
         if parts:
             return "/dev/" + sorted(parts, reverse=True)[0][1]
     except Exception:
-        pass
+        _logger.debug("get_root_partition: lsblk probe of %s failed", disk, exc_info=True)
     try:
         out = subprocess.check_output(
             ["blkid", "--output", "device", "--match-types", "btrfs"],
             text=True, stderr=subprocess.DEVNULL,
         )
-        for dev in out.splitlines():
-            dev = dev.strip()
+        for raw_dev in out.splitlines():
+            dev = raw_dev.strip()
             if dev and dev.startswith(disk):
                 return dev
     except Exception:
-        pass
+        _logger.debug("get_root_partition: blkid probe of %s failed", disk, exc_info=True)
     raise RuntimeError(
         f"Cannot determine root partition on {disk}. "
         "lsblk and blkid both failed — check that the disk completed writing."

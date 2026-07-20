@@ -12,7 +12,7 @@ from ..services.network import (
     _load_sync_config, _rclone_available, _rclone_list_remotes, _save_sync_config,
 )
 from ..services.software import Worker, _finish_worker, _is_flatpak_installed
-from ..qt import (  # noqa: E501
+from ..qt import (
     QDesktopServices, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QUrl,
 )
 from ..widgets import Page

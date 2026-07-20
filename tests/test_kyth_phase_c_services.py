@@ -12,9 +12,9 @@ from kyth_welcome.services import repair, sched, telem  # noqa: E402
 class RepairServiceTests(unittest.TestCase):
     def test_command_builders(self):
         self.assertEqual(repair.session_snapshot_command()[0], "/usr/bin/kyth-session-snapshot")
-        export = repair.setup_export_command("/tmp/out")
+        export = repair.setup_export_command("/tmp/out")  # noqa: S108 — fixture string, not a real path opened on disk
         self.assertEqual(export[1], "export")
-        self.assertEqual(export[2], "/tmp/out")
+        self.assertEqual(export[2], "/tmp/out")  # noqa: S108 — fixture string, not a real path opened on disk
         rollback = repair.rollback_command()
         self.assertIn("bootc", rollback)
         self.assertIn("rollback", rollback)

@@ -16,7 +16,6 @@ Package layout:
     app.py         entry point
 """
 
-import os
 import sys
 from pathlib import Path
 

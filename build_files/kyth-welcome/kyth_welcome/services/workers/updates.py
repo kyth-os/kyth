@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 
 from ...qt import Signal
@@ -10,6 +11,8 @@ from ..process import _run_command
 from ..registry import check_registry_update
 from ..runtime import TrackedThread
 from ..updates import firmware_check_commands
+
+_logger = logging.getLogger(__name__)
 
 _BOOTED_ANNOTATIONS_CACHE: dict[str, dict] = {}
 
@@ -66,7 +69,7 @@ class ChangelogWorker(TrackedThread):
         try:
             r = subprocess.run(
                 ["skopeo", "inspect", "--raw", "--no-creds", f"docker://{ref}"],
-                capture_output=True, timeout=30,
+                capture_output=True, timeout=30, check=False,
             )
             if r.returncode != 0:
                 return {}
@@ -104,7 +107,7 @@ class ChangelogWorker(TrackedThread):
                             remote_ann = entry.get("annotations") or remote_ann
                             break
             except Exception:
-                pass
+                _logger.debug("ChangelogWorker.run: parsing the cached remote manifest failed", exc_info=True)
 
         if not remote_ann:
             remote_ann = self._fetch_annotations(f"{REGISTRY}:{tag}")

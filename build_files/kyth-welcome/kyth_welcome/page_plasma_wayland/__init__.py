@@ -4,9 +4,7 @@ from ._profiles import _ProfilesMixin
 from ._polish import _PolishMixin
 from ._repair import _RepairMixin
 from ._refresh import _RefreshMixin
-from ..qt import (  # noqa: E501
-    QFrame, QHBoxLayout, QLabel, QVBoxLayout, Qt, single_shot,
-)
+from ..qt import QLabel, QVBoxLayout, single_shot
 from ..widgets import ActionRow, Page, _make_card
 
 

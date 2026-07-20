@@ -29,3 +29,7 @@ mrtrick/
 
 # Pinned validators downloaded by local/CI validation.
 .cache/kyth-ci-tools/
+
+# Coverage.py output from `just test-coverage`
+.coverage
+.coverage.*

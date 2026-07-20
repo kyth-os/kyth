@@ -302,7 +302,7 @@ def copy_windows_fonts(font_dirs: list[str]) -> tuple[int, int]:
                 copied += 1
             except OSError:
                 skipped += 1
-    subprocess.run(["fc-cache", "-f", dest], capture_output=True, timeout=120)
+    subprocess.run(["fc-cache", "-f", dest], capture_output=True, timeout=120, check=False)
     return copied, skipped
 
 

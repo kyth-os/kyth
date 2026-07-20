@@ -9,10 +9,10 @@ from .core_base import _current_branch
 from .page_registry import (
     PROBLEM_ROUTES, SEARCH_ALIASES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups,
 )
-from .qt import (  # noqa: E501
+from .qt import (
     QCompleter, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     _divider, _theme_icon,
 )
 
@@ -460,9 +460,9 @@ class MainWindow(QMainWindow):
         if index == 0:
             self._crumb_lbl.setText("")
         elif section and section != label:
-            self._crumb_lbl.setText(f"›  {section}  ›  {label}")
+            self._crumb_lbl.setText(f"›  {section}  ›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
         else:
-            self._crumb_lbl.setText(f"›  {label}")
+            self._crumb_lbl.setText(f"›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
 
     def closeEvent(self, event):
         # Registry catches workers regardless of which attribute a page keeps

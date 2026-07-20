@@ -19,7 +19,7 @@ from .disk import (
 from .runner import run_command
 from .system import _as_root, _settle
 
-_BACKUP_PATH = Path("/tmp/kyth-partition-backup")
+_BACKUP_PATH = Path("/tmp/kyth-partition-backup")  # noqa: S108 — unlinked before each write in _save_snapshot
 _current_journal: Optional["Journal"] = None
 
 
@@ -68,6 +68,9 @@ class Journal:
     def _save_snapshot(self) -> None:
         _require_sgdisk()
         backup = str(_BACKUP_PATH)
+        # sgdisk runs as root and will happily write through a pre-existing
+        # symlink at this world-writable-/tmp path — refuse first.
+        _BACKUP_PATH.unlink(missing_ok=True)
         run_command(
             _as_root(["sgdisk", "--backup", backup, self.disk]),
             check=True, timeout=30,
@@ -335,13 +338,16 @@ def get_journal() -> Optional[Journal]:
 
 
 def init_journal(disk: str) -> Journal:
-    global _current_journal
+    # Single module-level journal for the installer's one active session —
+    # get/init/reset above are its whole public API, so `global` here is the
+    # deliberate single-owner pattern, not incidental shared mutable state.
+    global _current_journal  # noqa: PLW0603
     _current_journal = Journal(disk)
     return _current_journal
 
 
 def reset_journal() -> None:
-    global _current_journal
+    global _current_journal  # noqa: PLW0603
     if _current_journal:
         _current_journal.ops.clear()
         _current_journal._committed = False

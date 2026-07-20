@@ -2,7 +2,7 @@ import os
 import re
 import shutil
 from .core_base import _restyle
-from .qt import (  # noqa: E501
+from .qt import (
     QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QUrl,
     QVBoxLayout, QWidget, Qt,
 )

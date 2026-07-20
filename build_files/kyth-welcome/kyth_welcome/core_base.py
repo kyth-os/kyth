@@ -21,7 +21,7 @@ import subprocess
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .qt import (  # noqa: E501
+from .qt import (
     QLabel, QPushButton, QTextEdit, QWidget,
 )
 

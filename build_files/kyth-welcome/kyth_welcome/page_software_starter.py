@@ -4,7 +4,7 @@ from .core_base import _restyle
 from .services.software import (
     Worker, _chromium_app_window_cmd, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
 )
-from .qt import (  # noqa: E501
+from .qt import (
     QCheckBox, QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar,
     QPushButton, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
 )

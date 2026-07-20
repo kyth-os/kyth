@@ -131,7 +131,7 @@ def convert_pst(path: str) -> tuple[bool, str]:
         os.makedirs(dest, exist_ok=True)
         r = subprocess.run(
             ["readpst", "-r", "-o", dest, path],
-            capture_output=True, text=True, timeout=3600,
+            capture_output=True, text=True, timeout=3600, check=False,
         )
     except FileNotFoundError:
         return False, "readpst is not installed — update KythOS to the latest image."

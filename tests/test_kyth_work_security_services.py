@@ -29,7 +29,7 @@ class WorkServiceTests(unittest.TestCase):
 
     def test_convert_pst_missing_tool(self):
         with mock.patch("subprocess.run", side_effect=FileNotFoundError):
-            ok, msg = work.convert_pst("/tmp/mail.pst")
+            ok, msg = work.convert_pst("/tmp/mail.pst")  # noqa: S108 — fixture string, not a real path opened on disk
         self.assertFalse(ok)
         self.assertIn("readpst", msg)
 

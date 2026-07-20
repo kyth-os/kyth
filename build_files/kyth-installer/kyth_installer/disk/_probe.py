@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
 
@@ -9,6 +10,8 @@ import kyth_installer.disk as _disk
 subprocess = _disk.subprocess
 
 from ..config import _IS_LIVE_SESSION
+
+_logger = logging.getLogger(__name__)
 
 def _running_system_disk() -> str:
     # Returns the raw mount SOURCE for "/" (which may be a partition, an LVM
@@ -46,7 +49,7 @@ def _get_live_usb_disk() -> Optional[str]:
                 if parent:
                     return f"/dev/{parent}"
             except Exception:
-                pass
+                _logger.debug("_get_live_usb_disk: PKNAME lookup for %s failed", source, exc_info=True)
             try:
                 disk = subprocess.check_output(
                     ["lsblk", "-n", "-o", "NAME,TYPE", source],
@@ -55,9 +58,11 @@ def _get_live_usb_disk() -> Optional[str]:
                 for line in disk.splitlines():
                     parts = line.split()
                     if len(parts) >= 2 and parts[1] == "disk":
-                        return f"/dev/{parts[0].lstrip('└─├─')}"
+                        # lsblk prefixes child devices with tree-drawing characters
+                        # (e.g. "└─sda1"); strip only those, never a real device name.
+                        return f"/dev/{parts[0].lstrip('└─├')}"
             except Exception:
-                pass
+                _logger.debug("_get_live_usb_disk: NAME,TYPE lookup for %s failed", source, exc_info=True)
             try:
                 devtype = subprocess.check_output(
                     ["lsblk", "-n", "-o", "TYPE", source],
@@ -66,9 +71,9 @@ def _get_live_usb_disk() -> Optional[str]:
                 if devtype == "disk":
                     return source
             except Exception:
-                pass
+                _logger.debug("_get_live_usb_disk: TYPE lookup for %s failed", source, exc_info=True)
         except Exception:
-            pass
+            _logger.debug("_get_live_usb_disk: findmnt probe of %s failed", path, exc_info=True)
     return None
 
 

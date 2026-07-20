@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
 from .lazy_page import compose_on_first_init
@@ -31,7 +33,7 @@ def _load_software_mixins() -> tuple[type, ...]:
 class SoftwarePage(Page):
     """App store — Starter Packs | Store | AppImages | Installed."""
 
-    _STARTER_PACKS = [
+    _STARTER_PACKS: ClassVar[list[dict]] = [
         {
             "name": "Gaming",
             "desc": "Steam, Epic/GOG, compatibility launchers, saves, and standalone .exe support.",
@@ -72,7 +74,7 @@ class SoftwarePage(Page):
         },
     ]
 
-    _CR_TOOLS = [
+    _CR_TOOLS: ClassVar[list[dict]] = [
         {
             "flatpak": "com.obsproject.Studio",
             "name": "OBS Studio",
@@ -108,7 +110,7 @@ class SoftwarePage(Page):
 
     _SEC_BOX_NAME = "kali"
     _SEC_BOX_IMAGE = "docker.io/kalilinux/kali-rolling"
-    _SEC_HOST_TOOLS = [
+    _SEC_HOST_TOOLS: ClassVar[list[dict]] = [
         {
             "flatpak": "org.wireshark.Wireshark",
             "name": "Wireshark",
@@ -123,7 +125,7 @@ class SoftwarePage(Page):
         },
     ]
 
-    _CURATED_APPIMAGES = [
+    _CURATED_APPIMAGES: ClassVar[list[dict]] = [
         {
             "name": "Obsidian",
             "desc": "Markdown note-taking and knowledge base with graph view.",
@@ -161,7 +163,7 @@ class SoftwarePage(Page):
         },
     ]
 
-    _FAMILIAR_APPS = [
+    _FAMILIAR_APPS: ClassVar[list[tuple[str, str, str]]] = [
         # Productivity
         ("Microsoft Office", "Use LibreOffice locally, or pin Microsoft 365 as a Web App.", "org.libreoffice.LibreOffice"),
         ("Word / Excel / PowerPoint", "LibreOffice Writer, Calc, and Impress are drop-in replacements. Install below.", "org.libreoffice.LibreOffice"),
@@ -220,7 +222,7 @@ class SoftwarePage(Page):
         ("LibreOffice", "LibreOffice is the drop-in Office suite. Install it from Flatpak if not already present.", "org.libreoffice.LibreOffice"),
     ]
 
-    _STORE_CATEGORIES = [
+    _STORE_CATEGORIES: ClassVar[list[tuple[str, str]]] = [
         ("Internet", "Network"),
         ("Gaming", "Game"),
         ("Productivity", "Office"),
@@ -230,7 +232,7 @@ class SoftwarePage(Page):
         ("Utilities", "Utility"),
     ]
 
-    _TRENDING_APPS = [
+    _TRENDING_APPS: ClassVar[list[str]] = [
         "com.brave.Browser",
         "com.discordapp.Discord",
         "com.spotify.Client",
@@ -241,7 +243,7 @@ class SoftwarePage(Page):
         "org.localsend.localsend_app",
     ]
 
-    _STORE_SHELVES = [
+    _STORE_SHELVES: ClassVar[list[dict]] = [
         {
             "name": "Game Night",
             "query": "Game",

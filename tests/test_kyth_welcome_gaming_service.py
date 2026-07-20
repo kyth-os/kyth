@@ -89,10 +89,10 @@ class GamingServiceTests(unittest.TestCase):
 
     def test_command_builders_preserve_runtime_arguments(self):
         opticscaler_cmd = gaming.opticscaler_deploy_command("/games/Test Game")
-        lutris_cmd = gaming.lutris_installer_command("/tmp/installer.exe")
+        lutris_cmd = gaming.lutris_installer_command("/tmp/installer.exe")  # noqa: S108 — fixture string, not a real path opened on disk
 
         self.assertIn("/games/Test Game", opticscaler_cmd)
-        self.assertIn("/tmp/installer.exe", lutris_cmd)
+        self.assertIn("/tmp/installer.exe", lutris_cmd)  # noqa: S108 — fixture string, not a real path opened on disk
         self.assertTrue(gaming.heroic_epic_launcher_command())
         self.assertTrue(gaming.discord_screenshare_fix_command())
         self.assertTrue(gaming.obs_pipewire_fix_command())

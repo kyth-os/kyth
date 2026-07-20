@@ -8,8 +8,26 @@ changing the image's installed RPM, not the code.
 # pylint: disable=unused-import
 # Every symbol below is a deliberate re-export for the rest of the package
 # to import from `.qt` — this module has no internal users of its own.
+# __all__ tells ruff (F401) the same thing, since it can't see the
+# `from .qt import X` consumers scattered across the rest of the package.
 
 import os
+
+__all__ = [
+    "QT_BINDING",
+    "QApplication", "QMainWindow", "QWidget", "QVBoxLayout", "QHBoxLayout",
+    "QPushButton", "QLabel", "QTextEdit", "QStackedWidget", "QProgressBar",
+    "QFrame", "QScrollArea", "QFileDialog", "QMessageBox", "QLineEdit",
+    "QSizePolicy", "QDialog", "QCheckBox", "QComboBox", "QRadioButton", "QButtonGroup",
+    "QDialogButtonBox", "QGridLayout", "QCompleter", "QInputDialog",
+    "Qt", "QThread", "Signal", "QTimer", "QUrl", "QLibraryInfo", "QSize", "QStringListModel",
+    "QDesktopServices", "QIcon", "QKeySequence", "QShortcut",
+    "QDBusConnection", "QDBusInterface",
+    "QWebEngineView", "QWebEnginePage", "QWebEngineProfile", "QWebEngineUrlScheme",
+    "QWebEngineUrlSchemeHandler", "QWebEngineUrlRequestJob", "QWebEngineScript",
+    "_WEBENGINE_AVAILABLE",
+    "single_shot",
+]
 
 # Must be set before any Qt WebEngine module is imported or initialized.
 os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")

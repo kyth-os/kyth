@@ -27,7 +27,7 @@ def _cpu_probe() -> HardwareProbe:
 
     logical = sum(1 for line in cpuinfo.splitlines() if line.startswith("processor"))
 
-    # Physical cores: Core(s) per socket × Socket(s) from lscpu
+    # Physical cores: Core(s) per socket × Socket(s) from lscpu  # noqa: RUF003 — multiplication sign, deliberate typography
     physical: int | None = None
     lscpu_out = _command_stdout(["lscpu"], timeout=5)
     cores_per_sock = sockets = None

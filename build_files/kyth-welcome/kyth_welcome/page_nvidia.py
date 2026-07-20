@@ -11,10 +11,10 @@ from .services.hardware import (
 from .services.software import (
     Worker, _finish_worker,
 )
-from .qt import (  # noqa: E501
+from .qt import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card, _set_log_panel,
 )
 
@@ -124,7 +124,7 @@ class NvidiaPage(Page):
             # kyth-hw-setup is running akmods in the background right now.
             self._sub.setText("NVIDIA GPU detected.")
             self._status_lbl.setText(
-                "Building NVIDIA kernel module automatically — this takes 5–15 minutes.\n"
+                "Building NVIDIA kernel module automatically — this takes 5–15 minutes.\n"  # noqa: RUF001 — en dash, deliberate typography
                 "You can keep using the system. This page will update when the build finishes."
             )
             self._status_lbl.setObjectName("subheading")

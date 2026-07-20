@@ -10,10 +10,10 @@ from .services.network import (
     _save_smb_config, _systemd_escape_mount_path,
 )
 from .services.software import Worker
-from .qt import (  # noqa: E501
+from .qt import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 

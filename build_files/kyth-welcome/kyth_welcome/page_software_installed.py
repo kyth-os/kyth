@@ -6,7 +6,7 @@ import shutil
 from .services.launch import popen
 from .core_base import _restyle
 from .services.software import Worker, _finish_worker
-from .qt import (  # noqa: E501
+from .qt import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 from .widgets import _set_log_panel

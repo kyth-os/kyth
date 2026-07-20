@@ -19,10 +19,10 @@ from ..services.runtime import (
     DataWorker,
 )
 from ..services.launch import popen, systemsettings, kcmshell
-from ..qt import (  # noqa: E501
+from ..qt import (
     QCheckBox, QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QUrl, single_shot,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 

@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import glob
 import json
+import logging
 import os
 import subprocess
 from pathlib import Path
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 
 def status_file_path() -> Path:
@@ -40,7 +43,7 @@ def list_schedulers() -> list[str]:
                 if os.path.isfile(p) and not p.endswith("scx_loader")
             )
         except Exception:
-            pass
+            _logger.debug("list_schedulers: /usr/bin/scx_* glob scan failed", exc_info=True)
     return schedulers or ["scx_lavd", "scx_bpfland", "scx_rusty"]
 
 
@@ -64,7 +67,7 @@ def apply_scheduler(name: str) -> None:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception:
-        pass
+        _logger.warning("apply_scheduler: failed to launch kyth-scx set %s", name, exc_info=True)
 
 
 def set_sched_daemon_enabled(enabled: bool) -> None:
@@ -75,4 +78,4 @@ def set_sched_daemon_enabled(enabled: bool) -> None:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception:
-        pass
+        _logger.warning("set_sched_daemon_enabled: failed to %s kyth-sched.service", cmd, exc_info=True)

@@ -16,6 +16,7 @@ from kyth_shared import _get_rx_bytes
 
 from .system import (
     _as_root,
+    _require_no_symlink,
     _try_stage_mok_enrollment,
     ensure_system_accounts,
     find_deploy_etc,
@@ -148,7 +149,7 @@ def _prepare_install_storage(
     if install_mode in ("alongside", "manual"):
         target_part = state.get("target_partition", "")
         efi_part    = state.get("efi_partition", "")
-        alongside_mount = "/var/tmp/kyth-alongside-target"
+        alongside_mount = "/var/tmp/kyth-alongside-target"  # noqa: S108 — _require_no_symlink guards this below
 
         log(f"Target partition : {target_part}")
         log(f"EFI partition    : {efi_part or '(none detected)'}")
@@ -161,8 +162,9 @@ def _prepare_install_storage(
 
         # Create btrfs subvolumes @ and @home
         log("Creating Btrfs subvolumes @ and @home ...")
-        btrfs_temp_root = "/var/tmp/kyth-btrfs-root"
+        btrfs_temp_root = "/var/tmp/kyth-btrfs-root"  # noqa: S108 — _require_no_symlink guards this below
         run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=False, capture_output=True)
+        _require_no_symlink(btrfs_temp_root)
         run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
         run_command(_as_root(["mount", target_part, btrfs_temp_root]), check=True)
         try:
@@ -173,6 +175,7 @@ def _prepare_install_storage(
         finally:
             run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=True)
 
+        _require_no_symlink(alongside_mount)
         run_command(_as_root(["mkdir", "-p", alongside_mount]), check=True)
         run_command(_as_root(["mount", "-o", "subvol=@", target_part, alongside_mount]), check=True)
         progress(11)
@@ -442,7 +445,8 @@ def _run_install_worker(
         if alongside_mount:
             config_root = alongside_mount
         else:
-            config_root = "/var/tmp/kyth-install-root"
+            config_root = "/var/tmp/kyth-install-root"  # noqa: S108 — _require_no_symlink guards this below
+            _require_no_symlink(config_root)
             run_command(_as_root(["mkdir", "-p", config_root]), check=True)
             # Detach any stale mount left by a previously crashed install attempt.
             run_command(_as_root(["umount", "-l", config_root]), check=False, capture_output=True)
@@ -508,8 +512,15 @@ def _run_install(context: InstallerContext = DEFAULT_CONTEXT) -> None:
     try:
         require_root()
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        LOG_FILE.write_text("")
-        os.chmod(LOG_FILE, 0o600)
+        # LOG_FILE sits under the world-writable /tmp by default — remove
+        # whatever's there first (unlink doesn't follow a symlink, it just
+        # drops the link itself), then create fresh with O_EXCL | O_NOFOLLOW
+        # so a symlink raced back in between the two calls makes this fail
+        # loudly instead of writing through it as root. /tmp's sticky bit
+        # protects the file for the rest of the run once this succeeds.
+        LOG_FILE.unlink(missing_ok=True)
+        fd = os.open(str(LOG_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        os.close(fd)
     except Exception as exc:
         message = format_install_error(exc)
         _push({"type": "error", "message": message}, context)

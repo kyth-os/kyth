@@ -33,6 +33,7 @@ Both resize_ntfs and free_space are thin front-ends onto the alongside path:
 whatever protections/flags apply to "alongside" (see above) apply to them too.
 """
 
+import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -57,6 +58,8 @@ from .disk import (
 from .partition_ops import get_journal
 from .system import _as_root, _settle, unmount_target_disk
 from .runner import run_command
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -185,7 +188,7 @@ def _is_gpt_disk(disk: str) -> bool:
         if out.strip().lower() == "gpt":
             return True
     except Exception:
-        pass
+        _logger.debug("_is_gpt_disk: blkid probe of %s failed", disk, exc_info=True)
     try:
         out = subprocess.check_output(
             ["parted", "-s", disk, "print"],

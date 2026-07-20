@@ -1,3 +1,4 @@
+import logging
 import time
 
 # __KYTH_GENERATED_IMPORTS__
@@ -10,12 +11,14 @@ from .services.software import (
     Worker, _finish_worker,
 )
 from .core_base import REGISTRY, _bootc_image_digest, _current_branch
-from .qt import (  # noqa: E501
+from .qt import (
     QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card, _set_log_panel,
 )
+
+_logger = logging.getLogger(__name__)
 
 # ── Page: Branches ────────────────────────────────────────────────────────────
 class BranchesPage(Page):
@@ -260,7 +263,7 @@ class BranchesPage(Page):
                     self._dl_monitor.stats.connect(self._on_dl_stats)
                     self._dl_monitor.start()
             except Exception:
-                pass
+                _logger.debug("_on_line: failed to parse download size from %r", text, exc_info=True)
         self._log.append(text)
         self._log.ensureCursorVisible()
 

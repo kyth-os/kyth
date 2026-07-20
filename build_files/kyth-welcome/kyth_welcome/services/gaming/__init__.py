@@ -69,7 +69,7 @@ from .gamenight import GameNightManager, _cleanup_game_night
 from .windows_partitions import _probe_windows_partitions
 
 # Pure re-export (no Qt)
-from ..hardware import _find_ntfs_drives  # noqa: F401
+from ..hardware import _find_ntfs_drives
 
 # pylint: disable=undefined-all-variable
 # TrackedThread/Worker/DataWorker/_ProtonDbBatchWorker resolve lazily via
@@ -87,20 +87,42 @@ __all__ = [
     "_COMPAT_GAMES",
     "_COMPAT_REMOTE_URL",
     "_COMPAT_STALE_DAYS",
+    "_PROC_MOUNT_ESCAPE_RE",
+    "_PROTONDB_CACHE_PATH",
     "_PROTONDB_TIER_STYLE",
     "_ProtonDbBatchWorker",
+    "_STEAM_NON_GAME_PATTERNS",
+    "_cleanup_game_night",
     "_collect_gaming_dashboard",
+    "_compat_tool_version",
+    "_decode_proc_mount_field",
+    "_detect_bottles_apps",
+    "_detect_heroic_games",
     "_detect_installed_games",
+    "_detect_lutris_games",
+    "_detect_steam_games",
     "_find_ntfs_drives",
+    "_find_steam_libraries",
+    "_gamescope_installed",
     "_gaming_health_items",
     "_gaming_migration_checklist_items",
     "_load_compat_games",
     "_load_protondb_cache",
+    "_ludusavi_backup_summary",
+    "_mangohud_installed",
+    "_ntsync_state",
     "_parse_compat_payload",
+    "_parse_steam_acf",
+    "_parse_steam_acf_text",
     "_probe_windows_partitions",
+    "_proton_cachyos_version",
     "_save_protondb_cache",
+    "_scan_steamapps_manifests",
     "_steam_libraries_on_ntfs",
+    "_steam_library_roots",
     "_streaming_health_items",
+    "_vkbasalt_installed",
+    "_vulkan_state",
     "blocked_compat_lookup",
     "command_details",
     "discord_screenshare_fix_command",

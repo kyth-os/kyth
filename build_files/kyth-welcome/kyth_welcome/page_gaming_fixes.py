@@ -2,7 +2,7 @@ import os
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.process import _run_command
-from .services.gaming import (  # noqa: E501
+from .services.gaming import (
     _streaming_health_items, command_details, discord_screenshare_fix_command, obs_pipewire_fix_command
 )
 from .services.software import _install_flatpak_inline

@@ -6,7 +6,7 @@ from .core_base import _apply_install_badge, _restyle
 from .services.launch import popen
 from .services.security import _is_socket_capable_kali_box
 from .services.software import Worker, _finish_worker
-from .qt import (  # noqa: E501
+from .qt import (
     QButtonGroup, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QRadioButton,
     QTextEdit, Qt,
 )
@@ -56,7 +56,7 @@ class _KaliContainerMixin:
             kali_layout.addWidget(rb)
 
         self._sec_everything_warn = QLabel(
-            "⚠  kali-linux-everything is extremely large — expect 15–20 GB or more of downloads "
+            "⚠  kali-linux-everything is extremely large — expect 15–20 GB or more of downloads "  # noqa: RUF001 — en dash, deliberate typography
             "and a very long install time. Only choose this if you need every available tool."
         )
         self._sec_everything_warn.setObjectName("card-copy")

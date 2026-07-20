@@ -5,6 +5,7 @@ a target disk before a wipe install.
 
 import glob
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -12,9 +13,30 @@ from pathlib import Path
 from typing import Optional
 from .runner import run_command
 
+_logger = logging.getLogger(__name__)
+
 
 def _as_root(cmd: list[str]) -> list[str]:
     return cmd if os.geteuid() == 0 else ["sudo", "-n", *cmd]
+
+
+def _require_no_symlink(path: str) -> None:
+    """Refuse to mkdir/mount/write through a pre-existing symlink at `path`.
+
+    The installer runs as root against fixed paths under the world-writable
+    /tmp and /var/tmp (mount staging dirs, log file, partition-table backup).
+    Without this check, a local user could pre-plant a symlink there (e.g.
+    pointing at /etc) before the installer runs, and a root `mkdir -p` +
+    `mount` (or file write) would silently follow it. Call this immediately
+    before the first privileged operation touches the path — once mkdir/open
+    has created a real, root-owned entry there, /tmp's sticky bit stops any
+    other user from swapping it out from under us.
+    """
+    if os.path.islink(path):
+        raise RuntimeError(
+            f"Refusing to use {path}: it already exists as a symlink, which "
+            "may indicate local tampering. Remove it and retry."
+        )
 
 
 def _settle():
@@ -84,14 +106,14 @@ def list_timezones() -> list[str]:
         if zones:
             return zones
     except Exception:
-        pass
+        _logger.debug("list_timezones: timedatectl probe failed", exc_info=True)
     # timedatectl unavailable or returned nothing — read zone.tab directly.
     for tab in ("/usr/share/zoneinfo/zone1970.tab", "/usr/share/zoneinfo/zone.tab"):
         try:
             zones = ["UTC"]
             with open(tab) as f:
-                for line in f:
-                    line = line.strip()
+                for raw_line in f:
+                    line = raw_line.strip()
                     if line and not line.startswith("#"):
                         parts = line.split()
                         if len(parts) >= 3:
@@ -99,7 +121,7 @@ def list_timezones() -> list[str]:
             if zones:
                 return sorted(set(zones))
         except Exception:
-            pass
+            _logger.debug("list_timezones: reading %s failed", tab, exc_info=True)
     return ["UTC"]
 
 
@@ -385,8 +407,8 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
         if "KythOS Secure Boot" in enrolled.stdout:
             log("Secure Boot: KythOS key already enrolled")
             return "enrolled"
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"Secure Boot: could not check enrolled keys ({exc}) — continuing")
 
     try:
         pending = run_command(
@@ -396,8 +418,8 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
         if "KythOS Secure Boot" in pending.stdout:
             log("Secure Boot: enrollment already staged — confirm it on next boot")
             return "pending"
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"Secure Boot: could not check staged keys ({exc}) — continuing")
 
     try:
         result = run_command(

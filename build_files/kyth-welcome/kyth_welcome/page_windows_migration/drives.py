@@ -16,10 +16,10 @@ from ..services.windows_migration import (
     WindowsLibraryWorker,
     _unlock_bitlocker_drive,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QDesktopServices, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QProgressBar, QPushButton, QUrl, QVBoxLayout,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 
@@ -227,7 +227,7 @@ class _DrivesMixin:
             "Microsoft account used on the Windows PC)."
         )
         unlock_btn.clicked.connect(
-            lambda _=False, d=part.get("device", ""), b=unlock_btn: self._unlock_bitlocker(d, b)
+            lambda _=False, p=part, b=unlock_btn: self._unlock_bitlocker(p.get("device", ""), b)
         )
         row.layout().addWidget(unlock_btn)
         return row

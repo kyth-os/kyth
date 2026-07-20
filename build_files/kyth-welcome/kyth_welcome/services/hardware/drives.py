@@ -15,7 +15,7 @@ def _find_ntfs_drives() -> list[dict]:
     try:
         r = subprocess.run(
             ["lsblk", "--json", "--output", "NAME,FSTYPE,SIZE,LABEL,MOUNTPOINT,PATH"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, check=False,
         )
         data = json.loads(r.stdout)
     except Exception:

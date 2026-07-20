@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import subprocess
+from typing import ClassVar
 
 from ..core_base import (
     _load_profile, _mark_wizard_done, _restyle, _running_threads, _save_profile,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QMainWindow, QMessageBox, QPushButton,
     QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
 )
@@ -28,7 +29,7 @@ class WizardWindow(
     """Linear first-run wizard. On close writes a sentinel so future launches
     open the hub (MainWindow) instead."""
 
-    _STEP_LABELS = ["Welcome", "Update", "Hardware", "Pick Apps", "Gaming", "All Done"]
+    _STEP_LABELS: ClassVar[list[str]] = ["Welcome", "Update", "Hardware", "Pick Apps", "Gaming", "All Done"]
 
     def __init__(self):
         super().__init__()

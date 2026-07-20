@@ -2,7 +2,7 @@ import os
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.plasma import _run_text, gpu_lspci_summary, kscreen_doctor_output
-from ..qt import (  # noqa: E501
+from ..qt import (
     QFrame, QHBoxLayout, QLabel, Qt,
 )
 from ..widgets import ActionRow, CommandResultPanel, _make_card

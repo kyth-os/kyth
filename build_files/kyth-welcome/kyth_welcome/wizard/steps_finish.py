@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+from typing import ClassVar
 
 from ..qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
@@ -61,7 +62,7 @@ class _FinishStepMixin:
 
     # ── Usage profile ──────────────────────────────────────────────────────────
 
-    _PROFILE_DEFAULT_APPS = {
+    _PROFILE_DEFAULT_APPS: ClassVar[dict[str, set[str]]] = {
         "gaming": {"com.valvesoftware.Steam", "com.discordapp.Discord"},
         "everyday": {"org.libreoffice.LibreOffice", "eu.betterbird.Betterbird"},
     }

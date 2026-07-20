@@ -17,10 +17,10 @@ from ..services.windows_migration import (
     _folder_sizes_calc,
     _windows_folder_dest,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 

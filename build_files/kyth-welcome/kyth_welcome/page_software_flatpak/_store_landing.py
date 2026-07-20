@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..qt import (  # noqa: E501
+from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QVBoxLayout,
 )
 from ..widgets import _make_card

@@ -48,6 +48,7 @@ for test_file in sorted(pathlib.Path("tests").glob("test_*.py")):
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

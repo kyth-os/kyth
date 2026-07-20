@@ -4,7 +4,7 @@ import shutil
 from .core_base import _restyle
 from .services.launch import popen
 from .services.software import Worker, _finish_worker, is_distrobox_container as _is_distrobox_container
-from .qt import (  # noqa: E501
+from .qt import (
     QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
     QTextEdit, QVBoxLayout, QWidget,
 )

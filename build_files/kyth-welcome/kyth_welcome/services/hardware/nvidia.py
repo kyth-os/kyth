@@ -11,7 +11,7 @@ from ..process import _probe_cached
 def _detect_nvidia() -> bool:
     def fetch() -> bool:
         try:
-            r = subprocess.run(["lspci"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(["lspci"], capture_output=True, text=True, timeout=5, check=False)
             return "nvidia" in r.stdout.lower()
         except Exception:
             return False
@@ -20,7 +20,7 @@ def _detect_nvidia() -> bool:
 
 def _nvidia_module_loaded() -> bool:
     try:
-        r = subprocess.run(["lsmod"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["lsmod"], capture_output=True, text=True, timeout=5, check=False)
         return "nvidia" in r.stdout.lower()
     except Exception:
         return False
@@ -28,7 +28,7 @@ def _nvidia_module_loaded() -> bool:
 
 def _akmod_nvidia_built() -> bool:
     try:
-        r = subprocess.run(["modinfo", "nvidia"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["modinfo", "nvidia"], capture_output=True, text=True, timeout=5, check=False)
         return r.returncode == 0
     except Exception:
         return False
@@ -36,7 +36,7 @@ def _akmod_nvidia_built() -> bool:
 
 def _akmod_nvidia_installed() -> bool:
     try:
-        r = subprocess.run(["rpm", "-q", "akmod-nvidia"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["rpm", "-q", "akmod-nvidia"], capture_output=True, text=True, timeout=5, check=False)
         return r.returncode == 0
     except Exception:
         return False
@@ -48,7 +48,7 @@ def _hw_setup_service_state() -> str:
     try:
         r = subprocess.run(
             ["systemctl", "is-active", "kyth-hw-setup.service"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, check=False,
         )
         return r.stdout.strip()
     except Exception:
