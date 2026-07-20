@@ -13,12 +13,6 @@
       ],
       "dedicated": true
     },
-    "proton-cachyos": {
-      "files": [
-        "/usr/share/steam/compatibilitytools.d/*"
-      ],
-      "dedicated": true
-    },
     "headroom": {
       "files": [
         "/usr/lib/headroom/*",
@@ -70,12 +64,6 @@
       "packages": [
         "hhd-ui"
       ]
-    },
-    "topgrade": {
-      "files": [
-        "/usr/bin/topgrade"
-      ],
-      "dedicated": false
     },
     "unpackaged": {
       "packages": [

@@ -35,18 +35,6 @@ RUN --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/
     ENABLE_ANANICY=${ENABLE_ANANICY} \
     bash /ctx/packages-static.sh
 
-# Build cache boundary: Proton-CachyOS (~700 MB).
-# Placed before the daily upgrade layer so its cache is only busted when
-# proton-cachyos.sh changes or PROTON_CACHYOS_VER changes — not on every daily
-# dnf upgrade run. Proton-CachyOS is a fully self-contained wine bundle with no
-# system library dependencies, so ordering before the upgrade is safe.
-ARG PROTON_CACHYOS_VER=
-RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/proton-cachyos.sh \
-    --mount=type=bind,source=build_files/scripts/lib/curl-common.sh,target=/ctx/lib/curl-common.sh \
-    --mount=type=tmpfs,dst=/tmp \
-    --mount=type=secret,id=github_token \
-    PROTON_CACHYOS_VER=${PROTON_CACHYOS_VER} bash /ctx/proton-cachyos.sh
-
 # Third-party binaries — topgrade, winetricks, SCX schedulers (~100 MB).
 # Placed before BUILD_DATE so the layer is only re-run when a tool ships a new
 # release. THIRDPARTY_VERSIONS_HASH is resolved in CI by querying the GitHub

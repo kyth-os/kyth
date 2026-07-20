@@ -29,7 +29,6 @@ class RechunkMetadataTests(unittest.TestCase):
     def test_large_independent_payloads_are_dedicated(self):
         expected = {
             "kyth-initramfs": ["/usr/lib/modules/*/initramfs"],
-            "proton-cachyos": ["/usr/share/steam/compatibilitytools.d/*"],
             "headroom": ["/usr/lib/headroom/*", "/usr/bin/headroom"],
             "rpmdb": ["/usr/share/rpm/rpmdb.sqlite"],
         }
@@ -51,7 +50,7 @@ class RechunkMetadataTests(unittest.TestCase):
 
     def test_custom_groups_precede_upstream_default_groups(self):
         names = list(self.groups)
-        custom = ["kyth-initramfs", "proton-cachyos", "headroom", "rpmdb", "kyth"]
+        custom = ["kyth-initramfs", "headroom", "rpmdb", "kyth"]
         self.assertEqual(names[: len(custom)], custom)
         self.assertIn("initramfs", self.groups)
         self.assertIn("kernel", self.groups)

@@ -53,13 +53,7 @@ build: build-base
     BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
 
-    _pc_tmp=$(mktemp) _tp_tmp=$(mktemp)
-    ( ./build_files/scripts/resolve-versions.sh proton-cachyos > "${_pc_tmp}" ) &
-    ( ./build_files/scripts/resolve-versions.sh thirdparty-hash > "${_tp_tmp}" ) &
-    wait
-    PROTON_CACHYOS_VER=$(cat "${_pc_tmp}"); rm -f "${_pc_tmp}"
-    THIRDPARTY_VERSIONS_HASH=$(cat "${_tp_tmp}"); rm -f "${_tp_tmp}"
-    echo "Proton-CachyOS: ${PROTON_CACHYOS_VER:-latest}"
+    THIRDPARTY_VERSIONS_HASH=$(./build_files/scripts/resolve-versions.sh thirdparty-hash)
     echo "Thirdparty hash: ${THIRDPARTY_VERSIONS_HASH}"
     MOK_SECRET_ARG=()
     SECUREBOOT_SIGNING_REQUESTED=0
@@ -81,7 +75,6 @@ build: build-base
     docker buildx build \
         --build-arg ENABLE_ANANICY="${ENABLE_ANANICY:-1}" \
         --build-arg ENABLE_SCX="${ENABLE_SCX:-1}" \
-        --build-arg PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" \
         --build-arg THIRDPARTY_VERSIONS_HASH="${THIRDPARTY_VERSIONS_HASH}" \
         --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
         --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \

@@ -13,8 +13,6 @@ dnf5 install -y --skip-unavailable \
 	python3-pyqt6 \
 	python3-pyqt6-webengine \
 	python3-pip \
-	python3-devel \
-	python3-pytest \
 	python3-defusedxml \
 	curl \
 	qt6-qtwayland \
@@ -24,8 +22,6 @@ dnf5 install -y --skip-unavailable \
 	distrobox \
 	unzip \
 	git \
-	ShellCheck \
-	shfmt \
 	spice-vdagent \
 	virt-viewer \
 	kscreen \
@@ -56,6 +52,65 @@ else
 	exec distrobox enter "${box}" -- headroom "$@"
 fi
 WRAPPEREOF
+
+# ShellCheck host wrapper — delegates to kyth-ai-dev container
+install -Dm 0755 /dev/stdin /usr/bin/shellcheck <<'WRAPPEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x "${HOME}/.local/bin/shellcheck" ]]; then
+	exec "${HOME}/.local/bin/shellcheck" "$@"
+fi
+
+box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
+if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
+	exec distrobox enter "${box}" -- shellcheck "$@"
+else
+	echo "shellcheck is managed in the KythOS AI Developer container (${box})."
+	echo "Initializing ${box} environment..."
+	kyth-ai-dev setup
+	exec distrobox enter "${box}" -- shellcheck "$@"
+fi
+WRAPPEREOF
+
+# shfmt host wrapper — delegates to kyth-ai-dev container
+install -Dm 0755 /dev/stdin /usr/bin/shfmt <<'WRAPPEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x "${HOME}/.local/bin/shfmt" ]]; then
+	exec "${HOME}/.local/bin/shfmt" "$@"
+fi
+
+box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
+if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
+	exec distrobox enter "${box}" -- shfmt "$@"
+else
+	echo "shfmt is managed in the KythOS AI Developer container (${box})."
+	echo "Initializing ${box} environment..."
+	kyth-ai-dev setup
+	exec distrobox enter "${box}" -- shfmt "$@"
+fi
+# GitHub CLI host wrapper — delegates to kyth-ai-dev container
+install -Dm 0755 /dev/stdin /usr/bin/gh <<'WRAPPEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x "${HOME}/.local/bin/gh" ]]; then
+	exec "${HOME}/.local/bin/gh" "$@"
+fi
+
+box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
+if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
+	exec distrobox enter "${box}" -- gh "$@"
+else
+	echo "GitHub CLI is managed in the KythOS AI Developer container (${box})."
+	echo "Initializing ${box} environment..."
+	kyth-ai-dev setup
+	exec distrobox enter "${box}" -- gh "$@"
+fi
+WRAPPEREOF
+
 
 # Atomic systems map /usr/local to the root-owned /var/usrlocal. npm's
 # system default therefore makes `npm install -g` fail for desktop users.
@@ -102,8 +157,6 @@ optional_desktop_packages=(
 	git-delta
 	starship
 	helix
-	gh
-	docker-compose
 	direnv
 	jq
 	yq

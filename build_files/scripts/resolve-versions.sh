@@ -24,8 +24,6 @@ set -euo pipefail
 CURL_ARGS=(-fsSL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60)
 
 THIRDPARTY_REPOS=(
-	topgrade-rs/topgrade
-	Winetricks/winetricks
 	Open-Wine-Components/umu-launcher
 	ishitatsuyuki/LatencyFleX
 	sched-ext/scx

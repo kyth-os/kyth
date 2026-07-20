@@ -18,7 +18,7 @@ install-vscode:
     set -euo pipefail
     kyth-vscode-wallet
     echo
-    echo "VS Code and Headroom are baked into the image."
+    echo "VS Code and Headroom are managed via the KythOS AI Developer container."
     echo "Launch VS Code from the app menu or run: code"
     echo "Run Headroom with: headroom"
 

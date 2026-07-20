@@ -25,18 +25,10 @@ else
 fi
 WRAPPEREOF
 
-# RDP, Active Directory, Kerberos, and SMB tooling — all in standard Fedora repos.
+# RDP and SMB tooling — standard Fedora repos.
 # freerdp: best-in-class RDP client; powers Remmina's RDP backend.
-# realmd/sssd/adcli: domain join, AD auth, and LDAP/Kerberos enrollment.
-# krb5-workstation: kinit, klist, kdestroy — Kerberos ticket management.
-# samba-client: smbclient + net ads + wbinfo for SMB share browsing and AD queries.
+# samba-client: smbclient + net ads + wbinfo for SMB share browsing.
 dnf5 install -y --skip-unavailable \
 	freerdp \
-	realmd \
-	sssd \
-	sssd-ad \
-	sssd-tools \
-	adcli \
-	krb5-workstation \
-	samba-client \
-	openldap-clients
+	samba-client
+
