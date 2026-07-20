@@ -42,7 +42,6 @@ dnf5 install -y --skip-unavailable \
 	qemu-device-display-virtio-vga \
 	qemu-device-usb-redirect \
 	qemu-img \
-	qemu-system-aarch64 \
 	qemu-system-x86-core \
 	util-linux-script \
 	tmux \

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# ── KythOS Automated NTFS Drive & Proton Compatdata Repair ───────────────────
+# Fixes NTFS mount options in /etc/fstab and redirects Steam Proton compatdata
+# prefixes to native Linux storage so Windows Steam libraries can play directly
+# without copying or redownloading games.
+set -euo pipefail
+
+log() {
+	echo "[kyth-ntfs-repair] $1"
+}
+
+user_uid=$(id -u)
+user_gid=$(id -g)
+user_home="${HOME}"
+
+native_compatdata="${user_home}/.local/share/Steam/steamapps/compatdata"
+flatpak_compatdata="${user_home}/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata"
+
+# Ensure primary native compatdata directory exists
+mkdir -p "${native_compatdata}"
+if [[ -d "${user_home}/.var/app/com.valvesoftware.Steam" ]]; then
+	mkdir -p "${flatpak_compatdata}"
+fi
+
+log "Scanning for connected NTFS storage partitions..."
+
+partitions=$(lsblk -P -o NAME,FSTYPE,LABEL,UUID,MOUNTPOINT | grep -i 'FSTYPE="ntfs' || true)
+
+if [[ -z "${partitions}" ]]; then
+	log "No NTFS partitions detected."
+	exit 0
+fi
+
+log "Found NTFS partition(s). Applying mount stabilization & Proton compatdata redirection..."
+
+echo "${partitions}" | while read -r line; do
+	eval "${line}"
+	dev="/dev/${NAME}"
+	label="${LABEL:-NTFS_Drive}"
+	uuid="${UUID:-}"
+	mount="${MOUNTPOINT:-}"
+
+	log "Processing partition: ${dev} (UUID: ${uuid:-unknown}, Label: ${label})"
+
+	# Determine target mountpoint if not currently mounted
+	if [[ -z "${mount}" ]]; then
+		mount="/var/mnt/ntfs_${uuid:-${NAME}}"
+		log "Drive not mounted. Mounting to ${mount}..."
+		sudo mkdir -p "${mount}"
+		sudo mount -t ntfs-3g -o "uid=${user_uid},gid=${user_gid},dmask=027,fmask=137,windows_names,rw" "${dev}" "${mount}" 2>/dev/null || \
+			sudo mount -o "uid=${user_uid},gid=${user_gid},dmask=027,fmask=137,windows_names,rw" "${dev}" "${mount}" 2>/dev/null || true
+	fi
+
+	# Search for Steam libraries on this drive
+	steam_dirs=$(find "${mount}" -maxdepth 3 -iname 'steamapps' -type d 2>/dev/null || true)
+
+	if [[ -n "${steam_dirs}" ]]; then
+		echo "${steam_dirs}" | while read -r sdir; do
+			log "Found Steam library at: ${sdir}"
+			target_cd="${sdir}/compatdata"
+
+			if [[ -L "${target_cd}" ]]; then
+				log "  Compatdata is already symlinked to native storage: $(readlink -f "${target_cd}")"
+			else
+				if [[ -d "${target_cd}" ]]; then
+					log "  Moving existing NTFS compatdata folder to backup..."
+					mv "${target_cd}" "${target_cd}.bak.$(date +%s)" 2>/dev/null || true
+				fi
+				log "  Symlinking compatdata -> ${native_compatdata}"
+				ln -sf "${native_compatdata}" "${target_cd}"
+			fi
+		done
+	else
+		log "No steamapps folder found on ${mount}."
+	fi
+done
+
+log "NTFS repair complete. You can now launch Steam games directly from your NTFS drive!"

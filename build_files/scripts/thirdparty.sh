@@ -14,7 +14,6 @@ unset _fragment
 # ── Parallel download + install ───────────────────────────────────────────────
 _launch umu install_umu
 _launch latencyflex install_latencyflex
-_launch opticscaler install_opticscaler
 if is_enabled "${ENABLE_SCX:-1}"; then
 	_launch scx install_scx
 fi

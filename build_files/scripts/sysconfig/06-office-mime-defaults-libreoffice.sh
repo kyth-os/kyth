@@ -8,8 +8,11 @@ set -euo pipefail
 # Map all Microsoft Office and ODF types to the corresponding LibreOffice
 # Flatpak sub-app so the right component opens directly (Writer, not the
 # LibreOffice Start Center for a .docx).
-cat >/etc/xdg/mimeapps.list <<'MIMEAPPSEOF'
-[Default Applications]
+mkdir -p /etc/xdg
+if ! grep -q '\[Default Applications\]' /etc/xdg/mimeapps.list 2>/dev/null; then
+	echo '[Default Applications]' >>/etc/xdg/mimeapps.list
+fi
+cat >>/etc/xdg/mimeapps.list <<'MIMEAPPSEOF'
 application/msword=org.libreoffice.LibreOffice.writer.desktop
 application/vnd.openxmlformats-officedocument.wordprocessingml.document=org.libreoffice.LibreOffice.writer.desktop
 application/vnd.ms-word.document.macroenabled.12=org.libreoffice.LibreOffice.writer.desktop

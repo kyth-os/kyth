@@ -39,5 +39,4 @@ dnf5 install -y --allowerasing --skip-unavailable --exclude=gstreamer1-plugins-b
 	gstreamer1-plugins-ugly \
 	gstreamer1-libav \
 	gstreamer1-vaapi \
-	mozilla-openh264 \
-	mpv
+	mozilla-openh264

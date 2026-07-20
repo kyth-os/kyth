@@ -5,9 +5,26 @@
 
 set -euo pipefail
 
-# Install the optional AI developer helper when the build context provides it.
+# Install optional helpers when provided by build context.
 if [[ -f /ctx/kyth-ai-dev ]]; then
 	install -Dm0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
+fi
+
+if [[ -f /ctx/kyth-game-boost ]]; then
+	install -Dm0755 /ctx/kyth-game-boost /usr/bin/kyth-game-boost
+	ln -sf /usr/bin/kyth-game-boost /usr/bin/game-performance
+fi
+
+if [[ -f /ctx/kyth-ntfs-repair ]]; then
+	install -Dm0755 /ctx/kyth-ntfs-repair /usr/bin/kyth-ntfs-repair
+fi
+
+if [[ -f /ctx/kyth-shader-preheat ]]; then
+	install -Dm0755 /ctx/kyth-shader-preheat /usr/bin/kyth-shader-preheat
+fi
+
+if [[ -f /ctx/kyth-health-check ]]; then
+	install -Dm0755 /ctx/kyth-health-check /usr/bin/kyth-health-check
 fi
 
 # Repair accounts/groups that may be missing after layering package changes.

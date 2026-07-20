@@ -111,6 +111,46 @@ else
 fi
 WRAPPEREOF
 
+# Helix host wrapper — delegates to kyth-ai-dev container
+install -Dm 0755 /dev/stdin /usr/bin/hx <<'WRAPPEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x "${HOME}/.local/bin/hx" ]]; then
+	exec "${HOME}/.local/bin/hx" "$@"
+fi
+
+box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
+if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
+	exec distrobox enter "${box}" -- hx "$@"
+else
+	echo "Helix editor is managed in the KythOS AI Developer container (${box})."
+	echo "Initializing ${box} environment..."
+	kyth-ai-dev setup
+	exec distrobox enter "${box}" -- hx "$@"
+fi
+WRAPPEREOF
+
+# Zellij host wrapper — delegates to kyth-ai-dev container
+install -Dm 0755 /dev/stdin /usr/bin/zellij <<'WRAPPEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x "${HOME}/.local/bin/zellij" ]]; then
+	exec "${HOME}/.local/bin/zellij" "$@"
+fi
+
+box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
+if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
+	exec distrobox enter "${box}" -- zellij "$@"
+else
+	echo "Zellij is managed in the KythOS AI Developer container (${box})."
+	echo "Initializing ${box} environment..."
+	kyth-ai-dev setup
+	exec distrobox enter "${box}" -- zellij "$@"
+fi
+WRAPPEREOF
+
 
 # Atomic systems map /usr/local to the root-owned /var/usrlocal. npm's
 # system default therefore makes `npm install -g` fail for desktop users.
@@ -157,7 +197,6 @@ optional_desktop_packages=(
 	zoxide
 	git-delta
 	starship
-	helix
 	direnv
 	jq
 	yq
@@ -167,8 +206,6 @@ optional_desktop_packages=(
 	# fish shell — out-of-box syntax highlighting and autosuggestions with no config.
 	# Good first shell for Windows migrants; veterans can chsh -s /usr/bin/fish.
 	fish
-	# zellij — modern terminal multiplexer; tmux-compatible with a friendlier UI.
-	zellij
 	# btop — interactive resource/process monitor (better htop).
 	btop
 	# fastfetch — system info display (neofetch replacement, actively maintained).

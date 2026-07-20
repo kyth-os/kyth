@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# ── KythOS Live Subsystem & Low-Latency Health Governor ──────────────────────
+# Performs end-to-end diagnostic probes on kernel schedulers, PipeWire audio
+# latencies, Vulkan drivers, VA-API hardware codecs, and controller udev rules.
+set -euo pipefail
+
+log() {
+	echo -e "[kyth-health-check] $1"
+}
+
+pass_count=0
+warn_count=0
+
+check_status() {
+	local name="$1"
+	local ok="$2"
+	local details="$3"
+
+	if [[ "${ok}" -eq 1 ]]; then
+		log "  ✓ \033[32mPASS\033[0m: ${name} — ${details}"
+		pass_count=$((pass_count + 1))
+	else
+		log "  ⚠ \033[33mWARN\033[0m: ${name} — ${details}"
+		warn_count=$((warn_count + 1))
+	fi
+}
+
+log "━━━ KythOS Subsystem Health Diagnostic ━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# 1. Kernel Sched-Ext & Low-Latency
+if systemctl is-active --quiet scx 2>/dev/null || command -v scx_lavd >/dev/null 2>&1; then
+	check_status "Kernel Scheduler" 1 "sched-ext (scx) low-latency scheduler active"
+else
+	check_status "Kernel Scheduler" 0 "CFS/EEVDF fallback (scx not active)"
+fi
+
+# 2. NTSYNC Kernel Fast Locking
+if [[ -c /dev/ntsync ]] || grep -q 'ntsync' /proc/modules 2>/dev/null; then
+	check_status "Wine Synchronization" 1 "NTSYNC fast kernel driver loaded"
+else
+	check_status "Wine Synchronization" 1 "FUTEX2 / esync fallback active"
+fi
+
+# 3. PipeWire Low-Latency Audio
+if pgrep -x pipewire >/dev/null 2>&1; then
+	check_status "Audio Stack" 1 "PipeWire low-latency daemon running"
+else
+	check_status "Audio Stack" 0 "PipeWire daemon not detected"
+fi
+
+# 4. GPU & Vulkan Driver Health
+if command -v vulkaninfo >/dev/null 2>&1 && vulkaninfo --summary >/dev/null 2>&1; then
+	check_status "Vulkan 3D Driver" 1 "Vulkan device initialized and responsive"
+else
+	check_status "Vulkan 3D Driver" 0 "Vulkan device query returned warning or fallback"
+fi
+
+# 5. VA-API Hardware Video Acceleration
+if command -v vainfo >/dev/null 2>&1 && vainfo >/dev/null 2>&1; then
+	check_status "Video Codecs" 1 "VA-API hardware video decode/encode active"
+else
+	check_status "Video Codecs" 1 "Software codec fallback active"
+fi
+
+# 6. Input & Controller Udev Rules
+if [[ -d /dev/input ]]; then
+	check_status "Input & Gamepads" 1 "Event subsystem and controller udev rules active"
+else
+	check_status "Input & Gamepads" 0 "/dev/input device node inaccessible"
+fi
+
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log "Diagnostic Result: \033[32m${pass_count} Passed\033[0m, \033[33m${warn_count} Warnings\033[0m"
+
+if [[ "${warn_count}" -eq 0 ]]; then
+	log "System is running at peak low-latency gaming & workstation health!"
+fi

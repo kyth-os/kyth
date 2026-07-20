@@ -70,6 +70,14 @@ setup-vr:
 setup-tailscale:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    if ! command -v tailscale >/dev/null 2>&1; then
+        echo "Tailscale is not installed. Installing Tailscale..."
+        sudo rpm-ostree install --idempotent tailscale
+        echo "Reboot required to activate tailscaled service."
+        exit 0
+    fi
+
     echo "Enabling tailscaled service..."
     sudo systemctl enable --now tailscaled.service
     echo
@@ -77,3 +85,4 @@ setup-tailscale:
     sudo tailscale up --accept-routes
     echo
     echo "Done. Check your Tailscale network at https://login.tailscale.com/admin/machines"
+

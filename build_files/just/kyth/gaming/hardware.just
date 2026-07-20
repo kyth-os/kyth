@@ -66,3 +66,11 @@ install-asus-tools:
 [group('KythOS')]
 install-vesktop: (_install-flatpak "dev.vencord.Vesktop" "Vesktop")
 
+# Fix NTFS drive mounts & symlink Proton compatdata for instant Steam game playback.
+[group('KythOS')]
+fix-ntfs-drives:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-ntfs-repair
+
+

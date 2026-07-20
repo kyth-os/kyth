@@ -71,7 +71,7 @@ RUN bash /tmp/plymouth-setup.sh && \
 
 # kyth-vscode-wallet and kyth-ai-dev are needed by both sysconfig-static and
 # sysconfig layers. COPY once so neither layer needs a redundant bind-mount.
-COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev /ctx/
+COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev build_files/kyth-game-boost build_files/kyth-ntfs-repair build_files/kyth-shader-preheat build_files/kyth-health-check /ctx/
 
 # Static system configuration — sysctl, kernel modules, PipeWire, Proton env
 # vars, gamemode, MangoHud, vkBasalt, bluetooth, and kyth-* service units.
