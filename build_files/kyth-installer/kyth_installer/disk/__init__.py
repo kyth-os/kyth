@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # noqa: F401 -- compatibility re-export used by callers/tests
 
-from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES, _IS_LIVE_SESSION
+from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES, _IS_LIVE_SESSION  # noqa: F401
 
-from ._util import (
+from ._util import (  # noqa: F401
     _safe_int,
     _normal_device_path,
     _lsblk_text,
@@ -14,7 +14,7 @@ from ._util import (
     _block_size_bytes,
 )
 
-from ._probe import (
+from ._probe import (  # noqa: F401
     _running_system_disk,
     _get_live_usb_disk,
     _parent_disk,
@@ -24,7 +24,7 @@ from ._probe import (
     partition_has_active_mount,
 )
 
-from ._query import (
+from ._query import (  # noqa: F401
     _partition_mountpoints,
     _is_active_mount,
     _descendant_mountpoints,
@@ -39,7 +39,7 @@ from ._query import (
     list_filesystems,
 )
 
-from ._lookup import (
+from ._lookup import (  # noqa: F401
     find_efi_partition,
     get_root_partition,
 )

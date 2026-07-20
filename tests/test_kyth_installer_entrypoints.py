@@ -36,6 +36,16 @@ class InstallerEntrypointTests(unittest.TestCase):
             check=True,
         )
 
+    def test_live_image_installs_shared_python_package(self):
+        containerfile = (ROOT / "installer" / "Containerfile").read_text()
+        build_script = (ROOT / "installer" / "build.sh").read_text()
+
+        self.assertIn("source=build_files/kyth_shared", containerfile)
+        self.assertIn(
+            "cp -a /src/build_files/kyth_shared/kyth_shared /usr/kyth_shared/",
+            build_script,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

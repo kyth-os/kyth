@@ -29,6 +29,7 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CODEQL_VERSION: 2.26.1
 
 jobs:
   analyze:
@@ -51,6 +52,7 @@ jobs:
         with:
           languages: python
           queries: security-extended
+          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v${{ env.CODEQL_VERSION }}/codeql-bundle-linux64.tar.zst
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2

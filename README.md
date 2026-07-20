@@ -356,12 +356,12 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-19 19:19:29 UTC
+- Last refreshed (UTC): 2026-07-20 00:09:33 UTC
 - Current branch: testing
-- HEAD commit: 7ab4163
-- Last commit title: Fix ISO runner disk guard and CI portability
-- Last commit date: 2026-07-19T15:00:20-04:00
+- HEAD commit: e1df506
+- Last commit title: Fix actionable boot log errors
+- Last commit date: 2026-07-19T17:49:13-04:00
 - CI workflow files: 8
-- Build script files: 19
+- Build script files: 20
 
 <!-- AUTO-README-END -->

@@ -26,16 +26,19 @@ function el(tag, attrs = {}, ...children) {
 }
 
 function apiFetch(url, opts={}) {
+  if (typeof url !== 'string' || !url.startsWith('/api/')) {
+    throw new TypeError('API requests must use a same-origin /api/ route');
+  }
   const o = {...opts, credentials:'same-origin'};
   const h = new Headers(o.headers || {});
   if (SESSION_TOKEN) h.set('X-Kyth-Session-Token', SESSION_TOKEN);
   o.headers = h;
-  return fetch(url, o);
+  return fetch(url, o); // nosemgrep -- url is constrained to a same-origin API route above
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function goto(name) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => { p.classList.remove('active'); });
   document.getElementById('page-' + name).classList.add('active');
   document.querySelectorAll('.step').forEach(el => {
     const si = STEPS.indexOf(el.dataset.step), ai = STEPS.indexOf(name);
@@ -88,12 +91,12 @@ function loadDisks(attempt) {
 }
 
 function selectDisk(idx) {
-  document.querySelectorAll('.disk-card').forEach(c => c.classList.remove('selected'));
+  document.querySelectorAll('.disk-card').forEach(c => { c.classList.remove('selected'); });
   document.getElementById('dcard-' + idx).classList.add('selected');
   S.disk = _disks[idx];
   S.install_mode = 'wipe'; S.target_partition = null;
   S.resize_partition = null; S.free_region_start = 0; S.free_region_end = 0;
-  document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
+  document.querySelectorAll('.mode-card').forEach(c => { c.classList.remove('selected'); });
   document.getElementById('mcard-wipe').classList.add('selected');
   
   const warn = document.getElementById('disk-warn');
@@ -116,7 +119,7 @@ function selectMode(id) {
   S.free_region_start = 0; 
   S.free_region_end = 0;
   
-  document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
+  document.querySelectorAll('.mode-card').forEach(c => { c.classList.remove('selected'); });
   const card = document.getElementById('mcard-' + id);
   if (card) card.classList.add('selected');
   
@@ -201,7 +204,6 @@ function loadPartitions() {
       ? 'Overwrite an existing partition with KythOS.'
       : 'Replace a Partition (Unavailable: no partitions >= 32 GiB found)';
 
-    const mManual = document.getElementById('mcard-manual');
     // Manual mode always available (always needs user interaction)
     
     document.getElementById('mode-section').style.display = '';
@@ -442,7 +444,7 @@ function selectPartitionByName(name) {
   const pIdx = _partitions.findIndex(p => p.name === name);
   if (pIdx >= 0) {
     const cards = document.querySelectorAll('#replace-list .part-selector-card');
-    cards.forEach(c => c.classList.toggle('selected', c.dataset.name === name));
+    cards.forEach(c => { c.classList.toggle('selected', c.dataset.name === name); });
   }
   renderDiskLayouts();
   updateDiskNext();
@@ -473,7 +475,7 @@ function selectFreeRegionByStart(start) {
     S.free_region_start = r.start_bytes;
     S.free_region_end = r.end_bytes;
     const cards = document.querySelectorAll('#free-space-list .part-selector-card');
-    cards.forEach(c => c.classList.toggle('selected', parseInt(c.dataset.start) === start));
+    cards.forEach(c => { c.classList.toggle('selected', parseInt(c.dataset.start) === start); });
   }
   renderDiskLayouts();
   updateDiskNext();
@@ -613,8 +615,8 @@ function describeOp(op) {
   const p = op.params || {};
   switch (op.kind) {
     case 'new_table':    return `📋 New partition table: ${(p.table_type || 'gpt').toUpperCase()}`;
-    case 'create':       return `➕ Create ${fmtBytes(p.size_bytes || 0)} ${p.fs_type || ''} partition${p.mountpoint ? ' at ' + p.mountpoint : ''}`;
-    case 'delete':       return `🗑  Delete ${p.partition || 'partition'}`;
+    case 'create':       return `➕ Add ${fmtBytes(p.size_bytes || 0)} ${p.fs_type || ''} partition${p.mountpoint ? ' at ' + p.mountpoint : ''}`;
+    case 'delete':       return `🗑  Remove ${p.partition || 'partition'}`;
     case 'resize':       return `↔  Resize ${p.partition || ''} to ${fmtBytes(p.new_size_bytes || 0)}`;
     case 'format':       return `🔧 Format ${p.partition || ''} as ${p.fs_type || ''}`;
     case 'set_mountpoint': return `📂 Mount ${p.partition || ''} at ${p.mountpoint || '(none)'}`;
@@ -622,7 +624,7 @@ function describeOp(op) {
   }
 }
 
-function removePendingOp(index) {
+function removePendingOp() {
   // Remove from local state and force a re-fetch from server
   // The server may not support individual removal, so we reload
   showOverlay('Removing operation...', '', null);
@@ -745,7 +747,6 @@ function showCreateDialog() {
       if (j.ok) {
         if (mountpoint) {
           // Also set the mountpoint after creation
-          const lastCreateIdx = _pendingOps.length;
           apiFetch('/api/disk/set-mountpoint', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -1056,8 +1057,8 @@ function initKernel() {
 
 function selectKernel(id) {
   S.kernel = id;
-  document.querySelectorAll('.kernel-card').forEach(c => c.classList.remove('selected'));
-  document.querySelectorAll('.kernel-card').forEach(c => c.setAttribute('aria-pressed', 'false'));
+  document.querySelectorAll('.kernel-card').forEach(c => { c.classList.remove('selected'); });
+  document.querySelectorAll('.kernel-card').forEach(c => { c.setAttribute('aria-pressed', 'false'); });
   const card = document.getElementById('kcard-' + id);
   if (card) {
     card.classList.add('selected');
@@ -1095,7 +1096,7 @@ function saveConfig() {
   const errEl    = document.getElementById('user-error');
   errEl.textContent = '';
 
-  if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(hostname)) {
+  if (!/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(hostname)) { // nosemgrep -- bounded, linear-time expression
     errEl.textContent = 'Hostname must contain only letters, digits, and hyphens.'; return;
   }
   if (!/^[a-z_][a-z0-9_-]{0,30}$/.test(username)) {
@@ -1382,6 +1383,16 @@ function reboot() {
   document.body.innerHTML = '<div id="main" style="display:flex;align-items:center;justify-content:center"><div class="card" style="text-align:center;padding:48px 40px"><div class="done-title">Restarting</div><p class="hero-body">Remove the installation media when your computer begins to restart.</p></div></div>';
   apiFetch('/api/reboot', {method:'POST'}).catch(()=>{});
 }
+
+// These handlers are referenced by inline event attributes in index.html.
+// Keeping an explicit reference list lets standalone JS analyzers see the
+// cross-file usage without changing the browser-facing API.
+void [
+  onSliderMove, showNewTableDialog, showCreateDialog, showDeleteDialog,
+  showResizeDialog, showFormatDialog, showMountDialog, commitPartitions,
+  rollbackPartitions, saveConfig, startInstall, copyFullLog, toggleLog,
+  backFromError, reboot,
+];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 apiFetch('/api/config').then(r=>r.json()).then(cfg => {

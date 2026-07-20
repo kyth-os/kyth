@@ -26,6 +26,14 @@ cp -a /src/build_files/kyth-installer/kyth_installer /usr/lib/kyth-installer/
 rm -rf /usr/lib/kyth-installer/kyth_installer/__pycache__
 find /usr/lib/kyth-installer -type d -exec chmod 0755 {} +
 find /usr/lib/kyth-installer -type f -exec chmod 0644 {} +
+# The entrypoint adds /usr/kyth_shared to sys.path.  The live payload is built
+# with bind mounts rather than the main image's /ctx staging directory, so copy
+# the shared package explicitly here as well.
+mkdir -p /usr/kyth_shared
+cp -a /src/build_files/kyth_shared/kyth_shared /usr/kyth_shared/
+rm -rf /usr/kyth_shared/kyth_shared/__pycache__
+find /usr/kyth_shared -type d -exec chmod 0755 {} +
+find /usr/kyth_shared -type f -exec chmod 0644 {} +
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
 install -Dm755 /src/build_files/kyth-partition-install.sh /usr/bin/kyth-partition-install
 install -Dm755 /src/build_files/scripts/plymouth-branding-guard.sh \

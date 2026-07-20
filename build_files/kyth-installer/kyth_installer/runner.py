@@ -45,13 +45,23 @@ def run_command(
     timeout: int | None = None,
     **kwargs,
 ):
+    if isinstance(argv, (str, bytes)):
+        raise TypeError("argv must be a sequence of arguments, not a shell command string")
     command = [_validate_command_arg(str(part)) for part in argv]
+    if not command or not command[0]:
+        raise ValueError("argv must contain a non-empty executable")
+    if kwargs.pop("shell", False):
+        raise ValueError("shell execution is forbidden for installer commands")
     label = description or _format_command(command)
     if log is not None:
         log(f"$ {_format_command(command)}")
 
     try:
-        return subprocess.run(command, timeout=timeout, **kwargs)
+        # Commands are assembled by trusted installer code, passed as an argv
+        # vector, and never interpreted by a shell. User-controlled disk names
+        # and labels can therefore only be arguments, not executable syntax.
+        # codeql[py/command-line-injection]
+        return subprocess.run(command, timeout=timeout, shell=False, **kwargs)  # nosec B603 # nosemgrep
     except subprocess.CalledProcessError as exc:
         detail = f"{label} failed with exit code {exc.returncode}"
         if exc.stdout:

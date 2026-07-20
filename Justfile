@@ -43,6 +43,11 @@ test:
 validate:
     ./build_files/scripts/validate.sh
 
+# Run Validation plus changed-file Codacy and pinned CodeQL security checks.
+[group('Quality')]
+ci-preflight:
+    ./build_files/scripts/ci-preflight.sh
+
 # Fix Just Syntax
 [group('Just')]
 fix:
@@ -113,7 +118,7 @@ install-git-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
     git config core.hooksPath .githooks
-    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/update-readme-snapshot.sh build_files/scripts/install-validation-tools.sh build_files/scripts/validate.sh
+    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/update-readme-snapshot.sh build_files/scripts/install-validation-tools.sh build_files/scripts/validate.sh build_files/scripts/ci-preflight.sh
     echo "Git hooks installed via core.hooksPath=.githooks"
 
 # Remove old output ISOs — keeps only the current live ISO and current BIB ISO.

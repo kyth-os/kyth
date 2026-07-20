@@ -42,6 +42,7 @@ RUN --mount=type=bind,source=installer/build.sh,target=/src/installer/build.sh \
     --mount=type=bind,source=installer/iso.yaml,target=/src/installer/iso.yaml \
     --mount=type=bind,source=build_files/scripts/plymouth-branding-guard.sh,target=/src/build_files/scripts/plymouth-branding-guard.sh \
     --mount=type=bind,source=build_files/kyth-installer,target=/src/build_files/kyth-installer \
+    --mount=type=bind,source=build_files/kyth_shared,target=/src/build_files/kyth_shared \
     --mount=type=bind,source=build_files/kyth-launch-installer,target=/src/build_files/kyth-launch-installer \
     --mount=type=bind,source=build_files/kyth-partition-install.sh,target=/src/build_files/kyth-partition-install.sh \
     env BASE_IMAGE="${BASE_IMAGE}" SOURCE_TAG="${SOURCE_TAG}" \
