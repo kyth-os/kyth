@@ -356,11 +356,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 15:38:37 UTC
+- Last refreshed (UTC): 2026-07-20 15:53:50 UTC
 - Current branch: testing
-- HEAD commit: d71ccdd
-- Last commit title: fix(lint): remove unused imports in page_software_developer.py
-- Last commit date: 2026-07-20T11:13:26-04:00
+- HEAD commit: f7956a1
+- Last commit title: refactor(base): carve out proton, dev toolchains, enterprise AD, and static thirdparty downloads
+- Last commit date: 2026-07-20T11:38:37-04:00
 - CI workflow files: 8
 - Build script files: 20
 

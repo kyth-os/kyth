@@ -407,7 +407,7 @@ jobs:
             jq -r '.layers[][] | sub("^dedi:"; "") | sub("^meta:"; "")' \
               <<<"${RECHUNK_INFO}"
           )"
-          for group in kyth-initramfs proton-cachyos headroom rpmdb kyth; do
+          for group in kyth-initramfs headroom rpmdb kyth; do
             grep -Fxq "${group}" <<<"${NORMALIZED_GROUPS}" || {
               echo "Missing required rechunk group: ${group}" >&2
               exit 1
