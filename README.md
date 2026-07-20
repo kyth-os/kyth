@@ -356,11 +356,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 15:10:39 UTC
+- Last refreshed (UTC): 2026-07-20 15:12:25 UTC
 - Current branch: testing
-- HEAD commit: 45b1b31
-- Last commit title: fix(sysconfig): disable helix in topgrade, fix CI defusedxml/vaapi tests, add shell script validation and git hooks
-- Last commit date: 2026-07-20T10:54:40-04:00
+- HEAD commit: 4ae5f90
+- Last commit title: feat: migrate IDEs, Node.js, and Azure CLI to kyth-ai-dev container
+- Last commit date: 2026-07-20T11:10:39-04:00
 - CI workflow files: 8
 - Build script files: 20
 
