@@ -69,9 +69,8 @@ class SysconfigFragmentTests(unittest.TestCase):
         body = (SCRIPTS / "packages" / "20-google-antigravity-ide.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn("/usr/libexec/kyth-antigravity", body)
-        self.assertIn('exec /usr/share/antigravity/antigravity "$@"', body)
-        self.assertNotIn('Exec=sh -c "ulimit', body)
+        self.assertIn("/usr/bin/antigravity", body)
+        self.assertIn("kyth-ai-dev", body)
 
     def test_bootc_sudoers_allows_status_without_arguments(self):
         body = (ROOT / "build_files" / "kyth-bootc-sudo").read_text(

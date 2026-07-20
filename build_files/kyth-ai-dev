@@ -9,8 +9,8 @@ usage() {
 	cat <<EOF
 Usage: kyth-ai-dev <setup|status|enter|remove|start|stop>
 
-Creates and manages the optional KythOS local AI developer Distrobox.
-No models are downloaded by setup.
+Creates and manages the KythOS AI & Developer Distrobox container.
+Houses IDEs (VS Code, Google Antigravity), developer runtimes (Node.js, Headroom), Azure CLI, and AI models.
 EOF
 }
 
@@ -41,20 +41,38 @@ status() {
 		echo "Box: present"
 	else
 		echo "Box: missing"
-		echo "Run: ujust ai-dev-setup"
+		echo "Run: ujust ai-dev-setup or kyth-ai-dev setup"
 		return 0
+	fi
+
+	if enter_box bash -lc 'command -v code >/dev/null 2>&1'; then
+		echo "VS Code: installed"
+	else
+		echo "VS Code: not installed"
+	fi
+
+	if enter_box bash -lc 'command -v antigravity >/dev/null 2>&1'; then
+		echo "Google Antigravity IDE: installed"
+	else
+		echo "Google Antigravity IDE: not installed"
+	fi
+
+	if enter_box bash -lc 'command -v node >/dev/null 2>&1'; then
+		echo "Node.js: installed ($(enter_box node --version 2>/dev/null || echo unknown))"
+	else
+		echo "Node.js: not installed"
+	fi
+
+	if enter_box bash -lc 'command -v headroom >/dev/null 2>&1'; then
+		echo "Headroom CLI: installed"
+	else
+		echo "Headroom CLI: not installed"
 	fi
 
 	if enter_box bash -lc 'command -v ollama >/dev/null 2>&1'; then
 		echo "Ollama: installed"
 	else
 		echo "Ollama: not installed"
-	fi
-
-	if enter_box bash -lc 'command -v llama-cli >/dev/null 2>&1 || command -v llama-cpp >/dev/null 2>&1'; then
-		echo "llama.cpp CLI: installed"
-	else
-		echo "llama.cpp CLI: not installed"
 	fi
 
 	if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
@@ -80,9 +98,16 @@ setup() {
 		echo "${box} already exists."
 	fi
 
-	echo "Installing AI developer tools in ${box}..."
+	echo "Installing developer & AI tools in ${box}..."
 	enter_box bash -lc '
         set -euo pipefail
+
+        # Configure Microsoft & Google RPM repos inside container
+        sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc || true
+        sudo sh -c '\''echo -e "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo'\''
+        sudo sh -c '\''echo -e "[azure-cli]\nname=Azure CLI\nbaseurl=https://packages.microsoft.com/yumrepos/azure-cli\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/azure-cli.repo'\''
+        sudo sh -c '\''echo -e "[antigravity-rpm]\nname=Antigravity RPM Repository\nbaseurl=https://us-central1-yum.pkg.dev/projects/antigravity-auto-updater-dev/antigravity-rpm\nenabled=1\ngpgcheck=0\nrepo_gpgcheck=0" > /etc/yum.repos.d/antigravity.repo'\''
+
         packages=(
             git git-lfs curl wget jq make cmake gcc gcc-c++
             python3 python3-pip python3-virtualenv python3-devel
@@ -90,46 +115,55 @@ setup() {
             podman skopeo
             vulkan-tools clinfo
             ollama llama.cpp
+            code antigravity azure-cli
         )
 
         if command -v dnf5 >/dev/null 2>&1; then
             sudo dnf5 install -y --skip-unavailable "${packages[@]}"
+            sudo dnf5 install -y --skip-unavailable pipx uv || true
         elif command -v dnf >/dev/null 2>&1; then
             sudo dnf install -y --skip-unavailable "${packages[@]}"
+            sudo dnf install -y --skip-unavailable pipx uv || true
         else
             echo "ERROR: unsupported container package manager." >&2
             exit 1
         fi
 
-        if command -v dnf5 >/dev/null 2>&1; then
-            sudo dnf5 install -y --skip-unavailable pipx uv || true
-        elif command -v dnf >/dev/null 2>&1; then
-            sudo dnf install -y --skip-unavailable pipx uv || true
-        fi
+        # Install headroom in container
+        python3 -m pip install --user --upgrade pipx uv headroom 2>/dev/null || \
+            python3 -m pip install --user --upgrade --break-system-packages pipx uv headroom || true
 
-        # Always ensure latest pipx and uv are installed/upgraded via pip.
-        # Quietly try standard install first, fallback to --break-system-packages if blocked by PEP 668.
-        if ! python3 -m pip install --user --upgrade pipx uv 2>/dev/null; then
-            python3 -m pip install --user --upgrade --break-system-packages pipx uv
-        fi
         if command -v pipx >/dev/null 2>&1; then
             pipx ensurepath || true
-        else
-            python3 -m pipx ensurepath || true
+        fi
+
+        # Export desktop applications and command line wrappers to host
+        echo "Exporting applications and CLI wrappers to host..."
+        distrobox-export --app code || true
+        distrobox-export --app antigravity || true
+        distrobox-export --bin /usr/bin/code --export-path ~/.local/bin || true
+        distrobox-export --bin /usr/bin/antigravity --export-path ~/.local/bin || true
+        distrobox-export --bin /usr/bin/az --export-path ~/.local/bin || true
+        distrobox-export --bin /usr/bin/node --export-path ~/.local/bin || true
+        distrobox-export --bin /usr/bin/npm --export-path ~/.local/bin || true
+        distrobox-export --bin /usr/bin/npx --export-path ~/.local/bin || true
+        if command -v headroom >/dev/null 2>&1; then
+            distrobox-export --bin "$(command -v headroom)" --export-path ~/.local/bin || true
+        elif [[ -x "${HOME}/.local/bin/headroom" ]]; then
+            distrobox-export --bin "${HOME}/.local/bin/headroom" --export-path ~/.local/bin || true
         fi
     '
 
 	echo
-	echo "AI developer environment is ready."
-	echo "Enter it with: distrobox enter ${box}"
-	echo "Models directory: ${model_dir}"
-	echo "No models were downloaded."
+	echo "Developer & AI environment (${box}) is ready."
+	echo "Applications (VS Code, Antigravity, Node, Azure CLI, Headroom) are exported to your host menu & PATH."
+	echo "Enter environment manually with: distrobox enter ${box}"
 }
 
 start() {
 	need_distrobox
 	if ! have_box; then
-		echo "ERROR: ${box} does not exist. Run: ujust ai-dev-setup" >&2
+		echo "ERROR: ${box} does not exist. Run: ujust ai-dev-setup or kyth-ai-dev setup" >&2
 		exit 1
 	fi
 	enter_box bash -lc 'command -v ollama >/dev/null 2>&1 || { echo "ERROR: ollama is not installed. Run: ujust ai-dev-setup" >&2; exit 1; }; nohup ollama serve >/tmp/kyth-ollama.log 2>&1 &'

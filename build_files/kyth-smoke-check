@@ -593,7 +593,7 @@ if is_live_session; then
     check_command antigravity "Google Antigravity IDE command"
     check_file /usr/share/applications/antigravity.desktop "Google Antigravity IDE launcher"
     check_command headroom "Headroom command"
-    check_file /usr/lib/headroom/bin/headroom "Headroom virtualenv entrypoint"
+    check_file /usr/bin/headroom "Headroom host wrapper"
     check_file_contains "${HOME}/.config/kickoffrc" "/usr/share/applications/kyth-welcome.desktop" "System Hub favorite" "pinned in launcher favorites"
     check_file_contains "${HOME}/.config/kickoffrc" "/usr/share/applications/kyth-install.desktop" "Installer favorite" "pinned in launcher favorites"
     check_file_contains "${HOME}/.config/kickoffrc" "/usr/share/applications/code.desktop" "VS Code favorite" "pinned in launcher favorites"

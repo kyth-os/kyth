@@ -31,15 +31,33 @@ dnf5 install -y --skip-unavailable \
 	kscreen \
 	neovim \
 	zsh \
-	nodejs \
-	npm \
 	openconnect \
 	vpnc \
 	kde-connect \
 	plasma-browser-integration \
 	cups-browsed
 
-# Atomic systems map /usr/local to the root-owned /var/usrlocal.  npm's
+# Headroom host wrapper — delegates to kyth-ai-dev container
+install -Dm 0755 /dev/stdin /usr/bin/headroom <<'WRAPPEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x "${HOME}/.local/bin/headroom" ]]; then
+	exec "${HOME}/.local/bin/headroom" "$@"
+fi
+
+box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
+if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
+	exec distrobox enter "${box}" -- headroom "$@"
+else
+	echo "Headroom is managed in the KythOS AI Developer container (${box})."
+	echo "Initializing ${box} environment..."
+	kyth-ai-dev setup
+	exec distrobox enter "${box}" -- headroom "$@"
+fi
+WRAPPEREOF
+
+# Atomic systems map /usr/local to the root-owned /var/usrlocal. npm's
 # system default therefore makes `npm install -g` fail for desktop users.
 # npmrc supports environment expansion, and ~/.local/bin is already on the
 # Fedora user PATH, so global CLI tools belong in the user's home directory.
