@@ -356,11 +356,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 15:53:50 UTC
+- Last refreshed (UTC): 2026-07-20 16:25:38 UTC
 - Current branch: testing
-- HEAD commit: f7956a1
-- Last commit title: refactor(base): carve out proton, dev toolchains, enterprise AD, and static thirdparty downloads
-- Last commit date: 2026-07-20T11:38:37-04:00
+- HEAD commit: 53ed6d8
+- Last commit title: fix(ci): update workflow rechunk group assertions and supply chain labels for proton-cachyos removal
+- Last commit date: 2026-07-20T11:53:50-04:00
 - CI workflow files: 8
 - Build script files: 20
 

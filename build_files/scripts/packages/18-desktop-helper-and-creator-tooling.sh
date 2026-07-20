@@ -129,6 +129,7 @@ if ! command -v pip >/dev/null 2>&1; then
 		echo "ERROR: python3-pip installed without pip3 on PATH." >&2
 		exit 1
 	fi
+	mkdir -p "$(realpath -m /usr/local)/bin"
 	ln -s "${pip3_path}" /usr/local/bin/pip
 fi
 pip --version
