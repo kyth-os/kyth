@@ -25,17 +25,8 @@ else
 fi
 WRAPPEREOF
 
-install -Dm 0644 /dev/stdin /usr/share/applications/antigravity.desktop <<'DESKTOPEOF'
-[Desktop Entry]
-Name=Google Antigravity
-Comment=Google Antigravity AI IDE
-GenericName=Text Editor
-Exec=/usr/bin/antigravity %F
-Icon=antigravity
-Type=Application
-StartupNotify=false
-StartupWMClass=antigravity
-Categories=Development;IDE;
-MimeType=text/plain;inode/directory;
-Keywords=antigravity;ide;ai;
-DESKTOPEOF
+# No GUI launcher is installed here: setup (triggered by the CLI wrapper above,
+# or `ujust ai-dev-setup`) can take several minutes on first run with no visible
+# progress in a menu-launched GUI app, which reads as a broken/hung icon.
+# distrobox-export (kyth-ai-dev setup) installs the real "Google Antigravity (on
+# kyth-ai-dev)" launcher once the container actually has Antigravity installed.

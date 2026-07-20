@@ -25,23 +25,8 @@ else
 fi
 WRAPPEREOF
 
-install -Dm 0644 /dev/stdin /usr/share/applications/code.desktop <<'DESKTOPEOF'
-[Desktop Entry]
-Name=Visual Studio Code
-Comment=Code Editing. Redefined.
-GenericName=Text Editor
-Exec=/usr/bin/code %F
-Icon=vscode
-Type=Application
-StartupNotify=false
-StartupWMClass=Code
-Categories=TextEditor;Development;IDE;
-MimeType=text/plain;inode/directory;
-Actions=new-empty-window;
-Keywords=vscode;
-
-[Desktop Action new-empty-window]
-Name=New Empty Window
-Exec=/usr/bin/code --new-window %F
-Icon=vscode
-DESKTOPEOF
+# No GUI launcher is installed here: setup (triggered by the CLI wrapper above,
+# or `ujust ai-dev-setup`) can take several minutes on first run with no visible
+# progress in a menu-launched GUI app, which reads as a broken/hung icon.
+# distrobox-export (kyth-ai-dev setup) installs the real "Visual Studio Code (on
+# kyth-ai-dev)" launcher once the container actually has VS Code installed.
