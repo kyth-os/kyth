@@ -66,6 +66,7 @@ class WizardPackageTests(unittest.TestCase):
         expected = {
             "window.py": "WizardWindow",
             "steps_welcome.py": "_WelcomeStepMixin",
+            "steps_machine.py": "_MachineStepMixin",
             "steps_apps.py": "_AppsStepMixin",
             "steps_gaming.py": "_GamingStepMixin",
             "steps_finish.py": "_FinishStepMixin",
@@ -82,10 +83,10 @@ class WizardPackageTests(unittest.TestCase):
         window_src = (wizard_dir / "window.py").read_text(encoding="utf-8")
         for method in (
             "_make_welcome_step",
+            "_make_machine_step",
             "_make_first_run_apps_step",
             "_make_gaming_step",
             "_make_finish_step",
-            "_wrap_step",
         ):
             # Methods live on mixins or shell; package as a whole must define them.
             found = any(

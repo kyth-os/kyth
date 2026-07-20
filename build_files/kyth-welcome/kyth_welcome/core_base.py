@@ -84,7 +84,6 @@ from .services.runtime import (  # noqa: F401
 # ── Constants still used by pages ─────────────────────────────────────────────
 _CLOUD_SYNC_CONFIG = os.path.expanduser("~/.config/kyth-cloud-sync.json")
 _SYNC_INTERVAL_MS = 5 * 60 * 1000  # 5 minutes
-_WIZARD_SENTINEL = os.path.expanduser("~/.config/kyth-welcome-done")
 _SMB_CONFIG = os.path.expanduser("~/.config/kyth-smb-shares.json")
 _SMB_CREDS_DIR = "/etc/kyth-smb-creds"
 
@@ -218,15 +217,8 @@ def _remove_autostart():
 
 
 def _is_first_run() -> bool:
-    return not os.path.exists(_WIZARD_SENTINEL)
-
-
-def _mark_wizard_done():
-    try:
-        os.makedirs(os.path.dirname(_WIZARD_SENTINEL), exist_ok=True)
-        open(_WIZARD_SENTINEL, "w").close()
-    except OSError:
-        pass
+    from .services.setup_state import is_first_run
+    return is_first_run()
 
 
 # ── Usage profile (everyday / gaming) ─────────────────────────────────────────

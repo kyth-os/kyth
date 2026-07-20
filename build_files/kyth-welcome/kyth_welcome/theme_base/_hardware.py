@@ -1,60 +1,64 @@
 """Hardware QSS styles."""
+from ..ui_tokens import (
+    KYTH_HAIRLINE, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_TEXT_FAINT,
+    STATUS_ERROR, STATUS_OK, STATUS_WARN,
+)
 
-HARDWARE_QSS = """
+HARDWARE_QSS = f"""
 /* ── Hardware cards ──────────────────────────────────────────────────────── */
-QFrame#hw-card-ok {
-    background: #151722;
-    border: 1px solid #26293a;
-    border-left: 4px solid #10b981;
+QFrame#hw-card-ok {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-left: 4px solid {STATUS_OK};
     border-radius: 8px;
-}
+}}
 
-QFrame#hw-card-ok:hover {
-    background: #1f2335;
-    border: 1px solid #2e324c;
-    border-left: 4px solid #10b981;
+QFrame#hw-card-ok:hover {{
+    background: {KYTH_SURFACE_RAISED};
+    border: 1px solid {KYTH_TEXT_FAINT};
+    border-left: 4px solid {STATUS_OK};
     border-radius: 8px;
-}
+}}
 
-QFrame#hw-card-warn {
-    background: #151722;
-    border: 1px solid #26293a;
-    border-left: 4px solid #f59e0b;
+QFrame#hw-card-warn {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-left: 4px solid {STATUS_WARN};
     border-radius: 8px;
-}
+}}
 
-QFrame#hw-card-warn:hover {
-    background: #1f2335;
-    border: 1px solid #2e324c;
-    border-left: 4px solid #f59e0b;
+QFrame#hw-card-warn:hover {{
+    background: {KYTH_SURFACE_RAISED};
+    border: 1px solid {KYTH_TEXT_FAINT};
+    border-left: 4px solid {STATUS_WARN};
     border-radius: 8px;
-}
+}}
 
-QFrame#hw-card-err {
-    background: #151722;
-    border: 1px solid #26293a;
-    border-left: 4px solid #e05f67;
+QFrame#hw-card-err {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-left: 4px solid {STATUS_ERROR};
     border-radius: 8px;
-}
+}}
 
-QFrame#hw-card-err:hover {
-    background: #1f2335;
-    border: 1px solid #2e324c;
-    border-left: 4px solid #e05f67;
+QFrame#hw-card-err:hover {{
+    background: {KYTH_SURFACE_RAISED};
+    border: 1px solid {KYTH_TEXT_FAINT};
+    border-left: 4px solid {STATUS_ERROR};
     border-radius: 8px;
-}
+}}
 
-QFrame#hw-card-dim {
-    background: #151722;
-    border: 1px solid #26293a;
-    border-left: 4px solid #66717f;
+QFrame#hw-card-dim {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-left: 4px solid {KYTH_TEXT_FAINT};
     border-radius: 8px;
-}
+}}
 
-QFrame#hw-card-dim:hover {
-    background: #1f2335;
-    border: 1px solid #2e324c;
-    border-left: 4px solid #66717f;
+QFrame#hw-card-dim:hover {{
+    background: {KYTH_SURFACE_RAISED};
+    border: 1px solid {KYTH_TEXT_FAINT};
+    border-left: 4px solid {KYTH_TEXT_FAINT};
     border-radius: 8px;
-}
+}}
 """

@@ -1,34 +1,35 @@
 """Global QSS styles."""
+from ..ui_tokens import KYTH_GROUND, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_TEXT
 
-GLOBAL_QSS = """
-* {
+GLOBAL_QSS = f"""
+* {{
     font-family: "Noto Sans", "Segoe UI", sans-serif;
     font-size: 13px;
-    color: #e8e8e8;
-}
+    color: {KYTH_TEXT};
+}}
 
 QMainWindow,
-QWidget#content-area {
-    background: #0c0e16;
-}
+QWidget#content-area {{
+    background: {KYTH_GROUND};
+}}
 
-QWidget {
+QWidget {{
     background: transparent;
-}
+}}
 
-QLabel {
+QLabel {{
     background: transparent;
-}
+}}
 
-QScrollArea {
+QScrollArea {{
     background: transparent;
     border: none;
-}
+}}
 
-QToolTip {
-    background: #151722;
-    color: #e8e8e8;
-    border: 1px solid #2e324c;
+QToolTip {{
+    background: {KYTH_SURFACE};
+    color: {KYTH_TEXT};
+    border: 1px solid {KYTH_HAIRLINE};
     padding: 4px 8px;
-}
+}}
 """

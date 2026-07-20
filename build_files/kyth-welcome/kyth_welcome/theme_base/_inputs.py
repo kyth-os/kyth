@@ -1,68 +1,77 @@
-"""Inputs QSS styles."""
+"""Inputs QSS styles.
 
-INPUTS_QSS = """
+Kyth Theme: tokenized. QCheckBox/QComboBox have no theme_hub_overlay.py
+equivalent and remain fully load-bearing (this is what styles the wizard's
+plain QCheckBox rows on the Get Apps step, for one).
+"""
+from ..ui_tokens import (
+    KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_SURFACE,
+    KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT,
+)
+
+INPUTS_QSS = f"""
 /* ── Inputs ──────────────────────────────────────────────────────────────── */
-QLineEdit {
-    background: #181b28;
-    border: 1px solid #26293a;
-    border-bottom: 1px solid #5c5c5c;
+QLineEdit {{
+    background: {KYTH_SURFACE_RAISED};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-bottom: 1px solid {KYTH_TEXT_FAINT};
     border-radius: 5px;
     padding: 7px 11px;
-    color: #e8e8e8;
-    selection-background-color: #1c253d;
-}
+    color: {KYTH_TEXT};
+    selection-background-color: {KYTH_HAIRLINE};
+}}
 
-QLineEdit:focus {
-    background: #1f1f1f;
-    border-bottom: 2px solid #8fb8ff;
-}
+QLineEdit:focus {{
+    background: {KYTH_SURFACE_RAISED};
+    border-bottom: 2px solid {KYTH_BLUE_LIGHT};
+}}
 
-QCheckBox {
-    color: #e8e8e8;
+QCheckBox {{
+    color: {KYTH_TEXT};
     spacing: 9px;
-}
+}}
 
-QCheckBox::indicator {
+QCheckBox::indicator {{
     width: 16px;
     height: 16px;
-    background: #181b28;
-    border: 1px solid #5c5c5c;
+    background: {KYTH_SURFACE_RAISED};
+    border: 1px solid {KYTH_TEXT_FAINT};
     border-radius: 4px;
-}
+}}
 
-QCheckBox::indicator:checked {
-    background: #4f8cff;
-    border-color: #4f8cff;
-}
+QCheckBox::indicator:checked {{
+    background: {KYTH_BLUE};
+    border-color: {KYTH_BLUE};
+}}
 
-QCheckBox::indicator:hover {
-    border-color: #8fb8ff;
-}
+QCheckBox::indicator:hover {{
+    border-color: {KYTH_BLUE_LIGHT};
+}}
 
-QComboBox {
-    background: #181b28;
-    border: 1px solid #26293a;
+QComboBox {{
+    background: {KYTH_SURFACE_RAISED};
+    border: 1px solid {KYTH_HAIRLINE};
     border-radius: 5px;
     padding: 7px 11px;
-    color: #e8e8e8;
+    color: {KYTH_TEXT};
     min-width: 80px;
-}
+}}
 
-QComboBox:hover {
-    border-color: #2e324c;
-    background: #1f2335;
-}
+QComboBox:hover {{
+    border-color: {KYTH_TEXT_FAINT};
+    background: {KYTH_SURFACE_RAISED};
+}}
 
-QComboBox::drop-down {
+QComboBox::drop-down {{
     border: none;
     width: 22px;
-}
+}}
 
-QComboBox QAbstractItemView {
-    background: #151722;
-    border: 1px solid #26293a;
-    color: #e8e8e8;
-    selection-background-color: #181b28;
+QComboBox QAbstractItemView {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    color: {KYTH_TEXT};
+    selection-background-color: {KYTH_SURFACE_RAISED};
     outline: none;
-}
+}}
 """

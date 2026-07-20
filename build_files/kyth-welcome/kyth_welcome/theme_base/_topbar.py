@@ -1,104 +1,113 @@
-"""Topbar QSS styles."""
+"""Topbar QSS styles.
 
-TOPBAR_QSS = """
+Kyth Theme: same token pass as _sidebar.py — the topbar now shares surface
+and hairline tone with the wizard's footer bar (both KYTH_SURFACE on
+KYTH_HAIRLINE), and the search focus state uses KYTH_BLUE to match the
+wizard's accent language instead of a separate blue.
+"""
+from ..ui_tokens import (
+    KYTH_BLUE, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_TEXT,
+    KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
+)
+
+TOPBAR_QSS = f"""
 /* ── Top command bar ─────────────────────────────────────────────────────── */
-QWidget#topbar {
-    background: #12141f;
-    border-bottom: 1px solid #1e2230;
-}
+QWidget#topbar {{
+    background: {KYTH_SURFACE};
+    border-bottom: 1px solid {KYTH_HAIRLINE};
+}}
 
-QPushButton#topbar-nav {
+QPushButton#topbar-nav {{
     background: transparent;
-    color: #e8e8e8;
+    color: {KYTH_TEXT};
     border: none;
     border-radius: 5px;
     padding: 4px 0;
     font-size: 15px;
     font-weight: 400;
-}
+}}
 
-QPushButton#topbar-nav:hover {
-    background: #181b28;
-}
+QPushButton#topbar-nav:hover {{
+    background: {KYTH_SURFACE_RAISED};
+}}
 
-QPushButton#topbar-nav:pressed {
-    background: #1e2230;
-}
+QPushButton#topbar-nav:pressed {{
+    background: {KYTH_HAIRLINE};
+}}
 
-QPushButton#topbar-nav:disabled {
-    color: #5c5c5c;
+QPushButton#topbar-nav:disabled {{
+    color: {KYTH_TEXT_FAINT};
     background: transparent;
-}
+}}
 
-QPushButton#breadcrumb-link {
+QPushButton#breadcrumb-link {{
     background: transparent;
-    color: #e8e8e8;
+    color: {KYTH_TEXT};
     border: none;
     border-radius: 5px;
     padding: 4px 8px;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
     text-align: left;
-}
+}}
 
-QPushButton#breadcrumb-link:hover {
-    background: #181b28;
-    color: #ffffff;
-}
+QPushButton#breadcrumb-link:hover {{
+    background: {KYTH_SURFACE_RAISED};
+    color: {KYTH_TEXT};
+}}
 
-QLabel#breadcrumb {
-    color: #a6a6a6;
+QLabel#breadcrumb {{
+    color: {KYTH_TEXT_FAINT};
     font-size: 13px;
-}
+}}
 
-QLineEdit#search-box {
-    background: #181b28;
-    color: #e8e8e8;
-    border: 1px solid #26293a;
-    border-bottom: 1px solid #5c5c5c;
+QLineEdit#search-box {{
+    background: {KYTH_SURFACE_RAISED};
+    color: {KYTH_TEXT};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-bottom: 1px solid {KYTH_TEXT_FAINT};
     border-radius: 5px;
     padding: 6px 12px;
-}
+}}
 
-QLineEdit#search-box:focus {
-    background: #1f1f1f;
-    border-bottom: 2px solid #8fb8ff;
-}
+QLineEdit#search-box:focus {{
+    background: {KYTH_SURFACE_RAISED};
+    border-bottom: 2px solid {KYTH_BLUE};
+}}
 
-QFrame#search-results-panel {
-    background: #12141f;
-    border-bottom: 1px solid #1e2230;
-}
+QFrame#search-results-panel {{
+    background: {KYTH_SURFACE};
+    border-bottom: 1px solid {KYTH_HAIRLINE};
+}}
 
-QLabel#search-results-title {
-    color: #ffffff;
+QLabel#search-results-title {{
+    color: {KYTH_TEXT};
     font-size: 12px;
     font-weight: 700;
-}
+}}
 
-QLabel#search-results-hint {
-    color: #8a8a8a;
+QLabel#search-results-hint {{
+    color: {KYTH_TEXT_FAINT};
     font-size: 11px;
-}
+}}
 
-QPushButton#search-result {
-    background: #151722;
-    color: #dcdcdc;
-    border: 1px solid #26293a;
+QPushButton#search-result {{
+    background: {KYTH_SURFACE_RAISED};
+    color: {KYTH_TEXT_MUTED};
+    border: 1px solid {KYTH_HAIRLINE};
     border-radius: 6px;
     padding: 8px 12px;
     text-align: left;
     font-size: 12px;
-    line-height: 1.35;
-}
+}}
 
-QPushButton#search-result:hover {
-    background: #181b28;
-    color: #ffffff;
-    border-color: #2e324c;
-}
+QPushButton#search-result:hover {{
+    background: {KYTH_HAIRLINE};
+    color: {KYTH_TEXT};
+    border-color: {KYTH_BLUE};
+}}
 
-QPushButton#search-result:pressed {
-    background: #0c0e16;
-}
+QPushButton#search-result:pressed {{
+    background: {KYTH_SURFACE};
+}}
 """

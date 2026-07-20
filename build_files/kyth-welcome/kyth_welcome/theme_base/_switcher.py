@@ -1,38 +1,42 @@
 """Switcher QSS styles."""
+from ..ui_tokens import (
+    KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_SURFACE_RAISED,
+    KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
+)
 
-SWITCHER_QSS = """
+SWITCHER_QSS = f"""
 /* ── Gaming section switcher ─────────────────────────────────────────────── */
-QFrame#gaming-section-switcher {
+QFrame#gaming-section-switcher {{
     background: transparent;
     border: none;
-}
+}}
 
-QWidget#gaming-section-row {
+QWidget#gaming-section-row {{
     background: transparent;
-}
+}}
 
 QPushButton#gaming-section,
-QPushButton#gaming-section-active {
+QPushButton#gaming-section-active {{
     border-radius: 5px;
     padding: 7px 14px;
     font-weight: 600;
-}
+}}
 
-QPushButton#gaming-section {
-    background: #151722;
-    color: #a6a6a6;
-    border: 1px solid #26293a;
-}
+QPushButton#gaming-section {{
+    background: {KYTH_SURFACE};
+    color: {KYTH_TEXT_MUTED};
+    border: 1px solid {KYTH_HAIRLINE};
+}}
 
-QPushButton#gaming-section:hover {
-    background: #181b28;
-    color: #ffffff;
-    border-color: #2e324c;
-}
+QPushButton#gaming-section:hover {{
+    background: {KYTH_SURFACE_RAISED};
+    color: {KYTH_TEXT};
+    border-color: {KYTH_TEXT_FAINT};
+}}
 
-QPushButton#gaming-section-active {
-    background: #1c253d;
-    color: #ffffff;
-    border: 1px solid #8fb8ff;
-}
+QPushButton#gaming-section-active {{
+    background: {KYTH_SURFACE_RAISED};
+    color: {KYTH_TEXT};
+    border: 1px solid {KYTH_BLUE_LIGHT};
+}}
 """

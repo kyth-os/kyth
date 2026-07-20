@@ -20,10 +20,11 @@ class WizardImportTests(unittest.TestCase):
     def test_wizard_runtime_helpers_are_imported(self):
         """Every helper used after the wizard refactor must be in scope."""
         required = {
-            "window.py": {"QIcon", "_divider", "_save_profile"},
+            "window.py": {"QIcon", "QScrollArea", "_save_profile"},
             "steps_apps.py": {"QFrame", "QScrollArea", "QSizePolicy", "Qt"},
             "steps_gaming.py": {"_divider"},
-            "steps_welcome.py": {"_command_stdout", "_divider"},
+            "steps_welcome.py": {"_divider"},
+            "steps_machine.py": {"_command_stdout"},
         }
         for filename, expected in required.items():
             with self.subTest(filename=filename):

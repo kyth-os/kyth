@@ -1,10 +1,11 @@
 """Divider QSS styles."""
+from ..ui_tokens import KYTH_HAIRLINE
 
-DIVIDER_QSS = """
+DIVIDER_QSS = f"""
 /* ── Divider ─────────────────────────────────────────────────────────────── */
-QFrame#divider {
-    background: #1e2230;
+QFrame#divider {{
+    background: {KYTH_HAIRLINE};
     max-height: 1px;
     border: none;
-}
+}}
 """

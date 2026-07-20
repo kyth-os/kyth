@@ -14,6 +14,7 @@ from .services.launch import reboot
 from .services.process import _command_stdout, _run_command
 from .services.software import _is_flatpak_installed as _flatpak_installed
 from .core_base import _current_branch
+from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (
     FIRST_WEEK_MAX_DAYS as _FIRST_WEEK_MAX_DAYS,
     FIRST_WEEK_MIN_DAYS as _FIRST_WEEK_MIN_DAYS,
@@ -85,6 +86,11 @@ class WelcomePage(Page):
             status_pill.setObjectName("glowing-pill-ok")
         hero_layout.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
         self._add(hero_card)
+
+        # ── 1b. Finish setup (resumable first-boot wizard steps) ──────────────
+        incomplete = [] if _IS_LIVE else incomplete_steps(self._profile)
+        if incomplete:
+            self._add(self._make_setup_resume_card(incomplete))
 
         # ── 2. Segmented Focus Vibe Selector ──────────────────────────────────
         vibe_row = QWidget()
@@ -346,6 +352,40 @@ class WelcomePage(Page):
         card = self._make_ntfs_library_card(list(libs))
         self._layout.insertWidget(self._ntfs_library_insert_index, card)
         _restyle(card)
+
+    def _make_setup_resume_card(self, incomplete: list[tuple[str, str]]) -> QFrame:
+        card, layout = _make_card("card-accent-warn")
+        title = QLabel("Finish setup")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+
+        body = QLabel(
+            "A few things from first-boot setup are still open. Pick up where you left off "
+            "whenever you're ready."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+
+        for key, status in incomplete:
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            badge = QLabel("Skipped" if status == "skipped" else "Not started")
+            badge.setObjectName("task-status-warn" if status == "skipped" else "task-status-idle")
+            row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+
+            label = QLabel(STEP_LABELS.get(key, key))
+            label.setObjectName("card-copy")
+            row.addWidget(label, 1)
+
+            page_key = STEP_RESUME_PAGE.get(key)
+            btn = QPushButton("Resume" if page_key else "Not available yet")
+            btn.setEnabled(bool(page_key))
+            if page_key:
+                btn.clicked.connect(lambda _=False, k=page_key: self._navigate(k))
+            row.addWidget(btn, 0, Qt.AlignmentFlag.AlignTop)
+            layout.addLayout(row)
+        return card
 
     def _make_first_week_card(self, days: int) -> QFrame:
         card, layout = _make_card("card-accent-ok")

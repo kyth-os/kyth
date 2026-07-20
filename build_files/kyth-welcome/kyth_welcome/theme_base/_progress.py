@@ -1,18 +1,19 @@
 """Progress QSS styles."""
+from ..ui_tokens import KYTH_BLUE, KYTH_SURFACE_RAISED
 
-PROGRESS_QSS = """
+PROGRESS_QSS = f"""
 /* ── Progress bar ────────────────────────────────────────────────────────── */
-QProgressBar {
-    background: #181b28;
+QProgressBar {{
+    background: {KYTH_SURFACE_RAISED};
     border: none;
     border-radius: 3px;
     max-height: 5px;
     text-align: center;
     color: transparent;
-}
+}}
 
-QProgressBar::chunk {
-    background: #4f8cff;
+QProgressBar::chunk {{
+    background: {KYTH_BLUE};
     border-radius: 3px;
-}
+}}
 """
