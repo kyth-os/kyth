@@ -156,9 +156,9 @@ setup() {
 
         # Configure Microsoft & Google RPM repos inside container
         sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc || true
-        sudo sh -c '\''echo -e "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo'\''
-        sudo sh -c '\''echo -e "[azure-cli]\nname=Azure CLI\nbaseurl=https://packages.microsoft.com/yumrepos/azure-cli\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/azure-cli.repo'\''
-        sudo sh -c '\''echo -e "[antigravity-rpm]\nname=Antigravity RPM Repository\nbaseurl=https://us-central1-yum.pkg.dev/projects/antigravity-auto-updater-dev/antigravity-rpm\nenabled=1\ngpgcheck=0\nrepo_gpgcheck=0" > /etc/yum.repos.d/antigravity.repo'\''
+        printf "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc\n" | sudo tee /etc/yum.repos.d/vscode.repo >/dev/null
+        printf "[azure-cli]\nname=Azure CLI\nbaseurl=https://packages.microsoft.com/yumrepos/azure-cli\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc\n" | sudo tee /etc/yum.repos.d/azure-cli.repo >/dev/null
+        printf "[antigravity-rpm]\nname=Antigravity RPM Repository\nbaseurl=https://us-central1-yum.pkg.dev/projects/antigravity-auto-updater-dev/antigravity-rpm\nenabled=1\ngpgcheck=0\nrepo_gpgcheck=0\n" | sudo tee /etc/yum.repos.d/antigravity.repo >/dev/null
 
         # mimalloc: the host sets LD_PRELOAD=/usr/lib64/libmimalloc.so.2
         # session-wide (sysconfig/46-mimalloc-preload.sh), which distrobox
@@ -260,6 +260,11 @@ pull_model() {
 		exit 1
 	fi
 	local model="${1:-qwen2.5-coder}"
+	if ! enter_box bash -lc 'pgrep -x ollama >/dev/null 2>&1'; then
+		echo "Starting background Ollama server before pulling model..."
+		start
+		sleep 2
+	fi
 	echo "Pulling AI model '${model}' into ${box} (${model_dir})..."
 	enter_box bash -lc "OLLAMA_MODELS='${model_dir}' ollama pull '${model}'"
 }
