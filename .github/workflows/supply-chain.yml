@@ -126,7 +126,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           CURRENT_DIGEST="${SOURCE_DIGEST}"
-          [[ "${CURRENT_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${CURRENT_DIGEST}"
           [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           LABELS_JSON="$(docker buildx imagetools inspect "${IMAGE}@${CURRENT_DIGEST}" --format '{{ json .Image.Config.Labels }}')"
           CURRENT_VERSION="$(jq -r '."org.opencontainers.image.version"' <<< "${LABELS_JSON}")"
@@ -142,7 +142,7 @@ jobs:
           [[ "${CURRENT_VERSION}" =~ ^${TAG}\.[0-9]{8}\.[0-9]+\.[0-9]+\.[0-9a-f]{8}$ ]]
           test "${BASE_NAME}" = "${IMAGE}:base-${TAG}"
           [[ "${BASE_NAME}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+$ ]]
-          [[ "${BASE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${BASE_DIGEST}"
           [[ "${UPSTREAM_BASE}" =~ ^ghcr\.io/ublue-os/kinoite-main:44@sha256:[0-9a-f]{64}$ ]]
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
           test "${KERNEL_FLAVOR}" = fedora

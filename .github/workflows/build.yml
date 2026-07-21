@@ -126,8 +126,7 @@ jobs:
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Maximize build space
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+        uses: ./.github/actions/free-disk-space
 
       - name: Prepare Docker auth config
         run: |
@@ -221,7 +220,7 @@ jobs:
           exec 3>>"${GITHUB_OUTPUT}"
           IMAGE="ghcr.io/ublue-os/kinoite-main:44"
           DIGEST="$(docker buildx imagetools inspect "${IMAGE}" --format '{{ .Manifest.Digest }}')"
-          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${DIGEST}"
           echo "image=${IMAGE}" >&3
           echo "digest=${DIGEST}" >&3
           echo "pinned=${IMAGE}@${DIGEST}" >&3
@@ -246,7 +245,7 @@ jobs:
             build_base/
 
           BASE_DIGEST="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/base-build-metadata.json")"
-          [[ "${BASE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${BASE_DIGEST}"
           echo "image=${BASE_IMAGE_REF}" >&3
           echo "digest=${BASE_DIGEST}" >&3
           echo "pinned=${BASE_IMAGE_REF}@${BASE_DIGEST}" >&3
@@ -309,7 +308,7 @@ jobs:
             .
 
           DIGEST="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/final-build-metadata.json")"
-          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${DIGEST}"
           REVISION="$(docker buildx imagetools inspect "${RAW_IMAGE_REF}@${DIGEST}" --format '{{ index .Image.Config.Labels "org.opencontainers.image.revision" }}')"
           test "${REVISION}" = "${STEPS_CHECKOUT_SHA_OUTPUTS_SHA}"
           echo "image=${IMAGE_FULL}" >&3
@@ -459,7 +458,7 @@ jobs:
             "docker://${PRIMARY_REF}"
 
           DIGEST="$(cat "${DIGEST_FILE}")"
-          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${DIGEST}"
           for tag in ${TAGS}; do
             if [[ "${tag}" != "${PRIMARY_TAG}" ]]; then
               docker buildx imagetools create \

@@ -19,6 +19,17 @@ sudoif command *args:
     }
     sudoif {{ command }} {{ args }}
 
+# Find the first free TCP port at or after start_port (checked via `ss`).
+[private]
+_find-free-port start_port:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port={{ start_port }}
+    while grep -q ":${port}\b" <<< "$(ss -tunal)"; do
+        port=$(( port + 1 ))
+    done
+    echo "${port}"
+
 # Command: _rootful_load_image
 # Description: Ensures the target image is available to the root Docker daemon.
 [private]
@@ -89,10 +100,7 @@ _build-bib $target_image $tag $type $config: (_rootful_load_image target_image t
 
         args+="--log-level=debug "
 
-        REG_PORT=5099
-        while grep -q ":${REG_PORT}\b" <<< "$(ss -tunal)"; do
-            REG_PORT=$(( REG_PORT + 1 ))
-        done
+        REG_PORT=$(just _find-free-port 5099)
         docker run -d --rm --name "${REG_NAME}" \
             -p "127.0.0.1:${REG_PORT}:5000" docker.io/library/registry:2
         BIB_IMAGE_REF="localhost:${REG_PORT}/${target_image##*/}:${tag}"

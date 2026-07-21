@@ -111,26 +111,17 @@ jobs:
           echo "artifact_name=${ARTIFACT_NAME}" >&3
 
       - name: Prepare live ISO build space
+        # /, /mnt, Docker, and rootful Podman all share /dev/root on GitHub's
+        # hosted runner. Reclaim both preinstalled tool payloads and Docker data
+        # before allocating the sparse btrfs image used by the ISO build.
+        uses: ./.github/actions/free-disk-space
+        with:
+          report: 'true'
+          extra-docker-cleanup: 'true'
+
+      - name: Verify available space for live ISO build
         run: |
           set -euo pipefail
-
-          show_space() {
-            echo "==> Disk space: $1"
-            df -h / /mnt /var/lib/containers 2>/dev/null || true
-          }
-
-          show_space "before cleanup"
-
-          # /, /mnt, Docker, and rootful Podman all share /dev/root on GitHub's
-          # hosted runner. Reclaim both preinstalled tool payloads and Docker data
-          # before allocating the sparse btrfs image used by the ISO build.
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
-          sudo docker system prune --all --force --volumes || true
-          sudo swapoff -a || true
-          sudo rm -f /mnt/swapfile || true
-
-          show_space "after cleanup"
-
           available_kb="$(df --output=avail /mnt | awk 'NR == 2 {print $1}')"
           # podman-storage.img is intentionally sparse: its 65 GiB logical size
           # does not need 65 GiB of physical backing. Successful builds produce
@@ -175,7 +166,7 @@ jobs:
           METADATA="${RUNNER_TEMP}/build-metadata/image.json"
           jq -e . "${METADATA}" >/dev/null
           DIGEST="$(jq -r .digest "${METADATA}")"
-          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${DIGEST}"
           echo "Pinned source digest from build metadata: ${DIGEST}"
           echo "digest=${DIGEST}" >&3
 
@@ -189,7 +180,7 @@ jobs:
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
           TAGGED_IMAGE="${IMAGE}:${SOURCE_TAG}"
           if [[ -n "${EXPECTED_DIGEST}" ]]; then
-            [[ "${EXPECTED_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+            build_files/scripts/validate-digest.sh "${EXPECTED_DIGEST}"
             DIGEST="${EXPECTED_DIGEST}"
             # Confirm the immutable manifest exists and belongs to this repository.
             sudo skopeo inspect "docker://${IMAGE}@${DIGEST}" >/dev/null
@@ -384,7 +375,7 @@ jobs:
           print(m.group(1) if m else '', end='')
           " <<< "${RELEASE_BODY}" || true)"
           fi
-          if [[ -z "${PREV_DIGEST}" || ! "${PREV_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          if [[ -z "${PREV_DIGEST}" ]] || ! build_files/scripts/validate-digest.sh "${PREV_DIGEST}" 2>/dev/null; then
             echo "No previous source digest found; CVE diff will be skipped"
             exit 0
           fi
@@ -476,10 +467,9 @@ jobs:
           echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
 
       - name: Free disk space
-        run: |
-          df -h
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
-          df -h
+        uses: ./.github/actions/free-disk-space
+        with:
+          report: 'true'
 
       - name: Download built ISO
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

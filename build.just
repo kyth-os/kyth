@@ -103,12 +103,13 @@ build-live-iso source_tag="latest":
     set -euo pipefail
     SOURCE_TAG={{ source_tag }} bash build_files/build-live-iso.sh
 
+# Identical to build-live-iso — build_files/build-live-iso.sh always does a
+# full rebuild, there's no separate incremental path. Kept as its own recipe
+# name for discoverability ("rebuild" reads more naturally once a live ISO
+# already exists); delegates so there's only one real implementation.
 # Rebuild the live ISO payload and assemble it with Titanoboa.
 [group('Build Virtual Machine Image')]
-rebuild-live-iso source_tag="latest":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    SOURCE_TAG={{ source_tag }} bash build_files/build-live-iso.sh
+rebuild-live-iso source_tag="latest": (build-live-iso source_tag)
 
 # Build a live ISO from localhost/kyth:latest for local QEMU testing.
 [group('Build Virtual Machine Image')]

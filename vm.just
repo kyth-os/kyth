@@ -17,10 +17,7 @@ _run-vm $target_image $tag $type $config:
         just "build-${type}" "$target_image" "$tag"
     fi
 
-    port=8006
-    while grep -q ":${port}" <<< $(ss -tunalp); do
-        port=$(( port + 1 ))
-    done
+    port=$(just _find-free-port 8006)
     echo "Using Port: ${port}"
     echo "Connect to http://localhost:${port}"
 
@@ -63,10 +60,7 @@ run-live-iso source_tag="latest":
         just build-live-iso {{ source_tag }}
     fi
 
-    port=8006
-    while grep -q ":${port}" <<< $(ss -tunalp); do
-        port=$(( port + 1 ))
-    done
+    port=$(just _find-free-port 8006)
     echo "Using Port: ${port}"
     echo "Connect to http://localhost:${port}"
 
