@@ -13,11 +13,28 @@ install_available_optional_packages() {
 	local -a available_packages=()
 
 	# One metadata load for all packages instead of N individual queries.
-	local available_set
-	available_set=$(dnf5 repoquery --available --qf '%{name}\n' "$@" 2>/dev/null | sort -u)
+	# %{arch} is included because some optional packages are arch-suffixed
+	# (e.g. "extest.i686") — the RPM Name tag alone never carries an arch
+	# qualifier, so matching on %{name} alone always reports those as
+	# unavailable even when they exist in configured repos.
+	local available_set available_names
+	available_set=$(dnf5 repoquery --available --qf '%{name}.%{arch}\n' "$@" 2>/dev/null | sort -u)
+	available_names=$(sed -E 's/\.[^.]+$//' <<<"${available_set}" | sort -u)
 
 	for pkg in "$@"; do
-		if grep -qx "${pkg}" <<<"${available_set}"; then
+		# Only treat a dotted suffix as an arch qualifier when it's an actual
+		# RPM arch (e.g. "extest.i686") — plenty of real package names contain
+		# dots too (python3.11, boost1.78, ...) and must not be misread as
+		# "name.arch".
+		if [[ "${pkg}" =~ \.(x86_64|i686|i386|noarch|aarch64|armv7hl|ppc64le|s390x|src)$ ]]; then
+			# Caller passed an arch-qualified name — match the exact
+			# name.arch pair dnf5 reported.
+			if grep -qx "${pkg}" <<<"${available_set}"; then
+				available_packages+=("${pkg}")
+			else
+				echo "optional ${group_name} package '${pkg}' is unavailable in configured repos; skipping."
+			fi
+		elif grep -qx "${pkg}" <<<"${available_names}"; then
 			available_packages+=("${pkg}")
 		else
 			echo "optional ${group_name} package '${pkg}' is unavailable in configured repos; skipping."

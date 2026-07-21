@@ -55,8 +55,21 @@ fi
 # ── Sign the custom kernel ───────────────────────────────────────────────────
 command -v sbsign >/dev/null
 echo "secureboot: signing ${VMLINUZ} (kernel ${KVER})"
-KEY_MD5=$(openssl rsa -in "${MOK_KEY_FILE}" -noout -modulus 2>/dev/null | openssl md5 | awk '{print $2}' || echo "UNREADABLE")
-CERT_MD5=$(openssl x509 -in "${CERT}" -noout -modulus 2>/dev/null | openssl md5 | awk '{print $2}' || echo "UNREADABLE")
+# Check each openssl modulus read on its own exit status rather than piping
+# straight into `openssl md5 | awk`: under pipefail, a trailing `|| echo
+# UNREADABLE` only fires if the LAST command in the pipe fails, but md5/awk
+# happily hash empty input and "succeed" even when the modulus read itself
+# failed — masking the real cause with a misleading (if harmless) hash value.
+if KEY_MODULUS=$(openssl rsa -in "${MOK_KEY_FILE}" -noout -modulus 2>/dev/null); then
+	KEY_MD5=$(openssl md5 <<<"${KEY_MODULUS}" | awk '{print $2}')
+else
+	KEY_MD5="UNREADABLE"
+fi
+if CERT_MODULUS=$(openssl x509 -in "${CERT}" -noout -modulus 2>/dev/null); then
+	CERT_MD5=$(openssl md5 <<<"${CERT_MODULUS}" | awk '{print $2}')
+else
+	CERT_MD5="UNREADABLE"
+fi
 echo "secureboot: key modulus md5=${KEY_MD5}"
 echo "secureboot: cert modulus md5=${CERT_MD5}"
 if [[ "${KEY_MD5}" != "${CERT_MD5}" ]]; then

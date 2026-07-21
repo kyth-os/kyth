@@ -45,8 +45,12 @@ ln -sf /etc/systemd/system/display-manager.service /etc/systemd/system/graphical
 ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
 
 # Service masks/disables that are intentionally runtime-layer policy.
+# NetworkManager-wait-online.service is deliberately NOT disabled here — it is
+# enabled later in branding/31-ujust-recipes.sh (which runs after this script
+# in the Dockerfile) so kyth-flathub-setup/kyth-default-flatpaks don't race DNS
+# at boot. Do not re-add a disable for it here; the two would silently fight
+# over the same unit depending on layer order.
 systemctl mask systemd-remount-fs.service
-systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl disable packagekit.service 2>/dev/null || true
 systemctl disable rpm-ostree-countme.timer 2>/dev/null || true
 systemctl disable fedora-atomic-desktop-appstream-cache-refresh.service 2>/dev/null || true

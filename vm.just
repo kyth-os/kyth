@@ -221,7 +221,7 @@ spawn-vm rebuild="0" type="qcow2" ram="6G":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    [ "{{ rebuild }}" -eq 1 ] && echo "Rebuilding the ISO" && just build-vm {{ rebuild }} {{ type }}
+    [ "{{ rebuild }}" -eq 1 ] && echo "Rebuilding the {{ type }} image" && just build-{{ type }}
 
     systemd-vmspawn \
       -M "bootc-image" \

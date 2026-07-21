@@ -734,14 +734,11 @@ function showCreateDialog() {
       }),
     }).then(r => r.json()).then(j => {
       if (j.ok) {
-        if (mountpoint) {
-          // Also set the mountpoint after creation
-          apiFetch('/api/disk/set-mountpoint', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ disk: S.disk.name, partition: '', mountpoint }),
-          }).catch(() => {});
-        }
+        // The mountpoint is already part of the /api/disk/create request body
+        // above and stored on the create op server-side — no follow-up
+        // set-mountpoint call is needed (and none is possible yet: the
+        // partition doesn't have a device name until commit() actually runs
+        // parted, so a call here could only ever target a placeholder name).
         loadPendingOps();
         loadPartitions();
         renderDiskLayouts();

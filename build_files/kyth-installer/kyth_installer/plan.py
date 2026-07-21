@@ -172,6 +172,22 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
             raise RuntimeError("No root partition (/) found in the committed partition layout.")
         if _parent_disk(target) != disk:
             raise RuntimeError("The root partition does not belong to the selected disk.")
+        # Re-validate the resolved root partition against the post-commit disk
+        # state, same as the "alongside" branch above. journal.root_partition
+        # is derived from a set-mountpoint op and is not necessarily the same
+        # partition a create/format op in the journal actually touched, so it
+        # could point at a pre-existing, still-mounted/in-use partition on the
+        # same disk — never trust it without re-checking here.
+        partitions = {p["name"]: p for p in list_partitions(disk)}
+        part = partitions.get(target)
+        if not part:
+            raise RuntimeError("The root partition was not found during the final disk scan.")
+        if part.get("efi"):
+            raise RuntimeError("The EFI system partition cannot be used as the KythOS root partition.")
+        if part.get("current") or part.get("in_use"):
+            raise RuntimeError("The selected root partition is mounted or has active encrypted/LVM mappings.")
+        if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
+            raise RuntimeError(f"The root partition is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
         if not find_efi_partition(disk):
             raise RuntimeError("Manual installation requires an EFI system partition on the system. Create one in the partition editor.")
         return disk, target

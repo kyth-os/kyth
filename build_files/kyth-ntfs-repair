@@ -69,6 +69,15 @@ echo "${partitions}" | while read -r line; do
 					log "  Moving existing NTFS compatdata folder to backup..."
 					mv "${target_cd}" "${target_cd}.bak.$(date +%s)" 2>/dev/null || true
 				fi
+				# Every NTFS library gets symlinked into the same native
+				# compatdata pool, keyed only by App ID — if another library
+				# (native or a different NTFS drive) already put a prefix
+				# there, this library now shares it rather than getting its
+				# own. Surface that instead of merging silently.
+				if [[ -n "$(find "${native_compatdata}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+					log "  NOTE: ${native_compatdata} already holds Proton prefixes from another library."
+					log "  Any App ID present in both will now share one Proton prefix instead of having separate ones."
+				fi
 				log "  Symlinking compatdata -> ${native_compatdata}"
 				ln -sfn "${native_compatdata}" "${target_cd}"
 			fi

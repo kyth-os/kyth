@@ -1,11 +1,17 @@
 # shellcheck shell=bash
 # ── Proton-CachyOS runtime update path ────────────────────────────────────────
-# The weekly timer installs new Proton-CachyOS to /var/lib/kyth/proton-cachyos/
-# (/var is writable on an immutable system). Tell Steam to check this path in
-# addition to the build-time install in /usr/share/steam/compatibilitytools.d/.
-# The directory must exist at first boot — Lutris (and Steam) call os.stat() on
-# every path in STEAM_EXTRA_COMPAT_TOOLS_PATHS and crash with FileNotFoundError
-# if any are missing, even before the update service has run for the first time.
+# The weekly kyth-proton-cachyos-update.timer installs Proton-CachyOS to
+# /var/lib/kyth/proton-cachyos/ (/var is writable on an immutable system) and
+# is the ONLY source of Proton-CachyOS on this image — there is no build-time
+# install in /usr/share/steam/compatibilitytools.d/ (that RUN layer was
+# removed from the Dockerfile). This means a fresh install has no
+# Proton-CachyOS until the timer first succeeds over the network, and the live
+# ISO never gets one at all (the timer is explicitly disabled there — see
+# installer/build.sh's kyth-proton-cachyos-update.timer disable).
+# The directory must exist at first boot regardless — Lutris (and Steam) call
+# os.stat() on every path in STEAM_EXTRA_COMPAT_TOOLS_PATHS and crash with
+# FileNotFoundError if any are missing, even before the update service has run
+# for the first time.
 mkdir -p /var/lib/kyth/proton-cachyos
 chmod 1777 /var/lib/kyth/proton-cachyos
 mkdir -p /usr/lib/tmpfiles.d

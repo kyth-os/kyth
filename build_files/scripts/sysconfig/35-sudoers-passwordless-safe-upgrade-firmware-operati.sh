@@ -27,7 +27,12 @@ install -m 0440 /dev/stdin /etc/sudoers.d/kyth-upgrade <<'SUDOEOF'
 # distrobox enter --root internally calls "sudo podman exec/start/inspect" to
 # manage rootful containers.  From a KDE app launcher (no TTY) sudo cannot
 # prompt for a password, so GUI apps like zenmap would silently fail.
-# Granting blanket podman access here is equivalent to the user's existing
-# full sudo access — it only removes the interactive prompt for GUI launches.
-%wheel ALL=(root) NOPASSWD: /usr/bin/podman
+# Scoped to the exact subcommands distrobox --root uses — NOT a blanket grant.
+# Unlike the other lines above, "podman exec *"/"podman start *" can still run
+# arbitrary commands inside an existing rootful container, but that is a much
+# smaller surface than unrestricted /usr/bin/podman (which also allows
+# "podman run --privileged -v /:/host ...", i.e. unconditional root).
+%wheel ALL=(root) NOPASSWD: /usr/bin/podman inspect *
+%wheel ALL=(root) NOPASSWD: /usr/bin/podman start *
+%wheel ALL=(root) NOPASSWD: /usr/bin/podman exec *
 SUDOEOF

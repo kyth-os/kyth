@@ -68,12 +68,6 @@ STEAM_DISABLE_BROWSER_SUBPROCESS=1
 MESA_SHADER_CACHE_MAX_SIZE=10G
 PROTONEOF
 
-mkdir -p /etc/flatpak/overrides
-cat >/etc/flatpak/overrides/com.obsproject.Studio <<'OBSEOF'
-[Environment]
-OBS_VKCAPTURE=1
-OBSEOF
-
 mkdir -p /etc/profile.d /etc/fish/conf.d
 
 cat >/etc/profile.d/brew.sh <<'BREWSHEOF'

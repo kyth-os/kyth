@@ -116,6 +116,16 @@ class Journal:
         return list(self.ops)
 
     def _find_root_partition(self) -> Optional[str]:
+        # A partition created with mountpoint="/" in the same journal (the
+        # normal "Create Partition" dialog flow) records its resolved device
+        # name onto the create op's own params during commit() — check that
+        # first, since the partition doesn't exist for list_partitions() to
+        # match against until after the create op has actually run.
+        for op in self.ops:
+            if op["kind"] == "create" and op["params"].get("mountpoint") == "/":
+                name = op["params"].get("partition")
+                if name:
+                    return name
         for part in list_partitions(self.disk):
             name = part.get("name")
             for op in self.ops:
@@ -192,8 +202,18 @@ class Journal:
             name = part.get("name")
             if part.get("current") or part.get("in_use"):
                 for op in self.ops:
-                    if op["kind"] in ("delete", "format", "resize") and op["params"].get("partition") == name:
+                    kind = op["kind"]
+                    params = op["params"]
+                    if kind in ("delete", "format", "resize") and params.get("partition") == name:
                         errors.append(f"Cannot modify {name} — it is currently mounted or in use.")
+                        break
+                    # A set_mountpoint("/", name) op makes this the install's
+                    # root partition, which gets reformatted at install time
+                    # even though no "format" op was staged for it here — that
+                    # eventual mkfs must be rejected too, not just an explicit
+                    # format/delete/resize op.
+                    if kind == "set_mountpoint" and params.get("partition") == name and params.get("mountpoint") == "/":
+                        errors.append(f"Cannot set {name} as the root partition — it is currently mounted or in use.")
                         break
 
         if gpt and not has_efi:
@@ -249,6 +269,11 @@ class Journal:
                 created = _latest_partition_on_disk(self.disk, before)
                 if not created:
                     raise RuntimeError("Could not find the newly created partition.")
+                # Record the resolved device name back onto the op so
+                # _find_root_partition() (and anything else inspecting the
+                # journal after commit) can tell which real partition this
+                # create op produced.
+                p["partition"] = created
 
                 if fs != "linux-swap":
                     log(f"Formatting {created} as {fs}...")

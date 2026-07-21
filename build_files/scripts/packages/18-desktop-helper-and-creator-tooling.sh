@@ -91,6 +91,8 @@ else
 	kyth-ai-dev setup
 	exec distrobox enter "${box}" -- shfmt "$@"
 fi
+WRAPPEREOF
+
 # GitHub CLI host wrapper — delegates to kyth-ai-dev container
 install -Dm 0755 /dev/stdin /usr/bin/gh <<'WRAPPEREOF'
 #!/usr/bin/env bash

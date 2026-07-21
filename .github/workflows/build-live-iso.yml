@@ -620,7 +620,7 @@ jobs:
           done
 
           aws s3 cp "${ISO}" "s3://kyth-releases/$(basename "${CHANNEL}")" \
-            --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" --no-progress
+            --endpoint-url "${R2_ENDPOINT}" --no-progress
           for suffix in -CHECKSUM .sig .bundle .intoto.jsonl .json; do
             aws s3 cp "${CHANNEL}${suffix}" \
               "s3://kyth-releases/$(basename "${CHANNEL}${suffix}")" \

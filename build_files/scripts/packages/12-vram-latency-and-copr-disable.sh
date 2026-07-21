@@ -24,12 +24,19 @@ set -euo pipefail
 # as an active package source in the final image.
 # shellcheck disable=SC2016 # $releasever is a dnf repo variable, not a shell expansion
 if dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release; then
-	dnf5 install -y \
+	# --skip-unavailable and the enable guards below match every other
+	# optional-feature fragment in this directory: a transient Terra mirror
+	# desync on one of these three packages must not hard-fail the whole
+	# image build the way an unguarded `dnf5 install` under `set -e` would.
+	if dnf5 install -y --skip-unavailable \
 		dmemcg-booster \
 		plasma-foreground-booster-dmemcg \
-		vulkan-low-latency-layer
-	systemctl enable dmemcg-booster-system.service
-	systemctl --global enable dmemcg-booster-user.service
+		vulkan-low-latency-layer; then
+		systemctl enable dmemcg-booster-system.service 2>/dev/null || true
+		systemctl --global enable dmemcg-booster-user.service 2>/dev/null || true
+	else
+		echo "WARNING: dmemcg-booster/vulkan-low-latency-layer install failed; skipping." >&2
+	fi
 	dnf5 config-manager setopt terra.enabled=0
 else
 	echo "WARNING: Terra repo bootstrap failed; skipping VRAM booster + low-latency layer." >&2
