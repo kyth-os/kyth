@@ -28,7 +28,7 @@ class _DeveloperTabMixin:
         ai_layout.addWidget(ai_title)
 
         ai_desc = QLabel(
-            "Unified local developer & AI Distrobox container housing VS Code, Google Antigravity IDE, Node.js, Azure CLI, Headroom, Ollama, llama.cpp, Rust, and Python. Exports applications and CLI tools directly to your desktop menu and PATH."
+            "Unified local developer & AI Distrobox container housing VS Code, Google Antigravity IDE, Node.js, Azure CLI, GitHub CLI, Claude Code, Codex CLI, Headroom, Ollama, llama.cpp, Rust, and Python. Exports applications and CLI tools directly to your desktop menu and PATH."
         )
         ai_desc.setWordWrap(True)
         ai_layout.addWidget(ai_desc)
