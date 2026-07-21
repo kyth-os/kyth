@@ -699,8 +699,13 @@ QPushButton#saml-cancel:pressed {
                 return
             self._done = True
             self._view.setPage(None)
-            self._page.deleteLater()
-            self._profile.deleteLater()
+            # _page is parented to _profile, which is parented to this dialog, so
+            # Qt already deletes both exactly once when _on_saml_required's
+            # dlg.deleteLater() runs after exec() returns. Explicitly scheduling
+            # a second deleteLater() here raced that cascading child destruction
+            # for ownership of the same C++ object — whichever deferred-delete
+            # fired second dereferenced an already-freed QObject, segfaulting
+            # inside Qt's posted-event bookkeeping.
 
         def _emit_cookie(self, cookie_str: str) -> None:
             if self._done:
