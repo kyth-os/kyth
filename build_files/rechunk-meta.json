@@ -65,6 +65,12 @@
         "hhd-ui"
       ]
     },
+    "topgrade": {
+      "files": [
+        "/usr/bin/topgrade"
+      ],
+      "dedicated": false
+    },
     "unpackaged": {
       "packages": [
         "ublue*",

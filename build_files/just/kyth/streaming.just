@@ -73,7 +73,9 @@ setup-tailscale:
 
     if ! command -v tailscale >/dev/null 2>&1; then
         echo "Tailscale is not installed. Installing Tailscale..."
+        sudo dnf5 config-manager setopt tailscale-stable.enabled=1
         sudo rpm-ostree install --idempotent tailscale
+        sudo dnf5 config-manager setopt tailscale-stable.enabled=0
         echo "Reboot required to activate tailscaled service."
         exit 0
     fi

@@ -58,7 +58,9 @@ install-asus-tools:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Installing ASUS Linux hardware control tools (asusctl & supergfxctl)..."
+    sudo dnf5 copr enable -y lukenukem/asus-linux
     sudo rpm-ostree install --idempotent asusctl supergfxctl
+    sudo dnf5 copr disable -y lukenukem/asus-linux
     echo
     echo "Reboot required to activate asusd system service."
 

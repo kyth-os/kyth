@@ -197,6 +197,7 @@ optional_desktop_packages=(
 	zoxide
 	git-delta
 	starship
+	docker-compose
 	direnv
 	jq
 	yq

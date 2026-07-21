@@ -35,7 +35,7 @@ RUN --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/
     ENABLE_ANANICY=${ENABLE_ANANICY} \
     bash /ctx/packages-static.sh
 
-# Third-party binaries — topgrade, winetricks, SCX schedulers (~100 MB).
+# Third-party binaries — topgrade, SCX schedulers, umu, LatencyFleX (~100 MB).
 # Placed before BUILD_DATE so the layer is only re-run when a tool ships a new
 # release. THIRDPARTY_VERSIONS_HASH is resolved in CI by querying the GitHub
 # releases API for each tool; when all versions are unchanged the layer is a
