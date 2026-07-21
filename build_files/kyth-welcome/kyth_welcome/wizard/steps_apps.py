@@ -21,6 +21,14 @@ _EVERYDAY_APP_IDS = {
     "com.brave.Browser", "org.libreoffice.LibreOffice", "eu.betterbird.Betterbird",
     "org.videolan.VLC",
 }
+# Apps that stay opt-in even when otherwise profile-relevant: still float to
+# the top of the list for a gaming profile, but never pre-ticked on first boot.
+_NEVER_PRECHECKED = {"com.obsproject.Studio"}
+
+
+def _default_checked_ids(profile: str) -> set[str]:
+    relevant = _GAMING_APP_IDS if profile == "gaming" else _EVERYDAY_APP_IDS
+    return relevant - _NEVER_PRECHECKED
 
 
 class _AppsStepMixin:
@@ -134,6 +142,7 @@ class _AppsStepMixin:
         apps_layout.setContentsMargins(0, 0, 8, 0)
         apps_layout.setSpacing(10)
 
+        checked_ids = _default_checked_ids(self._profile)
         self._wizard_extra_checks = []
         for app_id, name, desc in self._wizard_extra_apps:
             row = QWidget()
@@ -145,7 +154,7 @@ class _AppsStepMixin:
 
             already_installed = _is_flatpak_installed(app_id)
             check = QCheckBox()
-            check.setChecked(not already_installed and app_id in relevant)
+            check.setChecked(not already_installed and app_id in checked_ids)
             check.setEnabled(not already_installed)
             self._wizard_extra_checks.append((check, app_id, name))
             row_layout.addWidget(check, 0, Qt.AlignmentFlag.AlignTop)

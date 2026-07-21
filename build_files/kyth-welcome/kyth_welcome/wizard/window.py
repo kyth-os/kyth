@@ -18,7 +18,7 @@ from ..qt import (
     QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
 )
 from ..services.setup_state import STEP_KEYS, mark_step, mark_wizard_closed
-from .steps_apps import _EVERYDAY_APP_IDS, _GAMING_APP_IDS, _AppsStepMixin
+from .steps_apps import _AppsStepMixin, _default_checked_ids
 from .steps_finish import _FinishStepMixin
 from .steps_gaming import _GamingStepMixin
 from .steps_machine import _MachineStepMixin
@@ -256,7 +256,7 @@ class WizardWindow(
             pass
         # Re-seed the Get Apps defaults to match the chosen profile. Only
         # enabled boxes are touched — already-installed apps stay locked.
-        wanted = _GAMING_APP_IDS if profile == "gaming" else _EVERYDAY_APP_IDS
+        wanted = _default_checked_ids(profile)
         for check, app_id, _name in self._wizard_extra_checks:
             if check.isEnabled():
                 check.setChecked(app_id in wanted)

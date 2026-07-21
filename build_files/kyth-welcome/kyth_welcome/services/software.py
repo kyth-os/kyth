@@ -45,7 +45,6 @@ _DEFAULT_FIRST_RUN_APPS = (
     ("com.github.mtkennerly.ludusavi", "Ludusavi"),
     ("com.dec05eba.gpu_screen_recorder", "GPU Screen Recorder"),
     ("io.github.benjamimgois.goverlay", "GOverlay"),
-    ("dev.vencord.Vesktop", "Vesktop"),
     ("com.brave.Browser", "Brave"),
 )
 

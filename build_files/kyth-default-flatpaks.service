@@ -1,5 +1,5 @@
 [Unit]
-Description=Install default Flatpak applications (GPU Screen Recorder, GOverlay, Vesktop, MissionCenter, VLC)
+Description=Install default Flatpak applications (GPU Screen Recorder, GOverlay, MissionCenter, VLC)
 Documentation=https://github.com/mrtrick37/kyth
 After=network-online.target kyth-flathub-setup.service
 # Requires= (not just Wants=) so this service is skipped on offline boots
@@ -8,8 +8,9 @@ Requires=network-online.target kyth-flathub-setup.service
 # Sentinel is VERSIONED — bump the filename (v2 → v3, etc.) any time the app
 # list changes. The old sentinel survives OS upgrades (it lives in /var which
 # bootc never touches), so without versioning existing users never see new apps.
-# Current version: v11 (added Brave, LibreOffice, and Betterbird to first-run defaults)
-ConditionPathExists=!/var/lib/kyth/default-flatpaks-v11-done
+# Current version: v12 (dropped Vesktop and OBS Studio from first-run defaults —
+# opt-in only, via `ujust install-vesktop` / `ujust install-obs`)
+ConditionPathExists=!/var/lib/kyth/default-flatpaks-v12-done
 
 [Service]
 Type=oneshot
@@ -29,16 +30,14 @@ ExecStart=/usr/bin/flatpak install -y --noninteractive --system --or-update flat
     com.github.tchx84.Flatseal \
     com.dec05eba.gpu_screen_recorder \
     io.github.benjamimgois.goverlay \
-    dev.vencord.Vesktop \
     io.missioncenter.MissionCenter \
     org.videolan.VLC \
-    com.obsproject.Studio \
     io.github.wivrn.wivrn \
     com.brave.Browser \
     org.libreoffice.LibreOffice \
     eu.betterbird.Betterbird
 ExecStartPost=/bin/mkdir -p /var/lib/kyth
-ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v11-done
+ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v12-done
 RemainAfterExit=yes
 Nice=10
 IOSchedulingClass=idle
