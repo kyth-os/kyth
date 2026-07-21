@@ -2,6 +2,9 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+# shellcheck source=../lib/gaming-coprs.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/gaming-coprs.sh"
+
 # ── VRAM foreground prioritization + Vulkan low-latency layer ────────────────
 # dmemcg-booster (Valve, gitlab.steamos.cloud/holo/dmemcg-booster) enables the
 # kernel dmem cgroup controller across the systemd hierarchy and sets dmem.low
@@ -43,10 +46,6 @@ else
 fi
 
 # Disable COPRs so they don't persist in the final image
-dnf5 copr disable -y ublue-os/bazzite
-dnf5 copr disable -y ublue-os/bazzite-multilib
-dnf5 copr disable -y ublue-os/staging
-dnf5 copr disable -y ublue-os/packages
-dnf5 copr disable -y ublue-os/obs-vkcapture
-dnf5 copr disable -y lukenukem/asus-linux
-dnf5 copr disable -y ycollet/audinux
+for copr in "${KYTH_GAMING_COPRS[@]}"; do
+	dnf5 copr disable -y "${copr}"
+done

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=kyth-perf-report-common.sh disable=SC1091
+source /usr/libexec/kyth-perf-report-common.sh
+
 print_kv() {
     printf '%-20s %s\n' "$1" "$2"
 }
@@ -51,11 +54,7 @@ fi
 
 mkdir -p "${state_dir}"
 
-bootc_ref="unavailable"
-if command -v bootc >/dev/null 2>&1; then
-    bootc_ref=$(bootc status --json 2>/dev/null | jq -r '.spec.image.image // .status.booted.image.image.image // "unavailable"' 2>/dev/null || true)
-    bootc_ref=${bootc_ref:-unavailable}
-fi
+bootc_ref="$(get_booted_bootc_ref)"
 
 analyze_time=$(systemd-analyze time 2>/dev/null || true)
 total_str=$(grep -oP '= \K.*(?=\s*$)' <<<"${analyze_time}" | head -1 || true)

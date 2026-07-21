@@ -4,15 +4,13 @@ set -euo pipefail
 
 # shellcheck source=../lib/check-multilib.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/check-multilib.sh"
+# shellcheck source=../lib/gaming-coprs.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/gaming-coprs.sh"
 
 # Enable COPRs for gaming packages
-dnf5 copr enable -y ublue-os/bazzite
-dnf5 copr enable -y ublue-os/bazzite-multilib
-dnf5 copr enable -y ublue-os/staging
-dnf5 copr enable -y ublue-os/packages
-dnf5 copr enable -y ublue-os/obs-vkcapture
-dnf5 copr enable -y lukenukem/asus-linux
-dnf5 copr enable -y ycollet/audinux
+for copr in "${KYTH_GAMING_COPRS[@]}"; do
+	dnf5 copr enable -y "${copr}"
+done
 
 # Gaming packages
 # libde265.i686 is excluded: it's an HEVC decoder pulled in transitively by
