@@ -10,6 +10,8 @@ from ._util import (  # noqa: F401
     _safe_int,
     _normal_device_path,
     _lsblk_text,
+    _lsblk_blockdevices,
+    _findmnt_source,
     _device_type,
     _block_size_bytes,
 )

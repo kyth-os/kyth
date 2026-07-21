@@ -72,6 +72,18 @@ class PostRouteService:
             }, 400)
         return disk, journal, None
 
+    def _partition_for(self, body: dict):
+        """Resolve (disk, journal, partition) from a request body's "disk"
+        and "partition" fields. Returns (None, None, None, error_response)
+        if the journal can't be resolved or "partition" is missing."""
+        disk, journal, error = self._journal_for(body)
+        partition = _normal_device_path(body.get("partition", ""))
+        if error or not partition:
+            return None, None, None, error or ApiResponse(
+                {"ok": False, "message": "Disk and partition are required."}, 400
+            )
+        return disk, journal, partition, None
+
     def new_table(self, body: dict) -> ApiResponse:
         disk = _normal_device_path(body.get("disk", ""))
         if not disk:
@@ -107,10 +119,9 @@ class PostRouteService:
         return ApiResponse({"ok": not errors, "pending": len(journal.ops), "errors": errors})
 
     def delete_partition(self, body: dict) -> ApiResponse:
-        disk, journal, error = self._journal_for(body)
-        partition = _normal_device_path(body.get("partition", ""))
-        if error or not partition:
-            return ApiResponse({"ok": False, "message": "Disk and partition are required."}, 400)
+        disk, journal, partition, error = self._partition_for(body)
+        if error:
+            return error
         parts = {part["name"]: part for part in list_partitions(disk)}
         if partition not in parts:
             return ApiResponse({"ok": False, "message": f"Partition {partition} not found."}, 400)
@@ -120,11 +131,12 @@ class PostRouteService:
         return ApiResponse({"ok": True, "pending": len(journal.ops)})
 
     def resize_partition(self, body: dict) -> ApiResponse:
-        disk, journal, error = self._journal_for(body)
-        partition = _normal_device_path(body.get("partition", ""))
+        disk, journal, partition, error = self._partition_for(body)
+        if error:
+            return error
         new_size = _safe_int(body.get("new_size_bytes"), -1)
-        if error or not partition or new_size < 1:
-            return ApiResponse({"ok": False, "message": "Disk, partition, and new size are required."}, 400)
+        if new_size < 1:
+            return ApiResponse({"ok": False, "message": "A new size is required."}, 400)
         parts = {part["name"]: part for part in list_partitions(disk)}
         if partition not in parts:
             return ApiResponse({"ok": False, "message": f"Partition {partition} not found."}, 400)
@@ -134,11 +146,10 @@ class PostRouteService:
         return ApiResponse({"ok": True, "pending": len(journal.ops)})
 
     def format_partition(self, body: dict) -> ApiResponse:
-        _disk, journal, error = self._journal_for(body)
-        partition = _normal_device_path(body.get("partition", ""))
+        _disk, journal, partition, error = self._partition_for(body)
+        if error:
+            return error
         fs_type = body.get("fs_type", "btrfs")
-        if error or not partition:
-            return ApiResponse({"ok": False, "message": "Disk and partition are required."}, 400)
         if not any(item["id"] == fs_type for item in FILESYSTEM_OPTIONS):
             return ApiResponse({"ok": False, "message": f"Unsupported filesystem: {fs_type}"}, 400)
         journal.add_op("format", {
@@ -147,11 +158,10 @@ class PostRouteService:
         return ApiResponse({"ok": True, "pending": len(journal.ops)})
 
     def set_mountpoint(self, body: dict) -> ApiResponse:
-        _disk, journal, error = self._journal_for(body)
-        partition = _normal_device_path(body.get("partition", ""))
+        _disk, journal, partition, error = self._partition_for(body)
+        if error:
+            return error
         mountpoint = body.get("mountpoint", "").strip()
-        if error or not partition:
-            return ApiResponse({"ok": False, "message": "Disk and partition are required."}, 400)
         if mountpoint and not mountpoint.startswith("/"):
             return ApiResponse({"ok": False, "message": "Mount point must be an absolute path (e.g. /, /home)."}, 400)
         journal.add_op("set_mountpoint", {"partition": partition, "mountpoint": mountpoint})

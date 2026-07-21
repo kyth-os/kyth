@@ -32,6 +32,18 @@ function apiFetch(url, opts={}) {
   return fetch(url, o); // nosemgrep -- url is constrained to a same-origin API route above
 }
 
+function postRequest(url, body) {
+  return apiFetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+}
+
+function postJSON(url, body) {
+  return postRequest(url, body).then(r => r.json());
+}
+
 // ── Navigation ────────────────────────────────────────────────────────────────
 function goto(name) {
   document.querySelectorAll('.page').forEach(p => { p.classList.remove('active'); });
@@ -647,11 +659,7 @@ function showNewTableDialog() {
   );
   showOverlay('New Partition Table', content, () => {
     const tableType = document.getElementById('dlg-table-type').value;
-    apiFetch('/api/disk/new-table', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ disk: S.disk.name, table_type: tableType }),
-    }).then(r => r.json()).then(j => {
+    postJSON('/api/disk/new-table', { disk: S.disk.name, table_type: tableType }).then(j => {
       if (j.ok) {
         S.pendingOps = [];
         if (S.freeRegions) {
@@ -721,18 +729,14 @@ function showCreateDialog() {
     const mountpoint = document.getElementById('dlg-mount').value;
     const label = document.getElementById('dlg-label').value.trim();
     const sizeBytes = Math.floor(sizeGiB * 1024**3);
-    apiFetch('/api/disk/create', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        disk: S.disk.name,
-        start_bytes: start,
-        size_bytes: sizeBytes,
-        fs_type: fsType,
-        label: label,
-        mountpoint: mountpoint,
-      }),
-    }).then(r => r.json()).then(j => {
+    postJSON('/api/disk/create', {
+      disk: S.disk.name,
+      start_bytes: start,
+      size_bytes: sizeBytes,
+      fs_type: fsType,
+      label: label,
+      mountpoint: mountpoint,
+    }).then(j => {
       if (j.ok) {
         // The mountpoint is already part of the /api/disk/create request body
         // above and stored on the create op server-side — no follow-up
@@ -769,11 +773,7 @@ function showDeleteDialog() {
   );
   showOverlay('Delete Partition', content, () => {
     const part = document.getElementById('dlg-del-part').value;
-    apiFetch('/api/disk/delete', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ disk: S.disk.name, partition: part }),
-    }).then(r => r.json()).then(j => {
+    postJSON('/api/disk/delete', { disk: S.disk.name, partition: part }).then(j => {
       if (j.ok) {
         loadPendingOps();
         loadPartitions();
@@ -806,11 +806,7 @@ function showResizeDialog() {
     const part = document.getElementById('dlg-resize-part').value;
     const newSizeGiB = parseFloat(document.getElementById('dlg-resize-size').value);
     const newSizeBytes = Math.floor(newSizeGiB * 1024**3);
-    apiFetch('/api/disk/resize', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ disk: S.disk.name, partition: part, new_size_bytes: newSizeBytes }),
-    }).then(r => r.json()).then(j => {
+    postJSON('/api/disk/resize', { disk: S.disk.name, partition: part, new_size_bytes: newSizeBytes }).then(j => {
       if (j.ok) {
         loadPendingOps();
         loadPartitions();
@@ -849,11 +845,7 @@ function showFormatDialog() {
     const part = document.getElementById('dlg-fmt-part').value;
     const fsType = document.getElementById('dlg-fmt-fs').value;
     const label = document.getElementById('dlg-fmt-label').value.trim();
-    apiFetch('/api/disk/format', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ disk: S.disk.name, partition: part, fs_type: fsType, label: label }),
-    }).then(r => r.json()).then(j => {
+    postJSON('/api/disk/format', { disk: S.disk.name, partition: part, fs_type: fsType, label: label }).then(j => {
       if (j.ok) {
         loadPendingOps();
         loadPartitions();
@@ -893,11 +885,7 @@ function showMountDialog() {
     let mountpoint = document.getElementById('dlg-mount-point').value;
     const custom = document.getElementById('dlg-mount-custom').value.trim();
     if (custom) mountpoint = custom;
-    apiFetch('/api/disk/set-mountpoint', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ disk: S.disk.name, partition: part, mountpoint }),
-    }).then(r => r.json()).then(j => {
+    postJSON('/api/disk/set-mountpoint', { disk: S.disk.name, partition: part, mountpoint }).then(j => {
       if (j.ok) {
         loadPendingOps();
         renderDiskLayouts();
@@ -915,11 +903,7 @@ function commitPartitions() {
   showOverlay('Applying Changes',
     el('div', { style: 'color:var(--muted);', text: 'Writing partition changes to disk...' }), null);
 
-  apiFetch('/api/disk/commit', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ disk: S.disk.name }),
-  }).then(r => r.json()).then(j => {
+  postJSON('/api/disk/commit', { disk: S.disk.name }).then(j => {
     hideOverlay();
     if (j.ok) {
       S.manualCommitted = true;
@@ -948,11 +932,7 @@ function commitPartitions() {
 function rollbackPartitions() {
   showOverlay('Undo All Changes',
     el('div', { style: 'color:var(--muted);', text: 'Restoring previous partition table...' }), null);
-  apiFetch('/api/disk/rollback', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ disk: S.disk.name }),
-  }).then(r => r.json()).then(j => {
+  postJSON('/api/disk/rollback', { disk: S.disk.name }).then(j => {
     hideOverlay();
     if (j.ok) {
       S.manualCommitted = false;
@@ -1203,23 +1183,19 @@ function startInstall() {
   btn.disabled = true;
   btn.textContent = 'Starting…';
 
-  apiFetch('/api/start', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      disk: S.disk.name, hostname: S.hostname,
-      timezone: S.timezone, username: S.username, password: S.password,
-      kernel: S.kernel,
-      install_mode:      S.install_mode,
-      target_partition:  S.target_partition || '',
-      resize_partition:  S.resize_partition || '',
-      resize_gib:        S.resize_gib || 0,
-      free_region_start: S.free_region_start || 0,
-      free_region_end:   S.free_region_end || 0,
-      confirm_backup:    document.getElementById('confirm-backup').checked,
-      confirm_erase:     document.getElementById('confirm-erase').checked,
-      confirm_current:   document.getElementById('confirm-current').checked,
-    }),
+  postRequest('/api/start', {
+    disk: S.disk.name, hostname: S.hostname,
+    timezone: S.timezone, username: S.username, password: S.password,
+    kernel: S.kernel,
+    install_mode:      S.install_mode,
+    target_partition:  S.target_partition || '',
+    resize_partition:  S.resize_partition || '',
+    resize_gib:        S.resize_gib || 0,
+    free_region_start: S.free_region_start || 0,
+    free_region_end:   S.free_region_end || 0,
+    confirm_backup:    document.getElementById('confirm-backup').checked,
+    confirm_erase:     document.getElementById('confirm-erase').checked,
+    confirm_current:   document.getElementById('confirm-current').checked,
   }).then(r => {
     if (!r.ok) {
       btn.disabled = false;

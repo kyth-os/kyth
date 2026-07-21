@@ -221,6 +221,195 @@ def _prepare_install_storage(
         root_part = get_root_partition(disk)
     return target_part, root_part, alongside_mount
 
+def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
+    """Mount the alongside-install target's @home subvolume under the ostree
+    deploy root and wire it into the target system's fstab."""
+    target_home = Path(config_root) / "ostree/deploy/default/var/home"
+    run_command(_as_root(["mkdir", "-p", str(target_home)]), check=True)
+    run_command(_as_root(["umount", "-l", str(target_home)]), check=False, capture_output=True)
+    run_command(_as_root(["mount", "-o", "subvol=@home", target_part, str(target_home)]), check=True)
+
+    try:
+        uuid_out = subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", target_part], text=True).strip()
+        if uuid_out:
+            fstab_path = Path(etc, "fstab")
+            fstab_line = f"UUID={uuid_out} /var/home btrfs subvol=@home,compress=zstd:1 0 0\n"
+            run_command(
+                _as_root(["/usr/bin/tee", "-a", str(fstab_path)]),
+                input=fstab_line, text=True,
+                stdout=subprocess.DEVNULL, check=True
+            )
+            log(f"Fstab updated with Btrfs subvolume @home: {fstab_line.strip()}")
+    except OSError as fe:
+        log(
+            "Warning: failed to update fstab with @home subvolume: "
+            f"{format_os_error(fe, path=Path(etc, 'fstab'))}"
+        )
+    except Exception as fe:
+        log(f"Warning: failed to update fstab with @home subvolume: {fe}")
+
+
+def _configure_manual_mounts(config_root, etc, log) -> None:
+    """Mount each manually-configured partition under the ostree deploy root
+    and add a matching fstab entry (mapping /home to /var/home)."""
+    manual_mounts = _get_manual_mounts()
+    for mnt in manual_mounts:
+        part = mnt["partition"]
+        mp = mnt["mountpoint"]
+        fs = mnt["fstype"]
+        try:
+            uuid_out = subprocess.check_output(
+                ["blkid", "-s", "UUID", "-o", "value", part],
+                text=True, timeout=5
+            ).strip()
+            if not uuid_out:
+                log(f"Warning: could not get UUID for {part}, skipping fstab entry for {mp}")
+                continue
+            # Map /home to /var/home in ostree layout
+            fstab_mp = "/var/home" if mp == "/home" else mp
+            target_path = Path(config_root) / fstab_mp.lstrip("/")
+            if fs == "linux-swap":
+                fstab_line = f"UUID={uuid_out} none swap defaults 0 0\n"
+            else:
+                fstab_line = f"UUID={uuid_out} {fstab_mp} {fs} defaults,compress=zstd:1 0 2\n"
+                run_command(
+                    _as_root(["mkdir", "-p", str(target_path)]),
+                    check=False,
+                )
+                # Unmount any existing mount at this path (e.g. @home subvolume)
+                run_command(
+                    _as_root(["umount", "-l", str(target_path)]),
+                    check=False, capture_output=True,
+                )
+            run_command(
+                _as_root(["/usr/bin/tee", "-a", str(Path(etc, "fstab"))]),
+                input=fstab_line, text=True,
+                stdout=subprocess.DEVNULL, check=True,
+            )
+            if fs != "linux-swap":
+                run_command(
+                    _as_root(["mount", part, str(target_path)]),
+                    check=False,
+                )
+            log(f"Manual mount: {part} at {mp} ({fs})")
+        except Exception as me:
+            log(f"Warning: failed to configure manual mount {part} at {mp}: {me}")
+
+
+def _configure_hostname_timezone(etc, state, log) -> None:
+    hostname_path = str(Path(etc, "hostname"))
+    try:
+        run_command(
+            _as_root(["/usr/bin/tee", hostname_path]),
+            input=f"{state['hostname']}\n", text=True,
+            stdout=subprocess.DEVNULL, check=True,
+        )
+    except OSError as exc:
+        raise OSError(format_os_error(exc, path=hostname_path)) from exc
+    log(f"Hostname : {state['hostname']}")
+
+    localtime_path = str(Path(etc, "localtime"))
+    try:
+        run_command(
+            _as_root(["ln", "-snf",
+                      f"/usr/share/zoneinfo/{state['timezone']}",
+                      localtime_path]),
+            check=True,
+        )
+    except OSError as exc:
+        raise OSError(format_os_error(exc, path=localtime_path)) from exc
+    log(f"Timezone : {state['timezone']}")
+
+
+def _create_installer_user(etc, config_root, deploy_root, username, password_hash, log, progress) -> None:
+    log(f"Creating user: {username}")
+    try:
+        run_command(
+            _as_root([
+                "useradd", "--root", deploy_root,
+                "-M", "-G", "wheel,video,audio,render",
+                "-s", "/bin/bash", username,
+            ]),
+            check=True,
+        )
+
+        shadow_path = f"{etc}/shadow"
+        cat_r = run_command(
+            _as_root(["cat", shadow_path]),
+            capture_output=True, text=True, check=True,
+        )
+        new_lines = []
+        hash_written = False
+        for line in cat_r.stdout.splitlines(keepends=True):
+            if line.startswith(f"{username}:"):
+                fields = line.split(":")
+                fields[1] = password_hash
+                new_lines.append(":".join(fields))
+                hash_written = True
+            else:
+                new_lines.append(line)
+        if not hash_written:
+            raise RuntimeError(
+                f"User '{username}' not found in shadow after useradd"
+            )
+        run_command(
+            _as_root(["tee", shadow_path]),
+            input="".join(new_lines), text=True,
+            stdout=subprocess.DEVNULL, check=True,
+        )
+
+        uid, gid = "1000", "1000"
+        cat_r = run_command(
+            _as_root(["cat", f"{etc}/passwd"]),
+            capture_output=True, text=True,
+        )
+        for line in cat_r.stdout.splitlines():
+            if line.startswith(f"{username}:"):
+                parts = line.split(":")
+                uid, gid = parts[2], parts[3]
+                break
+
+        var_home = (
+            Path(config_root) / "ostree/deploy/default/var/home" / username
+        )
+        run_command(_as_root(["mkdir", "-p", str(var_home)]), check=True)
+        run_command(_as_root(["chown", f"{uid}:{gid}", str(var_home)]), check=True)
+        run_command(_as_root(["chmod", "700", str(var_home)]), check=True)
+
+        # skel may be under deploy root; test via elevated path.
+        skel = Path(deploy_root) / "etc/skel"
+        skel_check = run_command(
+            _as_root(["test", "-d", str(skel)]),
+            check=False, capture_output=True,
+        )
+        if skel_check.returncode == 0:
+            run_command(
+                _as_root(["cp", "-rT", str(skel), str(var_home)]),
+                check=True,
+            )
+            run_command(
+                _as_root(["chown", "-R", f"{uid}:{gid}", str(var_home)]),
+                check=True,
+            )
+
+        run_command(
+            _as_root(["restorecon", "-RF", str(var_home)]),
+            check=False,
+        )
+        log(f"User '{username}' created (uid={uid})")
+        ensure_system_accounts(deploy_root, log)
+        progress(97)
+    except OSError as ue:
+        log(
+            "Warning: user creation failed: "
+            f"{format_os_error(ue)}"
+        )
+        log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
+    except Exception as ue:
+        log(f"Warning: user creation failed: {ue}")
+        log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
+
+
 def _configure_installed_system(
     root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress,
     context: InstallerContext = DEFAULT_CONTEXT,
@@ -230,97 +419,13 @@ def _configure_installed_system(
         etc = find_deploy_etc(config_root)
         if etc:
             if install_mode == "alongside":
-                target_home = Path(config_root) / "ostree/deploy/default/var/home"
-                run_command(_as_root(["mkdir", "-p", str(target_home)]), check=True)
-                run_command(_as_root(["umount", "-l", str(target_home)]), check=False, capture_output=True)
-                run_command(_as_root(["mount", "-o", "subvol=@home", target_part, str(target_home)]), check=True)
-
-                try:
-                    uuid_out = subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", target_part], text=True).strip()
-                    if uuid_out:
-                        fstab_path = Path(etc, "fstab")
-                        fstab_line = f"UUID={uuid_out} /var/home btrfs subvol=@home,compress=zstd:1 0 0\n"
-                        run_command(
-                            _as_root(["/usr/bin/tee", "-a", str(fstab_path)]),
-                            input=fstab_line, text=True,
-                            stdout=subprocess.DEVNULL, check=True
-                        )
-                        log(f"Fstab updated with Btrfs subvolume @home: {fstab_line.strip()}")
-                except OSError as fe:
-                    log(
-                        "Warning: failed to update fstab with @home subvolume: "
-                        f"{format_os_error(fe, path=Path(etc, 'fstab'))}"
-                    )
-                except Exception as fe:
-                    log(f"Warning: failed to update fstab with @home subvolume: {fe}")
+                _configure_alongside_fstab(config_root, target_part, etc, log)
 
             # Manual partition mode: mount additional partitions and update fstab
             if install_mode == "manual":
-                manual_mounts = _get_manual_mounts()
-                for mnt in manual_mounts:
-                    part = mnt["partition"]
-                    mp = mnt["mountpoint"]
-                    fs = mnt["fstype"]
-                    try:
-                        uuid_out = subprocess.check_output(
-                            ["blkid", "-s", "UUID", "-o", "value", part],
-                            text=True, timeout=5
-                        ).strip()
-                        if not uuid_out:
-                            log(f"Warning: could not get UUID for {part}, skipping fstab entry for {mp}")
-                            continue
-                        # Map /home to /var/home in ostree layout
-                        fstab_mp = "/var/home" if mp == "/home" else mp
-                        target_path = Path(config_root) / fstab_mp.lstrip("/")
-                        if fs == "linux-swap":
-                            fstab_line = f"UUID={uuid_out} none swap defaults 0 0\n"
-                        else:
-                            fstab_line = f"UUID={uuid_out} {fstab_mp} {fs} defaults,compress=zstd:1 0 2\n"
-                            run_command(
-                                _as_root(["mkdir", "-p", str(target_path)]),
-                                check=False,
-                            )
-                            # Unmount any existing mount at this path (e.g. @home subvolume)
-                            run_command(
-                                _as_root(["umount", "-l", str(target_path)]),
-                                check=False, capture_output=True,
-                            )
-                        run_command(
-                            _as_root(["/usr/bin/tee", "-a", str(Path(etc, "fstab"))]),
-                            input=fstab_line, text=True,
-                            stdout=subprocess.DEVNULL, check=True,
-                        )
-                        if fs != "linux-swap":
-                            run_command(
-                                _as_root(["mount", part, str(target_path)]),
-                                check=False,
-                            )
-                        log(f"Manual mount: {part} at {mp} ({fs})")
-                    except Exception as me:
-                        log(f"Warning: failed to configure manual mount {part} at {mp}: {me}")
+                _configure_manual_mounts(config_root, etc, log)
 
-            hostname_path = str(Path(etc, "hostname"))
-            try:
-                run_command(
-                    _as_root(["/usr/bin/tee", hostname_path]),
-                    input=f"{state['hostname']}\n", text=True,
-                    stdout=subprocess.DEVNULL, check=True,
-                )
-            except OSError as exc:
-                raise OSError(format_os_error(exc, path=hostname_path)) from exc
-            log(f"Hostname : {state['hostname']}")
-
-            localtime_path = str(Path(etc, "localtime"))
-            try:
-                run_command(
-                    _as_root(["ln", "-snf",
-                              f"/usr/share/zoneinfo/{state['timezone']}",
-                              localtime_path]),
-                    check=True,
-                )
-            except OSError as exc:
-                raise OSError(format_os_error(exc, path=localtime_path)) from exc
-            log(f"Timezone : {state['timezone']}")
+            _configure_hostname_timezone(etc, state, log)
             progress(95)
 
             deploy_root = str(Path(etc).parent)
@@ -329,92 +434,7 @@ def _configure_installed_system(
             username = state.get("username", "").strip()
             password_hash = state.get("password_hash", "")
             if username and password_hash:
-                log(f"Creating user: {username}")
-                try:
-                    run_command(
-                        _as_root([
-                            "useradd", "--root", deploy_root,
-                            "-M", "-G", "wheel,video,audio,render",
-                            "-s", "/bin/bash", username,
-                        ]),
-                        check=True,
-                    )
-
-                    shadow_path = f"{etc}/shadow"
-                    cat_r = run_command(
-                        _as_root(["cat", shadow_path]),
-                        capture_output=True, text=True, check=True,
-                    )
-                    new_lines = []
-                    hash_written = False
-                    for line in cat_r.stdout.splitlines(keepends=True):
-                        if line.startswith(f"{username}:"):
-                            fields = line.split(":")
-                            fields[1] = password_hash
-                            new_lines.append(":".join(fields))
-                            hash_written = True
-                        else:
-                            new_lines.append(line)
-                    if not hash_written:
-                        raise RuntimeError(
-                            f"User '{username}' not found in shadow after useradd"
-                        )
-                    run_command(
-                        _as_root(["tee", shadow_path]),
-                        input="".join(new_lines), text=True,
-                        stdout=subprocess.DEVNULL, check=True,
-                    )
-
-                    uid, gid = "1000", "1000"
-                    cat_r = run_command(
-                        _as_root(["cat", f"{etc}/passwd"]),
-                        capture_output=True, text=True,
-                    )
-                    for line in cat_r.stdout.splitlines():
-                        if line.startswith(f"{username}:"):
-                            parts = line.split(":")
-                            uid, gid = parts[2], parts[3]
-                            break
-
-                    var_home = (
-                        Path(config_root) / "ostree/deploy/default/var/home" / username
-                    )
-                    run_command(_as_root(["mkdir", "-p", str(var_home)]), check=True)
-                    run_command(_as_root(["chown", f"{uid}:{gid}", str(var_home)]), check=True)
-                    run_command(_as_root(["chmod", "700", str(var_home)]), check=True)
-
-                    # skel may be under deploy root; test via elevated path.
-                    skel = Path(deploy_root) / "etc/skel"
-                    skel_check = run_command(
-                        _as_root(["test", "-d", str(skel)]),
-                        check=False, capture_output=True,
-                    )
-                    if skel_check.returncode == 0:
-                        run_command(
-                            _as_root(["cp", "-rT", str(skel), str(var_home)]),
-                            check=True,
-                        )
-                        run_command(
-                            _as_root(["chown", "-R", f"{uid}:{gid}", str(var_home)]),
-                            check=True,
-                        )
-
-                    run_command(
-                        _as_root(["restorecon", "-RF", str(var_home)]),
-                        check=False,
-                    )
-                    log(f"User '{username}' created (uid={uid})")
-                    ensure_system_accounts(deploy_root, log)
-                    progress(97)
-                except OSError as ue:
-                    log(
-                        "Warning: user creation failed: "
-                        f"{format_os_error(ue)}"
-                    )
-                    log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
-                except Exception as ue:
-                    log(f"Warning: user creation failed: {ue}")
-                    log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
+                _create_installer_user(etc, config_root, deploy_root, username, password_hash, log, progress)
         else:
             log("Warning: deploy/etc not found — skipping post-install configuration")
     finally:

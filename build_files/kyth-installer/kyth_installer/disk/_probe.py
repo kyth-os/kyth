@@ -19,26 +19,17 @@ def _running_system_disk() -> str:
     # to the physical disk via _disk._parent_disk(), which walks every layer of
     # device-mapper indirection rather than assuming a single PKNAME hop.
     try:
-        source = subprocess.check_output(
-            ["findmnt", "-n", "-o", "SOURCE", "/"],
-            text=True, stderr=subprocess.DEVNULL, timeout=5,
-        ).strip()
+        return _disk._findmnt_source("/")
     except Exception:
         return ""
-    if not source or not source.startswith("/dev/"):
-        return ""
-    return source
 
 
 
 def _get_live_usb_disk() -> Optional[str]:
     for path in ("/run/initramfs/live", "/run/initramfs/iso"):
         try:
-            source = subprocess.check_output(
-                ["findmnt", "-n", "-o", "SOURCE", path],
-                text=True, stderr=subprocess.DEVNULL, timeout=5,
-            ).strip()
-            if not source or not source.startswith("/dev/"):
+            source = _disk._findmnt_source(path)
+            if not source:
                 continue
             try:
                 pkname = subprocess.check_output(

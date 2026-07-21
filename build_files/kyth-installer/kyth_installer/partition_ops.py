@@ -141,8 +141,6 @@ class Journal:
             errors.append("No partition operations have been added.")
             return errors
 
-        gpt = False
-        has_efi = False
         has_root = False
         allocated: list[tuple[int, int, str]] = []
 
@@ -151,11 +149,7 @@ class Journal:
             p = op["params"]
 
             if kind == "new_table":
-                table_type = p.get("table_type", "gpt").lower()
-                if table_type == "gpt":
-                    gpt = True
                 allocated.clear()
-                has_efi = False
                 has_root = False
 
             elif kind == "create":
@@ -178,26 +172,11 @@ class Journal:
                     if fs != "btrfs":
                         errors.append("Root partition (/) must use the Btrfs filesystem.")
                     has_root = True
-                if fs == "fat32" or mount == "/boot/efi":
-                    has_efi = True
-                if fs == "linux-swap":
-                    pass
-
-            elif kind == "delete":
-                # Deletion removes the need to track this partition's overlap
-                pass
-
-        current_parts = list_partitions(self.disk)
-        for part in current_parts:
-            name = part.get("name")
-            if part.get("efi"):
-                has_efi = True
-            if part.get("fstype") == "btrfs" and not part.get("current"):
-                pass
 
         if not has_root:
             errors.append("No root partition (/) configured. Mount at least one partition as '/' with Btrfs.")
 
+        current_parts = list_partitions(self.disk)
         for part in current_parts:
             name = part.get("name")
             if part.get("current") or part.get("in_use"):
@@ -216,10 +195,94 @@ class Journal:
                         errors.append(f"Cannot set {name} as the root partition — it is currently mounted or in use.")
                         break
 
-        if gpt and not has_efi:
-            pass
-
         return errors
+
+    def _commit_new_table(self, p: dict, log) -> None:
+        table_type = p.get("table_type", "gpt")
+        log(f"Creating new {table_type.upper()} partition table on {self.disk}...")
+        run_command(
+            _as_root(["parted", "-s", self.disk, "mklabel", table_type]),
+            check=True, timeout=30,
+        )
+        _settle()
+
+    def _commit_create(self, p: dict, log) -> None:
+        start = _safe_int(p.get("start_bytes"), 0)
+        size = _safe_int(p.get("size_bytes"), 0)
+        fs = p.get("fs_type", "btrfs")
+        label = p.get("label", "")
+
+        if start <= 0 or size <= 0:
+            raise RuntimeError(f"Create partition: invalid start {start} or size {size}.")
+
+        before = {pt["name"] for pt in list_partitions(self.disk) if pt.get("name")}
+        sector = _block_size_bytes(self.disk)
+        end_byte = start + size - sector
+
+        log(f"Creating {_human_size(size)} partition ({fs}) at offset {start}...")
+        run_command(
+            _as_root(["parted", "-s", self.disk, "unit", "B",
+                      "mkpart", label or "partition", fs,
+                      f"{start}B", f"{end_byte}B"]),
+            check=True, timeout=120,
+        )
+        _settle()
+
+        created = _latest_partition_on_disk(self.disk, before)
+        if not created:
+            raise RuntimeError("Could not find the newly created partition.")
+        # Record the resolved device name back onto the op so
+        # _find_root_partition() (and anything else inspecting the
+        # journal after commit) can tell which real partition this
+        # create op produced.
+        p["partition"] = created
+
+        if fs != "linux-swap":
+            log(f"Formatting {created} as {fs}...")
+            _require_mkfs(fs, log)
+            fmt_cmd = _mkfs_cmd(fs, created, label)
+            run_command(_as_root(fmt_cmd), check=True, timeout=120)
+
+        log(f"Created {created}")
+
+    def _commit_delete(self, p: dict, log) -> None:
+        part_name = p.get("partition", "")
+        if not part_name:
+            raise RuntimeError("Delete: no partition specified.")
+        part_num = _partition_number(part_name)
+        log(f"Deleting {part_name}...")
+        run_command(
+            _as_root(["parted", "-s", self.disk, "rm", str(part_num)]),
+            check=True, timeout=60,
+        )
+        _settle()
+
+    def _commit_resize(self, p: dict, log) -> None:
+        part_name = p.get("partition", "")
+        new_size = _safe_int(p.get("new_size_bytes"), 0)
+        if not part_name or new_size <= 0:
+            raise RuntimeError(f"Resize: invalid partition {part_name} or size {new_size}.")
+        part_num = _partition_number(part_name)
+        start = _partition_start_bytes(part_name)
+        new_end = start + new_size - _block_size_bytes(self.disk)
+        log(f"Resizing {part_name} to {_human_size(new_size)}...")
+        run_command(
+            _as_root(["parted", "---pretend-input-tty", self.disk,
+                      "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
+            input="Yes\n", text=True, check=True, timeout=120,
+        )
+        _settle()
+
+    def _commit_format(self, p: dict, log) -> None:
+        part_name = p.get("partition", "")
+        fs = p.get("fs_type", "btrfs")
+        label = p.get("label", "")
+        if not part_name:
+            raise RuntimeError("Format: no partition specified.")
+        log(f"Formatting {part_name} as {fs}...")
+        _require_mkfs(fs, log)
+        fmt_cmd = _mkfs_cmd(fs, part_name, label)
+        run_command(_as_root(fmt_cmd), check=True, timeout=300)
 
     def commit(self, log) -> str:
         _require_parted()
@@ -230,100 +293,17 @@ class Journal:
             p = op["params"]
 
             if kind == "new_table":
-                table_type = p.get("table_type", "gpt")
-                log(f"Creating new {table_type.upper()} partition table on {self.disk}...")
-                run_command(
-                    _as_root(["parted", "-s", self.disk, "mklabel", table_type]),
-                    check=True, timeout=30,
-                )
-                _settle()
-
+                self._commit_new_table(p, log)
             elif kind == "create":
-                start = _safe_int(p.get("start_bytes"), 0)
-                size = _safe_int(p.get("size_bytes"), 0)
-                fs = p.get("fs_type", "btrfs")
-                label = p.get("label", "")
-
-                if start <= 0 or size <= 0:
-                    raise RuntimeError(f"Create partition: invalid start {start} or size {size}.")
-
-                before = {pt["name"] for pt in list_partitions(self.disk) if pt.get("name")}
-                sector = _block_size_bytes(self.disk)
-                end_byte = start + size - sector
-
-                fstype_for_parted = fs
-                if fstype_for_parted == "linux-swap":
-                    fstype_for_parted = "linux-swap"
-                elif fstype_for_parted == "fat32":
-                    fstype_for_parted = "fat32"
-
-                log(f"Creating {_human_size(size)} partition ({fs}) at offset {start}...")
-                run_command(
-                    _as_root(["parted", "-s", self.disk, "unit", "B",
-                              "mkpart", label or "partition", fstype_for_parted,
-                              f"{start}B", f"{end_byte}B"]),
-                    check=True, timeout=120,
-                )
-                _settle()
-
-                created = _latest_partition_on_disk(self.disk, before)
-                if not created:
-                    raise RuntimeError("Could not find the newly created partition.")
-                # Record the resolved device name back onto the op so
-                # _find_root_partition() (and anything else inspecting the
-                # journal after commit) can tell which real partition this
-                # create op produced.
-                p["partition"] = created
-
-                if fs != "linux-swap":
-                    log(f"Formatting {created} as {fs}...")
-                    _require_mkfs(fs, log)
-                    fmt_cmd = _mkfs_cmd(fs, created, label)
-                    run_command(_as_root(fmt_cmd), check=True, timeout=120)
-
-                log(f"Created {created}")
-
+                self._commit_create(p, log)
             elif kind == "delete":
-                part_name = p.get("partition", "")
-                if not part_name:
-                    raise RuntimeError("Delete: no partition specified.")
-                part_num = _partition_number(part_name)
-                log(f"Deleting {part_name}...")
-                run_command(
-                    _as_root(["parted", "-s", self.disk, "rm", str(part_num)]),
-                    check=True, timeout=60,
-                )
-                _settle()
-
+                self._commit_delete(p, log)
             elif kind == "resize":
-                part_name = p.get("partition", "")
-                new_size = _safe_int(p.get("new_size_bytes"), 0)
-                if not part_name or new_size <= 0:
-                    raise RuntimeError(f"Resize: invalid partition {part_name} or size {new_size}.")
-                part_num = _partition_number(part_name)
-                start = _partition_start_bytes(part_name)
-                new_end = start + new_size - _block_size_bytes(self.disk)
-                log(f"Resizing {part_name} to {_human_size(new_size)}...")
-                run_command(
-                    _as_root(["parted", "---pretend-input-tty", self.disk,
-                              "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
-                    input="Yes\n", text=True, check=True, timeout=120,
-                )
-                _settle()
-
+                self._commit_resize(p, log)
             elif kind == "format":
-                part_name = p.get("partition", "")
-                fs = p.get("fs_type", "btrfs")
-                label = p.get("label", "")
-                if not part_name:
-                    raise RuntimeError("Format: no partition specified.")
-                log(f"Formatting {part_name} as {fs}...")
-                _require_mkfs(fs, log)
-                fmt_cmd = _mkfs_cmd(fs, part_name, label)
-                run_command(_as_root(fmt_cmd), check=True, timeout=300)
-
-            elif kind == "set_mountpoint":
-                pass
+                self._commit_format(p, log)
+            # "set_mountpoint" ops are pure journal metadata (consumed by
+            # _find_root_partition() below) — no disk operation of their own.
 
         self._root_partition = self._find_root_partition()
         self._committed = True

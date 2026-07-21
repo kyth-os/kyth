@@ -33,11 +33,8 @@ def find_efi_partition(disk: str) -> str:
         return ""
     for mount in ("/boot/efi", "/efi"):
         try:
-            out = subprocess.check_output(
-                ["findmnt", "-n", "-o", "SOURCE", mount],
-                text=True, stderr=subprocess.DEVNULL, timeout=5,
-            ).strip()
-            if not out or not out.startswith("/dev/"):
+            out = _disk._findmnt_source(mount)
+            if not out:
                 continue
             # This mount could be the live ISO/USB's own ESP (e.g. /boot/efi
             # inside the live session) rather than one on a real install

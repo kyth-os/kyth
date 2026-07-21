@@ -54,13 +54,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("X-Kyth-Session-Token", "") == SESSION_TOKEN:
             return True
         # Check cookie
-        cookie_header = self.headers.get("Cookie", "")
-        if cookie_header:
-            for pair in cookie_header.split(";"):
-                if "=" in pair:
-                    k, v = pair.strip().split("=", 1)
-                    if k == "bootstrap_auth" and v == SESSION_TOKEN:
-                        return True
+        cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
+        if cookies.get("bootstrap_auth") == SESSION_TOKEN:
+            return True
         self.send_error(403, "Forbidden")
         return False
 

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import sys
 
 import kyth_installer.disk as _disk
-subprocess = _disk.subprocess
 
 from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES
 from kyth_shared import _human_bytes as _human_size
@@ -39,13 +37,10 @@ def list_disks():
     current_disk = _disk._parent_disk(_disk._running_system_disk())
     disks = []
     try:
-        out = subprocess.check_output(
-            ["lsblk", "--json", "--bytes", "--paths", "--nodeps", "--output", "NAME,SIZE,MODEL,TYPE,TRAN,ROTA,RM,RO,PTTYPE"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
+        blockdevices = _disk._lsblk_blockdevices(
+            ["--paths", "--nodeps", "--output", "NAME,SIZE,MODEL,TYPE,TRAN,ROTA,RM,RO,PTTYPE"]
         )
-        for d in json.loads(out).get("blockdevices", []):
+        for d in blockdevices:
             if d.get("type") != "disk":
                 continue
             name = _disk._normal_device_path(d.get("name"))
@@ -79,13 +74,9 @@ def list_partitions(disk: str, *, strict: bool = False):
         return []
     parts = []
     try:
-        out = subprocess.check_output(
-            ["lsblk", "--json", "--bytes", "--paths", "--output", "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS,START", disk],
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
+        devices = _disk._lsblk_blockdevices(
+            ["--paths", "--output", "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS,START", disk]
         )
-        devices = json.loads(out).get("blockdevices", [])
 
         def walk(items):
             for child in items or []:
@@ -228,13 +219,7 @@ def _partitions_after(disk: str, partition: str) -> list[dict]:
     part_start = _disk._partition_start_bytes(partition)
     found = []
     try:
-        out = subprocess.check_output(
-            ["lsblk", "--json", "--bytes", "--paths", "--output", "NAME,TYPE,START,SIZE", disk],
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
-        stack = list(json.loads(out).get("blockdevices", []))
+        stack = list(_disk._lsblk_blockdevices(["--paths", "--output", "NAME,TYPE,START,SIZE", disk]))
         while stack:
             item = stack.pop()
             if item.get("type") == "part":

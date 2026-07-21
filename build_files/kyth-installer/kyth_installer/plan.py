@@ -122,6 +122,24 @@ def _apply_install_plan(state: dict, plan: InstallPlan) -> None:
         state["target_partition"] = plan.target_partition
 
 
+def _validate_partition_target(disk: str, target: str, label: str) -> dict:
+    """Validate `target` is a real, unmounted, adequately-sized, non-EFI
+    partition on `disk`, using `list_partitions()`'s post-scan state.
+    `label` (e.g. "target partition", "root partition") is substituted into
+    the error messages. Returns the matching partition dict on success."""
+    partitions = {p["name"]: p for p in list_partitions(disk)}
+    part = partitions.get(target)
+    if not part:
+        raise RuntimeError(f"The selected {label} was not found during the final disk scan.")
+    if part.get("efi"):
+        raise RuntimeError(f"The EFI system partition cannot be used as the KythOS {label}.")
+    if part.get("current") or part.get("in_use"):
+        raise RuntimeError(f"The selected {label} is mounted or has active encrypted/LVM mappings.")
+    if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
+        raise RuntimeError(f"The {label} is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
+    return part
+
+
 def _validate_install_target(config: dict) -> tuple[str, str | None]:
     mode = str(config.get("install_mode") or "wipe").strip().lower()
     disk = _normal_device_path(config.get("disk"))
@@ -144,16 +162,7 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
             raise RuntimeError("No target partition was selected for alongside installation.")
         if _parent_disk(target) != disk:
             raise RuntimeError("The selected partition does not belong to the selected disk.")
-        partitions = {p["name"]: p for p in list_partitions(disk)}
-        part = partitions.get(target)
-        if not part:
-            raise RuntimeError("The selected partition was not found during the final disk scan.")
-        if part.get("efi"):
-            raise RuntimeError("The EFI system partition cannot be used as the KythOS target partition.")
-        if part.get("current") or part.get("in_use"):
-            raise RuntimeError("The selected partition is mounted or has active encrypted/LVM mappings.")
-        if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
-            raise RuntimeError(f"The target partition is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
+        _validate_partition_target(disk, target, "target partition")
         if _is_gpt_disk(disk) and not _has_bios_boot_partition(disk):
             raise RuntimeError(
                 "This GPT disk has no BIOS boot partition required by the KythOS bootloader. "
@@ -178,16 +187,7 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
         # partition a create/format op in the journal actually touched, so it
         # could point at a pre-existing, still-mounted/in-use partition on the
         # same disk — never trust it without re-checking here.
-        partitions = {p["name"]: p for p in list_partitions(disk)}
-        part = partitions.get(target)
-        if not part:
-            raise RuntimeError("The root partition was not found during the final disk scan.")
-        if part.get("efi"):
-            raise RuntimeError("The EFI system partition cannot be used as the KythOS root partition.")
-        if part.get("current") or part.get("in_use"):
-            raise RuntimeError("The selected root partition is mounted or has active encrypted/LVM mappings.")
-        if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
-            raise RuntimeError(f"The root partition is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
+        _validate_partition_target(disk, target, "root partition")
         if not find_efi_partition(disk):
             raise RuntimeError("Manual installation requires an EFI system partition on the system. Create one in the partition editor.")
         return disk, target
