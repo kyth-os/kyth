@@ -445,6 +445,8 @@ check_file /usr/share/plasma/look-and-feel/org.kythos.desktop/contents/splash/Sp
 check_file /usr/share/plasma/look-and-feel/org.kythos.desktop/contents/splash/images/kyth-logo.svg "KythOS session splash logo"
 check_file_contains /etc/xdg/ksplashrc "Theme=org.kythos.desktop" "System session splash" "late Plasma startup uses KythOS branding"
 check_file_contains /etc/skel/.config/ksplashrc "Theme=org.kythos.desktop" "New-user session splash" "new accounts use KythOS branding after login"
+check_file /usr/bin/kyth-session-splash-guard "Existing-user pre-splash branding guard"
+check_file_contains /usr/lib/systemd/user/plasma-ksplash.service.d/20-kyth-branding.conf "ExecStartPre=/usr/bin/kyth-session-splash-guard" "Pre-splash branding migration" "existing accounts are repaired before the first post-update splash"
 check_file_contains /usr/bin/kyth-user-polish "Theme org.kythos.desktop" "Existing-user session splash migration" "upgraded accounts stop using inherited session branding"
 check_file_contains /usr/bin/kyth-user-polish "highlightNewlyInstalledApps" "User launcher badge quieting" "new-app badges disabled after updates"
 check_file /usr/bin/kyth-apply-desktop-layout "KythOS default layout helper"

@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-22 19:08:25 UTC
+- Last refreshed (UTC): 2026-07-22 19:11:20 UTC
 - Current branch: testing
-- HEAD commit: e26165b
-- Last commit title: Refresh project documentation
-- Last commit date: 2026-07-22T15:01:50-04:00
+- HEAD commit: 96a3919
+- Last commit title: Own the late Plasma boot splash branding
+- Last commit date: 2026-07-22T15:08:25-04:00
 - CI workflow files: 8
 - Build script files: 20
 
