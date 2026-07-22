@@ -41,10 +41,9 @@ class InstallerEntrypointTests(unittest.TestCase):
         build_script = (ROOT / "installer" / "build.sh").read_text()
 
         self.assertIn("source=build_files/kyth_shared", containerfile)
-        self.assertIn(
-            "cp -a /src/build_files/kyth_shared/kyth_shared /usr/kyth_shared/",
-            build_script,
-        )
+        self.assertIn("python3 -m pip install", build_script)
+        self.assertIn("/src/build_files/kyth_shared", build_script)
+        self.assertNotIn("/usr/kyth_shared", build_script)
 
 
 if __name__ == "__main__":

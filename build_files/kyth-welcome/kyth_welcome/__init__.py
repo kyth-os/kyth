@@ -19,27 +19,9 @@ Package layout:
 import sys
 from pathlib import Path
 
-_shared = None
 _here = Path(__file__).resolve().parent
 # Source checkout: build_files/kyth-welcome/kyth_welcome/__init__.py
-#   → kyth_shared at parent.parent.parent / "kyth_shared"
-_p = _here.parent.parent.parent / "kyth_shared"
+#   → kyth_shared beside kyth-welcome under build_files.
+_p = _here.parent.parent / "kyth_shared"
 if _p.is_dir() and str(_p) not in sys.path:
-    _shared = str(_p)
-# Container image: kyth_shared is installed at /usr/kyth_shared
-if not _shared:
-    _p = Path("/usr/kyth_shared")
-    if _p.is_dir() and str(_p) not in sys.path:
-        _shared = str(_p)
-# Source checkout (alternate layout): kyth_shared adjacent to the shim
-if not _shared:
-    _p = _here.parent.parent / "kyth_shared"
-    if _p.is_dir() and str(_p) not in sys.path:
-        _shared = str(_p)
-# Fallback: sibling of the shim's parent directory
-if not _shared:
-    _p = _here.parent / "kyth_shared"
-    if _p.is_dir() and str(_p) not in sys.path:
-        _shared = str(_p)
-if _shared:
-    sys.path.insert(0, _shared)
+    sys.path.insert(0, str(_p))

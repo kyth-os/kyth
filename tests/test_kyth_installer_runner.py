@@ -8,7 +8,12 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
-from kyth_installer.runner import InstallerCommand, run_command, run_installer_command  # noqa: E402
+from kyth_installer.runner import (  # noqa: E402
+    InstallerCommand,
+    run_command,
+    run_installer_command,
+    spawn_command,
+)
 
 
 class InstallerRunnerTests(unittest.TestCase):
@@ -30,6 +35,18 @@ class InstallerRunnerTests(unittest.TestCase):
             run_command("echo unsafe")
         with self.assertRaisesRegex(ValueError, "shell execution is forbidden"):
             run_command(["echo", "safe"], shell=True)  # noqa: S604 — asserts this is rejected, never executed
+
+    @mock.patch("kyth_installer.runner.subprocess.Popen")
+    def test_spawn_command_uses_the_same_validated_boundary(self, mock_popen):
+        spawn_command(["echo", Path("message")], stdout=subprocess.PIPE)
+
+        mock_popen.assert_called_once_with(
+            ["echo", "message"], shell=False, stdout=subprocess.PIPE
+        )
+        with self.assertRaises(TypeError):
+            spawn_command("echo unsafe")
+        with self.assertRaisesRegex(ValueError, "shell execution is forbidden"):
+            spawn_command(["echo", "safe"], shell=True)
 
     @mock.patch("kyth_installer.runner.subprocess.run")
     def test_run_installer_command_forwards_timeout(self, mock_run):

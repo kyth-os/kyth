@@ -12,6 +12,7 @@ from collections import deque
 from collections.abc import Callable, Sequence
 
 from kyth_shared import _NetStatsTracker, _parse_size_bytes
+from .runner import spawn_command
 
 
 LogFn = Callable[[str], None]
@@ -54,7 +55,7 @@ class StreamingCommandRunner:
     ) -> None:
         argv = list(command)
         log(f"$ {' '.join(argv)}")
-        proc = subprocess.Popen(  # nosec B603 # nosemgrep
+        proc = spawn_command(
             argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0,
         )
         if proc.stdout is None:

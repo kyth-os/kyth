@@ -7,6 +7,7 @@ partition table is backed up for rollback via sgdisk.
 
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -18,10 +19,6 @@ from .disk import (
 )
 from .runner import run_command
 from .system import _as_root, _settle
-
-_BACKUP_PATH = Path("/tmp/kyth-partition-backup")  # noqa: S108 — unlinked before each write in _save_snapshot
-_current_journal: Optional["Journal"] = None
-
 
 def _require_sgdisk(log=None):
     if not shutil.which("sgdisk"):
@@ -56,6 +53,7 @@ class Journal:
         self._snapshot_saved = False
         self._committed = False
         self._root_partition: Optional[str] = None
+        self._backup_dir: tempfile.TemporaryDirectory[str] | None = None
 
     @property
     def committed(self) -> bool:
@@ -67,10 +65,10 @@ class Journal:
 
     def _save_snapshot(self) -> None:
         _require_sgdisk()
-        backup = str(_BACKUP_PATH)
-        # sgdisk runs as root and will happily write through a pre-existing
-        # symlink at this world-writable-/tmp path — refuse first.
-        _BACKUP_PATH.unlink(missing_ok=True)
+        self._discard_snapshot()
+        self._backup_dir = tempfile.TemporaryDirectory(prefix="kyth-partition-")
+        backup_path = Path(self._backup_dir.name) / "partition-table.backup"
+        backup = str(backup_path)
         run_command(
             _as_root(["sgdisk", "--backup", backup, self.disk]),
             check=True, timeout=30,
@@ -82,8 +80,12 @@ class Journal:
         if not self._snapshot_saved:
             return
         _require_sgdisk()
-        backup = str(_BACKUP_PATH)
-        if not _BACKUP_PATH.exists():
+        if self._backup_dir is None:
+            return
+        backup_path = Path(self._backup_dir.name) / "partition-table.backup"
+        backup = str(backup_path)
+        if not backup_path.exists():
+            self._discard_snapshot()
             return
         run_command(
             _as_root(["sgdisk", "--load-backup", backup, self.disk]),
@@ -91,7 +93,12 @@ class Journal:
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
         _settle()
-        _BACKUP_PATH.unlink(missing_ok=True)
+        self._discard_snapshot()
+
+    def _discard_snapshot(self) -> None:
+        if self._backup_dir is not None:
+            self._backup_dir.cleanup()
+            self._backup_dir = None
         self._snapshot_saved = False
 
     def add_op(self, kind: str, params: dict) -> dict:
@@ -338,23 +345,24 @@ def _mkfs_cmd(fstype: str, device: str, label: str = "") -> list[str]:
     return cmd
 
 
-def get_journal() -> Optional[Journal]:
-    return _current_journal
+def get_journal(context) -> Optional[Journal]:
+    with context.state_lock:
+        return context.journal
 
 
-def init_journal(disk: str) -> Journal:
-    # Single module-level journal for the installer's one active session —
-    # get/init/reset above are its whole public API, so `global` here is the
-    # deliberate single-owner pattern, not incidental shared mutable state.
-    global _current_journal  # noqa: PLW0603
-    _current_journal = Journal(disk)
-    return _current_journal
+def init_journal(disk: str, context) -> Journal:
+    with context.state_lock:
+        reset_journal(context)
+        context.journal = Journal(disk)
+        return context.journal
 
 
-def reset_journal() -> None:
-    global _current_journal  # noqa: PLW0603
-    if _current_journal:
-        _current_journal.ops.clear()
-        _current_journal._committed = False
-        _current_journal._root_partition = None
-    _current_journal = None
+def reset_journal(context) -> None:
+    with context.state_lock:
+        journal = context.journal
+        if journal:
+            journal.ops.clear()
+            journal._committed = False
+            journal._root_partition = None
+            journal._discard_snapshot()
+        context.journal = None

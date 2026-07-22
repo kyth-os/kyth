@@ -37,6 +37,15 @@ def _validate_command_arg(arg: str) -> str:
     return arg
 
 
+def prepare_command(argv: Sequence[object]) -> list[str]:
+    if isinstance(argv, (str, bytes)):
+        raise TypeError("argv must be a sequence of arguments, not a shell command string")
+    command = [_validate_command_arg(str(part)) for part in argv]
+    if not command or not command[0]:
+        raise ValueError("argv must contain a non-empty executable")
+    return command
+
+
 def run_command(
     argv: Sequence[object],
     *,
@@ -45,11 +54,7 @@ def run_command(
     timeout: int | None = None,
     **kwargs,
 ):
-    if isinstance(argv, (str, bytes)):
-        raise TypeError("argv must be a sequence of arguments, not a shell command string")
-    command = [_validate_command_arg(str(part)) for part in argv]
-    if not command or not command[0]:
-        raise ValueError("argv must contain a non-empty executable")
+    command = prepare_command(argv)
     if kwargs.pop("shell", False):
         raise ValueError("shell execution is forbidden for installer commands")
     label = description or _format_command(command)
@@ -77,6 +82,15 @@ def run_command(
         raise RuntimeError(detail) from exc
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"{label} timed out after {exc.timeout} seconds") from exc
+
+
+def spawn_command(argv: Sequence[object], **kwargs) -> subprocess.Popen:
+    """Start a validated argv command without invoking a shell."""
+    if kwargs.pop("shell", False):
+        raise ValueError("shell execution is forbidden for installer commands")
+    return subprocess.Popen(  # nosec B603 # nosemgrep
+        prepare_command(argv), shell=False, **kwargs
+    )
 
 
 def run_installer_command(

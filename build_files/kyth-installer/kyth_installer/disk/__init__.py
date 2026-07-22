@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess  # noqa: F401 -- compatibility re-export used by callers/tests
 
 from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES, _IS_LIVE_SESSION  # noqa: F401
+from ..runner import run_command  # noqa: F401
 
 from ._util import (  # noqa: F401
     _safe_int,

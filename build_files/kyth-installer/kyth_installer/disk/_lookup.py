@@ -52,10 +52,11 @@ def find_efi_partition(disk: str) -> str:
 
 def get_root_partition(disk: str) -> str:
     try:
-        out = subprocess.check_output(
+        result = _disk.run_command(
             ["lsblk", "--json", "--bytes", "--output", "NAME,SIZE,TYPE", disk],
-            text=True, stderr=subprocess.DEVNULL,
+            capture_output=True, text=True, check=True,
         )
+        out = result.stdout
         parts = []
         for d in json.loads(out).get("blockdevices", []):
             for c in d.get("children", []):
@@ -66,10 +67,11 @@ def get_root_partition(disk: str) -> str:
     except Exception:
         _logger.debug("get_root_partition: lsblk probe of %s failed", disk, exc_info=True)
     try:
-        out = subprocess.check_output(
+        result = _disk.run_command(
             ["blkid", "--output", "device", "--match-types", "btrfs"],
-            text=True, stderr=subprocess.DEVNULL,
+            capture_output=True, text=True, check=True,
         )
+        out = result.stdout
         for raw_dev in out.splitlines():
             dev = raw_dev.strip()
             if dev and dev.startswith(disk):
@@ -80,5 +82,4 @@ def get_root_partition(disk: str) -> str:
         f"Cannot determine root partition on {disk}. "
         "lsblk and blkid both failed — check that the disk completed writing."
     )
-
 

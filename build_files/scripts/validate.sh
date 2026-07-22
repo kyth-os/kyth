@@ -30,7 +30,7 @@ if ((${#shell_files[@]} == 0)); then
 	echo "No shell scripts found" >&2
 	exit 1
 fi
-shellcheck --severity=error "${shell_files[@]}"
+shellcheck --severity=warning "${shell_files[@]}"
 for file in "${shell_files[@]}"; do
 	bash -n "${file}"
 done
@@ -41,11 +41,36 @@ import ast
 import subprocess
 from pathlib import Path
 
-files = subprocess.check_output(["git", "ls-files", "*.py"], text=True).splitlines()
-for name in files:
+tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+files = []
+for name in filter(None, tracked):
+    path = Path(name)
+    if path.suffix == ".py":
+        files.append(path)
+        continue
+    try:
+        with path.open(encoding="utf-8") as stream:
+            first_line = stream.readline()
+    except (OSError, UnicodeDecodeError):
+        continue
+    if first_line.startswith("#!") and "python" in first_line.lower():
+        files.append(path)
+
+for path in files:
+    name = path.as_posix()
     ast.parse(Path(name).read_text(encoding="utf-8"), filename=name)
 print(f"Checked {len(files)} Python files")
 PY
+
+echo "==> JavaScript syntax"
+js_files=()
+while IFS= read -r -d '' file; do
+	js_files+=("${file}")
+done < <(git ls-files -z '*.js')
+for file in "${js_files[@]}"; do
+	node --check "${file}"
+done
+echo "Checked ${#js_files[@]} JavaScript files"
 
 echo "==> Committed-secret patterns"
 python3 - <<'PY'
@@ -107,7 +132,7 @@ unexpected="$(printf '%s\n' "${output}" |
 	grep -Ev \
 		-e '^[^:]+: Command .+ is not executable: No such file or directory$' \
 		-e '^Failed to turn off SO_PASSRIGHTS on user lookup socket, ignoring: Operation not permitted$' \
-		-e '^Failed to enable SO_PASSCRED on handoff timestamp socket, ignoring: Operation not permitted$' \
+		-e '^Failed to enable SO_PASSCRED on handoff timestamp socket(, ignoring)?: Operation not permitted$' \
 		-e '^ERROR: ld\.so: object .* cannot be preloaded .* ignored\.$' ||
 	true)"
 if [[ -n "${unexpected}" ]]; then

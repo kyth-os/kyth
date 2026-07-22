@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kyth-welcome"
+version = "0.1.0"
+description = "KythOS System Hub and first-run wizard"
+requires-python = ">=3.11"
+dependencies = ["kyth-shared>=0.1,<0.2"]
+
+[project.scripts]
+kyth-welcome = "kyth_welcome.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kyth_welcome*"]
+
+[tool.setuptools.package-data]
+kyth_welcome = ["*.json"]

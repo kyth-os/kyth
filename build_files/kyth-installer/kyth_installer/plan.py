@@ -140,7 +140,7 @@ def _validate_partition_target(disk: str, target: str, label: str) -> dict:
     return part
 
 
-def _validate_install_target(config: dict) -> tuple[str, str | None]:
+def _validate_install_target(config: dict, context=None) -> tuple[str, str | None]:
     mode = str(config.get("install_mode") or "wipe").strip().lower()
     disk = _normal_device_path(config.get("disk"))
     if not disk:
@@ -173,7 +173,9 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
         return disk, target
 
     if mode == "manual":
-        journal = get_journal()
+        if context is None:
+            raise RuntimeError("Manual installation requires an installer session context.")
+        journal = get_journal(context)
         if not journal or not journal.committed:
             raise RuntimeError("Partition changes have not been committed. Return to the disk step and apply your partition layout.")
         target = _normal_device_path(journal.root_partition or config.get("target_partition"))
@@ -197,19 +199,21 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
 
 def _is_gpt_disk(disk: str) -> bool:
     try:
-        out = subprocess.check_output(
+        result = run_command(
             ["blkid", "-o", "value", "-s", "PTTYPE", disk],
-            text=True, stderr=subprocess.DEVNULL, timeout=5
+            capture_output=True, text=True, check=True, timeout=5,
         )
+        out = result.stdout
         if out.strip().lower() == "gpt":
             return True
     except Exception:
         _logger.debug("_is_gpt_disk: blkid probe of %s failed", disk, exc_info=True)
     try:
-        out = subprocess.check_output(
+        result = run_command(
             ["parted", "-s", disk, "print"],
-            text=True, stderr=subprocess.DEVNULL, timeout=5
+            capture_output=True, text=True, check=True, timeout=5,
         )
+        out = result.stdout
         return "Partition Table: gpt" in out
     except Exception:
         return False
@@ -436,7 +440,7 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     return disk, created
 
 
-def _prepare_install_plan(state: dict, log) -> InstallPlan:
+def _prepare_install_plan(state: dict, log, context=None) -> InstallPlan:
     plan = _install_plan_from_state(state)
     if plan.mode == "resize_ntfs":
         _validate_resize_ntfs_target(state)
@@ -447,15 +451,15 @@ def _prepare_install_plan(state: dict, log) -> InstallPlan:
         disk, target_partition = _prepare_free_space_target(state, log)
         plan = InstallPlan("alongside", disk=disk, target_partition=target_partition)
     else:
-        disk, target_partition = _validate_install_target(state)
+        disk, target_partition = _validate_install_target(state, context)
         plan = InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
     _apply_install_plan(state, plan)
     return plan
 
 
-def _get_manual_mounts() -> list[dict]:
+def _get_manual_mounts(context) -> list[dict]:
     """Return non-root partition mount assignments from the committed journal."""
-    journal = get_journal()
+    journal = get_journal(context)
     if not journal or not journal.committed:
         return []
     mounts: list[dict] = []
@@ -484,7 +488,7 @@ def _get_manual_mounts() -> list[dict]:
     return mounts
 
 
-def _validate_storage_intent(state: dict) -> None:
+def _validate_storage_intent(state: dict, context=None) -> None:
     """Validate a review-page storage choice without changing the machine."""
     mode = _normalized_install_mode(state)
     if mode == "resize_ntfs":
@@ -492,6 +496,6 @@ def _validate_storage_intent(state: dict) -> None:
     elif mode == "free_space":
         _validate_free_space_target(state)
     elif mode == "manual":
-        _validate_install_target(state)
+        _validate_install_target(state, context)
     else:
-        _validate_install_target(state)
+        _validate_install_target(state, context)

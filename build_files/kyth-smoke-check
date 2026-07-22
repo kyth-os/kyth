@@ -296,17 +296,21 @@ read_deployment_status() {
     local dest="$1"
     DEPLOYMENT_STATUS_SOURCE=""
 
-    if have bootc && bootc status >"$dest" 2>/dev/null; then
+    capture_status() {
+        "$@" >"$dest"
+    }
+
+    if have bootc && capture_status bootc status 2>/dev/null; then
         DEPLOYMENT_STATUS_SOURCE="bootc"
         return 0
     fi
 
-    if have sudo && sudo -n bootc status >"$dest" 2>/dev/null; then
+    if have sudo && capture_status sudo -n bootc status 2>/dev/null; then
         DEPLOYMENT_STATUS_SOURCE="bootc-sudo"
         return 0
     fi
 
-    if have ostree && ostree admin status >"$dest" 2>/dev/null; then
+    if have ostree && capture_status ostree admin status 2>/dev/null; then
         DEPLOYMENT_STATUS_SOURCE="ostree"
         return 0
     fi

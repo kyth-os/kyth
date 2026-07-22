@@ -128,7 +128,7 @@ class InstallerStorageTests(unittest.TestCase):
         }
 
         with patch.object(self.disk, "_protected_install_disks", return_value={"/dev/sdb"}), \
-             patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+             patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             disks = self.disk.list_disks()
 
         self.assertEqual([d["name"] for d in disks], ["/dev/nvme0n1"])
@@ -144,7 +144,7 @@ class InstallerStorageTests(unittest.TestCase):
         with patch.object(self.disk, "_protected_install_disks", return_value=set()), \
              patch.object(self.disk, "_running_system_disk", return_value="/dev/nvme0n1"), \
              patch.object(self.disk, "_parent_disk", return_value="/dev/nvme0n1"), \
-             patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+             patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             disks = {d["name"]: d for d in self.disk.list_disks()}
 
         self.assertTrue(disks["/dev/nvme0n1"]["current"])
@@ -157,7 +157,7 @@ class InstallerStorageTests(unittest.TestCase):
         ]}
         with patch.object(self.disk, "_protected_install_disks", return_value=set()), \
              patch.object(self.disk, "_running_system_disk", return_value=""), \
-             patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+             patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             disks = self.disk.list_disks()
 
         self.assertEqual([item["name"] for item in disks], ["/dev/sdb"])
@@ -175,15 +175,15 @@ class InstallerStorageTests(unittest.TestCase):
             ("lsblk", "-n", "-o", "TYPE", "/dev/nvme0n1"): "disk\n",
         }
 
-        def fake_check_output(cmd, **_kwargs):
+        def fake_run_command(cmd, **_kwargs):
             key = tuple(cmd)
             if key not in chain:
                 raise AssertionError(f"unexpected lsblk invocation: {cmd}")
-            return chain[key]
+            return SimpleNamespace(stdout=chain[key], returncode=0)
 
         normalize = lambda p: p if p.startswith("/dev/") else f"/dev/{p}"
         with patch.object(self.disk, "_normal_device_path", side_effect=normalize), \
-             patch.object(self.disk.subprocess, "check_output", side_effect=fake_check_output):
+             patch.object(self.disk, "run_command", side_effect=fake_run_command):
             result = self.disk._parent_disk("/dev/mapper/kyth-root")
 
         self.assertEqual(result, "/dev/nvme0n1")
@@ -205,7 +205,7 @@ class InstallerStorageTests(unittest.TestCase):
             }]
         }
 
-        with patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+        with patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             parts = {p["name"]: p for p in self.disk.list_partitions("/dev/nvme0n1")}
 
         self.assertFalse(parts["/dev/nvme0n1p1"]["alongside_candidate"])
@@ -227,7 +227,7 @@ class InstallerStorageTests(unittest.TestCase):
 
     def test_find_efi_partition_falls_back_to_findmnt_when_no_partition_flagged(self):
         with patch.object(self.disk, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "efi": False}]), \
-             patch.object(self.disk.subprocess, "check_output", return_value="/dev/nvme0n1p1\n"):
+             patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout="/dev/nvme0n1p1\n", returncode=0)):
             result = self.disk.find_efi_partition("/dev/nvme0n1")
 
         self.assertEqual(result, "/dev/nvme0n1p1")
@@ -837,27 +837,27 @@ class InstallerSystemTests(unittest.TestCase):
 
 
 class InstallerGptDiskTests(unittest.TestCase):
-    @patch("kyth_installer.plan.subprocess.check_output")
-    def test_is_gpt_disk_via_blkid(self, mock_check_output):
-        mock_check_output.return_value = "gpt\n"
+    @patch("kyth_installer.plan.run_command")
+    def test_is_gpt_disk_via_blkid(self, mock_run):
+        mock_run.return_value = SimpleNamespace(stdout="gpt\n", returncode=0)
         self.assertTrue(plan._is_gpt_disk("/dev/sda"))
-        mock_check_output.assert_called_once_with(
+        mock_run.assert_called_once_with(
             ["blkid", "-o", "value", "-s", "PTTYPE", "/dev/sda"],
-            text=True, stderr=plan.subprocess.DEVNULL, timeout=5
+            capture_output=True, text=True, check=True, timeout=5,
         )
 
-    @patch("kyth_installer.plan.subprocess.check_output")
-    def test_is_gpt_disk_via_parted(self, mock_check_output):
-        mock_check_output.side_effect = [
-            plan.subprocess.CalledProcessError(1, "blkid"),
-            "Model: Virtual Disk\nPartition Table: gpt\n"
+    @patch("kyth_installer.plan.run_command")
+    def test_is_gpt_disk_via_parted(self, mock_run):
+        mock_run.side_effect = [
+            RuntimeError("blkid failed"),
+            SimpleNamespace(stdout="Model: Virtual Disk\nPartition Table: gpt\n", returncode=0),
         ]
         self.assertTrue(plan._is_gpt_disk("/dev/sda"))
-        self.assertEqual(mock_check_output.call_count, 2)
+        self.assertEqual(mock_run.call_count, 2)
 
-    @patch("kyth_installer.plan.subprocess.check_output")
-    def test_is_gpt_disk_non_gpt(self, mock_check_output):
-        mock_check_output.return_value = "dos\n"
+    @patch("kyth_installer.plan.run_command")
+    def test_is_gpt_disk_non_gpt(self, mock_run):
+        mock_run.return_value = SimpleNamespace(stdout="dos\n", returncode=0)
         self.assertFalse(plan._is_gpt_disk("/dev/sda"))
 
 

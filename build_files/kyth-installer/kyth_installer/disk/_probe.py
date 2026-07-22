@@ -32,20 +32,22 @@ def _get_live_usb_disk() -> Optional[str]:
             if not source:
                 continue
             try:
-                pkname = subprocess.check_output(
+                result = _disk.run_command(
                     ["lsblk", "-n", "-o", "PKNAME", source],
-                    text=True, stderr=subprocess.DEVNULL, timeout=5,
-                ).strip().splitlines()
+                    capture_output=True, text=True, check=True, timeout=5,
+                )
+                pkname = result.stdout.strip().splitlines()
                 parent = next((line.strip() for line in pkname if line.strip()), "")
                 if parent:
                     return f"/dev/{parent}"
             except Exception:
                 _logger.debug("_get_live_usb_disk: PKNAME lookup for %s failed", source, exc_info=True)
             try:
-                disk = subprocess.check_output(
+                result = _disk.run_command(
                     ["lsblk", "-n", "-o", "NAME,TYPE", source],
-                    text=True, stderr=subprocess.DEVNULL, timeout=5,
+                    capture_output=True, text=True, check=True, timeout=5,
                 )
+                disk = result.stdout
                 for line in disk.splitlines():
                     parts = line.split()
                     if len(parts) >= 2 and parts[1] == "disk":
@@ -55,10 +57,11 @@ def _get_live_usb_disk() -> Optional[str]:
             except Exception:
                 _logger.debug("_get_live_usb_disk: NAME,TYPE lookup for %s failed", source, exc_info=True)
             try:
-                devtype = subprocess.check_output(
+                result = _disk.run_command(
                     ["lsblk", "-n", "-o", "TYPE", source],
-                    text=True, stderr=subprocess.DEVNULL, timeout=5,
-                ).strip()
+                    capture_output=True, text=True, check=True, timeout=5,
+                )
+                devtype = result.stdout.strip()
                 if devtype == "disk":
                     return source
             except Exception:
@@ -95,7 +98,10 @@ def _mount_sources(path: str, recursive: bool = False) -> set[str]:
         if recursive:
             cmd.append("-R")
         cmd.extend(["-n", "-o", "SOURCE", path])
-        out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL, timeout=5)
+        result = _disk.run_command(
+            cmd, capture_output=True, text=True, check=True, timeout=5,
+        )
+        out = result.stdout
     except Exception:
         out = ""
     for line in out.splitlines():
@@ -140,13 +146,13 @@ def _disk_path_is_safe(path: str) -> bool:
 
 def partition_has_active_mount(partition: str) -> bool:
     try:
-        out = subprocess.check_output(
+        result = _disk.run_command(
             ["findmnt", "-n", "-o", "TARGET", partition],
-            text=True, stderr=subprocess.DEVNULL, timeout=5,
+            capture_output=True, text=True, check=True, timeout=5,
         )
+        out = result.stdout
         return bool(out.strip())
     except Exception:
         return False
-
 
 

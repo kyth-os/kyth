@@ -122,12 +122,17 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/syscon
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig.sh
 
-# kyth_shared — shared Python helpers used by kyth-welcome at runtime.
-# COPY (not bind-mount) is intentional: COPY includes file content hashes in the
-# cache key, so every kyth_shared content change busts the cache here rather than
-# silently shipping a stale layer cached from a previous successful build.
-# See the sibling comment for plymouth for the same reasoning.
-COPY build_files/kyth_shared/kyth_shared /usr/kyth_shared/kyth_shared/
+# Install the shared Python distribution from a COPY-backed source so content
+# changes invalidate BuildKit's cache. The later /ctx bind mount alone does not
+# participate in the cache key.
+COPY build_files/kyth_shared /tmp/kyth-shared-package
+RUN python3 -m pip install \
+        --no-cache-dir \
+        --no-deps \
+        --no-build-isolation \
+        --prefix=/usr \
+        /tmp/kyth-shared-package && \
+    rm -rf /tmp/kyth-shared-package
 
 # Build cache boundary: Secure Boot signing, branding, helper app, and Plymouth.
 # These operations share one raw BuildKit layer; legacy-rechunk repartitions the

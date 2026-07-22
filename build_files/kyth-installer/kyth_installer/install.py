@@ -6,7 +6,7 @@ import traceback
 from pathlib import Path
 
 from .config import LOG_FILE, SKIP_FETCH_CHECK
-from .context import DEFAULT_CONTEXT, InstallerContext
+from .context import InstallLifecycle, InstallerContext
 from .disk import get_root_partition
 from .imagesrc import _friendly_network_error, _install_images, _network_preflight
 from .plan import _get_manual_mounts, _prepare_install_plan, _validate_install_target, _validate_storage_intent
@@ -26,15 +26,7 @@ from .system import (
     unmount_target_disk,
 )
 
-# Temporary aliases for callers migrating from the former module globals.
-_state = DEFAULT_CONTEXT.state
-_events = DEFAULT_CONTEXT.events.events
-_new_event = DEFAULT_CONTEXT.events.condition
-_events_lock = _new_event
-_install_lock = DEFAULT_CONTEXT.install_lock
-
-
-def _push(event: dict, context: InstallerContext = DEFAULT_CONTEXT) -> None:
+def _push(event: dict, context: InstallerContext) -> None:
     context.events.publish(event)
 
 
@@ -72,6 +64,7 @@ def _run_cmd(
     progress,
     stall_timeout: int = 600,
     absolute_timeout: int | None = 3600,
+    publish=None,
 ) -> None:
     full_cmd = _as_root(cmd)
     def error_factory(returncode: int, recent_output: list[str], argv: list[str]) -> Exception:
@@ -99,7 +92,10 @@ def _run_cmd(
             f"Command failed (exit {returncode}):\n  {' '.join(argv)}\n\n{detail}"
         )
 
-    StreamingCommandRunner(rx_bytes=_get_rx_bytes, publish=_push).run(
+    StreamingCommandRunner(
+        rx_bytes=_get_rx_bytes,
+        publish=publish or (lambda _event: None),
+    ).run(
         full_cmd,
         pct_start,
         pct_end,
@@ -110,18 +106,18 @@ def _run_cmd(
         error_factory=error_factory,
     )
 
-def _prepare_install_context(log, context: InstallerContext = DEFAULT_CONTEXT):
+def _prepare_install_context(log, context: InstallerContext):
     state = context.state
     kernel = state.get("kernel", "fedora")
     src_ref, tgt_ref = _install_images(kernel)
-    _validate_storage_intent(state)
+    _validate_storage_intent(state, context)
     if not SKIP_FETCH_CHECK:
         log("Running network preflight check...")
         net_err = _network_preflight(src_ref)
         if net_err:
             raise RuntimeError(net_err)
-    install_plan = _prepare_install_plan(state, log)
-    disk, target_partition = _validate_install_target(state)
+    install_plan = _prepare_install_plan(state, log, context)
+    disk, target_partition = _validate_install_target(state, context)
     state["disk"] = disk
     if target_partition:
         state["target_partition"] = target_partition
@@ -141,7 +137,7 @@ def _prepare_install_context(log, context: InstallerContext = DEFAULT_CONTEXT):
 
 def _prepare_install_storage(
     disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount,
-    context: InstallerContext = DEFAULT_CONTEXT,
+    context: InstallerContext,
 ):
     state = context.state
     target_part = ""
@@ -158,7 +154,11 @@ def _prepare_install_storage(
         run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
 
         log(f"Formatting {target_part} as btrfs ...")
-        _run_cmd(["mkfs.btrfs", "-f", "-L", "KythOS", target_part], 5, 10, log, progress)
+        _run_cmd(
+            ["mkfs.btrfs", "-f", "-L", "KythOS", target_part],
+            5, 10, log, progress,
+            publish=lambda event: _push(event, context),
+        )
 
         # Create btrfs subvolumes @ and @home
         log("Creating Btrfs subvolumes @ and @home ...")
@@ -184,10 +184,11 @@ def _prepare_install_storage(
             efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
             run_command(_as_root(["mkdir", "-p", str(efi_mountpoint)]), check=True)
             try:
-                current_efi_mnt = subprocess.check_output(
+                result = run_command(
                     ["findmnt", "-n", "-o", "MOUNTPOINT", efi_part],
-                    text=True, stderr=subprocess.DEVNULL, timeout=5,
-                ).strip()
+                    capture_output=True, text=True, check=True, timeout=5,
+                )
+                current_efi_mnt = result.stdout.strip()
             except Exception:
                 current_efi_mnt = ""
             if current_efi_mnt:
@@ -207,7 +208,11 @@ def _prepare_install_storage(
             "to-filesystem", src_ref, tgt_ref, alongside_mount,
             extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@"],
         )
-        _run_cmd(install_cmd, 12, 90, log, progress, stall_timeout=3600, absolute_timeout=None)
+        _run_cmd(
+            install_cmd, 12, 90, log, progress,
+            stall_timeout=3600, absolute_timeout=None,
+            publish=lambda event: _push(event, context),
+        )
 
         root_part = target_part
 
@@ -217,7 +222,11 @@ def _prepare_install_storage(
             "to-disk", src_ref, tgt_ref, disk,
             extra_flags=["--filesystem", "btrfs", "--wipe"],
         )
-        _run_cmd(install_cmd, 5, 90, log, progress, stall_timeout=3600, absolute_timeout=None)
+        _run_cmd(
+            install_cmd, 5, 90, log, progress,
+            stall_timeout=3600, absolute_timeout=None,
+            publish=lambda event: _push(event, context),
+        )
         root_part = get_root_partition(disk)
     return target_part, root_part, alongside_mount
 
@@ -230,7 +239,11 @@ def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
     run_command(_as_root(["mount", "-o", "subvol=@home", target_part, str(target_home)]), check=True)
 
     try:
-        uuid_out = subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", target_part], text=True).strip()
+        result = run_command(
+            ["blkid", "-s", "UUID", "-o", "value", target_part],
+            capture_output=True, text=True, check=True,
+        )
+        uuid_out = result.stdout.strip()
         if uuid_out:
             fstab_path = Path(etc, "fstab")
             fstab_line = f"UUID={uuid_out} /var/home btrfs subvol=@home,compress=zstd:1 0 0\n"
@@ -249,19 +262,20 @@ def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
         log(f"Warning: failed to update fstab with @home subvolume: {fe}")
 
 
-def _configure_manual_mounts(config_root, etc, log) -> None:
+def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -> None:
     """Mount each manually-configured partition under the ostree deploy root
     and add a matching fstab entry (mapping /home to /var/home)."""
-    manual_mounts = _get_manual_mounts()
+    manual_mounts = _get_manual_mounts(context)
     for mnt in manual_mounts:
         part = mnt["partition"]
         mp = mnt["mountpoint"]
         fs = mnt["fstype"]
         try:
-            uuid_out = subprocess.check_output(
+            result = run_command(
                 ["blkid", "-s", "UUID", "-o", "value", part],
-                text=True, timeout=5
-            ).strip()
+                capture_output=True, text=True, check=True, timeout=5,
+            )
+            uuid_out = result.stdout.strip()
             if not uuid_out:
                 log(f"Warning: could not get UUID for {part}, skipping fstab entry for {mp}")
                 continue
@@ -412,7 +426,7 @@ def _create_installer_user(etc, config_root, deploy_root, username, password_has
 
 def _configure_installed_system(
     root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress,
-    context: InstallerContext = DEFAULT_CONTEXT,
+    context: InstallerContext,
 ):
     state = context.state
     try:
@@ -423,7 +437,7 @@ def _configure_installed_system(
 
             # Manual partition mode: mount additional partitions and update fstab
             if install_mode == "manual":
-                _configure_manual_mounts(config_root, etc, log)
+                _configure_manual_mounts(config_root, etc, log, context)
 
             _configure_hostname_timezone(etc, state, log)
             progress(95)
@@ -448,7 +462,7 @@ def _configure_installed_system(
             run_command(_as_root(["umount", config_root]), check=False)
 
 def _run_install_worker(
-    log, progress, alongside_mount, context: InstallerContext = DEFAULT_CONTEXT,
+    log, progress, alongside_mount, context: InstallerContext,
 ):
     state = context.state
     try:
@@ -482,6 +496,7 @@ def _run_install_worker(
         mok_state = _try_stage_mok_enrollment(log, kernel, state["mok_password"])
 
         progress(100)
+        context.transition(InstallLifecycle.DONE)
         _push({"type": "done", "mok_state": mok_state}, context)
 
     except Exception as exc:
@@ -499,6 +514,7 @@ def _run_install_worker(
         except Exception as log_exc:
             message = f"{message} (also failed writing installer log {LOG_FILE}: {log_exc})"
         log(f"ERROR: {message}")
+        context.transition(InstallLifecycle.FAILED)
         _push({"type": "error", "message": message}, context)
     finally:
         state["password_hash"] = ""  # nosec B105 # nosemgrep -- clearing, not a hardcoded secret
@@ -508,7 +524,7 @@ def _run_install_worker(
         if alongside_mount:
             run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
 
-def _run_install(context: InstallerContext = DEFAULT_CONTEXT) -> None:
+def _run_install(context: InstallerContext) -> None:
     context.events.clear()
 
     def log(msg: str) -> None:
@@ -543,6 +559,7 @@ def _run_install(context: InstallerContext = DEFAULT_CONTEXT) -> None:
         os.close(fd)
     except Exception as exc:
         message = format_install_error(exc)
+        context.transition(InstallLifecycle.FAILED)
         _push({"type": "error", "message": message}, context)
         return
 

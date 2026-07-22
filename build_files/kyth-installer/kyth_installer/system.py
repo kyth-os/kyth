@@ -99,9 +99,11 @@ def format_install_error(exc: BaseException) -> str:
 
 def list_timezones() -> list[str]:
     try:
-        out = subprocess.check_output(
-            ["timedatectl", "list-timezones"], text=True, timeout=5
+        result = run_command(
+            ["timedatectl", "list-timezones"],
+            capture_output=True, text=True, check=True, timeout=5,
         )
+        out = result.stdout
         zones = [ln.strip() for ln in out.splitlines() if ln.strip()]
         if zones:
             return zones
@@ -303,10 +305,11 @@ def ensure_system_accounts(deploy_root: str, log) -> None:
 
 def _lsblk_target_mounts(disk: str) -> list[tuple[str, str]]:
     """Return (device, mountpoint) pairs for mounted devices under disk."""
-    out = subprocess.check_output(
+    result = run_command(
         ["lsblk", "--json", "--paths", "--output", "NAME,TYPE,MOUNTPOINTS", disk],
-        text=True, stderr=subprocess.DEVNULL,
+        capture_output=True, text=True, check=True,
     )
+    out = result.stdout
     mounts: list[tuple[str, str]] = []
 
     def walk(dev: dict) -> None:

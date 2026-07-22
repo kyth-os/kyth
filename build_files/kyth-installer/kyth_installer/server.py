@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from . import config
 from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, _IS_LIVE_SESSION
-from .context import DEFAULT_CONTEXT, InstallerContext
+from .context import InstallerContext
 from .disk import list_disks, list_partitions, list_free_space
 from .partition_ops import FILESYSTEM_OPTIONS, get_journal
 from .plan import ROUTES, RouteSpec
@@ -44,7 +44,10 @@ def _route_for(method: str, path: str) -> RouteSpec | None:
 class Handler(BaseHTTPRequestHandler):
     @property
     def context(self) -> InstallerContext:
-        return getattr(getattr(self, "server", None), "context", DEFAULT_CONTEXT)
+        context = getattr(getattr(self, "server", None), "context", None)
+        if context is None:
+            raise RuntimeError("Installer HTTP handler has no runtime context")
+        return context
 
     def log_message(self, *_):
         pass
@@ -154,7 +157,7 @@ class Handler(BaseHTTPRequestHandler):
             disk = (qs.get("disk") or [""])[0]
             self._json(list_free_space(disk) if disk else [])
         elif route == ROUTES["partition_pending"]:
-            journal = get_journal()
+            journal = get_journal(self.context)
             self._json(journal.pending() if journal else [])
         elif route == ROUTES["filesystems"]:
             self._json(FILESYSTEM_OPTIONS)
@@ -235,6 +238,6 @@ class _Server(ThreadingHTTPServer):
     # and left a TIME_WAIT socket — prevents EADDRINUSE on rapid restarts.
     allow_reuse_address = True
 
-    def __init__(self, server_address, handler_class, context=DEFAULT_CONTEXT):
-        self.context = context
+    def __init__(self, server_address, handler_class, context: InstallerContext | None = None):
+        self.context = context or InstallerContext()
         super().__init__(server_address, handler_class)

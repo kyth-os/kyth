@@ -18,22 +18,16 @@ SOURCE_TAG=${SOURCE_TAG:?}
 # bwrap tries to write /proc/sys/user/max_user_namespaces which is mounted as ro
 mount -o remount,rw /proc/sys
 
-# ── KythOS installer binaries ─────────────────────────────────────────────────
-install -Dm755 /src/build_files/kyth-installer/kyth-installer /usr/bin/kyth-installer
-# /usr/bin/kyth-installer is a thin shim; the application package lives here.
-mkdir -p /usr/lib/kyth-installer
-cp -a /src/build_files/kyth-installer/kyth_installer /usr/lib/kyth-installer/
-rm -rf /usr/lib/kyth-installer/kyth_installer/__pycache__
-find /usr/lib/kyth-installer -type d -exec chmod 0755 {} +
-find /usr/lib/kyth-installer -type f -exec chmod 0644 {} +
-# The entrypoint adds /usr/kyth_shared to sys.path.  The live payload is built
-# with bind mounts rather than the main image's /ctx staging directory, so copy
-# the shared package explicitly here as well.
-mkdir -p /usr/kyth_shared
-cp -a /src/build_files/kyth_shared/kyth_shared /usr/kyth_shared/
-rm -rf /usr/kyth_shared/kyth_shared/__pycache__
-find /usr/kyth_shared -type d -exec chmod 0755 {} +
-find /usr/kyth_shared -type f -exec chmod 0644 {} +
+# ── KythOS installer Python packages ──────────────────────────────────────────
+# Install through their package metadata so entry points, dependencies, and
+# package data are verified by the same mechanism used by development builds.
+python3 -m pip install \
+	--no-cache-dir \
+	--no-deps \
+	--no-build-isolation \
+	--prefix=/usr \
+	/src/build_files/kyth_shared \
+	/src/build_files/kyth-installer
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
 install -Dm755 /src/build_files/kyth-partition-install.sh /usr/bin/kyth-partition-install
 install -Dm755 /src/build_files/scripts/plymouth-branding-guard.sh \

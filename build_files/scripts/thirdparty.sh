@@ -7,6 +7,7 @@ source "${HERE}/lib/thirdparty-common.sh"
 
 # Each per-tool fragment defines its own install_<name> function.
 for _fragment in "${HERE}/thirdparty"/*.sh; do
+	# shellcheck source=/dev/null
 	source "${_fragment}"
 done
 unset _fragment

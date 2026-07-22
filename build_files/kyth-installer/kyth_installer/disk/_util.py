@@ -30,7 +30,10 @@ def _normal_device_path(name: str | None) -> str | None:
 
 def _lsblk_text(args: list[str], timeout: int = 5) -> str:
     try:
-        return subprocess.check_output(["lsblk", *args], text=True, stderr=subprocess.DEVNULL, timeout=timeout).strip()
+        result = _disk.run_command(
+            ["lsblk", *args], capture_output=True, text=True, check=True, timeout=timeout,
+        )
+        return result.stdout.strip()
     except Exception:
         return ""
 
@@ -42,10 +45,11 @@ def _findmnt_source(target: str, timeout: int = 5) -> str:
     callers (e.g. _running_system_disk()) want to swallow those entirely,
     others (e.g. find_efi_partition()) want to log them, so this doesn't
     decide that for them."""
-    source = subprocess.check_output(
+    result = _disk.run_command(
         ["findmnt", "-n", "-o", "SOURCE", target],
-        text=True, stderr=subprocess.DEVNULL, timeout=timeout,
-    ).strip()
+        capture_output=True, text=True, check=True, timeout=timeout,
+    )
+    source = result.stdout.strip()
     return source if source.startswith("/dev/") else ""
 
 
@@ -56,10 +60,11 @@ def _lsblk_blockdevices(args: list[str], timeout: int = 5) -> list[dict]:
     failures — callers in disk/_query.py each apply their own policy
     (log-and-continue with partial results, log-and-return-empty, or raise)
     and need the real exception to do that."""
-    out = subprocess.check_output(
+    result = _disk.run_command(
         ["lsblk", "--json", "--bytes", *args],
-        text=True, stderr=subprocess.DEVNULL, timeout=timeout,
+        capture_output=True, text=True, check=True, timeout=timeout,
     )
+    out = result.stdout
     return json.loads(out).get("blockdevices", [])
 
 
@@ -75,10 +80,13 @@ def _device_type(dev: str | None) -> str:
 
 def _block_size_bytes(device: str) -> int:
     try:
-        out = subprocess.check_output(["blockdev", "--getss", device], text=True, stderr=subprocess.DEVNULL, timeout=5).strip()
+        result = _disk.run_command(
+            ["blockdev", "--getss", device],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+        out = result.stdout.strip()
         return max(512, _disk._safe_int(out, 512))
     except Exception:
         return 512
-
 
 

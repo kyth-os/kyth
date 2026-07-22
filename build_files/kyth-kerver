@@ -16,7 +16,10 @@ if command -v powerprofilesctl >/dev/null 2>&1; then
     power_profile=${power_profile:-unavailable}
 fi
 
-thp_mode=$(< /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || echo "unavailable")
+thp_mode="unavailable"
+if [[ -r /sys/kernel/mm/transparent_hugepage/enabled ]]; then
+    thp_mode=$(< /sys/kernel/mm/transparent_hugepage/enabled)
+fi
 tcp_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unavailable")
 zram_summary=$(zramctl --output NAME,ALGORITHM,DISKSIZE --noheadings 2>/dev/null | xargs echo || true)
 zram_summary=${zram_summary:-disabled}

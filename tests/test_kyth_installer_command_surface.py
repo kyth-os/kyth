@@ -9,24 +9,23 @@ ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "build_files" / "kyth-installer" / "kyth_installer"
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
-from kyth_installer import install  # noqa: E402
-from kyth_installer.context import InstallerContext  # noqa: E402
+from kyth_installer import install, post_routes  # noqa: E402
+from kyth_installer.context import InstallLifecycle, InstallerContext  # noqa: E402
+from kyth_installer.partition_ops import get_journal, init_journal, reset_journal  # noqa: E402
 from kyth_installer.plan import InstallPlan  # noqa: E402
 from kyth_installer.streaming import StreamingCommandRunner  # noqa: E402
 
 
 class InstallerCommandSurfaceTests(unittest.TestCase):
-    def test_execution_modules_use_runner_for_subprocess_run(self):
-        execution_modules = {
-            "imagesrc.py",
-            "install.py",
-            "plan.py",
-            "system.py",
-        }
+    def test_execution_modules_use_runner_for_process_launches(self):
+        forbidden = {"run", "Popen", "check_output", "check_call", "call"}
+        execution_modules = sorted(
+            path for path in INSTALLER.rglob("*.py") if path.name != "runner.py"
+        )
 
-        for filename in execution_modules:
-            with self.subTest(filename=filename):
-                tree = ast.parse((INSTALLER / filename).read_text())
+        for path in execution_modules:
+            with self.subTest(filename=path.relative_to(INSTALLER)):
+                tree = ast.parse(path.read_text())
                 calls = []
                 for node in ast.walk(tree):
                     if (
@@ -34,15 +33,11 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                         and isinstance(node.func, ast.Attribute)
                         and isinstance(node.func.value, ast.Name)
                         and node.func.value.id == "subprocess"
-                        and node.func.attr == "run"
+                        and node.func.attr in forbidden
                     ):
                         calls.append(node.lineno)
 
-                self.assertFalse(calls, f"direct subprocess.run calls at {calls}")
-                self.assertIn(
-                    "from .runner import run_command",
-                    (INSTALLER / filename).read_text(),
-                )
+                self.assertFalse(calls, f"direct process launches at {calls}")
 
     def test_discovery_modules_keep_subprocess_boundary_explicit(self):
         discovery_modules = {"disk/__init__.py"}
@@ -61,9 +56,51 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         self.assertEqual(second.state["disk"], "")
         self.assertEqual(second.events.events, [])
 
+    def test_installer_contexts_do_not_share_partition_journals(self):
+        first = InstallerContext()
+        second = InstallerContext()
+
+        with mock.patch(
+            "kyth_installer.partition_ops._normal_device_path", side_effect=lambda path: path
+        ):
+            first_journal = init_journal("/dev/sda", first)
+            second_journal = init_journal("/dev/nvme0n1", second)
+
+        first_journal.add_op("new_table", {"table_type": "gpt"})
+        self.assertIs(get_journal(first), first_journal)
+        self.assertIs(get_journal(second), second_journal)
+        self.assertEqual(second_journal.pending(), [])
+
+        reset_journal(first)
+        self.assertIsNone(get_journal(first))
+        self.assertIs(get_journal(second), second_journal)
+
+    def test_context_tracks_install_lifecycle(self):
+        context = InstallerContext()
+
+        self.assertEqual(context.lifecycle, InstallLifecycle.IDLE)
+        context.transition(InstallLifecycle.VALIDATED)
+        context.transition(InstallLifecycle.INSTALLING)
+        context.transition(InstallLifecycle.DONE)
+
+        self.assertEqual(context.lifecycle, InstallLifecycle.DONE)
+
+    def test_partition_mutations_are_blocked_during_installation(self):
+        context = InstallerContext()
+        service = post_routes.PostRouteService(context)
+        context.install_lock.acquire()
+        try:
+            response = service.dispatch("new_table", {"disk": "/dev/sda"})
+        finally:
+            context.install_lock.release()
+
+        self.assertEqual(response.status, 409)
+        self.assertFalse(response.payload["ok"])
+
     def test_wipe_storage_phase_returns_root_context(self):
         logs = []
         progress = []
+        context = InstallerContext()
 
         with mock.patch.object(install, "_run_cmd"), \
              mock.patch.object(install, "run_command"), \
@@ -77,6 +114,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 logs.append,
                 progress.append,
                 "",
+                context,
             )
 
         self.assertEqual((target_part, root_part, alongside_mount), ("", "/dev/sda3", ""))
@@ -89,6 +127,11 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 logs = []
                 progress = []
+                context = InstallerContext()
+                context.state.update({
+                    "install_mode": mode,
+                    "target_partition": "/dev/sda2",
+                })
                 with mock.patch.object(
                     install,
                     "_prepare_install_plan",
@@ -132,6 +175,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                         logs.append,
                         progress.append,
                         "",
+                        context,
                     )
 
                 self.assertIsInstance(target_part, str)
@@ -139,8 +183,8 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 self.assertIsInstance(alongside_mount, str)
 
     def test_wipe_worker_reaches_done_event_with_mocked_side_effects(self):
-        install._events.clear()
-        install._state.update({
+        context = InstallerContext()
+        context.state.update({
             "disk": "/dev/sda",
             "efi_partition": "",
             "hostname": "kyth",
@@ -203,14 +247,14 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         ):
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
-            install._run_install_worker(lambda _msg: None, lambda _pct: None, "")
+            install._run_install_worker(lambda _msg: None, lambda _pct: None, "", context)
 
-        self.assertTrue(any(event.get("type") == "done" for event in install._events))
-        self.assertFalse([event for event in install._events if event.get("type") == "error"])
+        self.assertTrue(any(event.get("type") == "done" for event in context.events.events))
+        self.assertFalse([event for event in context.events.events if event.get("type") == "error"])
 
     def test_alongside_worker_cleans_temp_mount_after_error(self):
-        install._events.clear()
-        install._state.update({
+        context = InstallerContext()
+        context.state.update({
             "disk": "/dev/sda",
             "efi_partition": "",
             "hostname": "kyth",
@@ -263,7 +307,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         ):
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
-            install._run_install_worker(lambda _msg: None, lambda _pct: None, "")
+            install._run_install_worker(lambda _msg: None, lambda _pct: None, "", context)
 
         cleanup_calls = [
             call
@@ -271,7 +315,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             if "/var/tmp/kyth-alongside-target" in repr(call)  # noqa: S108 — fixture string, not a real path opened on disk
         ]
         self.assertTrue(cleanup_calls)
-        self.assertTrue([event for event in install._events if event.get("type") == "error"])
+        self.assertTrue([event for event in context.events.events if event.get("type") == "error"])
 
     def test_bootc_to_disk_command_omits_acknowledge_destructive(self):
         # bootc's `install to-disk` subcommand has no --acknowledge-destructive
@@ -329,10 +373,10 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         self.assertTrue(any(5 <= v <= 90 for v in progress_values))
 
     def test_worker_fails_closed_when_not_root(self):
-        install._events.clear()
+        context = InstallerContext()
         with mock.patch.object(install, "require_root", side_effect=RuntimeError("must run as root")):
-            install._run_install_worker(lambda _msg: None, lambda _pct: None, "")
-        errors = [e for e in install._events if e.get("type") == "error"]
+            install._run_install_worker(lambda _msg: None, lambda _pct: None, "", context)
+        errors = [e for e in context.events.events if e.get("type") == "error"]
         self.assertTrue(errors)
         self.assertIn("root", errors[0].get("message", "").lower())
 

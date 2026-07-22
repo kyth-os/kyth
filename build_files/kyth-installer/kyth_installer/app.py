@@ -6,12 +6,12 @@ pointed at it.
 import os
 import secrets
 import shutil
-import subprocess
 import threading
 import time
 
 from . import config
 from .config import PORT
+from .runner import spawn_command
 from .server import Handler, _Server
 
 
@@ -68,9 +68,9 @@ def main() -> None:
             value = os.environ.get(key)
             if value:
                 gui_env.append(f"{key}={value}")
-        proc = subprocess.Popen(["sudo", "-u", sudo_user, "env", *gui_env, *chromium_cmd])
+        proc = spawn_command(["sudo", "-u", sudo_user, "env", *gui_env, *chromium_cmd])
     else:
-        proc = subprocess.Popen(chromium_cmd)
+        proc = spawn_command(chromium_cmd)
 
     # Wait for Chromium to exit so the process and port are released cleanly.
     # This means re-launching the installer from the desktop always gets a fresh server.

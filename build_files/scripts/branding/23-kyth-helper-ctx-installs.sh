@@ -1,18 +1,11 @@
 # shellcheck shell=bash
-# ── KythOS Helper app — /ctx file installs ──────────────────────────────────────
-install -m 0755 /ctx/kyth-welcome/kyth-welcome /usr/bin/kyth-welcome
-# /usr/bin/kyth-welcome is a thin shim; the application package lives here.
-mkdir -p /usr/lib/kyth-welcome
-cp -a /ctx/kyth-welcome/kyth_welcome /usr/lib/kyth-welcome/
-rm -rf /usr/lib/kyth-welcome/kyth_welcome/__pycache__
-# kyth_welcome.__init__ resolves kyth_shared via sys.path at
-# (file parent).parent.parent / "kyth_shared" → /usr/kyth_shared.
-mkdir -p -v /usr/kyth_shared
-cp -a -v /ctx/kyth_shared/kyth_shared /usr/kyth_shared/
-rm -rf /usr/kyth_shared/kyth_shared/__pycache__
-ls -la /usr/kyth_shared/kyth_shared/
-find /usr/lib/kyth-welcome -type d -exec chmod 0755 {} +
-find /usr/lib/kyth-welcome -type f -exec chmod 0644 {} +
+# ── KythOS Helper app — packaged Python install ───────────────────────────────
+python3 -m pip install \
+	--no-cache-dir \
+	--no-deps \
+	--no-build-isolation \
+	--prefix=/usr \
+	/ctx/kyth-welcome
 install -m 0755 /ctx/kyth-welcome/kyth-welcome-launch /usr/bin/kyth-welcome-launch
 install -m 0644 /ctx/kyth-welcome/kyth-welcome.desktop \
 	/usr/share/applications/kyth-welcome.desktop

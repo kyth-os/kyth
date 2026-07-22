@@ -9,7 +9,7 @@ from typing import Callable
 
 from . import install
 from .config import _IS_LIVE_SESSION
-from .context import InstallerContext
+from .context import InstallLifecycle, InstallationState, InstallerContext
 from .disk import (
     _normal_device_path,
     _safe_int,
@@ -38,6 +38,17 @@ class ApiResponse:
 class PostRouteService:
     """Validate and execute POST requests independently of HTTP transport."""
 
+    _PARTITION_ROUTES = {
+        "new_table",
+        "create_partition",
+        "delete_partition",
+        "resize_partition",
+        "format_partition",
+        "set_mountpoint",
+        "commit_partitions",
+        "rollback_partitions",
+    }
+
     def __init__(self, context: InstallerContext):
         self.context = context
         self.handlers: dict[str, Callable[[dict], ApiResponse]] = {
@@ -57,14 +68,22 @@ class PostRouteService:
         handler = self.handlers.get(route_name)
         if handler is None:
             return ApiResponse({"ok": False, "message": "Route not found."}, 404)
-        return handler(body)
+        # POST handlers mutate session state and, for partitioning, a single
+        # transaction journal. Serialize them per server session so concurrent
+        # browser requests cannot interleave validation and commit operations.
+        with self.context.state_lock:
+            if route_name in self._PARTITION_ROUTES and self.context.install_lock.locked():
+                return ApiResponse(
+                    {"ok": False, "message": "Partition changes are locked while installation is running."},
+                    409,
+                )
+            return handler(body)
 
-    @staticmethod
-    def _journal_for(body: dict):
+    def _journal_for(self, body: dict):
         disk = _normal_device_path(body.get("disk", ""))
         if not disk:
             return None, None, ApiResponse({"ok": False, "message": "No disk specified."}, 400)
-        journal = get_journal()
+        journal = get_journal(self.context)
         if not journal or journal.disk != disk:
             return None, None, ApiResponse({
                 "ok": False,
@@ -93,7 +112,7 @@ class PostRouteService:
         table_type = body.get("table_type", "gpt")
         if table_type not in ("gpt", "msdos"):
             return ApiResponse({"ok": False, "message": "Table type must be 'gpt' or 'msdos'."}, 400)
-        journal = init_journal(disk)
+        journal = init_journal(disk, self.context)
         journal.add_op("new_table", {"table_type": table_type})
         return ApiResponse({"ok": True, "pending": len(journal.ops)})
 
@@ -175,12 +194,15 @@ class PostRouteService:
         if errors:
             return ApiResponse({"ok": False, "message": "Validation failed.", "errors": errors}, 400)
         try:
+            self.context.transition(InstallLifecycle.PARTITIONING)
             root_part = journal.commit(
                 lambda msg: self.context.events.publish({"type": "log", "text": f"[partition] {msg}"})
             )
+            self.context.transition(InstallLifecycle.IDLE)
             return ApiResponse({"ok": True, "root_partition": root_part})
         except RuntimeError as exc:
             journal.rollback(lambda _msg: None)
+            self.context.transition(InstallLifecycle.FAILED)
             return ApiResponse({"ok": False, "message": str(exc)}, 500)
 
     def rollback_partitions(self, body: dict) -> ApiResponse:
@@ -189,7 +211,7 @@ class PostRouteService:
             return error
         try:
             journal.rollback(lambda _msg: None)
-            reset_journal()
+            reset_journal(self.context)
             return ApiResponse({"ok": True})
         except RuntimeError as exc:
             return ApiResponse({"ok": False, "message": str(exc)}, 500)
@@ -229,7 +251,7 @@ class PostRouteService:
                 return ApiResponse({"started": False, "message": "Invalid free space region."}, 400)
             efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
         elif install_mode == "manual":
-            journal = get_journal()
+            journal = get_journal(self.context)
             if not journal or not journal.committed:
                 return ApiResponse({"started": False, "message": "Partition changes must be committed before starting the install."}, 400)
             target_partition = journal.root_partition or ""
@@ -249,7 +271,7 @@ class PostRouteService:
             "free_region_end": free_region_end,
         }
         try:
-            _validate_storage_intent(state)
+            _validate_storage_intent(state, self.context)
         except RuntimeError as exc:
             return ApiResponse({"started": False, "message": str(exc)}, 409)
 
@@ -273,7 +295,7 @@ class PostRouteService:
 
         if not self.context.install_lock.acquire(blocking=False):
             return ApiResponse({"started": False, "message": "An installation is already running."}, 409)
-        self.context.state.update({
+        next_state: InstallationState = {
             **state,
             "efi_partition": efi_partition,
             "hostname": hostname,
@@ -282,10 +304,13 @@ class PostRouteService:
             "password_hash": password_hash,
             "kernel": body.get("kernel", "fedora") or "fedora",
             "mok_password": body.get("mok_password", "") or "",
-        })
+        }
+        self.context.replace_state(next_state)
+        self.context.transition(InstallLifecycle.VALIDATED)
 
         def worker() -> None:
             try:
+                self.context.transition(InstallLifecycle.INSTALLING)
                 install._run_install(self.context)
             finally:
                 self.context.install_lock.release()
