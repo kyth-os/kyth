@@ -16,7 +16,7 @@ from .tools import (
 from ..bootc import _has_staged_update
 from ..hardware import _detect_controllers, _find_ntfs_drives
 from ..process import _run_command
-from ..software import _is_flatpak_installed
+from ..flatpak import is_installed
 
 
 def _gaming_health_items(*, controllers: dict | None = None,
@@ -30,9 +30,9 @@ def _gaming_health_items(*, controllers: dict | None = None,
     ge_ver = _compat_tool_version("GE-Proton")
     vulkan_status, vulkan_summary = _vulkan_state()
     ntsync_status, ntsync_summary = _ntsync_state()
-    steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
-    heroic_ok = _is_flatpak_installed("com.heroicgameslauncher.hgl")
-    lutris_ok = _is_flatpak_installed("net.lutris.Lutris")
+    steam_ok = is_installed("com.valvesoftware.Steam")
+    heroic_ok = is_installed("com.heroicgameslauncher.hgl")
+    lutris_ok = is_installed("net.lutris.Lutris")
     if controllers is None:
         controllers = _detect_controllers()
     controller_count = len(controllers.get("usb_controllers", [])) + len(controllers.get("input_nodes", []))
@@ -67,11 +67,11 @@ def _gaming_health_items(*, controllers: dict | None = None,
 def _gaming_migration_checklist_items(*, controllers: dict | None = None,
                                       windows_drives: list | None = None,
                                       saves: tuple | None = None) -> list[tuple[str, str, str]]:
-    steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
-    heroic_ok = _is_flatpak_installed("com.heroicgameslauncher.hgl")
-    lutris_ok = _is_flatpak_installed("net.lutris.Lutris")
-    discord_ok = _is_flatpak_installed("com.discordapp.Discord")
-    obs_ok = _is_flatpak_installed("com.obsproject.Studio")
+    steam_ok = is_installed("com.valvesoftware.Steam")
+    heroic_ok = is_installed("com.heroicgameslauncher.hgl")
+    lutris_ok = is_installed("net.lutris.Lutris")
+    discord_ok = is_installed("com.discordapp.Discord")
+    obs_ok = is_installed("com.obsproject.Studio")
     ludusavi_status, _, ludusavi_summary = saves if saves is not None else _ludusavi_backup_summary()
     controller_info = controllers if controllers is not None else _detect_controllers()
     controller_count = len(controller_info.get("usb_controllers", [])) + len(controller_info.get("input_nodes", []))
@@ -115,7 +115,7 @@ def _collect_gaming_dashboard() -> dict:
  # _collect_gaming_dashboard
 
 def _ludusavi_backup_summary() -> tuple[str, str, str]:
-    ludusavi_ok = _is_flatpak_installed("com.github.mtkennerly.ludusavi")
+    ludusavi_ok = is_installed("com.github.mtkennerly.ludusavi")
     candidates = [
         os.path.expanduser("~/Ludusavi"),
         os.path.expanduser("~/Games/Ludusavi"),
@@ -145,8 +145,8 @@ def _streaming_health_items() -> list[tuple[str, str, str]]:
     v4l2_probe = _run_command(["modprobe", "-n", "v4l2loopback"], timeout=4)
     v4l2_ok = v4l2_probe is not None and v4l2_probe.returncode == 0
     mic_hint = "PipeWire ready; test mic in Discord/OBS." if pipewire_ok else "PipeWire tools not found."
-    obs_ok = _is_flatpak_installed("com.obsproject.Studio")
-    discord_ok = _is_flatpak_installed("com.discordapp.Discord")
+    obs_ok = is_installed("com.obsproject.Studio")
+    discord_ok = is_installed("com.discordapp.Discord")
 
     return [
         ("ok" if obs_ok else "warn", "OBS Studio", "Installed." if obs_ok else "Install OBS for capture and streaming."),
@@ -156,4 +156,3 @@ def _streaming_health_items() -> list[tuple[str, str, str]]:
         ("ok" if v4l2_ok else "dim", "Virtual camera", "v4l2loopback available." if v4l2_ok else "Optional: v4l2loopback not available."),
     ]
  # _streaming_health_items
-

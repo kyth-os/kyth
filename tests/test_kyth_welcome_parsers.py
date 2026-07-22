@@ -68,7 +68,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
 from kyth_welcome import core_base, page_vpn  # noqa: E402
-from kyth_welcome.services import gaming, hardware, software  # noqa: E402
+from kyth_welcome.services import appstream, first_run, gaming, hardware  # noqa: E402
 
 
 class CoreParserTests(unittest.TestCase):
@@ -108,7 +108,7 @@ class AppDefaultsTests(unittest.TestCase):
     def test_brave_is_in_default_first_run_apps(self):
         self.assertIn(
             ("com.brave.Browser", "Brave"),
-            software._DEFAULT_FIRST_RUN_APPS,
+            first_run.DEFAULT_FIRST_RUN_APPS,
         )
 
 
@@ -169,8 +169,8 @@ class AppStreamCatalogTests(unittest.TestCase):
         </component>
         """
         elem = ET.fromstring(xml_str)  # noqa: S314 — literal fixture above, not untrusted input
-        self.assertEqual(software._as_localized(elem, "name", "de"), "Deutsches App")
-        self.assertEqual(software._as_localized(elem, "name", "en"), "English App")
+        self.assertEqual(appstream._as_localized(elem, "name", "de"), "Deutsches App")
+        self.assertEqual(appstream._as_localized(elem, "name", "en"), "English App")
 
     def test_as_localized_desc(self):
         import xml.etree.ElementTree as ET
@@ -182,7 +182,7 @@ class AppStreamCatalogTests(unittest.TestCase):
         </component>
         """
         elem = ET.fromstring(xml_str)  # noqa: S314 — literal fixture above, not untrusted input
-        self.assertEqual(software._as_localized_desc(elem, "en"), "Hello world")
+        self.assertEqual(appstream._as_localized_desc(elem, "en"), "Hello world")
 
 
 if __name__ == "__main__":

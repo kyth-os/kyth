@@ -1,4 +1,6 @@
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -6,7 +8,13 @@ from unittest.mock import MagicMock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 
-from kyth_welcome.services import browser_apps, flatpak, software  # noqa: E402
+from kyth_welcome.services import (  # noqa: E402
+    browser_apps,
+    creator,
+    first_run,
+    flatpak,
+    software,
+)
 
 
 class SoftwareServiceTests(unittest.TestCase):
@@ -60,25 +68,44 @@ class SoftwareServiceTests(unittest.TestCase):
 
     def test_first_run_app_setup_state_ready_when_no_missing(self):
         with (
-            patch("kyth_welcome.services.software._is_live_session", return_value=False),
-            patch("kyth_welcome.services.software._is_flatpak_installed", return_value=True),
+            patch("kyth_welcome.services.first_run._is_live_session", return_value=False),
+            patch("kyth_welcome.services.first_run.is_installed", return_value=True),
         ):
-            state, _msg, missing = software._first_run_app_setup_state()
+            state, _msg, missing = first_run.app_setup_state()
 
         self.assertEqual(state, "ready")
         self.assertEqual(missing, [])
 
-    def test_davinci_zip_candidates_finds_matches(self):
-        with (
-            patch("kyth_welcome.services.software._davinci_download_dir", return_value="/tmp/downloads"),  # noqa: S108 — test path mock
-            patch("os.path.isdir", return_value=True),
-            patch("glob.glob", side_effect=lambda p: ["/tmp/downloads/DaVinci_Resolve_19_Linux.zip"] if "DaVinci" in p else []),  # noqa: S108 — test path mock
-            patch("os.path.isfile", return_value=True),
-            patch("os.path.getmtime", return_value=100.0),
-        ):
-            candidates = software._davinci_zip_candidates()
+    def test_first_run_ignores_malformed_status_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status_path = Path(tmp) / "first-run-apps.status"
+            status_path.write_text("state='unterminated\n", encoding="utf-8")
+            with (
+                patch("kyth_welcome.services.first_run._is_live_session", return_value=False),
+                patch("kyth_welcome.services.first_run.is_installed", return_value=False),
+                patch("kyth_welcome.services.first_run.os.path.expanduser", return_value=str(status_path)),
+                patch(
+                    "kyth_welcome.services.first_run._run_command",
+                    return_value=MagicMock(stdout="inactive"),
+                ),
+            ):
+                state, _msg, missing = first_run.app_setup_state()
 
-        self.assertEqual(candidates, ["/tmp/downloads/DaVinci_Resolve_19_Linux.zip"])  # noqa: S108 — test path assertion
+        self.assertEqual(state, "pending")
+        self.assertTrue(missing)
+
+    def test_davinci_zip_candidates_finds_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            older = Path(tmp) / "DaVinci_Resolve_19_Linux.zip"
+            newer = Path(tmp) / "DaVinci_Resolve_20_Linux.zip"
+            older.touch()
+            newer.touch()
+            os.utime(older, (100, 100))
+            os.utime(newer, (200, 200))
+            with patch("kyth_welcome.services.creator.davinci_download_dir", return_value=tmp):
+                candidates = creator.davinci_zip_candidates()
+
+        self.assertEqual(candidates, [str(newer), str(older)])
 
     def test_software_facade_uses_split_service_implementations(self):
         self.assertIs(software._installed_flatpak_ids, flatpak.installed_app_ids)
@@ -86,6 +113,8 @@ class SoftwareServiceTests(unittest.TestCase):
             software._chromium_app_window_cmd,
             browser_apps.chromium_app_window_command,
         )
+        self.assertIs(software._davinci_zip_candidates, creator.davinci_zip_candidates)
+        self.assertIs(software._first_run_app_setup_state, first_run.app_setup_state)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import os
 import time
 
 from .process import _run_command
-from .software import _is_flatpak_installed
+from .flatpak import is_installed
 
 _FIRST_WEEK_DISMISS = os.path.expanduser("~/.config/kyth-first-week-done")
 _FIRST_BOOT_MARKERS = (
@@ -73,7 +73,7 @@ def first_week_days() -> int | None:
 def first_week_items() -> list[tuple[str, bool, str]]:
     """Return (label, done, page_key) checklist for the first-week card."""
     return [
-        ("Install a game launcher", _is_flatpak_installed("com.valvesoftware.Steam"), "Gaming"),
+        ("Install a game launcher", is_installed("com.valvesoftware.Steam"), "Gaming"),
         ("Pair a controller", controller_seen(), "Controllers"),
         ("Connect phone (KDE Connect)", kdeconnect_configured(), "Move Files"),
         ("Set up cloud storage", cloud_storage_configured(), "Cloud Storage"),

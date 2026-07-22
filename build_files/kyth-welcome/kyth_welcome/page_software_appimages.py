@@ -229,5 +229,5 @@ class _AppImageTabMixin:
             os.chmod(desktop_path, 0o600)
         except OSError:
             return
-        from .services.software import refresh_desktop_database
+        from .services.desktop import refresh_desktop_database
         refresh_desktop_database(desktop_dir)
