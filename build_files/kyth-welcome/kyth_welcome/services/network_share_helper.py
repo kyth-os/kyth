@@ -185,7 +185,10 @@ def main(argv: list[str] | None = None) -> int:
         return 64
     try:
         share = _payload()
-        add_share(share) if args[0] == "add" else remove_share(share)
+        if args[0] == "add":
+            add_share(share)
+        else:
+            remove_share(share)
     except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
         print(f"Network share {args[0]} failed: {exc}", file=sys.stderr)
         return 1

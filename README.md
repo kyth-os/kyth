@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-22 19:41:25 UTC
+- Last refreshed (UTC): 2026-07-22 19:42:41 UTC
 - Current branch: testing
-- HEAD commit: 17882c5
-- Last commit title: Centralize System Hub privileged command construction
-- Last commit date: 2026-07-22T15:41:15-04:00
+- HEAD commit: d234491
+- Last commit title: Gate live-ISO releases on unattended VM acceptance
+- Last commit date: 2026-07-22T15:41:25-04:00
 - CI workflow files: 8
 - Build script files: 21
 
