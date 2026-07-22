@@ -1,6 +1,8 @@
 # shellcheck shell=bash
 install_latencyflex() {
-	local LFX_REPO_API="https://api.github.com/repos/ishitatsuyuki/LatencyFleX/releases/latest"
+	: "${LATENCYFLEX_VERSION:?LATENCYFLEX_VERSION must be an exact release tag}"
+	require_release_tag LATENCYFLEX_VERSION "${LATENCYFLEX_VERSION}"
+	local LFX_REPO_API="https://api.github.com/repos/ishitatsuyuki/LatencyFleX/releases/tags/${LATENCYFLEX_VERSION}"
 	local TMPDIR_LFX
 	TMPDIR_LFX=$(mktemp -d)
 	local release_json="${TMPDIR_LFX}/release.json"
@@ -16,7 +18,9 @@ install_latencyflex() {
 			local LFX_TARBALL
 			LFX_TARBALL=$(basename "${LFX_URL}")
 			if ! release_asset_has_verification "${release_json}" "${LFX_TARBALL}"; then
-				echo "WARNING: latencyflex: no verification metadata for ${LFX_TARBALL}; skipping unverified install." >&2
+				echo "ERROR: latencyflex: pinned asset ${LFX_TARBALL} has no verification metadata." >&2
+				rm -rf "${TMPDIR_LFX}"
+				return 1
 			else
 				echo "latencyflex: downloading ${LFX_TARBALL}"
 				curl -fsSL "${CURL_COMMON_ARGS[@]}" "${LFX_URL}" -o "${TMPDIR_LFX}/${LFX_TARBALL}"
@@ -38,14 +42,20 @@ install_latencyflex() {
 						/usr/share/vulkan/implicit_layer.d/latencyflex_layer.json
 					echo "latencyflex: Vulkan layer installed"
 				else
-					echo "latencyflex: could not find layer .so or .json in archive; skipping."
+					echo "ERROR: latencyflex: pinned release ${LATENCYFLEX_VERSION} is missing its layer payload." >&2
+					rm -rf "${TMPDIR_LFX}"
+					return 1
 				fi
 			fi
 		else
-			echo "latencyflex: no tarball found in release assets; skipping."
+			echo "ERROR: latencyflex: pinned release ${LATENCYFLEX_VERSION} has no installable tarball." >&2
+			rm -rf "${TMPDIR_LFX}"
+			return 1
 		fi
 	else
-		echo "latencyflex: failed to fetch release info from GitHub; skipping."
+		echo "ERROR: latencyflex: failed to fetch pinned release ${LATENCYFLEX_VERSION}." >&2
+		rm -rf "${TMPDIR_LFX}"
+		return 1
 	fi
 	rm -rf "${TMPDIR_LFX}"
 }

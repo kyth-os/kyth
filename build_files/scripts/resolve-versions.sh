@@ -6,12 +6,11 @@
 # diagnostics go to stderr.
 #
 # Subcommands:
-#   proton-cachyos   Latest Proton-CachyOS release tag. Prints "" on failure so
-#                    proton-cachyos.sh falls back to the /latest release
-#                    endpoint instead of requesting a nonexistent tag.
-#   thirdparty-hash  16-char digest of the third-party tool release tags.
-#                    Only used as a Docker layer cache-bust value: when every
-#                    tool's tag is unchanged the thirdparty layer is a cache hit.
+#   proton-cachyos   Exact Proton-CachyOS release tag. Resolution failure is
+#                    fatal so build provenance always describes the payload.
+#   thirdparty-versions  Exact umu, LatencyFleX, and SCX release tags as a
+#                        tab-separated line. Resolution failure is fatal so an
+#                        image can never silently omit a requested component.
 #   cachyos-kernel   Latest succeeded kernel-cachyos COPR build (version-release).
 #                    Falls back to today's date so a COPR API outage busts the
 #                    kernel layer cache instead of silently freezing it.
@@ -50,11 +49,14 @@ PY
 cmd_proton_cachyos() {
 	local tag
 	tag=$(gh_latest_tag CachyOS/proton-cachyos)
-	[[ -n "${tag}" ]] || echo "WARNING: could not resolve latest Proton-CachyOS release; proton-cachyos.sh will use the /latest endpoint" >&2
+	if [[ ! "${tag}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+		echo "ERROR: could not resolve a safe immutable Proton-CachyOS release tag" >&2
+		return 1
+	fi
 	printf '%s\n' "${tag}"
 }
 
-cmd_thirdparty_hash() {
+cmd_thirdparty_versions() {
 	# Fetch all tags in parallel so the total wait is the slowest single request.
 	local tmp repo
 	tmp=$(mktemp -d)
@@ -63,15 +65,20 @@ cmd_thirdparty_hash() {
 	done
 	wait
 
-	local tags="" tag
+	local -a tags=()
+	local tag
 	for repo in "${THIRDPARTY_REPOS[@]}"; do
 		tag=$(cat "${tmp}/${repo//\//_}")
-		[[ -n "${tag}" ]] || echo "WARNING: could not resolve latest release of ${repo}" >&2
-		echo "  ${repo}: ${tag:-unknown}" >&2
-		tags+="${tag:-unknown}"
+		if [[ ! "${tag}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+			echo "ERROR: could not resolve a safe immutable release tag for ${repo}" >&2
+			rm -rf "${tmp}"
+			return 1
+		fi
+		echo "  ${repo}: ${tag}" >&2
+		tags+=("${tag}")
 	done
 	rm -rf "${tmp}"
-	printf '%s' "${tags}" | sha256sum | cut -c1-16
+	printf '%s\t%s\t%s\n' "${tags[0]}" "${tags[1]}" "${tags[2]}"
 }
 
 cmd_cachyos_kernel() {
@@ -104,10 +111,10 @@ PY
 
 case "${1:-}" in
 proton-cachyos) cmd_proton_cachyos ;;
-thirdparty-hash) cmd_thirdparty_hash ;;
+thirdparty-versions) cmd_thirdparty_versions ;;
 cachyos-kernel) cmd_cachyos_kernel ;;
 *)
-	echo "usage: $0 {proton-cachyos|thirdparty-hash|cachyos-kernel}" >&2
+	echo "usage: $0 {proton-cachyos|thirdparty-versions|cachyos-kernel}" >&2
 	exit 2
 	;;
 esac

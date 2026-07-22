@@ -13,15 +13,15 @@ CURL_COMMON_ARGS+=(--max-time 3600)
 # Standard x86_64 build (not the _v3 microarch variant) to avoid crashing on
 # CPUs without AVX2/BMI2/FMA.
 PROTON_CACHYOS_REPO_API="https://api.github.com/repos/CachyOS/proton-cachyos/releases"
-PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER:-}"
+PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER:?PROTON_CACHYOS_VER must be an exact release tag}"
+if [[ ! "${PROTON_CACHYOS_VER}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+	echo "Invalid Proton-CachyOS release tag: ${PROTON_CACHYOS_VER}" >&2
+	exit 1
+fi
 TMPDIR_PC=$(mktemp -d)
 trap 'rm -rf "${TMPDIR_PC}"' EXIT
 
-if [[ -n "${PROTON_CACHYOS_VER}" ]]; then
-	release_api="${PROTON_CACHYOS_REPO_API}/tags/${PROTON_CACHYOS_VER}"
-else
-	release_api="${PROTON_CACHYOS_REPO_API}/latest"
-fi
+release_api="${PROTON_CACHYOS_REPO_API}/tags/${PROTON_CACHYOS_VER}"
 
 release_json="${TMPDIR_PC}/release.json"
 if ! curl -fsSL "${CURL_COMMON_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" "${release_api}" -o "${release_json}"; then

@@ -81,7 +81,7 @@ KythOS doesn't promise every game works on Linux. It makes the games that can wo
 | **Proton** | Proton-CachyOS, ProtonUp-Qt, GE-Proton, protontricks, winetricks, umu-launcher, libFAudio |
 | **Overlay & capture** | MangoHud (pre-configured overlay), vkBasalt (sharpening on by default), obs-vkcapture |
 | **Performance** | GameMode, Gamescope presets, sched-ext, KythOS scheduler switching |
-| **Controllers** | steam-devices, xpadneo, xone, OpenRazer, OpenTabletDriver, Piper, OpenRGB, input-remapper |
+| **Controllers** | steam-devices, xpadneo, xone, DualSense, joycond, input-remapper; specialized peripheral profile available at build time |
 | **Wine/Proton defaults** | NTSYNC, fsync/esync fallbacks, DXR, VKD3D feature level 12_2, RADV GPL, Mesa GL threading |
 | **Helper commands** | `kyth-gamescope`, `game-performance`, `kyth-scx`, `kyth-smoke-check`, `ujust post-update-check` |
 
@@ -102,7 +102,7 @@ Gaming-first doesn't mean gaming-only.
 - **Video & streaming:** OBS Studio (pre-installed Flatpak with Vulkan/OpenGL `OBS_VKCAPTURE=1` capture enabled), Kdenlive, DaVinci Resolve helper
 - **Audio:** Audacity, PipeWire tuned for low latency
 - **Graphics:** GIMP, full media codec stack including thumbnails
-- **Dev tools:** Google Antigravity IDE (native RPM with full host filesystem access), VS Code, direnv, jq, yq, container-backed GitHub CLI, Homebrew, Distrobox/Podman, QEMU/libvirt, Incus/LXC
+- **Dev tools:** Google Antigravity IDE (native RPM with full host filesystem access), VS Code, direnv, jq, yq, container-backed GitHub CLI, Homebrew, and Distrobox/Podman. QEMU host tooling is an optional build profile.
 - **Productivity:** Brave, KDE Connect, OpenDeck, rclone cloud storage mounts, Mission Center (Task Manager)
 - **Security:** Optional Kali Linux toolbox container, Wireshark, Burp Suite Community
 - **VPN:** Standalone VPN Connect app with GlobalProtect SAML flow
@@ -283,10 +283,13 @@ just build-live-iso       # Bootable ISO
 just run-live-iso-native  # Boot the ISO in QEMU with SPICE
 ```
 
-Optional build flags:
+Optional build profiles and feature flags (all profiles default off):
 
 ```bash
 ENABLE_SCX=0 just build
+ENABLE_GAMING_PERIPHERALS=1 just build   # tablet, CEC, capture-loopback, tuning and diagnostic tools
+ENABLE_VIRTUALIZATION_HOST=1 just build # QEMU system emulator and image tooling
+ENABLE_KSM=1 just build                 # global KSM/ksmtuned memory deduplication
 ```
 
 If Docker returns a permission error after joining the `docker` group, run `newgrp docker`. `just build-base` handles this automatically.

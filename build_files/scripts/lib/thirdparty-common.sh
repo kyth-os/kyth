@@ -12,6 +12,14 @@ is_enabled() {
 	esac
 }
 
+require_release_tag() {
+	local name=$1 value=$2
+	if [[ ! "${value}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+		echo "ERROR: ${name} is not a safe immutable release tag: ${value}" >&2
+		return 1
+	fi
+}
+
 # verify_release_asset RELEASE_JSON TARBALL_PATH TARBALL_NAME TMPDIR
 verify_release_asset() {
 	local release_json=$1

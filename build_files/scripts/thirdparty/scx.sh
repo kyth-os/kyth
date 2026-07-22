@@ -1,6 +1,8 @@
 # shellcheck shell=bash
 install_scx() {
-	local SCX_REPO_API="https://api.github.com/repos/sched-ext/scx/releases/latest"
+	: "${SCX_VERSION:?SCX_VERSION must be an exact release tag}"
+	require_release_tag SCX_VERSION "${SCX_VERSION}"
+	local SCX_REPO_API="https://api.github.com/repos/sched-ext/scx/releases/tags/${SCX_VERSION}"
 	local TMPDIR_SCX
 	TMPDIR_SCX=$(mktemp -d)
 	local release_json="${TMPDIR_SCX}/release.json"
@@ -62,16 +64,24 @@ SCXEOF
 					systemctl enable scx_loader.service 2>/dev/null || true
 					echo "scx: enabled ${SCX_SCHEDULER}"
 				else
-					echo "scx: no scheduler binaries found in archive"
+					echo "ERROR: scx: pinned release ${SCX_VERSION} contains no supported scheduler binaries." >&2
+					rm -rf "${TMPDIR_SCX}"
+					return 1
 				fi
 			else
-				echo "scx: scx_loader not found after extraction"
+				echo "ERROR: scx: pinned release ${SCX_VERSION} contains no scx_loader." >&2
+				rm -rf "${TMPDIR_SCX}"
+				return 1
 			fi
 		else
-			echo "scx: no x86_64 tarball found in release assets; skipping."
+			echo "ERROR: scx: pinned release ${SCX_VERSION} has no x86_64 tarball." >&2
+			rm -rf "${TMPDIR_SCX}"
+			return 1
 		fi
 	else
-		echo "scx: failed to fetch release info from GitHub; skipping."
+		echo "ERROR: scx: failed to fetch pinned release ${SCX_VERSION}." >&2
+		rm -rf "${TMPDIR_SCX}"
+		return 1
 	fi
 
 	rm -rf "${TMPDIR_SCX}"

@@ -5,6 +5,13 @@
 # repos and falling back to individual installs if the batch fails. Shared by
 # the optional gaming-peripheral and optional desktop-tooling package
 # fragments so one flaky COPR/mirror package can't block a whole fragment.
+is_enabled() {
+	case "${1,,}" in
+	1 | true | yes | on) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
 install_available_optional_packages() {
 	local group_name=$1
 	shift

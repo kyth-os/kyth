@@ -36,10 +36,13 @@ python3 -m unittest discover -s tests
 just test
 ```
 
-Feature flags let you skip optional build steps:
+Feature flags and opt-in image profiles:
 
 ```bash
 ENABLE_SCX=0 just build
+ENABLE_GAMING_PERIPHERALS=1 just build
+ENABLE_VIRTUALIZATION_HOST=1 just build
+ENABLE_KSM=1 just build
 ```
 
 ## What Makes a Good PR

@@ -53,8 +53,11 @@ build: build-base
     BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
 
-    THIRDPARTY_VERSIONS_HASH=$(./build_files/scripts/resolve-versions.sh thirdparty-hash)
-    echo "Thirdparty hash: ${THIRDPARTY_VERSIONS_HASH}"
+    PROTON_CACHYOS_VER=$(./build_files/scripts/resolve-versions.sh proton-cachyos)
+    [[ -n "${PROTON_CACHYOS_VER}" ]] || { echo "Unable to pin Proton-CachyOS" >&2; exit 1; }
+    read -r UMU_VERSION LATENCYFLEX_VERSION SCX_VERSION < <(./build_files/scripts/resolve-versions.sh thirdparty-versions)
+    THIRDPARTY_VERSIONS_HASH=$(printf '%s\0%s\0%s' "${UMU_VERSION}" "${LATENCYFLEX_VERSION}" "${SCX_VERSION}" | sha256sum | cut -c1-16)
+    echo "Pinned third-party releases: umu=${UMU_VERSION}, LatencyFleX=${LATENCYFLEX_VERSION}, scx=${SCX_VERSION}"
     MOK_SECRET_ARG=()
     SECUREBOOT_SIGNING_REQUESTED=0
     if [[ -n "${MOK_KEY_FILE:-}" && ! -f "${MOK_KEY_FILE}" ]]; then
@@ -74,6 +77,13 @@ build: build-base
     fi
     docker buildx build \
         --build-arg ENABLE_SCX="${ENABLE_SCX:-1}" \
+        --build-arg ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS:-0}" \
+        --build-arg ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST:-0}" \
+        --build-arg ENABLE_KSM="${ENABLE_KSM:-0}" \
+        --build-arg PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" \
+        --build-arg UMU_VERSION="${UMU_VERSION}" \
+        --build-arg LATENCYFLEX_VERSION="${LATENCYFLEX_VERSION}" \
+        --build-arg SCX_VERSION="${SCX_VERSION}" \
         --build-arg THIRDPARTY_VERSIONS_HASH="${THIRDPARTY_VERSIONS_HASH}" \
         --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
         --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \

@@ -783,7 +783,7 @@ if systemctl is-enabled cups-browsed.service &>/dev/null; then
 else
     warn "cups-browsed" "not enabled — printers require manual add"
 fi
-check_optional_command smbclient "SMB client"
+check_command smbclient "SMB client"
 check_file_contains /usr/share/applications/kyth-exe-handler.desktop "application/x-ms-dos-executable" ".exe handler registered" ".exe files open in Bottles/Wine selector"
 if flatpak info io.missioncenter.MissionCenter &>/dev/null 2>&1; then
     pass "Mission Center" "GPU-accelerated Task Manager installed"

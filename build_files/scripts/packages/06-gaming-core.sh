@@ -56,6 +56,11 @@ dnf5 install -y --skip-unavailable --exclude=libde265.i686 \
 	nss \
 	nss.i686 \
 	steam-devices \
+	game-devices-udev \
+	xpadneo \
+	xone \
+	dualsensectl \
+	joycond \
 	kdeplasma-addons \
 	input-remapper \
 	libxcrypt-compat

@@ -27,7 +27,6 @@ dnf5 install -y --skip-unavailable \
 	ntfs-3g \
 	ntfsprogs \
 	libpst \
-	cifs-utils \
 	rsync \
 	fuse \
 	fuse-libs \
@@ -35,12 +34,6 @@ dnf5 install -y --skip-unavailable \
 	mtools \
 	dosfstools \
 	sbsigntools \
-	qemu-char-spice \
-	qemu-device-display-virtio-gpu \
-	qemu-device-display-virtio-vga \
-	qemu-device-usb-redirect \
-	qemu-img \
-	qemu-system-x86-core \
 	util-linux-script \
 	tmux \
 	openssl \

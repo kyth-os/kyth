@@ -18,6 +18,12 @@ LABEL org.osbuild.branding.release="KythOS 44"
 ### MODIFICATIONS
 ARG ENABLE_SCX=1
 ARG ENABLE_MESA_GIT=0
+ARG ENABLE_GAMING_PERIPHERALS=0
+ARG ENABLE_VIRTUALIZATION_HOST=0
+ARG ENABLE_KSM=0
+LABEL org.kyth.profile.gaming-peripherals="${ENABLE_GAMING_PERIPHERALS}"
+LABEL org.kyth.profile.virtualization-host="${ENABLE_VIRTUALIZATION_HOST}"
+LABEL org.kyth.profile.ksm="${ENABLE_KSM}"
 
 # Build cache boundary: all RPM package installs (~2-3 GB).
 # Stable — only re-run when packages-static.sh or packages/*.sh fragments
@@ -31,22 +37,40 @@ RUN --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
+    ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS}" \
+    ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST}" \
+    ENABLE_KSM="${ENABLE_KSM}" \
     bash /ctx/packages-static.sh
+
+# Proton-CachyOS is an offline fallback for fresh installs. The build must use
+# the exact release tag resolved by CI; the mutable user-side updater may fetch
+# newer versions later while retaining a rollback copy.
+ARG PROTON_CACHYOS_VER
+RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/proton-cachyos.sh \
+    --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
+    --mount=type=secret,id=github_token \
+    test -n "${PROTON_CACHYOS_VER}" && \
+    PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" bash /ctx/proton-cachyos.sh
 
 # Third-party binaries — SCX schedulers, umu, and LatencyFleX.
 # Placed before BUILD_DATE so the layer is only re-run when a tool ships a new
-# release. THIRDPARTY_VERSIONS_HASH is resolved in CI by querying the GitHub
-# releases API for each tool; when all versions are unchanged the layer is a
-# registry cache hit and no downloads occur. The binaries are self-contained and
-# have no dependency on daily-upgraded RPMs, so ordering before the upgrade is safe.
+# release. Exact tags are resolved once by CI and used for both cache identity
+# and downloads; installers never re-resolve "latest" inside the build.
 ARG THIRDPARTY_VERSIONS_HASH=unset
+ARG UMU_VERSION
+ARG LATENCYFLEX_VERSION
+ARG SCX_VERSION
 RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/thirdparty.sh \
     --mount=type=bind,source=build_files/scripts/thirdparty,target=/ctx/thirdparty \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=tmpfs,dst=/tmp \
     --mount=type=secret,id=github_token \
     : "cache-bust=${THIRDPARTY_VERSIONS_HASH}" && \
-    ENABLE_SCX=${ENABLE_SCX} bash /ctx/thirdparty.sh
+    UMU_VERSION="${UMU_VERSION}" \
+    LATENCYFLEX_VERSION="${LATENCYFLEX_VERSION}" \
+    SCX_VERSION="${SCX_VERSION}" \
+    ENABLE_SCX="${ENABLE_SCX}" \
+    bash /ctx/thirdparty.sh
 
 # Plymouth boot splash + initramfs rebuild.
 # COPY (not bind-mount) is intentional: COPY includes file content hashes in the

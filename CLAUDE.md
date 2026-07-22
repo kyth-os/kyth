@@ -18,6 +18,9 @@ just lint && just format          # Shellcheck + shfmt
 Feature flags:
 ```bash
 ENABLE_SCX=0 sudo just build
+ENABLE_GAMING_PERIPHERALS=1 sudo just build
+ENABLE_VIRTUALIZATION_HOST=1 sudo just build
+ENABLE_KSM=1 sudo just build
 ```
 
 ## Common Issues
