@@ -210,13 +210,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
-          read -r UMU_VERSION LATENCYFLEX_VERSION SCX_VERSION < <(./build_files/scripts/resolve-versions.sh thirdparty-versions)
-          HASH=$(printf '%s\0%s\0%s' "${UMU_VERSION}" "${LATENCYFLEX_VERSION}" "${SCX_VERSION}" | sha256sum | cut -c1-16)
+          UMU_VERSION=$(./build_files/scripts/resolve-versions.sh thirdparty-versions)
+          HASH=$(printf '%s' "${UMU_VERSION}" | sha256sum | cut -c1-16)
           echo "umu=${UMU_VERSION}" >&3
-          echo "latencyflex=${LATENCYFLEX_VERSION}" >&3
-          echo "scx=${SCX_VERSION}" >&3
           echo "hash=${HASH}" >&3
-          echo "Pinned releases: umu=${UMU_VERSION}, LatencyFleX=${LATENCYFLEX_VERSION}, scx=${SCX_VERSION} (${HASH})"
+          echo "Pinned release: umu=${UMU_VERSION} (${HASH})"
 
       - name: Resolve upstream base image digest
         id: upstream_base
@@ -279,8 +277,6 @@ jobs:
             --label "org.kyth.build.proton-cachyos-version=${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}"
             --label "org.kyth.build.thirdparty-versions-hash=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}"
             --label "org.kyth.build.umu-version=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU}"
-            --label "org.kyth.build.latencyflex-version=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_LATENCYFLEX}"
-            --label "org.kyth.build.scx-version=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_SCX}"
             --label "org.kyth.build.kernel-flavor=${MATRIX_KERNEL_FLAVOR}"
             --label "org.kyth.build.cachyos-kernel-version=${CACHYOS_KERNEL_VERSION}"
           )
@@ -304,8 +300,6 @@ jobs:
             --build-arg BASE_IMAGE="${STEPS_BUILD_BASE_OUTPUTS_PINNED}" \
             --build-arg PROTON_CACHYOS_VER="${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}" \
             --build-arg UMU_VERSION="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU}" \
-            --build-arg LATENCYFLEX_VERSION="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_LATENCYFLEX}" \
-            --build-arg SCX_VERSION="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_SCX}" \
             --build-arg THIRDPARTY_VERSIONS_HASH="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}" \
             --build-arg ENABLE_GAMING_PERIPHERALS=0 \
             --build-arg ENABLE_VIRTUALIZATION_HOST=0 \
@@ -346,8 +340,6 @@ jobs:
           STEPS_PROTON_CACHYOS_OUTPUTS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
           STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU: ${{ steps.thirdparty_versions.outputs.umu }}
-          STEPS_THIRDPARTY_VERSIONS_OUTPUTS_LATENCYFLEX: ${{ steps.thirdparty_versions.outputs.latencyflex }}
-          STEPS_THIRDPARTY_VERSIONS_OUTPUTS_SCX: ${{ steps.thirdparty_versions.outputs.scx }}
           STEPS_BUILD_BASE_OUTPUTS_PINNED: ${{ steps.build_base.outputs.pinned }}
           STEPS_CHECKOUT_SHA_OUTPUTS_SHA: ${{ steps.checkout_sha.outputs.sha }}
 
@@ -398,8 +390,6 @@ jobs:
             org.kyth.build.proton-cachyos-version=${{ steps.proton_cachyos.outputs.version }}
             org.kyth.build.thirdparty-versions-hash=${{ steps.thirdparty_versions.outputs.hash }}
             org.kyth.build.umu-version=${{ steps.thirdparty_versions.outputs.umu }}
-            org.kyth.build.latencyflex-version=${{ steps.thirdparty_versions.outputs.latencyflex }}
-            org.kyth.build.scx-version=${{ steps.thirdparty_versions.outputs.scx }}
             org.kyth.build.kernel-flavor=${{ matrix.kernel_flavor }}
             org.kyth.build.cachyos-kernel-version=${{ steps.cachyos_kernel.outputs.version || 'unused' }}
 
@@ -515,8 +505,6 @@ jobs:
           PROTON_CACHYOS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           THIRDPARTY_VERSIONS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
           UMU_VERSION: ${{ steps.thirdparty_versions.outputs.umu }}
-          LATENCYFLEX_VERSION: ${{ steps.thirdparty_versions.outputs.latencyflex }}
-          SCX_VERSION: ${{ steps.thirdparty_versions.outputs.scx }}
           KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           WORKFLOW_GITHUB_SHA: ${{ github.sha }}
         run: |
@@ -544,8 +532,6 @@ jobs:
                   "proton_cachyos_version": os.environ["PROTON_CACHYOS_VERSION"],
                   "thirdparty_versions_hash": os.environ["THIRDPARTY_VERSIONS_HASH"],
                   "umu_version": os.environ["UMU_VERSION"],
-                  "latencyflex_version": os.environ["LATENCYFLEX_VERSION"],
-                  "scx_version": os.environ["SCX_VERSION"],
                   "kernel_flavor": os.environ["KERNEL_FLAVOR"],
               },
           }
@@ -565,7 +551,7 @@ jobs:
   build_live_iso:
     name: Build Live ISO (${{ matrix.branch == 'main' && 'latest' || matrix.branch }})
     needs: build_push
-    if: ${{ always() && github.event_name != 'pull_request' && needs.build_push.result != 'cancelled' }}
+    if: ${{ github.event_name != 'pull_request' && needs.build_push.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -593,7 +579,7 @@ jobs:
   finalize:
     name: Attest and dispatch (${{ matrix.branch }}, ${{ matrix.kernel_flavor }})
     needs: build_push
-    if: always() && needs.build_push.result != 'cancelled'
+    if: needs.build_push.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:

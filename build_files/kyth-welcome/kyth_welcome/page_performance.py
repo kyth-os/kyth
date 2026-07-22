@@ -21,7 +21,7 @@ class PerformancePage(Page):
         self._page_header(
             "Gaming",
             "Scheduler & Performance",
-            "kyth-sched auto-switches between scx_lavd (gaming) and scx_bpfland (desktop) "
+            "kyth-sched enables scx_rusty for gaming and restores the kernel scheduler for desktop use "
             "based on active game detection. Session history is captured by kyth-telem "
             "from MangoHud logs.",
         )

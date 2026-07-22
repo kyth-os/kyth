@@ -6,6 +6,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/check-multilib.sh"
 # shellcheck source=../lib/gaming-coprs.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/gaming-coprs.sh"
+# shellcheck source=../lib/packages-helpers.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/packages-helpers.sh"
 
 # Enable COPRs for gaming packages
 for copr in "${KYTH_GAMING_COPRS[@]}"; do
@@ -69,3 +71,11 @@ dnf5 install -y --skip-unavailable --exclude=libde265.i686 \
 # lib/check-multilib.sh for why). The install above uses --skip-unavailable,
 # so a mirror/COPR desync on any of these can silently drop just one arch.
 check_multilib_pairs "${KYTH_MULTILIB_PAIRS[@]}"
+
+# Upstream SCX GitHub releases do not publish Linux binaries. Use Fedora's
+# signed RPM instead of silently omitting the scheduler or compiling an
+# untracked payload during the image build.
+if is_enabled "${ENABLE_SCX:-1}"; then
+	dnf5 install -y scx_rusty
+	command -v scx_rusty >/dev/null
+fi

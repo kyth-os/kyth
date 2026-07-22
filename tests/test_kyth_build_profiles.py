@@ -55,11 +55,7 @@ class BuildProfileTests(unittest.TestCase):
         self.assertIn("thirdparty-versions", resolver)
         self.assertNotIn("thirdparty-hash", resolver)
 
-        version_vars = {
-            "umu.sh": "UMU_VERSION",
-            "latencyflex.sh": "LATENCYFLEX_VERSION",
-            "scx.sh": "SCX_VERSION",
-        }
+        version_vars = {"umu.sh": "UMU_VERSION"}
         for filename, variable in version_vars.items():
             source = _read(f"build_files/scripts/thirdparty/{filename}")
             self.assertNotIn("/releases/latest", source)
@@ -73,10 +69,22 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_ci_passes_and_records_exact_third_party_versions(self):
         workflow = _read(".github/workflows/build.yml")
-        for name in ("UMU_VERSION", "LATENCYFLEX_VERSION", "SCX_VERSION"):
-            self.assertIn(f"--build-arg {name}=", workflow)
-        for label in ("umu-version", "latencyflex-version", "scx-version"):
-            self.assertIn(f"org.kyth.build.{label}", workflow)
+        self.assertIn("--build-arg UMU_VERSION=", workflow)
+        self.assertIn("org.kyth.build.umu-version", workflow)
+        self.assertNotIn("LATENCYFLEX_VERSION", workflow)
+        self.assertNotIn("SCX_VERSION", workflow)
+
+    def test_scx_uses_fedora_package_and_kyth_owned_launcher(self):
+        gaming = _read("build_files/scripts/packages/06-gaming-core.sh")
+        thirdparty = _read("build_files/scripts/thirdparty.sh")
+        loader = _read("build_files/kyth-scx-loader")
+        self.assertIn("dnf5 install -y scx_rusty", gaming)
+        self.assertNotIn("install_scx", thirdparty)
+        self.assertIn('^scx_[a-z0-9_]+$', loader)
+
+    def test_dependent_workflows_require_successful_image_build(self):
+        workflow = _read(".github/workflows/build.yml")
+        self.assertGreaterEqual(workflow.count("needs.build_push.result == 'success'"), 2)
 
 
 if __name__ == "__main__":

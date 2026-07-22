@@ -52,7 +52,7 @@ class GamingPackageTests(unittest.TestCase):
         self.assertEqual(data.get("name"), "Team Fortress 2")
 
     def test_command_builders(self):
-        cmd = gaming.scx_scheduler_command("scx_lavd")
+        cmd = gaming.scx_scheduler_command("scx_rusty")
         self.assertIsInstance(cmd, list)
         self.assertTrue(cmd)
 

@@ -14,9 +14,5 @@ unset _fragment
 
 # ── Parallel download + install ───────────────────────────────────────────────
 _launch umu install_umu
-_launch latencyflex install_latencyflex
-if is_enabled "${ENABLE_SCX:-1}"; then
-	_launch scx install_scx
-fi
 
 _wait_and_report

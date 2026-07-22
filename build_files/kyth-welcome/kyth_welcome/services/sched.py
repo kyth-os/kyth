@@ -44,7 +44,7 @@ def list_schedulers() -> list[str]:
             )
         except Exception:
             _logger.debug("list_schedulers: /usr/bin/scx_* glob scan failed", exc_info=True)
-    return schedulers or ["scx_lavd", "scx_bpfland", "scx_rusty"]
+    return schedulers or ["scx_rusty"]
 
 
 def is_sched_daemon_active() -> bool:

@@ -30,7 +30,7 @@ class SchedServiceTests(unittest.TestCase):
         with patch("kyth_welcome.services.sched.subprocess.run", side_effect=FileNotFoundError):
             with patch("kyth_welcome.services.sched.glob.glob", return_value=[]):
                 names = sched.list_schedulers()
-        self.assertIn("scx_lavd", names)
+        self.assertIn("scx_rusty", names)
 
     def test_read_sched_status_missing(self):
         with patch.object(sched, "status_file_path", return_value=pathlib.Path("/no/such/status.json")):
@@ -50,7 +50,7 @@ class TelemServiceTests(unittest.TestCase):
             avg_fps=120.4,
             p1_low_fps=90.1,
             stutter_count=2,
-            scheduler="scx_lavd",
+            scheduler="scx_rusty",
         )
         self.assertEqual(row.duration_label, "2m 05s")
         self.assertIn("/", row.fps_label)

@@ -2,9 +2,9 @@
 """
 kyth-sched — automatic sched-ext profile switcher for KythOS.
 
-Monitors GameMode and /proc for active gaming sessions and switches the
-BPF scheduler between a gaming profile (scx_lavd) and a desktop profile
-(scx_bpfland).  Also integrates with kyth-performance-mode to wire EPP
+Monitors GameMode and /proc for active gaming sessions, enabling Fedora's
+packaged scx_rusty scheduler while gaming and restoring the kernel scheduler
+for desktop use. Also integrates with kyth-performance-mode to wire EPP
 and compositor tweaks into the same trigger.
 
 Config: ~/.config/kyth/sched-profiles.toml  (user)
@@ -40,8 +40,8 @@ _RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{_UID}"))
 STATUS_FILE = _RUNTIME_DIR / "kyth-sched-status.json"
 
 DEFAULT_CONFIG: dict = {
-    "desktop_scheduler":  "scx_bpfland",
-    "gaming_scheduler":   "scx_lavd",
+    "desktop_scheduler":  "default",
+    "gaming_scheduler":   "scx_rusty",
     "poll_interval":      5,
     "integrate_perf_mode": True,   # also call kyth-performance-mode on switch
 }
@@ -115,7 +115,8 @@ def current_scheduler() -> str:
 
 def set_scheduler(name: str) -> bool:
     """Switch scheduler via kyth-scx (NOPASSWD sudo)."""
-    ok, out = _run("sudo", "-n", "/usr/bin/kyth-scx", "set", name)
+    action = ("stop",) if name == "default" else ("set", name)
+    ok, out = _run("sudo", "-n", "/usr/bin/kyth-scx", *action)
     if ok:
         LOG.info("Scheduler → %s", name)
     else:

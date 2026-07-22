@@ -40,6 +40,7 @@ RUN --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/
     ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS}" \
     ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST}" \
     ENABLE_KSM="${ENABLE_KSM}" \
+    ENABLE_SCX="${ENABLE_SCX}" \
     bash /ctx/packages-static.sh
 
 # Proton-CachyOS is an offline fallback for fresh installs. The build must use
@@ -52,14 +53,12 @@ RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/p
     test -n "${PROTON_CACHYOS_VER}" && \
     PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" bash /ctx/proton-cachyos.sh
 
-# Third-party binaries — SCX schedulers, umu, and LatencyFleX.
+# Third-party binary — umu launcher.
 # Placed before BUILD_DATE so the layer is only re-run when a tool ships a new
 # release. Exact tags are resolved once by CI and used for both cache identity
 # and downloads; installers never re-resolve "latest" inside the build.
 ARG THIRDPARTY_VERSIONS_HASH=unset
 ARG UMU_VERSION
-ARG LATENCYFLEX_VERSION
-ARG SCX_VERSION
 RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/thirdparty.sh \
     --mount=type=bind,source=build_files/scripts/thirdparty,target=/ctx/thirdparty \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
@@ -67,9 +66,6 @@ RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/third
     --mount=type=secret,id=github_token \
     : "cache-bust=${THIRDPARTY_VERSIONS_HASH}" && \
     UMU_VERSION="${UMU_VERSION}" \
-    LATENCYFLEX_VERSION="${LATENCYFLEX_VERSION}" \
-    SCX_VERSION="${SCX_VERSION}" \
-    ENABLE_SCX="${ENABLE_SCX}" \
     bash /ctx/thirdparty.sh
 
 # Plymouth boot splash + initramfs rebuild.

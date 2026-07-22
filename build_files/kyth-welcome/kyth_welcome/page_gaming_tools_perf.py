@@ -139,8 +139,8 @@ class _PerfTuningMixin:
         scx_top.addWidget(self._scx_badge)
         scx_layout.addLayout(scx_top)
         scx_desc = QLabel(
-            "KythOS uses CachyOS sched-ext support for latency-focused gaming. "
-            "lavd is the default all-rounder; rusty and bpfland are useful alternates for testing."
+            "KythOS uses Fedora's packaged scx_rusty scheduler for gaming and "
+            "returns to the kernel scheduler for normal desktop work."
         )
         scx_desc.setObjectName("card-copy")
         scx_desc.setWordWrap(True)
@@ -150,11 +150,7 @@ class _PerfTuningMixin:
         scx_layout.addWidget(self._scx_status_lbl)
         scx_btns = QHBoxLayout()
         scx_btns.setSpacing(8)
-        for label, scheduler in (
-            ("Use lavd", "lavd"),
-            ("Use rusty", "rusty"),
-            ("Use bpfland", "bpfland"),
-        ):
+        for label, scheduler in (("Use scx_rusty", "rusty"),):
             btn = QPushButton(label)
             btn.clicked.connect(lambda _=False, sched=scheduler: self._set_scx_scheduler(sched))
             scx_btns.addWidget(btn)

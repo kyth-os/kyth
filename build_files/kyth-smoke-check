@@ -714,12 +714,6 @@ check_file_contains /etc/environment.d/proton-radv.conf "PROTON_USE_NTSYNC=1" "N
 check_file_contains /etc/environment.d/proton-radv.conf "VKD3D_CONFIG=dxr11,dxr" "VKD3D ray tracing" "DX12 RT enabled in VKD3D-Proton"
 check_file_contains /etc/environment.d/proton-radv.conf "WINEFSYNC=1" "FSYNC fallback" "fsync fallback when NTSYNC unavailable"
 
-if [[ -f /usr/share/vulkan/implicit_layer.d/latencyflex_layer.json ]]; then
-    pass "LatencyFleX layer" "Vulkan implicit layer installed"
-else
-    warn "LatencyFleX layer" "not installed — anti-stutter latency-flex layer missing"
-fi
-
 if [[ -f /usr/share/vulkan/implicit_layer.d/VkLowLatencyLayer.json ]] \
    || ls /usr/share/vulkan/implicit_layer.d/VkLowLatency* >/dev/null 2>&1; then
     pass "vulkan-low-latency-layer" "AMD Anti-Lag2 / Reflex implicit layer present"
@@ -823,6 +817,9 @@ check_file_contains /etc/pipewire/pipewire.conf.d/99-kyth.conf "default.clock.qu
 check_file_contains /etc/environment.d/obs-vkcapture.conf "OBS_VKCAPTURE intentionally" "OBS capture config present" "per-user opt-in via ujust install-obs"
 check_file_contains /usr/bin/kyth-sched "Do not include launcher shells" "Scheduler launcher calm" "idle launchers do not pin gaming mode"
 check_file_contains /usr/bin/kyth-performance-mode "save|restore" "Performance mode recovery" "performance mode exposes save and restore"
+check_command scx_rusty "Fedora sched-ext scheduler"
+check_file /usr/bin/scx_loader "KythOS sched-ext launcher"
+check_file /usr/lib/systemd/system/scx_loader.service "KythOS sched-ext service"
 check_file /usr/share/ublue-os/just/75-kyth.just "KythOS ujust recipes"
 check_optional_command kyth-ai-dev "AI developer environment helper"
 check_file_contains /usr/share/ublue-os/just/75-kyth.just "ai-dev-setup" "AI dev setup recipe" "opt-in local AI developer environment recipe is available"

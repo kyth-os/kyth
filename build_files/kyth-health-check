@@ -28,7 +28,7 @@ check_status() {
 log "━━━ KythOS Subsystem Health Diagnostic ━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # 1. Kernel Sched-Ext & Low-Latency
-if systemctl is-active --quiet scx 2>/dev/null || command -v scx_lavd >/dev/null 2>&1; then
+if systemctl is-active --quiet scx_loader.service 2>/dev/null || command -v scx_rusty >/dev/null 2>&1; then
 	check_status "Kernel Scheduler" 1 "sched-ext (scx) low-latency scheduler active"
 else
 	check_status "Kernel Scheduler" 0 "CFS/EEVDF fallback (scx not active)"

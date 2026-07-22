@@ -73,7 +73,7 @@ game-scope preset="quality" *args:
     exec /usr/bin/kyth-gamescope "{{ preset }}" {{ args }}
 
 # Show or change the active sched-ext scheduler.
-# Usage: ujust scx status | ujust scx list | ujust scx set lavd
+# Usage: ujust scx status | ujust scx list | ujust scx set rusty
 [group('KythOS')]
 scx action="status" scheduler="":
     #!/usr/bin/env bash

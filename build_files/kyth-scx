@@ -12,7 +12,6 @@ Usage: kyth-scx <status|list|set|restart|stop> [scheduler]
 Examples:
   kyth-scx status
   kyth-scx list
-  kyth-scx set lavd
   kyth-scx set rusty
   kyth-scx stop
 HELPEOF
@@ -91,6 +90,7 @@ case "$cmd" in
     stop)
         need_root "$@"
         systemctl disable --now "$SERVICE"
+        rm -f "$CONFIG_FILE"
         echo "Stopped sched-ext loader. Kernel default scheduler is active."
         ;;
     -h|--help|help)

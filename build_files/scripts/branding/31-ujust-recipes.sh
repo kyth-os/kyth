@@ -15,6 +15,7 @@ printf '\nimport? "/usr/share/ublue-os/just/75-kyth.just"\n' >>/usr/share/ublue-
 install -m 0644 /ctx/kyth-local-bin-migrate.service /usr/lib/systemd/system/kyth-local-bin-migrate.service
 install -m 0644 /ctx/kyth-duperemove.service /usr/lib/systemd/system/kyth-duperemove.service
 install -m 0644 /ctx/kyth-duperemove.timer /usr/lib/systemd/system/kyth-duperemove.timer
+install -m 0644 /ctx/kyth-scx-loader.service /usr/lib/systemd/system/scx_loader.service
 systemctl enable kyth-local-bin-migrate.service 2>/dev/null || true
 systemctl enable kyth-duperemove.timer 2>/dev/null || true
 systemctl --global enable kyth-proton-cachyos-update.timer 2>/dev/null || true
@@ -27,6 +28,8 @@ systemctl enable kyth-default-flatpaks.service 2>/dev/null || true
 systemctl enable kyth-hw-setup.service 2>/dev/null || true
 systemctl enable kyth-update-watcher.timer 2>/dev/null || true
 systemctl enable kyth-probe.timer 2>/dev/null || true
-systemctl --global enable kyth-sched.service 2>/dev/null || true
+if command -v scx_rusty >/dev/null 2>&1; then
+	systemctl --global enable kyth-sched.service 2>/dev/null || true
+fi
 systemctl --global enable kyth-telem.service 2>/dev/null || true
 systemctl --global enable kyth-probe.timer 2>/dev/null || true

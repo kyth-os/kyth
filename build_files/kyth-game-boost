@@ -34,10 +34,10 @@ status_only() {
 	fi
 
 	# Sched-Ext (scx) Status
-	if command -v scx_lavd >/dev/null 2>&1; then
-		log "Sched-Ext (scx_lavd): Installed and ready for dynamic low-latency switching"
-	elif systemctl is-active --quiet scx 2>/dev/null; then
-		log "Sched-Ext (scx): Service active"
+	if command -v scx_rusty >/dev/null 2>&1; then
+		log "Sched-Ext (scx_rusty): Fedora-packaged gaming scheduler available"
+	elif systemctl is-active --quiet scx_loader.service 2>/dev/null; then
+		log "Sched-Ext (scx_loader): Service active"
 	else
 		log "Sched-Ext (scx): Default kernel scheduler fallback"
 	fi
@@ -98,9 +98,9 @@ if [[ -w /sys/kernel/mm/transparent_hugepage/enabled ]]; then
 fi
 
 # ── 3. Sched-Ext (scx) Low-Latency Profile Switcher ─────────────────────────
-if command -v scx_lavd >/dev/null 2>&1 && systemctl is-active --quiet scx 2>/dev/null; then
-	log "Switching sched-ext to low-latency gaming scheduler (scx_lavd)..."
-	sudo systemctl restart scx_lavd.service 2>/dev/null || true
+if command -v scx_rusty >/dev/null 2>&1; then
+	log "Switching sched-ext to the scx_rusty gaming scheduler..."
+	sudo -n /usr/bin/kyth-scx set rusty 2>/dev/null || true
 fi
 
 # ── 4. Launch Target Application ────────────────────────────────────────────

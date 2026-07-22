@@ -80,12 +80,12 @@ class GamingServiceTests(unittest.TestCase):
 
     def test_scheduler_command_handles_default_and_named_scheduler(self):
         default_cmd = gaming.scx_scheduler_command("default")
-        named_cmd = gaming.scx_scheduler_command("scx_lavd")
+        named_cmd = gaming.scx_scheduler_command("scx_rusty")
 
         self.assertIsInstance(default_cmd, list)
         self.assertIsInstance(named_cmd, list)
         self.assertNotEqual(default_cmd, named_cmd)
-        self.assertIn("scx_lavd", named_cmd)
+        self.assertIn("scx_rusty", named_cmd)
 
     def test_command_builders_preserve_runtime_arguments(self):
         opticscaler_cmd = gaming.opticscaler_deploy_command("/games/Test Game")

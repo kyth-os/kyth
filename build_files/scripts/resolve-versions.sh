@@ -8,9 +8,8 @@
 # Subcommands:
 #   proton-cachyos   Exact Proton-CachyOS release tag. Resolution failure is
 #                    fatal so build provenance always describes the payload.
-#   thirdparty-versions  Exact umu, LatencyFleX, and SCX release tags as a
-#                        tab-separated line. Resolution failure is fatal so an
-#                        image can never silently omit a requested component.
+#   thirdparty-versions  Exact umu release tag. Resolution failure is fatal so
+#                        an image can never silently omit the requested tool.
 #   cachyos-kernel   Latest succeeded kernel-cachyos COPR build (version-release).
 #                    Falls back to today's date so a COPR API outage busts the
 #                    kernel layer cache instead of silently freezing it.
@@ -24,8 +23,6 @@ CURL_ARGS=(-fsSL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60)
 
 THIRDPARTY_REPOS=(
 	Open-Wine-Components/umu-launcher
-	ishitatsuyuki/LatencyFleX
-	sched-ext/scx
 )
 
 # Prints the latest release tag of GitHub repo $1, or "" on any failure.
@@ -78,7 +75,7 @@ cmd_thirdparty_versions() {
 		tags+=("${tag}")
 	done
 	rm -rf "${tmp}"
-	printf '%s\t%s\t%s\n' "${tags[0]}" "${tags[1]}" "${tags[2]}"
+	printf '%s\n' "${tags[0]}"
 }
 
 cmd_cachyos_kernel() {

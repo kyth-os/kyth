@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+config=/etc/scx/scx_loader.conf
+[[ -r "${config}" ]] || {
+	echo "scx_loader: missing ${config}" >&2
+	exit 1
+}
+
+scheduler=$(awk -F= '/^SCX_SCHEDULER=/{print $2; exit}' "${config}")
+if [[ ! "${scheduler}" =~ ^scx_[a-z0-9_]+$ ]]; then
+	echo "scx_loader: invalid scheduler name: ${scheduler}" >&2
+	exit 1
+fi
+
+binary="/usr/bin/${scheduler}"
+[[ -x "${binary}" ]] || {
+	echo "scx_loader: scheduler is not installed: ${scheduler}" >&2
+	exit 1
+}
+
+exec "${binary}"
