@@ -10,6 +10,7 @@ from .core_base import (
 )
 from .services.launch import reboot
 from .services.runtime import Worker, _finish_worker
+from .services.privileged import bootc_action
 from .core_base import _current_branch
 from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
 from .widgets import _make_card, _set_log_panel
@@ -253,7 +254,7 @@ class _UpdateOpsMixin:
         self._start_operation(
             "update",
             "Downloading the next KythOS OS image…",
-            ["sudo", "bootc", "upgrade"],
+            bootc_action("upgrade").command(),
             "KythOS is downloading a system update",
         )
 
@@ -261,7 +262,7 @@ class _UpdateOpsMixin:
         self._start_operation(
             "rollback",
             "Staging the previous deployment for next boot…",
-            ["sudo", "bootc", "rollback"],
+            bootc_action("rollback").command(),
             "KythOS is staging a system rollback",
         )
 

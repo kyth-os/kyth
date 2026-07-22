@@ -1,10 +1,8 @@
 import logging
-import os
-import shlex
 import shutil
 import subprocess
 
-from ..core_base import _CLOUD_SYNC_CONFIG, _SMB_CONFIG, _SMB_CREDS_DIR
+from ..core_base import _CLOUD_SYNC_CONFIG, _SMB_CONFIG
 from .config import load_json_config, save_json_config
 from .process import _run_command
 
@@ -78,91 +76,3 @@ def _is_mounted(path: str) -> bool:
     except Exception:
         return False
  # _is_mounted
-
-def _build_add_share_script(share: dict, mount_now: bool) -> str:
-    import base64 as _b64
-    name       = share["name"]
-    server     = share["server"]
-    share_path = share["share_path"].lstrip("/")
-    mount_pt   = share["mount_point"]
-    username   = share["username"]
-    password   = share.get("password", "")
-    domain     = share.get("domain", "")
-    auto_mount = share.get("auto_mount", False)
-    uid        = os.getuid()
-    gid        = os.getgid()
-
-    unit_name  = _systemd_escape_mount_path(mount_pt)
-    cred_file  = f"{_SMB_CREDS_DIR}/{name}"
-    unc        = f"//{server}/{share_path}"
-    opts       = (
-        f"credentials={cred_file},uid={uid},gid={gid},"
-        "iocharset=utf8,vers=3.0,nofail,_netdev"
-    )
-
-    creds = f"username={username}\npassword={password}\n"
-    if domain:
-        creds += f"domain={domain}\n"
-    creds_b64 = _b64.b64encode(creds.encode()).decode()
-
-    unit = "\n".join([
-        "[Unit]",
-        f"Description=SMB Share {unc}",
-        "After=network-online.target",
-        "Wants=network-online.target",
-        "",
-        "[Mount]",
-        f"What={unc}",
-        f"Where={mount_pt}",
-        "Type=cifs",
-        f"Options={opts}",
-        "TimeoutSec=30",
-        "",
-        "[Install]",
-        "WantedBy=multi-user.target",
-    ])
-    unit_b64 = _b64.b64encode(unit.encode()).decode()
-    creds_dir_q = shlex.quote(_SMB_CREDS_DIR)
-    cred_file_q = shlex.quote(cred_file)
-    mount_pt_q = shlex.quote(mount_pt)
-    unit_path_q = shlex.quote(f"/etc/systemd/system/{unit_name}")
-    unit_name_q = shlex.quote(unit_name)
-
-    lines = [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        f"mkdir -p {creds_dir_q}",
-        f"chmod 700 {creds_dir_q}",
-        f"echo '{creds_b64}' | base64 -d > {cred_file_q}",
-        f"chmod 600 {cred_file_q}",
-        f"mkdir -p {mount_pt_q}",
-        f"echo '{unit_b64}' | base64 -d > {unit_path_q}",
-        "systemctl daemon-reload",
-    ]
-    if auto_mount:
-        lines.append(f"systemctl enable {unit_name_q}")
-    if mount_now:
-        lines.append(f"systemctl start {unit_name_q} || true")
-
-    return "\n".join(lines)
- # _build_add_share_script
-
-def _build_remove_share_script(share: dict) -> str:
-    name      = share["name"]
-    mount_pt  = share["mount_point"]
-    unit_name = _systemd_escape_mount_path(mount_pt)
-    cred_file = f"{_SMB_CREDS_DIR}/{name}"
-    unit_name_q = shlex.quote(unit_name)
-    unit_path_q = shlex.quote(f"/etc/systemd/system/{unit_name}")
-    cred_file_q = shlex.quote(cred_file)
-
-    return "\n".join([
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        f"systemctl stop {unit_name_q} 2>/dev/null || true",
-        f"systemctl disable {unit_name_q} 2>/dev/null || true",
-        f"rm -f {unit_path_q}",
-        "systemctl daemon-reload",
-        f"rm -f {cred_file_q}",
-    ])
- # _build_remove_share_script

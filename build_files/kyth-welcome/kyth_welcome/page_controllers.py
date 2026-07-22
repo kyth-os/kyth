@@ -5,6 +5,7 @@ from .core_base import _release_worker_when_finished
 from .services.gaming import TrackedThread
 from .services.hardware import _detect_controllers
 from .services.runtime import Worker
+from .services.privileged import AuthFrontend, helper_action
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QPushButton, Signal,
 )
@@ -283,7 +284,11 @@ class ControllerPage(Page):
             return
         self._xone_btn.setEnabled(False)
         self._xone_status_lbl.setText("Flashing firmware…")
-        worker = Worker(["pkexec", cmd])
+        helper = "xone-dongle-install" if cmd.endswith("xone-dongle-install") else "xone-firmware-install"
+        worker = Worker(helper_action(
+            helper,
+            frontend=AuthFrontend.PKEXEC,
+        ).command())
         worker.done.connect(self._on_xone_done)
         worker.start()
         self._xone_worker = worker

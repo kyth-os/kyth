@@ -4,7 +4,7 @@ from __future__ import annotations
 import shlex
 
 from .core_base import _restyle
-from .services.launch import flatpak_run, kcmshell, popen, systemsettings
+from .services.launch import flatpak_run, kcmshell, popen, popen_privileged, systemsettings
 from .services.repair import (
     enable_clipboard_history,
     force_deep_sleep,
@@ -14,6 +14,7 @@ from .services.repair import (
 from .actions import _install_flatpak_inline
 from .services.flatpak import _is_flatpak_installed
 from .services.runtime import Worker, _finish_worker
+from .services.privileged import systemctl_action
 from .qt import QDesktopServices, QMessageBox, QUrl
 from .widgets import _set_log_panel
 
@@ -67,7 +68,7 @@ class _QuickFixMixin:
         QMessageBox.warning(self, "Task Manager not found", "Could not find System Monitor or a terminal task viewer.")
 
     def _open_printer_setup(self):
-        popen(["sudo", "systemctl", "enable", "--now", "cups"])
+        popen_privileged(systemctl_action("enable", "cups.service", now=True))
         if kcmshell("kcm_printer_manager") or systemsettings():
             return
         QDesktopServices.openUrl(QUrl("http://localhost:631"))

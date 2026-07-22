@@ -1,3 +1,4 @@
+import json
 import os
 import re
 
@@ -6,9 +7,10 @@ from .core_base import (
     _apply_install_badge, _restyle,
 )
 from .services.network import (
-    _build_add_share_script, _build_remove_share_script, _is_cifs_available, _is_mounted, _load_smb_config,
+    _is_cifs_available, _is_mounted, _load_smb_config,
     _save_smb_config, _systemd_escape_mount_path,
 )
+from .services.privileged import helper_action, systemctl_action
 from .services.runtime import Worker
 from .qt import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
@@ -341,9 +343,17 @@ class NetworkSharesPage(Page):
         if not share:
             return
         mount_now = self._mount_now_chk.isChecked()
-        script = _build_add_share_script(share, mount_now)
+        payload = {
+            **share,
+            "mount_now": mount_now,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+        }
         self._begin_op(f"Adding share {share['name']}…")
-        self._worker = Worker(["sudo", "-A", "bash", "-c", script])
+        self._worker = Worker(
+            helper_action("network-share", "add").command(),
+            input_text=json.dumps(payload),
+        )
         self._worker.line.connect(self._op_log.append)
         self._worker.done.connect(lambda code, s=share: self._on_add_done(code, s))
         self._worker.start()
@@ -375,13 +385,13 @@ class NetworkSharesPage(Page):
         if self._worker and self._worker.isRunning():
             return
         unit = _systemd_escape_mount_path(share["mount_point"])
-        self._run_sudo(["systemctl", "start", unit], f"Mounting {share['name']}…")
+        self._run_systemctl("start", unit, f"Mounting {share['name']}…")
 
     def _unmount_share(self, share: dict):
         if self._worker and self._worker.isRunning():
             return
         unit = _systemd_escape_mount_path(share["mount_point"])
-        self._run_sudo(["systemctl", "stop", unit], f"Unmounting {share['name']}…")
+        self._run_systemctl("stop", unit, f"Unmounting {share['name']}…")
 
     def _toggle_auto_mount(self, share: dict, enabled: bool):
         if self._worker and self._worker.isRunning():
@@ -393,7 +403,7 @@ class NetworkSharesPage(Page):
         unit   = _systemd_escape_mount_path(share["mount_point"])
         action = "enable" if enabled else "disable"
         label  = "Enabling" if enabled else "Disabling"
-        self._run_sudo(["systemctl", action, unit], f"{label} auto-mount for {share['name']}…")
+        self._run_systemctl(action, unit, f"{label} auto-mount for {share['name']}…")
 
     def _remove_share(self, share: dict):
         reply = QMessageBox.question(
@@ -405,9 +415,14 @@ class NetworkSharesPage(Page):
             return
         if self._worker and self._worker.isRunning():
             return
-        script = _build_remove_share_script(share)
         self._begin_op(f"Removing {share['name']}…")
-        self._worker = Worker(["sudo", "-A", "bash", "-c", script])
+        self._worker = Worker(
+            helper_action("network-share", "remove").command(),
+            input_text=json.dumps({
+                "name": share["name"],
+                "mount_point": share["mount_point"],
+            }),
+        )
         self._worker.line.connect(self._op_log.append)
         self._worker.done.connect(lambda code, s=share: self._on_remove_done(code, s))
         self._worker.start()
@@ -425,9 +440,9 @@ class NetworkSharesPage(Page):
         _restyle(self._op_status)
         self._rebuild_shares_list()
 
-    def _run_sudo(self, cmd: list[str], status_msg: str):
+    def _run_systemctl(self, action: str, unit: str, status_msg: str):
         self._begin_op(status_msg)
-        self._worker = Worker(["sudo", "-A"] + cmd)
+        self._worker = Worker(systemctl_action(action, unit).command())
         self._worker.line.connect(self._op_log.append)
         self._worker.done.connect(self._on_generic_done)
         self._worker.start()

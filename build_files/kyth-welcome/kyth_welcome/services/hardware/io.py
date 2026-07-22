@@ -8,6 +8,7 @@ import shutil
 from .types import HardwareProbe
 from ..process import _command_stdout, _run_command
 from ..updates import firmware_check_commands
+from ..privileged import AuthFrontend, helper_action
 
 
 def _firmware_probe() -> HardwareProbe:
@@ -229,7 +230,15 @@ def _controller_probe(usb_text: str, lsmod_text: str) -> HardwareProbe:
                 "is complete.\n\n" + firmware_hint
             ),
             "Install Xbox dongle firmware (opens password prompt)",
-            action_cmd=(["pkexec", xone_cmd] if xone_cmd else None),
+            action_cmd=(
+                helper_action(
+                    "xone-dongle-install"
+                    if xone_cmd and xone_cmd.endswith("xone-dongle-install")
+                    else "xone-firmware-install",
+                    frontend=AuthFrontend.PKEXEC,
+                ).command()
+                if xone_cmd else None
+            ),
         )
 
     n = len(usb_controllers) or len(input_nodes)
@@ -359,4 +368,3 @@ def _displaylink_probe(usb_text: str, lsmod_text: str) -> HardwareProbe:
         ),
     )
  # _displaylink_probe
-

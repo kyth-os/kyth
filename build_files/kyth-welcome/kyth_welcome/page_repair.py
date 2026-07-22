@@ -4,10 +4,11 @@ import shutil
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _has_rollback_deployment
 from .page_repair_components import repair_overview_cards, rollback_card
-from .services.launch import kcmshell, popen
+from .services.launch import kcmshell, popen_privileged
 from .services.hardware import _detect_nvidia
 from .services.repair import _read_sys_text
 from .services.flatpak import _is_flatpak_installed
+from .services.privileged import systemctl_action
 from .page_repair_assist import _AssistMixin
 from .page_repair_quick import _QuickFixMixin
 from .page_repair_reset import _ResetMixin
@@ -78,13 +79,13 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             ("Apply User Polish", "Re-apply KythOS default theme, fonts, and KDE settings to your user profile.",
              ["/usr/bin/kyth-user-polish"]),
             ("Retry Game Apps",   "Restart the Flatpak install service to retry installing Steam, Lutris, and other game apps.",
-             ["sudo", "-A", "systemctl", "restart", "kyth-default-flatpaks.service"]),
+             systemctl_action("restart", "kyth-default-flatpaks.service").command()),
             ("Fix Flatpak Apps",  "Repair the Flatpak user installation. Fixes corrupted or missing app runtimes.",
              ["flatpak", "repair", "--user"]),
             ("Restart Audio",     "Restart PipeWire, PipeWire-Pulse, and WirePlumber. Fixes audio that has stopped working.",
              ["systemctl", "--user", "restart", "pipewire", "pipewire-pulse", "wireplumber"]),
             ("Restart Bluetooth", "Restart the Bluetooth service. Fixes controllers and headsets that won't pair or connect.",
-             ["sudo", "-A", "systemctl", "restart", "bluetooth"]),
+             systemctl_action("restart", "bluetooth.service").command()),
         ):
             btn = QPushButton(label)
             btn.setToolTip(tip)
@@ -206,7 +207,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         cups_btn = QPushButton("Open CUPS Web Interface")
         cups_btn.setToolTip("Advanced printer management at http://localhost:631")
         cups_btn.clicked.connect(lambda _=False: (
-            popen(["sudo", "systemctl", "enable", "--now", "cups"]),
+            popen_privileged(systemctl_action("enable", "cups.service", now=True)),
             QDesktopServices.openUrl(QUrl("http://localhost:631"))
         ))
         printer_btns.addWidget(cups_btn)

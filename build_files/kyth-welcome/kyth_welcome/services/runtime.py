@@ -83,9 +83,10 @@ class Worker(TrackedThread):
     line = Signal(str)
     done = Signal(int)
 
-    def __init__(self, cmd: list[str]):
+    def __init__(self, cmd: list[str], *, input_text: str | None = None):
         super().__init__()
         self._cmd = cmd
+        self._input_text = input_text
         self._proc: subprocess.Popen[str] | None = None
         self._cancel_requested = False
 
@@ -117,6 +118,7 @@ class Worker(TrackedThread):
             env["LC_ALL"] = "en_US.UTF-8"
             proc = subprocess.Popen(
                 self._cmd,
+                stdin=subprocess.PIPE if self._input_text is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -127,6 +129,10 @@ class Worker(TrackedThread):
                 start_new_session=True,
             )
             self._proc = proc
+            if self._input_text is not None and proc.stdin is not None:
+                proc.stdin.write(self._input_text)
+                proc.stdin.close()
+                self._input_text = None
             for ln in proc.stdout:
                 self.line.emit(ln.rstrip())
             proc.wait()

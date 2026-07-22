@@ -7,6 +7,7 @@ from .core_base import (
 )
 from .services.diagnostics import _command_stdout
 from .services.runtime import Worker, _finish_worker
+from .services.privileged import bootc_action
 from .core_base import REGISTRY, _current_branch
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, single_shot,
@@ -182,7 +183,10 @@ class KernelPage(Page):
         for btn in self._kernel_buttons.values():
             btn.setEnabled(False)
 
-        self._worker = Worker(_with_idle_inhibit(["sudo", "bootc", "switch", ref], "KythOS is switching kernel image"))
+        self._worker = Worker(_with_idle_inhibit(
+            bootc_action("switch", ref).command(),
+            "KythOS is switching kernel image",
+        ))
         _set_session_inhibit(self, "KythOS is switching kernel image")
         self._worker.line.connect(self._on_line)
         self._worker.done.connect(self._on_done)

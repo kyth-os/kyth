@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 
 from .process import _command_stdout, _with_idle_inhibit
+from .privileged import bootc_action, helper_action, systemctl_action
 
 
 def read_sys_text(path: str) -> str:
@@ -52,7 +53,7 @@ def setup_summary_command(archive: str) -> list[str]:
 
 
 def force_deep_sleep_command() -> list[str]:
-    return ["sudo", "-A", "bash", "-c", "echo deep > /sys/power/mem_sleep"]
+    return helper_action("sleep-mode", "deep").command()
 
 
 def force_deep_sleep() -> tuple[bool, str]:
@@ -117,14 +118,14 @@ def wakeup_sources_text(timeout: int = 5) -> str:
 
 def rollback_command() -> list[str]:
     return _with_idle_inhibit(
-        ["sudo", "bootc", "rollback"],
+        bootc_action("rollback").command(),
         "KythOS is staging a rollback",
     )
 
 
 def reset_command() -> list[str]:
     return _with_idle_inhibit(
-        ["sudo", "bootc", "reset"],
+        bootc_action("reset").command(),
         "KythOS is resetting the system",
     )
 
@@ -166,7 +167,7 @@ def volume_mixer_commands() -> list[list[str]]:
 
 def printer_setup_commands() -> list[list[str]]:
     cmds: list[list[str]] = [
-        ["sudo", "systemctl", "enable", "--now", "cups"],
+        systemctl_action("enable", "cups.service", now=True).command(),
     ]
     for binary in ("kcmshell6", "systemsettings"):
         if binary == "kcmshell6" and shutil.which("kcmshell6"):

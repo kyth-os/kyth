@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .privileged import scheduler_action
+
 _logger = logging.getLogger(__name__)
 
 
@@ -63,7 +65,7 @@ def apply_scheduler(name: str) -> None:
         return
     try:
         subprocess.Popen(
-            ["sudo", "-n", "/usr/bin/kyth-scx", "set", name],
+            scheduler_action(name).command(),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception:

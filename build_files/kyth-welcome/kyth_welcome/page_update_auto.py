@@ -5,7 +5,8 @@ from kyth_shared.update_status import read_update_snapshot
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.dbus_utils import is_systemd_unit_enabled
-from .services.launch import popen
+from .services.launch import popen_privileged
+from .services.privileged import AuthFrontend, systemctl_action
 from .qt import QCheckBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt
 from .widgets import _make_card
 
@@ -104,7 +105,16 @@ class _AutoUpdateMixin:
 
     def _toggle_auto_update(self, state: int) -> None:
         cmd = "enable" if state else "disable"
-        popen(["pkexec", "systemctl", cmd, "--now", "kyth-update-watcher.timer"])
+        popen_privileged(systemctl_action(
+            cmd,
+            "kyth-update-watcher.timer",
+            now=True,
+            frontend=AuthFrontend.PKEXEC,
+        ))
 
     def _run_auto_update_now(self) -> None:
-        popen(["pkexec", "systemctl", "start", "kyth-update-watcher.service"])
+        popen_privileged(systemctl_action(
+            "start",
+            "kyth-update-watcher.service",
+            frontend=AuthFrontend.PKEXEC,
+        ))

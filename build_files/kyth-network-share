@@ -1,0 +1,4 @@
+#!/usr/bin/python3
+from kyth_welcome.services.network_share_helper import main
+
+raise SystemExit(main())

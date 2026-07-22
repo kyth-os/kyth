@@ -13,6 +13,7 @@ from ..services.network import (
 )
 from ..services.flatpak import _is_flatpak_installed
 from ..services.runtime import Worker, _finish_worker
+from ..services.privileged import helper_action
 from ..qt import (
     QDesktopServices, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QUrl,
 )
@@ -225,7 +226,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         self._op_status.setObjectName("subheading")
         self._op_status.show()
         _restyle(self._op_status)
-        self._worker = Worker(["sudo", "-A", "/usr/bin/kyth-rclone-update"])
+        self._worker = Worker(helper_action("rclone-update").command())
         self._worker.line.connect(self._on_line)
         self._worker.done.connect(self._on_rclone_install_done)
         self._worker.start()

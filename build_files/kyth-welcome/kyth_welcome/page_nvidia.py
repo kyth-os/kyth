@@ -9,6 +9,7 @@ from .services.hardware import (
     _nvidia_module_loaded,
 )
 from .services.runtime import Worker, _finish_worker
+from .services.privileged import helper_action
 from .qt import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer,
 )
@@ -169,18 +170,7 @@ class NvidiaPage(Page):
         self._build_module()
 
     def _build_module(self):
-        kargs = (
-            "rd.driver.blacklist=nouveau,nova_core "
-            "modprobe.blacklist=nouveau,nova_core "
-            "nvidia-drm.modeset=1"
-        )
-        cmd = [
-            "sudo", "bash", "-c",
-            "rm -f /var/lib/kyth/hw-setup-done && "
-            'akmods --force --kernels "$(uname -r)" && '
-            f"{{ grubby --update-kernel=ALL --args='{kargs}' || "
-            "echo 'grubby: non-fatal — kargs.d applies on next deployment'; }",
-        ]
+        cmd = helper_action("hardware-setup").command()
         self._log.clear()
         self._log.append("→ Building NVIDIA kernel module via akmods…\n")
         self._log_toggle.show()

@@ -8,6 +8,7 @@ from .core_base import (
     _image_tag_for_channel, _parse_size_bytes, _restyle, _set_session_inhibit, _with_idle_inhibit,
 )
 from .services.runtime import Worker, _finish_worker
+from .services.privileged import bootc_action
 from .core_base import REGISTRY, _bootc_image_digest, _current_branch
 from .qt import (
     QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,
@@ -233,7 +234,10 @@ class BranchesPage(Page):
         self._stable_btn.setEnabled(False)
         self._testing_btn.setEnabled(False)
 
-        self._worker = Worker(_with_idle_inhibit(["sudo", "bootc", "switch", ref], "KythOS is switching branch"))
+        self._worker = Worker(_with_idle_inhibit(
+            bootc_action("switch", ref).command(),
+            "KythOS is switching branch",
+        ))
         _set_session_inhibit(self, "KythOS is switching the system branch")
         self._worker.line.connect(self._on_line)
         self._worker.done.connect(self._on_done)

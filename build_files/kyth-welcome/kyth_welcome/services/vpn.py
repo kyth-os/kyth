@@ -9,6 +9,8 @@ import os
 import re
 from urllib.parse import parse_qs
 
+from .privileged import openconnect_action
+
 _VPN_CONFIG = os.path.expanduser("~/.config/kyth-vpn-connect")
 VPN_PROTOCOLS = ["gp", "anyconnect", "pulse", "nc", "f5", "fortinet", "array"]
 VPN_OS_OPTIONS = ["win", "linux", "mac"]
@@ -118,21 +120,6 @@ def saml_url_from_log_line(line: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _openconnect_base(protocol: str, os_emul: str) -> list[str]:
-    return [
-        "sudo",
-        "-E",
-        "-A",
-        "/usr/bin/openconnect",
-        "--protocol",
-        protocol,
-        "--os",
-        os_emul,
-        "--script",
-        "/usr/libexec/kyth-vpnc-script",
-    ]
-
-
 def build_initial_command(
     gateway: str,
     protocol: str,
@@ -141,12 +128,13 @@ def build_initial_command(
     password: str = "",
 ) -> tuple[list[str], str]:
     """Build the first openconnect probe/connection command."""
-    command = _openconnect_base(protocol, os_emul)
-    if username:
-        command += ["--user", username]
-    if password:
-        command.append("--passwd-on-stdin")
-    command.append(gateway)
+    command = openconnect_action(
+        gateway=gateway,
+        protocol=protocol,
+        os_emulation=os_emul,
+        username=username,
+        password_stdin=bool(password),
+    ).command()
     return command, password
 
 
@@ -157,12 +145,13 @@ def build_gateway_probe_command(
     username: str = "",
 ) -> list[str]:
     """Build the gateway-specific probe used after portal SAML succeeds."""
-    command = _openconnect_base(protocol, os_emul)
-    command += ["--usergroup", "gateway"]
-    if username:
-        command += ["--user", username]
-    command.append(gateway)
-    return command
+    return openconnect_action(
+        gateway=gateway,
+        protocol=protocol,
+        os_emulation=os_emul,
+        username=username,
+        usergroup="gateway",
+    ).command()
 
 
 def build_saml_reconnect_command(
@@ -175,15 +164,17 @@ def build_saml_reconnect_command(
 ) -> tuple[list[str], str, str]:
     """Build the authenticated reconnect and return command/stdin/username."""
     field, value, saml_username = parse_gp_saml_cookie(cookie)
-    command = _openconnect_base(protocol, os_emul)
     stdin_text = ""
     if protocol == "gp" and field and value:
-        command += ["--passwd-on-stdin", "--usergroup", f"{interface}:{field}"]
         stdin_text = value
-    else:
-        command += ["--cookie", cookie]
     username = saml_username or configured_username
-    if username:
-        command += ["--user", username]
-    command.append(gateway)
+    command = openconnect_action(
+        gateway=gateway,
+        protocol=protocol,
+        os_emulation=os_emul,
+        username=username,
+        usergroup=f"{interface}:{field}" if protocol == "gp" and field and value else "",
+        password_stdin=bool(stdin_text),
+        cookie="" if stdin_text else cookie,
+    ).command()
     return command, stdin_text, username

@@ -354,12 +354,12 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-22 19:18:40 UTC
+- Last refreshed (UTC): 2026-07-22 19:41:15 UTC
 - Current branch: testing
-- HEAD commit: 4db4388
+- HEAD commit: bb96121
 - Last commit title: Harden installer command dispatch
-- Last commit date: 2026-07-22T15:16:48-04:00
+- Last commit date: 2026-07-22T15:18:40-04:00
 - CI workflow files: 8
-- Build script files: 20
+- Build script files: 21
 
 <!-- AUTO-README-END -->
