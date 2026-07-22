@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-22 19:11:20 UTC
+- Last refreshed (UTC): 2026-07-22 19:18:40 UTC
 - Current branch: testing
-- HEAD commit: 96a3919
-- Last commit title: Own the late Plasma boot splash branding
-- Last commit date: 2026-07-22T15:08:25-04:00
+- HEAD commit: 4db4388
+- Last commit title: Harden installer command dispatch
+- Last commit date: 2026-07-22T15:16:48-04:00
 - CI workflow files: 8
 - Build script files: 20
 

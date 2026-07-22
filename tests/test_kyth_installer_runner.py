@@ -36,6 +36,29 @@ class InstallerRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "shell execution is forbidden"):
             run_command(["echo", "safe"], shell=True)  # noqa: S604 — asserts this is rejected, never executed
 
+    def test_run_command_rejects_unapproved_executables(self):
+        with self.assertRaisesRegex(RuntimeError, "unapproved installer executable"):
+            run_command(["python3", "-c", "print('unsafe')"])
+        with self.assertRaisesRegex(RuntimeError, "outside trusted system paths"):
+            run_command(["/tmp/lsblk"])  # noqa: S108 — intentionally untrusted fixture path
+
+    def test_run_command_validates_executable_nested_under_sudo(self):
+        with self.assertRaisesRegex(RuntimeError, "unapproved installer executable"):
+            run_command(["sudo", "-n", "python3", "-c", "print('unsafe')"])
+        with self.assertRaisesRegex(RuntimeError, "unsupported sudo command form"):
+            run_command(["sudo", "--preserve-env", "lsblk"])
+
+    @mock.patch("kyth_installer.runner.subprocess.Popen")
+    def test_spawn_command_accepts_installer_chromium_sudo_form(self, mock_popen):
+        spawn_command([
+            "sudo", "-u", "liveuser", "env", "DISPLAY=:0", "chromium", "--app=http://127.0.0.1",
+        ])
+
+        mock_popen.assert_called_once_with(
+            ["sudo", "-u", "liveuser", "env", "DISPLAY=:0", "chromium", "--app=http://127.0.0.1"],
+            shell=False,
+        )
+
     @mock.patch("kyth_installer.runner.subprocess.Popen")
     def test_spawn_command_uses_the_same_validated_boundary(self, mock_popen):
         spawn_command(["echo", Path("message")], stdout=subprocess.PIPE)

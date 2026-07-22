@@ -13,7 +13,15 @@ WEBUI_DIR = INSTALLER_ROOT / "kyth_installer/webui"
 if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
-from kyth_installer import disk, install, plan, post_routes, server, system  # noqa: E402
+from kyth_installer import (  # noqa: E402
+    disk,
+    install,
+    plan,
+    post_routes,
+    runner as command_runner,
+    server,
+    system,
+)
 from kyth_installer.context import InstallerContext  # noqa: E402
 
 
@@ -97,7 +105,15 @@ class InstallerCommandTests(unittest.TestCase):
         ]
 
         with patch.object(install, "_as_root", side_effect=lambda cmd: cmd), \
-             patch.object(install, "_get_rx_bytes", return_value=0):
+             patch.object(install, "_get_rx_bytes", return_value=0), \
+             patch(
+                 "kyth_installer.runner._ALLOWED_EXECUTABLES",
+                 new={
+                     *command_runner._ALLOWED_EXECUTABLES,
+                     Path(sys.executable).name,
+                     Path(sys.executable).resolve().name,
+                 },
+             ):
             install._run_cmd(
                 command, 5, 90, logs.append, progress.append,
                 stall_timeout=2, absolute_timeout=None,
