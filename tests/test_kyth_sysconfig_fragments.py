@@ -9,6 +9,7 @@ SCRIPTS = ROOT / "build_files" / "scripts"
 FRAG_DIR = SCRIPTS / "sysconfig"
 RUNNER = SCRIPTS / "sysconfig-static.sh"
 SYSCTL_DATA = ROOT / "build_files" / "data" / "sysctl.d" / "99-kyth.conf"
+BRANDING_FRAG_DIR = SCRIPTS / "branding"
 
 
 class SysconfigFragmentTests(unittest.TestCase):
@@ -64,6 +65,27 @@ class SysconfigFragmentTests(unittest.TestCase):
         final = (SCRIPTS / "plymouth-initramfs.sh").read_text(encoding="utf-8")
         self.assertIn('install_items+=" /etc/passwd /etc/group "', setup)
         self.assertIn("etc/passwd etc/group", final)
+
+    def test_late_plasma_splash_is_kyth_owned(self):
+        fragment = (BRANDING_FRAG_DIR / "12-kyth-session-splash.sh").read_text(
+            encoding="utf-8"
+        )
+        qml = (
+            ROOT
+            / "build_files"
+            / "branding"
+            / "plasma-splash"
+            / "contents"
+            / "splash"
+            / "Splash.qml"
+        ).read_text(encoding="utf-8")
+        polish = (ROOT / "build_files" / "kyth-user-polish").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Theme=org.kythos.desktop", fragment)
+        self.assertIn('source: "images/kyth-logo.svg"', qml)
+        self.assertNotIn("fedora", qml.lower())
+        self.assertIn("--key Theme org.kythos.desktop", polish)
 
     def test_antigravity_uses_desktop_safe_wrapper(self):
         body = (SCRIPTS / "packages" / "20-google-antigravity-ide.sh").read_text(

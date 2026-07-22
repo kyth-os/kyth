@@ -6,7 +6,7 @@
 
 **An opinionated Fedora Atomic desktop for gaming, work, and recovery.**
 
-Fedora Kinoite 44 · KDE Plasma 6 · bootc · Atomic updates · Graphical installer
+KythOS 44 · Based on Fedora Kinoite · KDE Plasma 6 · bootc · Atomic updates · Graphical installer
 
 [Download stable](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-latest.iso) · [Download testing](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-testing.iso) · [Report a bug](https://github.com/mrtrick37/kyth/issues) · [Discussions](https://github.com/mrtrick37/kyth/discussions)
 
@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-22 19:01:50 UTC
+- Last refreshed (UTC): 2026-07-22 19:08:25 UTC
 - Current branch: testing
-- HEAD commit: dad5f7b
-- Last commit title: Refine System Hub software service boundaries
-- Last commit date: 2026-07-22T14:59:08-04:00
+- HEAD commit: e26165b
+- Last commit title: Refresh project documentation
+- Last commit date: 2026-07-22T15:01:50-04:00
 - CI workflow files: 8
 - Build script files: 20
 

@@ -1,0 +1,15 @@
+{
+  "KPackageStructure": "Plasma/LookAndFeel",
+  "KPlugin": {
+    "Authors": [
+      {
+        "Name": "KythOS"
+      }
+    ],
+    "Description": "KythOS Plasma session splash",
+    "Id": "org.kythos.desktop",
+    "License": "Apache-2.0",
+    "Name": "KythOS Session Splash",
+    "Website": "https://github.com/mrtrick37/kyth"
+  }
+}
