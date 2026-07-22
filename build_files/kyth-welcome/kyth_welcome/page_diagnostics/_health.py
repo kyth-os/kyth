@@ -12,7 +12,7 @@ from ..services.diagnostics import (
 from ..services.gaming import DataWorker
 from ..services.hardware import HardwareProbeWorker
 from ..services.launch import popen
-from ..services.software import _finish_worker
+from ..services.runtime import _finish_worker
 from ..qt import QApplication, QFileDialog
 from ..widgets import HardwareCard
 

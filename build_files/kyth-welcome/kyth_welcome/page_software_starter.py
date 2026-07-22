@@ -1,9 +1,10 @@
 import shlex
 from .services.launch import popen
 from .core_base import _restyle
-from .services.software import (
-    Worker, _chromium_app_window_cmd, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
-)
+from .actions import _install_flatpak_inline
+from .services.browser_apps import _chromium_app_window_cmd
+from .services.flatpak import _is_flatpak_installed
+from .services.runtime import Worker, _finish_worker
 from .qt import (
     QCheckBox, QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar,
     QPushButton, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,

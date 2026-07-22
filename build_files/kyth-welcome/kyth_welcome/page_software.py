@@ -3,7 +3,7 @@ from typing import ClassVar
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
 from .lazy_page import compose_on_first_init
-from .services.software import Worker
+from .services.runtime import Worker
 from .qt import QHBoxLayout, QPushButton, QWidget
 from .widgets import Page, _divider
 

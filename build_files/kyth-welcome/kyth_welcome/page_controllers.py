@@ -4,7 +4,7 @@ import shutil
 from .core_base import _release_worker_when_finished
 from .services.gaming import TrackedThread
 from .services.hardware import _detect_controllers
-from .services.software import Worker
+from .services.runtime import Worker
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QPushButton, Signal,
 )

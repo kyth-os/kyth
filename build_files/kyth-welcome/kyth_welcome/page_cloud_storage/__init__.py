@@ -11,7 +11,8 @@ from ..services.launch import popen
 from ..services.network import (
     _load_sync_config, _rclone_available, _rclone_list_remotes, _save_sync_config,
 )
-from ..services.software import Worker, _finish_worker, _is_flatpak_installed
+from ..services.flatpak import _is_flatpak_installed
+from ..services.runtime import Worker, _finish_worker
 from ..qt import (
     QDesktopServices, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QUrl,
 )

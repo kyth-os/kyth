@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..services.software import _install_flatpak_inline
+from ..actions import _install_flatpak_inline
 from ..qt import QDesktopServices, QHBoxLayout, QLabel, QPushButton, QUrl
 from ..widgets import _make_card
 

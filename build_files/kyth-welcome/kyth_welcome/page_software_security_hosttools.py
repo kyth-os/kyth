@@ -1,7 +1,8 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
 from .services.launch import popen
-from .services.software import Worker, _finish_worker, _is_flatpak_installed
+from .services.flatpak import _is_flatpak_installed
+from .services.runtime import Worker, _finish_worker
 from .qt import QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QWidget
 from .widgets import _make_card, _set_log_panel
 

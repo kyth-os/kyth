@@ -74,12 +74,12 @@ class PlasmaShortcutsTests(unittest.TestCase):
 
 class FlatpakPendingCountTests(unittest.TestCase):
     def test_pending_uses_probe_key(self):
-        from kyth_welcome.services import software
+        from kyth_welcome.services import flatpak
 
         with mock.patch.object(
-            software, "_probe_cached", return_value=4,
+            flatpak, "_probe_cached", return_value=4,
         ) as cached:
-            n = software._pending_flatpak_update_count()
+            n = flatpak.pending_update_count()
         self.assertEqual(n, 4)
         self.assertEqual(cached.call_args[0][0], "flatpak-updates")
 

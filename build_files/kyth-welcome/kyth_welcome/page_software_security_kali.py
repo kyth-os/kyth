@@ -5,7 +5,7 @@ import shutil
 from .core_base import _apply_install_badge, _restyle
 from .services.launch import popen
 from .services.security import _is_socket_capable_kali_box
-from .services.software import Worker, _finish_worker
+from .services.runtime import Worker, _finish_worker
 from .qt import (
     QButtonGroup, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QRadioButton,
     QTextEdit, Qt,

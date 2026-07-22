@@ -19,6 +19,8 @@ from kyth_welcome.qt import QApplication, QPushButton
 from kyth_welcome.services.runtime import _shutdown_threads
 from kyth_welcome.windows import MainWindow
 from kyth_welcome.wizard import WizardWindow
+from kyth_welcome.vpn_app import VpnWindow
+from kyth_welcome.page_vpn import VpnPage
 
 app = QApplication([])
 wizard = WizardWindow()
@@ -71,6 +73,11 @@ with patch("kyth_welcome.page_windows_migration.popen") as launch:
     terminal_buttons[0].click()
 launch.assert_called_once_with(["konsole"])
 hub.close()
+
+vpn_window = VpnWindow()
+assert isinstance(vpn_window.centralWidget(), VpnPage)
+assert vpn_window.windowTitle() == "VPN Connect"
+vpn_window.close()
 _shutdown_threads()
 """
 

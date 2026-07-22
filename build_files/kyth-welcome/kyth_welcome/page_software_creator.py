@@ -2,9 +2,10 @@ import os
 import shutil
 from .services.launch import flatpak_run, popen
 from .core_base import _apply_install_badge, _restyle
+from .services.flatpak import _is_flatpak_installed
+from .services.runtime import Worker, _finish_worker
 from .services.software import (
-    Worker, _davinci_download_dir, _davinci_flatpak_app_id, _davinci_zip_candidates, _finish_worker,
-    _is_flatpak_installed,
+    _davinci_download_dir, _davinci_flatpak_app_id, _davinci_zip_candidates,
 )
 from .qt import (
     QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,

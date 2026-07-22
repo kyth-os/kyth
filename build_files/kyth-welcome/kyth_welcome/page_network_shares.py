@@ -9,7 +9,7 @@ from .services.network import (
     _build_add_share_script, _build_remove_share_script, _is_cifs_available, _is_mounted, _load_smb_config,
     _save_smb_config, _systemd_escape_mount_path,
 )
-from .services.software import Worker
+from .services.runtime import Worker
 from .qt import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )

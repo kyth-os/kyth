@@ -5,6 +5,8 @@ import json
 import logging
 import subprocess
 
+from kyth_shared.update_status import read_update_snapshot
+
 from ...qt import Signal
 from ..bootc import REGISTRY, _bootc_image_digest, _bootc_status_data, _current_branch
 from ..process import _run_command
@@ -22,6 +24,10 @@ class UpdateCheckWorker(TrackedThread):
     result = Signal(str, str, str)
 
     def run(self):
+        snapshot = read_update_snapshot(max_age=300)
+        if snapshot is not None and snapshot.system_state != "unknown":
+            self.result.emit(snapshot.system_state, "", "")
+            return
         result = check_registry_update(
             status_data=_bootc_status_data() or {},
             branch=_current_branch() or "latest",
@@ -121,7 +127,7 @@ class FlatpakCheckWorker(TrackedThread):
     result = Signal(int)
 
     def run(self):
-        from ..software import _pending_flatpak_update_count
+        from ..flatpak import _pending_flatpak_update_count
 
         count = _pending_flatpak_update_count()
         self.result.emit(0 if count is None else int(count))

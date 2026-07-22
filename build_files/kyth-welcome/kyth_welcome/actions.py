@@ -8,7 +8,7 @@ import re
 
 from .qt import QPushButton
 from .services.runtime import Worker, _finish_worker
-from .services.software import flatpak_install_shell_command
+from .services.flatpak import flatpak_install_shell_command
 
 
 def _install_flatpak_inline(owner: object, btn: QPushButton, app_id: str, name: str,

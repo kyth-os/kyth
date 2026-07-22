@@ -5,7 +5,7 @@ from datetime import datetime
 from ..core_base import _restyle
 from ..services.cloud_sync import RcloneSyncWorker
 from ..services.network import _save_sync_config
-from ..services.software import _finish_worker
+from ..services.runtime import _finish_worker
 from ..qt import QComboBox, QHBoxLayout, QLabel, QPushButton, QTextEdit, QTimer
 from ..widgets import _make_card
 

@@ -9,7 +9,7 @@ from .services.hardware import (
     switch_to_bt_audio_output,
 )
 from .services.launch import kcmshell, popen
-from .services.software import _finish_worker
+from .services.runtime import _finish_worker
 from .qt import (
     QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QUrl, QVBoxLayout, QWidget, Signal, single_shot,
 )

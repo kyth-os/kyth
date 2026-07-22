@@ -4,7 +4,8 @@ from __future__ import annotations
 import shlex
 
 from ..core_base import _cancel_worker, _restyle
-from ..services.software import Worker, _finish_worker, _is_flatpak_installed
+from ..services.flatpak import _is_flatpak_installed
+from ..services.runtime import Worker, _finish_worker
 from ..qt import (
     QCheckBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QMessageBox,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QUrl,

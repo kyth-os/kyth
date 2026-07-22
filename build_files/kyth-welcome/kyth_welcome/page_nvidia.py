@@ -8,9 +8,7 @@ from .services.hardware import (
     _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
     _nvidia_module_loaded,
 )
-from .services.software import (
-    Worker, _finish_worker,
-)
+from .services.runtime import Worker, _finish_worker
 from .qt import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer,
 )

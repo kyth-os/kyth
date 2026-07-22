@@ -7,9 +7,7 @@ from .page_repair_components import repair_overview_cards, rollback_card
 from .services.launch import kcmshell, popen
 from .services.hardware import _detect_nvidia
 from .services.repair import _read_sys_text
-from .services.software import (
-    _is_flatpak_installed,
-)
+from .services.flatpak import _is_flatpak_installed
 from .page_repair_assist import _AssistMixin
 from .page_repair_quick import _QuickFixMixin
 from .page_repair_reset import _ResetMixin

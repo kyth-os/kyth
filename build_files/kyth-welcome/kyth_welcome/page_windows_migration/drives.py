@@ -9,9 +9,7 @@ from ..core_base import (
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.software import (
-    _finish_worker,
-)
+from ..services.runtime import _finish_worker
 from ..services.windows_migration import (
     WindowsLibraryWorker,
     _unlock_bitlocker_drive,

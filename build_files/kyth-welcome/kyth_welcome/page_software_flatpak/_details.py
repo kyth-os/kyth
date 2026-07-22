@@ -1,6 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from ..core_base import _restyle
-from ..services.software import _is_flatpak_installed
+from ..services.flatpak import _is_flatpak_installed
 from ..qt import (
     QDesktopServices, QDialog, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QTextEdit, QUrl, QVBoxLayout,
 )

@@ -3,7 +3,8 @@ import shutil
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.launch import popen
-from ..services.software import _chromium_app_window_cmd, _is_flatpak_installed
+from ..services.browser_apps import _chromium_app_window_cmd
+from ..services.flatpak import _is_flatpak_installed
 from ..qt import (
     QCheckBox, QComboBox, QDBusConnection, QDBusInterface, QHBoxLayout, QLabel, QPushButton,
 )

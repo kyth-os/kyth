@@ -2,7 +2,8 @@ import json
 import os
 
 # __KYTH_GENERATED_IMPORTS__
-from ..services.software import Worker, _finish_worker, load_appstream_catalog
+from ..services.appstream import load_appstream_catalog
+from ..services.runtime import Worker, _finish_worker
 
 
 class _CatalogMixin:

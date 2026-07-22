@@ -1,7 +1,7 @@
 import json
 
 # __KYTH_GENERATED_IMPORTS__
-from ..services.software import Worker, _finish_worker
+from ..services.runtime import Worker, _finish_worker
 
 
 class _SearchMixin:

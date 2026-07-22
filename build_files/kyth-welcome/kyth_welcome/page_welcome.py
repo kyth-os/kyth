@@ -12,7 +12,7 @@ from .services.gaming import (
 from .services.hardware import _detect_nvidia
 from .services.launch import reboot
 from .services.process import _command_stdout, _run_command
-from .services.software import _is_flatpak_installed as _flatpak_installed
+from .services.flatpak import _is_flatpak_installed as _flatpak_installed
 from .core_base import _current_branch
 from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (

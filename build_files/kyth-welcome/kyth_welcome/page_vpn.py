@@ -4,8 +4,11 @@ from .services.vpn import (
     VPN_OS_OPTIONS as _VPN_OS_OPTIONS,
     VPN_PROTOCOLS as _VPN_PROTOCOLS,
     _GP_PRELOGIN_IFACE_RE,
+    build_gateway_probe_command,
+    build_initial_command,
+    build_saml_reconnect_command,
     _load_vpn_config,
-    _parse_gp_saml_cookie,
+    _parse_gp_saml_cookie as _parse_gp_saml_cookie,
     _redact_vpn_log_line,
     _save_vpn_config,
     _vpn_line_is_connected,
@@ -188,19 +191,10 @@ class VpnPage(Page):
         for w in self._vpn_config_widgets():
             w.setEnabled(False)
 
-        cmd = [
-            "sudo", "-E", "-A", "/usr/bin/openconnect",
-            "--protocol", protocol,
-            "--os", os_emul,
-            "--script", "/usr/libexec/kyth-vpnc-script",
-        ]
-        if username:
-            cmd += ["--user", username]
-        if password:
-            cmd += ["--passwd-on-stdin"]
-        cmd.append(gateway)
-
-        self._start_vpn_worker(cmd, password)
+        cmd, stdin_text = build_initial_command(
+            gateway, protocol, os_emul, username, password
+        )
+        self._start_vpn_worker(cmd, stdin_text)
 
     def _on_disconnect(self) -> None:
         if self._worker:
@@ -281,16 +275,12 @@ class VpnPage(Page):
         """
         self._gp_interface = "gateway"
         self._set_vpn_status("connecting")
-        cmd = [
-            "sudo", "-E", "-A", "/usr/bin/openconnect",
-            "--protocol", self._saml_protocol,
-            "--os", self._saml_os_emul,
-            "--script", "/usr/libexec/kyth-vpnc-script",
-            "--usergroup", "gateway",
-        ]
-        if self._saml_username:
-            cmd += ["--user", self._saml_username]
-        cmd.append(self._saml_gateway)
+        cmd = build_gateway_probe_command(
+            self._saml_gateway,
+            self._saml_protocol,
+            self._saml_os_emul,
+            self._saml_username,
+        )
         self._start_vpn_worker(cmd)
 
     def _on_saml_required(self, saml_url: str) -> None:
@@ -314,26 +304,18 @@ class VpnPage(Page):
             if not self._worker.wait(10000):
                 self._vpn_log.append("[Error: timed out waiting for the first openconnect process to exit]")
                 return
-        field, value, saml_username = _parse_gp_saml_cookie(cookie)
-        cmd = [
-            "sudo", "-E", "-A", "/usr/bin/openconnect",
-            "--protocol", self._saml_protocol,
-            "--os", self._saml_os_emul,
-            "--script", "/usr/libexec/kyth-vpnc-script",
-        ]
-        worker_stdin = ""
-        if self._saml_protocol == "gp" and field and value:
-            cmd += ["--passwd-on-stdin", "--usergroup", f"{self._gp_interface}:{field}"]
-            worker_stdin = value
-            print(f"[SAML dbg] reconnecting via {self._gp_interface} with {field} and username={'yes' if (self._saml_username or saml_username) else 'no'}")
-        else:
-            cmd += ["--cookie", cookie]
-        # The GP prelogin-cookie is bound to the SAML identity — the server
-        # 512s if --user doesn't match it exactly, so it wins over the form.
-        username = saml_username or self._saml_username
-        if username:
-            cmd += ["--user", username]
-        cmd.append(self._saml_gateway)
+        cmd, worker_stdin, username = build_saml_reconnect_command(
+            self._saml_gateway,
+            self._saml_protocol,
+            self._saml_os_emul,
+            self._gp_interface,
+            cookie,
+            self._saml_username,
+        )
+        print(
+            f"[SAML dbg] reconnecting via {self._gp_interface} "
+            f"with username={'yes' if username else 'no'}"
+        )
 
         self._start_vpn_worker(cmd, worker_stdin)
 

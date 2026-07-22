@@ -359,11 +359,11 @@ Not affiliated with Fedora, Universal Blue, CachyOS, Valve, KDE, or any game pub
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-20 17:23:57 UTC
+- Last refreshed (UTC): 2026-07-22 17:32:18 UTC
 - Current branch: testing
-- HEAD commit: fbd732d
-- Last commit title: refactor(packages): externalize peripheral RGB stack and Sunshine to user-managed Flatpaks and recipes
-- Last commit date: 2026-07-20T12:34:57-04:00
+- HEAD commit: 48496b1
+- Last commit title: Fix VPN regression and split shared services
+- Last commit date: 2026-07-22T13:30:55-04:00
 - CI workflow files: 8
 - Build script files: 20
 

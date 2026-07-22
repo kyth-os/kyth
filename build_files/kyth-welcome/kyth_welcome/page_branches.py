@@ -7,9 +7,7 @@ from .core_base import (
     DownloadMonitor, _bootc_image_timestamp, _branch_display_name, _get_rx_bytes, _human_bytes, _human_bytes_pair,
     _image_tag_for_channel, _parse_size_bytes, _restyle, _set_session_inhibit, _with_idle_inhibit,
 )
-from .services.software import (
-    Worker, _finish_worker,
-)
+from .services.runtime import Worker, _finish_worker
 from .core_base import REGISTRY, _bootc_image_digest, _current_branch
 from .qt import (
     QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,

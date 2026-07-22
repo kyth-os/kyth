@@ -1,7 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
 from .services.gaming import scx_scheduler_command
-from .services.software import Worker, _finish_worker
+from .services.runtime import Worker, _finish_worker
 from .qt import QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, Qt
 from .widgets import _copy_text, _launch_opt_label, _launch_opt_value, _make_card, _set_log_panel
 

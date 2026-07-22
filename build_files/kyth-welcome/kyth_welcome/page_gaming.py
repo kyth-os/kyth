@@ -8,7 +8,7 @@ from .services.gaming import (
     _gamescope_installed, _gaming_health_items, _gaming_migration_checklist_items,
     _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed
 )
-from .services.software import _is_flatpak_installed
+from .services.flatpak import _is_flatpak_installed
 from .services.workers.windows_migration import WindowsLibraryWorker
 from .qt import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt, single_shot

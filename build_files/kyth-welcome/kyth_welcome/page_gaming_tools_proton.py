@@ -1,7 +1,9 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
 from .services.launch import flatpak_run
-from .services.software import Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed
+from .actions import _install_flatpak_inline
+from .services.flatpak import _is_flatpak_installed
+from .services.runtime import Worker, _finish_worker
 from .qt import QDesktopServices, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QUrl, Qt
 from .widgets import _copy_text, _launch_opt_label, _launch_opt_value, _make_card, _set_log_panel
 

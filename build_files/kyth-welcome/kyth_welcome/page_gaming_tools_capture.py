@@ -5,7 +5,8 @@ from pathlib import Path
 from .core_base import _restyle
 from .services.gaming import opticscaler_deploy_command
 from .services.launch import popen
-from .services.software import Worker, _finish_worker, _install_flatpak_inline
+from .actions import _install_flatpak_inline
+from .services.runtime import Worker, _finish_worker
 from .qt import (
     QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, Qt, single_shot,
 )

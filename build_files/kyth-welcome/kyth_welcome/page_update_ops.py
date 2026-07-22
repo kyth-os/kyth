@@ -9,7 +9,7 @@ from .core_base import (
     _restyle, _set_session_inhibit, _with_idle_inhibit,
 )
 from .services.launch import reboot
-from .services.software import Worker, _finish_worker
+from .services.runtime import Worker, _finish_worker
 from .core_base import _current_branch
 from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
 from .widgets import _make_card, _set_log_panel

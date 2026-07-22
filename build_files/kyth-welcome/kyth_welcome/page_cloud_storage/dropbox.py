@@ -3,7 +3,7 @@ import shutil
 
 from ..core_base import _restyle
 from ..services.launch import flatpak_run, popen
-from ..services.software import Worker, _finish_worker
+from ..services.runtime import Worker, _finish_worker
 from ..qt import QHBoxLayout, QLabel, QPushButton
 from ..widgets import _make_card
 

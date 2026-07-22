@@ -1,6 +1,7 @@
-import json
 import logging
 from datetime import datetime
+
+from kyth_shared.update_status import read_update_snapshot
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.dbus_utils import is_systemd_unit_enabled
@@ -63,12 +64,12 @@ class _AutoUpdateMixin:
         self._add(auto_card)
 
     def _refresh_auto_update_status(self) -> None:
-        status = {}
-        try:
-            with open("/var/lib/kyth/update-watcher-status.json") as f:
-                status = json.load(f)
-        except Exception:
-            _logger.debug("_refresh_auto_update_status: could not read watcher status", exc_info=True)
+        snapshot = read_update_snapshot()
+        if snapshot is None:
+            _logger.debug("_refresh_auto_update_status: watcher status is unavailable")
+            status = {}
+        else:
+            status = snapshot.to_dict()
 
         ts = status.get("ts", 0)
         if ts:

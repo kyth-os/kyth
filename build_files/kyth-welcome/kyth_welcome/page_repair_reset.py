@@ -7,7 +7,7 @@ from .core_base import (
     _has_rollback_deployment, _restyle, _set_session_inhibit,
 )
 from .services.repair import rollback_command, reset_command
-from .services.software import Worker, _finish_worker
+from .services.runtime import Worker, _finish_worker
 from .qt import single_shot
 from .widgets import _set_log_panel
 

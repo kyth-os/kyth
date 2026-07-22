@@ -506,19 +506,15 @@ QPushButton#saml-cancel:pressed {
             self._status_msg.setText("VPN token not received")
 
         def _teardown_webengine(self) -> None:
-            # QWebEngineProfile must outlive every Page/View created from it.
-            # _profile, _page, and _view are otherwise independent children of
-            # this dialog, so leaving their destruction to Qt's default
-            # parent/child teardown order crashes with "Release of profile
-            # requested but WebEnginePage still not deleted." Detach and
-            # schedule deletion in the safe order explicitly, from every path
-            # that ends the dialog (success and cancel/close alike).
             if self._done:
                 return
             self._done = True
             self._view.setPage(None)
-            self._page.deleteLater()
-            self._profile.deleteLater()
+            # _page is parented to _profile, which is parented to this dialog.
+            # VpnPage schedules the dialog itself for deletion after exec()
+            # returns, so Qt's parent-child cascade owns page/profile deletion.
+            # Calling deleteLater() on either child here schedules a second
+            # destruction and can crash in Qt's posted-event bookkeeping.
 
         def _emit_cookie(self, cookie_str: str) -> None:
             if self._done:

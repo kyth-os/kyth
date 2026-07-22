@@ -10,9 +10,7 @@ from ..core_base import (
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.software import (
-    _install_flatpak_inline,
-)
+from ..actions import _install_flatpak_inline
 from ..services.windows_migration import (
     _scan_windows_bookmarks,
     _scan_windows_extras,

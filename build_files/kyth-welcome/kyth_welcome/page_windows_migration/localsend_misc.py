@@ -9,10 +9,8 @@ from ..core_base import (
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.software import (
-    _install_flatpak_inline,
-    _is_flatpak_installed,
-)
+from ..actions import _install_flatpak_inline
+from ..services.flatpak import _is_flatpak_installed
 from ..services.launch import flatpak_run, popen, systemsettings, kcmshell
 from ..services.windows_migration import (
     _collect_hw_sanity,

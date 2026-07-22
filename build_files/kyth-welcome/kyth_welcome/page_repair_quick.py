@@ -11,7 +11,9 @@ from .services.repair import (
     set_exe_mime_defaults,
     wakeup_sources_text,
 )
-from .services.software import Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed
+from .actions import _install_flatpak_inline
+from .services.flatpak import _is_flatpak_installed
+from .services.runtime import Worker, _finish_worker
 from .qt import QDesktopServices, QMessageBox, QUrl
 from .widgets import _set_log_panel
 
@@ -141,4 +143,3 @@ class _QuickFixMixin:
             self._status_lbl.setObjectName("status-err")
             _set_log_panel(self._log_toggle, self._log, True)
         _restyle(self._status_lbl)
-

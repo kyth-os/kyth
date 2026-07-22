@@ -17,6 +17,17 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+
+def _ensure_kyth_shared_path() -> None:
+    source_path = Path(__file__).resolve().parent.parent / "kyth_shared"
+    if (source_path / "kyth_shared").is_dir() and str(source_path) not in sys.path:
+        sys.path.insert(0, str(source_path))
+
+
+_ensure_kyth_shared_path()
+
+from kyth_shared.update_status import read_update_snapshot  # noqa: E402
+
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -198,6 +209,15 @@ class UpdateCheckWorker(QThread):
     result = pyqtSignal(str, str)  # (state, digest): state = staged|available|uptodate|unknown|error
 
     def run(self):
+        # The root watcher already performs bootc and registry checks. Reuse a
+        # recent atomic snapshot instead of launching the same probes again at
+        # every desktop login and tray interval.
+        snapshot = read_update_snapshot(max_age=(CHECK_INTERVAL_MS / 1000) + 900)
+        if snapshot is not None and snapshot.system_state != "unknown":
+            digest = snapshot.staged_digest or snapshot.remote_digest
+            self.result.emit(snapshot.system_state, digest)
+            return
+
         # Fast path: a staged image is already waiting locally — no registry call needed.
         local_data = _bootc_status_data() or {}
         staged_section = _nested_get(local_data, ("status", "staged"))
@@ -271,6 +291,10 @@ class FlatpakUpdateCheckWorker(QThread):
     result = pyqtSignal(int)  # number of pending Flatpak updates
 
     def run(self):
+        snapshot = read_update_snapshot(max_age=(CHECK_INTERVAL_MS / 1000) + 900)
+        if snapshot is not None:
+            self.result.emit(max(0, int(snapshot.flatpak_updates)))
+            return
         try:
             # Refresh remote metadata first (fast, no downloads)
             subprocess.run(

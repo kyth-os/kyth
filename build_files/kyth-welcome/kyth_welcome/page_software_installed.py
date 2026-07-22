@@ -5,7 +5,7 @@ import shlex
 import shutil
 from .services.launch import popen
 from .core_base import _restyle
-from .services.software import Worker, _finish_worker
+from .services.runtime import Worker, _finish_worker
 from .qt import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
@@ -250,7 +250,7 @@ class _InstalledTabMixin:
     # ── Shared helpers ────────────────────────────────────────────────────────
 
     def _installed_flatpak_apps(self) -> list[dict[str, str]]:
-        from .services.software import list_installed_flatpak_apps
+        from .services.flatpak import list_installed_flatpak_apps
         apps = list_installed_flatpak_apps()
         return sorted(apps, key=lambda app: app["name"].casefold())
 

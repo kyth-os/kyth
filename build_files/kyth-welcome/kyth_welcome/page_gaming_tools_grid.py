@@ -1,7 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _cancel_worker, _restyle
 from .services.launch import popen
-from .services.software import Worker, _finish_worker
+from .services.runtime import Worker, _finish_worker
 from .qt import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit,
 )

@@ -5,7 +5,8 @@ import shutil
 # __KYTH_GENERATED_IMPORTS__
 from .services.gaming import GameNightManager, _gamescope_installed, _mangohud_installed, _proton_cachyos_version
 from .services.launch import flatpak_run, popen
-from .services.software import _install_flatpak_inline, _is_flatpak_installed
+from .actions import _install_flatpak_inline
+from .services.flatpak import _is_flatpak_installed
 from .qt import QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, Qt
 from .widgets import ActionRow, _make_card
 

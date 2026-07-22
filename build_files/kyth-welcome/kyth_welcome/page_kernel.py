@@ -6,9 +6,7 @@ from .core_base import (
     _parse_update_phase, _restyle, _set_session_inhibit, _with_idle_inhibit,
 )
 from .services.diagnostics import _command_stdout
-from .services.software import (
-    Worker, _finish_worker,
-)
+from .services.runtime import Worker, _finish_worker
 from .core_base import REGISTRY, _current_branch
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, single_shot,

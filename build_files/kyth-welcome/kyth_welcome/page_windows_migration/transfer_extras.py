@@ -11,9 +11,7 @@ from ..services.process import _run_command
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.software import (
-    Worker,
-)
+from ..services.runtime import Worker
 from ..services.launch import popen
 from ..services.windows_migration import (
     _copy_game_saves,

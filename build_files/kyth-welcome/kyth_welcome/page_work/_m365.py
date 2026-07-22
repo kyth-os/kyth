@@ -1,6 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from ..services.launch import popen
-from ..services.software import _chromium_app_window_cmd
+from ..services.browser_apps import _chromium_app_window_cmd
 from ..services.work import _M365_APPS, _create_m365_shortcuts, _m365_shortcuts_present, _refresh_m365_shortcuts
 from ..qt import QHBoxLayout, QLabel, QMessageBox, QPushButton
 from ..widgets import _make_card
