@@ -29,7 +29,6 @@ class RechunkMetadataTests(unittest.TestCase):
     def test_large_independent_payloads_are_dedicated(self):
         expected = {
             "kyth-initramfs": ["/usr/lib/modules/*/initramfs"],
-            "headroom": ["/usr/lib/headroom/*", "/usr/bin/headroom"],
             "rpmdb": ["/usr/share/rpm/rpmdb.sqlite"],
         }
         for name, paths in expected.items():
@@ -50,7 +49,7 @@ class RechunkMetadataTests(unittest.TestCase):
 
     def test_custom_groups_precede_upstream_default_groups(self):
         names = list(self.groups)
-        custom = ["kyth-initramfs", "headroom", "rpmdb", "kyth"]
+        custom = ["kyth-initramfs", "rpmdb", "kyth"]
         self.assertEqual(names[: len(custom)], custom)
         self.assertIn("initramfs", self.groups)
         self.assertIn("kernel", self.groups)
@@ -83,4 +82,3 @@ class RechunkMetadataTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

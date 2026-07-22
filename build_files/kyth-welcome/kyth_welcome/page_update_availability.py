@@ -45,7 +45,7 @@ class _UpdateAvailabilityMixin:
         self._update_now_btn.setObjectName("primary")
         self._update_now_btn.setMinimumWidth(120)
         self._update_now_btn.hide()
-        self._update_now_btn.clicked.connect(self._run_topgrade)
+        self._update_now_btn.clicked.connect(self._run_full_update)
         avail_btn_col.addWidget(self._update_now_btn)
         self._restart_now_btn = QPushButton("Restart Now")
         self._restart_now_btn.setObjectName("primary")

@@ -438,10 +438,9 @@ for unit in \
 	kyth-default-flatpaks.service kyth-flathub-setup.service \
 	kyth-proton-cachyos-update.service kyth-proton-cachyos-update.timer \
 	kyth-hw-setup.service kyth-local-bin-migrate.service \
-	kyth-topgrade-migrate.service kyth-duperemove.service kyth-duperemove.timer \
+	kyth-duperemove.service kyth-duperemove.timer \
 	kyth-enroll-mok.service plasmalogin.service akmods.service \
-	plasma-setup.service com.system76.Scheduler.service \
-	scxd.service ananicy-cpp.service \
+	plasma-setup.service scxd.service \
 	fwupd.service fwupd-refresh.service fwupd-refresh.timer; do
 	systemctl disable "${unit}" 2>/dev/null || true
 	ln -sf /dev/null "/etc/systemd/system/${unit}"

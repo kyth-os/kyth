@@ -18,7 +18,7 @@ _logger = logging.getLogger(__name__)
 
 
 class _UpdateOpsMixin:
-    """Runs topgrade/bootc-upgrade/rollback/firmware operations: the image status
+    """Runs full/bootc-upgrade/rollback/firmware operations: the image status
     summary, manual-action buttons, and the shared progress/log/cancel UI that
     every operation streams into."""
 
@@ -65,11 +65,11 @@ class _UpdateOpsMixin:
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        self._topgrade_btn = QPushButton("Full Update")
-        self._topgrade_btn.setObjectName("primary")
-        self._topgrade_btn.setToolTip("Updates the OS image, Flatpaks, and all topgrade-managed tools in one pass")
-        self._topgrade_btn.clicked.connect(self._run_topgrade)
-        btn_row.addWidget(self._topgrade_btn)
+        self._full_update_btn = QPushButton("Full Update")
+        self._full_update_btn.setObjectName("primary")
+        self._full_update_btn.setToolTip("Updates the OS image, Flatpaks, firmware, and KythOS-managed tools")
+        self._full_update_btn.clicked.connect(self._run_full_update)
+        btn_row.addWidget(self._full_update_btn)
 
         self._os_btn = QPushButton("OS Image Only")
         self._os_btn.setToolTip("Downloads the next KythOS system image only (bootc upgrade)")
@@ -139,7 +139,7 @@ class _UpdateOpsMixin:
         self._add(self._reboot_btn)
 
     def _set_buttons_enabled(self, enabled: bool):
-        self._topgrade_btn.setEnabled(enabled)
+        self._full_update_btn.setEnabled(enabled)
         self._os_btn.setEnabled(enabled)
         self._fw_btn.setEnabled(enabled)
         rollback_ok = enabled and _has_rollback_deployment()
@@ -241,11 +241,11 @@ class _UpdateOpsMixin:
         self._log.ensureCursorVisible()
         self._worker.cancel()
 
-    def _run_topgrade(self):
+    def _run_full_update(self):
         self._start_operation(
-            "topgrade",
-            "Running full system update via topgrade…",
-            ["topgrade", "--yes", "--no-retry"],
+            "full-update",
+            "Running KythOS full system update…",
+            ["/usr/bin/kyth-full-update"],
             "KythOS is running a full system update",
         )
 
@@ -373,7 +373,7 @@ class _UpdateOpsMixin:
         self._activity_lbl.show()
 
     def _heartbeat_tick(self):
-        if self._worker is None or self._mode not in ("topgrade", "update"):
+        if self._worker is None or self._mode not in ("full-update", "update"):
             self._heartbeat.stop()
             self._update_activity()
             return
@@ -452,7 +452,7 @@ class _UpdateOpsMixin:
                 self._log.append("\nDone. Your next system image is staged and waiting for restart.")
                 self._reboot_btn.show()
                 self._check_for_update()
-            elif self._mode == "topgrade":
+            elif self._mode == "full-update":
                 self._status_lbl.setText("Update complete — everything is up to date.")
                 self._status_lbl.setObjectName("status-ok")
                 self._log.append("\nDone. All managed tools and apps are up to date.")
@@ -464,7 +464,7 @@ class _UpdateOpsMixin:
                 self._check_for_update()
         else:
             label = {
-                "topgrade": "topgrade", "update": "bootc upgrade",
+                "full-update": "full update", "update": "bootc upgrade",
                 "rollback": "bootc rollback", "switch": "bootc switch",
                 "firmware": "fwupdmgr upgrade",
             }.get(self._mode, "operation")

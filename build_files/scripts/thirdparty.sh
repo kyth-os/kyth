@@ -13,7 +13,6 @@ done
 unset _fragment
 
 # ── Parallel download + install ───────────────────────────────────────────────
-_launch topgrade install_topgrade
 _launch umu install_umu
 _launch latencyflex install_latencyflex
 if is_enabled "${ENABLE_SCX:-1}"; then

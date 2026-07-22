@@ -80,7 +80,7 @@ KythOS doesn't promise every game works on Linux. It makes the games that can wo
 | **Launchers** | Steam, Lutris, Heroic Games Launcher |
 | **Proton** | Proton-CachyOS, ProtonUp-Qt, GE-Proton, protontricks, winetricks, umu-launcher, libFAudio |
 | **Overlay & capture** | MangoHud (pre-configured overlay), vkBasalt (sharpening on by default), obs-vkcapture |
-| **Performance** | GameMode, Gamescope presets, sched-ext, ananicy-cpp, system76-scheduler |
+| **Performance** | GameMode, Gamescope presets, sched-ext, KythOS scheduler switching |
 | **Controllers** | steam-devices, xpadneo, xone, OpenRazer, OpenTabletDriver, Piper, OpenRGB, input-remapper |
 | **Wine/Proton defaults** | NTSYNC, fsync/esync fallbacks, DXR, VKD3D feature level 12_2, RADV GPL, Mesa GL threading |
 | **Helper commands** | `kyth-gamescope`, `game-performance`, `kyth-scx`, `kyth-smoke-check`, `ujust post-update-check` |
@@ -102,7 +102,7 @@ Gaming-first doesn't mean gaming-only.
 - **Video & streaming:** OBS Studio (pre-installed Flatpak with Vulkan/OpenGL `OBS_VKCAPTURE=1` capture enabled), Kdenlive, DaVinci Resolve helper
 - **Audio:** Audacity, PipeWire tuned for low latency
 - **Graphics:** GIMP, full media codec stack including thumbnails
-- **Dev tools:** Google Antigravity IDE (native RPM with full host filesystem access), VS Code, docker-compose, direnv, jq, yq, GitHub CLI, Docker, Homebrew, Distrobox, QEMU/libvirt, Incus/LXC
+- **Dev tools:** Google Antigravity IDE (native RPM with full host filesystem access), VS Code, direnv, jq, yq, container-backed GitHub CLI, Homebrew, Distrobox/Podman, QEMU/libvirt, Incus/LXC
 - **Productivity:** Brave, KDE Connect, OpenDeck, rclone cloud storage mounts, Mission Center (Task Manager)
 - **Security:** Optional Kali Linux toolbox container, Wireshark, Burp Suite Community
 - **VPN:** Standalone VPN Connect app with GlobalProtect SAML flow
@@ -286,7 +286,7 @@ just run-live-iso-native  # Boot the ISO in QEMU with SPICE
 Optional build flags:
 
 ```bash
-ENABLE_ANANICY=0 ENABLE_SCX=0 just build
+ENABLE_SCX=0 just build
 ```
 
 If Docker returns a permission error after joining the `docker` group, run `newgrp docker`. `just build-base` handles this automatically.

@@ -11,7 +11,7 @@ install -m 0755 /ctx/kyth-dynamic-lock /usr/bin/kyth-dynamic-lock
 # kyth-duperemove.service/.timer and kyth-local-bin-migrate.service are
 # installed in branding/31-ujust-recipes.sh instead, right before the
 # `systemctl enable` calls that need them to already exist.
-install -m 0755 /ctx/kyth-topgrade-migrate /usr/bin/kyth-topgrade-migrate
+install -m 0755 /ctx/kyth-full-update /usr/bin/kyth-full-update
 install -m 0755 /ctx/kyth-vscode-wallet /usr/bin/kyth-vscode-wallet
 mkdir -p /usr/lib/systemd/user /usr/lib/systemd/user/default.target.wants
 install -m 0644 /ctx/kyth-dynamic-lock.service /usr/lib/systemd/user/kyth-dynamic-lock.service
@@ -29,5 +29,3 @@ WantedBy=default.target
 WALLETDEFAULTSEOF
 ln -sf ../kyth-browser-wallet-defaults.service \
 	/usr/lib/systemd/user/default.target.wants/kyth-browser-wallet-defaults.service
-# kyth-topgrade-migrate.service is installed in branding/31-ujust-recipes.sh
-# instead, right before the `systemctl enable` call that needs it to exist.

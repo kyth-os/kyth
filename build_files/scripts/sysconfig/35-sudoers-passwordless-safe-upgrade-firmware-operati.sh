@@ -15,6 +15,7 @@ install -m 0440 /dev/stdin /etc/sudoers.d/kyth-upgrade <<'SUDOEOF'
 %wheel ALL=(root) NOPASSWD: /usr/bin/bootc switch ghcr.io/mrtrick37/kyth\:*
 %wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr refresh
 %wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr update
+%wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr update --assume-yes --no-reboot-check
 %wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr get-updates
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-set-epp *
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-rclone-update

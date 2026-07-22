@@ -73,7 +73,6 @@ build: build-base
         echo "Secure Boot: MOK key not set — signing skipped (set MOK_KEY_FILE to enable)"
     fi
     docker buildx build \
-        --build-arg ENABLE_ANANICY="${ENABLE_ANANICY:-1}" \
         --build-arg ENABLE_SCX="${ENABLE_SCX:-1}" \
         --build-arg THIRDPARTY_VERSIONS_HASH="${THIRDPARTY_VERSIONS_HASH}" \
         --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \

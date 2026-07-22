@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Update the KythOS-owned system surfaces without traversing arbitrary
+# language-package managers or user development environments.
+
+set -uo pipefail
+
+declare -a STEP_NAMES=()
+declare -a STEP_RESULTS=()
+critical_failures=0
+
+section() {
+	printf '\n―― %s - %s ――\n' "$(date +%H:%M:%S)" "$1"
+}
+
+record() {
+	STEP_NAMES+=("$1")
+	STEP_RESULTS+=("$2")
+}
+
+run_step() {
+	local severity="$1" label="$2"
+	shift 2
+	section "${label}"
+	if "$@"; then
+		record "${label}" "OK"
+		return 0
+	else
+		local rc=$?
+		if [[ "${severity}" == critical ]]; then
+			record "${label}" "FAILED"
+			critical_failures=$((critical_failures + 1))
+		else
+			record "${label}" "WARNING"
+		fi
+		printf '%s exited with status %d.\n' "${label}" "${rc}" >&2
+	fi
+	return 0
+}
+
+if command -v fwupdmgr >/dev/null 2>&1; then
+	run_step optional "Firmware metadata" sudo -n /usr/bin/fwupdmgr refresh
+	run_step optional "Firmware upgrades" sudo -n /usr/bin/fwupdmgr update --assume-yes --no-reboot-check
+fi
+
+if command -v flatpak >/dev/null 2>&1; then
+	run_step critical "Flatpak user packages" flatpak update --user --assumeyes --noninteractive
+	run_step critical "Flatpak system packages" flatpak update --system --assumeyes --noninteractive
+fi
+
+run_step critical "KythOS system image" sudo -n /usr/bin/bootc upgrade
+
+if [[ -x /usr/bin/kyth-rclone-update ]]; then
+	run_step optional "KythOS rclone" sudo -n /usr/bin/kyth-rclone-update
+fi
+
+section "Summary"
+for i in "${!STEP_NAMES[@]}"; do
+	printf '%s: %s\n' "${STEP_NAMES[$i]}" "${STEP_RESULTS[$i]}"
+done
+
+if ((critical_failures > 0)); then
+	printf 'Full update failed in %d required step(s).\n' "${critical_failures}" >&2
+	exit 1
+fi
+
+if printf '%s\n' "${STEP_RESULTS[@]}" | grep -qx WARNING; then
+	printf 'Core update complete with optional-step warnings.\n'
+else
+	printf 'Full update complete.\n'
+fi

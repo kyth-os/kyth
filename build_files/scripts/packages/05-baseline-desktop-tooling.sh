@@ -29,8 +29,6 @@ dnf5 install -y --skip-unavailable \
 	libpst \
 	cifs-utils \
 	rsync \
-	xorriso \
-	squashfs-tools \
 	fuse \
 	fuse-libs \
 	fuse3 \
@@ -45,7 +43,6 @@ dnf5 install -y --skip-unavailable \
 	qemu-system-x86-core \
 	util-linux-script \
 	tmux \
-	gh \
 	openssl \
 	fwupd \
 	hyperfine

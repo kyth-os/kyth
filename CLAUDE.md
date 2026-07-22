@@ -17,7 +17,7 @@ just lint && just format          # Shellcheck + shfmt
 
 Feature flags:
 ```bash
-ENABLE_ANANICY=0 ENABLE_SCX=0 sudo just build
+ENABLE_SCX=0 sudo just build
 ```
 
 ## Common Issues

@@ -39,7 +39,7 @@ just test
 Feature flags let you skip optional build steps:
 
 ```bash
-ENABLE_ANANICY=0 ENABLE_SCX=0 just build
+ENABLE_SCX=0 just build
 ```
 
 ## What Makes a Good PR

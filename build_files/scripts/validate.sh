@@ -21,6 +21,7 @@ hadolint --failure-threshold error \
 echo "==> Shell scripts"
 shell_files=()
 while IFS= read -r -d '' file; do
+	[[ -f "${file}" ]] || continue
 	mime_type="$(file --brief --mime-type "${file}")"
 	if [[ "${mime_type}" == "text/x-shellscript" ]]; then
 		shell_files+=("${file}")
@@ -45,6 +46,8 @@ tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0"
 files = []
 for name in filter(None, tracked):
     path = Path(name)
+    if not path.is_file():
+        continue
     if path.suffix == ".py":
         files.append(path)
         continue
@@ -90,6 +93,8 @@ files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
 findings = []
 for name in files:
     path = Path(name)
+    if not path.is_file():
+        continue
     if path.suffix.lower() in binary_suffixes:
         continue
     try:
@@ -111,6 +116,7 @@ python3 -m unittest discover -s tests
 
 echo "==> Structured configuration"
 while IFS= read -r -d '' file; do
+	[[ -f "${file}" ]] || continue
 	jq empty "${file}"
 done < <(git ls-files -z '*.json')
 python3 - <<'PY'
@@ -120,7 +126,10 @@ from pathlib import Path
 
 files = subprocess.check_output(["git", "ls-files", "*.toml"], text=True).splitlines()
 for name in files:
-    with Path(name).open("rb") as stream:
+    path = Path(name)
+    if not path.is_file():
+        continue
+    with path.open("rb") as stream:
         tomllib.load(stream)
 print(f"Checked {len(files)} TOML files")
 PY
@@ -143,6 +152,7 @@ fi
 echo "==> Just recipes"
 just --list >/dev/null
 while IFS= read -r -d '' file; do
+	[[ -f "${file}" ]] || continue
 	just --justfile "${file}" --list >/dev/null
 done < <(git ls-files -z '*.just')
 

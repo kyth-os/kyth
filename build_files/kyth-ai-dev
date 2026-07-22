@@ -160,12 +160,6 @@ setup() {
         printf "[azure-cli]\nname=Azure CLI\nbaseurl=https://packages.microsoft.com/yumrepos/azure-cli\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc\n" | sudo tee /etc/yum.repos.d/azure-cli.repo >/dev/null
         printf "[antigravity-rpm]\nname=Antigravity RPM Repository\nbaseurl=https://us-central1-yum.pkg.dev/projects/antigravity-auto-updater-dev/antigravity-rpm\nenabled=1\ngpgcheck=0\nrepo_gpgcheck=0\n" | sudo tee /etc/yum.repos.d/antigravity.repo >/dev/null
 
-        # mimalloc: the host sets LD_PRELOAD=/usr/lib64/libmimalloc.so.2
-        # session-wide (sysconfig/46-mimalloc-preload.sh), which distrobox
-        # carries into every command run in this container. Without the
-        # library present here too, every single process launched in the
-        # box printed "ld.so: ... cannot be preloaded ... ignored" — installing
-        # it resolves the preload for real instead of just silencing the spam.
         packages=(
             git git-lfs curl wget jq yq make cmake gcc gcc-c++
             python3 python3-pip python3-virtualenv python3-devel
@@ -176,7 +170,6 @@ setup() {
             helix zellij shellcheck shfmt
             ripgrep fd-find fzf
             code antigravity azure-cli gh
-            mimalloc
         )
 
         if command -v dnf5 >/dev/null 2>&1; then
@@ -193,12 +186,13 @@ setup() {
         # Install Claude Code and Codex CLI (npm globals, need Node.js above)
         sudo npm install -g @anthropic-ai/claude-code @openai/codex || true
 
-        # Install headroom in container
-        python3 -m pip install --user --upgrade pipx uv headroom 2>/dev/null || \
-            python3 -m pip install --user --upgrade --break-system-packages pipx uv headroom || true
-
-        if command -v pipx >/dev/null 2>&1; then
-            pipx ensurepath || true
+        # Keep Headroom out of the base image and out of the shared user-site
+        # Python tree. uv gives the optional Distrobox tool an isolated env.
+        if command -v uv >/dev/null 2>&1; then
+            uv tool install --upgrade headroom || \
+                echo "WARNING: Headroom installation failed; continuing without it."
+        else
+            echo "WARNING: uv is unavailable; continuing without Headroom."
         fi
 
         # Export desktop applications and command line wrappers to host
@@ -222,16 +216,12 @@ setup() {
         if command -v codex >/dev/null 2>&1; then
             distrobox-export --bin "$(command -v codex)" --export-path ~/.local/bin || true
         fi
-        if command -v headroom >/dev/null 2>&1; then
-            distrobox-export --bin "$(command -v headroom)" --export-path ~/.local/bin || true
-        elif [[ -x "${HOME}/.local/bin/headroom" ]]; then
-            distrobox-export --bin "${HOME}/.local/bin/headroom" --export-path ~/.local/bin || true
-        fi
     '
 
 	echo
 	echo "Developer & AI environment (${box}) is ready."
-	echo "Exported to host: VS Code, Antigravity, Node.js, Azure CLI, GitHub CLI, Claude Code, Codex CLI, Helix, Zellij, ShellCheck, shfmt, Headroom."
+	echo "Exported to host: VS Code, Antigravity, Node.js, Azure CLI, GitHub CLI, Claude Code, Codex CLI, Helix, Zellij, ShellCheck, shfmt."
+	echo "Optional Distrobox tool in the shared user PATH: Headroom."
 	echo "Enter environment manually with: distrobox enter ${box}"
 }
 

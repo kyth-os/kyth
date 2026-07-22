@@ -16,7 +16,6 @@ LABEL org.osbuild.version="44"
 LABEL org.osbuild.branding.release="KythOS 44"
 
 ### MODIFICATIONS
-ARG ENABLE_ANANICY=1
 ARG ENABLE_SCX=1
 ARG ENABLE_MESA_GIT=0
 
@@ -32,10 +31,9 @@ RUN --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
-    ENABLE_ANANICY=${ENABLE_ANANICY} \
     bash /ctx/packages-static.sh
 
-# Third-party binaries — topgrade, SCX schedulers, umu, LatencyFleX (~100 MB).
+# Third-party binaries — SCX schedulers, umu, and LatencyFleX.
 # Placed before BUILD_DATE so the layer is only re-run when a tool ships a new
 # release. THIRDPARTY_VERSIONS_HASH is resolved in CI by querying the GitHub
 # releases API for each tool; when all versions are unchanged the layer is a

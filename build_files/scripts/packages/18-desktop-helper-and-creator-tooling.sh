@@ -34,26 +34,6 @@ dnf5 install -y --skip-unavailable \
 	plasma-browser-integration \
 	cups-browsed
 
-# Headroom host wrapper — delegates to kyth-ai-dev container
-install -Dm 0755 /dev/stdin /usr/bin/headroom <<'WRAPPEREOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ -x "${HOME}/.local/bin/headroom" ]]; then
-	exec "${HOME}/.local/bin/headroom" "$@"
-fi
-
-box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
-if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
-	exec distrobox enter "${box}" -- headroom "$@"
-else
-	echo "Headroom is managed in the KythOS AI Developer container (${box})."
-	echo "Initializing ${box} environment..."
-	kyth-ai-dev setup
-	exec distrobox enter "${box}" -- headroom "$@"
-fi
-WRAPPEREOF
-
 # ShellCheck host wrapper — delegates to kyth-ai-dev container
 install -Dm 0755 /dev/stdin /usr/bin/shellcheck <<'WRAPPEREOF'
 #!/usr/bin/env bash
@@ -200,7 +180,6 @@ optional_desktop_packages=(
 	zoxide
 	git-delta
 	starship
-	docker-compose
 	direnv
 	jq
 	yq

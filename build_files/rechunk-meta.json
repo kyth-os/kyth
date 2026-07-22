@@ -13,13 +13,6 @@
       ],
       "dedicated": true
     },
-    "headroom": {
-      "files": [
-        "/usr/lib/headroom/*",
-        "/usr/bin/headroom"
-      ],
-      "dedicated": true
-    },
     "rpmdb": {
       "files": [
         "/usr/share/rpm/rpmdb.sqlite"
@@ -64,12 +57,6 @@
       "packages": [
         "hhd-ui"
       ]
-    },
-    "topgrade": {
-      "files": [
-        "/usr/bin/topgrade"
-      ],
-      "dedicated": false
     },
     "unpackaged": {
       "packages": [
@@ -583,12 +570,6 @@
         "docker-ce*"
       ]
     },
-    "docker-compose": {
-      "files": [
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ],
-      "dedicated": false
-    },
     "docker-buildx": {
       "files": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
@@ -1061,11 +1042,6 @@
     "code": {
       "packages": [
         "code*"
-      ]
-    },
-    "docker-compose-plugin": {
-      "packages": [
-        "docker-compose-plugin*"
       ]
     },
     "emacs": {

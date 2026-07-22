@@ -9,7 +9,7 @@
 #   proton-cachyos   Latest Proton-CachyOS release tag. Prints "" on failure so
 #                    proton-cachyos.sh falls back to the /latest release
 #                    endpoint instead of requesting a nonexistent tag.
-#   thirdparty-hash  16-char digest of the five thirdparty tool release tags.
+#   thirdparty-hash  16-char digest of the third-party tool release tags.
 #                    Only used as a Docker layer cache-bust value: when every
 #                    tool's tag is unchanged the thirdparty layer is a cache hit.
 #   cachyos-kernel   Latest succeeded kernel-cachyos COPR build (version-release).
@@ -24,7 +24,6 @@ set -euo pipefail
 CURL_ARGS=(-fsSL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60)
 
 THIRDPARTY_REPOS=(
-	topgrade-rs/topgrade
 	Open-Wine-Components/umu-launcher
 	ishitatsuyuki/LatencyFleX
 	sched-ext/scx

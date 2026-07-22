@@ -31,6 +31,11 @@ class NodeToolingTests(unittest.TestCase):
         self.assertIn("distrobox-export --bin /usr/bin/npm", self.ai_dev_script)
         self.assertIn("distrobox-export --bin /usr/bin/npx", self.ai_dev_script)
 
+    def test_headroom_is_isolated_to_the_ai_dev_environment(self):
+        self.assertNotIn("/usr/bin/headroom", self.package_script)
+        self.assertIn("uv tool install --upgrade headroom", self.ai_dev_script)
+        self.assertNotIn("pip install --user --upgrade pipx", self.ai_dev_script)
+
 
 if __name__ == "__main__":
     unittest.main()

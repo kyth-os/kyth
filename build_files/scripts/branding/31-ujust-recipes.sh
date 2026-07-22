@@ -13,11 +13,9 @@ printf '\nimport? "/usr/share/ublue-os/just/75-kyth.just"\n' >>/usr/share/ublue-
 # enable` below needs each one to already exist — see
 # branding/36-misc-utility-installs.sh for the matching binaries.
 install -m 0644 /ctx/kyth-local-bin-migrate.service /usr/lib/systemd/system/kyth-local-bin-migrate.service
-install -m 0644 /ctx/kyth-topgrade-migrate.service /usr/lib/systemd/system/kyth-topgrade-migrate.service
 install -m 0644 /ctx/kyth-duperemove.service /usr/lib/systemd/system/kyth-duperemove.service
 install -m 0644 /ctx/kyth-duperemove.timer /usr/lib/systemd/system/kyth-duperemove.timer
 systemctl enable kyth-local-bin-migrate.service 2>/dev/null || true
-systemctl enable kyth-topgrade-migrate.service 2>/dev/null || true
 systemctl enable kyth-duperemove.timer 2>/dev/null || true
 systemctl --global enable kyth-proton-cachyos-update.timer 2>/dev/null || true
 # Without wait-online, network-online.target is reached instantly and the

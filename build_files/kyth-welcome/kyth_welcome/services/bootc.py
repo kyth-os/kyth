@@ -99,7 +99,7 @@ def _active_bootc_operation() -> str | None:
 def _default_phase(mode: str) -> str:
     return {
         "update": "Pulling OS image from container registry…",
-        "topgrade": "Running full system update…",
+        "full-update": "Running full system update…",
         "rollback": "Staging rollback deployment…",
     }.get(mode, "Operation in progress…")
 
@@ -149,7 +149,7 @@ def _parse_update_phase(line: str, mode: str) -> str | None:
         return "Already on the latest image — nothing to download."
     if "queued" in lo and "boot" in lo:
         return "Staged — new image ready for next reboot."
-    if mode == "topgrade" and line.startswith("――"):
+    if mode == "full-update" and line.startswith("――"):
         m = re.match(r"――\s*[\d:]+\s*-\s*(.+?)\s*――", line)
         if m:
             section = m.group(1).strip()
