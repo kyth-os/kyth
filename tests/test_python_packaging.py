@@ -45,8 +45,12 @@ class PythonPackagingTests(unittest.TestCase):
 
         self.assertIn("python3 -m pip install", installer_build)
         self.assertIn("/src/build_files/kyth-installer", installer_build)
+        self.assertIn("mktemp -d /tmp/kyth-installer-packages", installer_build)
+        self.assertIn('"${installer_package_root}/kyth-installer"', installer_build)
         self.assertIn("python3 -m pip install", helper_build)
         self.assertIn("/ctx/kyth-welcome", helper_build)
+        self.assertIn("mktemp -d /tmp/kyth-welcome-package", helper_build)
+        self.assertIn('"${welcome_package_dir}"', helper_build)
         self.assertNotIn("/usr/lib/kyth-installer", installer_build)
         self.assertNotIn("/usr/lib/kyth-welcome", helper_build)
 

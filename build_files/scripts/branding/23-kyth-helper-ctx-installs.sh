@@ -1,11 +1,17 @@
 # shellcheck shell=bash
 # ── KythOS Helper app — packaged Python install ───────────────────────────────
+# /ctx is a read-only BuildKit bind mount. Setuptools creates build metadata
+# beside a local project, so stage the package in the writable build tmpfs.
+welcome_package_dir="$(mktemp -d /tmp/kyth-welcome-package.XXXXXX)"
+cp -a /ctx/kyth-welcome/. "${welcome_package_dir}/"
 python3 -m pip install \
 	--no-cache-dir \
 	--no-deps \
 	--no-build-isolation \
 	--prefix=/usr \
-	/ctx/kyth-welcome
+	"${welcome_package_dir}"
+rm -rf "${welcome_package_dir}"
+unset welcome_package_dir
 install -m 0755 /ctx/kyth-welcome/kyth-welcome-launch /usr/bin/kyth-welcome-launch
 install -m 0644 /ctx/kyth-welcome/kyth-welcome.desktop \
 	/usr/share/applications/kyth-welcome.desktop

@@ -21,13 +21,20 @@ mount -o remount,rw /proc/sys
 # ── KythOS installer Python packages ──────────────────────────────────────────
 # Install through their package metadata so entry points, dependencies, and
 # package data are verified by the same mechanism used by development builds.
+# /src is a read-only BuildKit bind mount, while setuptools writes build
+# metadata beside local projects. Stage both sources in writable temporary
+# storage before invoking pip.
+installer_package_root="$(mktemp -d /tmp/kyth-installer-packages.XXXXXX)"
+cp -a /src/build_files/kyth_shared "${installer_package_root}/kyth_shared"
+cp -a /src/build_files/kyth-installer "${installer_package_root}/kyth-installer"
 python3 -m pip install \
 	--no-cache-dir \
 	--no-deps \
 	--no-build-isolation \
 	--prefix=/usr \
-	/src/build_files/kyth_shared \
-	/src/build_files/kyth-installer
+	"${installer_package_root}/kyth_shared" \
+	"${installer_package_root}/kyth-installer"
+rm -rf "${installer_package_root}"
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
 install -Dm755 /src/build_files/kyth-partition-install.sh /usr/bin/kyth-partition-install
 install -Dm755 /src/build_files/scripts/plymouth-branding-guard.sh \
