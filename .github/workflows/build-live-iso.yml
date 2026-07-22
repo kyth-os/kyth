@@ -21,6 +21,11 @@ on:
         required: false
         type: string
         default: ""
+      acceptance_update_ref:
+        description: Optional second image ref for update and rollback VM acceptance
+        required: false
+        type: string
+        default: ""
     secrets:
       R2_ACCESS_KEY_ID:
         required: true
@@ -51,6 +56,10 @@ on:
         description: Source commit matching source_digest
         required: false
         type: string
+      acceptance_update_ref:
+        description: Optional second image ref for update and rollback VM acceptance
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -66,7 +75,7 @@ jobs:
   build:
     name: Build ISO (${{ inputs.source_tag }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 240
     permissions:
       actions: read
       contents: read
@@ -262,6 +271,35 @@ jobs:
         env:
           STEPS_RELEASE_OUTPUTS_ISO_BASENAME: ${{ steps.release.outputs.iso_basename }}
           STEPS_RELEASE_OUTPUTS_CHANNEL_BASENAME: ${{ steps.release.outputs.channel_basename }}
+
+      - name: Install VM acceptance dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf socat
+
+      - name: Boot, install, update, and rollback acceptance
+        env:
+          ISO_BASENAME: ${{ steps.release.outputs.iso_basename }}
+          UPDATE_REF: ${{ inputs.acceptance_update_ref }}
+        run: |
+          args=(
+            --iso "output/live-iso/${ISO_BASENAME}"
+            --artifacts "${RUNNER_TEMP}/vm-acceptance"
+            --timeout-minutes 75
+          )
+          if [[ -n "${UPDATE_REF}" ]]; then
+            args+=(--update-ref "${UPDATE_REF}")
+          fi
+          build_files/scripts/vm-acceptance.sh "${args[@]}"
+
+      - name: Upload VM acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vm-acceptance-${{ steps.release.outputs.release_id }}
+          path: ${{ runner.temp }}/vm-acceptance/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload unsigned ISO artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

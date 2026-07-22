@@ -38,6 +38,33 @@ Flatpaks, and desktop audio without raising a popup for optional software.
 `nvidia-status`, `controller-check`, and `resume-check` are manual validation
 helpers for hardware-specific testing.
 
+## Automated VM Acceptance
+
+The live-ISO workflow now gates publication on an unattended QEMU lifecycle:
+
+1. Boot the live ISO and wait for Plasma.
+2. Run the smoke check, install the OCI image bundled in that ISO to a dedicated
+   virtual disk, and reboot from it.
+3. Wait for the installed display manager and run the smoke check again.
+4. When `acceptance_update_ref` is supplied to the workflow, switch to that
+   image, verify the new deployment and rollback slot, reboot, roll back, and
+   verify the original image digest is active again.
+
+The guest service is inert on normal hardware and ordinary virtual machines. It
+only runs when the host supplies the private QEMU firmware flag used by the
+acceptance driver. Serial logs and live/installed screenshots are retained as
+workflow artifacts.
+
+Run the same install-only gate locally after building an ISO:
+
+```bash
+just accept-live-iso output/live-iso/kyth-live-testing.iso
+```
+
+To exercise update and rollback directly, invoke
+`build_files/scripts/vm-acceptance.sh` with `--update-ref` pointing at a second,
+different KythOS image.
+
 ## Release Gates
 
 A release candidate should pass these before being called daily-driver ready:

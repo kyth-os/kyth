@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-22 19:41:15 UTC
+- Last refreshed (UTC): 2026-07-22 19:41:25 UTC
 - Current branch: testing
-- HEAD commit: bb96121
-- Last commit title: Harden installer command dispatch
-- Last commit date: 2026-07-22T15:18:40-04:00
+- HEAD commit: 17882c5
+- Last commit title: Centralize System Hub privileged command construction
+- Last commit date: 2026-07-22T15:41:15-04:00
 - CI workflow files: 8
 - Build script files: 21
 

@@ -209,6 +209,18 @@ run-live-iso-native-local:
     just rebuild-live-iso-local
     LIVE_ISO_VM_RESET=1 just run-live-iso-native local
 
+# Unattended live boot, install, and installed-boot acceptance. Supply a second
+# image ref to additionally prove update activation and rollback across reboots.
+[group('Run Virtual Machine')]
+accept-live-iso iso="output/live-iso/kyth-live-testing.iso" update_ref="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(--iso "{{ iso }}" --artifacts "output/vm-acceptance")
+    if [[ -n "{{ update_ref }}" ]]; then
+        args+=(--update-ref "{{ update_ref }}")
+    fi
+    build_files/scripts/vm-acceptance.sh "${args[@]}"
+
 # Run a virtual machine using systemd-vmspawn
 [group('Run Virtual Machine')]
 spawn-vm rebuild="0" type="qcow2" ram="6G":
