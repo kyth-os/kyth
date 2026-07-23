@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 01:05:53 UTC
+- Last refreshed (UTC): 2026-07-23 01:11:08 UTC
 - Current branch: testing
-- HEAD commit: 4cfff6f
-- Last commit title: Fix alongside/manual installs missing --skip-fetch-check on bootc
-- Last commit date: 2026-07-22T20:59:29-04:00
+- HEAD commit: c33a5d8
+- Last commit title: Extract Kali distrobox command construction out of the Qt page
+- Last commit date: 2026-07-22T21:05:53-04:00
 - CI workflow files: 8
 - Build script files: 20
 

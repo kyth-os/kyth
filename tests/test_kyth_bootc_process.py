@@ -11,8 +11,11 @@ from kyth_welcome.services.bootc import (  # noqa: E402
     REGISTRY,
     image_digest_from_status,
     image_reference_from_status,
+    _bootc_cancel_block_reason,
     _branch_from_ref,
     _branch_display_name,
+    _default_phase,
+    _parse_update_phase,
 )
 from kyth_welcome.services.process import (  # noqa: E402
     _human_bytes,
@@ -71,6 +74,64 @@ class BootcHelpersTests(unittest.TestCase):
         self.assertEqual(_branch_from_ref(f"{REGISTRY}:testing-cachy"), "testing-cachy")
         self.assertEqual(_branch_display_name("latest"), "Stable (latest)")
         self.assertEqual(_branch_display_name("testing"), "Testing")
+
+
+class UpdatePhaseParsingTests(unittest.TestCase):
+    """page_update_ops.py's status label and cancel-safety gating both come
+    from these pure functions — drives the Update page's progress display and,
+    more importantly, decides when it's no longer safe to let a user cancel
+    (once bootc has started writing/staging the new image)."""
+
+    def test_default_phase_per_mode(self):
+        self.assertEqual(_default_phase("update"), "Pulling OS image from container registry…")
+        self.assertEqual(_default_phase("full-update"), "Running full system update…")
+        self.assertEqual(_default_phase("rollback"), "Staging rollback deployment…")
+        self.assertEqual(_default_phase("unknown-mode"), "Operation in progress…")
+
+    def test_parse_update_phase_recognizes_known_lines(self):
+        cases = [
+            ("Pulling sha256:abcdef from ghcr.io", "Downloading image layers…"),
+            ("Unpacking layer 3/5", "Unpacking image layers…"),
+            ("Checking out tree onto filesystem", "Importing image into system storage…"),
+            ("Writing manifest to image destination", "Storing image manifest…"),
+            ("Composing final image", "Writing new OS image to disk…"),
+            ("rpmdb: verifying package database", "Updating package database in the new image…"),
+            ("Generating initramfs for kernel 6.x", "Preparing boot files for the new image…"),
+            ("Deploying commit abc123", "Deploying new OS image…"),
+            ("Transaction complete", "Staging new image for next reboot…"),
+            ("No update available.", "Already on the latest image — nothing to download."),
+        ]
+        for line, expected in cases:
+            self.assertEqual(_parse_update_phase(line, "update"), expected, msg=line)
+
+    def test_parse_update_phase_returns_none_for_unrecognized_line(self):
+        self.assertIsNone(_parse_update_phase("some unrelated log noise", "update"))
+
+    def test_parse_update_phase_full_update_section_header(self):
+        line = "―― 12:34:01 - Flatpaks ――"
+        self.assertEqual(
+            _parse_update_phase(line, "full-update"),
+            "Updating Flatpaks…",
+        )
+        # The same section-header format is only meaningful in full-update mode.
+        self.assertIsNone(_parse_update_phase(line, "update"))
+
+    def test_cancel_blocked_once_writing_or_staging(self):
+        for phase in (
+            "Unpacking image layers…",
+            "Writing new OS image to disk…",
+            "Staging new image for next reboot…",
+        ):
+            self.assertNotEqual(_bootc_cancel_block_reason("update", phase), "")
+
+    def test_cancel_allowed_while_still_downloading(self):
+        self.assertEqual(_bootc_cancel_block_reason("update", "Downloading image layers…"), "")
+        self.assertEqual(_bootc_cancel_block_reason("update", "Resolving OS image version…"), "")
+
+    def test_rollback_never_cancellable(self):
+        # Rollback has no safe early phase to cancel from at all.
+        self.assertNotEqual(_bootc_cancel_block_reason("rollback", "Staging rollback deployment…"), "")
+        self.assertNotEqual(_bootc_cancel_block_reason("rollback", ""), "")
 
 
 class RegistrySharedTests(unittest.TestCase):
