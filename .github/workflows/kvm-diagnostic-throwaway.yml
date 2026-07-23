@@ -1,6 +1,8 @@
 name: KVM diagnostic (throwaway)
 on:
   workflow_dispatch: {}
+permissions:
+  contents: read
 jobs:
   check:
     runs-on: ubuntu-24.04

@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 00:13:25 UTC
+- Last refreshed (UTC): 2026-07-23 00:13:35 UTC
 - Current branch: testing
-- HEAD commit: f33ba5e
-- Last commit title: Fix lint: use if/else instead of side-effect ternary in network share helper
-- Last commit date: 2026-07-22T15:42:41-04:00
+- HEAD commit: df5f627
+- Last commit title: Add throwaway KVM diagnostic workflow
+- Last commit date: 2026-07-22T20:13:25-04:00
 - CI workflow files: 9
 - Build script files: 21
 
