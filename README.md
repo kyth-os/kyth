@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 03:03:15 UTC
+- Last refreshed (UTC): 2026-07-23 11:36:06 UTC
 - Current branch: testing
-- HEAD commit: e5e0748
-- Last commit title: Extract page_nvidia.py's status decision tree into a testable pure function
-- Last commit date: 2026-07-22T23:01:02-04:00
+- HEAD commit: f77e9b3
+- Last commit title: Extract page_update_availability.py's hero card into a testable pure function
+- Last commit date: 2026-07-22T23:03:15-04:00
 - CI workflow files: 8
 - Build script files: 20
 
