@@ -3,6 +3,7 @@ import pathlib
 import subprocess
 import sys
 import unittest
+from unittest.mock import mock_open, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
@@ -14,7 +15,10 @@ from kyth_welcome.services.bootc import (  # noqa: E402
     _bootc_cancel_block_reason,
     _branch_from_ref,
     _branch_display_name,
+    _current_kernel_flavor,
     _default_phase,
+    _image_tag_for_channel,
+    _image_tag_for_kernel,
     _parse_update_phase,
 )
 from kyth_welcome.services.process import (  # noqa: E402
@@ -92,6 +96,59 @@ class BootcHelpersTests(unittest.TestCase):
         self.assertEqual(_branch_from_ref(f"{REGISTRY}:testing-cachy"), "testing-cachy")
         self.assertEqual(_branch_display_name("latest"), "Stable (latest)")
         self.assertEqual(_branch_display_name("testing"), "Testing")
+
+
+class KernelFlavorTests(unittest.TestCase):
+    """page_kernel.py's current-kernel label and switch-target image tag both
+    come from these functions. _probe_cached is bypassed (call fetch directly)
+    so tests exercise the fetch logic itself rather than a shared, ordering-
+    sensitive in-memory cache."""
+
+    def _fetch_flavor(self, file_content=None, file_error=False, uname="6.1.0-300.fc44.x86_64"):
+        open_patch = (
+            patch("builtins.open", side_effect=OSError("no such file"))
+            if file_error
+            else patch("builtins.open", mock_open(read_data=file_content))
+        )
+        with patch("kyth_welcome.services.bootc._probe_cached", side_effect=lambda key, ttl, fetch: fetch()), \
+             open_patch, \
+             patch("kyth_welcome.services.bootc._command_stdout", return_value=uname):
+            return _current_kernel_flavor()
+
+    def test_flavor_from_marker_file(self):
+        self.assertEqual(self._fetch_flavor(file_content="cachy\n"), "cachy")
+        self.assertEqual(self._fetch_flavor(file_content="fedora\n"), "fedora")
+
+    def test_flavor_falls_back_to_uname_when_marker_missing(self):
+        self.assertEqual(
+            self._fetch_flavor(file_error=True, uname="6.1.0-300.cachy.fc44.x86_64"), "cachy",
+        )
+        self.assertEqual(
+            self._fetch_flavor(file_error=True, uname="6.1.0-300.fc44.x86_64"), "fedora",
+        )
+
+    def test_flavor_falls_back_to_uname_when_marker_content_invalid(self):
+        self.assertEqual(
+            self._fetch_flavor(file_content="bogus\n", uname="6.1.0-300.cachy.fc44.x86_64"), "cachy",
+        )
+
+    def test_image_tag_for_channel(self):
+        self.assertEqual(_image_tag_for_channel("latest", flavor="fedora"), "latest")
+        self.assertEqual(_image_tag_for_channel("latest", flavor="cachy"), "latest-cachy")
+        self.assertEqual(_image_tag_for_channel("testing", flavor="fedora"), "testing")
+        self.assertEqual(_image_tag_for_channel("testing", flavor="cachy"), "testing-cachy")
+        # Anything other than the literal "testing" channel name is treated as stable.
+        self.assertEqual(_image_tag_for_channel("unknown", flavor="fedora"), "latest")
+
+    def test_image_tag_for_kernel(self):
+        with patch("kyth_welcome.services.bootc._current_branch", return_value="latest"):
+            self.assertEqual(_image_tag_for_kernel("fedora"), "latest")
+            self.assertEqual(_image_tag_for_kernel("cachy"), "latest-cachy")
+        with patch("kyth_welcome.services.bootc._current_branch", return_value="testing-cachy"):
+            self.assertEqual(_image_tag_for_kernel("fedora"), "testing")
+            self.assertEqual(_image_tag_for_kernel("cachy"), "testing-cachy")
+        with patch("kyth_welcome.services.bootc._current_branch", return_value=None):
+            self.assertEqual(_image_tag_for_kernel("fedora"), "latest")
 
 
 class UpdatePhaseParsingTests(unittest.TestCase):

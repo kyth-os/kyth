@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 02:54:57 UTC
+- Last refreshed (UTC): 2026-07-23 03:00:54 UTC
 - Current branch: testing
-- HEAD commit: 635197c
-- Last commit title: Unify bootc download-progress tracking, fix dead total-extend update
-- Last commit date: 2026-07-22T22:40:05-04:00
+- HEAD commit: 8fc0d97
+- Last commit title: Extract duplicate _open_m365_webapp into a shared action helper
+- Last commit date: 2026-07-22T22:54:57-04:00
 - CI workflow files: 8
 - Build script files: 20
 
