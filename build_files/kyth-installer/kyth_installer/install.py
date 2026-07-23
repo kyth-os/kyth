@@ -50,7 +50,7 @@ def _build_bootc_install_cmd(
         cmd.append("--acknowledge-destructive")
     if extra_flags:
         cmd.extend(extra_flags)
-    if SKIP_FETCH_CHECK:
+    if SKIP_FETCH_CHECK and "--skip-fetch-check" not in cmd:
         cmd.append("--skip-fetch-check")
     cmd.append(target)
     return cmd
@@ -206,7 +206,14 @@ def _prepare_install_storage(
 
         install_cmd = _build_bootc_install_cmd(
             "to-filesystem", src_ref, tgt_ref, alongside_mount,
-            extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@"],
+            # --skip-fetch-check unconditionally here (not gated behind the
+            # SKIP_FETCH_CHECK env toggle, which controls the unrelated
+            # network-preflight check below): this target mountpoint already
+            # has other partitions (e.g. a bind-mounted /boot/efi) mounted
+            # under it, which is exactly the case kyth-partition-install.sh
+            # always passes the same flag for. See plan.py's install_mode
+            # docstring for the "alongside" mode.
+            extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@", "--skip-fetch-check"],
         )
         _run_cmd(
             install_cmd, 12, 90, log, progress,

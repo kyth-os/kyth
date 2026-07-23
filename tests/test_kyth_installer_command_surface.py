@@ -335,6 +335,88 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         )
         self.assertIn("--acknowledge-destructive", cmd)
 
+    def test_skip_fetch_check_not_duplicated_when_env_toggle_also_set(self):
+        # extra_flags may already carry --skip-fetch-check (alongside/manual
+        # partition installs, which always need it); the SKIP_FETCH_CHECK env
+        # toggle must not append a second copy of the same flag.
+        with mock.patch.object(install, "SKIP_FETCH_CHECK", True):
+            cmd = install._build_bootc_install_cmd(
+                "to-filesystem", "src", "tgt", "/mnt/target",
+                extra_flags=["--skip-finalize", "--skip-fetch-check"],
+            )
+        self.assertEqual(cmd.count("--skip-fetch-check"), 1)
+
+    def test_alongside_install_always_passes_skip_fetch_check(self):
+        # bootc install to-filesystem onto an alongside/manual target mounts
+        # other partitions (e.g. /boot/efi) under it before running; per
+        # plan.py's install_mode docstring this needs --skip-fetch-check
+        # unconditionally, the same as kyth-partition-install.sh, regardless
+        # of the unrelated SKIP_FETCH_CHECK network-preflight env toggle.
+        context = InstallerContext()
+        context.state.update({
+            "disk": "/dev/sda",
+            "efi_partition": "",
+            "hostname": "kyth",
+            "install_mode": "alongside",
+            "kernel": "fedora",
+            "mok_password": "",
+            "password_hash": "$6$hash",
+            "target_partition": "/dev/sda2",
+            "timezone": "UTC",
+            "username": "user",
+        })
+
+        captured_cmd = {}
+
+        def fake_run_cmd(cmd, *args, **kwargs):
+            if cmd and cmd[0] == "bootc":
+                captured_cmd["argv"] = cmd
+                raise RuntimeError("stop after capturing the install command")
+
+        with mock.patch.object(
+            install,
+            "_prepare_install_plan",
+            return_value=InstallPlan(
+                mode="alongside",
+                disk="/dev/sda",
+                target_partition="/dev/sda2",
+            ),
+        ), mock.patch.object(
+            install,
+            "_validate_install_target",
+            return_value=("/dev/sda", "/dev/sda2"),
+        ), mock.patch.object(
+            install,
+            "_install_images",
+            return_value=("src", "tgt"),
+        ), mock.patch.object(
+            install,
+            "_network_preflight",
+            return_value=None,
+        ), mock.patch.object(
+            install,
+            "_validate_storage_intent",
+            return_value=None,
+        ), mock.patch.object(
+            install,
+            "run_command",
+        ) as run_command, mock.patch.object(
+            install,
+            "_run_cmd",
+            side_effect=fake_run_cmd,
+        ), mock.patch.object(
+            install,
+            "unmount_target_disk",
+        ), mock.patch.object(
+            install,
+            "require_root",
+        ):
+            run_command.return_value.stdout = "UUID=abc\n"
+            run_command.return_value.returncode = 0
+            install._run_install_worker(lambda _msg: None, lambda _pct: None, "", context)
+
+        self.assertIn("--skip-fetch-check", captured_cmd["argv"])
+
     def test_streaming_runner_publishes_stats_with_zero_network_baseline(self):
         # output_state was referenced by _net_monitor and emit_line but never
         # assigned anywhere in _run_cmd's scope. emit_line's write hit a bare

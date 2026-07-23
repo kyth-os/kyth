@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 00:54:45 UTC
+- Last refreshed (UTC): 2026-07-23 00:59:29 UTC
 - Current branch: testing
-- HEAD commit: 5ec571f
-- Last commit title: Add _run_worker helper, migrate its safest call sites off manual wiring
-- Last commit date: 2026-07-22T20:40:15-04:00
+- HEAD commit: 0afc4d9
+- Last commit title: Consolidate account-database repair into kyth_shared, drop bash reimplementation
+- Last commit date: 2026-07-22T20:54:45-04:00
 - CI workflow files: 8
 - Build script files: 20
 
