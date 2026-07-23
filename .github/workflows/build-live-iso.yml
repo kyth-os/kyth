@@ -277,6 +277,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf socat
 
+      - name: Enable KVM access for the runner user
+        # Hosted runners ship /dev/kvm but it is not group-writable for the
+        # runner user by default; without this, QEMU silently falls back to
+        # TCG software emulation, which is too slow to boot a full desktop OS
+        # inside any practical timeout.
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+
       - name: Boot, install, update, and rollback acceptance
         env:
           ISO_BASENAME: ${{ steps.release.outputs.iso_basename }}

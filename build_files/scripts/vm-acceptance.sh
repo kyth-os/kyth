@@ -6,11 +6,16 @@ set -euo pipefail
 usage() {
 	cat <<'EOF'
 Usage: vm-acceptance.sh --iso PATH [--update-ref IMAGE] [--artifacts DIR]
-                        [--timeout-minutes N]
+                        [--timeout-minutes N] [--allow-tcg]
 
 Without --update-ref, validates live boot, bundled-image installation, and the
 first installed boot. With --update-ref, also stages that image, boots it,
 stages rollback, and verifies the original digest after the rollback boot.
+
+Booting a full desktop OS under software emulation (no /dev/kvm) is too slow
+to finish inside any practical timeout, so hardware acceleration is required
+by default; pass --allow-tcg to run under TCG anyway (expect it to time out
+except on a trivially small workload).
 EOF
 }
 
@@ -18,6 +23,7 @@ ISO=
 UPDATE_REF=
 ARTIFACTS=
 TIMEOUT_MINUTES=75
+ALLOW_TCG=0
 while (($#)); do
 	case "$1" in
 	--iso)
@@ -35,6 +41,10 @@ while (($#)); do
 	--timeout-minutes)
 		TIMEOUT_MINUTES="${2:?}"
 		shift 2
+		;;
+	--allow-tcg)
+		ALLOW_TCG=1
+		shift
 		;;
 	--help | -h)
 		usage
@@ -117,9 +127,14 @@ QEMU_ARGS=(
 )
 if [[ -r /dev/kvm && -w /dev/kvm ]]; then
 	QEMU_ARGS+=(-enable-kvm -cpu host)
-else
+elif ((ALLOW_TCG)); then
 	echo "Warning: /dev/kvm is unavailable; using slower TCG emulation" >&2
 	QEMU_ARGS+=(-accel tcg -cpu max)
+else
+	echo "/dev/kvm is unavailable; refusing to boot a full desktop OS under" >&2
+	echo "software emulation (it will not finish inside any practical timeout)." >&2
+	echo "Pass --allow-tcg to override, or fix KVM access on this host." >&2
+	exit 69
 fi
 if [[ -n "${UPDATE_REF}" ]]; then
 	[[ "${UPDATE_REF}" =~ ^[A-Za-z0-9._/@:+-]+$ ]] || {

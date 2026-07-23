@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 00:16:09 UTC
+- Last refreshed (UTC): 2026-07-23 00:16:26 UTC
 - Current branch: testing
-- HEAD commit: 7831fa3
-- Last commit title: Add explicit read-only permissions to throwaway KVM diagnostic
-- Last commit date: 2026-07-22T20:13:35-04:00
+- HEAD commit: cce6f42
+- Last commit title: Remove throwaway KVM diagnostic workflow
+- Last commit date: 2026-07-22T20:16:09-04:00
 - CI workflow files: 8
 - Build script files: 21
 
