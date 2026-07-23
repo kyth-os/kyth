@@ -20,6 +20,7 @@ from kyth_welcome.services.bootc import (  # noqa: E402
     _image_tag_for_channel,
     _image_tag_for_kernel,
     _parse_update_phase,
+    update_availability_view,
 )
 from kyth_welcome.services.process import (  # noqa: E402
     _format_dl_progress_line,
@@ -207,6 +208,57 @@ class UpdatePhaseParsingTests(unittest.TestCase):
         # Rollback has no safe early phase to cancel from at all.
         self.assertNotEqual(_bootc_cancel_block_reason("rollback", "Staging rollback deployment…"), "")
         self.assertNotEqual(_bootc_cancel_block_reason("rollback", ""), "")
+
+
+class UpdateAvailabilityViewTests(unittest.TestCase):
+    """page_update_availability.py's hero card (icon/title/body/buttons) is
+    driven entirely by this decision tree — no Qt, so it's testable directly."""
+
+    def _view(self, **overrides):
+        base = dict(
+            staged=False, check_state="uptodate", flatpak_count=0,
+            check_ts="14:00", check_ts_details="", staged_ts=None,
+        )
+        base.update(overrides)
+        return update_availability_view(**base)
+
+    def test_staged_takes_priority_and_offers_restart(self):
+        view = self._view(staged=True, staged_ts="2026-07-20", check_state="uptodate", flatpak_count=2)
+        self.assertEqual(view.card_style, "card-accent-ok")
+        self.assertEqual(view.title, "Restart required")
+        self.assertTrue(view.restart_btn_visible)
+        self.assertFalse(view.update_btn_visible)
+        self.assertIn("built 2026-07-20", view.body)
+        self.assertIn("2 Flatpak updates can be installed", view.body)
+
+    def test_system_update_available(self):
+        view = self._view(check_state="available", check_ts_details="2026-07-21")
+        self.assertEqual(view.title, "Update available")
+        self.assertTrue(view.update_btn_visible)
+        self.assertFalse(view.restart_btn_visible)
+        self.assertIn("built 2026-07-21", view.body)
+
+    def test_only_flatpaks_pending(self):
+        view = self._view(check_state="uptodate", flatpak_count=1)
+        self.assertEqual(view.title, "App updates available")
+        self.assertIn("1 Flatpak app update is available", view.body)
+        self.assertTrue(view.update_btn_visible)
+
+    def test_up_to_date(self):
+        view = self._view(check_state="uptodate", flatpak_count=0)
+        self.assertEqual(view.title, "Up to date")
+        self.assertFalse(view.update_btn_visible)
+        self.assertFalse(view.restart_btn_visible)
+
+    def test_check_unavailable(self):
+        view = self._view(check_state="", flatpak_count=0)
+        self.assertEqual(view.title, "Check unavailable")
+        self.assertFalse(view.update_btn_visible)
+        self.assertFalse(view.restart_btn_visible)
+
+    def test_singular_flatpak_wording_on_staged_branch(self):
+        view = self._view(staged=True, flatpak_count=1)
+        self.assertIn("1 Flatpak update can be installed", view.body)
 
 
 class RegistrySharedTests(unittest.TestCase):

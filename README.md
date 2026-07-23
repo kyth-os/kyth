@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 03:01:02 UTC
+- Last refreshed (UTC): 2026-07-23 03:03:15 UTC
 - Current branch: testing
-- HEAD commit: 6fc5d66
-- Last commit title: Add coverage for page_kernel.py's flavor/image-tag logic
-- Last commit date: 2026-07-22T23:00:54-04:00
+- HEAD commit: e5e0748
+- Last commit title: Extract page_nvidia.py's status decision tree into a testable pure function
+- Last commit date: 2026-07-22T23:01:02-04:00
 - CI workflow files: 8
 - Build script files: 20
 

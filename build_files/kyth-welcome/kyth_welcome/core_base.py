@@ -70,6 +70,7 @@ from .services.bootc import (  # noqa: F401
     _nested_get,
     _parse_update_phase,
     _walk_strings,
+    update_availability_view,
 )
 
 # ── Re-exports: runtime (Qt workers) ──────────────────────────────────────────

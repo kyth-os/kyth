@@ -1,7 +1,10 @@
 from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _bootc_image_timestamp, _has_staged_update, _release_worker_when_finished, _restyle
+from .core_base import (
+    _bootc_image_timestamp, _has_staged_update, _release_worker_when_finished, _restyle,
+    update_availability_view,
+)
 from .services.launch import reboot
 from .services.workers.updates import FlatpakCheckWorker, UpdateCheckWorker
 from .qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt
@@ -113,11 +116,8 @@ class _UpdateAvailabilityMixin:
             return
 
         self._check_btn.setEnabled(True)
-        ts_hint = f"  ·  Checked at {self._check_ts}"
-        built = f"  ·  built {self._check_ts_details}" if self._check_ts_details else ""
-
-        staged = _has_staged_update()
         flatpak_count = self._flatpak_count
+        staged = _has_staged_update()
 
         # Update the automatic updates status card locally with the fresh counts
         self._au_last_lbl.setText(self._check_ts)
@@ -129,74 +129,19 @@ class _UpdateAvailabilityMixin:
             self._au_flatpak_lbl.setText("Up to date")
             self._au_flatpak_lbl.setStyleSheet("color: #4caf50;")
 
-        if staged:
-            self._avail_card.setObjectName("card-accent-ok")
-            _restyle(self._avail_card)
-            self._avail_icon.setText("↻")
-            self._avail_icon.setStyleSheet("font-size: 28px; color: #4fc1ff;")
-            self._avail_title.setText("Restart required")
-            staged_ts = _bootc_image_timestamp("staged")
-            built_staged = f"  ·  built {staged_ts}" if staged_ts else ""
-
-            flatpak_part = ""
-            if flatpak_count > 0:
-                noun = "update" if flatpak_count == 1 else "updates"
-                flatpak_part = f" Additionally, {flatpak_count} Flatpak {noun} can be installed."
-
-            self._avail_lbl.setText(
-                f"A new image is staged and waiting{built_staged}.{flatpak_part} "
-                f"Restart now or later — your current system stays available as a fallback.{ts_hint}"
-            )
-            self._restart_now_btn.show()
-            self._update_now_btn.hide()
-        elif self._check_state == "available":
-            self._avail_card.setObjectName("card-accent-warn")
-            _restyle(self._avail_card)
-            self._avail_icon.setText("↓")
-            self._avail_icon.setStyleSheet("font-size: 28px; color: #d4a843;")
-            self._avail_title.setText("Update available")
-
-            flatpak_part = ""
-            if flatpak_count > 0:
-                noun = "update" if flatpak_count == 1 else "updates"
-                flatpak_part = f" and {flatpak_count} Flatpak {noun} are pending"
-
-            self._avail_lbl.setText(
-                f"A new system image is ready{built}{flatpak_part}. "
-                f"Run a full update to download and install them.{ts_hint}"
-            )
-            self._update_now_btn.show()
-            self._restart_now_btn.hide()
-        elif flatpak_count > 0:
-            self._avail_card.setObjectName("card-accent-warn")
-            _restyle(self._avail_card)
-            self._avail_icon.setText("↓")
-            self._avail_icon.setStyleSheet("font-size: 28px; color: #d4a843;")
-            self._avail_title.setText("App updates available")
-            noun = "update is" if flatpak_count == 1 else "updates are"
-            self._avail_lbl.setText(
-                f"Your system OS is up to date, but {flatpak_count} Flatpak app {noun} available. "
-                f"Run a full update to install them.{ts_hint}"
-            )
-            self._update_now_btn.show()
-            self._restart_now_btn.hide()
-        elif self._check_state == "uptodate":
-            self._avail_card.setObjectName("card-accent-ok")
-            _restyle(self._avail_card)
-            self._avail_icon.setText("✓")
-            self._avail_icon.setStyleSheet("font-size: 28px; color: #4caf50;")
-            self._avail_title.setText("Up to date")
-            self._avail_lbl.setText(f"Running the latest image{built}.{ts_hint}")
-            self._update_now_btn.hide()
-            self._restart_now_btn.hide()
-        else:
-            self._avail_card.setObjectName("card")
-            _restyle(self._avail_card)
-            self._avail_icon.setText("⚠")
-            self._avail_icon.setStyleSheet("font-size: 28px; color: #888888;")
-            self._avail_title.setText("Check unavailable")
-            self._avail_lbl.setText(
-                f"Could not reach the update server — check your network connection.{ts_hint}"
-            )
-            self._update_now_btn.hide()
-            self._restart_now_btn.hide()
+        view = update_availability_view(
+            staged=staged,
+            check_state=self._check_state,
+            flatpak_count=flatpak_count,
+            check_ts=self._check_ts,
+            check_ts_details=self._check_ts_details,
+            staged_ts=_bootc_image_timestamp("staged") if staged else None,
+        )
+        self._avail_card.setObjectName(view.card_style)
+        _restyle(self._avail_card)
+        self._avail_icon.setText(view.icon_text)
+        self._avail_icon.setStyleSheet(f"font-size: 28px; color: {view.icon_color};")
+        self._avail_title.setText(view.title)
+        self._avail_lbl.setText(view.body)
+        self._update_now_btn.setVisible(view.update_btn_visible)
+        self._restart_now_btn.setVisible(view.restart_btn_visible)
