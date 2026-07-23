@@ -354,12 +354,12 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-22 19:42:41 UTC
+- Last refreshed (UTC): 2026-07-23 00:13:25 UTC
 - Current branch: testing
-- HEAD commit: d234491
-- Last commit title: Gate live-ISO releases on unattended VM acceptance
-- Last commit date: 2026-07-22T15:41:25-04:00
-- CI workflow files: 8
+- HEAD commit: f33ba5e
+- Last commit title: Fix lint: use if/else instead of side-effect ternary in network share helper
+- Last commit date: 2026-07-22T15:42:41-04:00
+- CI workflow files: 9
 - Build script files: 21
 
 <!-- AUTO-README-END -->
