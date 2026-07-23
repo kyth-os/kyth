@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 from .runner import run_command
+from kyth_shared import accounts as _accounts
 
 _logger = logging.getLogger(__name__)
 
@@ -134,29 +135,24 @@ def find_deploy_etc(root_mount: str) -> Optional[str]:
     return sorted(candidates)[-1]
 
 
-SYSTEM_GROUP_FALLBACKS = {
-    "sddm": "sddm:x:959:",
-}
-
-SYSTEM_PASSWD_FALLBACKS = {
-    "sddm": "sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin",
-}
+# The actual account-database repair algorithm lives in kyth_shared.accounts
+# so kyth-partition-install.sh (a separate, bash-based install path) can run
+# the identical logic instead of an independently-drifting reimplementation.
+# These wrappers keep this module's historical call signatures — used
+# directly by tests and by install.py — by injecting a run() that carries
+# this package's own _as_root escalation and OSError formatting.
+def _run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+    return run_command(_as_root(argv), **kwargs)
 
 
 def _read_lines(path: Path) -> list[str]:
     """Read a target-tree file via elevated cat (never host open())."""
     try:
-        result = run_command(
-            _as_root(["cat", str(path)]),
-            capture_output=True, text=True, check=False,
-        )
+        return _accounts._read_lines(path, _run)
     except Exception as exc:
         raise type(exc)(
             f"{format_os_error(exc, path=path) if isinstance(exc, OSError) else exc}"
         ) from exc
-    if result.returncode != 0:
-        return []
-    return result.stdout.splitlines()
 
 
 def _write_lines(path: Path, lines: list[str], mode: int) -> None:
@@ -166,141 +162,33 @@ def _write_lines(path: Path, lines: list[str], mode: int) -> None:
     Always go through _as_root so account databases never depend on the Python
     process being able to open the mounted deploy tree itself.
     """
-    path_str = str(path)
-    parent = str(path.parent)
-    content = "\n".join(lines) + "\n"
     try:
-        run_command(_as_root(["mkdir", "-p", parent]), check=True)
-        run_command(
-            _as_root(["tee", path_str]),
-            input=content,
-            text=True,
-            stdout=subprocess.DEVNULL,
-            check=True,
-        )
-        # mode is an integer permission (e.g. 0o644); chmod wants octal digits.
-        run_command(_as_root(["chmod", f"{mode:o}", path_str]), check=True)
+        _accounts._write_lines(path, lines, mode, _run)
     except OSError as exc:
-        raise OSError(format_os_error(exc, path=path_str)) from exc
+        raise OSError(format_os_error(exc, path=str(path))) from exc
     except Exception as exc:
         # run_command raises RuntimeError with command detail; annotate path.
-        raise RuntimeError(f"Could not write {path_str}: {exc}") from exc
+        raise RuntimeError(f"Could not write {path}: {exc}") from exc
 
 
 def _path_exists(path: Path) -> bool:
-    result = run_command(
-        _as_root(["test", "-e", str(path)]),
-        check=False, capture_output=True,
-    )
-    return result.returncode == 0
+    return _accounts._path_exists(path, _run)
 
 
 def _chmod_path(path: Path, mode: int) -> None:
-    path_str = str(path)
     try:
-        run_command(_as_root(["chmod", f"{mode:o}", path_str]), check=True)
+        _accounts._chmod_path(path, mode, _run)
     except OSError as exc:
-        raise OSError(format_os_error(exc, path=path_str)) from exc
-
-
-def _append_missing_records(dest: Path, sources: list[Path], fallbacks: dict[str, str]) -> bool:
-    lines = _read_lines(dest)
-    names = {line.split(":", 1)[0] for line in lines if line and ":" in line}
-    changed = False
-
-    for source in sources:
-        for line in _read_lines(source):
-            if not line or ":" not in line:
-                continue
-            name = line.split(":", 1)[0]
-            if name and name not in names:
-                lines.append(line)
-                names.add(name)
-                changed = True
-
-    for name, line in fallbacks.items():
-        if name not in names:
-            lines.append(line)
-            names.add(name)
-            changed = True
-
-    if changed:
-        _write_lines(dest, lines, 0o644)
-    return changed
+        raise OSError(format_os_error(exc, path=str(path))) from exc
 
 
 def ensure_system_accounts(deploy_root: str, log) -> None:
-    root = Path(deploy_root)
-    etc = root / "etc"
-
-    group_changed = _append_missing_records(
-        etc / "group",
-        [root / "usr/lib/group"],
-        SYSTEM_GROUP_FALLBACKS,
-    )
-    passwd_changed = _append_missing_records(
-        etc / "passwd",
-        [root / "usr/lib/passwd"],
-        SYSTEM_PASSWD_FALLBACKS,
-    )
-
-    passwd_names = {
-        line.split(":", 1)[0]
-        for line in _read_lines(etc / "passwd")
-        if line and ":" in line
-    }
-    shadow = etc / "shadow"
-    shadow_lines = _read_lines(shadow)
-    shadow_names = {
-        line.split(":", 1)[0]
-        for line in shadow_lines
-        if line and ":" in line
-    }
-    shadow_changed = False
-    for name in sorted(passwd_names - shadow_names):
-        if name == "root" or not name:
-            continue
-        shadow_lines.append(f"{name}:!*:19700:0:99999:7:::")
-        shadow_changed = True
-    if shadow_changed:
-        _write_lines(shadow, shadow_lines, 0o000)
-    elif _path_exists(shadow):
-        _chmod_path(shadow, 0o000)
-
-    sddm_home = root / "var/lib/sddm"
     try:
-        run_command(_as_root(["mkdir", "-p", str(sddm_home)]), check=True)
+        _accounts.ensure_system_accounts(deploy_root, log, run=_run)
+    except OSError as exc:
+        raise OSError(format_os_error(exc, path=deploy_root)) from exc
     except Exception as exc:
-        raise RuntimeError(
-            f"Could not create SDDM home directory {sddm_home}: "
-            f"{format_os_error(exc, path=sddm_home) if isinstance(exc, OSError) else exc}"
-        ) from exc
-
-    # Read the actual sddm UID/GID from target's etc/passwd to support dynamic allocation
-    # and ensure numeric chown works even if the host environment has no sddm user/group.
-    sddm_uid, sddm_gid = "959", "959"
-    for line in _read_lines(etc / "passwd"):
-        if line.startswith("sddm:"):
-            parts = line.split(":")
-            if len(parts) >= 4:
-                sddm_uid, sddm_gid = parts[2], parts[3]
-                break
-    run_command(_as_root(["chown", f"{sddm_uid}:{sddm_gid}", str(sddm_home)]), check=False)
-    restorecon = shutil.which("restorecon")
-    if restorecon:
-        run_command(
-            _as_root([
-                restorecon,
-                str(etc / "passwd"),
-                str(etc / "group"),
-                str(etc / "shadow"),
-                str(sddm_home),
-            ]),
-            check=False,
-        )
-
-    if group_changed or passwd_changed or shadow_changed:
-        log("Repaired installed system account databases for SDDM/D-Bus")
+        raise RuntimeError(f"Could not repair system accounts under {deploy_root}: {exc}") from exc
 
 
 def _lsblk_target_mounts(disk: str) -> list[tuple[str, str]]:

@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 00:40:15 UTC
+- Last refreshed (UTC): 2026-07-23 00:54:45 UTC
 - Current branch: testing
-- HEAD commit: df7b9a2
-- Last commit title: Remove two dead scripts superseded by other install paths
-- Last commit date: 2026-07-22T20:33:39-04:00
+- HEAD commit: 5ec571f
+- Last commit title: Add _run_worker helper, migrate its safest call sites off manual wiring
+- Last commit date: 2026-07-22T20:40:15-04:00
 - CI workflow files: 8
 - Build script files: 20
 
