@@ -13,6 +13,7 @@ from .plan import _get_manual_mounts, _prepare_install_plan, _validate_install_t
 from .runner import run_command
 from .streaming import StreamingCommandRunner
 from kyth_shared import _get_rx_bytes
+from kyth_shared.accounts import create_installer_user as _shared_create_installer_user
 
 from .system import (
     _as_root,
@@ -342,82 +343,14 @@ def _configure_hostname_timezone(etc, state, log) -> None:
     log(f"Timezone : {state['timezone']}")
 
 
-def _create_installer_user(etc, config_root, deploy_root, username, password_hash, log, progress) -> None:
+def _create_installer_user(config_root, deploy_root, username, password_hash, log, progress) -> None:
     log(f"Creating user: {username}")
     try:
-        run_command(
-            _as_root([
-                "useradd", "--root", deploy_root,
-                "-M", "-G", "wheel,video,audio,render",
-                "-s", "/bin/bash", username,
-            ]),
-            check=True,
+        _shared_create_installer_user(
+            deploy_root, config_root, username, password_hash, log,
+            run=lambda argv, **kw: run_command(_as_root(argv), **kw),
         )
-
-        shadow_path = f"{etc}/shadow"
-        cat_r = run_command(
-            _as_root(["cat", shadow_path]),
-            capture_output=True, text=True, check=True,
-        )
-        new_lines = []
-        hash_written = False
-        for line in cat_r.stdout.splitlines(keepends=True):
-            if line.startswith(f"{username}:"):
-                fields = line.split(":")
-                fields[1] = password_hash
-                new_lines.append(":".join(fields))
-                hash_written = True
-            else:
-                new_lines.append(line)
-        if not hash_written:
-            raise RuntimeError(
-                f"User '{username}' not found in shadow after useradd"
-            )
-        run_command(
-            _as_root(["tee", shadow_path]),
-            input="".join(new_lines), text=True,
-            stdout=subprocess.DEVNULL, check=True,
-        )
-
-        uid, gid = "1000", "1000"
-        cat_r = run_command(
-            _as_root(["cat", f"{etc}/passwd"]),
-            capture_output=True, text=True,
-        )
-        for line in cat_r.stdout.splitlines():
-            if line.startswith(f"{username}:"):
-                parts = line.split(":")
-                uid, gid = parts[2], parts[3]
-                break
-
-        var_home = (
-            Path(config_root) / "ostree/deploy/default/var/home" / username
-        )
-        run_command(_as_root(["mkdir", "-p", str(var_home)]), check=True)
-        run_command(_as_root(["chown", f"{uid}:{gid}", str(var_home)]), check=True)
-        run_command(_as_root(["chmod", "700", str(var_home)]), check=True)
-
-        # skel may be under deploy root; test via elevated path.
-        skel = Path(deploy_root) / "etc/skel"
-        skel_check = run_command(
-            _as_root(["test", "-d", str(skel)]),
-            check=False, capture_output=True,
-        )
-        if skel_check.returncode == 0:
-            run_command(
-                _as_root(["cp", "-rT", str(skel), str(var_home)]),
-                check=True,
-            )
-            run_command(
-                _as_root(["chown", "-R", f"{uid}:{gid}", str(var_home)]),
-                check=True,
-            )
-
-        run_command(
-            _as_root(["restorecon", "-RF", str(var_home)]),
-            check=False,
-        )
-        log(f"User '{username}' created (uid={uid})")
+        # Re-lock /etc/shadow now that this user's entry exists in it.
         ensure_system_accounts(deploy_root, log)
         progress(97)
     except OSError as ue:
@@ -455,7 +388,7 @@ def _configure_installed_system(
             username = state.get("username", "").strip()
             password_hash = state.get("password_hash", "")
             if username and password_hash:
-                _create_installer_user(etc, config_root, deploy_root, username, password_hash, log, progress)
+                _create_installer_user(config_root, deploy_root, username, password_hash, log, progress)
         else:
             log("Warning: deploy/etc not found — skipping post-install configuration")
     finally:

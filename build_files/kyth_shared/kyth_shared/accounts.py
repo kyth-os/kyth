@@ -155,13 +155,89 @@ def ensure_system_accounts(deploy_root: str, log: Callable[[str], None], *, run:
         log("Repaired installed system account databases for SDDM/D-Bus")
 
 
+def create_installer_user(
+    deploy_root: str,
+    target_root: str,
+    username: str,
+    password_hash: str,
+    log: Callable[[str], None],
+    *,
+    run: RunFn,
+) -> None:
+    """Create the primary user account on an offline (unbooted) target tree.
+
+    deploy_root is the ostree deploy commit's own root (dirname of its etc/);
+    target_root is the mounted disk root under which
+    ostree/deploy/default/var/home actually lives — the same mount, just
+    referenced above the deploy-commit directory rather than inside it.
+    Callers must run ensure_system_accounts again afterward to re-lock
+    /etc/shadow permissions once this user's entry exists.
+    """
+    root = Path(deploy_root)
+    etc = root / "etc"
+
+    run(
+        ["useradd", "--root", str(root), "-M", "-G", "wheel,video,audio,render",
+         "-s", "/bin/bash", username],
+        check=True,
+    )
+
+    shadow_lines = _read_lines(etc / "shadow", run)
+    new_lines = []
+    hash_written = False
+    for line in shadow_lines:
+        if line.startswith(f"{username}:"):
+            fields = line.split(":")
+            fields[1] = password_hash
+            new_lines.append(":".join(fields))
+            hash_written = True
+        else:
+            new_lines.append(line)
+    if not hash_written:
+        raise RuntimeError(f"User '{username}' not found in shadow after useradd")
+    # Plain overwrite, not _write_lines: shadow already exists with whatever
+    # permissions useradd/a prior ensure_system_accounts left it at, and
+    # callers are required to run ensure_system_accounts again afterward to
+    # re-lock it down — this just replaces the content in place.
+    content = "\n".join(new_lines) + "\n"
+    run(["tee", str(etc / "shadow")], input=content, text=True, stdout=subprocess.DEVNULL, check=True)
+
+    uid, gid = "1000", "1000"
+    for line in _read_lines(etc / "passwd", run):
+        if line.startswith(f"{username}:"):
+            parts = line.split(":")
+            uid, gid = parts[2], parts[3]
+            break
+
+    var_home = Path(target_root) / "ostree/deploy/default/var/home" / username
+    run(["mkdir", "-p", str(var_home)], check=True)
+    run(["chown", f"{uid}:{gid}", str(var_home)], check=True)
+    run(["chmod", "700", str(var_home)], check=True)
+
+    skel = root / "etc/skel"
+    if run(["test", "-d", str(skel)], check=False, capture_output=True).returncode == 0:
+        run(["cp", "-rT", str(skel), str(var_home)], check=True)
+        run(["chown", "-R", f"{uid}:{gid}", str(var_home)], check=True)
+
+    run(["restorecon", "-RF", str(var_home)], check=False)
+    log(f"User '{username}' created (uid={uid})")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) != 1:
-        print("Usage: python3 -m kyth_shared.accounts DEPLOY_ROOT", file=sys.stderr)
-        return 64
-    ensure_system_accounts(args[0], print, run=_default_run)
-    return 0
+    if len(args) == 1:
+        ensure_system_accounts(args[0], print, run=_default_run)
+        return 0
+    if len(args) == 5 and args[0] == "create-user":
+        _, deploy_root, target_root, username, password_hash = args
+        create_installer_user(deploy_root, target_root, username, password_hash, print, run=_default_run)
+        return 0
+    print(
+        "Usage: python3 -m kyth_shared.accounts DEPLOY_ROOT\n"
+        "       python3 -m kyth_shared.accounts create-user DEPLOY_ROOT TARGET_ROOT USERNAME PASSWORD_HASH",
+        file=sys.stderr,
+    )
+    return 64
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
@@ -139,6 +140,132 @@ class EnsureSystemAccountsTests(unittest.TestCase):
 
             self.assertEqual(accounts.main([str(root)]), 0)
             self.assertIn("sddm:", (root / "etc/passwd").read_text())
+
+
+def _fake_useradd_run(useradd_uid_gid="1000:1000"):
+    """A fake run() simulating enough of useradd/cat/tee/mkdir/chown/chmod/cp
+    to exercise create_installer_user's own logic without needing real root
+    privileges (useradd --root and chown to an arbitrary uid both do)."""
+    uid, gid = useradd_uid_gid.split(":")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if argv[0] == "useradd":
+            root = pathlib.Path(argv[2])
+            username = argv[-1]
+            with (root / "etc/passwd").open("a") as f:
+                f.write(f"{username}:x:{uid}:{gid}::/home/{username}:/bin/bash\n")
+            with (root / "etc/shadow").open("a") as f:
+                f.write(f"{username}:!:19700:0:99999:7:::\n")
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "cat":
+            path = pathlib.Path(argv[1])
+            if path.exists():
+                return subprocess.CompletedProcess(argv, 0, stdout=path.read_text(), stderr="")
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+        if argv[0] == "test":
+            exists = pathlib.Path(argv[2]).exists()
+            return subprocess.CompletedProcess(argv, 0 if exists else 1)
+        if argv[0] == "mkdir":
+            pathlib.Path(argv[2]).mkdir(parents=True, exist_ok=True)
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "tee":
+            path = pathlib.Path(argv[1])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(kwargs.get("input", ""))
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "chmod":
+            pathlib.Path(argv[2]).chmod(int(argv[1], 8))
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "chown":
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "cp":
+            import shutil as _shutil
+            _shutil.copytree(argv[2], argv[3], dirs_exist_ok=True)
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "restorecon":
+            return subprocess.CompletedProcess(argv, 0)
+        raise AssertionError(f"unexpected command: {argv}")
+
+    return fake_run, calls
+
+
+class CreateInstallerUserTests(unittest.TestCase):
+    def test_creates_user_sets_password_hash_and_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _write(root / "etc/passwd", "root:x:0:0:root:/root:/bin/bash\n")
+            _write(root / "etc/shadow", "root:!locked:19700:0:99999:7:::\n")
+
+            fake_run, calls = _fake_useradd_run("1000:1000")
+            accounts.create_installer_user(
+                str(root), str(root), "alice", "$6$fakehash", lambda _msg: None, run=fake_run,
+            )
+
+            passwd = (root / "etc/passwd").read_text()
+            shadow = (root / "etc/shadow").read_text()
+            self.assertIn("alice:x:1000:1000:", passwd)
+            self.assertIn("alice:$6$fakehash:", shadow)
+            self.assertEqual(shadow.count("root:!locked"), 1)
+
+            var_home = root / "ostree/deploy/default/var/home/alice"
+            self.assertTrue(var_home.is_dir())
+            self.assertEqual(var_home.stat().st_mode & 0o777, 0o700)
+
+            useradd_calls = [c for c in calls if c[0] == "useradd"]
+            self.assertEqual(useradd_calls[0][2], str(root))
+            self.assertIn("wheel,video,audio,render", useradd_calls[0])
+
+    def test_copies_skel_into_new_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _write(root / "etc/passwd", "root:x:0:0:root:/root:/bin/bash\n")
+            _write(root / "etc/shadow", "root:!locked:19700:0:99999:7:::\n")
+            _write(root / "etc/skel/.bashrc", "# skel bashrc\n")
+
+            fake_run, _ = _fake_useradd_run("1000:1000")
+            accounts.create_installer_user(
+                str(root), str(root), "bob", "$6$hash", lambda _msg: None, run=fake_run,
+            )
+
+            copied = root / "ostree/deploy/default/var/home/bob/.bashrc"
+            self.assertTrue(copied.is_file())
+            self.assertEqual(copied.read_text(), "# skel bashrc\n")
+
+    def test_raises_if_user_missing_from_shadow_after_useradd(self):
+        # Simulates a broken/mocked useradd that didn't actually add a shadow
+        # entry — must fail loudly rather than silently leave no password set.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _write(root / "etc/passwd", "root:x:0:0:root:/root:/bin/bash\n")
+            _write(root / "etc/shadow", "root:!locked:19700:0:99999:7:::\n")
+
+            def fake_run(argv, **kwargs):
+                if argv[0] == "useradd":
+                    return subprocess.CompletedProcess(argv, 0)
+                if argv[0] == "cat":
+                    path = pathlib.Path(argv[1])
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout=path.read_text() if path.exists() else "", stderr="",
+                    )
+                return subprocess.CompletedProcess(argv, 0)
+
+            with self.assertRaises(RuntimeError):
+                accounts.create_installer_user(
+                    str(root), str(root), "carol", "$6$hash", lambda _msg: None, run=fake_run,
+                )
+
+    def test_cli_dispatches_create_user_with_parsed_arguments(self):
+        # useradd --root needs real root, so this checks main()'s own
+        # argument parsing/dispatch rather than re-testing create_installer_user.
+        with mock.patch.object(accounts, "create_installer_user") as mocked:
+            rc = accounts.main(["create-user", "/deploy", "/target", "dave", "$6$h"])
+        self.assertEqual(rc, 0)
+        mocked.assert_called_once()
+        args, kwargs = mocked.call_args
+        self.assertEqual(args[:4], ("/deploy", "/target", "dave", "$6$h"))
+        self.assertIs(kwargs["run"], accounts._default_run)
 
 
 if __name__ == "__main__":

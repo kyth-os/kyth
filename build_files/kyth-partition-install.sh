@@ -77,58 +77,22 @@ ensure_system_accounts() {
 	as_root python3 -m kyth_shared.accounts "$deploy_root"
 }
 
+# The graphical kyth-installer creates its admin user the same way; both
+# call the shared implementation in kyth_shared.accounts (see
+# ensure_system_accounts above) instead of keeping two independently-
+# drifting reimplementations in sync by hand.
 create_user() {
 	local root_mnt="$1"
 	local deploy_etc="$2"
 	local username="$3"
 	local password="$4"
-	local deploy_root shadow_path pw_hash uid gid var_home skel tmp_shadow
+	local deploy_root pw_hash
 
 	[[ -n "$username" && -n "$password" ]] || return 0
 
 	deploy_root="$(dirname "$deploy_etc")"
-	as_root useradd --root "$deploy_root" \
-		-M \
-		-G wheel,video,audio,render \
-		-s /bin/bash \
-		"$username"
-
 	pw_hash="$(openssl passwd -6 -stdin <<<"$password")"
-	shadow_path="$deploy_etc/shadow"
-	tmp_shadow="$(mktemp)"
-	# shellcheck disable=SC2016
-	as_root awk -F: -v OFS=: -v user="$username" -v hash="$pw_hash" '
-		$1 == user { $2 = hash; found = 1 }
-		{ print }
-		END { if (!found) exit 42 }
-	' "$shadow_path" >"$tmp_shadow" ||
-		{
-			rm -f "$tmp_shadow"
-			die "Failed to update password hash for ${username}"
-		}
-	as_root tee "$shadow_path" >/dev/null <"$tmp_shadow"
-	rm -f "$tmp_shadow"
-
-	uid="1000"
-	gid="1000"
-	while IFS=: read -r name _ pass_uid pass_gid _; do
-		if [[ "$name" == "$username" ]]; then
-			uid="$pass_uid"
-			gid="$pass_gid"
-			break
-		fi
-	done < <(as_root cat "$deploy_etc/passwd")
-
-	var_home="$root_mnt/ostree/deploy/default/var/home/$username"
-	as_root mkdir -p "$var_home"
-	as_root chown "$uid:$gid" "$var_home"
-	as_root chmod 700 "$var_home"
-
-	skel="$deploy_root/etc/skel"
-	if [[ -d "$skel" ]]; then
-		as_root cp -rT "$skel" "$var_home"
-		as_root chown -R "$uid:$gid" "$var_home"
-	fi
+	as_root python3 -m kyth_shared.accounts create-user "$deploy_root" "$root_mnt" "$username" "$pw_hash"
 }
 
 usage() {
