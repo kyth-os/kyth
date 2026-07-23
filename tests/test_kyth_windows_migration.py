@@ -123,6 +123,11 @@ class HardwareSanityTests(unittest.TestCase):
     def test_strip_ansi(self):
         self.assertEqual(_strip_ansi("\x1b[32mOK\x1b[0m"), "OK")
 
+    def test_strip_ansi_non_color_csi_sequences(self):
+        # Cursor-movement/erase CSI codes end in letters other than 'm'
+        # (e.g. 'H', 'K'); a color-only regex would leave these behind.
+        self.assertEqual(_strip_ansi("\x1b[2K\x1b[1GHDR: enabled"), "HDR: enabled")
+
     def test_hw_display_row_hdr_vrr(self):
         sample = "Output: HDMI-1\nHDR: enabled\nVRR: automatic\n"
         with patch(

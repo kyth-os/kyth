@@ -4,11 +4,7 @@ from __future__ import annotations
 import glob
 import re
 
-from ..process import _command_stdout, _run_command
-
-
-def _strip_ansi(text: str) -> str:
-    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+from ..process import _command_stdout, _run_command, _strip_ansi
 
 
 def hw_display_row() -> tuple[str, str, str] | None:

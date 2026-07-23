@@ -9,6 +9,7 @@ by ``kyth-probe`` (and write-through on live fetch) warms cold Hub starts.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 import threading
@@ -60,6 +61,11 @@ def _command_stdout(cmd: list[str], timeout: int = 5) -> str:
     if result is None:
         return ""
     return result.stdout.strip()
+
+
+def _strip_ansi(text: str) -> str:
+    """Strip ANSI CSI escape sequences (color, cursor movement, etc.)."""
+    return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
 
 
 def _with_idle_inhibit(cmd: list[str], reason: str) -> list[str]:

@@ -6,12 +6,8 @@ import os
 import re
 
 from .types import HardwareProbe
-from ..process import _command_stdout
+from ..process import _command_stdout, _strip_ansi
 
-
-def _strip_ansi(text: str) -> str:
-    return re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
- # _strip_ansi
 
 def _format_display_mode(mode: str) -> str:
     m = re.match(r'(\d+)x(\d+)@([\d.]+)', mode)

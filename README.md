@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 01:32:26 UTC
+- Last refreshed (UTC): 2026-07-23 02:24:58 UTC
 - Current branch: testing
-- HEAD commit: bd5d69f
-- Last commit title: Suppress false-positive CodeQL clear-text-storage finding in test fixtures
-- Last commit date: 2026-07-22T21:30:24-04:00
+- HEAD commit: b54ef39
+- Last commit title: Fix CodeQL suppression comment placement (same line as the alert)
+- Last commit date: 2026-07-22T21:32:26-04:00
 - CI workflow files: 8
 - Build script files: 20
 
