@@ -10,6 +10,7 @@ from .services.network import (
     _is_cifs_available, _is_mounted, _load_smb_config,
     _save_smb_config, _systemd_escape_mount_path,
 )
+from .services.network_share_helper import _mount_point
 from .services.privileged import helper_action, systemctl_action
 from .services.runtime import Worker
 from .qt import (
@@ -303,15 +304,18 @@ class NetworkSharesPage(Page):
         safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", name)
         if not mount_pt:
             mount_pt = f"/mnt/kyth/{safe_name}"
-        mount_pt = os.path.normpath(os.path.expanduser(mount_pt))
-        # Restrict mount points to safe prefixes — the add-share script runs as
-        # root and creates the directory, so mounting over /etc or /usr would
-        # corrupt the system.
-        _SAFE_MOUNT_PREFIXES = ("/mnt/", "/media/", "/run/media/", "/home/")
-        if not any(mount_pt.startswith(p) for p in _SAFE_MOUNT_PREFIXES):
+        mount_pt = os.path.expanduser(mount_pt)
+        # Same validation the root-side add/remove helper enforces (it runs as
+        # root and creates this directory, so mounting over /etc or /usr would
+        # corrupt the system) — checked here too so bad input gets a friendly
+        # message immediately instead of a less-clear failure from the helper.
+        try:
+            mount_pt = _mount_point(mount_pt)
+        except ValueError:
             QMessageBox.warning(
                 self, "Invalid Mount Point",
-                "Mount point must be under /mnt/, /media/, /run/media/, or /home/.",
+                "Mount point must be under /mnt/, /media/, /run/media/, or /home/, "
+                "and contain only letters, numbers, spaces, '.', '_', '-', or '/'.",
             )
             return None
 
