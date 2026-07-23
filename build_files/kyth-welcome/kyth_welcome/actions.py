@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import re
 
-from .qt import QPushButton
+from .qt import QMessageBox, QPushButton
+from .services.browser_apps import _chromium_app_window_cmd
+from .services.launch import popen
 from .services.runtime import Worker, _finish_worker
 from .services.flatpak import flatpak_install_shell_command
 
@@ -47,3 +49,25 @@ def _install_flatpak_inline(owner: object, btn: QPushButton, app_id: str, name: 
     worker.done.connect(_done)
     setattr(owner, attr, worker)
     worker.start()
+
+
+def _open_chromium_webapp(owner: object, url: str, *, extra_hint: str = "") -> None:
+    """Open `url` in a dedicated Chromium-family app window.
+
+    Used for web-app shortcuts (e.g. Microsoft 365) that should feel like
+    native apps rather than browser tabs.
+    """
+    launch = _chromium_app_window_cmd(url)
+    if launch is None:
+        message = (
+            "Opening web app shortcuts needs a Chromium-family browser "
+            "(Brave, Chromium, Edge, or Chrome), but none was found."
+        )
+        if extra_hint:
+            message += f"\n\n{extra_hint}"
+        QMessageBox.warning(owner, "No browser found", message)
+        return
+    try:
+        popen(launch[0])
+    except OSError as exc:
+        QMessageBox.warning(owner, "Could not open web app", str(exc))

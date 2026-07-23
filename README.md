@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 02:40:05 UTC
+- Last refreshed (UTC): 2026-07-23 02:54:57 UTC
 - Current branch: testing
-- HEAD commit: fe92529
-- Last commit title: Consolidate duplicate _strip_ansi into services/process.py
-- Last commit date: 2026-07-22T22:24:58-04:00
+- HEAD commit: 635197c
+- Last commit title: Unify bootc download-progress tracking, fix dead total-extend update
+- Last commit date: 2026-07-22T22:40:05-04:00
 - CI workflow files: 8
 - Build script files: 20
 
