@@ -112,6 +112,14 @@ class EnsureSystemAccountsTests(unittest.TestCase):
                 if argv[0] == "tee":
                     path = pathlib.Path(argv[1])
                     path.parent.mkdir(parents=True, exist_ok=True)
+                    # lgtm[py/clear-text-storage-sensitive-data]
+                    # This fake `run` stands in for the real root-escalated
+                    # `tee` used to write /etc/shadow itself, whose whole job
+                    # is storing password hashes in a plain (permission-
+                    # locked, not encrypted) file, matching real Unix shadow
+                    # file semantics — not a credential-handling bug, and the
+                    # data here is a synthetic test fixture, never a real
+                    # secret.
                     path.write_text(kwargs.get("input", ""))
                     return subprocess.CompletedProcess(argv, 0)
                 if argv[0] == "chmod":
@@ -173,6 +181,12 @@ def _fake_useradd_run(useradd_uid_gid="1000:1000"):
         if argv[0] == "tee":
             path = pathlib.Path(argv[1])
             path.parent.mkdir(parents=True, exist_ok=True)
+            # lgtm[py/clear-text-storage-sensitive-data]
+            # Stands in for the real root-escalated `tee` writing
+            # /etc/shadow, whose job is storing password hashes in a plain
+            # (permission-locked, not encrypted) file — real Unix shadow
+            # file semantics, not a credential-handling bug. The hash here
+            # ("$6$fakehash" etc.) is a synthetic test fixture.
             path.write_text(kwargs.get("input", ""))
             return subprocess.CompletedProcess(argv, 0)
         if argv[0] == "chmod":

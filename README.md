@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 01:24:42 UTC
+- Last refreshed (UTC): 2026-07-23 01:30:24 UTC
 - Current branch: testing
-- HEAD commit: cd3672f
-- Last commit title: Move the HTTP route table out of plan.py into server.py
-- Last commit date: 2026-07-22T21:19:12-04:00
+- HEAD commit: 03c7a21
+- Last commit title: Consolidate installer user creation into kyth_shared, drop bash reimplementation
+- Last commit date: 2026-07-22T21:24:42-04:00
 - CI workflow files: 8
 - Build script files: 20
 
