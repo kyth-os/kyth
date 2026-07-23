@@ -1,6 +1,7 @@
 """Hardware probes package (GPU, display, controllers, platform, …)."""
 from .types import HardwareProbe, _status_palette
 from .nvidia import (
+    NvidiaStatusView,
     _akmod_nvidia_built,
     _akmod_nvidia_installed,
     _detect_nvidia,
@@ -8,6 +9,7 @@ from .nvidia import (
     _hw_setup_done,
     _hw_setup_service_state,
     _nvidia_module_loaded,
+    nvidia_status_view,
 )
 from .io import (
     _audio_probe,

@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 03:00:54 UTC
+- Last refreshed (UTC): 2026-07-23 03:01:02 UTC
 - Current branch: testing
-- HEAD commit: 8fc0d97
-- Last commit title: Extract duplicate _open_m365_webapp into a shared action helper
-- Last commit date: 2026-07-22T22:54:57-04:00
+- HEAD commit: 6fc5d66
+- Last commit title: Add coverage for page_kernel.py's flavor/image-tag logic
+- Last commit date: 2026-07-22T23:00:54-04:00
 - CI workflow files: 8
 - Build script files: 20
 

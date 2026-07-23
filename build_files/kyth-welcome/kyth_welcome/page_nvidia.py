@@ -6,7 +6,7 @@ from .core_base import (
 )
 from .services.hardware import (
     _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
-    _nvidia_module_loaded,
+    _nvidia_module_loaded, nvidia_status_view,
 )
 from .services.runtime import _finish_worker
 from .services.privileged import helper_action
@@ -87,81 +87,34 @@ class NvidiaPage(Page):
         self._refresh_status()
 
     def _refresh_status(self):
-        has_gpu = _detect_nvidia()
-        loaded = _nvidia_module_loaded()
-        built = _akmod_nvidia_built()
-        installed = _akmod_nvidia_installed()
-        svc_state = _hw_setup_service_state()
-        auto_building = svc_state == "activating"
+        view = nvidia_status_view(
+            has_gpu=_detect_nvidia(),
+            loaded=_nvidia_module_loaded(),
+            built=_akmod_nvidia_built(),
+            installed=_akmod_nvidia_installed(),
+            hw_setup_done=_hw_setup_done(),
+            svc_state=_hw_setup_service_state(),
+        )
 
         # Keep polling while the background service is compiling.
-        if auto_building and not self._poll_timer.isActive():
+        if view.keep_polling and not self._poll_timer.isActive():
             self._poll_timer.start()
-        elif not auto_building:
+        elif not view.keep_polling:
             self._poll_timer.stop()
 
-        if not has_gpu:
-            self._sub.setText("No NVIDIA GPU detected in this system.")
-            self._status_lbl.setText("No NVIDIA hardware found.")
-            self._status_lbl.setObjectName("status-dim")
-            self._install_btn.hide()
-            self._progress.hide()
-        elif loaded:
-            self._sub.setText("NVIDIA GPU detected.")
-            self._status_lbl.setText("Drivers are active and the kernel module is loaded.")
-            self._status_lbl.setObjectName("status-ok")
-            self._install_btn.hide()
-            self._progress.hide()
-        elif built:
-            self._sub.setText("NVIDIA GPU detected.")
-            self._status_lbl.setText("Drivers installed — reboot to activate.")
-            self._status_lbl.setObjectName("status-warn")
-            self._install_btn.hide()
-            self._progress.hide()
-            self._reboot_btn.show()
-        elif auto_building:
-            # kyth-hw-setup is running akmods in the background right now.
-            self._sub.setText("NVIDIA GPU detected.")
-            self._status_lbl.setText(
-                "Building NVIDIA kernel module automatically — this takes 5–15 minutes.\n"  # noqa: RUF001 — en dash, deliberate typography
-                "You can keep using the system. This page will update when the build finishes."
-            )
-            self._status_lbl.setObjectName("subheading")
-            self._install_btn.hide()
+        self._sub.setText(view.sub_text)
+        self._status_lbl.setText(view.status_text)
+        self._status_lbl.setObjectName(view.status_style)
+
+        self._install_btn.setVisible(view.install_visible)
+        if view.install_visible:
+            self._install_btn.setText(view.install_text)
+
+        self._progress.setVisible(view.progress_visible)
+        if view.progress_visible:
             self._progress.setRange(0, 0)
-            self._progress.show()
-        elif _hw_setup_done() and svc_state == "failed":
-            # Service ran but akmods failed — offer a manual retry.
-            self._sub.setText("NVIDIA GPU detected — automatic build failed.")
-            self._status_lbl.setText(
-                "kyth-hw-setup could not build the kernel module. "
-                "Check journalctl -u kyth-hw-setup for details, then click below to retry."
-            )
-            self._status_lbl.setObjectName("status-err")
-            self._install_btn.setText("Retry Build")
-            self._install_btn.show()
-            self._progress.hide()
-        elif installed:
-            # Service hasn't run yet or was reset — offer a manual kick-off.
-            self._sub.setText("NVIDIA GPU detected.")
-            self._status_lbl.setText(
-                "Kernel module will be compiled automatically on next boot, "
-                "or click below to build it now."
-            )
-            self._status_lbl.setObjectName("subheading")
-            self._install_btn.setText("Build Driver Now")
-            self._install_btn.show()
-            self._progress.hide()
-        else:
-            # akmod-nvidia missing — should never happen on a correctly built image.
-            self._sub.setText("NVIDIA GPU detected — driver package missing.")
-            self._status_lbl.setText(
-                "akmod-nvidia is not installed. This is unexpected on KythOS.\n"
-                "Run: rpm-ostree install akmod-nvidia, then reboot and return here."
-            )
-            self._status_lbl.setObjectName("status-err")
-            self._install_btn.hide()
-            self._progress.hide()
+
+        self._reboot_btn.setVisible(view.reboot_visible)
 
         _restyle(self._sub)
         _restyle(self._status_lbl)

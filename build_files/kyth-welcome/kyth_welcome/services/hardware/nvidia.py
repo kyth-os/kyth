@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from dataclasses import dataclass
 
 from .types import HardwareProbe
 from ..process import _probe_cached
@@ -57,6 +58,81 @@ def _hw_setup_service_state() -> str:
 
 def _hw_setup_done() -> bool:
     return os.path.exists("/var/lib/kyth/hw-setup-done")
+
+
+@dataclass(frozen=True)
+class NvidiaStatusView:
+    """What page_nvidia.py's NvidiaPage should show, driven purely by probe
+    results — no Qt, so the decision tree is testable without a display."""
+    sub_text: str
+    status_text: str
+    status_style: str
+    install_visible: bool
+    install_text: str
+    progress_visible: bool
+    reboot_visible: bool
+    keep_polling: bool
+
+
+def nvidia_status_view(
+    *, has_gpu: bool, loaded: bool, built: bool, installed: bool,
+    hw_setup_done: bool, svc_state: str,
+) -> NvidiaStatusView:
+    auto_building = svc_state == "activating"
+
+    if not has_gpu:
+        return NvidiaStatusView(
+            "No NVIDIA GPU detected in this system.",
+            "No NVIDIA hardware found.", "status-dim",
+            False, "", False, False, auto_building,
+        )
+    if loaded:
+        return NvidiaStatusView(
+            "NVIDIA GPU detected.",
+            "Drivers are active and the kernel module is loaded.", "status-ok",
+            False, "", False, False, auto_building,
+        )
+    if built:
+        return NvidiaStatusView(
+            "NVIDIA GPU detected.",
+            "Drivers installed — reboot to activate.", "status-warn",
+            False, "", False, True, auto_building,
+        )
+    if auto_building:
+        # kyth-hw-setup is running akmods in the background right now.
+        return NvidiaStatusView(
+            "NVIDIA GPU detected.",
+            "Building NVIDIA kernel module automatically — this takes 5–15 minutes.\n"  # noqa: RUF001 — en dash, deliberate typography
+            "You can keep using the system. This page will update when the build finishes.",
+            "subheading",
+            False, "", True, False, True,
+        )
+    if hw_setup_done and svc_state == "failed":
+        # Service ran but akmods failed — offer a manual retry.
+        return NvidiaStatusView(
+            "NVIDIA GPU detected — automatic build failed.",
+            "kyth-hw-setup could not build the kernel module. "
+            "Check journalctl -u kyth-hw-setup for details, then click below to retry.",
+            "status-err",
+            True, "Retry Build", False, False, False,
+        )
+    if installed:
+        # Service hasn't run yet or was reset — offer a manual kick-off.
+        return NvidiaStatusView(
+            "NVIDIA GPU detected.",
+            "Kernel module will be compiled automatically on next boot, "
+            "or click below to build it now.",
+            "subheading",
+            True, "Build Driver Now", False, False, False,
+        )
+    # akmod-nvidia missing — should never happen on a correctly built image.
+    return NvidiaStatusView(
+        "NVIDIA GPU detected — driver package missing.",
+        "akmod-nvidia is not installed. This is unexpected on KythOS.\n"
+        "Run: rpm-ostree install akmod-nvidia, then reboot and return here.",
+        "status-err",
+        False, "", False, False, False,
+    )
 
 
 def _gpu_probe(pci_text: str, lsmod_text: str) -> HardwareProbe:
