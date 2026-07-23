@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import shlex
 
-from .core_base import _restyle
+from .core_base import _restyle, _run_worker
 from .services.launch import flatpak_run, kcmshell, popen, popen_privileged, systemsettings
 from .services.repair import (
     enable_clipboard_history,
@@ -13,7 +13,7 @@ from .services.repair import (
 )
 from .actions import _install_flatpak_inline
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import _finish_worker
 from .services.privileged import systemctl_action
 from .qt import QDesktopServices, QMessageBox, QUrl
 from .widgets import _set_log_panel
@@ -125,10 +125,12 @@ class _QuickFixMixin:
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.show()
         _restyle(self._status_lbl)
-        self._worker = Worker(cmd)
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(lambda code, name=label: self._on_quick_fix_done(code, name))
-        self._worker.start()
+        _run_worker(
+            self,
+            cmd,
+            on_line=self._on_line,
+            on_done=lambda code, name=label: self._on_quick_fix_done(code, name),
+        )
 
     def _on_quick_fix_done(self, code: int, label: str):
         self._progress.hide()

@@ -5,9 +5,9 @@ import time
 from .services.launch import reboot
 from .core_base import (
     DownloadMonitor, _bootc_image_timestamp, _branch_display_name, _get_rx_bytes, _human_bytes, _human_bytes_pair,
-    _image_tag_for_channel, _parse_size_bytes, _restyle, _set_session_inhibit, _with_idle_inhibit,
+    _image_tag_for_channel, _parse_size_bytes, _restyle, _run_worker, _set_session_inhibit, _with_idle_inhibit,
 )
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import _finish_worker
 from .services.privileged import bootc_action
 from .core_base import REGISTRY, _bootc_image_digest, _current_branch
 from .qt import (
@@ -234,14 +234,16 @@ class BranchesPage(Page):
         self._stable_btn.setEnabled(False)
         self._testing_btn.setEnabled(False)
 
-        self._worker = Worker(_with_idle_inhibit(
-            bootc_action("switch", ref).command(),
-            "KythOS is switching branch",
-        ))
-        _set_session_inhibit(self, "KythOS is switching the system branch")
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            _with_idle_inhibit(
+                bootc_action("switch", ref).command(),
+                "KythOS is switching branch",
+            ),
+            session_inhibit_reason="KythOS is switching the system branch",
+            on_line=self._on_line,
+            on_done=self._on_done,
+        )
         self._update_activity()
         self._heartbeat.start()
 

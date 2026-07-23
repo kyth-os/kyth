@@ -6,7 +6,7 @@ from .core_base import (
     DownloadMonitor, _active_bootc_operation, _bootc_cancel_block_reason, _bootc_image_timestamp,
     _bootc_proxy_running, _branch_display_name, _get_disk_write_bytes, _get_rx_bytes, _has_rollback_deployment,
     _has_staged_update, _human_bytes, _human_bytes_pair, _parse_size_bytes, _parse_update_phase,
-    _restyle, _set_session_inhibit, _with_idle_inhibit,
+    _restyle, _run_worker, _set_session_inhibit, _with_idle_inhibit,
 )
 from .services.launch import reboot
 from .services.runtime import Worker, _finish_worker
@@ -186,11 +186,13 @@ class _UpdateOpsMixin:
         self._cancel_note.show()
         self._set_buttons_enabled(False)
 
-        self._worker = Worker(_with_idle_inhibit(cmd, inhibit_reason))
-        _set_session_inhibit(self, inhibit_reason)
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            _with_idle_inhibit(cmd, inhibit_reason),
+            session_inhibit_reason=inhibit_reason,
+            on_line=self._on_line,
+            on_done=self._on_done,
+        )
         self._update_activity()
         self._update_cancel_state()
         if mode != "rollback":

@@ -4,7 +4,7 @@ import re
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
-    _apply_install_badge, _restyle,
+    _apply_install_badge, _restyle, _run_worker,
 )
 from .services.network import (
     _is_cifs_available, _is_mounted, _load_smb_config,
@@ -350,13 +350,13 @@ class NetworkSharesPage(Page):
             "gid": os.getgid(),
         }
         self._begin_op(f"Adding share {share['name']}…")
-        self._worker = Worker(
+        _run_worker(
+            self,
             helper_action("network-share", "add").command(),
             input_text=json.dumps(payload),
+            on_line=self._op_log.append,
+            on_done=lambda code, s=share: self._on_add_done(code, s),
         )
-        self._worker.line.connect(self._op_log.append)
-        self._worker.done.connect(lambda code, s=share: self._on_add_done(code, s))
-        self._worker.start()
 
     def _on_add_done(self, code: int, share: dict):
         self._op_progress.hide()
@@ -416,16 +416,16 @@ class NetworkSharesPage(Page):
         if self._worker and self._worker.isRunning():
             return
         self._begin_op(f"Removing {share['name']}…")
-        self._worker = Worker(
+        _run_worker(
+            self,
             helper_action("network-share", "remove").command(),
             input_text=json.dumps({
                 "name": share["name"],
                 "mount_point": share["mount_point"],
             }),
+            on_line=self._op_log.append,
+            on_done=lambda code, s=share: self._on_remove_done(code, s),
         )
-        self._worker.line.connect(self._op_log.append)
-        self._worker.done.connect(lambda code, s=share: self._on_remove_done(code, s))
-        self._worker.start()
 
     def _on_remove_done(self, code: int, share: dict):
         self._op_progress.hide()
@@ -442,10 +442,12 @@ class NetworkSharesPage(Page):
 
     def _run_systemctl(self, action: str, unit: str, status_msg: str):
         self._begin_op(status_msg)
-        self._worker = Worker(systemctl_action(action, unit).command())
-        self._worker.line.connect(self._op_log.append)
-        self._worker.done.connect(self._on_generic_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            systemctl_action(action, unit).command(),
+            on_line=self._op_log.append,
+            on_done=self._on_generic_done,
+        )
 
     def _on_generic_done(self, code: int):
         self._op_progress.hide()

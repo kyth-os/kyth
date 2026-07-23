@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from ..core_base import _restyle
+from ..core_base import _restyle, _run_worker
 from .dropbox import _DropboxMixin
 from .gdrive import _GoogleDriveMixin
 from .onedrive import _OneDriveMixin
@@ -12,7 +12,7 @@ from ..services.network import (
     _load_sync_config, _rclone_available, _rclone_list_remotes, _save_sync_config,
 )
 from ..services.flatpak import _is_flatpak_installed
-from ..services.runtime import Worker, _finish_worker
+from ..services.runtime import _finish_worker
 from ..services.privileged import helper_action
 from ..qt import (
     QDesktopServices, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QUrl,
@@ -226,10 +226,12 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         self._op_status.setObjectName("subheading")
         self._op_status.show()
         _restyle(self._op_status)
-        self._worker = Worker(helper_action("rclone-update").command())
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_rclone_install_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            helper_action("rclone-update").command(),
+            on_line=self._on_line,
+            on_done=self._on_rclone_install_done,
+        )
 
     def _on_rclone_install_done(self, code: int):
         self._progress.hide()

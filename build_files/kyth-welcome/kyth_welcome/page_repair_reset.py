@@ -4,10 +4,10 @@ from __future__ import annotations
 from .services.launch import reboot
 
 from .core_base import (
-    _has_rollback_deployment, _restyle, _set_session_inhibit,
+    _has_rollback_deployment, _restyle, _run_worker, _set_session_inhibit,
 )
 from .services.repair import rollback_command, reset_command
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import _finish_worker
 from .qt import single_shot
 from .widgets import _set_log_panel
 
@@ -32,11 +32,13 @@ class _ResetMixin:
         self._status_lbl.show()
         _restyle(self._status_lbl)
 
-        self._worker = Worker(rollback_command())
-        _set_session_inhibit(self, "KythOS is staging a rollback")
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_rollback_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            rollback_command(),
+            session_inhibit_reason="KythOS is staging a rollback",
+            on_line=self._on_line,
+            on_done=self._on_rollback_done,
+        )
 
     def _on_rollback_done(self, code: int):
         self._progress.hide()
@@ -68,11 +70,13 @@ class _ResetMixin:
         self._status_lbl.show()
         _restyle(self._status_lbl)
 
-        self._worker = Worker(reset_command())
-        _set_session_inhibit(self, "KythOS is resetting the system image")
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            reset_command(),
+            session_inhibit_reason="KythOS is resetting the system image",
+            on_line=self._on_line,
+            on_done=self._on_done,
+        )
 
     def _on_line(self, text: str):
         self._log.append(text)

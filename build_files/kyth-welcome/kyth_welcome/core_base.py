@@ -208,6 +208,33 @@ def _set_session_inhibit(owner: object, reason: str | None = None) -> None:
         owner._screen_inhibit_cookie = int(match.group(1))
 
 
+def _run_worker(
+    owner: object,
+    cmd: list[str],
+    *,
+    on_line,
+    on_done,
+    attr: str = "_worker",
+    input_text: str | None = None,
+    session_inhibit_reason: str | None = None,
+) -> Worker:
+    """Construct, wire, and start a Worker stored on owner.<attr>.
+
+    Collapses the ubiquitous ``self._worker = Worker(cmd);
+    self._worker.line.connect(on_line); self._worker.done.connect(on_done);
+    self._worker.start()`` sequence — optionally preceded by a session-inhibit
+    call, in the same order pages already issue it — repeated across pages.
+    """
+    worker = Worker(cmd, input_text=input_text)
+    setattr(owner, attr, worker)
+    if session_inhibit_reason is not None:
+        _set_session_inhibit(owner, session_inhibit_reason)
+    worker.line.connect(on_line)
+    worker.done.connect(on_done)
+    worker.start()
+    return worker
+
+
 def _remove_autostart():
     path = os.path.expanduser("~/.config/autostart/kyth-welcome.desktop")
     try:

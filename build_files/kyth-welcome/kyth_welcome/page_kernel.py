@@ -3,7 +3,7 @@
 from .services.launch import reboot
 from .core_base import (
     _bootc_cancel_block_reason, _branch_display_name, _current_kernel_flavor, _image_tag_for_kernel,
-    _parse_update_phase, _restyle, _set_session_inhibit, _with_idle_inhibit,
+    _parse_update_phase, _restyle, _run_worker, _set_session_inhibit, _with_idle_inhibit,
 )
 from .services.diagnostics import _command_stdout
 from .services.runtime import Worker, _finish_worker
@@ -183,14 +183,16 @@ class KernelPage(Page):
         for btn in self._kernel_buttons.values():
             btn.setEnabled(False)
 
-        self._worker = Worker(_with_idle_inhibit(
-            bootc_action("switch", ref).command(),
-            "KythOS is switching kernel image",
-        ))
-        _set_session_inhibit(self, "KythOS is switching kernel image")
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            _with_idle_inhibit(
+                bootc_action("switch", ref).command(),
+                "KythOS is switching kernel image",
+            ),
+            session_inhibit_reason="KythOS is switching kernel image",
+            on_line=self._on_line,
+            on_done=self._on_done,
+        )
 
     def _on_line(self, text: str):
         phase = _parse_update_phase(text.strip(), "switch")

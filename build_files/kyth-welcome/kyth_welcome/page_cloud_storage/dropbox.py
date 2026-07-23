@@ -1,9 +1,9 @@
 import os
 import shutil
 
-from ..core_base import _restyle
+from ..core_base import _restyle, _run_worker
 from ..services.launch import flatpak_run, popen
-from ..services.runtime import Worker, _finish_worker
+from ..services.runtime import _finish_worker
 from ..qt import QHBoxLayout, QLabel, QPushButton
 from ..widgets import _make_card
 
@@ -55,10 +55,12 @@ class _DropboxMixin:
         self._op_status.setObjectName("subheading")
         self._op_status.show()
         _restyle(self._op_status)
-        self._worker = Worker(["flatpak", "install", "-y", "--user", "flathub", "com.dropbox.Client"])
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_dropbox_install_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            ["flatpak", "install", "-y", "--user", "flathub", "com.dropbox.Client"],
+            on_line=self._on_line,
+            on_done=self._on_dropbox_install_done,
+        )
 
     def _on_dropbox_install_done(self, code: int):
         self._progress.hide()

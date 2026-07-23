@@ -2,13 +2,13 @@
 # __KYTH_GENERATED_IMPORTS__
 from .services.launch import reboot
 from .core_base import (
-    _restyle, _set_session_inhibit,
+    _restyle, _run_worker, _set_session_inhibit,
 )
 from .services.hardware import (
     _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
     _nvidia_module_loaded,
 )
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import _finish_worker
 from .services.privileged import helper_action
 from .qt import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer,
@@ -178,11 +178,13 @@ class NvidiaPage(Page):
         self._progress.show()
         self._install_btn.setEnabled(False)
 
-        self._worker = Worker(cmd)
-        _set_session_inhibit(self, "KythOS is building NVIDIA kernel module")
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            cmd,
+            session_inhibit_reason="KythOS is building NVIDIA kernel module",
+            on_line=self._on_line,
+            on_done=self._on_done,
+        )
 
     def _on_line(self, text: str):
         self._log.append(text)
