@@ -354,12 +354,12 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 00:16:26 UTC
+- Last refreshed (UTC): 2026-07-23 00:33:39 UTC
 - Current branch: testing
-- HEAD commit: cce6f42
-- Last commit title: Remove throwaway KVM diagnostic workflow
-- Last commit date: 2026-07-22T20:16:09-04:00
+- HEAD commit: c4e5264
+- Last commit title: Fix VM acceptance timeout: grant KVM access, fail fast without it
+- Last commit date: 2026-07-22T20:16:26-04:00
 - CI workflow files: 8
-- Build script files: 21
+- Build script files: 20
 
 <!-- AUTO-README-END -->
