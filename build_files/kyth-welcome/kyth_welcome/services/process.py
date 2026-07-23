@@ -155,3 +155,28 @@ def _get_disk_write_bytes() -> int:
 
 # pylint: disable-next=unused-import
 from kyth_shared import _get_rx_bytes, _human_bytes, _human_bytes_pair, _parse_size_bytes  # noqa: F401
+
+
+def _format_elapsed(seconds: int) -> str:
+    """Render whole seconds as "Xm YYs", or just "Ys" under a minute."""
+    mins, secs = divmod(max(0, seconds), 60)
+    return f"{mins}m {secs:02d}s" if mins else f"{secs}s"
+
+
+def _format_eta(seconds: int) -> str:
+    """Render a download ETA, or "" when there's nothing worth showing."""
+    if seconds > 60:
+        return f"~{_format_elapsed(seconds)} remaining"
+    if seconds > 0:
+        return f"~{seconds}s remaining"
+    return ""
+
+
+def _format_dl_progress_line(downloaded: int, total: int, speed_bps: int, eta_sec: int) -> str:
+    """Render a live "downloaded / total  ·  speed  ·  eta" activity line."""
+    dl_downloaded, dl_total = _human_bytes_pair(downloaded, total)
+    parts = [f"{dl_downloaded} / {dl_total}", f"{_human_bytes(speed_bps)}/s"]
+    eta_str = _format_eta(eta_sec)
+    if eta_str:
+        parts.append(eta_str)
+    return "  ·  ".join(parts)

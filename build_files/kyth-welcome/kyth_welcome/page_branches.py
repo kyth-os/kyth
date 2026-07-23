@@ -1,11 +1,11 @@
-import logging
 import time
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.launch import reboot
 from .core_base import (
-    DownloadMonitor, _bootc_image_timestamp, _branch_display_name, _get_rx_bytes, _human_bytes, _human_bytes_pair,
-    _image_tag_for_channel, _parse_size_bytes, _restyle, _run_worker, _set_session_inhibit, _with_idle_inhibit,
+    _bootc_image_timestamp, _branch_display_name, _format_dl_progress_line, _format_elapsed,
+    _image_tag_for_channel, _restyle, _run_worker, _set_session_inhibit, _start_or_extend_dl_monitor,
+    _stop_download_monitor, _with_idle_inhibit,
 )
 from .services.runtime import _finish_worker
 from .services.privileged import bootc_action
@@ -16,8 +16,6 @@ from .qt import (
 from .widgets import (
     Page, _make_card, _set_log_panel,
 )
-
-_logger = logging.getLogger(__name__)
 
 # ── Page: Branches ────────────────────────────────────────────────────────────
 class BranchesPage(Page):
@@ -248,26 +246,18 @@ class BranchesPage(Page):
         self._heartbeat.start()
 
     def _stop_dl_monitor(self):
-        if self._dl_monitor is not None:
-            self._dl_monitor.stop()
-            self._dl_monitor.wait()
-            self._dl_monitor.deleteLater()
-            self._dl_monitor = None
+        _stop_download_monitor(self._dl_monitor)
+        self._dl_monitor = None
 
     def _on_line(self, text: str):
-        if "layers needed:" in text and self._dl_monitor is None:
-            try:
-                m = text.split("layers needed:")[1]
-                size_str = m.split("(")[1].rstrip(")") if "(" in m else ""
-                total = _parse_size_bytes(size_str)
-                if total > 0:
-                    self._dl_total = total
-                    self._progress.setRange(0, 1000)
-                    self._dl_monitor = DownloadMonitor(total, _get_rx_bytes())
-                    self._dl_monitor.stats.connect(self._on_dl_stats)
-                    self._dl_monitor.start()
-            except Exception:
-                _logger.debug("_on_line: failed to parse download size from %r", text, exc_info=True)
+        self._dl_monitor, self._dl_total, started, progress_ready = _start_or_extend_dl_monitor(
+            text, self._dl_monitor, self._dl_total,
+        )
+        if progress_ready:
+            self._progress.setRange(0, 1000)
+        if started:
+            self._dl_monitor.stats.connect(self._on_dl_stats)
+            self._dl_monitor.start()
         self._log.append(text)
         self._log.ensureCursorVisible()
 
@@ -277,28 +267,13 @@ class BranchesPage(Page):
         if total > 0:
             self._progress.setValue(int(min(downloaded / total, 1.0) * 1000))
         if speed_bps > 100_000:
-            dl_dl, dl_total = _human_bytes_pair(downloaded, total)
-            dl_str = f"{dl_dl} / {dl_total}"
-            speed_str = f"{_human_bytes(speed_bps)}/s"
-            if eta_sec > 60:
-                eta_mins, eta_secs = divmod(eta_sec, 60)
-                eta_str = f"~{eta_mins}m {eta_secs:02d}s remaining"
-            elif eta_sec > 0:
-                eta_str = f"~{eta_sec}s remaining"
-            else:
-                eta_str = ""
-            parts = [dl_str, speed_str]
-            if eta_str:
-                parts.append(eta_str)
-            self._activity_lbl.setText("  ·  ".join(parts))
+            self._activity_lbl.setText(_format_dl_progress_line(downloaded, total, speed_bps, eta_sec))
             self._activity_lbl.show()
 
     def _update_activity(self):
         elapsed = int(time.monotonic() - self._op_start_ts) if self._op_start_ts else 0
-        mins, secs = divmod(elapsed, 60)
-        elapsed_str = f"{mins}m {secs:02d}s" if mins else f"{secs}s"
         phase = self._current_phase or "Switching branch…"
-        self._activity_lbl.setText(f"{phase}  ·  {elapsed_str} elapsed")
+        self._activity_lbl.setText(f"{phase}  ·  {_format_elapsed(elapsed)} elapsed")
         self._activity_lbl.show()
 
     def _heartbeat_tick(self):

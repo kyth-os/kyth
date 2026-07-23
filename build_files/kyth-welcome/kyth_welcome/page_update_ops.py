@@ -1,12 +1,12 @@
-import logging
 import time
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
-    DownloadMonitor, _active_bootc_operation, _bootc_cancel_block_reason, _bootc_image_timestamp,
-    _bootc_proxy_running, _branch_display_name, _get_disk_write_bytes, _get_rx_bytes, _has_rollback_deployment,
-    _has_staged_update, _human_bytes, _human_bytes_pair, _parse_size_bytes, _parse_update_phase,
-    _restyle, _run_worker, _set_session_inhibit, _with_idle_inhibit,
+    _active_bootc_operation, _bootc_cancel_block_reason, _bootc_image_timestamp,
+    _bootc_proxy_running, _branch_display_name, _format_dl_progress_line, _format_elapsed,
+    _get_disk_write_bytes, _has_rollback_deployment, _has_staged_update, _human_bytes, _parse_update_phase,
+    _restyle, _run_worker, _set_session_inhibit, _start_or_extend_dl_monitor, _stop_download_monitor,
+    _with_idle_inhibit,
 )
 from .services.launch import reboot
 from .services.runtime import Worker, _finish_worker
@@ -14,8 +14,6 @@ from .services.privileged import bootc_action
 from .core_base import _current_branch
 from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
 from .widgets import _make_card, _set_log_panel
-
-_logger = logging.getLogger(__name__)
 
 
 class _UpdateOpsMixin:
@@ -277,34 +275,20 @@ class _UpdateOpsMixin:
             if phase != "Downloading image layers…" and self._dl_downloaded >= self._dl_total > 0:
                 self._progress.setRange(0, 0)
         # Start or update network monitor when bootc tells us how much to download
-        if "layers needed:" in text:
-            try:
-                m = text.split("layers needed:")[1]
-                size_str = m.split("(")[1].rstrip(")") if "(" in m else ""
-                total = _parse_size_bytes(size_str)
-                if total > 0:
-                    if self._dl_monitor is None:
-                        self._dl_total = total
-                        self._progress.setRange(0, 1000)
-                        self._dl_monitor = DownloadMonitor(total, _get_rx_bytes())
-                        self._dl_monitor.stats.connect(self._on_dl_stats)
-                        self._dl_monitor.start()
-                    elif total > self._dl_total:
-                        # A later phase reports a larger download — update in place
-                        self._dl_total = total
-                        self._dl_monitor._total = total
-                        self._progress.setRange(0, 1000)
-            except Exception:
-                _logger.debug("_on_line: failed to parse download size from %r", text, exc_info=True)
+        self._dl_monitor, self._dl_total, started, progress_ready = _start_or_extend_dl_monitor(
+            text, self._dl_monitor, self._dl_total,
+        )
+        if progress_ready:
+            self._progress.setRange(0, 1000)
+        if started:
+            self._dl_monitor.stats.connect(self._on_dl_stats)
+            self._dl_monitor.start()
         self._log.append(text)
         self._log.ensureCursorVisible()
 
     def _stop_dl_monitor(self):
-        if self._dl_monitor is not None:
-            self._dl_monitor.stop()
-            self._dl_monitor.wait()
-            self._dl_monitor.deleteLater()
-            self._dl_monitor = None
+        _stop_download_monitor(self._dl_monitor)
+        self._dl_monitor = None
 
     def _on_dl_stats(self, downloaded: int, total: int, speed_bps: int, eta_sec: int):
         self._dl_downloaded = downloaded
@@ -342,20 +326,7 @@ class _UpdateOpsMixin:
         if speed_bps > 100_000 and downloaded < total:
             self._set_phase("Downloading image layers…")
         if speed_bps > 100_000:
-            dl_dl, dl_total = _human_bytes_pair(downloaded, total)
-            dl_str = f"{dl_dl} / {dl_total}"
-            speed_str = f"{_human_bytes(speed_bps)}/s"
-            if eta_sec > 60:
-                eta_mins, eta_secs = divmod(eta_sec, 60)
-                eta_str = f"~{eta_mins}m {eta_secs:02d}s remaining"
-            elif eta_sec > 0:
-                eta_str = f"~{eta_sec}s remaining"
-            else:
-                eta_str = ""
-            parts = [dl_str, speed_str]
-            if eta_str:
-                parts.append(eta_str)
-            self._activity_lbl.setText("  ·  ".join(parts))
+            self._activity_lbl.setText(_format_dl_progress_line(downloaded, total, speed_bps, eta_sec))
             self._activity_lbl.show()
 
     def _update_activity(self):
@@ -366,12 +337,10 @@ class _UpdateOpsMixin:
         if self._dl_monitor is not None and self._dl_speed > 100_000:
             return
         elapsed = int(time.monotonic() - self._op_start_ts) if self._op_start_ts else 0
-        mins, secs = divmod(elapsed, 60)
-        elapsed_str = f"{mins}m {secs:02d}s" if mins else f"{secs}s"
         parts: list[str] = []
         if self._dl_final_bytes > 0:
             parts.append(f"{_human_bytes(self._dl_final_bytes)} downloaded")
-        parts.append(f"{elapsed_str} elapsed")
+        parts.append(f"{_format_elapsed(elapsed)} elapsed")
         self._activity_lbl.setText("  ·  ".join(parts))
         self._activity_lbl.show()
 
@@ -400,8 +369,7 @@ class _UpdateOpsMixin:
                 self._staging_write_start = _get_disk_write_bytes()
             written = max(0, _get_disk_write_bytes() - self._staging_write_start)
             elapsed = int(time.monotonic() - self._op_start_ts) if self._op_start_ts else 0
-            mins, secs_part = divmod(elapsed, 60)
-            elapsed_str = f"{mins}m {secs_part:02d}s" if mins else f"{secs_part}s"
+            elapsed_str = _format_elapsed(elapsed)
             if written >= 1024 * 1024:
                 msg = f"  [staging] writing image to disk… {_human_bytes(written)} written · {elapsed_str} elapsed"
             else:

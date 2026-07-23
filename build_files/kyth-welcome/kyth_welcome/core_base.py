@@ -30,6 +30,9 @@ from .services.process import (  # noqa: F401
     _BOOTC_CACHE_TTL,
     _FLATPAK_CACHE_TTL,
     _command_stdout,
+    _format_dl_progress_line,
+    _format_elapsed,
+    _format_eta,
     _get_disk_write_bytes,
     _get_rx_bytes,
     _human_bytes,
@@ -79,6 +82,8 @@ from .services.runtime import (  # noqa: F401
     _release_worker_when_finished,
     _running_threads,
     _shutdown_threads,
+    _start_or_extend_dl_monitor,
+    _stop_download_monitor,
 )
 
 # ── Constants still used by pages ─────────────────────────────────────────────

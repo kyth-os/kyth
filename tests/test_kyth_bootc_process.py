@@ -18,6 +18,9 @@ from kyth_welcome.services.bootc import (  # noqa: E402
     _parse_update_phase,
 )
 from kyth_welcome.services.process import (  # noqa: E402
+    _format_dl_progress_line,
+    _format_elapsed,
+    _format_eta,
     _human_bytes,
     _human_bytes_pair,
     _parse_size_bytes,
@@ -41,6 +44,21 @@ class ProcessHelpersTests(unittest.TestCase):
     def test_parse_size_bytes(self):
         self.assertEqual(_parse_size_bytes("8.0 GB"), 8 * 1024**3)
         self.assertEqual(_parse_size_bytes("bad"), 0)
+
+    def test_format_elapsed(self):
+        self.assertEqual(_format_elapsed(45), "45s")
+        self.assertEqual(_format_elapsed(65), "1m 05s")
+
+    def test_format_eta(self):
+        self.assertEqual(_format_eta(0), "")
+        self.assertEqual(_format_eta(45), "~45s remaining")
+        self.assertEqual(_format_eta(125), "~2m 05s remaining")
+
+    def test_format_dl_progress_line(self):
+        line = _format_dl_progress_line(512 * 1024, 2 * 1024**2, 300_000, 30)
+        self.assertIn("/", line)
+        self.assertIn(f"{_human_bytes(300_000)}/s", line)
+        self.assertIn("~30s remaining", line)
 
 
 class BootcHelpersTests(unittest.TestCase):

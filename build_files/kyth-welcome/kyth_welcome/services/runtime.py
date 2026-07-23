@@ -14,7 +14,7 @@ import time
 
 from ..qt import QThread, Signal
 from kyth_shared import _NetStatsTracker, _get_rx_bytes
-from .process import _invalidate_probe_caches
+from .process import _invalidate_probe_caches, _parse_size_bytes
 
 _logger = logging.getLogger(__name__)
 
@@ -178,12 +178,57 @@ class DownloadMonitor(TrackedThread):
     def stop(self):
         self._stop_event.set()
 
+    def update_total(self, total_bytes: int) -> None:
+        """Raise the expected download size when a later phase reports more."""
+        self._tracker._total = total_bytes
+
     def run(self):
         while not self._stop_event.is_set():
             if self._stop_event.wait(1):
                 break
             stats = self._tracker.tick(_get_rx_bytes())
             self.stats.emit(stats["downloaded"], stats["total"], stats["speed"], stats["eta_sec"])
+
+
+def _stop_download_monitor(monitor: DownloadMonitor | None) -> None:
+    """Stop and dispose of a running DownloadMonitor thread, if any."""
+    if monitor is not None:
+        monitor.stop()
+        monitor.wait()
+        monitor.deleteLater()
+
+
+def _start_or_extend_dl_monitor(
+    text: str, monitor: DownloadMonitor | None, total: int,
+) -> tuple[DownloadMonitor | None, int, bool, bool]:
+    """Parse a bootc "layers needed: ... (SIZE)" line and start a new
+    DownloadMonitor, or raise an already-running one's total if a later
+    phase reports a bigger download.
+
+    Returns (monitor, total, started, progress_ready):
+      - ``started`` is True only when a new monitor was created and the
+        caller still needs to connect ``.stats`` and call ``.start()``.
+      - ``progress_ready`` is True whenever the total changed (new or
+        extended monitor) and the caller should switch its progress bar to
+        determinate mode.
+    """
+    if "layers needed:" not in text:
+        return monitor, total, False, False
+    try:
+        after = text.split("layers needed:")[1]
+        size_str = after.split("(")[1].rstrip(")") if "(" in after else ""
+        new_total = _parse_size_bytes(size_str)
+    except Exception:
+        _logger.debug("_start_or_extend_dl_monitor: failed to parse download size from %r", text, exc_info=True)
+        return monitor, total, False, False
+    if new_total <= 0:
+        return monitor, total, False, False
+    if monitor is None:
+        return DownloadMonitor(new_total, _get_rx_bytes()), new_total, True, True
+    if new_total > total:
+        monitor.update_total(new_total)
+        return monitor, new_total, False, True
+    return monitor, total, False, False
 
 
 class DataWorker(TrackedThread):
