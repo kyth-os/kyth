@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 01:30:24 UTC
+- Last refreshed (UTC): 2026-07-23 01:32:26 UTC
 - Current branch: testing
-- HEAD commit: 03c7a21
-- Last commit title: Consolidate installer user creation into kyth_shared, drop bash reimplementation
-- Last commit date: 2026-07-22T21:24:42-04:00
+- HEAD commit: bd5d69f
+- Last commit title: Suppress false-positive CodeQL clear-text-storage finding in test fixtures
+- Last commit date: 2026-07-22T21:30:24-04:00
 - CI workflow files: 8
 - Build script files: 20
 
