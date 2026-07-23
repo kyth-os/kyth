@@ -4,7 +4,12 @@ import shutil
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _apply_install_badge, _restyle
 from .services.launch import popen
-from .services.security import _is_socket_capable_kali_box
+from .services.security import (
+    _is_socket_capable_kali_box,
+    build_kali_create_command,
+    build_kali_export_command,
+    build_kali_remove_command,
+)
 from .services.runtime import Worker, _finish_worker
 from .qt import (
     QButtonGroup, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QRadioButton,
@@ -182,104 +187,7 @@ class _KaliContainerMixin:
         self._sec_unpack_count = 0
         self._sec_setup_count = 0
 
-        export_step = (
-            f" && distrobox enter --root {self._SEC_BOX_NAME} --"
-            r" bash -c 'for f in /usr/share/applications/*.desktop;"
-            r" do app=$(basename $f .desktop);"
-            r" distrobox-export --app $app 2>/dev/null || true; done'"
-            "\n_d=\"$HOME/.local/share/applications\"\n"
-            "for _f in \"$_d/\"*.desktop; do\n"
-            "    [[ -f \"$_f\" ]] || continue\n"
-            "    grep -qE -- '--name kali|-n kali' \"$_f\" 2>/dev/null || continue\n"
-            "    if grep -q '^Categories=' \"$_f\"; then\n"
-            "        sed -i 's|^Categories=.*|Categories=X-KythSecurity;|' \"$_f\"\n"
-            "    else\n"
-            "        printf '\\nCategories=X-KythSecurity;\\n' >> \"$_f\"\n"
-            "    fi\n"
-            "    sed -i '/^NoDisplay[[:space:]]*=[[:space:]]*true/Id' \"$_f\"\n"
-            "    sed -i '/^OnlyShowIn[[:space:]]*=/d' \"$_f\"\n"
-            "    sed -i '/^NotShowIn[[:space:]]*=/d' \"$_f\"\n"
-            "    if grep -qE 'pkexec|kdesu|gksu|gksudo' \"$_f\" 2>/dev/null; then\n"
-            "        sed -i -E 's/(pkexec|kdesu|gksu|gksudo)[[:space:]]+/sudo -E /g' \"$_f\"\n"
-            "    fi\n"
-            "done\n"
-            "for _f in \"$_d/\"*zenmap*.desktop; do\n"
-            "    [[ -f \"$_f\" ]] || continue\n"
-            "    grep -qE -- '--name kali|-n kali' \"$_f\" 2>/dev/null || continue\n"
-            "    grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec' \"$_f\" 2>/dev/null || continue\n"
-            "    grep -q ' sudo ' \"$_f\" && continue\n"
-            "    sed -i -E 's|[[:space:]]--[[:space:]]+| -- sudo -E |' \"$_f\"\n"
-            "done\n"
-            "for _f in \"$_d/\"*zenmap*.desktop; do\n"
-            "    [[ -f \"$_f\" ]] || continue\n"
-            "    grep -qE -- '--name kali|-n kali|^Exec=.*sudo -E' \"$_f\" 2>/dev/null || continue\n"
-            "    grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec|sudo -E' \"$_f\" 2>/dev/null || continue\n"
-            "    sed -i -E 's|^Exec=.*$|Exec=kyth-distrobox-root-launch --root kali /usr/bin/zenmap|' \"$_f\"\n"
-            "    sed -i -E 's|^TryExec=.*$|TryExec=kyth-distrobox-root-launch|' \"$_f\"\n"
-            "done\n"
-            "update-desktop-database \"$_d\" 2>/dev/null || true\n"
-            "kbuildsycoca6 --noincremental 2>/dev/null || true"
-        ) if has_gui else ""
-        cmd = [
-            "bash", "-c",
-            "set -euo pipefail\n"
-            f"box={self._SEC_BOX_NAME!r}\n"
-            f"image={self._SEC_BOX_IMAGE!r}\n"
-            "rootless_exists=0\n"
-            "distrobox list --no-color 2>/dev/null | grep -q \"^${box}\\b\" && rootless_exists=1 || true\n"
-            "if [[ \"${rootless_exists}\" -eq 1 ]]; then\n"
-            "    echo \"Removing rootless ${box}; raw socket tools require a rootful Kali box...\"\n"
-            "    distrobox stop \"${box}\" --yes 2>/dev/null || distrobox stop \"${box}\" 2>/dev/null || true\n"
-            "    distrobox rm --force \"${box}\" 2>/dev/null || distrobox rm \"${box}\" --yes 2>/dev/null || true\n"
-            "    podman rm -f \"${box}\" 2>/dev/null || true\n"
-            "fi\n"
-            "rootful_exists=0\n"
-            "sudo -A podman inspect \"${box}\" >/dev/null 2>&1 && rootful_exists=1 || true\n"
-            "if [[ \"${rootful_exists}\" -eq 1 ]]; then\n"
-            "    _image=$(sudo -A podman inspect \"${box}\" --format '{{.ImageName}}' 2>/dev/null || true)\n"
-            "    _privileged=$(sudo -A podman inspect \"${box}\" --format '{{.HostConfig.Privileged}}' 2>/dev/null || true)\n"
-            "    _security_opts=$(sudo -A podman inspect \"${box}\" --format '{{range .HostConfig.SecurityOpt}}{{.}} {{end}}' 2>/dev/null || true)\n"
-            "    if [[ \"${_image}\" != *kali* ]] || [[ \"${_privileged}\" != \"true\" ]] || [[ \"${_security_opts}\" != *label=disable* ]]; then\n"
-            "        echo \"Recreating ${box} with privileged rootful networking and SELinux label disabled...\"\n"
-            "        distrobox stop --root \"${box}\" --yes 2>/dev/null || distrobox stop --root \"${box}\" 2>/dev/null || true\n"
-            "        distrobox rm --root --force \"${box}\" 2>/dev/null || distrobox rm --root \"${box}\" --yes 2>/dev/null || true\n"
-            "        sudo -A podman rm -f \"${box}\" 2>/dev/null || true\n"
-            "        rootful_exists=0\n"
-            "    fi\n"
-            "fi\n"
-            "if [[ \"${rootful_exists}\" -eq 0 ]]; then\n"
-            "    distrobox create --root --image \"${image}\" --name \"${box}\" --yes"
-            " --additional-flags '--privileged --security-opt label=disable'\n"
-            "fi\n"
-            f"distrobox enter --root {self._SEC_BOX_NAME} -- bash -c \""
-            "export DEBIAN_FRONTEND=noninteractive; "
-            "(printf '%s\\n' "
-            "'popularity-contest popularity-contest/participate boolean false' "
-            "'encfs encfs/security-information boolean true' "
-            "'encfs encfs/security-information seen true' "
-            "'console-setup console-setup/charmap47 select UTF-8' "
-            "'samba-common samba-common/dhcp boolean false' "
-            "'macchanger macchanger/automatically_run boolean false' "
-            "'kismet-capture-common kismet-capture-common/install-users string' "
-            "'kismet-capture-common kismet-capture-common/install-setuid boolean true' "
-            "'wireshark-common wireshark-common/install-setuid boolean true' "
-            "'sslh sslh/inetd_or_standalone select standalone' "
-            "| sudo debconf-set-selections) || true; "
-            "sudo -E apt-get install -y "
-            "-o Dpkg::Options::=--force-confdef "
-            "-o Dpkg::Options::=--force-confold "
-            f"{meta}\""
-            f" && distrobox enter --root {self._SEC_BOX_NAME} -- bash -c \""
-            "echo '${USER} ALL=(root) NOPASSWD: ALL' "
-            "| sudo tee /etc/sudoers.d/kali-user-nopasswd > /dev/null; "
-            "sudo chmod 0440 /etc/sudoers.d/kali-user-nopasswd; "
-            "mkdir -p /root/.config/gtk-3.0; "
-            "printf '[Settings]\\ngtk-icon-theme-name = hicolor\\n' > /root/.config/gtk-3.0/settings.ini; "
-            "if command -v nmap >/dev/null 2>&1; then "
-            "printf '#!/bin/sh\\nexec sudo /usr/bin/nmap \\\"\\$@\\\"\\n' | sudo tee /usr/local/bin/nmap > /dev/null; "
-            "sudo chmod 755 /usr/local/bin/nmap; fi\""
-            + export_step,
-        ]
+        cmd = build_kali_create_command(self._SEC_BOX_NAME, self._SEC_BOX_IMAGE, meta, has_gui)
         self._sec_worker = Worker(cmd)
         self._sec_worker.line.connect(self._sec_on_create_line)
         self._sec_worker.done.connect(self._sec_on_create_done)
@@ -517,54 +425,7 @@ class _KaliContainerMixin:
         self._sec_status_lbl.show()
         _restyle(self._sec_status_lbl)
 
-        cmd = [
-            "bash", "-c",
-            f"distrobox enter --root {self._SEC_BOX_NAME} --"
-            r" bash -c '"
-            r"shopt -s nullglob; files=(/usr/share/applications/*.desktop);"
-            r" if [ ${#files[@]} -eq 0 ]; then exit 2; fi;"
-            r" n=0; for f in ${files[@]}; do"
-            r"   app=$(basename $f .desktop);"
-            r"   distrobox-export --app $app 2>&1 && n=$((n+1)) || echo skip: $app;"
-            r" done; echo EXPORTED:$n'"
-            "\n_rc=$?; [ \"$_rc\" -eq 2 ] && exit 2\n"
-            f"distrobox enter --root {self._SEC_BOX_NAME} -- bash -c \""
-            "echo '${USER} ALL=(root) NOPASSWD: ALL' "
-            "| sudo tee /etc/sudoers.d/kali-user-nopasswd > /dev/null; "
-            "sudo chmod 0440 /etc/sudoers.d/kali-user-nopasswd\"\n"
-            "_d=\"$HOME/.local/share/applications\"\n"
-            "for _f in \"$_d/\"*.desktop; do\n"
-            "    [[ -f \"$_f\" ]] || continue\n"
-            "    grep -qE -- '--name kali|-n kali' \"$_f\" 2>/dev/null || continue\n"
-            "    if grep -q '^Categories=' \"$_f\"; then\n"
-            "        sed -i 's|^Categories=.*|Categories=X-KythSecurity;|' \"$_f\"\n"
-            "    else\n"
-            "        printf '\\nCategories=X-KythSecurity;\\n' >> \"$_f\"\n"
-            "    fi\n"
-            "    sed -i '/^NoDisplay[[:space:]]*=[[:space:]]*true/Id' \"$_f\"\n"
-            "    sed -i '/^OnlyShowIn[[:space:]]*=/d' \"$_f\"\n"
-            "    sed -i '/^NotShowIn[[:space:]]*=/d' \"$_f\"\n"
-            "    if grep -qE 'pkexec|kdesu|gksu|gksudo' \"$_f\" 2>/dev/null; then\n"
-            "        sed -i -E 's/(pkexec|kdesu|gksu|gksudo)[[:space:]]+/sudo -E /g' \"$_f\"\n"
-            "    fi\n"
-            "done\n"
-            "for _f in \"$_d/\"*zenmap*.desktop; do\n"
-            "    [[ -f \"$_f\" ]] || continue\n"
-            "    grep -qE -- '--name kali|-n kali' \"$_f\" 2>/dev/null || continue\n"
-            "    grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec' \"$_f\" 2>/dev/null || continue\n"
-            "    grep -q ' sudo ' \"$_f\" && continue\n"
-            "    sed -i -E 's|[[:space:]]--[[:space:]]+| -- sudo -E |' \"$_f\"\n"
-            "done\n"
-            "for _f in \"$_d/\"*zenmap*.desktop; do\n"
-            "    [[ -f \"$_f\" ]] || continue\n"
-            "    grep -qE -- '--name kali|-n kali|^Exec=.*sudo -E' \"$_f\" 2>/dev/null || continue\n"
-            "    grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec|sudo -E' \"$_f\" 2>/dev/null || continue\n"
-            "    sed -i -E 's|^Exec=.*$|Exec=kyth-distrobox-root-launch --root kali /usr/bin/zenmap|' \"$_f\"\n"
-            "    sed -i -E 's|^TryExec=.*$|TryExec=kyth-distrobox-root-launch|' \"$_f\"\n"
-            "done\n"
-            "update-desktop-database \"$_d\" 2>/dev/null || true\n"
-            "kbuildsycoca6 --noincremental 2>/dev/null || true",
-        ]
+        cmd = build_kali_export_command(self._SEC_BOX_NAME)
         self._sec_worker = Worker(cmd)
         self._sec_worker.line.connect(self._sec_on_export_line)
         self._sec_worker.done.connect(self._sec_on_export_done)
@@ -646,61 +507,7 @@ class _KaliContainerMixin:
         self._sec_status_lbl.show()
         _restyle(self._sec_status_lbl)
 
-        remove_script = f"""
-set -euo pipefail
-box={self._SEC_BOX_NAME!r}
-appdir="${{HOME}}/.local/share/applications"
-
-echo "Stopping ${{box}} if it is running..."
-distrobox stop "${{box}}" --yes 2>/dev/null \
-    || distrobox stop "${{box}}" 2>/dev/null \
-    || true
-distrobox stop --root "${{box}}" --yes 2>/dev/null \
-    || distrobox stop --root "${{box}}" 2>/dev/null \
-    || true
-
-echo "Removing ${{box}}..."
-distrobox rm --force "${{box}}" \
-    || distrobox rm "${{box}}" --yes \
-    || true
-distrobox rm --root --force "${{box}}" 2>/dev/null \
-    || distrobox rm --root "${{box}}" --yes 2>/dev/null \
-    || true
-
-if distrobox list --no-color 2>/dev/null | grep -q "^${{box}}\\b" \
-    || sudo -A podman inspect "${{box}}" >/dev/null 2>&1; then
-    echo "Distrobox still lists ${{box}}; forcing backend container removal..."
-    if command -v podman >/dev/null 2>&1; then
-        podman rm -f "${{box}}" 2>/dev/null || true
-        sudo -A podman rm -f "${{box}}" 2>/dev/null || true
-    fi
-    if command -v docker >/dev/null 2>&1; then
-        docker rm -f "${{box}}" 2>/dev/null || true
-    fi
-fi
-
-if distrobox list --no-color 2>/dev/null | grep -q "^${{box}}\\b" \
-    || sudo -A podman inspect "${{box}}" >/dev/null 2>&1; then
-    echo "ERROR: ${{box}} still exists after removal attempts." >&2
-    exit 1
-fi
-
-if [[ -d "${{appdir}}" ]]; then
-    removed=0
-    while IFS= read -r -d "" f; do
-        if grep -qE -- "--name[[:space:]]+${{box}}|-n[[:space:]]+${{box}}|kyth-distrobox-root-launch[[:space:]]+${{box}}\\b" "$f" 2>/dev/null; then
-            rm -f "$f"
-            removed=$((removed + 1))
-        fi
-    done < <(find "${{appdir}}" -maxdepth 1 -type f -name "*.desktop" -print0)
-    echo "Removed ${{removed}} exported launcher(s)."
-fi
-
-update-desktop-database "${{appdir}}" 2>/dev/null || true
-kbuildsycoca6 --noincremental 2>/dev/null || true
-echo "Kali box is stopped and removed."
-"""
-        self._sec_worker = Worker(["bash", "-c", remove_script])
+        self._sec_worker = Worker(build_kali_remove_command(self._SEC_BOX_NAME))
         self._sec_worker.line.connect(lambda ln: (
             self._sec_log.append(ln),
             self._sec_log.ensureCursorVisible(),

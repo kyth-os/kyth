@@ -47,15 +47,33 @@ class SecurityServiceTests(unittest.TestCase):
         with mock.patch.object(security, "_run_command", return_value=r):
             self.assertTrue(security.is_socket_capable_kali_box("kali"))
 
-    def test_command_builders(self):
-        cmd = security.distrobox_create_command("kali", "img")
-        self.assertEqual(cmd[0], "distrobox")
-        self.assertIn("--root", cmd)
-        self.assertIn("kali", cmd)
-        enter = security.distrobox_enter_command("kali", "bash")
-        self.assertEqual(enter[-1], "bash")
-        rms = security.distrobox_remove_commands("kali")
-        self.assertGreaterEqual(len(rms), 2)
+    def test_kali_create_command_shape(self):
+        cmd = security.build_kali_create_command("kali", "img", "kali-linux-headless", False)
+        self.assertEqual(cmd[:2], ["bash", "-c"])
+        script = cmd[2]
+        self.assertIn("box='kali'", script)
+        self.assertIn("image='img'", script)
+        self.assertIn("kali-linux-headless", script)
+        self.assertNotIn("distrobox-export", script)
+
+    def test_kali_create_command_gui_tier_bulk_exports_apps(self):
+        cmd = security.build_kali_create_command("kali", "img", "kali-linux-default", True)
+        script = cmd[2]
+        self.assertIn("distrobox-export --app", script)
+        self.assertIn("Categories=X-KythSecurity", script)
+
+    def test_kali_export_command_shape(self):
+        cmd = security.build_kali_export_command("kali")
+        self.assertEqual(cmd[:2], ["bash", "-c"])
+        self.assertIn("EXPORTED:$n", cmd[2])
+        self.assertIn("Categories=X-KythSecurity", cmd[2])
+
+    def test_kali_remove_command_shape(self):
+        cmd = security.build_kali_remove_command("kali")
+        self.assertEqual(cmd[:2], ["bash", "-c"])
+        self.assertIn("box='kali'", cmd[2])
+        self.assertIn("distrobox rm --force", cmd[2])
+        self.assertIn("distrobox rm --root --force", cmd[2])
 
 
 class DiagnosticsDrainTests(unittest.TestCase):

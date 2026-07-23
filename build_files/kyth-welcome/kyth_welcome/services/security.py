@@ -1,6 +1,6 @@
 """Security toolbox helpers (Kali distrobox probe + command builders).
 
-Pure — no Qt. UI lives in page_software_security.
+Pure — no Qt. UI lives in page_software_security_kali.
 """
 from __future__ import annotations
 
@@ -47,29 +47,206 @@ def is_socket_capable_kali_box(name: str = DEFAULT_KALI_BOX) -> bool:
 _is_socket_capable_kali_box = is_socket_capable_kali_box
 
 
-def distrobox_create_command(
-    name: str = DEFAULT_KALI_BOX,
-    image: str = DEFAULT_KALI_IMAGE,
+# Run once after any bulk `distrobox-export --app ...`: tags Kali-exported
+# launchers with a distinct menu category, strips NoDisplay/OnlyShowIn/
+# NotShowIn so they actually surface in the host menu, rewrites any
+# pkexec/kdesu/gksu escalation to `sudo -E` (Kali's own sudoers policy lives
+# inside the rootful container, not on the host), and repoints Zenmap
+# specifically through kyth-distrobox-root-launch so its own internal
+# re-exec-as-root works when launched from the host menu. Shared verbatim
+# between the create and export flows, which both run a bulk export.
+_DESKTOP_FILE_REWRITE_SCRIPT = (
+    "_d=\"$HOME/.local/share/applications\"\n"
+    "for _f in \"$_d/\"*.desktop; do\n"
+    "    [[ -f \"$_f\" ]] || continue\n"
+    "    grep -qE -- '--name kali|-n kali' \"$_f\" 2>/dev/null || continue\n"
+    "    if grep -q '^Categories=' \"$_f\"; then\n"
+    "        sed -i 's|^Categories=.*|Categories=X-KythSecurity;|' \"$_f\"\n"
+    "    else\n"
+    "        printf '\\nCategories=X-KythSecurity;\\n' >> \"$_f\"\n"
+    "    fi\n"
+    "    sed -i '/^NoDisplay[[:space:]]*=[[:space:]]*true/Id' \"$_f\"\n"
+    "    sed -i '/^OnlyShowIn[[:space:]]*=/d' \"$_f\"\n"
+    "    sed -i '/^NotShowIn[[:space:]]*=/d' \"$_f\"\n"
+    "    if grep -qE 'pkexec|kdesu|gksu|gksudo' \"$_f\" 2>/dev/null; then\n"
+    "        sed -i -E 's/(pkexec|kdesu|gksu|gksudo)[[:space:]]+/sudo -E /g' \"$_f\"\n"
+    "    fi\n"
+    "done\n"
+    "for _f in \"$_d/\"*zenmap*.desktop; do\n"
+    "    [[ -f \"$_f\" ]] || continue\n"
+    "    grep -qE -- '--name kali|-n kali' \"$_f\" 2>/dev/null || continue\n"
+    "    grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec' \"$_f\" 2>/dev/null || continue\n"
+    "    grep -q ' sudo ' \"$_f\" && continue\n"
+    "    sed -i -E 's|[[:space:]]--[[:space:]]+| -- sudo -E |' \"$_f\"\n"
+    "done\n"
+    "for _f in \"$_d/\"*zenmap*.desktop; do\n"
+    "    [[ -f \"$_f\" ]] || continue\n"
+    "    grep -qE -- '--name kali|-n kali|^Exec=.*sudo -E' \"$_f\" 2>/dev/null || continue\n"
+    "    grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec|sudo -E' \"$_f\" 2>/dev/null || continue\n"
+    "    sed -i -E 's|^Exec=.*$|Exec=kyth-distrobox-root-launch --root kali /usr/bin/zenmap|' \"$_f\"\n"
+    "    sed -i -E 's|^TryExec=.*$|TryExec=kyth-distrobox-root-launch|' \"$_f\"\n"
+    "done\n"
+    "update-desktop-database \"$_d\" 2>/dev/null || true\n"
+    "kbuildsycoca6 --noincremental 2>/dev/null || true"
+)
+
+
+def build_kali_create_command(
+    box_name: str, box_image: str, meta: str, has_gui: bool,
 ) -> list[str]:
+    """Recreate the box if it exists but isn't rootful/privileged, install the
+    chosen tool metapackage with debconf preseeded to avoid install-time
+    prompts, grant the container user passwordless sudo, and (GUI tiers only)
+    bulk-export .desktop launchers and fix them up for the host menu."""
+    export_step = (
+        f" && distrobox enter --root {box_name} --"
+        r" bash -c 'for f in /usr/share/applications/*.desktop;"
+        r" do app=$(basename $f .desktop);"
+        r" distrobox-export --app $app 2>/dev/null || true; done'"
+        "\n" + _DESKTOP_FILE_REWRITE_SCRIPT
+    ) if has_gui else ""
     return [
-        "distrobox", "create", "--root", "--image", image, "--name", name,
-        "--additional-flags", "--privileged --security-opt label=disable",
+        "bash", "-c",
+        "set -euo pipefail\n"
+        f"box={box_name!r}\n"
+        f"image={box_image!r}\n"
+        "rootless_exists=0\n"
+        "distrobox list --no-color 2>/dev/null | grep -q \"^${box}\\b\" && rootless_exists=1 || true\n"
+        "if [[ \"${rootless_exists}\" -eq 1 ]]; then\n"
+        "    echo \"Removing rootless ${box}; raw socket tools require a rootful Kali box...\"\n"
+        "    distrobox stop \"${box}\" --yes 2>/dev/null || distrobox stop \"${box}\" 2>/dev/null || true\n"
+        "    distrobox rm --force \"${box}\" 2>/dev/null || distrobox rm \"${box}\" --yes 2>/dev/null || true\n"
+        "    podman rm -f \"${box}\" 2>/dev/null || true\n"
+        "fi\n"
+        "rootful_exists=0\n"
+        "sudo -A podman inspect \"${box}\" >/dev/null 2>&1 && rootful_exists=1 || true\n"
+        "if [[ \"${rootful_exists}\" -eq 1 ]]; then\n"
+        "    _image=$(sudo -A podman inspect \"${box}\" --format '{{.ImageName}}' 2>/dev/null || true)\n"
+        "    _privileged=$(sudo -A podman inspect \"${box}\" --format '{{.HostConfig.Privileged}}' 2>/dev/null || true)\n"
+        "    _security_opts=$(sudo -A podman inspect \"${box}\" --format '{{range .HostConfig.SecurityOpt}}{{.}} {{end}}' 2>/dev/null || true)\n"
+        "    if [[ \"${_image}\" != *kali* ]] || [[ \"${_privileged}\" != \"true\" ]] || [[ \"${_security_opts}\" != *label=disable* ]]; then\n"
+        "        echo \"Recreating ${box} with privileged rootful networking and SELinux label disabled...\"\n"
+        "        distrobox stop --root \"${box}\" --yes 2>/dev/null || distrobox stop --root \"${box}\" 2>/dev/null || true\n"
+        "        distrobox rm --root --force \"${box}\" 2>/dev/null || distrobox rm --root \"${box}\" --yes 2>/dev/null || true\n"
+        "        sudo -A podman rm -f \"${box}\" 2>/dev/null || true\n"
+        "        rootful_exists=0\n"
+        "    fi\n"
+        "fi\n"
+        "if [[ \"${rootful_exists}\" -eq 0 ]]; then\n"
+        "    distrobox create --root --image \"${image}\" --name \"${box}\" --yes"
+        " --additional-flags '--privileged --security-opt label=disable'\n"
+        "fi\n"
+        f"distrobox enter --root {box_name} -- bash -c \""
+        "export DEBIAN_FRONTEND=noninteractive; "
+        "(printf '%s\\n' "
+        "'popularity-contest popularity-contest/participate boolean false' "
+        "'encfs encfs/security-information boolean true' "
+        "'encfs encfs/security-information seen true' "
+        "'console-setup console-setup/charmap47 select UTF-8' "
+        "'samba-common samba-common/dhcp boolean false' "
+        "'macchanger macchanger/automatically_run boolean false' "
+        "'kismet-capture-common kismet-capture-common/install-users string' "
+        "'kismet-capture-common kismet-capture-common/install-setuid boolean true' "
+        "'wireshark-common wireshark-common/install-setuid boolean true' "
+        "'sslh sslh/inetd_or_standalone select standalone' "
+        "| sudo debconf-set-selections) || true; "
+        "sudo -E apt-get install -y "
+        "-o Dpkg::Options::=--force-confdef "
+        "-o Dpkg::Options::=--force-confold "
+        f"{meta}\""
+        f" && distrobox enter --root {box_name} -- bash -c \""
+        "echo '${USER} ALL=(root) NOPASSWD: ALL' "
+        "| sudo tee /etc/sudoers.d/kali-user-nopasswd > /dev/null; "
+        "sudo chmod 0440 /etc/sudoers.d/kali-user-nopasswd; "
+        "mkdir -p /root/.config/gtk-3.0; "
+        "printf '[Settings]\\ngtk-icon-theme-name = hicolor\\n' > /root/.config/gtk-3.0/settings.ini; "
+        "if command -v nmap >/dev/null 2>&1; then "
+        "printf '#!/bin/sh\\nexec sudo /usr/bin/nmap \\\"\\$@\\\"\\n' | sudo tee /usr/local/bin/nmap > /dev/null; "
+        "sudo chmod 755 /usr/local/bin/nmap; fi\""
+        + export_step,
     ]
 
 
-def distrobox_enter_command(name: str = DEFAULT_KALI_BOX, *inner: str) -> list[str]:
-    cmd = ["distrobox", "enter", "--root", name]
-    if inner:
-        cmd.append("--")
-        cmd.extend(inner)
-    return cmd
-
-
-def distrobox_remove_commands(name: str = DEFAULT_KALI_BOX) -> list[list[str]]:
-    """Stop/rm rootless and rootful attempts."""
+def build_kali_export_command(box_name: str) -> list[str]:
+    """Bulk-export every .desktop file the container ships (exit 2 if none),
+    grant passwordless sudo, then fix up the exported launchers for the host
+    menu. Mirrors the GUI-tier export step in build_kali_create_command for a
+    box that already exists."""
     return [
-        ["distrobox", "stop", name],
-        ["distrobox", "rm", "-f", name],
-        ["distrobox", "stop", "--root", name],
-        ["distrobox", "rm", "-f", "--root", name],
+        "bash", "-c",
+        f"distrobox enter --root {box_name} --"
+        r" bash -c '"
+        r"shopt -s nullglob; files=(/usr/share/applications/*.desktop);"
+        r" if [ ${#files[@]} -eq 0 ]; then exit 2; fi;"
+        r" n=0; for f in ${files[@]}; do"
+        r"   app=$(basename $f .desktop);"
+        r"   distrobox-export --app $app 2>&1 && n=$((n+1)) || echo skip: $app;"
+        r" done; echo EXPORTED:$n'"
+        "\n_rc=$?; [ \"$_rc\" -eq 2 ] && exit 2\n"
+        f"distrobox enter --root {box_name} -- bash -c \""
+        "echo '${USER} ALL=(root) NOPASSWD: ALL' "
+        "| sudo tee /etc/sudoers.d/kali-user-nopasswd > /dev/null; "
+        "sudo chmod 0440 /etc/sudoers.d/kali-user-nopasswd\"\n"
+        + _DESKTOP_FILE_REWRITE_SCRIPT,
     ]
+
+
+def build_kali_remove_command(box_name: str) -> list[str]:
+    """Stop and remove both a rootless and rootful box by this name, forcing
+    backend container removal if distrobox still lists it afterward, then
+    delete any exported launchers pointing at it."""
+    script = f"""
+set -euo pipefail
+box={box_name!r}
+appdir="${{HOME}}/.local/share/applications"
+
+echo "Stopping ${{box}} if it is running..."
+distrobox stop "${{box}}" --yes 2>/dev/null \
+    || distrobox stop "${{box}}" 2>/dev/null \
+    || true
+distrobox stop --root "${{box}}" --yes 2>/dev/null \
+    || distrobox stop --root "${{box}}" 2>/dev/null \
+    || true
+
+echo "Removing ${{box}}..."
+distrobox rm --force "${{box}}" \
+    || distrobox rm "${{box}}" --yes \
+    || true
+distrobox rm --root --force "${{box}}" 2>/dev/null \
+    || distrobox rm --root "${{box}}" --yes 2>/dev/null \
+    || true
+
+if distrobox list --no-color 2>/dev/null | grep -q "^${{box}}\\b" \
+    || sudo -A podman inspect "${{box}}" >/dev/null 2>&1; then
+    echo "Distrobox still lists ${{box}}; forcing backend container removal..."
+    if command -v podman >/dev/null 2>&1; then
+        podman rm -f "${{box}}" 2>/dev/null || true
+        sudo -A podman rm -f "${{box}}" 2>/dev/null || true
+    fi
+    if command -v docker >/dev/null 2>&1; then
+        docker rm -f "${{box}}" 2>/dev/null || true
+    fi
+fi
+
+if distrobox list --no-color 2>/dev/null | grep -q "^${{box}}\\b" \
+    || sudo -A podman inspect "${{box}}" >/dev/null 2>&1; then
+    echo "ERROR: ${{box}} still exists after removal attempts." >&2
+    exit 1
+fi
+
+if [[ -d "${{appdir}}" ]]; then
+    removed=0
+    while IFS= read -r -d "" f; do
+        if grep -qE -- "--name[[:space:]]+${{box}}|-n[[:space:]]+${{box}}|kyth-distrobox-root-launch[[:space:]]+${{box}}\\b" "$f" 2>/dev/null; then
+            rm -f "$f"
+            removed=$((removed + 1))
+        fi
+    done < <(find "${{appdir}}" -maxdepth 1 -type f -name "*.desktop" -print0)
+    echo "Removed ${{removed}} exported launcher(s)."
+fi
+
+update-desktop-database "${{appdir}}" 2>/dev/null || true
+kbuildsycoca6 --noincremental 2>/dev/null || true
+echo "Kali box is stopped and removed."
+"""
+    return ["bash", "-c", script]
