@@ -1,6 +1,7 @@
 """Authenticated local HTTP transport for the installer application."""
 
 import json
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -10,11 +11,43 @@ from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, _IS_LIVE_SESSIO
 from .context import InstallerContext
 from .disk import list_disks, list_partitions, list_free_space
 from .partition_ops import FILESYSTEM_OPTIONS, get_journal
-from .plan import ROUTES, RouteSpec
 from .post_routes import PostRouteService
 from .system import list_timezones
 
 _WEBUI_DIR = Path(__file__).parent / "webui"
+
+
+@dataclass(frozen=True)
+class RouteSpec:
+    method: str
+    path: str
+    requires_auth: bool = True
+    requires_same_origin: bool = False
+
+
+ROUTES = {
+    "index": RouteSpec("GET", "/", requires_auth=False),
+    "config": RouteSpec("GET", "/api/config"),
+    "disks": RouteSpec("GET", "/api/disks"),
+    "partitions": RouteSpec("GET", "/api/partitions"),
+    "free_space": RouteSpec("GET", "/api/free-space"),
+    "stream": RouteSpec("GET", "/api/stream"),
+    "log": RouteSpec("GET", "/api/log"),
+    "timezones": RouteSpec("GET", "/api/timezones"),
+    "start": RouteSpec("POST", "/api/start", requires_same_origin=True),
+    "reboot": RouteSpec("POST", "/api/reboot", requires_same_origin=True),
+    # Manual partition management
+    "partition_pending": RouteSpec("GET", "/api/disk/pending"),
+    "filesystems": RouteSpec("GET", "/api/disk/filesystems"),
+    "new_table": RouteSpec("POST", "/api/disk/new-table", requires_same_origin=True),
+    "create_partition": RouteSpec("POST", "/api/disk/create", requires_same_origin=True),
+    "delete_partition": RouteSpec("POST", "/api/disk/delete", requires_same_origin=True),
+    "resize_partition": RouteSpec("POST", "/api/disk/resize", requires_same_origin=True),
+    "format_partition": RouteSpec("POST", "/api/disk/format", requires_same_origin=True),
+    "set_mountpoint": RouteSpec("POST", "/api/disk/set-mountpoint", requires_same_origin=True),
+    "commit_partitions": RouteSpec("POST", "/api/disk/commit", requires_same_origin=True),
+    "rollback_partitions": RouteSpec("POST", "/api/disk/rollback", requires_same_origin=True),
+}
 
 
 def _read_webui(name: str) -> str:

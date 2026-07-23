@@ -31,7 +31,7 @@ class InstallerRefactorTests(unittest.TestCase):
         self.assertEqual(cookies, {"a": "1", "b": "two"})
 
     def test_start_route_requires_same_origin(self):
-        route = plan.ROUTES["start"]
+        route = server.ROUTES["start"]
 
         self.assertEqual(route.method, "POST")
         self.assertEqual(route.path, "/api/start")
@@ -40,7 +40,7 @@ class InstallerRefactorTests(unittest.TestCase):
     def test_route_lookup_matches_method_and_path(self):
         route = server._route_for("GET", "/api/disks")
 
-        self.assertIs(route, plan.ROUTES["disks"])
+        self.assertIs(route, server.ROUTES["disks"])
         self.assertIsNone(server._route_for("POST", "/api/disks"))
 
 

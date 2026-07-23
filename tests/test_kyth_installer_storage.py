@@ -70,7 +70,7 @@ class InstallerWebuiTests(unittest.TestCase):
             ("GET", "/api/log"),
             ("POST", "/api/start"),
         }
-        actual = {(route.method, route.path) for route in plan.ROUTES.values()}
+        actual = {(route.method, route.path) for route in server.ROUTES.values()}
 
         self.assertTrue(expected.issubset(actual))
 

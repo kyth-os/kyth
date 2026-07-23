@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 01:16:44 UTC
+- Last refreshed (UTC): 2026-07-23 01:19:12 UTC
 - Current branch: testing
-- HEAD commit: 09a7f94
-- Last commit title: Add coverage for page_update_ops and page_compatibility's core logic
-- Last commit date: 2026-07-22T21:11:08-04:00
+- HEAD commit: aa12bad
+- Last commit title: Reuse the root helper's mount-point validator instead of re-deriving it
+- Last commit date: 2026-07-22T21:16:44-04:00
 - CI workflow files: 8
 - Build script files: 20
 
