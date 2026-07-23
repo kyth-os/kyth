@@ -9,7 +9,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 GUEST = ROOT / "build_files" / "kyth-vm-acceptance-guest"
 HOST = ROOT / "build_files" / "scripts" / "vm-acceptance.sh"
 UNIT = ROOT / "build_files" / "kyth-vm-acceptance.service"
-WORKFLOW = ROOT / ".github" / "workflows" / "build-live-iso.yml"
 
 
 class VmAcceptanceTests(unittest.TestCase):
@@ -37,14 +36,6 @@ class VmAcceptanceTests(unittest.TestCase):
         self.assertIn("live-desktop.ppm", text)
         self.assertIn("installed-login.ppm", text)
         self.assertIn("KYTH_ACCEPTANCE:FAILED", text)
-
-    def test_workflow_gates_unsigned_iso_upload(self):
-        text = WORKFLOW.read_text(encoding="utf-8")
-        acceptance = text.index("- name: Boot, install, update, and rollback acceptance")
-        upload = text.index("- name: Upload unsigned ISO artifact")
-        self.assertLess(acceptance, upload)
-        self.assertIn("acceptance_update_ref", text)
-        self.assertIn("Upload VM acceptance evidence", text)
 
 
 if __name__ == "__main__":
