@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass
 
 from .process import _run_command
-from .flatpak import is_installed
 
 _FIRST_WEEK_DISMISS = os.path.expanduser("~/.config/kyth-first-week-done")
 _FIRST_BOOT_MARKERS = (
@@ -70,16 +70,42 @@ def first_week_days() -> int | None:
     return int(age)
 
 
-def first_week_items() -> list[tuple[str, bool, str]]:
-    """Return (label, done, page_key) checklist for the first-week card."""
-    return [
-        ("Install a game launcher", is_installed("com.valvesoftware.Steam"), "Gaming"),
-        ("Pair a controller", controller_seen(), "Controllers"),
-        ("Connect phone (KDE Connect)", kdeconnect_configured(), "Move Files"),
-        ("Set up cloud storage", cloud_storage_configured(), "Cloud Storage"),
-        ("Add a printer", printer_configured(), "Repair"),
-        ("Browser integration", browser_integration_native_ready(), "Work Setup"),
-    ]
+@dataclass(frozen=True)
+class HomeHeroView:
+    """What page_welcome.py's hero banner and recommended-action card should
+    show, driven purely by system state — no Qt, so the decision tree is
+    testable without a display."""
+    pill_text: str
+    pill_object_name: str
+    rec_text: str
+    rec_btn_label: str
+    rec_target: str
+
+
+def home_hero_view(staged: bool, rollback: bool, windows_found: bool) -> HomeHeroView:
+    if staged:
+        pill_text, pill_object_name = "RESTART REQUIRED", "glowing-pill-warn"
+    else:
+        pill_text, pill_object_name = "SYSTEM UP-TO-DATE", "glowing-pill-ok"
+
+    if staged:
+        rec_text = "Restart to apply staged updates."
+        rec_btn_label = "Restart Now"
+        rec_target = "reboot"
+    elif rollback:
+        rec_text = "Previous build is saved in case of bugs."
+        rec_btn_label = "Manage Rollbacks"
+        rec_target = "Update"
+    elif windows_found:
+        rec_text = "Import games and documents from Windows."
+        rec_btn_label = "Transfer Files"
+        rec_target = "Move Files"
+    else:
+        rec_text = "System is up-to-date. Ready for configuration."
+        rec_btn_label = "Configure Games"
+        rec_target = "Gaming"
+
+    return HomeHeroView(pill_text, pill_object_name, rec_text, rec_btn_label, rec_target)
 
 
 # Underscore aliases

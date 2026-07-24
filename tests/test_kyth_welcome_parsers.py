@@ -68,7 +68,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
 from kyth_welcome import core_base, page_vpn  # noqa: E402
-from kyth_welcome.services import appstream, first_run, gaming, hardware  # noqa: E402
+from kyth_welcome.services import appstream, first_run, gaming, hardware, welcome  # noqa: E402
 
 
 class CoreParserTests(unittest.TestCase):
@@ -156,6 +156,33 @@ class VpnParserTests(unittest.TestCase):
     def test_vpn_line_is_connected(self):
         self.assertTrue(page_vpn._vpn_line_is_connected("Established DTLS connection"))
         self.assertFalse(page_vpn._vpn_line_is_connected("Authentication failed"))
+
+
+class HomeHeroViewTests(unittest.TestCase):
+    def test_staged_update_takes_priority(self):
+        view = welcome.home_hero_view(staged=True, rollback=True, windows_found=True)
+        self.assertEqual(view.pill_text, "RESTART REQUIRED")
+        self.assertEqual(view.pill_object_name, "glowing-pill-warn")
+        self.assertEqual(view.rec_target, "reboot")
+        self.assertEqual(view.rec_btn_label, "Restart Now")
+
+    def test_rollback_beats_windows_when_not_staged(self):
+        view = welcome.home_hero_view(staged=False, rollback=True, windows_found=True)
+        self.assertEqual(view.pill_text, "SYSTEM UP-TO-DATE")
+        self.assertEqual(view.pill_object_name, "glowing-pill-ok")
+        self.assertEqual(view.rec_target, "Update")
+        self.assertEqual(view.rec_btn_label, "Manage Rollbacks")
+
+    def test_windows_found_without_staged_or_rollback(self):
+        view = welcome.home_hero_view(staged=False, rollback=False, windows_found=True)
+        self.assertEqual(view.rec_target, "Move Files")
+        self.assertEqual(view.rec_btn_label, "Transfer Files")
+
+    def test_default_recommends_gaming_setup(self):
+        view = welcome.home_hero_view(staged=False, rollback=False, windows_found=False)
+        self.assertEqual(view.rec_target, "Gaming")
+        self.assertEqual(view.rec_btn_label, "Configure Games")
+        self.assertEqual(view.pill_text, "SYSTEM UP-TO-DATE")
 
 
 class AppStreamCatalogTests(unittest.TestCase):

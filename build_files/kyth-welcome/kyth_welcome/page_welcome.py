@@ -25,6 +25,7 @@ from .services.welcome import (
     _first_week_days,
     _kdeconnect_configured,
     _printer_configured,
+    home_hero_view,
 )
 from .qt import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt, Signal, single_shot,
@@ -56,6 +57,7 @@ class WelcomePage(Page):
         kernel = uname.release or "unknown"
         hostname = uname.nodename or "This PC"
         windows_found = bool(_find_ntfs_drives())
+        hero_view = home_hero_view(staged, rollback, windows_found)
 
         # ── 1. The Dynamic Gen Z Hero Banner ──────────────────────────────────
         hero_card = QFrame()
@@ -78,12 +80,8 @@ class WelcomePage(Page):
 
         # Status Pill Badge
         status_pill = QLabel()
-        if staged:
-            status_pill.setText("RESTART REQUIRED")
-            status_pill.setObjectName("glowing-pill-warn")
-        else:
-            status_pill.setText("SYSTEM UP-TO-DATE")
-            status_pill.setObjectName("glowing-pill-ok")
+        status_pill.setText(hero_view.pill_text)
+        status_pill.setObjectName(hero_view.pill_object_name)
         hero_layout.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
         self._add(hero_card)
 
@@ -203,35 +201,18 @@ class WelcomePage(Page):
         title4.setObjectName("hud-title")
         layout4.addWidget(title4)
 
-        if staged:
-            rec_text = "Restart to apply staged updates."
-            rec_btn_label = "Restart Now"
-            rec_target = "reboot"
-        elif rollback:
-            rec_text = "Previous build is saved in case of bugs."
-            rec_btn_label = "Manage Rollbacks"
-            rec_target = "Update"
-        elif windows_found:
-            rec_text = "Import games and documents from Windows."
-            rec_btn_label = "Transfer Files"
-            rec_target = "Move Files"
-        else:
-            rec_text = "System is up-to-date. Ready for configuration."
-            rec_btn_label = "Configure Games"
-            rec_target = "Gaming"
-
-        desc4 = QLabel(rec_text)
+        desc4 = QLabel(hero_view.rec_text)
         desc4.setObjectName("hud-desc")
         desc4.setWordWrap(True)
         layout4.addWidget(desc4)
 
-        btn4 = QPushButton(rec_btn_label)
+        btn4 = QPushButton(hero_view.rec_btn_label)
         btn4.setObjectName("primary")
         btn4.setCursor(Qt.CursorShape.PointingHandCursor)
-        if rec_target == "reboot":
+        if hero_view.rec_target == "reboot":
             btn4.clicked.connect(lambda _=False: reboot())
         else:
-            btn4.clicked.connect(lambda _=False: self._navigate(rec_target))
+            btn4.clicked.connect(lambda _=False: self._navigate(hero_view.rec_target))
         layout4.addWidget(btn4)
         hud_grid.addWidget(card4, 1, 1)
 

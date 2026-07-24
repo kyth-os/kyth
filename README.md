@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 01:02:53 UTC
+- Last refreshed (UTC): 2026-07-24 01:03:01 UTC
 - Current branch: testing
-- HEAD commit: 19edbb0
-- Last commit title: Fix stale VM-acceptance docs after CI gate revert
-- Last commit date: 2026-07-23T21:02:27-04:00
+- HEAD commit: 4112061
+- Last commit title: Group sysconfig fragments into domain subdirectories
+- Last commit date: 2026-07-23T21:02:53-04:00
 - CI workflow files: 8
 - Build script files: 20
 
