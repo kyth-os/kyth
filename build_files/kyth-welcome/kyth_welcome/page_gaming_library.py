@@ -4,7 +4,8 @@ from urllib.parse import urlencode
 from .core_base import _release_worker_when_finished
 from .services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _detect_installed_games, _load_protondb_cache,
-    _save_protondb_cache, find_compat_game, recommended_launcher_for_game, recommended_profile_for_game
+    _save_protondb_cache, find_compat_game, game_row_status_view, library_summary_text,
+    readiness_result_text,
 )
 from .services.gaming import _COMPAT_GAMES
 from .qt import QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, Qt
@@ -86,21 +87,10 @@ class _LibraryMixin:
 
     def _make_my_game_row(self, game_info: dict, protondb_tier: str = "") -> QFrame:
         compat = find_compat_game(_COMPAT_GAMES, game_info.get("name", ""))
-        if compat is None:
-            status = "dim"
-            status_text = "Unknown"
-            summary = "Not in curated list. ProtonDB rating shown when available."
-            profile = "kyth-gamescope quality -- %command%"
-        else:
-            status = "ok" if compat.status in ("native", "proton") else "warn" if compat.status == "tweaks" else "err"
-            status_text = {
-                "native": "Native",
-                "proton": "Works",
-                "tweaks": "Tweaks",
-                "blocked": "Blocked",
-            }.get(compat.status, compat.status)
-            summary = f"{compat.note} Checked {compat.checked} via {compat.source}."
-            profile = recommended_profile_for_game(compat)
+        row_view = game_row_status_view(compat)
+        status, status_text, summary, profile = (
+            row_view.status, row_view.status_text, row_view.summary, row_view.profile,
+        )
 
         row = QFrame()
         row.setObjectName("hw-card-dim")
@@ -195,15 +185,7 @@ class _LibraryMixin:
         if cache is None:
             cache = _load_protondb_cache()
 
-        matched = sum(1 for game in games if find_compat_game(_COMPAT_GAMES, game.get("name", "")))
-        by_launcher: dict[str, int] = {}
-        for game in games:
-            launcher = game.get("launcher", "Unknown")
-            by_launcher[launcher] = by_launcher.get(launcher, 0) + 1
-        launcher_summary = ", ".join(f"{name}: {count}" for name, count in sorted(by_launcher.items()))
-        self._my_games_summary_lbl.setText(
-            f"Detected {len(games)} installed item(s); {matched} matched KythOS compatibility data. {launcher_summary}"
-        )
+        self._my_games_summary_lbl.setText(library_summary_text(games, _COMPAT_GAMES))
 
         for game in games[:20]:
             appid = game.get("appid", "")
@@ -240,32 +222,7 @@ class _LibraryMixin:
             )
             return
 
-        status_label = {
-            "native": "Native Linux",
-            "proton": "Works via Proton",
-            "tweaks": "Works with tweaks",
-            "blocked": "Blocked by publisher/anti-cheat",
-        }.get(game.status, game.status)
-        save_note = (
-            "Back up saves with Ludusavi before migrating or modding."
-            if game.status != "blocked"
-            else "Do not migrate saves until the game has a supported Linux path."
-        )
-        mod_note = (
-            "Use the Modding guide before applying other system mod managers."
-            if game.status != "blocked"
-            else "Modding is irrelevant while the game is blocked."
-        )
-        self._readiness_result.setText(
-            f"{game.name}: {status_label}\n"
-            f"Anti-cheat/middleware: {game.anticheat}\n"
-            f"Launcher: {recommended_launcher_for_game(game)}\n"
-            f"Runner/profile: {recommended_profile_for_game(game)}\n"
-            f"Saves: {save_note}\n"
-            f"Mods: {mod_note}\n"
-            f"Checked: {game.checked} via {game.source}\n"
-            f"{game.note}"
-        )
+        self._readiness_result.setText(readiness_result_text(game))
 
     def _open_readiness_protondb(self):
         query = self._readiness_combo.currentText().strip()

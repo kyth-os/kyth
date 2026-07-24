@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 01:27:14 UTC
+- Last refreshed (UTC): 2026-07-24 01:27:25 UTC
 - Current branch: testing
-- HEAD commit: 7338ada
-- Last commit title: Extract page_software_installed.py's AppImage discovery into services/appimages.py
-- Last commit date: 2026-07-23T21:27:05-04:00
+- HEAD commit: a28a8d1
+- Last commit title: Extract page_controllers.py's status decision tree into a testable pure function
+- Last commit date: 2026-07-23T21:27:14-04:00
 - CI workflow files: 8
 - Build script files: 20
 

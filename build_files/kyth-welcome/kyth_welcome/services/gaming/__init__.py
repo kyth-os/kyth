@@ -41,15 +41,22 @@ from .protondb import (
     _save_protondb_cache,
 )
 from .health import (
+    GamingReadinessView,
     _collect_gaming_dashboard,
     _gaming_health_items,
     _gaming_migration_checklist_items,
     _ludusavi_backup_summary,
     _streaming_health_items,
+    gaming_readiness_view,
+    ready_status_prefix,
 )
 from .compat import (
+    GameRowStatusView,
     blocked_compat_lookup,
     find_compat_game,
+    game_row_status_view,
+    library_summary_text,
+    readiness_result_text,
     recommended_launcher_for_game,
     recommended_profile_for_game,
 )
@@ -104,6 +111,9 @@ __all__ = [
     "_find_ntfs_drives",
     "_find_steam_libraries",
     "_gamescope_installed",
+    "GamingReadinessView",
+    "gaming_readiness_view",
+    "ready_status_prefix",
     "_gaming_health_items",
     "_gaming_migration_checklist_items",
     "_load_compat_games",
@@ -127,6 +137,10 @@ __all__ = [
     "command_details",
     "discord_screenshare_fix_command",
     "find_compat_game",
+    "GameRowStatusView",
+    "game_row_status_view",
+    "library_summary_text",
+    "readiness_result_text",
     "heroic_epic_launcher_command",
     "load_compat_games",
     "lutris_installer_command",

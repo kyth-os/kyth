@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from dataclasses import dataclass
 
 from .steam import _detect_installed_games
 from .tools import (
@@ -17,6 +18,57 @@ from ..bootc import _has_staged_update
 from ..hardware import _detect_controllers, _find_ntfs_drives
 from ..process import _run_command
 from ..flatpak import is_installed
+
+
+@dataclass(frozen=True)
+class GamingReadinessView:
+    """What page_gaming_setup.py's readiness panel should show — no Qt, so
+    the item list, counts, and summary-text decision are testable without
+    a display."""
+    items: list[tuple[str, str, str]]
+    ok_count: int
+    issue_count: int
+    warn_count: int
+    total: int
+    score_style: str
+    summary_text: str
+
+
+def gaming_readiness_view(
+    *, steam_ok: bool, pc_ver: str | None, vulkan_ok: bool, ntsync_ok: bool,
+    gamescope_ok: bool, mangohud_ok: bool,
+) -> GamingReadinessView:
+    items = [
+        ("ok" if steam_ok else "warn", "Steam", "Installed." if steam_ok else "Install Steam for your library."),
+        ("ok" if pc_ver else "err", "Proton-CachyOS", pc_ver or "Update Proton-CachyOS before testing PC games."),
+        ("ok" if vulkan_ok else "err", "Vulkan", "Render device found." if vulkan_ok else "No Vulkan render device found."),
+        ("ok" if ntsync_ok else "warn", "NTSYNC", "Ready." if ntsync_ok else "Not active; Proton can fall back safely."),
+        ("ok" if gamescope_ok else "warn", "Gamescope", "Ready." if gamescope_ok else "Install for scaling, HDR, and frame pacing presets."),
+        ("ok" if mangohud_ok else "warn", "MangoHud", "Ready." if mangohud_ok else "Install for the performance overlay."),
+    ]
+    ok_count = sum(1 for status, _, _ in items if status == "ok")
+    issue_count = sum(1 for status, _, _ in items if status == "err")
+    warn_count = sum(1 for status, _, _ in items if status == "warn")
+
+    score_style = "ready-score-err" if issue_count else "ready-score-warn" if warn_count else "ready-score"
+    if issue_count:
+        summary_text = "A couple of core pieces need attention before PC games will feel smooth."
+    elif warn_count:
+        summary_text = "The core stack is close. Review the yellow items before benchmarking or migrating."
+    else:
+        summary_text = "The important pieces are in place. Scroll down for launchers, Proton, and game tools."
+
+    return GamingReadinessView(
+        items=items, ok_count=ok_count, issue_count=issue_count, warn_count=warn_count,
+        total=len(items), score_style=score_style, summary_text=summary_text,
+    )
+
+
+_READY_STATUS_PREFIXES = {"ok": "Ready", "warn": "Check", "err": "Fix", "dim": "Optional"}
+
+
+def ready_status_prefix(status: str) -> str:
+    return _READY_STATUS_PREFIXES.get(status, "Info")
 
 
 def _gaming_health_items(*, controllers: dict | None = None,
