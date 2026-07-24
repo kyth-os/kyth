@@ -81,27 +81,21 @@ jobs:
         id: prep
         env:
           MATRIX_BRANCH: ${{ matrix.branch }}
-          MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
           exec 4>>"${GITHUB_ENV}"
           [[ "${MATRIX_BRANCH}" == main || "${MATRIX_BRANCH}" == testing ]]
           echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >&4
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >&4
-          # main → :latest, everything else → :<branch-name>
-          TAG="${MATRIX_BRANCH}"
-          if [[ "${TAG}" == main ]]; then
-            TAG=latest
-          fi
-          case "${MATRIX_KERNEL_FLAVOR}" in
-            fedora) SUFFIX="" ;;
-            cachy)  SUFFIX="-cachy" ;;
-          esac
-          echo "DEFAULT_TAG=${TAG}" >&4
-          echo "KERNEL_TAG_SUFFIX=${SUFFIX}" >&4
-          echo "default_tag=${TAG}${SUFFIX}" >&3
           DATE_SHORT="$(date -u +%Y%m%d)"
           echo "date_short=${DATE_SHORT}" >&3
+
+      - name: Resolve default tag
+        id: resolve_tag
+        uses: ./.github/actions/resolve-image-tag
+        with:
+          branch: ${{ matrix.branch }}
+          kernel-flavor: ${{ matrix.kernel_flavor }}
 
       # These stage versions are pinned by https://github.com/renovatebot/renovate
       - name: Checkout
@@ -119,7 +113,7 @@ jobs:
           echo "short_sha=${SHA:0:8}" >&3
           echo "image_version=${STEPS_PREP_OUTPUTS_DEFAULT_TAG}.${STEPS_PREP_OUTPUTS_DATE_SHORT}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.${SHA:0:8}" >&3
         env:
-          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.prep.outputs.default_tag }}
+          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_PREP_OUTPUTS_DATE_SHORT: ${{ steps.prep.outputs.date_short }}
 
       - name: Set up Docker Buildx
@@ -152,7 +146,7 @@ jobs:
           # This generates all the tags for your image, you can add custom tags here too!
           # Default tags are "$DEFAULT_TAG" and "$DEFAULT_TAG.$date".
           tags: |
-            type=raw,value=${{ steps.prep.outputs.default_tag }}
+            type=raw,value=${{ steps.resolve_tag.outputs.tag }}
             type=raw,value=${{ steps.checkout_sha.outputs.image_version }}
             type=raw,value=${{ steps.prep.outputs.date_short }}.${{ github.run_number }}.${{ github.run_attempt }}.${{ steps.checkout_sha.outputs.short_sha }},enable=${{ matrix.branch == 'main' && matrix.kernel_flavor == 'fedora' }}
           labels: |
@@ -255,7 +249,7 @@ jobs:
           MATRIX_BRANCH: ${{ matrix.branch }}
           MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           CACHYOS_KERNEL_VERSION: ${{ steps.cachyos_kernel.outputs.version || 'unused' }}
-          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.prep.outputs.default_tag }}
+          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_UPSTREAM_BASE_OUTPUTS_PINNED: ${{ steps.upstream_base.outputs.pinned }}
 
       - name: Build final image
@@ -332,7 +326,7 @@ jobs:
           MATRIX_BRANCH: ${{ matrix.branch }}
           MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           CACHYOS_KERNEL_VERSION: ${{ steps.cachyos_kernel.outputs.version || 'unused' }}
-          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.prep.outputs.default_tag }}
+          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_METADATA_OUTPUTS_LABELS: ${{ steps.metadata.outputs.labels }}
           STEPS_BUILD_BASE_OUTPUTS_IMAGE: ${{ steps.build_base.outputs.image }}
           STEPS_BUILD_BASE_OUTPUTS_DIGEST: ${{ steps.build_base.outputs.digest }}
@@ -375,7 +369,7 @@ jobs:
         with:
           rechunk: ghcr.io/mrtrick37/legacy-rechunk@sha256:ed2e0c0749cae465284b14c61c2106d7d929d5f270b838f27a251d31fcacf800
           ref: ${{ steps.build_final.outputs.raw_ref }}
-          prev-ref: ${{ steps.build_final.outputs.image }}:${{ steps.prep.outputs.default_tag }}
+          prev-ref: ${{ steps.build_final.outputs.image }}:${{ steps.resolve_tag.outputs.tag }}
           meta: build_files/rechunk-meta.json
           max-layers: '64'
           skip_compression: true
@@ -438,7 +432,7 @@ jobs:
         env:
           IMAGE_FULL: ${{ steps.build_final.outputs.image }}
           SOURCE_REF: ${{ steps.rechunk.outputs.ref }}
-          PRIMARY_TAG: ${{ steps.prep.outputs.default_tag }}
+          PRIMARY_TAG: ${{ steps.resolve_tag.outputs.tag }}
           TAGS: ${{ steps.metadata.outputs.tags }}
           EXPECTED_VERSION: ${{ steps.checkout_sha.outputs.image_version }}
           EXPECTED_REVISION: ${{ steps.checkout_sha.outputs.sha }}
@@ -499,7 +493,7 @@ jobs:
           DIGEST: ${{ steps.publish_final.outputs.digest }}
           VERSION: ${{ steps.publish_final.outputs.version }}
           SOURCE_SHA: ${{ steps.checkout_sha.outputs.sha }}
-          SOURCE_TAG: ${{ steps.prep.outputs.default_tag }}
+          SOURCE_TAG: ${{ steps.resolve_tag.outputs.tag }}
           UPSTREAM_BASE: ${{ steps.upstream_base.outputs.pinned }}
           BUILD_BASE: ${{ steps.build_base.outputs.pinned }}
           PROTON_CACHYOS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
@@ -543,7 +537,7 @@ jobs:
       - name: Upload immutable build metadata
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: image-build-metadata-${{ steps.prep.outputs.default_tag }}
+          name: image-build-metadata-${{ steps.resolve_tag.outputs.tag }}
           path: output/build-metadata/image.json
           if-no-files-found: error
           retention-days: 7
@@ -597,20 +591,10 @@ jobs:
     steps:
       - name: Prepare artifact identity
         id: prep
-        env:
-          MATRIX_BRANCH: ${{ matrix.branch }}
-          MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
-        run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          TAG="${MATRIX_BRANCH}"
-          if [[ "${TAG}" == main ]]; then
-            TAG=latest
-          fi
-          case "${MATRIX_KERNEL_FLAVOR}" in
-            fedora) SUFFIX="" ;;
-            cachy) SUFFIX="-cachy" ;;
-          esac
-          echo "tag=${TAG}${SUFFIX}" >&3
+        uses: ./.github/actions/resolve-image-tag
+        with:
+          branch: ${{ matrix.branch }}
+          kernel-flavor: ${{ matrix.kernel_flavor }}
 
       - name: Download immutable build metadata
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

@@ -308,38 +308,18 @@ jobs:
 
       - name: Setup Grype
         id: setup_grype
-        env:
-          GRYPE_VERSION: 0.88.0
-        run: |
-          ARCHIVE="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
-          BASE="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
-          curl --fail --location --silent --show-error \
-            --output "${RUNNER_TEMP}/${ARCHIVE}" "${BASE}/${ARCHIVE}"
-          curl --fail --location --silent --show-error \
-            --output "${RUNNER_TEMP}/grype_checksums.txt" \
-            "${BASE}/grype_${GRYPE_VERSION}_checksums.txt"
-          (cd "${RUNNER_TEMP}" && grep " ${ARCHIVE}$" grype_checksums.txt | sha256sum --check --strict -)
-          tar --extract --gzip --file "${RUNNER_TEMP}/${ARCHIVE}" --directory "${RUNNER_TEMP}" grype
-          chmod +x "${RUNNER_TEMP}/grype"
-          echo "cmd=${RUNNER_TEMP}/grype" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/setup-grype
 
       - name: Pull source image SBOM
         id: current_sbom
-        env:
-          SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
-          SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
-        run: |
-          SBOM_DIGEST="$(oras discover --format json "${SOURCE_IMAGE}@${SOURCE_DIGEST}" \
-            | jq -r '[.referrers[] | select(.artifactType | contains("syft"))] | .[0].digest // empty' \
-            2>/dev/null || true)"
-          if [[ -z "${SBOM_DIGEST}" ]]; then
-            echo "::warning::No SBOM attached to source image; CVE section will be skipped"
-            exit 0
-          fi
-          mkdir -p "${RUNNER_TEMP}/current-sbom"
-          oras pull "${SOURCE_IMAGE}@${SBOM_DIGEST}" -o "${RUNNER_TEMP}/current-sbom/"
-          SBOM="$(find "${RUNNER_TEMP}/current-sbom" -name '*.json' -type f | head -1)"
-          [[ -n "${SBOM}" ]] && echo "path=${SBOM}" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/pull-sbom-referrer
+        with:
+          image-ref: ${{ needs.build.outputs.source_image }}@${{ needs.build.outputs.source_digest }}
+          dest-dir: ${{ runner.temp }}/current-sbom
+
+      - name: Warn if source image has no SBOM
+        if: steps.current_sbom.outputs.path == ''
+        run: echo "::warning::No SBOM attached to source image; CVE section will be skipped"
 
       - name: Scan source image with Grype
         id: grype_current
@@ -353,15 +333,15 @@ jobs:
             echo "::warning::Grype scan failed; security section will be limited"
           [[ -f "${OUT}" ]] && echo "path=${OUT}" >> "$GITHUB_OUTPUT"
 
-      - name: Pull previous ISO source image SBOM
-        id: previous_sbom
+      - name: Resolve previous release image digest
+        id: previous_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
           SOURCE_TAG: ${{ inputs.source_tag }}
           IMMUTABLE_TAG: ${{ needs.build.outputs.immutable_tag }}
         run: |
+          exec 3>>"${GITHUB_OUTPUT}"
           PREV_DIGEST=""
           PREV_TAG="$(gh release list --limit 30 --json tagName \
             -q ".[] | .tagName | select(startswith(\"iso-${SOURCE_TAG}-\"))" \
@@ -375,21 +355,23 @@ jobs:
           print(m.group(1) if m else '', end='')
           " <<< "${RELEASE_BODY}" || true)"
           fi
-          if [[ -z "${PREV_DIGEST}" ]] || ! build_files/scripts/validate-digest.sh "${PREV_DIGEST}" 2>/dev/null; then
+          if [[ -n "${PREV_DIGEST}" ]] && build_files/scripts/validate-digest.sh "${PREV_DIGEST}" 2>/dev/null; then
+            echo "digest=${PREV_DIGEST}" >&3
+          else
             echo "No previous source digest found; CVE diff will be skipped"
-            exit 0
           fi
-          PREV_SBOM_DIGEST="$(oras discover --format json "${SOURCE_IMAGE}@${PREV_DIGEST}" \
-            | jq -r '[.referrers[] | select(.artifactType | contains("syft"))] | .[0].digest // empty' \
-            2>/dev/null || true)"
-          if [[ -z "${PREV_SBOM_DIGEST}" ]]; then
-            echo "No previous SBOM found; CVE diff will be skipped"
-            exit 0
-          fi
-          mkdir -p "${RUNNER_TEMP}/prev-sbom"
-          oras pull "${SOURCE_IMAGE}@${PREV_SBOM_DIGEST}" -o "${RUNNER_TEMP}/prev-sbom/"
-          PREV_SBOM="$(find "${RUNNER_TEMP}/prev-sbom" -name '*.json' -type f | head -1)"
-          [[ -n "${PREV_SBOM}" ]] && echo "path=${PREV_SBOM}" >> "$GITHUB_OUTPUT"
+
+      - name: Pull previous ISO source image SBOM
+        id: previous_sbom
+        if: steps.previous_release.outputs.digest != ''
+        uses: ./.github/actions/pull-sbom-referrer
+        with:
+          image-ref: ${{ needs.build.outputs.source_image }}@${{ steps.previous_release.outputs.digest }}
+          dest-dir: ${{ runner.temp }}/prev-sbom
+
+      - name: Warn if previous release has no SBOM
+        if: steps.previous_release.outputs.digest != '' && steps.previous_sbom.outputs.path == ''
+        run: echo "No previous SBOM found; CVE diff will be skipped"
 
       - name: Scan previous source image with Grype
         id: grype_previous

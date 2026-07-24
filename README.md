@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 01:27:25 UTC
+- Last refreshed (UTC): 2026-07-24 01:45:00 UTC
 - Current branch: testing
-- HEAD commit: a28a8d1
-- Last commit title: Extract page_controllers.py's status decision tree into a testable pure function
-- Last commit date: 2026-07-23T21:27:14-04:00
+- HEAD commit: d83785e
+- Last commit title: Extract gaming readiness, game-row status, and library-summary logic
+- Last commit date: 2026-07-23T21:27:25-04:00
 - CI workflow files: 8
 - Build script files: 20
 

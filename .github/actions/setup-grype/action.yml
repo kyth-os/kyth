@@ -1,0 +1,30 @@
+name: Setup Grype
+description: >
+  Download and verify a pinned Grype release, exposing its path for
+  subsequent `grype "sbom:..."` scan steps. Used by both the live-ISO
+  publish job and the supply-chain metadata job, which each scan a
+  current and a previous SBOM independently.
+outputs:
+  cmd:
+    description: Path to the verified Grype binary.
+    value: ${{ steps.setup_grype.outputs.cmd }}
+runs:
+  using: composite
+  steps:
+    - name: Setup Grype
+      id: setup_grype
+      shell: bash
+      env:
+        GRYPE_VERSION: 0.88.0
+      run: |
+        ARCHIVE="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+        BASE="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
+        curl --fail --location --silent --show-error \
+          --output "${RUNNER_TEMP}/${ARCHIVE}" "${BASE}/${ARCHIVE}"
+        curl --fail --location --silent --show-error \
+          --output "${RUNNER_TEMP}/grype_checksums.txt" \
+          "${BASE}/grype_${GRYPE_VERSION}_checksums.txt"
+        (cd "${RUNNER_TEMP}" && grep " ${ARCHIVE}$" grype_checksums.txt | sha256sum --check --strict -)
+        tar --extract --gzip --file "${RUNNER_TEMP}/${ARCHIVE}" --directory "${RUNNER_TEMP}" grype
+        chmod +x "${RUNNER_TEMP}/grype"
+        echo "cmd=${RUNNER_TEMP}/grype" >> "$GITHUB_OUTPUT"
