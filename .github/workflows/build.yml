@@ -90,19 +90,22 @@ jobs:
           DATE_SHORT="$(date -u +%Y%m%d)"
           echo "date_short=${DATE_SHORT}" >&3
 
-      - name: Resolve default tag
-        id: resolve_tag
-        uses: ./.github/actions/resolve-image-tag
-        with:
-          branch: ${{ matrix.branch }}
-          kernel-flavor: ${{ matrix.kernel_flavor }}
-
       # These stage versions are pinned by https://github.com/renovatebot/renovate
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ matrix.branch }}
           persist-credentials: false
+
+      # Local composite actions resolve from the checked-out working tree, so
+      # this must run after Checkout — unlike the old inline run: step it
+      # replaced, which needed no repo files and could run before it.
+      - name: Resolve default tag
+        id: resolve_tag
+        uses: ./.github/actions/resolve-image-tag
+        with:
+          branch: ${{ matrix.branch }}
+          kernel-flavor: ${{ matrix.kernel_flavor }}
 
       - name: Capture checked-out commit
         id: checkout_sha
@@ -589,6 +592,15 @@ jobs:
       attestations: write
 
     steps:
+      # This job previously needed no repo files (its one step was a pure
+      # run: block), but a local composite action resolves from the checked-
+      # out working tree, so Checkout is now required here too.
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ matrix.branch }}
+          persist-credentials: false
+
       - name: Prepare artifact identity
         id: prep
         uses: ./.github/actions/resolve-image-tag
