@@ -1,0 +1,27 @@
+name: Setup ORAS
+description: >
+  Install ORAS and optionally log in to GitHub Container Registry (GHCR).
+inputs:
+  version:
+    description: ORAS version to install.
+    required: false
+    default: 1.3.1
+  gh-token:
+    description: GitHub token for GHCR login.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install ORAS
+      uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      with:
+        version: ${{ inputs.version }}
+
+    - name: Log in to GHCR
+      if: inputs.gh-token != ''
+      shell: bash
+      run: |
+        echo "${GH_TOKEN}" | oras login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}

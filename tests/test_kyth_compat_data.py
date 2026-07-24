@@ -21,7 +21,6 @@ try:
         replace_compat_games,
         calculate_data_age_days,
         calculate_compat_stats,
-        CompatStats,
     )
 except ImportError:
     raise unittest.SkipTest("PyQt6/PySide6 required by kyth_welcome.core_base → qt imports") from None

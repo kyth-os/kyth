@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 02:45:39 UTC
+- Last refreshed (UTC): 2026-07-24 02:51:19 UTC
 - Current branch: testing
-- HEAD commit: b9c3c64
-- Last commit title: Refactor game compatibility age and summary statistics calculations to service layer
-- Last commit date: 2026-07-23T22:40:22-04:00
+- HEAD commit: c7f6742
+- Last commit title: Extract ORAS, Syft, and Cosign setup into composite actions
+- Last commit date: 2026-07-23T22:50:07-04:00
 - CI workflow files: 8
 - Build script files: 20
 
