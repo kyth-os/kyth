@@ -1,4 +1,3 @@
-import re
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
@@ -9,6 +8,7 @@ from .services.security import (
     build_kali_create_command,
     build_kali_export_command,
     build_kali_remove_command,
+    KaliInstallProgressTracker,
 )
 from .services.runtime import Worker, _finish_worker
 from .qt import (
@@ -182,10 +182,7 @@ class _KaliContainerMixin:
         self._sec_status_lbl.setObjectName("subheading")
         self._sec_status_lbl.show()
         _restyle(self._sec_status_lbl)
-        self._sec_install_phase = 0
-        self._sec_total_packages = 0
-        self._sec_unpack_count = 0
-        self._sec_setup_count = 0
+        self._sec_progress_tracker = KaliInstallProgressTracker()
 
         cmd = build_kali_create_command(self._SEC_BOX_NAME, self._SEC_BOX_IMAGE, meta, has_gui)
         self._sec_worker = Worker(cmd)
@@ -197,173 +194,12 @@ class _KaliContainerMixin:
         self._sec_log.append(ln)
         self._sec_log.ensureCursorVisible()
 
-        lo = ln.lower()
-        phase = self._sec_install_phase
-
-        if phase <= 1:
-            if any(k in lo for k in (
-                "trying to pull", "pulling image", "getting image source",
-                "copying blob", "copying config",
-            )):
-                self._sec_install_phase = 1
-                if "copying blob" in lo:
-                    digest = ln.split()[-1] if ln.split() else ""
-                    short = digest[:19] if digest else ""
-                    msg = f"Pulling image layer {short}…" if short else "Pulling Kali image layers…"
-                elif "copying config" in lo:
-                    msg = "Pulling image config…"
-                else:
-                    msg = "Pulling kalilinux/kali-rolling from registry…"
-                self._sec_status_lbl.setText(msg)
-                _restyle(self._sec_status_lbl)
-                cur = self._sec_progress.value()
-                if cur < 40:
-                    self._sec_progress.setValue(cur + 1)
-                return
-            if "writing manifest" in lo or "storing signatures" in lo:
-                self._sec_install_phase = 1
-                self._sec_status_lbl.setText("Storing image manifest…")
-                _restyle(self._sec_status_lbl)
-                self._sec_progress.setValue(42)
-                return
-            if any(k in lo for k in (
-                "container kali", "creating container", "starting container",
-                "image is now available", "image already present",
-            )) or (phase == 1 and "distrobox" in lo and "creat" in lo):
-                self._sec_install_phase = 2
-                self._sec_status_lbl.setText("Creating Kali distrobox container…")
-                _restyle(self._sec_status_lbl)
-                self._sec_progress.setValue(max(self._sec_progress.value(), 44))
-                return
-
-        if phase == 2:
-            if any(k in lo for k in ("installing basic", "bootstrapping", "reading package")):
-                self._sec_install_phase = 3
-                self._sec_status_lbl.setText("Bootstrapping Kali environment…")
-                _restyle(self._sec_status_lbl)
-                self._sec_progress.setValue(max(self._sec_progress.value(), 55))
-            else:
-                cur = self._sec_progress.value()
-                if cur < 54:
-                    self._sec_progress.setValue(cur + 1)
-            return
-
-        if phase == 3:
-            if any(k in lo for k in ("reading package lists", "building dependency",
-                                     "reading state information")):
-                self._sec_status_lbl.setText("Fetching Kali package lists…")
-                _restyle(self._sec_status_lbl)
-                cur = self._sec_progress.value()
-                if cur < 59:
-                    self._sec_progress.setValue(cur + 1)
-            elif any(k in lo for k in ("following new package", "following additional",
-                                       "will be installed")):
-                self._sec_status_lbl.setText("Resolving package dependencies…")
-                _restyle(self._sec_status_lbl)
-                self._sec_progress.setValue(max(self._sec_progress.value(), 58))
-            m = re.search(r'(\d+) newly installed', ln)
-            if m:
-                self._sec_total_packages = int(m.group(1))
-            m2 = re.search(r'Need to get (.+?) of archives', ln, re.IGNORECASE)
-            if m2:
-                self._sec_install_phase = 4
-                size_str = m2.group(1)
-                count_str = f" ({self._sec_total_packages} packages)" if self._sec_total_packages else ""
-                self._sec_status_lbl.setText(f"Downloading {size_str} of packages{count_str}…")
-                _restyle(self._sec_status_lbl)
-                self._sec_progress.setValue(max(self._sec_progress.value(), 60))
-            elif "need to get" in lo and "archive" in lo:
-                self._sec_install_phase = 4
-                self._sec_status_lbl.setText("Downloading packages…")
-                _restyle(self._sec_status_lbl)
-                self._sec_progress.setValue(max(self._sec_progress.value(), 60))
-            return
-
-        if phase == 4:
-            m = re.match(r'Get:(\d+)\s+\S+\s+\S+\s+\S+\s+(\S+)', ln)
-            if m:
-                n = int(m.group(1))
-                pkg = m.group(2)
-                if self._sec_total_packages > 0:
-                    frac = min(1.0, n / self._sec_total_packages)
-                    self._sec_progress.setValue(max(self._sec_progress.value(),
-                                                   int(60 + frac * 15)))
-                    self._sec_status_lbl.setText(
-                        f"Downloading {pkg}… ({n} / {self._sec_total_packages})"
-                    )
-                else:
-                    cur = self._sec_progress.value()
-                    if cur < 74:
-                        self._sec_progress.setValue(cur + 1)
-                    self._sec_status_lbl.setText(f"Downloading {pkg}…")
-                _restyle(self._sec_status_lbl)
-            if ln.startswith("Selecting previously") or ln.startswith("Preparing to unpack"):
-                self._sec_install_phase = 5
-                total_str = f" / {self._sec_total_packages}" if self._sec_total_packages else ""
-                self._sec_status_lbl.setText(f"Unpacking packages… (0{total_str})")
-                _restyle(self._sec_status_lbl)
-                self._sec_progress.setValue(max(self._sec_progress.value(), 75))
-            return
-
-        if phase == 5:
-            if ln.startswith("Unpacking "):
-                self._sec_unpack_count += 1
-                pkg = ln.split()[1] if len(ln.split()) > 1 else ""
-                pkg = pkg.split(":")[0]
-                total_str = f" / {self._sec_total_packages}" if self._sec_total_packages else ""
-                self._sec_status_lbl.setText(
-                    f"Unpacking {pkg}… ({self._sec_unpack_count}{total_str})"
-                )
-                _restyle(self._sec_status_lbl)
-                if self._sec_total_packages > 0:
-                    frac = min(1.0, self._sec_unpack_count / self._sec_total_packages)
-                    self._sec_progress.setValue(max(self._sec_progress.value(),
-                                                   int(75 + frac * 13)))
-                else:
-                    cur = self._sec_progress.value()
-                    if cur < 87:
-                        self._sec_progress.setValue(cur + 1)
-            if ln.startswith("Setting up "):
-                self._sec_install_phase = 6
-                pkg = ln.split()[2] if len(ln.split()) > 2 else ""
-                pkg = pkg.split(":")[0]
-                self._sec_setup_count = 1
-                total_str = f" / {self._sec_total_packages}" if self._sec_total_packages else ""
-                self._sec_status_lbl.setText(f"Configuring {pkg}… (1{total_str})")
-                _restyle(self._sec_status_lbl)
-                if self._sec_total_packages > 0:
-                    frac = min(1.0, 1 / self._sec_total_packages)
-                    self._sec_progress.setValue(max(self._sec_progress.value(),
-                                                   int(88 + frac * 10)))
-                else:
-                    self._sec_progress.setValue(max(self._sec_progress.value(), 88))
-            return
-
-        if phase == 6:
-            if ln.startswith("Setting up "):
-                self._sec_setup_count += 1
-                pkg = ln.split()[2] if len(ln.split()) > 2 else ""
-                pkg = pkg.split(":")[0]
-                total_str = f" / {self._sec_total_packages}" if self._sec_total_packages else ""
-                self._sec_status_lbl.setText(
-                    f"Configuring {pkg}… ({self._sec_setup_count}{total_str})"
-                )
-                _restyle(self._sec_status_lbl)
-                if self._sec_total_packages > 0:
-                    frac = min(1.0, self._sec_setup_count / self._sec_total_packages)
-                    self._sec_progress.setValue(max(self._sec_progress.value(),
-                                                   int(88 + frac * 10)))
-                else:
-                    cur = self._sec_progress.value()
-                    if cur < 97:
-                        self._sec_progress.setValue(cur + 1)
-            if "processing triggers" in lo:
-                pkg_m = re.search(r'processing triggers for (\S+)', lo)
-                trigger_pkg = pkg_m.group(1) if pkg_m else ""
-                msg = f"Running post-install triggers ({trigger_pkg})…" if trigger_pkg else "Running post-install triggers…"
-                self._sec_status_lbl.setText(msg)
-                _restyle(self._sec_status_lbl)
-                self._sec_progress.setValue(max(self._sec_progress.value(), 98))
+        msg, prog = self._sec_progress_tracker.parse_line(ln)
+        if msg is not None:
+            self._sec_status_lbl.setText(msg)
+            _restyle(self._sec_status_lbl)
+        if prog is not None:
+            self._sec_progress.setValue(prog)
 
     def _sec_on_create_done(self, code: int):
         self._sec_progress.setValue(100)

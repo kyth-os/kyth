@@ -4,6 +4,8 @@ Pure — no Qt. UI lives in page_software_security_kali.
 """
 from __future__ import annotations
 
+import re
+
 from .process import _run_command
 
 DEFAULT_KALI_BOX = "kali"
@@ -250,3 +252,246 @@ kbuildsycoca6 --noincremental 2>/dev/null || true
 echo "Kali box is stopped and removed."
 """
     return ["bash", "-c", script]
+
+
+class KaliInstallProgressTracker:
+    """Tracks distrobox Kali Linux installation log output and updates progress state.
+
+    Pure logic — decoupled from PySide6 widgets.
+    """
+
+    def __init__(self) -> None:
+        self.phase = 0
+        self.total_packages = 0
+        self.unpack_count = 0
+        self.setup_count = 0
+        self.progress_value = 2
+        self.status_message: str | None = None
+
+    def parse_line(self, ln: str) -> tuple[str | None, int | None]:
+        lo = ln.lower()
+        msg_changed = False
+        progress_changed = False
+
+        def set_status(val: str):
+            nonlocal msg_changed
+            if self.status_message != val:
+                self.status_message = val
+                msg_changed = True
+
+        def set_progress(val: int):
+            nonlocal progress_changed
+            if self.progress_value != val:
+                self.progress_value = val
+                progress_changed = True
+
+        if self.phase <= 1:
+            if any(
+                k in lo
+                for k in (
+                    "trying to pull",
+                    "pulling image",
+                    "getting image source",
+                    "copying blob",
+                    "copying config",
+                )
+            ):
+                self.phase = 1
+                if "copying blob" in lo:
+                    digest = ln.split()[-1] if ln.split() else ""
+                    short = digest[:19] if digest else ""
+                    msg = (
+                        f"Pulling image layer {short}…"
+                        if short
+                        else "Pulling Kali image layers…"
+                    )
+                elif "copying config" in lo:
+                    msg = "Pulling image config…"
+                else:
+                    msg = "Pulling kalilinux/kali-rolling from registry…"
+                set_status(msg)
+                if self.progress_value < 40:
+                    set_progress(self.progress_value + 1)
+                return (
+                    self.status_message if msg_changed else None,
+                    self.progress_value if progress_changed else None,
+                )
+
+            if "writing manifest" in lo or "storing signatures" in lo:
+                self.phase = 1
+                set_status("Storing image manifest…")
+                set_progress(42)
+                return (
+                    self.status_message if msg_changed else None,
+                    self.progress_value if progress_changed else None,
+                )
+
+            if any(
+                k in lo
+                for k in (
+                    "container kali",
+                    "creating container",
+                    "starting container",
+                    "image is now available",
+                    "image already present",
+                )
+            ) or (self.phase == 1 and "distrobox" in lo and "creat" in lo):
+                self.phase = 2
+                set_status("Creating Kali distrobox container…")
+                set_progress(max(self.progress_value, 44))
+                return (
+                    self.status_message if msg_changed else None,
+                    self.progress_value if progress_changed else None,
+                )
+
+        if self.phase == 2:
+            if any(
+                k in lo
+                for k in ("installing basic", "bootstrapping", "reading package")
+            ):
+                self.phase = 3
+                set_status("Bootstrapping Kali environment…")
+                set_progress(max(self.progress_value, 55))
+            else:
+                if self.progress_value < 54:
+                    set_progress(self.progress_value + 1)
+            return (
+                self.status_message if msg_changed else None,
+                self.progress_value if progress_changed else None,
+            )
+
+        if self.phase == 3:
+            if any(
+                k in lo
+                for k in (
+                    "reading package lists",
+                    "building dependency",
+                    "reading state information",
+                )
+            ):
+                set_status("Fetching Kali package lists…")
+                if self.progress_value < 59:
+                    set_progress(self.progress_value + 1)
+            elif any(
+                k in lo
+                for k in (
+                    "following new package",
+                    "following additional",
+                    "will be installed",
+                )
+            ):
+                set_status("Resolving package dependencies…")
+                set_progress(max(self.progress_value, 58))
+
+            m = re.search(r"(\d+) newly installed", ln)
+            if m:
+                self.total_packages = int(m.group(1))
+
+            m2 = re.search(r"need to get (.+?) of archives", ln, re.IGNORECASE)
+            if m2:
+                self.phase = 4
+                size_str = m2.group(1)
+                count_str = (
+                    f" ({self.total_packages} packages)"
+                    if self.total_packages
+                    else ""
+                )
+                set_status(f"Downloading {size_str} of packages{count_str}…")
+                set_progress(max(self.progress_value, 60))
+            elif "need to get" in lo and "archive" in lo:
+                self.phase = 4
+                set_status("Downloading packages…")
+                set_progress(max(self.progress_value, 60))
+            return (
+                self.status_message if msg_changed else None,
+                self.progress_value if progress_changed else None,
+            )
+
+        if self.phase == 4:
+            m = re.match(r"Get:(\d+)\s+\S+\s+\S+\s+\S+\s+(\S+)", ln)
+            if m:
+                n = int(m.group(1))
+                pkg = m.group(2)
+                if self.total_packages > 0:
+                    frac = min(1.0, n / self.total_packages)
+                    set_progress(max(self.progress_value, int(60 + frac * 15)))
+                    set_status(f"Downloading {pkg}… ({n} / {self.total_packages})")
+                else:
+                    if self.progress_value < 74:
+                        set_progress(self.progress_value + 1)
+                    set_status(f"Downloading {pkg}…")
+
+            if ln.startswith("Selecting previously") or ln.startswith(
+                "Preparing to unpack"
+            ):
+                self.phase = 5
+                total_str = f" / {self.total_packages}" if self.total_packages else ""
+                set_status(f"Unpacking packages… (0{total_str})")
+                set_progress(max(self.progress_value, 75))
+            return (
+                self.status_message if msg_changed else None,
+                self.progress_value if progress_changed else None,
+            )
+
+        if self.phase == 5:
+            if ln.startswith("Unpacking "):
+                self.unpack_count += 1
+                pkg = ln.split()[1] if len(ln.split()) > 1 else ""
+                pkg = pkg.split(":")[0]
+                total_str = f" / {self.total_packages}" if self.total_packages else ""
+                set_status(f"Unpacking {pkg}… ({self.unpack_count}{total_str})")
+                if self.total_packages > 0:
+                    frac = min(1.0, self.unpack_count / self.total_packages)
+                    set_progress(max(self.progress_value, int(75 + frac * 13)))
+                else:
+                    if self.progress_value < 87:
+                        set_progress(self.progress_value + 1)
+
+            if ln.startswith("Setting up "):
+                self.phase = 6
+                pkg = ln.split()[2] if len(ln.split()) > 2 else ""
+                pkg = pkg.split(":")[0]
+                self.setup_count = 1
+                total_str = f" / {self.total_packages}" if self.total_packages else ""
+                set_status(f"Configuring {pkg}… (1{total_str})")
+                if self.total_packages > 0:
+                    frac = min(1.0, 1 / self.total_packages)
+                    set_progress(max(self.progress_value, int(88 + frac * 10)))
+                else:
+                    set_progress(max(self.progress_value, 88))
+            return (
+                self.status_message if msg_changed else None,
+                self.progress_value if progress_changed else None,
+            )
+
+        if self.phase == 6:
+            if ln.startswith("Setting up "):
+                self.setup_count += 1
+                pkg = ln.split()[2] if len(ln.split()) > 2 else ""
+                pkg = pkg.split(":")[0]
+                total_str = f" / {self.total_packages}" if self.total_packages else ""
+                set_status(f"Configuring {pkg}… ({self.setup_count}{total_str})")
+                if self.total_packages > 0:
+                    frac = min(1.0, self.setup_count / self.total_packages)
+                    set_progress(max(self.progress_value, int(88 + frac * 10)))
+                else:
+                    if self.progress_value < 97:
+                        set_progress(self.progress_value + 1)
+
+            if "processing triggers" in lo:
+                pkg_m = re.search(r"processing triggers for (\S+)", lo)
+                trigger_pkg = pkg_m.group(1) if pkg_m else ""
+                msg = (
+                    f"Running post-install triggers ({trigger_pkg})…"
+                    if trigger_pkg
+                    else "Running post-install triggers…"
+                )
+                set_status(msg)
+                set_progress(max(self.progress_value, 98))
+
+            return (
+                self.status_message if msg_changed else None,
+                self.progress_value if progress_changed else None,
+            )
+
+        return (None, None)
