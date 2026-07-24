@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 01:51:29 UTC
+- Last refreshed (UTC): 2026-07-24 01:58:37 UTC
 - Current branch: testing
-- HEAD commit: adfacb0
-- Last commit title: Extract three CI composite actions, dedupe Grype/SBOM/tag-resolution logic
-- Last commit date: 2026-07-23T21:45:00-04:00
+- HEAD commit: bcfb3bf
+- Last commit title: Fix build.yml: local composite actions must run after Checkout
+- Last commit date: 2026-07-23T21:51:29-04:00
 - CI workflow files: 8
 - Build script files: 20
 
