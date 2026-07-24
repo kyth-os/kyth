@@ -16,6 +16,7 @@ if str(INSTALLER_ROOT) not in sys.path:
 from kyth_installer import (  # noqa: E402
     disk,
     install,
+    partition_ops,
     plan,
     post_routes,
     runner as command_runner,
@@ -649,6 +650,96 @@ class InstallerPlanTests(unittest.TestCase):
                     {"disk": "/dev/nvme0n1", "free_region_start": 40 * 1024**3, "free_region_end": 80 * 1024**3},
                     lambda _msg: None,
                 )
+
+
+class JournalValidateTests(unittest.TestCase):
+    """Journal.validate() gates real partitioning safety properties (no
+    overlaps, exactly one Btrfs root, never touch a mounted/in-use partition)
+    but previously had no direct test coverage of its own."""
+
+    def _journal(self, current_parts=()):
+        with patch.object(partition_ops, "list_partitions", return_value=list(current_parts)):
+            return partition_ops.Journal("/dev/nvme0n1")
+
+    def test_empty_journal_is_rejected(self):
+        journal = self._journal()
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertIn("No partition operations have been added.", errors)
+
+    def test_missing_root_partition_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fs_type": "btrfs", "mountpoint": "",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("No root partition" in e for e in errors))
+
+    def test_root_partition_must_be_btrfs(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fs_type": "ext4", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("must use the Btrfs filesystem" in e for e in errors))
+        # Still flagged as satisfying "has a root", so this must be the only error.
+        self.assertEqual(len(errors), 1)
+
+    def test_overlapping_creates_are_rejected(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        journal.add_op("create", {
+            "start_bytes": 5 * 1024**3, "size_bytes": 10 * 1024**3, "fs_type": "ext4", "mountpoint": "",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("overlaps with existing region" in e for e in errors))
+
+    def test_valid_single_root_partition_has_no_errors(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertEqual(errors, [])
+
+    def test_new_table_op_resets_prior_allocations_and_root_flag(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        journal.add_op("new_table", {"table_type": "gpt"})
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        # The new_table wipes the earlier root, so validate must complain
+        # about a missing root rather than silently accepting the stale one.
+        self.assertTrue(any("No root partition" in e for e in errors))
+
+    def test_format_of_mounted_partition_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        journal.add_op("format", {"partition": "/dev/nvme0n1p3", "fs_type": "ext4"})
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p3", "current": True},
+        ]):
+            errors = journal.validate()
+        self.assertTrue(any("currently mounted or in use" in e for e in errors))
+
+    def test_set_mountpoint_root_on_in_use_partition_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p3", "mountpoint": "/"})
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p3", "in_use": True},
+        ]):
+            errors = journal.validate()
+        self.assertTrue(any("Cannot set /dev/nvme0n1p3 as the root partition" in e for e in errors))
 
 
 class InstallerServerConfirmationTests(unittest.TestCase):

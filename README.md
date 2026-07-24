@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 01:03:08 UTC
+- Last refreshed (UTC): 2026-07-24 01:03:17 UTC
 - Current branch: testing
-- HEAD commit: 8c4ee52
-- Last commit title: Extract page_welcome.py's hero-card decision tree into a testable pure function
-- Last commit date: 2026-07-23T21:03:01-04:00
+- HEAD commit: a314e96
+- Last commit title: Extract page_repair.py's sleep-mode label mapping into services/repair.py
+- Last commit date: 2026-07-23T21:03:08-04:00
 - CI workflow files: 8
 - Build script files: 20
 
