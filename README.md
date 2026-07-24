@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 02:57:25 UTC
+- Last refreshed (UTC): 2026-07-24 03:03:45 UTC
 - Current branch: testing
-- HEAD commit: c36b83b
-- Last commit title: Extract ORAS, Syft, and Cosign setup into composite actions
-- Last commit date: 2026-07-23T22:51:19-04:00
+- HEAD commit: c440590
+- Last commit title: Refactor CI/CD pipelines: centralize tool setup, metadata generation, changelog formats, and SARIF filters
+- Last commit date: 2026-07-23T22:57:25-04:00
 - CI workflow files: 8
 - Build script files: 20
 

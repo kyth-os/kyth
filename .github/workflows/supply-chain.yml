@@ -169,14 +169,19 @@ jobs:
           version: 1.39.0
           sha256: bb8f1ba8201d1ce0d99ab4f5243142629c1afba4da97a7c4ca2df97327f97190
 
+      - name: Login rootful Podman to GHCR
+        uses: ./.github/actions/registry-login
+        with:
+          password: ${{ secrets.GITHUB_TOKEN }}
+          docker: "false"
+          sudo-podman: "true"
+
       - name: Prepare image RPM database
         id: image_rootfs
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE: ${{ steps.meta.outputs.image }}
           DIGEST: ${{ steps.image.outputs.current_digest }}
         run: |
-          printf '%s' "${GH_TOKEN}" | sudo podman login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           sudo podman pull "${IMAGE}@${DIGEST}"
           CONTAINER="$(sudo podman create "${IMAGE}@${DIGEST}" /usr/bin/true)"
           trap 'sudo podman rm --force "${CONTAINER}" >/dev/null' EXIT

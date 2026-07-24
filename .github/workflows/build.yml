@@ -174,10 +174,8 @@ jobs:
           sep-annotations: "\n"
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: ./.github/actions/registry-login
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Version resolution lives in build_files/scripts/resolve-versions.sh,
@@ -341,10 +339,11 @@ jobs:
           STEPS_CHECKOUT_SHA_OUTPUTS_SHA: ${{ steps.checkout_sha.outputs.sha }}
 
       - name: Login rootful Podman to GHCR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '%s' "${GH_TOKEN}" | sudo podman login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+        uses: ./.github/actions/registry-login
+        with:
+          password: ${{ secrets.GITHUB_TOKEN }}
+          docker: "false"
+          sudo-podman: "true"
 
       - name: Free disk space before rechunking
         run: |
@@ -623,10 +622,8 @@ jobs:
           echo "github_sha=${GITHUB_SHA_META}" >&3
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: ./.github/actions/registry-login
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Attest image build provenance

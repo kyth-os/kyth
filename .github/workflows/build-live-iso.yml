@@ -515,51 +515,14 @@ jobs:
           cp "${ATTESTATION_BUNDLE_PATH}" "output/live-iso/${CHANNEL_BASENAME}.intoto.jsonl"
 
       - name: Upload ISO to Cloudflare R2
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          NEEDS_BUILD_OUTPUTS_ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
-          NEEDS_BUILD_OUTPUTS_CHANNEL_BASENAME: ${{ needs.build.outputs.channel_basename }}
-        run: |
-          set -euo pipefail
-
-          if [[ -n "${R2_ENDPOINT_URL:-}" ]]; then
-            R2_ENDPOINT="${R2_ENDPOINT_URL%/}"
-          elif [[ "${R2_ACCOUNT_ID:-}" == https://* ]]; then
-            R2_ENDPOINT="${R2_ACCOUNT_ID%/}"
-          elif [[ -n "${R2_ACCOUNT_ID:-}" ]]; then
-            R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          else
-            echo "::error::Set R2_ENDPOINT_URL to the Cloudflare R2 S3 endpoint URL or set R2_ACCOUNT_ID."
-            exit 1
-          fi
-
-          if [[ ! "${R2_ENDPOINT}" =~ ^https://[A-Za-z0-9.-]+\.r2\.cloudflarestorage\.com$ ]]; then
-            echo "::error::Invalid R2 endpoint URL: ${R2_ENDPOINT}"
-            echo "::error::Expected a value like https://<account-id>.r2.cloudflarestorage.com"
-            exit 1
-          fi
-
-          ISO="output/live-iso/${NEEDS_BUILD_OUTPUTS_ISO_BASENAME}"
-          CHANNEL="output/live-iso/${NEEDS_BUILD_OUTPUTS_CHANNEL_BASENAME}"
-
-          for artifact in "${ISO}" "${ISO}-CHECKSUM" "${ISO}.sig" "${ISO}.bundle" "${ISO}.intoto.jsonl" "${ISO}.json"; do
-            aws s3 cp "${artifact}" \
-              "s3://kyth-releases/$(basename "${artifact}")" \
-              --endpoint-url "${R2_ENDPOINT}" \
-              --no-progress
-          done
-
-          aws s3 cp "${ISO}" "s3://kyth-releases/$(basename "${CHANNEL}")" \
-            --endpoint-url "${R2_ENDPOINT}" --no-progress
-          for suffix in -CHECKSUM .sig .bundle .intoto.jsonl .json; do
-            aws s3 cp "${CHANNEL}${suffix}" \
-              "s3://kyth-releases/$(basename "${CHANNEL}${suffix}")" \
-              --endpoint-url "${R2_ENDPOINT}" \
-              --no-progress
-          done
+        uses: ./.github/actions/upload-r2
+        with:
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-endpoint-url: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          iso-basename: ${{ needs.build.outputs.iso_basename }}
+          channel-basename: ${{ needs.build.outputs.channel_basename }}
 
       - name: Publish GitHub releases
         env:
@@ -575,72 +538,19 @@ jobs:
           ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
           CHANNEL_BASENAME: ${{ needs.build.outputs.channel_basename }}
           ISO_CHANGELOG: ${{ steps.iso_changelog.outputs.path }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          ISO="output/live-iso/${ISO_BASENAME}"
-          CHANNEL="output/live-iso/${CHANNEL_BASENAME}"
-          PUBLIC_BASE="https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev"
-          IMMUTABLE_ISO_URL="${PUBLIC_BASE}/${ISO_BASENAME}"
-          CHANNEL_ISO_URL="${PUBLIC_BASE}/${CHANNEL_BASENAME}"
-          IMMUTABLE_RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${IMMUTABLE_TAG}"
-
-          if [[ "${SOURCE_TAG}" == "testing" ]]; then
-            CHANNEL_TITLE="Kyth Live ISO - Testing"
-            IMMUTABLE_TITLE="Kyth Live ISO - Testing - ${RELEASE_ID}"
-            PRERELEASE="--prerelease"
-            LATEST=""
-          else
-            CHANNEL_TITLE="Kyth Live ISO - Stable"
-            IMMUTABLE_TITLE="Kyth Live ISO - Stable - ${RELEASE_ID}"
-            PRERELEASE=""
-            LATEST="--latest"
-          fi
-
-          IMMUTABLE_NOTES="$(mktemp)"
-          {
-            echo "Permanent KythOS ISO build from **${SOURCE_TAG}**."
-            echo ""
-            cat "${ISO_CHANGELOG:-/dev/null}" 2>/dev/null || true
-            echo "---"
-            echo "**[Download immutable ISO](${IMMUTABLE_ISO_URL})** | [Checksum](${IMMUTABLE_ISO_URL}-CHECKSUM)"
-            echo ""
-            echo "- Source commit: **${SOURCE_SHA}**"
-            echo "- Source image digest: **${SOURCE_DIGEST}**"
-            echo "- Workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo "- Build provenance: ${ATTESTATION_URL}"
-            echo ""
-            echo "The checksum, Cosign signature and bundle, metadata, and GitHub build provenance are attached to this release."
-          } > "${IMMUTABLE_NOTES}"
-
-          gh release create "${IMMUTABLE_TAG}" \
-            --target "${SOURCE_SHA}" \
-            --title "${IMMUTABLE_TITLE}" \
-            --notes-file "${IMMUTABLE_NOTES}" \
-            ${PRERELEASE}
-          gh release upload "${IMMUTABLE_TAG}" \
-            "${ISO}-CHECKSUM" "${ISO}.sig" "${ISO}.bundle" "${ISO}.intoto.jsonl" "${ISO}.json"
-
-          CHANNEL_NOTES="$(mktemp)"
-          {
-            echo "This is the moving **${SOURCE_TAG}** channel pointer."
-            echo ""
-            cat "${ISO_CHANGELOG:-/dev/null}" 2>/dev/null || true
-            echo "---"
-            echo "**[Download current ISO](${CHANNEL_ISO_URL})** | [Checksum](${CHANNEL_ISO_URL}-CHECKSUM)"
-            echo ""
-            echo "Current immutable release: [${IMMUTABLE_TAG}](${IMMUTABLE_RELEASE_URL})"
-            echo ""
-            echo "- Source commit: **${SOURCE_SHA}**"
-            echo "- Source image digest: **${SOURCE_DIGEST}**"
-            echo "- Build provenance: ${ATTESTATION_URL}"
-          } > "${CHANNEL_NOTES}"
-
-          if gh release view "${CHANNEL_TAG}" >/dev/null 2>&1; then
-            gh release delete "${CHANNEL_TAG}" --yes
-          fi
-          gh release create "${CHANNEL_TAG}" \
-            --target "${SOURCE_SHA}" \
-            --title "${CHANNEL_TITLE}" \
-            --notes-file "${CHANNEL_NOTES}" \
-            ${PRERELEASE} ${LATEST}
-          gh release upload "${CHANNEL_TAG}" --clobber \
-            "${CHANNEL}-CHECKSUM" "${CHANNEL}.sig" "${CHANNEL}.bundle" "${CHANNEL}.intoto.jsonl" "${CHANNEL}.json"
+          python3 build_files/scripts/publish-release.py \
+            --repo "${GH_REPO}" \
+            --source-tag "${SOURCE_TAG}" \
+            --channel-tag "${CHANNEL_TAG}" \
+            --immutable-tag "${IMMUTABLE_TAG}" \
+            --release-id "${RELEASE_ID}" \
+            --source-sha "${SOURCE_SHA}" \
+            --source-digest "${SOURCE_DIGEST}" \
+            --attestation-url "${ATTESTATION_URL}" \
+            --iso-basename "${ISO_BASENAME}" \
+            --channel-basename "${CHANNEL_BASENAME}" \
+            --iso-changelog "${ISO_CHANGELOG}" \
+            --source-dir "output/live-iso" \
+            --run-id "${RUN_ID}"
