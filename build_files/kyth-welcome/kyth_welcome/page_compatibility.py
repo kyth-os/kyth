@@ -1,6 +1,5 @@
 import json
 import os
-from datetime import datetime
 from typing import ClassVar
 from urllib.request import Request, urlopen
 
@@ -15,6 +14,8 @@ from .services.gaming.compat_data import (
     _COMPAT_STALE_DAYS,
     _parse_compat_payload,
     replace_compat_games,
+    calculate_data_age_days,
+    calculate_compat_stats,
 )
 from .qt import (
     QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt, Signal,
@@ -27,13 +28,6 @@ from .widgets import (
 def _adopt_compat_data(updated: str, games: list[CompatGame]) -> None:
     # Mutate the shared service list so all importers see the refresh.
     replace_compat_games(updated, games)
-
-
-def _compat_data_age_days() -> int | None:
-    try:
-        return (datetime.now() - datetime.strptime(compat_data._COMPAT_DATA_UPDATED, "%Y-%m-%d")).days
-    except ValueError:
-        return None
 
 
 class _CompatRefreshWorker(TrackedThread):
@@ -335,20 +329,17 @@ class CompatibilityPage(Page):
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _update_summary(self, refresh_note: str = ""):
-        works   = sum(1 for game in _COMPAT_GAMES if game.status in ("native", "proton", "tweaks"))
-        blocked = sum(1 for game in _COMPAT_GAMES if game.status == "blocked")
-        total   = len(_COMPAT_GAMES)
-        oldest_check = min((game.checked for game in _COMPAT_GAMES), default="unknown")
+        stats = calculate_compat_stats(_COMPAT_GAMES)
         self._sum_title.setText(
-            f"{works} of the {total} listed games work on KythOS — "
+            f"{stats.works} of the {stats.total} listed games work on KythOS — "
             f"including most of the Steam top 100."
         )
         self._sum_copy.setText(
-            f"The {blocked} blocked titles are tracked conservatively: if a publisher blocks "
+            f"The {stats.blocked} blocked titles are tracked conservatively: if a publisher blocks "
             "or refuses SteamOS/Proton, KythOS marks it blocked until release validation proves "
-            f"otherwise. Oldest source check in this list: {oldest_check}."
+            f"otherwise. Oldest source check in this list: {stats.oldest_check}."
         )
-        age = _compat_data_age_days()
+        age = calculate_data_age_days(compat_data._COMPAT_DATA_UPDATED)
         if age is not None and age > _COMPAT_STALE_DAYS:
             self._freshness_lbl.setStyleSheet("font-size:11px; color:#d4a843;")
             note = (

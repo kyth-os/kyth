@@ -19,6 +19,9 @@ try:
         CompatGame,
         parse_compat_payload,
         replace_compat_games,
+        calculate_data_age_days,
+        calculate_compat_stats,
+        CompatStats,
     )
 except ImportError:
     raise unittest.SkipTest("PyQt6/PySide6 required by kyth_welcome.core_base → qt imports") from None
@@ -110,6 +113,42 @@ class ReplaceCompatGamesTests(unittest.TestCase):
         finally:
             # Restore so this test doesn't leak state into others.
             replace_compat_games(original_updated, original_snapshot)
+
+
+class CalculateDataAgeDaysTests(unittest.TestCase):
+    def test_calculate_age_valid(self):
+        from datetime import datetime
+        now = datetime(2026, 7, 24)
+        age = calculate_data_age_days("2026-07-20", now)
+        self.assertEqual(age, 4)
+
+    def test_calculate_age_invalid_format(self):
+        age = calculate_data_age_days("not-a-date")
+        self.assertIsNone(age)
+        age = calculate_data_age_days("")
+        self.assertIsNone(age)
+
+
+class CalculateCompatStatsTests(unittest.TestCase):
+    def test_calculate_stats_simple(self):
+        games = [
+            CompatGame("G1", "None", "native", "", "2026-01-01", "", ""),
+            CompatGame("G2", "None", "proton", "", "2026-01-05", "", ""),
+            CompatGame("G3", "None", "tweaks", "", "2026-01-10", "", ""),
+            CompatGame("G4", "None", "blocked", "", "2026-01-03", "", ""),
+        ]
+        stats = calculate_compat_stats(games)
+        self.assertEqual(stats.works, 3)
+        self.assertEqual(stats.blocked, 1)
+        self.assertEqual(stats.total, 4)
+        self.assertEqual(stats.oldest_check, "2026-01-01")
+
+    def test_calculate_stats_empty(self):
+        stats = calculate_compat_stats([])
+        self.assertEqual(stats.works, 0)
+        self.assertEqual(stats.blocked, 0)
+        self.assertEqual(stats.total, 0)
+        self.assertEqual(stats.oldest_check, "unknown")
 
 
 if __name__ == "__main__":
