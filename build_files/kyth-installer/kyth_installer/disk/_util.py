@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import kyth_installer.disk as _disk
 subprocess = _disk.subprocess
+_SAFE_DEVICE_PATH_RE = re.compile(r"^/dev/[A-Za-z0-9._/+:-]+$")
 
 def _safe_int(value, default: int = 0) -> int:
     try:
@@ -24,7 +26,12 @@ def _normal_device_path(name: str | None) -> str | None:
         return None
     if not name.startswith("/dev/"):
         name = f"/dev/{name}"
-    return os.path.realpath(name)
+    real = os.path.realpath(name)
+    if not real.startswith("/dev/"):
+        return None
+    if not _SAFE_DEVICE_PATH_RE.fullmatch(real):
+        return None
+    return real
 
 
 
