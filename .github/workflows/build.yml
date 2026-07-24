@@ -505,37 +505,22 @@ jobs:
           KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           WORKFLOW_GITHUB_SHA: ${{ github.sha }}
         run: |
-          mkdir -p output/build-metadata
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          metadata = {
-              "image": os.environ["IMAGE"],
-              "digest": os.environ["DIGEST"],
-              "version": os.environ["VERSION"],
-              "source_sha": os.environ["SOURCE_SHA"],
-              # GITHUB_SHA is the triggering commit recorded in the build provenance
-              # attestation. For schedule runs it equals the default branch HEAD and
-              # may differ from source_sha when building a non-default branch.
-              "github_sha": os.environ["WORKFLOW_GITHUB_SHA"],
-              "source_tag": os.environ["SOURCE_TAG"],
-              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
-              "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
-              "materials": {
-                  "upstream_base": os.environ["UPSTREAM_BASE"],
-                  "build_base": os.environ["BUILD_BASE"],
-                  "proton_cachyos_version": os.environ["PROTON_CACHYOS_VERSION"],
-                  "thirdparty_versions_hash": os.environ["THIRDPARTY_VERSIONS_HASH"],
-                  "umu_version": os.environ["UMU_VERSION"],
-                  "kernel_flavor": os.environ["KERNEL_FLAVOR"],
-              },
-          }
-          Path("output/build-metadata/image.json").write_text(
-              json.dumps(metadata, indent=2) + "\n"
-          )
-          PY
+          python3 build_files/scripts/generate-metadata.py \
+            --image "${IMAGE}" \
+            --digest "${DIGEST}" \
+            --version "${VERSION}" \
+            --source-sha "${SOURCE_SHA}" \
+            --github-sha "${WORKFLOW_GITHUB_SHA}" \
+            --source-tag "${SOURCE_TAG}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --upstream-base "${UPSTREAM_BASE}" \
+            --build-base "${BUILD_BASE}" \
+            --proton-cachyos-version "${PROTON_CACHYOS_VERSION}" \
+            --thirdparty-versions-hash "${THIRDPARTY_VERSIONS_HASH}" \
+            --umu-version "${UMU_VERSION}" \
+            --kernel-flavor "${KERNEL_FLAVOR}" \
+            --output output/build-metadata/image.json
 
       - name: Upload immutable build metadata
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

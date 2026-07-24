@@ -215,18 +215,55 @@ def commit_section(previous_labels: dict[str, str], current_sha: str) -> str:
 
 
 def main() -> int:
+    import os
     parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["image", "iso"], default="image")
     parser.add_argument("--image", required=True)
     parser.add_argument("--branch", required=True)
-    parser.add_argument("--current-tag", required=True)
+    parser.add_argument("--current-tag", default="")
     parser.add_argument("--current-digest", required=True)
     parser.add_argument("--previous-digest", default="")
     parser.add_argument("--current-sha", required=True)
     parser.add_argument("--current-sbom-file", default="")
     parser.add_argument("--grype-current", default="")
     parser.add_argument("--grype-previous", default="")
+    parser.add_argument("--image-version", default="")
+    parser.add_argument("--repo", default="")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+
+    if args.mode == "image" and not args.current_tag:
+        parser.error("--current-tag is required in image mode")
+
+    if args.mode == "iso":
+        repo = args.repo or os.environ.get("GITHUB_REPOSITORY", "")
+        lines = [
+            "### What this ISO installs",
+            "",
+            f"Bootable installer for KythOS from the **{args.branch}** channel. "
+            "Boot from USB and click **Install KythOS** to set up your system.",
+            "",
+            f"- Source image: `{args.image}@{args.current_digest}`",
+            f"- Source commit: `{args.current_sha}`",
+            "",
+        ]
+        sec = security_section(args.grype_current or None, args.grype_previous or None)
+        if sec:
+            lines.append(sec.rstrip())
+            lines.append("")
+
+        if args.image_version:
+            release_tag = "image-" + args.image_version.replace(".", "-")
+            image_url = f"https://github.com/{repo}/releases/tag/{release_tag}"
+            lines += [f"Full package changelog: [{release_tag}]({image_url})", ""]
+        else:
+            lines += [
+                f"Full package changelog: [image releases]"
+                f"(https://github.com/{repo}/releases?q=image-{args.branch})",
+                "",
+            ]
+        Path(args.output).write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        return 0
 
     if args.current_sbom_file:
         try:

@@ -303,7 +303,10 @@ jobs:
 
       - name: Setup Grype
         id: setup_grype
-        uses: ./.github/actions/setup-grype
+        uses: ./.github/actions/setup-anchore-tool
+        with:
+          tool: grype
+          version: 0.88.0
 
       - name: Pull source image SBOM
         id: current_sbom
@@ -395,52 +398,17 @@ jobs:
           IMAGE_VERSION="$(skopeo inspect --no-creds \
             "docker://${SOURCE_IMAGE}@${SOURCE_DIGEST}" 2>/dev/null \
             | jq -r '.Labels["org.opencontainers.image.version"] // empty' || true)"
-          export IMAGE_VERSION NOTES
-          python3 - <<'PY'
-          import json, os, sys
-          from pathlib import Path
-          sys.path.insert(0, '.github/scripts')
-          from kyth_changelog import security_section
-
-          repo = os.environ.get("GH_REPO", "")
-          tag = os.environ.get("SOURCE_TAG", "")
-          source_sha = os.environ.get("SOURCE_SHA", "")
-          source_image = os.environ.get("SOURCE_IMAGE", "")
-          source_digest = os.environ.get("SOURCE_DIGEST", "")
-          image_version = os.environ.get("IMAGE_VERSION", "")
-          grype_current = os.environ.get("GRYPE_CURRENT") or None
-          grype_previous = os.environ.get("GRYPE_PREVIOUS") or None
-          notes_path = os.environ["NOTES"]
-
-          lines = [
-              "### What this ISO installs",
-              "",
-              f"Bootable installer for KythOS from the **{tag}** channel. "
-              "Boot from USB and click **Install KythOS** to set up your system.",
-              "",
-              f"- Source image: `{source_image}@{source_digest}`",
-              f"- Source commit: `{source_sha}`",
-              "",
-          ]
-
-          sec = security_section(grype_current, grype_previous)
-          if sec:
-              lines.append(sec.rstrip())
-              lines.append("")
-
-          if image_version:
-              release_tag = "image-" + image_version.replace(".", "-")
-              image_url = f"https://github.com/{repo}/releases/tag/{release_tag}"
-              lines += [f"Full package changelog: [{release_tag}]({image_url})", ""]
-          else:
-              lines += [
-                  f"Full package changelog: [image releases]"
-                  f"(https://github.com/{repo}/releases?q=image-{tag})",
-                  "",
-              ]
-
-          Path(notes_path).write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-          PY
+          python3 .github/scripts/kyth_changelog.py \
+            --mode iso \
+            --repo "${GH_REPO}" \
+            --branch "${SOURCE_TAG}" \
+            --current-sha "${SOURCE_SHA}" \
+            --image "${SOURCE_IMAGE}" \
+            --current-digest "${SOURCE_DIGEST}" \
+            --image-version "${IMAGE_VERSION}" \
+            --grype-current "${GRYPE_CURRENT:-}" \
+            --grype-previous "${GRYPE_PREVIOUS:-}" \
+            --output "${NOTES}"
           echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
 
       - name: Free disk space

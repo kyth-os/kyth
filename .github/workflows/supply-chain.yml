@@ -76,14 +76,9 @@ jobs:
           persist-credentials: false
 
       - name: Preflight source image
-        run: |
-          set -euo pipefail
-          tag="${SOURCE_TAG}"
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:${tag}"
-          echo "Checking ${image} before preparing supply-chain metadata"
-          docker manifest inspect "${image}" >/dev/null
-        env:
-          SOURCE_TAG: ${{ inputs.source_tag }}
+        uses: ./.github/actions/preflight-image
+        with:
+          image-tag: ${{ inputs.source_tag }}
       - name: Prepare metadata variables
         id: meta
         env:
@@ -168,7 +163,11 @@ jobs:
 
       - name: Setup Syft
         id: setup_syft
-        uses: ./.github/actions/setup-syft
+        uses: ./.github/actions/setup-anchore-tool
+        with:
+          tool: syft
+          version: 1.39.0
+          sha256: bb8f1ba8201d1ce0d99ab4f5243142629c1afba4da97a7c4ca2df97327f97190
 
       - name: Prepare image RPM database
         id: image_rootfs
@@ -246,7 +245,10 @@ jobs:
 
       - name: Setup Grype
         id: setup_grype
-        uses: ./.github/actions/setup-grype
+        uses: ./.github/actions/setup-anchore-tool
+        with:
+          tool: grype
+          version: 0.88.0
 
       - name: Scan current SBOM with Grype
         id: grype_current

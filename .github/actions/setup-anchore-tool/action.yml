@@ -1,0 +1,46 @@
+name: Setup Anchore Tool
+description: Download, verify, and extract an Anchore tool (e.g. Grype or Syft).
+inputs:
+  tool:
+    description: Tool name (e.g. grype, syft).
+    required: true
+  version:
+    description: Pinned version to download.
+    required: true
+  sha256:
+    description: Optional expected SHA256 of the archive file. If not set, downloads checksums file.
+    required: false
+    default: ""
+outputs:
+  cmd:
+    description: Path to the verified tool binary.
+    value: ${{ steps.setup.outputs.cmd }}
+runs:
+  using: composite
+  steps:
+    - name: Download and verify tool
+      id: setup
+      shell: bash
+      env:
+        TOOL: ${{ inputs.tool }}
+        VERSION: ${{ inputs.version }}
+        SHA256: ${{ inputs.sha256 }}
+      run: |
+        ARCHIVE="${TOOL}_${VERSION}_linux_amd64.tar.gz"
+        BASE="https://github.com/anchore/${TOOL}/releases/download/v${VERSION}"
+        
+        curl --fail --location --silent --show-error \
+          --output "${RUNNER_TEMP}/${ARCHIVE}" "${BASE}/${ARCHIVE}"
+        
+        if [[ -n "${SHA256}" ]]; then
+          echo "${SHA256}  ${RUNNER_TEMP}/${ARCHIVE}" | sha256sum --check
+        else
+          curl --fail --location --silent --show-error \
+            --output "${RUNNER_TEMP}/${TOOL}_checksums.txt" \
+            "${BASE}/${TOOL}_${VERSION}_checksums.txt"
+          (cd "${RUNNER_TEMP}" && grep " ${ARCHIVE}$" "${TOOL}_checksums.txt" | sha256sum --check --strict -)
+        fi
+        
+        tar --extract --gzip --file "${RUNNER_TEMP}/${ARCHIVE}" --directory "${RUNNER_TEMP}" "${TOOL}"
+        chmod +x "${RUNNER_TEMP}/${TOOL}"
+        echo "cmd=${RUNNER_TEMP}/${TOOL}" >> "$GITHUB_OUTPUT"

@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 02:51:19 UTC
+- Last refreshed (UTC): 2026-07-24 02:57:25 UTC
 - Current branch: testing
-- HEAD commit: c7f6742
+- HEAD commit: c36b83b
 - Last commit title: Extract ORAS, Syft, and Cosign setup into composite actions
-- Last commit date: 2026-07-23T22:50:07-04:00
+- Last commit date: 2026-07-23T22:51:19-04:00
 - CI workflow files: 8
 - Build script files: 20
 

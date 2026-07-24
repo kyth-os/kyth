@@ -43,49 +43,7 @@ fi
 echo "==> Codacy analyzers (changed-file gate relative to ${base_ref})"
 ./.codacy/cli.sh analyze --format sarif --output "${report}"
 
-python3 - "${repo_root}" "${changed_file}" "${report}" <<'PY'
-import json
-import sys
-from pathlib import Path
-from urllib.parse import unquote, urlparse
-
-root = Path(sys.argv[1]).resolve()
-changed = set(Path(sys.argv[2]).read_text(encoding="utf-8").splitlines())
-payload = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
-findings = []
-
-for run in payload.get("runs", []):
-    for result in run.get("results", []):
-        if any(item.get("kind") == "inSource" for item in result.get("suppressions", [])):
-            continue
-        locations = result.get("locations") or []
-        if not locations:
-            continue
-        physical = locations[0].get("physicalLocation", {})
-        uri = physical.get("artifactLocation", {}).get("uri", "")
-        parsed = urlparse(uri)
-        candidate = Path(unquote(parsed.path if parsed.scheme == "file" else uri))
-        if candidate.is_absolute():
-            try:
-                name = candidate.resolve().relative_to(root).as_posix()
-            except ValueError:
-                continue
-        else:
-            name = candidate.as_posix()
-        if name not in changed:
-            continue
-        region = physical.get("region", {})
-        message = result.get("message", {}).get("text", "Codacy finding")
-        findings.append((name, region.get("startLine", 1), result.get("ruleId", "unknown"), message))
-
-if findings:
-    print(f"Codacy found {len(findings)} issue(s) in changed files:", file=sys.stderr)
-    for name, line, rule, message in findings:
-        print(f"  {name}:{line}: {rule}: {message}", file=sys.stderr)
-    raise SystemExit(1)
-
-print(f"Codacy passed for {len(changed)} changed file(s)")
-PY
+python3 build_files/scripts/filter-sarif.py --root "${repo_root}" --changed-files "${changed_file}" --sarif "${report}" --label "Codacy"
 
 echo "==> Codacy preflight passed"
 
@@ -124,46 +82,6 @@ codeql_report="${work_dir}/codeql.sarif"
 	--format=sarif-latest \
 	--output="${codeql_report}"
 
-python3 - "${repo_root}" "${changed_file}" "${codeql_report}" <<'PY'
-import json
-import sys
-from pathlib import Path
-from urllib.parse import unquote, urlparse
-
-root = Path(sys.argv[1]).resolve()
-changed = set(Path(sys.argv[2]).read_text(encoding="utf-8").splitlines())
-payload = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
-findings = []
-for run in payload.get("runs", []):
-    for result in run.get("results", []):
-        if any(item.get("kind") == "inSource" for item in result.get("suppressions", [])):
-            continue
-        locations = result.get("locations") or []
-        if not locations:
-            continue
-        physical = locations[0].get("physicalLocation", {})
-        uri = physical.get("artifactLocation", {}).get("uri", "")
-        parsed = urlparse(uri)
-        candidate = Path(unquote(parsed.path if parsed.scheme == "file" else uri))
-        if candidate.is_absolute():
-            try:
-                name = candidate.resolve().relative_to(root).as_posix()
-            except ValueError:
-                continue
-        else:
-            name = candidate.as_posix()
-        if name not in changed:
-            continue
-        region = physical.get("region", {})
-        message = result.get("message", {}).get("text", "CodeQL finding")
-        findings.append((name, region.get("startLine", 1), result.get("ruleId", "unknown"), message))
-
-if findings:
-    print(f"CodeQL found {len(findings)} issue(s) in changed files:", file=sys.stderr)
-    for name, line, rule, message in findings:
-        print(f"  {name}:{line}: {rule}: {message}", file=sys.stderr)
-    raise SystemExit(1)
-print(f"CodeQL passed for {len(changed)} changed file(s)")
-PY
+python3 build_files/scripts/filter-sarif.py --root "${repo_root}" --changed-files "${changed_file}" --sarif "${codeql_report}" --label "CodeQL"
 
 echo "==> CI preflight passed"
