@@ -93,6 +93,77 @@ class NvidiaStatusViewTests(unittest.TestCase):
         self.assertEqual(view.install_text, "Build Driver Now")
 
 
+class ControllerStatusViewTests(unittest.TestCase):
+    """page_controllers.py's whole post-probe display is driven by this
+    decision tree — no Qt, so it's testable directly without a display."""
+
+    def _view(self, **overrides):
+        base = dict(
+            usb_controllers=[], input_nodes=[],
+            xone_dongle=False, xone_loaded=False,
+            xpadneo_loaded=False, hid_ps_loaded=False,
+            dualsense_found=False, dualsensectl_out="",
+            secure_boot=False,
+        )
+        base.update(overrides)
+        return hardware.controller_status_view(base)
+
+    def test_no_controllers_detected(self):
+        view = self._view()
+        self.assertIn("No controllers detected", view.status_text)
+        self.assertFalse(view.xone_button_visible)
+        self.assertFalse(view.dualsense_status_visible)
+        self.assertFalse(view.secure_boot_warning_visible)
+
+    def test_connected_controller_lists_name_and_active_drivers(self):
+        view = self._view(
+            usb_controllers=[("PlayStation 5 DualSense", "dualsense")],
+            hid_ps_loaded=True,
+        )
+        self.assertIn("PlayStation 5 DualSense", view.status_text)
+        self.assertIn("hid_playstation", view.status_text)
+
+    def test_input_node_label_strips_prefix_and_underscores(self):
+        view = self._view(input_nodes=["usb-Sony_DualSense_Wireless_Controller"])
+        self.assertIn("Sony DualSense Wireless Controller", view.status_text)
+
+    def test_xone_dongle_needs_firmware(self):
+        view = self._view(xone_dongle=True, xone_loaded=False)
+        self.assertTrue(view.xone_button_visible)
+        self.assertIn("firmware not yet flashed", view.xone_status_text)
+
+    def test_xone_dongle_ready(self):
+        view = self._view(xone_dongle=True, xone_loaded=True)
+        self.assertFalse(view.xone_button_visible)
+        self.assertIn("ready", view.xone_status_text)
+
+    def test_dualsense_with_status_output(self):
+        view = self._view(dualsense_found=True, dualsensectl_out="battery: 80%\nextra line")
+        self.assertTrue(view.dualsense_status_visible)
+        self.assertEqual(view.dualsense_status_text, "DualSense connected — battery: 80%")
+
+    def test_dualsense_without_status_output(self):
+        view = self._view(dualsense_found=True, dualsensectl_out="")
+        self.assertTrue(view.dualsense_status_visible)
+        self.assertEqual(view.dualsense_status_text, "✓  DualSense connected.")
+
+    def test_secure_boot_warns_for_xone_dongle(self):
+        view = self._view(secure_boot=True, xone_dongle=True)
+        self.assertTrue(view.secure_boot_warning_visible)
+
+    def test_secure_boot_warns_when_xpadneo_not_loaded(self):
+        view = self._view(secure_boot=True, xpadneo_loaded=False)
+        self.assertTrue(view.secure_boot_warning_visible)
+
+    def test_secure_boot_silent_when_xpadneo_already_loaded(self):
+        view = self._view(secure_boot=True, xpadneo_loaded=True, xone_dongle=False)
+        self.assertFalse(view.secure_boot_warning_visible)
+
+    def test_secure_boot_off_never_warns(self):
+        view = self._view(secure_boot=False, xone_dongle=True, xpadneo_loaded=False)
+        self.assertFalse(view.secure_boot_warning_visible)
+
+
 class GamingPackageTests(unittest.TestCase):
     def test_public_surface(self):
         self.assertGreaterEqual(len(gaming.GAMING_TOOLS), 5)

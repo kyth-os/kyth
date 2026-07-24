@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 01:27:05 UTC
+- Last refreshed (UTC): 2026-07-24 01:27:14 UTC
 - Current branch: testing
-- HEAD commit: c7e1ff9
-- Last commit title: Extract form validation and search logic from two Network/Software pages
-- Last commit date: 2026-07-23T21:26:55-04:00
+- HEAD commit: 7338ada
+- Last commit title: Extract page_software_installed.py's AppImage discovery into services/appimages.py
+- Last commit date: 2026-07-23T21:27:05-04:00
 - CI workflow files: 8
 - Build script files: 20
 

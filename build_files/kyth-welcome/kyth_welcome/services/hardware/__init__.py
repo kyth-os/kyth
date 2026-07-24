@@ -46,6 +46,7 @@ from .bluetooth_audio import (
     switch_to_bt_audio_output,
 )
 from .collect import _collect_hardware_probes
+from .controllers import ControllerStatusView, controller_status_view
 from .drives import _detect_controllers, _find_ntfs_drives
 
 # pylint: disable=undefined-all-variable
@@ -66,6 +67,8 @@ __all__ = [
     "_compact_vaapi_failure_details",
     "_connectivity_probe",
     "_controller_probe",
+    "ControllerStatusView",
+    "controller_status_view",
     "_cpu_probe",
     "_detect_controllers",
     "_detect_nvidia",
