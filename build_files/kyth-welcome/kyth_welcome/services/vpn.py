@@ -7,6 +7,7 @@ from __future__ import annotations
 import configparser
 import os
 import re
+from dataclasses import dataclass
 from urllib.parse import parse_qs
 
 from .privileged import openconnect_action
@@ -105,6 +106,20 @@ def vpn_line_is_connected(line: str) -> bool:
 
 
 _vpn_line_is_connected = vpn_line_is_connected
+
+
+@dataclass(frozen=True)
+class VpnStatusView:
+    text: str
+    style: str
+
+
+def vpn_status_view(state: str) -> VpnStatusView:
+    if state == "connected":
+        return VpnStatusView("● Connected", "status-ok")
+    if state == "connecting":
+        return VpnStatusView("● Connecting…", "status-warn")
+    return VpnStatusView("● Disconnected", "status-dim")
 
 
 def gp_interface_from_log_line(line: str) -> str | None:

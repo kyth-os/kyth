@@ -20,6 +20,7 @@ from kyth_welcome.services.vpn import (  # noqa: E402
     saml_url_from_log_line,
     save_vpn_config,
     vpn_line_is_connected,
+    vpn_status_view,
 )
 
 
@@ -73,6 +74,22 @@ class VpnParserTests(unittest.TestCase):
             "gateway",
         )
         self.assertIsNone(gp_interface_from_log_line("GET https://example/"))
+
+    def test_vpn_status_view_connected(self):
+        view = vpn_status_view("connected")
+        self.assertEqual(view.text, "● Connected")
+        self.assertEqual(view.style, "status-ok")
+
+    def test_vpn_status_view_connecting(self):
+        view = vpn_status_view("connecting")
+        self.assertEqual(view.text, "● Connecting…")
+        self.assertEqual(view.style, "status-warn")
+
+    def test_vpn_status_view_disconnected_is_the_default(self):
+        for state in ("disconnected", "", "unknown-state"):
+            view = vpn_status_view(state)
+            self.assertEqual(view.text, "● Disconnected")
+            self.assertEqual(view.style, "status-dim")
 
     def test_initial_command_preserves_askpass_and_password_stdin(self):
         command, stdin_text = build_initial_command(

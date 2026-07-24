@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 02:06:40 UTC
+- Last refreshed (UTC): 2026-07-24 02:06:47 UTC
 - Current branch: testing
-- HEAD commit: 7317db2
-- Last commit title: Add coverage for kyth_changelog.py's pure formatting/diff functions
-- Last commit date: 2026-07-23T21:58:37-04:00
+- HEAD commit: e8d6c96
+- Last commit title: Extract page_hardware.py's status decision tree and HDR/VRR text parser
+- Last commit date: 2026-07-23T22:06:40-04:00
 - CI workflow files: 8
 - Build script files: 20
 

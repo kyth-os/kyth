@@ -3,15 +3,16 @@ from .core_base import _restyle
 from .services.vpn import (
     VPN_OS_OPTIONS as _VPN_OS_OPTIONS,
     VPN_PROTOCOLS as _VPN_PROTOCOLS,
-    _GP_PRELOGIN_IFACE_RE,
     build_gateway_probe_command,
     build_initial_command,
     build_saml_reconnect_command,
+    gp_interface_from_log_line,
     _load_vpn_config,
     _parse_gp_saml_cookie as _parse_gp_saml_cookie,
     _redact_vpn_log_line,
     _save_vpn_config,
     _vpn_line_is_connected,
+    vpn_status_view,
 )
 from .services.workers.vpn import VpnConnectWorker as _VpnConnectWorker
 from .qt import (
@@ -208,9 +209,9 @@ class VpnPage(Page):
         if _vpn_line_is_connected(line):
             self._set_vpn_status("connected")
             return
-        m = _GP_PRELOGIN_IFACE_RE.search(line)
-        if m:
-            self._gp_interface = "portal" if m.group(1) == "global-protect" else "gateway"
+        interface = gp_interface_from_log_line(line)
+        if interface:
+            self._gp_interface = interface
             return
         if (
             "fgets (stdin)" in line
@@ -329,13 +330,7 @@ class VpnPage(Page):
         self._vpn_log.append("\n[SAML authentication cancelled]")
 
     def _set_vpn_status(self, state: str) -> None:
-        if state == "connected":
-            self._vpn_status.setText("● Connected")
-            self._vpn_status.setObjectName("status-ok")
-        elif state == "connecting":
-            self._vpn_status.setText("● Connecting…")
-            self._vpn_status.setObjectName("status-warn")
-        else:
-            self._vpn_status.setText("● Disconnected")
-            self._vpn_status.setObjectName("status-dim")
+        view = vpn_status_view(state)
+        self._vpn_status.setText(view.text)
+        self._vpn_status.setObjectName(view.style)
         _restyle(self._vpn_status)
