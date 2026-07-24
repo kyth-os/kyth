@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-23 11:36:50 UTC
+- Last refreshed (UTC): 2026-07-24 01:02:27 UTC
 - Current branch: testing
-- HEAD commit: fcc3030
-- Last commit title: Revert live-ISO CI to pre-VM-acceptance build
-- Last commit date: 2026-07-23T07:36:06-04:00
+- HEAD commit: 7ff0ee6
+- Last commit title: Drop stale workflow-contract test for removed VM acceptance CI step
+- Last commit date: 2026-07-23T07:36:50-04:00
 - CI workflow files: 8
 - Build script files: 20
 
