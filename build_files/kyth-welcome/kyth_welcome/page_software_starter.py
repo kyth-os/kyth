@@ -2,6 +2,7 @@ import shlex
 from .core_base import _restyle
 from .actions import _install_flatpak_inline, _open_chromium_webapp
 from .services.flatpak import _is_flatpak_installed
+from .services.software import find_familiar_app_match
 from .services.runtime import Worker, _finish_worker
 from .qt import (
     QCheckBox, QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QProgressBar,
@@ -243,12 +244,7 @@ class _StarterPackTabMixin:
 
     def _find_familiar_app(self):
         query = self._familiar_combo.currentText().strip()
-        lower = query.lower()
-        match = None
-        for name, desc, app_id in self._FAMILIAR_APPS:
-            if lower in name.lower() or name.lower() in lower:
-                match = (name, desc, app_id)
-                break
+        match = find_familiar_app_match(query, self._FAMILIAR_APPS)
         if not match:
             self._familiar_result.setText(
                 f"No curated path for “{query}” yet. Search Flathub first; use Bottles only when a native/web path does not exist."

@@ -1,6 +1,5 @@
 import json
 import os
-import re
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
@@ -8,9 +7,8 @@ from .core_base import (
 )
 from .services.network import (
     _is_cifs_available, _is_mounted, _load_smb_config,
-    _save_smb_config, _systemd_escape_mount_path,
+    _save_smb_config, _systemd_escape_mount_path, validate_share_form,
 )
-from .services.network_share_helper import _mount_point
 from .services.privileged import helper_action, systemctl_action
 from .services.runtime import Worker
 from .qt import (
@@ -279,64 +277,22 @@ class NetworkSharesPage(Page):
     # ── Form validation ───────────────────────────────────────────────────────
 
     def _validate_form(self) -> dict | None:
-        name       = self._f_name.text().strip()
-        server     = self._f_server.text().strip()
-        share_path = self._f_share.text().strip()
-        mount_pt   = self._f_mount.text().strip()
-        username   = self._f_user.text().strip()
-        password   = self._f_pass.text()
-        domain     = self._f_domain.text().strip()
-        auto_mount = self._f_auto.isChecked()
-
-        if not name:
-            QMessageBox.warning(self, "Missing Field", "Please enter a Share Name.")
+        result = validate_share_form(
+            name=self._f_name.text().strip(),
+            server=self._f_server.text().strip(),
+            share_path=self._f_share.text().strip(),
+            mount_pt=self._f_mount.text().strip(),
+            username=self._f_user.text().strip(),
+            password=self._f_pass.text(),
+            domain=self._f_domain.text().strip(),
+            auto_mount=self._f_auto.isChecked(),
+            existing_names={s["name"] for s in self._shares},
+            reconnect_name=self._reconnect_name,
+        )
+        if result.share is None:
+            QMessageBox.warning(self, result.error_title, result.error_message)
             return None
-        if not server:
-            QMessageBox.warning(self, "Missing Field", "Please enter a Server address.")
-            return None
-        if not share_path:
-            QMessageBox.warning(self, "Missing Field", "Please enter the Share Path.")
-            return None
-        if not username:
-            QMessageBox.warning(self, "Missing Field", "Please enter a Username.")
-            return None
-
-        safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", name)
-        if not mount_pt:
-            mount_pt = f"/mnt/kyth/{safe_name}"
-        mount_pt = os.path.expanduser(mount_pt)
-        # Same validation the root-side add/remove helper enforces (it runs as
-        # root and creates this directory, so mounting over /etc or /usr would
-        # corrupt the system) — checked here too so bad input gets a friendly
-        # message immediately instead of a less-clear failure from the helper.
-        try:
-            mount_pt = _mount_point(mount_pt)
-        except ValueError:
-            QMessageBox.warning(
-                self, "Invalid Mount Point",
-                "Mount point must be under /mnt/, /media/, /run/media/, or /home/, "
-                "and contain only letters, numbers, spaces, '.', '_', '-', or '/'.",
-            )
-            return None
-
-        existing = {s["name"] for s in self._shares}
-        if safe_name in existing and safe_name != self._reconnect_name:
-            QMessageBox.warning(
-                self, "Duplicate Name",
-                f'A share named "{safe_name}" already exists. Remove it first or use a different name.',
-            )
-            return None
-
-        return {
-            "name":       safe_name,
-            "server":     server,
-            "share_path": share_path.lstrip("/"),
-            "mount_point": mount_pt,
-            "username":   username,
-            "password":   password,
-            "domain":     domain,
-            "auto_mount": auto_mount,
-        }
+        return result.share
 
     # ── Actions ───────────────────────────────────────────────────────────────
 

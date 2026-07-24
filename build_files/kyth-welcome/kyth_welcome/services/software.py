@@ -46,3 +46,19 @@ def _install_flatpak_inline(
     from ..actions import _install_flatpak_inline as install
 
     return install(owner, btn, app_id, name, extra_cmd=extra_cmd, done_cb=done_cb)
+
+
+def find_familiar_app_match(
+    query: str, apps: list[tuple[str, str, str]]
+) -> tuple[str, str, str] | None:
+    """First (name, desc, app_id) in `apps` whose name contains, or is
+    contained by, `query` (case-insensitive). `apps` is checked in its
+    curated order, so an earlier/more specific entry wins over a later,
+    broader one."""
+    lower = query.strip().lower()
+    if not lower:
+        return None
+    for name, desc, app_id in apps:
+        if lower in name.lower() or name.lower() in lower:
+            return (name, desc, app_id)
+    return None

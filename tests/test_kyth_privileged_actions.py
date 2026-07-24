@@ -125,21 +125,35 @@ class NetworkShareHelperTests(unittest.TestCase):
 
 class NetworkSharesPageMountValidationTests(unittest.TestCase):
     """page_network_shares.py can't be imported in this sandbox (no PySide6),
-    so this checks its source directly for the property that matters: it must
-    call the same _mount_point the root helper enforces, not re-derive its
-    own copy of the safe-prefix list, which is what let the two drift before
-    (the page only checked prefixes; the helper also rejected unsafe
-    characters, so bad input could pass the page's check and only fail late,
-    inside the root-escalated helper, with a worse error message)."""
+    so this checks source directly for the property that matters: form
+    validation must call the same _mount_point the root helper enforces, not
+    re-derive its own copy of the safe-prefix list, which is what let the two
+    drift before (the page only checked prefixes; the helper also rejected
+    unsafe characters, so bad input could pass the page's check and only fail
+    late, inside the root-escalated helper, with a worse error message).
 
-    def test_page_imports_and_uses_shared_mount_point_validator(self):
+    That validation now lives in services/network.py's validate_share_form
+    (the page just calls it), so the import/call assertions check that
+    module; the page itself is only checked for not reintroducing a local
+    copy of the prefix list."""
+
+    def test_validator_uses_shared_mount_point_check(self):
+        source = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "build_files" / "kyth-welcome" / "kyth_welcome" / "services" / "network.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("from .network_share_helper import _mount_point", source)
+        self.assertIn("_mount_point(mount_pt)", source)
+        self.assertNotIn("_SAFE_MOUNT_PREFIXES", source)
+
+    def test_page_does_not_reintroduce_local_mount_validation(self):
         source = (
             pathlib.Path(__file__).resolve().parents[1]
             / "build_files" / "kyth-welcome" / "kyth_welcome" / "page_network_shares.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("from .services.network_share_helper import _mount_point", source)
-        self.assertIn("_mount_point(mount_pt)", source)
+        self.assertIn("validate_share_form", source)
         self.assertNotIn("_SAFE_MOUNT_PREFIXES", source)
+        self.assertNotIn("_mount_point", source)
 
 
 if __name__ == "__main__":

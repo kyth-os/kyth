@@ -68,7 +68,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
 from kyth_welcome import core_base, page_vpn  # noqa: E402
-from kyth_welcome.services import appstream, first_run, gaming, hardware, welcome  # noqa: E402
+from kyth_welcome.services import appstream, first_run, gaming, hardware, network, software, welcome  # noqa: E402
 
 
 class CoreParserTests(unittest.TestCase):
@@ -183,6 +183,88 @@ class HomeHeroViewTests(unittest.TestCase):
         self.assertEqual(view.rec_target, "Gaming")
         self.assertEqual(view.rec_btn_label, "Configure Games")
         self.assertEqual(view.pill_text, "SYSTEM UP-TO-DATE")
+
+
+class FamiliarAppMatchTests(unittest.TestCase):
+    _APPS = [
+        ("Microsoft Office", "Use LibreOffice.", "org.libreoffice.LibreOffice"),
+        ("Word / Excel / PowerPoint", "LibreOffice Writer, Calc, Impress.", "org.libreoffice.LibreOffice"),
+        ("Notepad", "Kate is already installed.", ""),
+    ]
+
+    def test_exact_name_matches(self):
+        match = software.find_familiar_app_match("Notepad", self._APPS)
+        self.assertEqual(match, ("Notepad", "Kate is already installed.", ""))
+
+    def test_case_insensitive_substring_match(self):
+        match = software.find_familiar_app_match("office", self._APPS)
+        self.assertEqual(match[0], "Microsoft Office")
+
+    def test_earlier_entry_wins_ties(self):
+        apps = [("Notepad", "d1", "a"), ("Notepad++", "d2", "b")]
+        match = software.find_familiar_app_match("Notepad", apps)
+        self.assertEqual(match[0], "Notepad")
+
+    def test_no_match_returns_none(self):
+        self.assertIsNone(software.find_familiar_app_match("Blender", self._APPS))
+
+    def test_empty_query_returns_none(self):
+        self.assertIsNone(software.find_familiar_app_match("   ", self._APPS))
+
+
+class ShareFormValidationTests(unittest.TestCase):
+    _VALID = dict(
+        name="NAS-Media", server="192.168.1.100", share_path="Media",
+        mount_pt="", username="alice", password="hunter2", domain="",
+        auto_mount=True, existing_names=set(), reconnect_name=None,
+    )
+
+    def test_missing_required_fields_are_rejected(self):
+        for field, message in (
+            ("name", "Please enter a Share Name."),
+            ("server", "Please enter a Server address."),
+            ("share_path", "Please enter the Share Path."),
+            ("username", "Please enter a Username."),
+        ):
+            kwargs = {**self._VALID, field: ""}
+            result = network.validate_share_form(**kwargs)
+            self.assertIsNone(result.share)
+            self.assertEqual(result.error_title, "Missing Field")
+            self.assertEqual(result.error_message, message)
+
+    def test_valid_form_defaults_mount_point_from_name(self):
+        result = network.validate_share_form(**self._VALID)
+        self.assertIsNotNone(result.share)
+        self.assertEqual(result.share["mount_point"], "/mnt/kyth/NAS-Media")
+        self.assertEqual(result.share["name"], "NAS-Media")
+
+    def test_name_is_sanitized_to_safe_characters(self):
+        result = network.validate_share_form(**{**self._VALID, "name": "NAS Media!"})
+        self.assertEqual(result.share["name"], "NAS_Media_")
+
+    def test_mount_point_outside_approved_prefix_is_rejected(self):
+        result = network.validate_share_form(**{**self._VALID, "mount_pt": "/etc/passwd"})
+        self.assertIsNone(result.share)
+        self.assertEqual(result.error_title, "Invalid Mount Point")
+
+    def test_duplicate_name_is_rejected(self):
+        result = network.validate_share_form(
+            **{**self._VALID, "existing_names": {"NAS-Media"}}
+        )
+        self.assertIsNone(result.share)
+        self.assertEqual(result.error_title, "Duplicate Name")
+
+    def test_duplicate_name_allowed_when_reconnecting_same_share(self):
+        result = network.validate_share_form(**{
+            **self._VALID,
+            "existing_names": {"NAS-Media"},
+            "reconnect_name": "NAS-Media",
+        })
+        self.assertIsNotNone(result.share)
+
+    def test_share_path_leading_slash_is_stripped(self):
+        result = network.validate_share_form(**{**self._VALID, "share_path": "/Media/Movies"})
+        self.assertEqual(result.share["share_path"], "Media/Movies")
 
 
 class AppStreamCatalogTests(unittest.TestCase):

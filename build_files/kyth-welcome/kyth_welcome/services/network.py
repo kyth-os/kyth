@@ -1,9 +1,13 @@
 import logging
+import os
+import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 
 from ..core_base import _CLOUD_SYNC_CONFIG, _SMB_CONFIG
 from .config import load_json_config, save_json_config
+from .network_share_helper import _mount_point
 from .process import _run_command
 
 _logger = logging.getLogger(__name__)
@@ -76,3 +80,66 @@ def _is_mounted(path: str) -> bool:
     except Exception:
         return False
  # _is_mounted
+
+
+@dataclass(frozen=True)
+class ShareFormResult:
+    """Either `share` (validation passed) or both error fields are set —
+    no Qt, so page_network_shares.py's add/reconnect form validation is
+    testable without a display."""
+    share: dict | None = None
+    error_title: str = ""
+    error_message: str = ""
+
+
+def validate_share_form(
+    *, name: str, server: str, share_path: str, mount_pt: str, username: str,
+    password: str, domain: str, auto_mount: bool,
+    existing_names: set[str], reconnect_name: str | None,
+) -> ShareFormResult:
+    """Validate already-stripped form field values. `mount_pt` may be empty
+    (defaulted from `name`) but every other field is required."""
+    if not name:
+        return ShareFormResult(error_title="Missing Field", error_message="Please enter a Share Name.")
+    if not server:
+        return ShareFormResult(error_title="Missing Field", error_message="Please enter a Server address.")
+    if not share_path:
+        return ShareFormResult(error_title="Missing Field", error_message="Please enter the Share Path.")
+    if not username:
+        return ShareFormResult(error_title="Missing Field", error_message="Please enter a Username.")
+
+    safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", name)
+    if not mount_pt:
+        mount_pt = f"/mnt/kyth/{safe_name}"
+    mount_pt = os.path.expanduser(mount_pt)
+    # Same validation the root-side add/remove helper enforces (it runs as
+    # root and creates this directory, so mounting over /etc or /usr would
+    # corrupt the system) — checked here too so bad input gets a friendly
+    # message immediately instead of a less-clear failure from the helper.
+    try:
+        mount_pt = _mount_point(mount_pt)
+    except ValueError:
+        return ShareFormResult(
+            error_title="Invalid Mount Point",
+            error_message=(
+                "Mount point must be under /mnt/, /media/, /run/media/, or /home/, "
+                "and contain only letters, numbers, spaces, '.', '_', '-', or '/'."
+            ),
+        )
+
+    if safe_name in existing_names and safe_name != reconnect_name:
+        return ShareFormResult(
+            error_title="Duplicate Name",
+            error_message=f'A share named "{safe_name}" already exists. Remove it first or use a different name.',
+        )
+
+    return ShareFormResult(share={
+        "name":       safe_name,
+        "server":     server,
+        "share_path": share_path.lstrip("/"),
+        "mount_point": mount_pt,
+        "username":   username,
+        "password":   password,
+        "domain":     domain,
+        "auto_mount": auto_mount,
+    })
