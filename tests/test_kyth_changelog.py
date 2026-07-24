@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -79,6 +80,7 @@ class TableForTests(unittest.TestCase):
 class GrypeCveSetTests(unittest.TestCase):
     def _write_report(self, matches: list[dict]) -> str:
         fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
         Path(path).write_text(json.dumps({"matches": matches}), encoding="utf-8")
         return path
 
@@ -112,6 +114,7 @@ class GrypeCveSetTests(unittest.TestCase):
 
     def test_malformed_json_returns_empty_set(self):
         fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
         Path(path).write_text("not json", encoding="utf-8")
         try:
             self.assertEqual(changelog.grype_cve_set(path), set())
@@ -122,6 +125,7 @@ class GrypeCveSetTests(unittest.TestCase):
 class SecuritySectionTests(unittest.TestCase):
     def _write_report(self, matches: list[dict]) -> str:
         fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
         Path(path).write_text(json.dumps({"matches": matches}), encoding="utf-8")
         return path
 
