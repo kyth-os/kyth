@@ -9,7 +9,7 @@ set -euo pipefail
 # MEMLOCK is only raised for the user manager (interactive login sessions,
 # where games actually run), not the system manager. Unbounded MEMLOCK is
 # non-swappable and non-reclaimable by the kernel, which works directly
-# against the sysconfig/03-systemd-oomd-hardening.sh rationale of avoiding
+# against the sysconfig/systemd/03-systemd-oomd-hardening.sh rationale of avoiding
 # sudden low-memory OOM kills — raising it for every root-level system
 # service too (which never needs it) would widen that risk for no gaming
 # benefit, so system.conf.d only gets the NOFILE bump.

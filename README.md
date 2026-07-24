@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 01:02:27 UTC
+- Last refreshed (UTC): 2026-07-24 01:02:53 UTC
 - Current branch: testing
-- HEAD commit: 7ff0ee6
-- Last commit title: Drop stale workflow-contract test for removed VM acceptance CI step
-- Last commit date: 2026-07-23T07:36:50-04:00
+- HEAD commit: 19edbb0
+- Last commit title: Fix stale VM-acceptance docs after CI gate revert
+- Last commit date: 2026-07-23T21:02:27-04:00
 - CI workflow files: 8
 - Build script files: 20
 

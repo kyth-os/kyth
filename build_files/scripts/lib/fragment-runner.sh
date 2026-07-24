@@ -26,8 +26,7 @@ run_fragments() {
         exit 1
     fi
 
-    shopt -s nullglob
-    fragments=("${FRAG_DIR}"/*.sh)
+    mapfile -t fragments < <(find "${FRAG_DIR}" -type f -name '*.sh' | sort)
     if ((${#fragments[@]} == 0)); then
         echo "No ${dir_name} fragments in ${FRAG_DIR}" >&2
         exit 1

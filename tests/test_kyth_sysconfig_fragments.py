@@ -22,7 +22,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertNotIn("99-kyth.conf", text)
 
     def test_fragments_present_and_named(self):
-        frags = sorted(FRAG_DIR.glob("*.sh"))
+        frags = sorted(FRAG_DIR.rglob("*.sh"))
         self.assertGreaterEqual(len(frags), 20)
         for frag in frags:
             self.assertRegex(frag.name, r"^\d{2}-.+\.sh$")
@@ -35,7 +35,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         # instead of embedding them in a heredoc — same pattern as every other
         # extracted config in this refactor. The values themselves are checked
         # against that data file, not the fragment script.
-        path = FRAG_DIR / "01-kernel-sysctl-parameters.sh"
+        path = FRAG_DIR / "kernel" / "01-kernel-sysctl-parameters.sh"
         self.assertTrue(path.is_file())
         body = path.read_text(encoding="utf-8")
         self.assertIn("99-kyth.conf", body)
@@ -43,7 +43,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn("vm.swappiness", SYSCTL_DATA.read_text(encoding="utf-8"))
 
     def test_boot_log_regression_guards(self):
-        guards = (FRAG_DIR / "09-autostart-log-noise-guards.sh").read_text(
+        guards = (FRAG_DIR / "desktop" / "09-autostart-log-noise-guards.sh").read_text(
             encoding="utf-8"
         )
         self.assertIn("groupadd --system plugdev", guards)
@@ -54,7 +54,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertNotIn('TEST{0002}!="/sys%p/charge_', guards)
 
     def test_openrgb_is_not_unconditionally_autostarted(self):
-        body = (FRAG_DIR / "39-openrgb-rgb-peripheral-control.sh").read_text(
+        body = (FRAG_DIR / "peripherals" / "39-openrgb-rgb-peripheral-control.sh").read_text(
             encoding="utf-8"
         )
         self.assertIn("rm -f /etc/skel/.config/autostart/openrgb.desktop", body)
