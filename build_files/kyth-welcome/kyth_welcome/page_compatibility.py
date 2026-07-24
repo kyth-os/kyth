@@ -4,7 +4,7 @@ from typing import ClassVar
 from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
-from .services.gaming import TrackedThread
+from .services.workers import CompatRefreshWorker
 from .services.gaming import compat_data
 from .services.gaming.compat_data import (
     CompatGame,
@@ -30,26 +30,6 @@ def _adopt_compat_data(updated: str, games: list[CompatGame]) -> None:
     replace_compat_games(updated, games)
 
 
-class _CompatRefreshWorker(TrackedThread):
-    """Fetch newer compatibility data from the repo and cache it per-user."""
-    refreshed = Signal(str, list)   # (updated, list[CompatGame])
-    unchanged = Signal()
-
-    def run(self):
-        try:
-            req = Request(_COMPAT_REMOTE_URL, headers={"User-Agent": "KythOS-Compat/1.0"})
-            with urlopen(req, timeout=10) as resp:
-                raw = resp.read().decode("utf-8")
-            updated, games = _parse_compat_payload(json.loads(raw))
-            if not games or updated <= compat_data._COMPAT_DATA_UPDATED:
-                self.unchanged.emit()
-                return
-            os.makedirs(os.path.dirname(_COMPAT_CACHE_PATH), exist_ok=True)
-            with open(_COMPAT_CACHE_PATH, "w", encoding="utf-8") as fh:
-                fh.write(raw)
-            self.refreshed.emit(updated, games)
-        except Exception:
-            self.unchanged.emit()
 
 
 
@@ -321,7 +301,7 @@ class CompatibilityPage(Page):
 
         # Refresh the compatibility data in the background so blocked/working
         # status stays current between OS image updates.
-        self._refresh_worker = _CompatRefreshWorker()
+        self._refresh_worker = CompatRefreshWorker()
         self._refresh_worker.refreshed.connect(self._on_compat_refreshed)
         self._refresh_worker.unchanged.connect(self._on_compat_unchanged)
         self._refresh_worker.start()

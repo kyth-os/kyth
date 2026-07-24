@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 11:51:20 UTC
+- Last refreshed (UTC): 2026-07-24 12:08:33 UTC
 - Current branch: testing
-- HEAD commit: 76322f1
-- Last commit title: Refactor supply-chain.yml: extract wait loop, RPM manifest generator, and metadata JSON packer
-- Last commit date: 2026-07-23T23:18:07-04:00
+- HEAD commit: 1274408
+- Last commit title: ci: fix attest-build-provenance SHA and create build failure resolution skill
+- Last commit date: 2026-07-24T07:51:20-04:00
 - CI workflow files: 8
 - Build script files: 20
 

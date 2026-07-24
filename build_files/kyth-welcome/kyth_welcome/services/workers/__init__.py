@@ -23,6 +23,9 @@ __all__ = [
     "WindowsLibraryWorker",
     "_ProtonDbBatchWorker",
     "_VpnConnectWorker",
+    "ControllerProbeWorker",
+    "CompatRefreshWorker",
+    "GitHubIssueWorker",
 ]
 # pylint: enable=undefined-all-variable
 
@@ -46,13 +49,23 @@ def __getattr__(name: str):
     }:
         from . import updates as m
         return getattr(m, name)
-    if name == "HardwareProbeWorker":
-        from .hardware import HardwareProbeWorker
-        return HardwareProbeWorker
+    if name in {"HardwareProbeWorker", "ControllerProbeWorker"}:
+        from .hardware import HardwareProbeWorker, ControllerProbeWorker
+        mapping = {
+            "HardwareProbeWorker": HardwareProbeWorker,
+            "ControllerProbeWorker": ControllerProbeWorker,
+        }
+        return mapping[name]
     if name in {"WindowsLibraryWorker", "UserFilesCopyWorker"}:
         from . import windows_migration as m
         return getattr(m, name)
     if name == "_ProtonDbBatchWorker":
         from .protondb import ProtonDbBatchWorker
         return ProtonDbBatchWorker
+    if name == "CompatRefreshWorker":
+        from .compat import CompatRefreshWorker
+        return CompatRefreshWorker
+    if name == "GitHubIssueWorker":
+        from .feedback import GitHubIssueWorker
+        return GitHubIssueWorker
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

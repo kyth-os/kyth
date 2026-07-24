@@ -19,6 +19,7 @@ from .disk import (
 )
 from .runner import run_command
 from .system import _as_root, _settle
+from .services.disk_service import DiskService
 
 def _require_sgdisk(log=None):
     if not shutil.which("sgdisk"):
@@ -44,7 +45,7 @@ def _require_mkfs(fstype: str, log=None):
 class Journal:
     """Transaction journal for partition operations on a single disk."""
 
-    def __init__(self, disk: str):
+    def __init__(self, disk: str, disk_service: DiskService | None = None):
         resolved = _normal_device_path(disk)
         if not resolved:
             raise RuntimeError("Invalid disk path for journal.")
@@ -54,6 +55,7 @@ class Journal:
         self._committed = False
         self._root_partition: Optional[str] = None
         self._backup_dir: tempfile.TemporaryDirectory[str] | None = None
+        self._disk_service = disk_service or DiskService()
 
     @property
     def committed(self) -> bool:
@@ -64,35 +66,28 @@ class Journal:
         return self._root_partition
 
     def _save_snapshot(self) -> None:
-        _require_sgdisk()
+        if not self._disk_service.dry_run:
+            _require_sgdisk()
         self._discard_snapshot()
         self._backup_dir = tempfile.TemporaryDirectory(prefix="kyth-partition-")
         backup_path = Path(self._backup_dir.name) / "partition-table.backup"
         backup = str(backup_path)
-        run_command(
-            _as_root(["sgdisk", "--backup", backup, self.disk]),
-            check=True, timeout=30,
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-        )
+        self._disk_service.backup_table(self.disk, backup)
         self._snapshot_saved = True
 
     def _restore_snapshot(self) -> None:
         if not self._snapshot_saved:
             return
-        _require_sgdisk()
+        if not self._disk_service.dry_run:
+            _require_sgdisk()
         if self._backup_dir is None:
             return
         backup_path = Path(self._backup_dir.name) / "partition-table.backup"
         backup = str(backup_path)
-        if not backup_path.exists():
+        if not backup_path.exists() and not self._disk_service.dry_run:
             self._discard_snapshot()
             return
-        run_command(
-            _as_root(["sgdisk", "--load-backup", backup, self.disk]),
-            check=False, timeout=60,
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-        )
-        _settle()
+        self._disk_service.restore_table(self.disk, backup)
         self._discard_snapshot()
 
     def _discard_snapshot(self) -> None:
@@ -207,11 +202,7 @@ class Journal:
     def _commit_new_table(self, p: dict, log) -> None:
         table_type = p.get("table_type", "gpt")
         log(f"Creating new {table_type.upper()} partition table on {self.disk}...")
-        run_command(
-            _as_root(["parted", "-s", self.disk, "mklabel", table_type]),
-            check=True, timeout=30,
-        )
-        _settle()
+        self._disk_service.create_label(self.disk, table_type)
 
     def _commit_create(self, p: dict, log) -> None:
         start = _safe_int(p.get("start_bytes"), 0)
@@ -222,22 +213,19 @@ class Journal:
         if start <= 0 or size <= 0:
             raise RuntimeError(f"Create partition: invalid start {start} or size {size}.")
 
-        before = {pt["name"] for pt in list_partitions(self.disk) if pt.get("name")}
-        sector = _block_size_bytes(self.disk)
-        end_byte = start + size - sector
+        before = set()
+        if not self._disk_service.dry_run:
+            before = {pt["name"] for pt in list_partitions(self.disk) if pt.get("name")}
 
         log(f"Creating {_human_size(size)} partition ({fs}) at offset {start}...")
-        run_command(
-            _as_root(["parted", "-s", self.disk, "unit", "B",
-                      "mkpart", label or "partition", fs,
-                      f"{start}B", f"{end_byte}B"]),
-            check=True, timeout=120,
-        )
-        _settle()
+        self._disk_service.create_partition(self.disk, start, size, fs, label)
 
-        created = _latest_partition_on_disk(self.disk, before)
-        if not created:
-            raise RuntimeError("Could not find the newly created partition.")
+        if self._disk_service.dry_run:
+            created = f"{self.disk}p99"
+        else:
+            created = _latest_partition_on_disk(self.disk, before)
+            if not created:
+                raise RuntimeError("Could not find the newly created partition.")
         # Record the resolved device name back onto the op so
         # _find_root_partition() (and anything else inspecting the
         # journal after commit) can tell which real partition this
@@ -246,9 +234,7 @@ class Journal:
 
         if fs != "linux-swap":
             log(f"Formatting {created} as {fs}...")
-            _require_mkfs(fs, log)
-            fmt_cmd = _mkfs_cmd(fs, created, label)
-            run_command(_as_root(fmt_cmd), check=True, timeout=120)
+            self._disk_service.format_filesystem(created, fs, label)
 
         log(f"Created {created}")
 
@@ -256,29 +242,19 @@ class Journal:
         part_name = p.get("partition", "")
         if not part_name:
             raise RuntimeError("Delete: no partition specified.")
-        part_num = _partition_number(part_name)
+        part_num = _partition_number(part_name) if not self._disk_service.dry_run else 99
         log(f"Deleting {part_name}...")
-        run_command(
-            _as_root(["parted", "-s", self.disk, "rm", str(part_num)]),
-            check=True, timeout=60,
-        )
-        _settle()
+        self._disk_service.delete_partition(self.disk, part_num)
 
     def _commit_resize(self, p: dict, log) -> None:
         part_name = p.get("partition", "")
         new_size = _safe_int(p.get("new_size_bytes"), 0)
         if not part_name or new_size <= 0:
             raise RuntimeError(f"Resize: invalid partition {part_name} or size {new_size}.")
-        part_num = _partition_number(part_name)
-        start = _partition_start_bytes(part_name)
-        new_end = start + new_size - _block_size_bytes(self.disk)
+        part_num = _partition_number(part_name) if not self._disk_service.dry_run else 99
+        start = _partition_start_bytes(part_name) if not self._disk_service.dry_run else 1024**2
         log(f"Resizing {part_name} to {_human_size(new_size)}...")
-        run_command(
-            _as_root(["parted", "---pretend-input-tty", self.disk,
-                      "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
-            input="Yes\n", text=True, check=True, timeout=120,
-        )
-        _settle()
+        self._disk_service.resize_partition(self.disk, part_num, start, new_size)
 
     def _commit_format(self, p: dict, log) -> None:
         part_name = p.get("partition", "")
@@ -287,12 +263,11 @@ class Journal:
         if not part_name:
             raise RuntimeError("Format: no partition specified.")
         log(f"Formatting {part_name} as {fs}...")
-        _require_mkfs(fs, log)
-        fmt_cmd = _mkfs_cmd(fs, part_name, label)
-        run_command(_as_root(fmt_cmd), check=True, timeout=300)
+        self._disk_service.format_filesystem(part_name, fs, label)
 
     def commit(self, log) -> str:
-        _require_parted()
+        if not self._disk_service.dry_run:
+            _require_parted()
         self._save_snapshot()
 
         for op in self.ops:
@@ -335,7 +310,7 @@ def _mkfs_cmd(fstype: str, device: str, label: str = "") -> list[str]:
     info = _FILESYSTEM.get(fstype)
     if not info:
         return []
-    cmd = list(info["args"])
+    cmd = [info["binary"]] + list(info["args"])
     if label:
         if fstype == "fat32":
             cmd.extend(["-n", label])

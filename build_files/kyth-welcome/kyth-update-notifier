@@ -28,30 +28,15 @@ _ensure_kyth_shared_path()
 
 from kyth_shared.update_status import read_update_snapshot  # noqa: E402
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from kyth_shared.qt import (
+    QThread, QTimer, Signal as pyqtSignal, QIcon, QApplication, QMenu, QSystemTrayIcon, single_shot
+)
 
 REGISTRY = "ghcr.io/mrtrick37/kyth"
 CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000   # 4 hours
 _LOCK_FILE = Path.home() / ".cache" / "kyth" / "kyth-update-notifier.lock"
 _NOTIFIED_DIGEST_FILE = Path.home() / ".config" / "kyth-update-notified-digest"
 
-
-def _single_shot(parent, ms: int, slot):
-    """QTimer.singleShot(ms, slot) that stays alive as a real, parented QTimer.
-
-    QTimer.singleShot(ms, callable) routes through PyQt6's internal
-    PyQtSlotProxy helper object, which has been observed to segfault with a
-    use-after-free (SIGSEGV in PyQtSlotProxy::qt_metacall -> QObject::deleteLater)
-    on newer CPython builds. A QTimer parented to a real, long-lived QObject
-    sidesteps that code path entirely via normal Qt ownership/signal-slot.
-    """
-    timer = QTimer(parent)
-    timer.setSingleShot(True)
-    timer.timeout.connect(slot)
-    timer.start(ms)
-    return timer
 _STAGED_NOTIFIED_FILE = Path.home() / ".config" / "kyth-update-staged-notified-digest"
 _WELCOME_DONE_FILE = Path.home() / ".config" / "kyth-welcome-done"
 
@@ -348,8 +333,8 @@ class UpdateNotifier(QSystemTrayIcon):
         self._timer.start(CHECK_INTERVAL_MS)
 
         # Delay initial check so the session has time to fully settle
-        _single_shot(self, 15_000, self._check_now)
-        _single_shot(self, 60_000, self._check_flatpak)
+        single_shot(self, 15_000, self._check_now)
+        single_shot(self, 60_000, self._check_flatpak)
 
     def _set_icon_normal(self):
         for name in ("system-software-update", "software-update-available", "view-refresh"):

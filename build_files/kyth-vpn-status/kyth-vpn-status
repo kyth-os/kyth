@@ -5,9 +5,15 @@ import os
 import subprocess
 import sys
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+def _ensure_kyth_shared_path() -> None:
+    from pathlib import Path
+    source_path = Path(__file__).resolve().parent.parent / "kyth_shared"
+    if (source_path / "kyth_shared").is_dir() and str(source_path) not in sys.path:
+        sys.path.insert(0, str(source_path))
+
+_ensure_kyth_shared_path()
+
+from kyth_shared.qt import QTimer, QAction, QIcon, QApplication, QMenu, QSystemTrayIcon
 
 _APP_ICON_NAME = "network-vpn"
 

@@ -968,5 +968,41 @@ class InstallerGptDiskTests(unittest.TestCase):
         self.assertFalse(plan._is_gpt_disk("/dev/sda"))
 
 
+class InstallerDiskServiceTests(unittest.TestCase):
+    def test_disk_service_dry_run_collects_journal(self):
+        from kyth_installer.services.disk_service import DiskService
+        svc = DiskService(dry_run=True)
+        svc.create_label("/dev/sda", "gpt")
+        svc.create_partition("/dev/sda", 1024**2, 10 * 1024**3, "btrfs", "KythOS")
+        svc.delete_partition("/dev/sda", 1)
+        svc.resize_partition("/dev/sda", 2, 1024**2, 20 * 1024**3)
+        svc.format_filesystem("/dev/sda2", "ext4", "mydata")
+
+        # Verify command journal
+        self.assertEqual(len(svc.journal), 5)
+        self.assertIn("mklabel gpt", " ".join(svc.journal[0]))
+        self.assertIn("mkpart KythOS btrfs", " ".join(svc.journal[1]))
+        self.assertIn("rm 1", " ".join(svc.journal[2]))
+        self.assertIn("resizepart 2", " ".join(svc.journal[3]))
+        self.assertIn("mkfs.ext4", " ".join(svc.journal[4]))
+
+    def test_journal_with_dry_run_disk_service_executes_safely(self):
+        from kyth_installer.services.disk_service import DiskService
+        svc = DiskService(dry_run=True)
+        # Mock normal device path and disk block size
+        with patch("kyth_installer.partition_ops._normal_device_path", return_value="/dev/sda"):
+            journal = partition_ops.Journal("/dev/sda", disk_service=svc)
+            journal.add_op("new_table", {"table_type": "gpt"})
+            journal.add_op("create", {
+                "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+            })
+            # Verify we can validate and commit without throwing any command execution errors
+            errors = journal.validate()
+            self.assertEqual(errors, [])
+            root_part = journal.commit(lambda _msg: None)
+            self.assertEqual(root_part, "/dev/sdap99")
+            self.assertGreater(len(svc.journal), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

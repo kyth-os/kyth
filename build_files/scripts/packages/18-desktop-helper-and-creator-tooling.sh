@@ -34,105 +34,42 @@ dnf5 install -y --skip-unavailable \
 	plasma-browser-integration \
 	cups-browsed
 
-# ShellCheck host wrapper — delegates to kyth-ai-dev container
-install -Dm 0755 /dev/stdin /usr/bin/shellcheck <<'WRAPPEREOF'
+# Generic Distrobox wrapper — delegates to kyth-ai-dev container dynamically
+install -Dm 0755 /dev/stdin /usr/libexec/kyth-distrobox-wrapper <<'WRAPPEREOF'
 #!/usr/bin/env bash
 set -euo pipefail
+tool="$(basename "$0")"
 
-if [[ -x "${HOME}/.local/bin/shellcheck" ]]; then
-	exec "${HOME}/.local/bin/shellcheck" "$@"
+# Mapping human-readable descriptions of tools
+declare -A descriptions=(
+	[shellcheck]="shellcheck"
+	[shfmt]="shfmt"
+	[gh]="GitHub CLI"
+	[hx]="Helix editor"
+	[zellij]="Zellij"
+)
+desc="${descriptions[$tool]:-$tool}"
+
+if [[ -x "${HOME}/.local/bin/${tool}" ]]; then
+	exec "${HOME}/.local/bin/${tool}" "$@"
 fi
 
 box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
 if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
-	exec distrobox enter "${box}" -- shellcheck "$@"
-else
-	echo "shellcheck is managed in the KythOS AI Developer container (${box})."
-	echo "Initializing ${box} environment..."
-	kyth-ai-dev setup
-	exec distrobox enter "${box}" -- shellcheck "$@"
+	exec distrobox enter "${box}" -- "${tool}" "$@"
 fi
+
+echo "${desc} is managed in the KythOS AI Developer container (${box})."
+echo "Initializing ${box} environment..."
+kyth-ai-dev setup
+exec distrobox enter "${box}" -- "${tool}" "$@"
 WRAPPEREOF
 
-# shfmt host wrapper — delegates to kyth-ai-dev container
-install -Dm 0755 /dev/stdin /usr/bin/shfmt <<'WRAPPEREOF'
-#!/usr/bin/env bash
-set -euo pipefail
+# Create host symlinks to the generic distrobox wrapper
+for tool in shellcheck shfmt gh hx zellij; do
+	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
+done
 
-if [[ -x "${HOME}/.local/bin/shfmt" ]]; then
-	exec "${HOME}/.local/bin/shfmt" "$@"
-fi
-
-box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
-if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
-	exec distrobox enter "${box}" -- shfmt "$@"
-else
-	echo "shfmt is managed in the KythOS AI Developer container (${box})."
-	echo "Initializing ${box} environment..."
-	kyth-ai-dev setup
-	exec distrobox enter "${box}" -- shfmt "$@"
-fi
-WRAPPEREOF
-
-# GitHub CLI host wrapper — delegates to kyth-ai-dev container
-install -Dm 0755 /dev/stdin /usr/bin/gh <<'WRAPPEREOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ -x "${HOME}/.local/bin/gh" ]]; then
-	exec "${HOME}/.local/bin/gh" "$@"
-fi
-
-box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
-if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
-	exec distrobox enter "${box}" -- gh "$@"
-else
-	echo "GitHub CLI is managed in the KythOS AI Developer container (${box})."
-	echo "Initializing ${box} environment..."
-	kyth-ai-dev setup
-	exec distrobox enter "${box}" -- gh "$@"
-fi
-WRAPPEREOF
-
-# Helix host wrapper — delegates to kyth-ai-dev container
-install -Dm 0755 /dev/stdin /usr/bin/hx <<'WRAPPEREOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ -x "${HOME}/.local/bin/hx" ]]; then
-	exec "${HOME}/.local/bin/hx" "$@"
-fi
-
-box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
-if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
-	exec distrobox enter "${box}" -- hx "$@"
-else
-	echo "Helix editor is managed in the KythOS AI Developer container (${box})."
-	echo "Initializing ${box} environment..."
-	kyth-ai-dev setup
-	exec distrobox enter "${box}" -- hx "$@"
-fi
-WRAPPEREOF
-
-# Zellij host wrapper — delegates to kyth-ai-dev container
-install -Dm 0755 /dev/stdin /usr/bin/zellij <<'WRAPPEREOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ -x "${HOME}/.local/bin/zellij" ]]; then
-	exec "${HOME}/.local/bin/zellij" "$@"
-fi
-
-box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
-if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
-	exec distrobox enter "${box}" -- zellij "$@"
-else
-	echo "Zellij is managed in the KythOS AI Developer container (${box})."
-	echo "Initializing ${box} environment..."
-	kyth-ai-dev setup
-	exec distrobox enter "${box}" -- zellij "$@"
-fi
-WRAPPEREOF
 
 
 # Atomic systems map /usr/local to the root-owned /var/usrlocal. npm's
