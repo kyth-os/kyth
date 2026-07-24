@@ -1,8 +1,11 @@
-import configparser
 import glob
 import os
 import shlex
 import shutil
+from .services.appimages import (
+    appimage_entry_from_desktop_text, flatpak_uninstall_command,
+    is_user_appimage_path, safe_home_targets, uninstall_app_detail,
+)
 from .services.launch import popen
 from .core_base import _restyle
 from .services.runtime import Worker, _finish_worker
@@ -110,7 +113,7 @@ class _InstalledTabMixin:
         name_lbl.setObjectName("card-summary")
         name_lbl.setWordWrap(True)
         text_col.addWidget(name_lbl)
-        detail_lbl = QLabel(self._uninstall_app_detail(app))
+        detail_lbl = QLabel(uninstall_app_detail(app))
         detail_lbl.setObjectName("card-copy")
         detail_lbl.setWordWrap(True)
         text_col.addWidget(detail_lbl)
@@ -121,12 +124,6 @@ class _InstalledTabMixin:
         self._uninstall_buttons.append(uninstall_btn)
         row_layout.addWidget(uninstall_btn)
         return row
-
-    def _uninstall_app_detail(self, app: dict[str, str]) -> str:
-        if app["kind"] == "appimage":
-            launcher = " · launcher" if app.get("desktop_path") else ""
-            return f"{app['path']} · AppImage{launcher}"
-        return f"{app['app_id']} · {app['installation']} install · {app['origin']}"
 
     def _set_uninstall_controls_enabled(self, enabled: bool):
         self._uninstall_refresh_btn.setEnabled(enabled)
@@ -150,12 +147,7 @@ class _InstalledTabMixin:
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        cmd = ["flatpak", "uninstall", "-y"]
-        if app["installation"] == "user":
-            cmd.append("--user")
-        elif app["installation"] == "system":
-            cmd.append("--system")
-        cmd.append(app["app_id"])
+        cmd = flatpak_uninstall_command(app["app_id"], app["installation"])
         self._set_uninstall_controls_enabled(False)
         self._uninstall_log.clear()
         self._uninstall_log.append("→ " + " ".join(shlex.quote(part) for part in cmd) + "\n")
@@ -185,12 +177,7 @@ class _InstalledTabMixin:
         targets = [app["path"]]
         if app.get("desktop_path"):
             targets.append(app["desktop_path"])
-        safe_targets: list[str] = []
-        for target in targets:
-            real = os.path.realpath(os.path.expanduser(target))
-            home = os.path.realpath(os.path.expanduser("~"))
-            if real.startswith(home + os.sep):
-                safe_targets.append(real)
+        safe_targets = safe_home_targets(targets)
         if not safe_targets:
             QMessageBox.warning(
                 self,
@@ -264,61 +251,15 @@ class _InstalledTabMixin:
             os.path.join(home, "Downloads"),
         ]
 
-    def _path_is_user_appimage(self, path: str) -> bool:
-        if not path:
-            return False
-        try:
-            real = os.path.realpath(os.path.expanduser(path))
-            home = os.path.realpath(os.path.expanduser("~"))
-        except OSError:
-            return False
-        return (
-            real.startswith(home + os.sep)
-            and os.path.isfile(real)
-            and os.path.basename(real).lower().endswith(".appimage")
-        )
-
-    def _desktop_entry_for_appimage(self, desktop_path: str) -> dict[str, str] | None:
-        parser = configparser.ConfigParser(interpolation=None, strict=False)
-        parser.optionxform = str
-        try:
-            parser.read(desktop_path, encoding="utf-8")
-        except Exception:
-            return None
-        if not parser.has_section("Desktop Entry"):
-            return None
-        entry = parser["Desktop Entry"]
-        exec_line = entry.get("Exec", "")
-        try_exec = entry.get("TryExec", "")
-        candidates: list[str] = []
-        for line in (exec_line, try_exec):
-            if not line:
-                continue
-            try:
-                parts = shlex.split(line)
-            except ValueError:
-                parts = line.split()
-            candidates.extend(part for part in parts if ".AppImage" in part or ".appimage" in part)
-        appimage_path = next((part for part in candidates if self._path_is_user_appimage(part)), "")
-        if not appimage_path:
-            return None
-        appimage_path = os.path.realpath(os.path.expanduser(appimage_path))
-        return {
-            "kind": "appimage",
-            "app_id": appimage_path,
-            "name": entry.get("Name", "") or os.path.basename(appimage_path),
-            "origin": "AppImage",
-            "installation": "user file",
-            "path": appimage_path,
-            "desktop_path": desktop_path,
-            "icon": entry.get("Icon", ""),
-        }
-
     def _installed_appimage_apps(self) -> list[dict[str, str]]:
         apps_by_path: dict[str, dict[str, str]] = {}
         desktop_dir = os.path.join(os.path.expanduser("~"), ".local", "share", "applications")
         for desktop_path in glob.glob(os.path.join(desktop_dir, "*.desktop")):
-            app = self._desktop_entry_for_appimage(desktop_path)
+            try:
+                desktop_text = open(desktop_path, encoding="utf-8").read()
+            except OSError:
+                continue
+            app = appimage_entry_from_desktop_text(desktop_text, desktop_path)
             if app:
                 apps_by_path[app["path"]] = app
         for directory in self._appimage_search_dirs():
@@ -330,7 +271,7 @@ class _InstalledTabMixin:
                 continue
             for name in entries:
                 path = os.path.join(directory, name)
-                if not self._path_is_user_appimage(path):
+                if not is_user_appimage_path(path):
                     continue
                 real = os.path.realpath(path)
                 apps_by_path.setdefault(real, {
