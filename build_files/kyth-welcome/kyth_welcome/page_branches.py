@@ -10,6 +10,7 @@ from .core_base import (
 from .services.runtime import _finish_worker
 from .services.privileged import bootc_action
 from .core_base import REGISTRY, _bootc_image_digest, _current_branch
+from .services.bootc import branches_view
 from .qt import (
     QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,
 )
@@ -183,29 +184,15 @@ class BranchesPage(Page):
             self._state_copy_btn.hide()
 
         # Branch cards
-        if tag in ("latest", "latest-cachy"):
-            self._stable_btn.setObjectName("branch-active")
-            self._stable_btn.setText("On Stable  (current)")
-            self._stable_build_lbl.setText(f"Running: built {booted_ts}" if booted_ts else "")
-            self._stable_build_lbl.setVisible(bool(booted_ts))
-            self._testing_btn.setObjectName("branch-inactive")
-            self._testing_btn.setText("Switch to Testing")
-            self._testing_build_lbl.hide()
-        elif tag in ("testing", "testing-cachy"):
-            self._stable_btn.setObjectName("branch-inactive")
-            self._stable_btn.setText("Switch to Stable")
-            self._stable_build_lbl.hide()
-            self._testing_btn.setObjectName("branch-active")
-            self._testing_btn.setText("On Testing  (current)")
-            self._testing_build_lbl.setText(f"Running: built {booted_ts}" if booted_ts else "")
-            self._testing_build_lbl.setVisible(bool(booted_ts))
-        else:
-            self._stable_btn.setObjectName("branch-inactive")
-            self._stable_btn.setText("Switch to Stable")
-            self._stable_build_lbl.hide()
-            self._testing_btn.setObjectName("branch-inactive")
-            self._testing_btn.setText("Switch to Testing")
-            self._testing_build_lbl.hide()
+        view = branches_view(tag, booted_ts)
+        self._stable_btn.setObjectName(view.stable.object_name)
+        self._stable_btn.setText(view.stable.button_text)
+        self._stable_build_lbl.setText(view.stable.build_label_text)
+        self._stable_build_lbl.setVisible(view.stable.build_label_visible)
+        self._testing_btn.setObjectName(view.testing.object_name)
+        self._testing_btn.setText(view.testing.button_text)
+        self._testing_build_lbl.setText(view.testing.build_label_text)
+        self._testing_build_lbl.setVisible(view.testing.build_label_visible)
 
         _restyle(self._stable_btn)
         _restyle(self._testing_btn)

@@ -343,6 +343,40 @@ def _bootc_image_digest(section: str) -> tuple[str, str] | None:
 
 
 @dataclass(frozen=True)
+class BranchCardView:
+    object_name: str
+    button_text: str
+    build_label_text: str
+    build_label_visible: bool
+
+
+@dataclass(frozen=True)
+class BranchesView:
+    """What page_branches.py's Stable/Testing selector cards should show —
+    no Qt, so the decision tree is testable without a display."""
+    stable: BranchCardView
+    testing: BranchCardView
+
+
+def branches_view(tag: str | None, booted_ts: str | None) -> BranchesView:
+    build_text = f"Running: built {booted_ts}" if booted_ts else ""
+    inactive_stable = BranchCardView("branch-inactive", "Switch to Stable", "", False)
+    inactive_testing = BranchCardView("branch-inactive", "Switch to Testing", "", False)
+
+    if tag in ("latest", "latest-cachy"):
+        return BranchesView(
+            stable=BranchCardView("branch-active", "On Stable  (current)", build_text, bool(booted_ts)),
+            testing=inactive_testing,
+        )
+    if tag in ("testing", "testing-cachy"):
+        return BranchesView(
+            stable=inactive_stable,
+            testing=BranchCardView("branch-active", "On Testing  (current)", build_text, bool(booted_ts)),
+        )
+    return BranchesView(stable=inactive_stable, testing=inactive_testing)
+
+
+@dataclass(frozen=True)
 class UpdateAvailabilityView:
     """What page_update_availability.py's hero card should show — no Qt, so
     the decision tree is testable without a display."""

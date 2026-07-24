@@ -15,6 +15,7 @@ from kyth_welcome.services.bootc import (  # noqa: E402
     _bootc_cancel_block_reason,
     _branch_from_ref,
     _branch_display_name,
+    branches_view,
     _current_kernel_flavor,
     _default_phase,
     _image_tag_for_channel,
@@ -208,6 +209,50 @@ class UpdatePhaseParsingTests(unittest.TestCase):
         # Rollback has no safe early phase to cancel from at all.
         self.assertNotEqual(_bootc_cancel_block_reason("rollback", "Staging rollback deployment…"), "")
         self.assertNotEqual(_bootc_cancel_block_reason("rollback", ""), "")
+
+
+class BranchesViewTests(unittest.TestCase):
+    """page_branches.py's Stable/Testing selector cards are driven entirely
+    by this decision tree — no Qt, so it's testable directly."""
+
+    def test_on_stable_marks_stable_active(self):
+        view = branches_view("latest", "2026-07-20")
+        self.assertEqual(view.stable.object_name, "branch-active")
+        self.assertEqual(view.stable.button_text, "On Stable  (current)")
+        self.assertIn("built 2026-07-20", view.stable.build_label_text)
+        self.assertTrue(view.stable.build_label_visible)
+        self.assertEqual(view.testing.object_name, "branch-inactive")
+        self.assertEqual(view.testing.button_text, "Switch to Testing")
+        self.assertFalse(view.testing.build_label_visible)
+
+    def test_on_stable_cachy_flavor_also_marks_stable_active(self):
+        view = branches_view("latest-cachy", "2026-07-20")
+        self.assertEqual(view.stable.object_name, "branch-active")
+
+    def test_on_testing_marks_testing_active(self):
+        view = branches_view("testing", "2026-07-21")
+        self.assertEqual(view.testing.object_name, "branch-active")
+        self.assertEqual(view.testing.button_text, "On Testing  (current)")
+        self.assertIn("built 2026-07-21", view.testing.build_label_text)
+        self.assertTrue(view.testing.build_label_visible)
+        self.assertEqual(view.stable.object_name, "branch-inactive")
+        self.assertFalse(view.stable.build_label_visible)
+
+    def test_on_testing_cachy_flavor_also_marks_testing_active(self):
+        view = branches_view("testing-cachy", "2026-07-21")
+        self.assertEqual(view.testing.object_name, "branch-active")
+
+    def test_unrecognized_branch_marks_neither_active(self):
+        view = branches_view("some-other-branch", "2026-07-21")
+        self.assertEqual(view.stable.object_name, "branch-inactive")
+        self.assertEqual(view.testing.object_name, "branch-inactive")
+        self.assertFalse(view.stable.build_label_visible)
+        self.assertFalse(view.testing.build_label_visible)
+
+    def test_missing_booted_timestamp_hides_build_label(self):
+        view = branches_view("latest", None)
+        self.assertFalse(view.stable.build_label_visible)
+        self.assertEqual(view.stable.build_label_text, "")
 
 
 class UpdateAvailabilityViewTests(unittest.TestCase):
