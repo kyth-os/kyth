@@ -135,13 +135,7 @@ jobs:
           fi
 
       - name: Mount compressed Podman storage
-        run: |
-          sudo truncate -s 65G /mnt/podman-storage.img
-          sudo mkfs.btrfs -f /mnt/podman-storage.img
-          sudo podman system reset --force
-          sudo systemctl stop podman.service
-          sudo mount -o compress-force=zstd:2 /mnt/podman-storage.img /var/lib/containers/storage
-          sudo systemctl start podman.service
+        uses: ./.github/actions/setup-compressed-storage
 
       # When called from build.yml, this run already carries the immutable
       # build metadata artifact — use its digest so the ISO is built from the
@@ -172,31 +166,20 @@ jobs:
 
       - name: Resolve source image digest
         id: source_image
+        uses: ./.github/actions/fetch-image-metadata
+        with:
+          image-tag: ${{ inputs.source_tag }}
+          expected-digest: ${{ inputs.source_digest || steps.build_metadata.outputs.digest }}
+
+      - name: Verify source image revision matches checkout
         env:
-          SOURCE_TAG: ${{ inputs.source_tag }}
-          EXPECTED_DIGEST: ${{ inputs.source_digest || steps.build_metadata.outputs.digest }}
+          REVISION: ${{ steps.source_image.outputs.revision }}
         run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
-          TAGGED_IMAGE="${IMAGE}:${SOURCE_TAG}"
-          if [[ -n "${EXPECTED_DIGEST}" ]]; then
-            build_files/scripts/validate-digest.sh "${EXPECTED_DIGEST}"
-            DIGEST="${EXPECTED_DIGEST}"
-            # Confirm the immutable manifest exists and belongs to this repository.
-            sudo skopeo inspect "docker://${IMAGE}@${DIGEST}" >/dev/null
-          else
-            echo "::warning::No source_digest supplied; resolving the moving ${SOURCE_TAG} tag for this manual build."
-            DIGEST="$(sudo skopeo inspect --format '{{.Digest}}' "docker://${TAGGED_IMAGE}")"
-          fi
-          REVISION="$(sudo skopeo inspect "docker://${IMAGE}@${DIGEST}" | jq -r '.Labels["org.opencontainers.image.revision"] // empty')"
           EXPECTED_REVISION="$(git rev-parse HEAD)"
           if [[ "${REVISION}" != "${EXPECTED_REVISION}" ]]; then
-            echo "::error::Source image ${IMAGE}@${DIGEST} was built from revision '${REVISION:-<missing>}', but this ISO workflow checked out '${EXPECTED_REVISION}'. Re-run the image build for this commit, then pass its digest as source_digest."
+            echo "::error::Source image built from revision '${REVISION:-<missing>}', but this ISO workflow checked out '${EXPECTED_REVISION}'. Re-run the image build for this commit, then pass its digest as source_digest."
             exit 1
           fi
-          echo "name=${IMAGE}" >&3
-          echo "digest=${DIGEST}" >&3
-          echo "pinned=${IMAGE}@${DIGEST}" >&3
 
       - name: Build live payload container
         env:
@@ -433,20 +416,12 @@ jobs:
       - name: Setup Cosign
         uses: ./.github/actions/setup-cosign
 
-      - name: Sign ISO
-        run: |
-          ISO="output/live-iso/${NEEDS_BUILD_OUTPUTS_ISO_BASENAME}"
-          cosign sign-blob -y "${ISO}" \
-            --output-signature "${ISO}.sig" \
-            --bundle "${ISO}.bundle"
-        env:
-          NEEDS_BUILD_OUTPUTS_ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
-
-      - name: Attest ISO build provenance
+      - name: Sign and Attest ISO
         id: attest_iso
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        uses: ./.github/actions/attest-artifact
         with:
           subject-path: output/live-iso/${{ needs.build.outputs.iso_basename }}
+          cosign-sign: "true"
 
       - name: Generate signed release metadata
         env:
@@ -459,54 +434,27 @@ jobs:
           SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
           SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
           SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           ISO="output/live-iso/${ISO_BASENAME}"
           SHA256="$(sha256sum "${ISO}" | awk '{print $1}')"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          export SHA256 BUILD_DATE
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
 
-          tag = os.environ["SOURCE_TAG"]
-          iso = Path("output/live-iso") / os.environ["ISO_BASENAME"]
-          channel = os.environ["CHANNEL_BASENAME"]
-          base_url = "https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev"
-          metadata = {
-              "iso": iso.name,
-              "sha256": os.environ["SHA256"],
-              "signature": iso.name + ".sig",
-              "bundle": iso.name + ".bundle",
-              "provenance": iso.name + ".intoto.jsonl",
-              "checksum": iso.name + "-CHECKSUM",
-              "attestation_url": os.environ["ATTESTATION_URL"],
-              "source_image": os.environ["SOURCE_IMAGE"],
-              "source_image_digest": os.environ["SOURCE_DIGEST"],
-              "pinned_source_image": os.environ["SOURCE_IMAGE"] + "@" + os.environ["SOURCE_DIGEST"],
-              "source_commit": os.environ["SOURCE_SHA"],
-              "source_tag": tag,
-              "build_date": os.environ["BUILD_DATE"],
-              "release_tag": os.environ["IMMUTABLE_TAG"],
-              "download_url": f"{base_url}/{iso.name}",
-              "workflow_run": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
-          }
-          Path(str(iso) + ".json").write_text(json.dumps(metadata, indent=2) + "\n")
-
-          channel_metadata = dict(metadata)
-          channel_metadata.update({
-              "iso": channel,
-              "signature": channel + ".sig",
-              "bundle": channel + ".bundle",
-              "provenance": channel + ".intoto.jsonl",
-              "checksum": channel + "-CHECKSUM",
-              "download_url": f"{base_url}/{channel}",
-              "immutable_download_url": metadata["download_url"],
-          })
-          Path("output/live-iso", channel + ".json").write_text(
-              json.dumps(channel_metadata, indent=2) + "\n"
-          )
-          PY
+          python3 build_files/scripts/generate-release-metadata.py \
+            --source-tag "${SOURCE_TAG}" \
+            --iso-basename "${ISO_BASENAME}" \
+            --channel-basename "${CHANNEL_BASENAME}" \
+            --sha256 "${SHA256}" \
+            --attestation-url "${ATTESTATION_URL}" \
+            --immutable-tag "${IMMUTABLE_TAG}" \
+            --source-sha "${SOURCE_SHA}" \
+            --source-image "${SOURCE_IMAGE}" \
+            --source-digest "${SOURCE_DIGEST}" \
+            --build-date "${BUILD_DATE}" \
+            --github-repository "${GITHUB_REPOSITORY}" \
+            --github-run-id "${GITHUB_RUN_ID}" \
+            --output-dir "output/live-iso"
 
           cp "${ISO}.sig" "output/live-iso/${CHANNEL_BASENAME}.sig"
           cp "${ISO}.bundle" "output/live-iso/${CHANNEL_BASENAME}.bundle"

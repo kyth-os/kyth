@@ -183,33 +183,21 @@ jobs:
       - name: Resolve latest CachyOS kernel version
         id: cachyos_kernel
         if: matrix.kernel_flavor == 'cachy'
-        run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          KVER=$(./build_files/scripts/resolve-versions.sh cachyos-kernel)
-          echo "version=${KVER}" >&3
-          echo "Resolved CachyOS kernel: ${KVER}"
+        uses: ./.github/actions/resolve-versions
+        with:
+          dependency: cachyos-kernel
 
       - name: Resolve latest Proton-CachyOS version
         id: proton_cachyos
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          PC_VER=$(./build_files/scripts/resolve-versions.sh proton-cachyos)
-          echo "version=${PC_VER}" >&3
-          echo "Resolved Proton-CachyOS: ${PC_VER:-latest}"
+        uses: ./.github/actions/resolve-versions
+        with:
+          dependency: proton-cachyos
 
       - name: Resolve thirdparty tool versions
         id: thirdparty_versions
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          UMU_VERSION=$(./build_files/scripts/resolve-versions.sh thirdparty-versions)
-          HASH=$(printf '%s' "${UMU_VERSION}" | sha256sum | cut -c1-16)
-          echo "umu=${UMU_VERSION}" >&3
-          echo "hash=${HASH}" >&3
-          echo "Pinned release: umu=${UMU_VERSION} (${HASH})"
+        uses: ./.github/actions/resolve-versions
+        with:
+          dependency: thirdparty-versions
 
       - name: Resolve upstream base image digest
         id: upstream_base
@@ -334,7 +322,7 @@ jobs:
           STEPS_UPSTREAM_BASE_OUTPUTS_PINNED: ${{ steps.upstream_base.outputs.pinned }}
           STEPS_PROTON_CACHYOS_OUTPUTS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
-          STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU: ${{ steps.thirdparty_versions.outputs.umu }}
+          STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU: ${{ steps.thirdparty_versions.outputs.version }}
           STEPS_BUILD_BASE_OUTPUTS_PINNED: ${{ steps.build_base.outputs.pinned }}
           STEPS_CHECKOUT_SHA_OUTPUTS_SHA: ${{ steps.checkout_sha.outputs.sha }}
 
@@ -385,7 +373,7 @@ jobs:
             org.kyth.build.upstream-base=${{ steps.upstream_base.outputs.pinned }}
             org.kyth.build.proton-cachyos-version=${{ steps.proton_cachyos.outputs.version }}
             org.kyth.build.thirdparty-versions-hash=${{ steps.thirdparty_versions.outputs.hash }}
-            org.kyth.build.umu-version=${{ steps.thirdparty_versions.outputs.umu }}
+            org.kyth.build.umu-version=${{ steps.thirdparty_versions.outputs.version }}
             org.kyth.build.kernel-flavor=${{ matrix.kernel_flavor }}
             org.kyth.build.cachyos-kernel-version=${{ steps.cachyos_kernel.outputs.version || 'unused' }}
 
@@ -500,7 +488,7 @@ jobs:
           BUILD_BASE: ${{ steps.build_base.outputs.pinned }}
           PROTON_CACHYOS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           THIRDPARTY_VERSIONS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
-          UMU_VERSION: ${{ steps.thirdparty_versions.outputs.umu }}
+          UMU_VERSION: ${{ steps.thirdparty_versions.outputs.version }}
           KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           WORKFLOW_GITHUB_SHA: ${{ github.sha }}
         run: |
@@ -627,11 +615,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Attest image build provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        uses: ./.github/actions/attest-artifact
         with:
           subject-name: ${{ steps.image.outputs.image }}
           subject-digest: ${{ steps.image.outputs.digest }}
-          push-to-registry: true
+          push-to-registry: "true"
 
       # Supply-chain metadata (SBOM attach, image release, CVE scan dispatch)
       # runs only against the Fedora-flavor image and needs the immutable

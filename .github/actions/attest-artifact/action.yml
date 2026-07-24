@@ -1,0 +1,56 @@
+name: Attest and Sign Artifact
+description: Generate build provenance and sign checksums with Cosign
+inputs:
+  subject-path:
+    description: Path to file artifact to attest.
+    required: false
+  subject-name:
+    description: Name of OCI image to attest.
+    required: false
+  subject-digest:
+    description: Digest of OCI image to attest.
+    required: false
+  push-to-registry:
+    description: Push OCI attestation to registry.
+    required: false
+    default: "false"
+  cosign-sign:
+    description: Sign file checksum with Cosign.
+    required: false
+    default: "false"
+  cosign-private-key:
+    description: Cosign private key to sign the checksum.
+    required: false
+  cosign-subject-checksum:
+    description: Path to checksum file to sign with Cosign.
+    required: false
+outputs:
+  attestation-url:
+    description: URL of the generated attestation.
+    value: ${{ steps.attest.outputs.attestation-url }}
+  bundle-path:
+    description: Path to the attestation bundle.
+    value: ${{ steps.attest.outputs.bundle-path }}
+runs:
+  using: composite
+  steps:
+    - name: Generate build provenance
+      id: attest
+      uses: actions/attest-build-provenance@173d19e59d99723dd8ef6a084620f38b4382582b # v1.3.3
+      with:
+        subject-path: ${{ inputs.subject-path }}
+        subject-name: ${{ inputs.subject-name }}
+        subject-digest: ${{ inputs.subject-digest }}
+        push-to-registry: ${{ inputs.push-to-registry }}
+        show-summary: false
+
+    - name: Sign blob with Cosign (Keyless)
+      if: inputs.cosign-sign == 'true'
+      shell: bash
+      env:
+        COSIGN_YES: "true"
+        SUBJECT_PATH: ${{ inputs.subject-path }}
+      run: |
+        cosign sign-blob -y "${SUBJECT_PATH}" \
+          --output-signature "${SUBJECT_PATH}.sig" \
+          --bundle "${SUBJECT_PATH}.bundle"

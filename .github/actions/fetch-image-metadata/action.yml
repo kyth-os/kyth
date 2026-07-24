@@ -1,0 +1,64 @@
+name: Fetch Image Metadata
+description: Retrieve tag digest, version, and revision for a container image
+inputs:
+  image-tag:
+    description: Tag to fetch metadata for (e.g. latest, testing)
+    required: true
+  image-name:
+    description: Image name (defaults to ghcr.io/<repo-owner>/<repo-name>)
+    required: false
+  expected-digest:
+    description: Optional digest override to pin instead of resolving the tag
+    required: false
+outputs:
+  image:
+    description: Pinned image registry path (lowercase)
+    value: ${{ steps.fetch.outputs.image }}
+  name:
+    description: Pinned image registry path (lowercase) (alias for image)
+    value: ${{ steps.fetch.outputs.image }}
+  digest:
+    description: Resolved image digest
+    value: ${{ steps.fetch.outputs.digest }}
+  version:
+    description: Image version label
+    value: ${{ steps.fetch.outputs.version }}
+  revision:
+    description: Image revision label (git commit revision)
+    value: ${{ steps.fetch.outputs.revision }}
+  pinned:
+    description: Pinned full image path (image@digest)
+    value: ${{ steps.fetch.outputs.pinned }}
+runs:
+  using: composite
+  steps:
+    - name: Fetch metadata
+      id: fetch
+      shell: bash
+      env:
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        IMAGE_NAME: ${{ inputs.image-name }}
+        EXPECTED_DIGEST: ${{ inputs.expected-digest }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        if [[ -n "${IMAGE_NAME}" ]]; then
+          IMAGE="${IMAGE_NAME}"
+        else
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+        fi
+
+        if [[ -n "${EXPECTED_DIGEST}" ]]; then
+          DIGEST="${EXPECTED_DIGEST}"
+        else
+          DIGEST="$(oras manifest fetch --descriptor "${IMAGE}:${IMAGE_TAG}" | jq -r '.digest')"
+        fi
+
+        METADATA="$(skopeo inspect "docker://${IMAGE}@${DIGEST}")"
+        VERSION="$(echo "${METADATA}" | jq -r '.Labels["org.opencontainers.image.version"] // empty')"
+        REVISION="$(echo "${METADATA}" | jq -r '.Labels["org.opencontainers.image.revision"] // empty')"
+
+        echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+        echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "revision=${REVISION}" >> "$GITHUB_OUTPUT"
+        echo "pinned=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
