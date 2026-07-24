@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 03:10:51 UTC
+- Last refreshed (UTC): 2026-07-24 03:18:07 UTC
 - Current branch: testing
-- HEAD commit: 5bbaece
-- Last commit title: Refactor CI/CD: extract registry logins, validator tools install, inline validate.sh python scripts, Cloudflare R2 uploads, and release notes formatting
-- Last commit date: 2026-07-23T23:03:45-04:00
+- HEAD commit: 5180b3b
+- Last commit title: Refactor CI/CD: extract version resolution, compressed storage, attestation wrappers, tag metadata resolution, and release metadata script
+- Last commit date: 2026-07-23T23:10:51-04:00
 - CI workflow files: 8
 - Build script files: 20
 

@@ -95,20 +95,10 @@ jobs:
         uses: ./.github/actions/setup-oras
 
       - name: Wait for image to be available in registry
-        env:
-          IMAGE: ${{ steps.meta.outputs.image }}
-          SOURCE_DIGEST: ${{ inputs.source_digest }}
-        run: |
-          for attempt in $(seq 1 10); do
-            if docker buildx imagetools inspect "${IMAGE}@${SOURCE_DIGEST}" >/dev/null 2>&1; then
-              echo "Image available (attempt ${attempt}/10)"
-              exit 0
-            fi
-            echo "Image not yet available (attempt ${attempt}/10); retrying in 30s..."
-            sleep 30
-          done
-          echo "::error::Image ${IMAGE}@${SOURCE_DIGEST} was not available after 5 minutes"
-          exit 1
+        uses: ./.github/actions/wait-for-image
+        with:
+          image: ${{ steps.meta.outputs.image }}
+          digest: ${{ inputs.source_digest }}
 
       - name: Validate immutable image identity and resolve previous digest
         id: image
@@ -225,27 +215,9 @@ jobs:
           SBOM_PATH: ${{ steps.sbom.outputs.path }}
         run: |
           OUT_FILE="rpm-manifest-${TAG}-${VERSION}.txt"
-          python3 - "${SBOM_PATH}" "${OUT_FILE}" <<'PY'
-          import json, sys
-          from pathlib import Path
-          sbom = json.loads(Path(sys.argv[1]).read_text())
-          pkgs = []
-          for a in sbom.get("artifacts", []):
-              if a.get("type") != "rpm":
-                  continue
-              m = a.get("metadata") or {}
-              name = a["name"]
-              arch = m.get("architecture", "")
-              meta_ver = m.get("version", "")
-              meta_rel = m.get("release", "")
-              if meta_ver and meta_rel:
-                  pkgs.append(f"{name}-{meta_ver}-{meta_rel}.{arch}")
-              else:
-                  ver = a.get("version", "")
-                  pkgs.append(f"{name}-{ver}.{arch}" if arch else f"{name}-{ver}")
-          pkgs.sort()
-          Path(sys.argv[2]).write_text("\n".join(pkgs) + "\n")
-          PY
+          python3 build_files/scripts/extract-rpm-manifest.py \
+            --sbom "${SBOM_PATH}" \
+            --output "${OUT_FILE}"
           echo "path=${OUT_FILE}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Grype
@@ -347,38 +319,24 @@ jobs:
         run: |
           mkdir -p output/supply-chain
           cp "${RPM_MANIFEST}" "${SBOM}" "${NOTES}" output/supply-chain/
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          source_sha = os.environ["SOURCE_SHA"]
-          metadata = {
-              "image": os.environ["IMAGE"],
-              "tag": os.environ["TAG"],
-              "source_sha": source_sha,
-              # github_sha is the GITHUB_SHA from the triggering build workflow run.
-              # For schedule runs building a non-default branch, it equals the default
-              # branch HEAD rather than the checked-out branch commit (source_sha).
-              "github_sha": os.environ.get("SOURCE_GITHUB_SHA") or source_sha,
-              "current_digest": os.environ["CURRENT_DIGEST"],
-              "current_version": os.environ["CURRENT_VERSION"],
-              "previous_digest": os.environ["PREVIOUS_DIGEST"],
-              "materials": {
-                  "build_base": os.environ["BASE_NAME"] + "@" + os.environ["BASE_DIGEST"],
-                  "upstream_base": os.environ["UPSTREAM_BASE"],
-                  "proton_cachyos_version": os.environ["PROTON_CACHYOS_VERSION"],
-                  "thirdparty_versions_hash": os.environ["THIRDPARTY_HASH"],
-                  "kernel_flavor": os.environ["KERNEL_FLAVOR"],
-              },
-              "rpm_manifest": Path(os.environ["RPM_MANIFEST"]).name,
-              "sbom": Path(os.environ["SBOM"]).name,
-              "notes": Path(os.environ["NOTES"]).name,
-          }
-          Path("output/supply-chain/metadata.json").write_text(
-              json.dumps(metadata, indent=2) + "\n"
-          )
-          PY
+          python3 build_files/scripts/generate-supply-chain-metadata.py \
+            --image "${IMAGE}" \
+            --tag "${TAG}" \
+            --source-sha "${SOURCE_SHA}" \
+            --source-github-sha "${SOURCE_GITHUB_SHA}" \
+            --current-digest "${CURRENT_DIGEST}" \
+            --current-version "${CURRENT_VERSION}" \
+            --previous-digest "${PREVIOUS_DIGEST}" \
+            --base-name "${BASE_NAME}" \
+            --base-digest "${BASE_DIGEST}" \
+            --upstream-base "${UPSTREAM_BASE}" \
+            --proton-cachyos-version "${PROTON_CACHYOS_VERSION}" \
+            --thirdparty-hash "${THIRDPARTY_HASH}" \
+            --kernel-flavor "${KERNEL_FLAVOR}" \
+            --rpm-manifest "${RPM_MANIFEST}" \
+            --sbom "${SBOM}" \
+            --notes "${NOTES}" \
+            --output-dir "output/supply-chain"
 
       - name: Upload prepared metadata
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
