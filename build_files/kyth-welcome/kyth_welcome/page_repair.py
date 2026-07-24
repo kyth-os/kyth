@@ -6,7 +6,7 @@ from .core_base import _has_rollback_deployment
 from .page_repair_components import repair_overview_cards, rollback_card
 from .services.launch import kcmshell, popen_privileged
 from .services.hardware import _detect_nvidia
-from .services.repair import _read_sys_text
+from .services.repair import _read_sys_text, sleep_mode_label
 from .services.flatpak import _is_flatpak_installed
 from .services.privileged import systemctl_action
 from .page_repair_assist import _AssistMixin
@@ -394,13 +394,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
 
         mem_sleep = _read_sys_text("/sys/power/mem_sleep")
         sleep_state = _read_sys_text("/sys/power/state")
-        current_mode = "unknown"
-        if "[deep]" in mem_sleep:
-            current_mode = "S3 deep (good)"
-        elif "[s2idle]" in mem_sleep:
-            current_mode = "s2idle (modern standby — may wake early)"
-        elif mem_sleep:
-            current_mode = mem_sleep.strip()
+        current_mode = sleep_mode_label(mem_sleep)
 
         sleep_body = QLabel(
             f"Current sleep mode: {current_mode}\n"

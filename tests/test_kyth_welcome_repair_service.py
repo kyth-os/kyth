@@ -48,6 +48,17 @@ class RepairServiceTests(unittest.TestCase):
         self.assertGreaterEqual(len(cmds), 1)
         self.assertIn(["plasma-systemmonitor"], cmds)
 
+    def test_sleep_mode_label(self):
+        self.assertEqual(
+            repair.sleep_mode_label("s2idle [deep]"), "S3 deep (good)"
+        )
+        self.assertEqual(
+            repair.sleep_mode_label("[s2idle] deep"),
+            "s2idle (modern standby — may wake early)",
+        )
+        self.assertEqual(repair.sleep_mode_label("freeze"), "freeze")
+        self.assertEqual(repair.sleep_mode_label(""), "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

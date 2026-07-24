@@ -22,6 +22,17 @@ def read_sys_text(path: str) -> str:
 _read_sys_text = read_sys_text
 
 
+def sleep_mode_label(mem_sleep: str) -> str:
+    """Map /sys/power/mem_sleep's raw text to the label page_repair.py shows."""
+    if "[deep]" in mem_sleep:
+        return "S3 deep (good)"
+    if "[s2idle]" in mem_sleep:
+        return "s2idle (modern standby — may wake early)"
+    if mem_sleep:
+        return mem_sleep.strip()
+    return "unknown"
+
+
 def setup_transfer_helper() -> str:
     """Return path to kyth-setup-transfer (installed or repo checkout)."""
     installed = "/usr/bin/kyth-setup-transfer"
