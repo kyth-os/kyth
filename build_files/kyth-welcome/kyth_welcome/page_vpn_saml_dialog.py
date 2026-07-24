@@ -1,9 +1,7 @@
-import re
-from urllib.parse import parse_qs, urlencode, unquote, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import parse_qs, unquote, urlparse
 
 # __KYTH_GENERATED_IMPORTS__
-from .services.vpn import _GP_SAML_FIELDS
+from .services.vpn import _GP_SAML_FIELDS, replay_saml_acs
 from .qt import (
     QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QUrl, QVBoxLayout,
     QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineUrlRequestJob,
@@ -462,48 +460,19 @@ QPushButton#saml-cancel:pressed {
             print("[SAML dbg] captured SAML ACS form; replaying to read GP headers")
             self._status_msg.setText("Completing VPN handoff")
             try:
-                req = Request(
-                    action_url,
-                    data=body.encode("utf-8"),
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "User-Agent": "PAN GlobalProtect",
-                    },
-                    method="POST",
-                )
-                with urlopen(req, timeout=30) as resp:
-                    headers = {k.lower(): v for k, v in resp.headers.items()}
-                    text = resp.read().decode("utf-8", errors="replace")
+                cookie_str = replay_saml_acs(action_url, body)
             except Exception as exc:
                 print(f"[SAML dbg] ACS replay failed: {exc}")
                 self._info.setText("Could not replay the SAML response to the VPN portal.")
                 self._status_msg.setText("VPN handoff failed")
                 return
 
-            print(f"[SAML dbg] ACS replay headers: {sorted(headers.keys())}")
-            for name in ("prelogin-cookie", "portal-userauthcookie", "cas", "preloginuserauthcookie"):
-                if headers.get(name):
-                    print(f"[SAML dbg] ACS replay found {name} and saml-username")
-                    self._emit_cookie(urlencode({
-                        name: headers[name],
-                        "saml-username": headers.get("saml-username", ""),
-                    }))
-                    return
-
-            for name in ("prelogin-cookie", "portal-userauthcookie", "cas", "preloginuserauthcookie"):
-                m = re.search(rf"<{re.escape(name)}>([^<]+)</{re.escape(name)}>", text, re.I)
-                if m:
-                    user_match = re.search(r"<saml-username>([^<]+)</saml-username>", text, re.I)
-                    print(f"[SAML dbg] ACS body found {name}")
-                    self._emit_cookie(urlencode({
-                        name: m.group(1).strip(),
-                        "saml-username": user_match.group(1).strip() if user_match else "",
-                    }))
-                    return
-
-            print("[SAML dbg] ACS replay did not include a GP auth token")
-            self._info.setText("SAML completed, but the VPN portal did not return a GP auth token.")
-            self._status_msg.setText("VPN token not received")
+            if cookie_str:
+                self._emit_cookie(cookie_str)
+            else:
+                print("[SAML dbg] ACS replay did not include a GP auth token")
+                self._info.setText("SAML completed, but the VPN portal did not return a GP auth token.")
+                self._status_msg.setText("VPN token not received")
 
         def _teardown_webengine(self) -> None:
             if self._done:

@@ -21,6 +21,8 @@ from kyth_welcome.services.vpn import (  # noqa: E402
     save_vpn_config,
     vpn_line_is_connected,
     vpn_status_view,
+    parse_saml_acs_response,
+    replay_saml_acs,
 )
 
 
@@ -123,6 +125,37 @@ class VpnParserTests(unittest.TestCase):
         group_index = command.index("--usergroup")
         self.assertEqual(command[group_index + 1], "gateway")
         self.assertEqual(command[-1], "vpn.example")
+
+    def test_parse_saml_acs_response_headers(self):
+        # Header token found
+        headers = {"Prelogin-Cookie": "token123", "saml-username": "user123"}
+        res = parse_saml_acs_response(headers, "")
+        self.assertEqual(res, "prelogin-cookie=token123&saml-username=user123")
+
+        # No relevant headers
+        headers = {"some-header": "value"}
+        res = parse_saml_acs_response(headers, "")
+        self.assertIsNone(res)
+
+    def test_parse_saml_acs_response_body(self):
+        # XML body token found
+        body = "<portal-userauthcookie>token456</portal-userauthcookie><saml-username>user456</saml-username>"
+        res = parse_saml_acs_response({}, body)
+        self.assertEqual(res, "portal-userauthcookie=token456&saml-username=user456")
+
+        # XML body no match
+        res = parse_saml_acs_response({}, "invalid body")
+        self.assertIsNone(res)
+
+    @patch("kyth_welcome.services.vpn.urlopen")
+    def test_replay_saml_acs_network(self, mock_urlopen):
+        # Setup mock response
+        mock_resp = mock_urlopen.return_value.__enter__.return_value
+        mock_resp.headers = {"preloginuserauthcookie": "token789", "saml-username": "user789"}
+        mock_resp.read.return_value = b""
+
+        res = replay_saml_acs("https://vpn.example", "body")
+        self.assertEqual(res, "preloginuserauthcookie=token789&saml-username=user789")
 
 
 class VpnConfigTests(unittest.TestCase):

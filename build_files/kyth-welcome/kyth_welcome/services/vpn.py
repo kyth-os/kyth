@@ -8,7 +8,8 @@ import configparser
 import os
 import re
 from dataclasses import dataclass
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
+from urllib.request import Request, urlopen
 
 from .privileged import openconnect_action
 
@@ -193,3 +194,65 @@ def build_saml_reconnect_command(
         cookie="" if stdin_text else cookie,
     ).command()
     return command, stdin_text, username
+
+
+def parse_saml_acs_response(headers: dict[str, str], body_text: str) -> str | None:
+    """Parses response headers and body to extract a GlobalProtect auth token.
+
+    Returns the urlencoded cookie string if found, otherwise None.
+    """
+    lower_headers = {k.lower(): v for k, v in headers.items()}
+    for name in (
+        "prelogin-cookie",
+        "portal-userauthcookie",
+        "cas",
+        "preloginuserauthcookie",
+    ):
+        if lower_headers.get(name):
+            return urlencode(
+                {
+                    name: lower_headers[name],
+                    "saml-username": lower_headers.get("saml-username", ""),
+                }
+            )
+
+    for name in (
+        "prelogin-cookie",
+        "portal-userauthcookie",
+        "cas",
+        "preloginuserauthcookie",
+    ):
+        m = re.search(
+            rf"<{re.escape(name)}>([^<]+)</{re.escape(name)}>", body_text, re.I
+        )
+        if m:
+            user_match = re.search(
+                r"<saml-username>([^<]+)</saml-username>", body_text, re.I
+            )
+            return urlencode(
+                {
+                    name: m.group(1).strip(),
+                    "saml-username": (
+                        user_match.group(1).strip() if user_match else ""
+                    ),
+                }
+            )
+    return None
+
+
+def replay_saml_acs(action_url: str, body: str) -> str | None:
+    """Replays the SAML ACS response to the VPN portal and returns the cookie string if found."""
+    req = Request(
+        action_url,
+        data=body.encode("utf-8"),
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "PAN GlobalProtect",
+        },
+        method="POST",
+    )
+    with urlopen(req, timeout=30) as resp:
+        headers = {k.lower(): v for k, v in resp.headers.items()}
+        text = resp.read().decode("utf-8", errors="replace")
+
+    return parse_saml_acs_response(headers, text)

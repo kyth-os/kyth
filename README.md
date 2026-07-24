@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 02:34:29 UTC
+- Last refreshed (UTC): 2026-07-24 02:37:14 UTC
 - Current branch: testing
-- HEAD commit: 41a81ca
-- Last commit title: Fix unused-variable lint in test_kyth_changelog.py
-- Last commit date: 2026-07-23T22:08:40-04:00
+- HEAD commit: 8458a02
+- Last commit title: Refactor Distrobox progress parsing out of page_software_security_kali.py into KaliInstallProgressTracker
+- Last commit date: 2026-07-23T22:34:29-04:00
 - CI workflow files: 8
 - Build script files: 20
 
