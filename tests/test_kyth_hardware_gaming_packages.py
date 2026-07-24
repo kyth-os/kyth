@@ -32,6 +32,70 @@ class HardwarePackageTests(unittest.TestCase):
         self.assertIsNone(probe.action_cmd)
 
 
+class HdrVrrStatusTextTests(unittest.TestCase):
+    def test_empty_input_reports_unavailable(self):
+        self.assertIn("unavailable", hardware.hdr_vrr_status_text(""))
+
+    def test_single_output_hdr_and_vrr(self):
+        raw = "Output: 1 DP-1\n  HDR: enabled\n  VRR: automatic\n"
+        text = hardware.hdr_vrr_status_text(raw)
+        self.assertEqual(text, "DP-1: HDR on  ·  VRR automatic")
+
+    def test_hdr_disabled_renders_off(self):
+        raw = "Output: 1 DP-1\n  HDR: disabled\n  VRR: incapable\n"
+        text = hardware.hdr_vrr_status_text(raw)
+        self.assertIn("HDR off", text)
+        self.assertIn("VRR incapable", text)
+
+    def test_output_with_only_vrr_and_no_hdr_line(self):
+        raw = "Output: 1 HDMI-A-1\n  VRR: automatic\n"
+        text = hardware.hdr_vrr_status_text(raw)
+        self.assertEqual(text, "HDMI-A-1: VRR automatic")
+
+    def test_multiple_outputs_each_get_a_line(self):
+        raw = (
+            "Output: 1 DP-1\n  HDR: enabled\n  VRR: automatic\n"
+            "Output: 2 HDMI-A-1\n  HDR: disabled\n  VRR: never\n"
+        )
+        text = hardware.hdr_vrr_status_text(raw)
+        lines = text.splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn("DP-1", lines[0])
+        self.assertIn("HDMI-A-1", lines[1])
+
+
+class HardwareSummaryViewTests(unittest.TestCase):
+    """page_hardware.py's status line and summary card are driven by this
+    decision tree — no Qt, so it's testable directly without a display."""
+
+    def _probe(self, status: str) -> HardwareProbe:
+        return HardwareProbe("Test", status, "summary", "details")
+
+    def test_all_ok(self):
+        view = hardware.hardware_summary_view([self._probe("ok"), self._probe("ok")])
+        self.assertEqual(view.status_style, "status-ok")
+        self.assertEqual(view.summary_card_style, "card-accent-ok")
+        self.assertIn("All 2 hardware checks passed", view.summary_title)
+
+    def test_warn_without_err(self):
+        view = hardware.hardware_summary_view([self._probe("ok"), self._probe("warn")])
+        self.assertEqual(view.status_style, "status-warn")
+        self.assertEqual(view.summary_card_style, "card-accent-warn")
+        self.assertIn("1 hardware warning", view.summary_title)
+
+    def test_err_takes_priority_over_warn(self):
+        view = hardware.hardware_summary_view(
+            [self._probe("ok"), self._probe("warn"), self._probe("err")]
+        )
+        self.assertEqual(view.status_style, "status-err")
+        self.assertEqual(view.summary_card_style, "card-accent-err")
+        self.assertIn("1 hardware issue", view.summary_title)
+
+    def test_plural_counts(self):
+        view = hardware.hardware_summary_view([self._probe("err"), self._probe("err")])
+        self.assertIn("2 hardware issues found", view.summary_title)
+
+
 class NvidiaStatusViewTests(unittest.TestCase):
     """page_nvidia.py's whole status display is driven by this decision
     tree — no Qt, so it's testable directly without a display."""

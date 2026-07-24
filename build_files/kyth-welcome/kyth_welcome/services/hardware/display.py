@@ -160,3 +160,39 @@ def _parse_kscreen_output(raw: str) -> HardwareProbe:
 
     return HardwareProbe("Display", "ok", summary, details)
  # _parse_kscreen_output
+
+
+def hdr_vrr_status_text(raw: str) -> str:
+    """Compact per-output HDR/VRR summary for page_hardware.py's Display
+    card, parsed from `kscreen-doctor -o` output. Distinct from the fuller
+    _parse_kscreen_output() probe above — this only reports HDR/VRR state,
+    not resolution/enabled/connected."""
+    hdr_outputs: list[tuple[str, str]] = []   # (name, hdr_state)
+    vrr_outputs: list[tuple[str, str]] = []   # (name, vrr_state)
+    if raw:
+        cur_name = ""
+        for line in raw.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("Output:") or (stripped and not line.startswith(" ")):
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    cur_name = parts[-1].rstrip(":")
+            elif stripped.lower().startswith("hdr:") and cur_name:
+                hdr_outputs.append((cur_name, stripped.split(":", 1)[1].strip()))
+            elif stripped.lower().startswith("vrr:") and cur_name:
+                vrr_outputs.append((cur_name, stripped.split(":", 1)[1].strip()))
+
+    if hdr_outputs or vrr_outputs:
+        lines = []
+        seen = set()
+        for name, hdr in hdr_outputs:
+            seen.add(name)
+            vrr = next((v for n, v in vrr_outputs if n == name), "unknown")
+            hdr_str = "HDR on" if hdr == "enabled" else "HDR off"
+            vrr_str = f"VRR {vrr}" if vrr not in ("unknown", "") else "VRR unknown"
+            lines.append(f"{name}: {hdr_str}  ·  {vrr_str}")
+        for name, vrr in vrr_outputs:
+            if name not in seen:
+                lines.append(f"{name}: VRR {vrr}")
+        return "\n".join(lines)
+    return "Display info unavailable — kscreen not running or no outputs detected."

@@ -24,6 +24,7 @@ from .display import (
     _format_display_mode,
     _parse_kscreen_output,
     _strip_ansi,
+    hdr_vrr_status_text,
 )
 from .system import (
     _cpu_probe,
@@ -45,7 +46,7 @@ from .bluetooth_audio import (
     force_ldac_reconnect,
     switch_to_bt_audio_output,
 )
-from .collect import _collect_hardware_probes
+from .collect import HardwareSummaryView, _collect_hardware_probes, hardware_summary_view
 from .controllers import ControllerStatusView, controller_status_view
 from .drives import _detect_controllers, _find_ntfs_drives
 
@@ -64,6 +65,8 @@ __all__ = [
     "_audio_probe",
     "_codec_probe",
     "_collect_hardware_probes",
+    "HardwareSummaryView",
+    "hardware_summary_view",
     "_compact_vaapi_failure_details",
     "_connectivity_probe",
     "_controller_probe",
@@ -76,6 +79,7 @@ __all__ = [
     "force_ldac_reconnect",
     "switch_to_bt_audio_output",
     "_display_probe",
+    "hdr_vrr_status_text",
     "_displaylink_probe",
     "_find_ntfs_drives",
     "_firmware_probe",
