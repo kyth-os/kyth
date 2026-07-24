@@ -13,6 +13,10 @@ inputs:
   dest-dir:
     description: Directory to pull the SBOM into.
     required: true
+  version:
+    description: Optional image version to match via referrer annotations.
+    required: false
+    default: ""
 outputs:
   path:
     description: Path to the pulled SBOM JSON file, or empty if none found.
@@ -26,10 +30,22 @@ runs:
       env:
         IMAGE_REF: ${{ inputs.image-ref }}
         DEST_DIR: ${{ inputs.dest-dir }}
+        VERSION: ${{ inputs.version }}
       run: |
-        SBOM_DIGEST="$(oras discover --format json "${IMAGE_REF}" \
-          | jq -r '[.referrers[] | select(.artifactType | contains("syft"))] | .[0].digest // empty' \
-          2>/dev/null || true)"
+        if [[ -n "${VERSION}" ]]; then
+          SBOM_DIGEST="$(oras discover --format json "${IMAGE_REF}" \
+            | jq -r --arg version "${VERSION}" '
+                [.referrers[] | select(.artifactType | contains("syft"))] as $all
+                | [$all[] | select(.annotations["org.opencontainers.image.version"] == $version)] as $matching
+                | if ($matching | length) == 1 then $matching[0].digest
+                  elif ($matching | length) == 0 and ($all | length) == 1 then $all[0].digest
+                  else empty
+                  end' 2>/dev/null || true)"
+        else
+          SBOM_DIGEST="$(oras discover --format json "${IMAGE_REF}" \
+            | jq -r '[.referrers[] | select(.artifactType | contains("syft"))] | .[0].digest // empty' \
+            2>/dev/null || true)"
+        fi
         if [[ -z "${SBOM_DIGEST}" ]]; then
           exit 0
         fi
@@ -38,3 +54,4 @@ runs:
         oras pull "${IMAGE_NAME}@${SBOM_DIGEST}" -o "${DEST_DIR}/"
         SBOM="$(find "${DEST_DIR}" -name '*.json' -type f | head -1)"
         [[ -n "${SBOM}" ]] && echo "path=${SBOM}" >> "$GITHUB_OUTPUT"
+
