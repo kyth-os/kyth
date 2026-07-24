@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 03:18:07 UTC
+- Last refreshed (UTC): 2026-07-24 11:51:20 UTC
 - Current branch: testing
-- HEAD commit: 5180b3b
-- Last commit title: Refactor CI/CD: extract version resolution, compressed storage, attestation wrappers, tag metadata resolution, and release metadata script
-- Last commit date: 2026-07-23T23:10:51-04:00
+- HEAD commit: 76322f1
+- Last commit title: Refactor supply-chain.yml: extract wait loop, RPM manifest generator, and metadata JSON packer
+- Last commit date: 2026-07-23T23:18:07-04:00
 - CI workflow files: 8
 - Build script files: 20
 

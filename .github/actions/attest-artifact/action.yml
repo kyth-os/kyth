@@ -36,7 +36,7 @@ runs:
   steps:
     - name: Generate build provenance
       id: attest
-      uses: actions/attest-build-provenance@173d19e59d99723dd8ef6a084620f38b4382582b # v1.3.3
+      uses: actions/attest-build-provenance@5e9cb68e95676991667494a6a4e59b8a2f13e1d0 # v1.3.3
       with:
         subject-path: ${{ inputs.subject-path }}
         subject-name: ${{ inputs.subject-name }}
