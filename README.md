@@ -354,12 +354,12 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-24 12:08:33 UTC
+- Last refreshed (UTC): 2026-07-25 00:48:16 UTC
 - Current branch: testing
-- HEAD commit: 1274408
-- Last commit title: ci: fix attest-build-provenance SHA and create build failure resolution skill
-- Last commit date: 2026-07-24T07:51:20-04:00
+- HEAD commit: 33a0e4e
+- Last commit title: Refactor 1-5: Modularize core services, consolidate distrobox wrappers, introduce DiskService layer, and externalize app database
+- Last commit date: 2026-07-24T08:08:33-04:00
 - CI workflow files: 8
-- Build script files: 20
+- Build script files: 21
 
 <!-- AUTO-README-END -->
