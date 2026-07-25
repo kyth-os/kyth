@@ -11,9 +11,10 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
-from kyth_welcome.services import probe as probe_mod  # noqa: E402
-from kyth_welcome.services import process as process_mod  # noqa: E402
+from kyth_shared.system import probe as probe_mod  # noqa: E402
+from kyth_shared.system import process as process_mod  # noqa: E402
 
 
 class ProbeCacheFileTests(unittest.TestCase):
@@ -143,13 +144,13 @@ class ProbeCachedIntegrationTests(unittest.TestCase):
 class CollectSnapshotTests(unittest.TestCase):
     def test_collect_snapshot_keys(self):
         with mock.patch(
-            "kyth_welcome.services.bootc._fetch_bootc_status_data",
+            "kyth_shared.system.bootc._fetch_bootc_status_data",
             return_value={"ok": True},
         ), mock.patch(
-            "kyth_welcome.services.bootc._fetch_bootc_status_text",
+            "kyth_shared.system.bootc._fetch_bootc_status_text",
             return_value="text",
         ), mock.patch(
-            "kyth_welcome.services.process._run_command",
+            "kyth_shared.system.process._run_command",
         ) as run:
             # flatpak list
             flatpak = mock.Mock(returncode=0, stdout="com.a.B\ncom.c.D\n")

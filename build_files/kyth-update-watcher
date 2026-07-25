@@ -25,29 +25,23 @@ import tomllib
 from datetime import datetime, time as dtime
 from pathlib import Path
 
-# Shared pure helpers live in the System Hub package (no Qt on this import path).
-def _ensure_kyth_welcome_path() -> None:
+def _ensure_kyth_shared_path() -> None:
     here = Path(__file__).resolve().parent
-    candidates = (
-        here / "kyth-welcome",                 # repo: build_files/kyth-welcome
-        Path("/usr/lib/kyth-welcome"),        # installed image layout
-    )
-    for candidate in candidates:
-        if (candidate / "kyth_welcome").is_dir():
-            path = str(candidate)
-            if path not in sys.path:
-                sys.path.insert(0, path)
-            return
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
 
 
-_ensure_kyth_welcome_path()
+_ensure_kyth_shared_path()
 
-from kyth_welcome.services.bootc import (  # noqa: E402
+from kyth_shared.system.bootc import (  # noqa: E402
     fetch_bootc_status_data_uncached,
     image_digest_from_status,
     image_reference_from_status,
 )
-from kyth_welcome.services.registry import (  # noqa: E402
+from kyth_shared.system.registry import (  # noqa: E402
     remote_digest_for_ref,
 )
 from kyth_shared.update_status import (  # noqa: E402
@@ -452,7 +446,7 @@ def main() -> None:
     status_data = get_bootc_status()
     if status_data:
         try:
-            from kyth_welcome.services.probe import update_sections
+            from kyth_shared.system.probe import update_sections
             update_sections({"bootc-status-data": status_data}, system=True)
         except Exception as exc:
             LOG.debug("Could not warm system probe cache: %s", exc)
@@ -501,7 +495,7 @@ def main() -> None:
             write_status("upgraded", None, output, start_ts, flatpak_count)
             _notify_updates(os_staged=True, flatpak_count=flatpak_count)
             try:
-                from kyth_welcome.services.probe import invalidate_after_bootc_change, refresh_cache
+                from kyth_shared.system.probe import invalidate_after_bootc_change, refresh_cache
                 invalidate_after_bootc_change()
                 refresh_cache(system=True)
             except Exception as exc:

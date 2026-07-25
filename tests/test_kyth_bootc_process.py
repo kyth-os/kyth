@@ -7,8 +7,9 @@ from unittest.mock import mock_open, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
-from kyth_welcome.services.bootc import (  # noqa: E402
+from kyth_shared.system.bootc import (  # noqa: E402
     REGISTRY,
     image_digest_from_status,
     image_reference_from_status,
@@ -23,7 +24,7 @@ from kyth_welcome.services.bootc import (  # noqa: E402
     _parse_update_phase,
     update_availability_view,
 )
-from kyth_welcome.services.process import (  # noqa: E402
+from kyth_shared.system.process import (  # noqa: E402
     _format_dl_progress_line,
     _format_elapsed,
     _format_eta,
@@ -31,7 +32,7 @@ from kyth_welcome.services.process import (  # noqa: E402
     _human_bytes_pair,
     _parse_size_bytes,
 )
-from kyth_welcome.services.registry import (  # noqa: E402
+from kyth_shared.system.registry import (  # noqa: E402
     check_registry_update,
 )
 
@@ -112,9 +113,9 @@ class KernelFlavorTests(unittest.TestCase):
             if file_error
             else patch("builtins.open", mock_open(read_data=file_content))
         )
-        with patch("kyth_welcome.services.bootc._probe_cached", side_effect=lambda key, ttl, fetch: fetch()), \
+        with patch("kyth_shared.system.bootc._probe_cached", side_effect=lambda key, ttl, fetch: fetch()), \
              open_patch, \
-             patch("kyth_welcome.services.bootc._command_stdout", return_value=uname):
+             patch("kyth_shared.system.bootc._command_stdout", return_value=uname):
             return _current_kernel_flavor()
 
     def test_flavor_from_marker_file(self):
@@ -143,13 +144,13 @@ class KernelFlavorTests(unittest.TestCase):
         self.assertEqual(_image_tag_for_channel("unknown", flavor="fedora"), "latest")
 
     def test_image_tag_for_kernel(self):
-        with patch("kyth_welcome.services.bootc._current_branch", return_value="latest"):
+        with patch("kyth_shared.system.bootc._current_branch", return_value="latest"):
             self.assertEqual(_image_tag_for_kernel("fedora"), "latest")
             self.assertEqual(_image_tag_for_kernel("cachy"), "latest-cachy")
-        with patch("kyth_welcome.services.bootc._current_branch", return_value="testing-cachy"):
+        with patch("kyth_shared.system.bootc._current_branch", return_value="testing-cachy"):
             self.assertEqual(_image_tag_for_kernel("fedora"), "testing")
             self.assertEqual(_image_tag_for_kernel("cachy"), "testing-cachy")
-        with patch("kyth_welcome.services.bootc._current_branch", return_value=None):
+        with patch("kyth_shared.system.bootc._current_branch", return_value=None):
             self.assertEqual(_image_tag_for_kernel("fedora"), "latest")
 
 

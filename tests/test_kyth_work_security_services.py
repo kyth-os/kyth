@@ -9,6 +9,7 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_welcome.services import security, work  # noqa: E402
 
@@ -139,21 +140,21 @@ class ProbeExpandedTests(unittest.TestCase):
             self.assertIn(key, probe.DISK_TTL)
 
     def test_collect_snapshot_includes_new_sections(self):
-        from kyth_welcome.services import probe
+        from kyth_shared.system import probe
 
         with mock.patch(
-            "kyth_welcome.services.bootc._fetch_bootc_status_data",
+            "kyth_shared.system.bootc._fetch_bootc_status_data",
             return_value={"status": {"booted": {"image": {"reference": "ghcr.io/mrtrick37/kyth:testing"}}}},
         ), mock.patch(
-            "kyth_welcome.services.bootc._fetch_bootc_status_text",
+            "kyth_shared.system.bootc._fetch_bootc_status_text",
             return_value="",
         ), mock.patch(
-            "kyth_welcome.services.bootc._current_kernel_flavor",
+            "kyth_shared.system.bootc._current_kernel_flavor",
             return_value="cachy",
         ), mock.patch(
-            "kyth_welcome.services.process._run_command",
+            "kyth_shared.system.process._run_command",
         ) as run, mock.patch(
-            "kyth_welcome.services.probe._count_flatpak_updates",
+            "kyth_shared.system.probe._count_flatpak_updates",
             return_value=3,
         ), mock.patch(
             "kyth_welcome.services.hardware.drives._detect_controllers",
