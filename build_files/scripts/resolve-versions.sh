@@ -19,7 +19,9 @@
 
 set -euo pipefail
 
-CURL_ARGS=(-fsSL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60)
+# shellcheck source=lib/curl-common.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/curl-common.sh"
+CURL_COMMON_ARGS+=(--max-time 60)
 
 THIRDPARTY_REPOS=(
 	Open-Wine-Components/umu-launcher
@@ -31,7 +33,7 @@ gh_latest_tag() {
 	[[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 	local tmp
 	tmp=$(mktemp)
-	if curl "${CURL_ARGS[@]}" "${auth[@]}" -o "${tmp}" "https://api.github.com/repos/$1/releases/latest" 2>/dev/null; then
+	if curl -fsSL "${CURL_COMMON_ARGS[@]}" "${auth[@]}" -o "${tmp}" "https://api.github.com/repos/$1/releases/latest" 2>/dev/null; then
 		python3 - "${tmp}" <<'PY' 2>/dev/null || true
 import json
 import sys
@@ -83,7 +85,7 @@ cmd_cachyos_kernel() {
 	# "package" wrapper key).
 	local tmp nvr
 	tmp=$(mktemp)
-	if curl "${CURL_ARGS[@]}" -o "${tmp}" "https://copr.fedorainfracloud.org/api_3/package/?ownername=bieszczaders&projectname=kernel-cachyos&packagename=kernel-cachyos&with_latest_succeeded_build=true" 2>/dev/null; then
+	if curl -fsSL "${CURL_COMMON_ARGS[@]}" -o "${tmp}" "https://copr.fedorainfracloud.org/api_3/package/?ownername=bieszczaders&projectname=kernel-cachyos&packagename=kernel-cachyos&with_latest_succeeded_build=true" 2>/dev/null; then
 		nvr=$(
 			python3 - "${tmp}" <<'PY' 2>/dev/null || true
 import datetime, json, sys

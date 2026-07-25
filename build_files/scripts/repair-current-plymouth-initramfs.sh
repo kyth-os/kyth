@@ -6,6 +6,8 @@ set -euo pipefail
 
 # shellcheck source=lib/plymouth-initrd-checks.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-initrd-checks.sh"
+# shellcheck source=lib/plymouth-stock-themes.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-stock-themes.sh"
 
 if [[ "${EUID}" -ne 0 ]]; then
 	printf 'ERROR: run as root, for example: run0 --pty /usr/bin/bash %q\n' "$0" >&2
@@ -54,10 +56,9 @@ fi
 
 cp -a /usr/share/plymouth/themes/kyth "${include_root}/usr/share/plymouth/themes/kyth"
 ln -sfn kyth/kyth.plymouth "${include_root}/usr/share/plymouth/themes/default.plymouth"
-rm -rf \
-	"${include_root}/usr/share/plymouth/themes/bgrt-fedora" \
-	"${include_root}/usr/share/plymouth/themes/bgrt" \
-	"${include_root}/usr/share/plymouth/themes/spinner"
+for theme_name in "${KYTH_STOCK_PLYMOUTH_THEMES[@]}"; do
+	rm -rf "${include_root}/usr/share/plymouth/themes/${theme_name}"
+done
 
 plugin_dir="$(plymouth --get-splash-plugin-path)"
 if [[ -r "${plugin_dir}/script.so" ]]; then

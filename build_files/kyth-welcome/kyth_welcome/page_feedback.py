@@ -1,3 +1,5 @@
+from kyth_shared.system.gpu import lspci_gpu_lines
+
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
     _IS_LIVE, _release_worker_when_finished, _restyle,
@@ -26,10 +28,7 @@ def _collect_system_info() -> str:
     digest_info = _bootc_image_digest("booted")
     if digest_info:
         lines.append(f"**Image digest:** `{digest_info[1][:16]}`")
-    gpu = _command_stdout(
-        ["bash", "-c", "lspci -mm 2>/dev/null | grep -iE 'vga|3d|display' | head -3"],
-        timeout=5,
-    ).strip() or "unknown"
+    gpu = "\n".join(lspci_gpu_lines()[:3]) or "unknown"
     lines.append(f"**GPU:**\n```\n{gpu}\n```")
     cpu = _command_stdout(
         ["bash", "-c", "grep -m1 'model name' /proc/cpuinfo | cut -d: -f2"],

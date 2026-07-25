@@ -23,7 +23,7 @@ check:
 
 # Check Dockerfile frontend/build rules without requiring the local kyth-base image.
 [group('Build')]
-check-dockerfile check_base_image="ghcr.io/ublue-os/kinoite-main:44":
+check-dockerfile check_base_image=default_base_image:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! id -nG | grep -qw docker; then

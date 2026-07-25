@@ -8,6 +8,8 @@ import os
 import shutil
 import subprocess
 
+from kyth_shared.system.gpu import lspci_gpu_lines
+
 from .hardware.types import HardwareProbe
 
 QDBUS_CANDIDATES = ("qdbus6", "qdbus-qt6", "qdbus")
@@ -268,8 +270,7 @@ def run_shell_script(script: str, *, timeout: int = 20) -> tuple[int, str, str]:
 
 
 def gpu_lspci_summary() -> str:
-    code, out, _ = run_shell_script("lspci | grep -Ei 'vga|3d|display' | head -2", timeout=4)
-    return out if code == 0 else ""
+    return "\n".join(lspci_gpu_lines()[:2])
 
 
 def kscreen_doctor_output(max_lines: int = 40) -> str:

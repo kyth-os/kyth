@@ -5,7 +5,7 @@ import "_internal.just"
 
 # Build the base image from build_base/.
 [group('Build')]
-build-base base_image="ghcr.io/ublue-os/kinoite-main:44" kernel_flavor="fedora":
+build-base base_image=default_base_image kernel_flavor="fedora":
     #!/usr/bin/env bash
     if ! id -nG | grep -qw docker; then
         if ! id -nG "$USER" | grep -qw docker; then

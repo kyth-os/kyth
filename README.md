@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 15:02:17 UTC
+- Last refreshed (UTC): 2026-07-25 15:49:10 UTC
 - Current branch: testing
-- HEAD commit: 5d462e6
-- Last commit title: refactor: consolidate kwriteconfig, sys.path bootstrap, GPU detection, report scaffolding, cache refresh, and run-once markers into kyth_shared
-- Last commit date: 2026-07-25T10:58:32-04:00
+- HEAD commit: 83fd3e2
+- Last commit title: fix: bind-mount kyth_shared into the sysconfig-static build layer
+- Last commit date: 2026-07-25T11:02:17-04:00
 - CI workflow files: 8
 - Build script files: 21
 

@@ -4,6 +4,12 @@
 
 set -euo pipefail
 
+# This script is installed standalone (/usr/libexec/kyth-plymouth-branding-guard,
+# also inst_multiple'd into the initramfs) with no sibling lib/ directory, so it
+# can't source build_files/scripts/lib/plymouth-stock-themes.sh like other
+# plymouth scripts do — keep this list in sync with that file by hand.
+KYTH_STOCK_PLYMOUTH_THEMES=(bgrt-fedora bgrt spinner)
+
 source_svg="${1:-}"
 asset_dir=/usr/share/kyth/branding
 transparent_svg="${asset_dir}/transparent-watermark.svg"
@@ -36,10 +42,8 @@ fi
 mkdir -p "${pixmaps_dir}"
 install -m 0644 "${transparent_png}" "${pixmaps_dir}/system-logo-white.png"
 
-for theme_dir in \
-	/usr/share/plymouth/themes/spinner \
-	/usr/share/plymouth/themes/bgrt \
-	/usr/share/plymouth/themes/bgrt-fedora; do
+for theme_name in "${KYTH_STOCK_PLYMOUTH_THEMES[@]}"; do
+	theme_dir="/usr/share/plymouth/themes/${theme_name}"
 	[[ -d "${theme_dir}" ]] || continue
 
 	for asset in watermark.png watermark@2x.png logo.png; do
@@ -102,6 +106,9 @@ ShowDelay=0
 DeviceTimeout=8
 UseFirmwareBackground=false
 PLYMOUTHDEFAULTS
+    # Keep in sync with KYTH_STOCK_PLYMOUTH_THEMES in
+    # build_files/scripts/lib/plymouth-stock-themes.sh — this heredoc is
+    # quoted so ${initdir} stays literal for dracut, and can't source it.
     rm -rf \
         "${initdir}/usr/share/plymouth/themes/default.plymouth" \
         "${initdir}/usr/share/plymouth/themes/bgrt-fedora" \
@@ -124,6 +131,7 @@ PLYMOUTHDEFAULTS
     inst_simple \
         /usr/share/kyth/branding/transparent-watermark.png \
         /usr/share/pixmaps/system-logo-white.png
+    # Keep in sync with KYTH_STOCK_PLYMOUTH_THEMES (see comment above).
     rm -rf \
         "${initdir}/usr/share/plymouth/themes/bgrt-fedora" \
         "${initdir}/usr/share/plymouth/themes/bgrt" \
@@ -148,8 +156,12 @@ grep -q 'force_add_dracutmodules+=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.co
 # Remove both Fedora-branded and plain bgrt themes from the system filesystem.
 # The bgrt theme can render the firmware BGRT image, which may still be Fedora
 # artwork from the inherited boot path. Removing it leaves only KythOS or text.
-rm -rf /usr/share/plymouth/themes/bgrt-fedora
-rm -rf /usr/share/plymouth/themes/bgrt
+# spinner is deliberately left installed on the host — only stripped from the
+# initramfs above — so skip it here.
+for theme_name in "${KYTH_STOCK_PLYMOUTH_THEMES[@]}"; do
+	[[ "${theme_name}" == spinner ]] && continue
+	rm -rf "/usr/share/plymouth/themes/${theme_name}"
+done
 plymouth-set-default-theme kyth
 
 # Keep host-side Plymouth config explicit too. Fedora's dracut Plymouth module

@@ -91,20 +91,15 @@ def set_exe_mime_defaults(bottles_desktop: str = "com.usebottles.bottles.desktop
 
 
 def enable_clipboard_history(*, max_items: int = 25) -> None:
+    from .plasma import kwriteconfig_command
     from .process import _run_command
 
     _run_command(
-        [
-            "kwriteconfig6", "--file", "klipperrc",
-            "--group", "General", "--key", "KeepClipboardContents", "true",
-        ],
+        kwriteconfig_command("klipperrc", ("General",), "KeepClipboardContents", "true"),
         timeout=5,
     )
     _run_command(
-        [
-            "kwriteconfig6", "--file", "klipperrc",
-            "--group", "General", "--key", "MaxClipItems", str(max_items),
-        ],
+        kwriteconfig_command("klipperrc", ("General",), "MaxClipItems", str(max_items)),
         timeout=5,
     )
     _run_command(
