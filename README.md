@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 00:48:35 UTC
+- Last refreshed (UTC): 2026-07-25 00:48:39 UTC
 - Current branch: testing
-- HEAD commit: bd1fab7
-- Last commit title: Extract live-ISO OWE wifi script; unify Plymouth initramfs verification
-- Last commit date: 2026-07-24T20:48:29-04:00
+- HEAD commit: a8c9e65
+- Last commit title: Dedupe vm.just: fold run-live-iso into the shared _run-vm recipe
+- Last commit date: 2026-07-24T20:48:35-04:00
 - CI workflow files: 8
 - Build script files: 21
 
