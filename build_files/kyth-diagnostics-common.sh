@@ -6,8 +6,14 @@
 
 have() { command -v "$1" >/dev/null 2>&1; }
 pass() { printf 'PASS  %-28s %s\n' "$1" "$2"; }
-warn() { printf 'WARN  %-28s %s\n' "$1" "$2"; WARNINGS=$((WARNINGS + 1)); }
-fail() { printf 'FAIL  %-28s %s\n' "$1" "$2"; FAILURES=$((FAILURES + 1)); }
+warn() {
+	printf 'WARN  %-28s %s\n' "$1" "$2"
+	WARNINGS=$((WARNINGS + 1))
+}
+fail() {
+	printf 'FAIL  %-28s %s\n' "$1" "$2"
+	FAILURES=$((FAILURES + 1))
+}
 
 WARNINGS=0
 FAILURES=0

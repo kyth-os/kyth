@@ -70,8 +70,6 @@ for tool in shellcheck shfmt gh hx zellij; do
 	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
 done
 
-
-
 # Atomic systems map /usr/local to the root-owned /var/usrlocal. npm's
 # system default therefore makes `npm install -g` fail for desktop users.
 # npmrc supports environment expansion, and ~/.local/bin is already on the
