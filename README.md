@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 01:11:15 UTC
+- Last refreshed (UTC): 2026-07-25 02:15:13 UTC
 - Current branch: testing
-- HEAD commit: c09e33c
-- Last commit title: style: shfmt three files that drifted from prior refactor commits
-- Last commit date: 2026-07-24T20:52:15-04:00
+- HEAD commit: 3d8468f
+- Last commit title: Fix ISO build failure and app lookup test import path
+- Last commit date: 2026-07-24T22:04:51-04:00
 - CI workflow files: 8
 - Build script files: 21
 

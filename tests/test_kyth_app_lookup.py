@@ -1,7 +1,12 @@
+import pathlib
+import sys
 import unittest
 import os
 import tempfile
 import json
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared import suggest_app
 
@@ -34,7 +39,6 @@ class TestKythAppLookup(unittest.TestCase):
         # to recognize it as source rather than failing to infer one.
         import importlib.util
         from importlib.machinery import SourceFileLoader
-        import sys
         from unittest.mock import MagicMock
 
         # Stub out kyth_shared.qt so it doesn't crash without PyQt6/PySide6
