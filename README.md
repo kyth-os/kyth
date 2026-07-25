@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 00:48:39 UTC
+- Last refreshed (UTC): 2026-07-25 00:48:44 UTC
 - Current branch: testing
-- HEAD commit: a8c9e65
-- Last commit title: Dedupe vm.just: fold run-live-iso into the shared _run-vm recipe
-- Last commit date: 2026-07-24T20:48:35-04:00
+- HEAD commit: bd9fceb
+- Last commit title: test: guard hostname regex against installer bash/Python drift
+- Last commit date: 2026-07-24T20:48:39-04:00
 - CI workflow files: 8
 - Build script files: 21
 
