@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 14:58:32 UTC
+- Last refreshed (UTC): 2026-07-25 15:02:17 UTC
 - Current branch: testing
-- HEAD commit: 27434b6
-- Last commit title: fix: clear Codacy pylint findings on the kyth_shared refactor diff
-- Last commit date: 2026-07-25T10:25:46-04:00
+- HEAD commit: 5d462e6
+- Last commit title: refactor: consolidate kwriteconfig, sys.path bootstrap, GPU detection, report scaffolding, cache refresh, and run-once markers into kyth_shared
+- Last commit date: 2026-07-25T10:58:32-04:00
 - CI workflow files: 8
 - Build script files: 21
 

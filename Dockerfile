@@ -96,10 +96,14 @@ COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev build_files/kyth-gam
 # Stable — only re-runs when sysconfig-static.sh or config defaults change,
 # not on every daily dnf5 upgrade. This keeps the post-upgrade layer chain
 # short and avoids users pulling a new sysconfig layer when only packages changed.
+# kyth_shared is bind-mounted (not yet pip-installed at this point in the build —
+# that happens further down) so kyth-vscode-wallet can import it when the
+# 24-vs-code-avoid-kwallet-password-prompts.sh fragment runs it against /etc/skel.
 RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx/sysconfig-static.sh \
     --mount=type=bind,source=build_files/scripts/sysconfig,target=/ctx/sysconfig \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/data,target=/ctx/data \
+    --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig-static.sh
 
