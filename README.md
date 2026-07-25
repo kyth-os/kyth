@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 02:04:51 UTC
+- Last refreshed (UTC): 2026-07-25 02:15:13 UTC
 - Current branch: testing
-- HEAD commit: e2f29ac
+- HEAD commit: 3d8468f
 - Last commit title: Fix ISO build failure and app lookup test import path
-- Last commit date: 2026-07-24T22:03:52-04:00
+- Last commit date: 2026-07-24T22:04:51-04:00
 - CI workflow files: 8
 - Build script files: 21
 
