@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 14:00:33 UTC
+- Last refreshed (UTC): 2026-07-25 14:01:23 UTC
 - Current branch: testing
-- HEAD commit: cc25e87
-- Last commit title: Refactor KythOS infrastructure, decouple installer services, migrate user-polish to Python, and improve unit testing
-- Last commit date: 2026-07-25T09:52:32-04:00
+- HEAD commit: f83955d
+- Last commit title: Refactor: extract system services (bootc, process, registry, probe) from kyth-welcome to kyth_shared
+- Last commit date: 2026-07-25T10:00:33-04:00
 - CI workflow files: 8
 - Build script files: 21
 

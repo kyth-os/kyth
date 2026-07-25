@@ -1,96 +1,25 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""kyth-refresh-taskbar-pins wrapper."""
+import sys
+from pathlib import Path
 
-config_file="plasma-org.kde.plasma.desktop-appletsrc"
 
-if command -v kreadconfig6 >/dev/null 2>&1; then
-    stamp="$(kreadconfig6 --file "${config_file}" --group KythOS --key KythComfortLayout 2>/dev/null || true)"
-    [[ -n "${stamp}" ]] || exit 0
-else
-    exit 0
-fi
+def _ensure_kyth_shared_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
 
-desktop_exists() {
-    local desktop="$1"
-    local path
-    for path in \
-        "/usr/share/applications/${desktop}" \
-        "/var/lib/flatpak/exports/share/applications/${desktop}" \
-        "${HOME}/.local/share/applications/${desktop}" \
-        "${HOME}/.local/share/flatpak/exports/share/applications/${desktop}"; do
-        if [[ -f "${path}" ]]; then
-            return 0
-        fi
-    done
-    return 1
-}
 
-available_launchers=()
-add_launcher() {
-    local candidate
-    for candidate in "$@"; do
-        if desktop_exists "${candidate#applications:}"; then
-            available_launchers+=("${candidate}")
-            return 0
-        fi
-    done
-    return 0
-}
+_ensure_kyth_shared_path()
+from kyth_shared.desktop.plasma import refresh_taskbar_pins  # noqa: E402
 
-add_launcher "applications:kyth-welcome.desktop"
-add_launcher "applications:kyth-app-store.desktop"
-add_launcher "applications:com.valvesoftware.Steam.desktop" "applications:steam.desktop"
-add_launcher "applications:com.brave.Browser.desktop" "applications:chromium-browser.desktop"
-add_launcher "applications:org.kde.dolphin.desktop"
-add_launcher "applications:org.kde.konsole.desktop"
-launcher_csv="$(IFS=,; printf '%s' "${available_launchers[*]}")"
-[[ -n "${launcher_csv}" ]] || exit 0
 
-state_dir="${HOME}/.local/share/kyth"
-state_file="${state_dir}/taskbar-pins"
-if [[ -f "${state_file}" && "$(cat "${state_file}" 2>/dev/null)" == "${launcher_csv}" ]]; then
-    exit 0
-fi
+def main() -> None:
+    sys.exit(refresh_taskbar_pins())
 
-qdbus_cmd=""
-for candidate in qdbus6 qdbus-qt6 qdbus; do
-    if command -v "${candidate}" >/dev/null 2>&1; then
-        qdbus_cmd="${candidate}"
-        break
-    fi
-done
-[[ -n "${qdbus_cmd}" ]] || exit 0
 
-runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
-[[ -d "${runtime_dir}" ]] || runtime_dir="/tmp"
-script_file="$(mktemp "${runtime_dir}/kyth-pins.XXXXXX.js")"
-trap 'rm -f "${script_file}"' EXIT
-
-cat > "${script_file}" <<'PINJSEOF'
-var launchers = "__KYTH_LAUNCHERS__";
-for (var i = 0; i < panelIds.length; ++i) {
-    var panel = panelById(panelIds[i]);
-    if (!panel) {
-        continue;
-    }
-    var ids = panel.widgetIds;
-    for (var j = 0; j < ids.length; ++j) {
-        var widget = panel.widgetById(ids[j]);
-        if (widget && widget.type === "org.kde.plasma.icontasks") {
-            try {
-                widget.currentConfigGroup = ["General"];
-                widget.writeConfig("launchers", launchers);
-                widget.reloadConfig();
-            } catch (e) {
-            }
-        }
-    }
-}
-PINJSEOF
-
-sed -i "s|__KYTH_LAUNCHERS__|${launcher_csv}|" "${script_file}"
-
-if "${qdbus_cmd}" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$(cat "${script_file}")" >/dev/null 2>&1; then
-    mkdir -p "${state_dir}"
-    printf '%s\n' "${launcher_csv}" > "${state_file}"
-fi
+if __name__ == "__main__":
+    main()
