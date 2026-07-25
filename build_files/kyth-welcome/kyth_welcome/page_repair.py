@@ -5,6 +5,7 @@ import shutil
 from .core_base import _has_rollback_deployment
 from .page_repair_components import repair_overview_cards, rollback_card
 from .services.launch import kcmshell, popen_privileged
+from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
 from .services.hardware import _detect_nvidia
 from .services.repair import _read_sys_text, sleep_mode_label
 from .services.flatpak import _is_flatpak_installed
@@ -44,7 +45,20 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         )
         self._add(rollback)
 
-        # Quick fixes
+        self._build_quick_fixes_card()
+        self._build_assist_card()
+        self._build_printer_card()
+        self._build_backup_card()
+        self._build_restore_setup_card()
+        self._build_snapshot_card()
+        self._build_reinstall_card()
+        self._build_warning_card()
+        self._build_reset_controls()
+        self._build_sleep_diagnostics_card()
+
+        self._stretch()
+
+    def _build_quick_fixes_card(self) -> None:
         quick, quick_layout = _make_card("card-accent-ok")
         quick_title = QLabel("Quick fixes")
         quick_title.setObjectName("card-title")
@@ -65,8 +79,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         panic_btn.clicked.connect(lambda _=False: self._run_quick_fix("Panic Button", [
             "bash", "-c",
             "set -e; "
-            "update-desktop-database \"$HOME/.local/share/applications\" 2>/dev/null || true; "
-            "kbuildsycoca6 --noincremental 2>/dev/null || true; "
+            f"{REFRESH_DESKTOP_DATABASE_SH}; "
             "/usr/bin/kyth-user-polish 2>/dev/null || true; "
             "flatpak repair --user 2>/dev/null || true; "
             "systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true; "
@@ -75,7 +88,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         quick_btns.addWidget(panic_btn)
         for label, tip, cmd in (
             ("Refresh App Menu",  "Rebuild the application menu database. Fixes missing app icons and entries after installs.",
-             ["bash", "-c", "update-desktop-database \"$HOME/.local/share/applications\" 2>/dev/null || true; kbuildsycoca6 --noincremental"]),
+             ["bash", "-c", REFRESH_DESKTOP_DATABASE_SH]),
             ("Apply User Polish", "Re-apply KythOS default theme, fonts, and KDE settings to your user profile.",
              ["/usr/bin/kyth-user-polish"]),
             ("Retry Game Apps",   "Restart the Flatpak install service to retry installing Steam, Lutris, and other game apps.",
@@ -147,7 +160,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         quick_layout.addLayout(quick_btns)
         self._add(quick)
 
-        # Quick Assist replacement
+    def _build_assist_card(self) -> None:
         assist_card, assist_layout = _make_card("card-accent-ok")
         assist_title = QLabel("Quick Assist — get or give remote help")
         assist_title.setObjectName("card-title")
@@ -183,7 +196,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._refresh_rustdesk_btn()
         self._add(assist_card)
 
-        # Printer setup card
+    def _build_printer_card(self) -> None:
         printer_card, printer_layout = _make_card()
         printer_title = QLabel("Printer Setup")
         printer_title.setObjectName("card-title")
@@ -215,6 +228,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         printer_layout.addLayout(printer_btns)
         self._add(printer_card)
 
+    def _build_backup_card(self) -> None:
         # File History — backups (Pika Backup wraps borg snapshots)
         backup_card, backup_layout = _make_card()
         backup_title = QLabel("File History — automatic backups")
@@ -241,7 +255,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         backup_layout.addLayout(backup_btns)
         self._add(backup_card)
 
-        # Restore My PC Setup
+    def _build_restore_setup_card(self) -> None:
         setup_card, setup_layout = _make_card("card-accent-ok")
         setup_title = QLabel("Restore My PC Setup")
         setup_title.setObjectName("card-title")
@@ -273,7 +287,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         setup_layout.addWidget(self._setup_status)
         self._add(setup_card)
 
-        # Session snapshot
+    def _build_snapshot_card(self) -> None:
         snapshot_card, snapshot_layout = _make_card()
         snapshot_title = QLabel("Session Snapshot")
         snapshot_title.setObjectName("card-title")
@@ -296,7 +310,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         snapshot_layout.addLayout(snapshot_btns)
         self._add(snapshot_card)
 
-        # Reinstall on another disk
+    def _build_reinstall_card(self) -> None:
         reinstall_card, reinstall_layout = _make_card()
         reinstall_title = QLabel("Install KythOS on another disk")
         reinstall_title.setObjectName("card-title")
@@ -322,17 +336,17 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         reinstall_layout.addLayout(reinstall_btns)
         self._add(reinstall_card)
 
-        # Warning card
+    def _build_warning_card(self) -> None:
         warn, warn_layout = _make_card("card-accent-err")
         warn_title = QLabel("This action cannot be undone")
         warn_title.setStyleSheet("color: #f7768e; font-size: 14px; font-weight: 700;")
         warn_layout.addWidget(warn_title)
         warn_body = QLabel(
             "Running a repair will:\n"
-            "  \u2022  Remove any layered packages and custom OS-level changes\n"
-            "  \u2022  Reset system configuration to KythOS defaults\n"
-            "  \u2022  Leave everything in /home untouched\n"
-            "  \u2022  Reboot automatically after staging\n\n"
+            "  •  Remove any layered packages and custom OS-level changes\n"
+            "  •  Reset system configuration to KythOS defaults\n"
+            "  •  Leave everything in /home untouched\n"
+            "  •  Reboot automatically after staging\n\n"
             "If you only need to undo a bad update, use Roll Back in the Update page first."
         )
         warn_body.setObjectName("card-copy")
@@ -340,7 +354,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         warn_layout.addWidget(warn_body)
         self._add(warn)
 
-        # Confirm
+    def _build_reset_controls(self) -> None:
         confirm_row = QHBoxLayout()
         confirm_row.setSpacing(12)
         confirm_lbl = QLabel("Type  RESET  to unlock:")
@@ -386,7 +400,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._log.hide()
         self._add(self._log)
 
-        # ── Sleep diagnostics ─────────────────────────────────────────────────
+    def _build_sleep_diagnostics_card(self) -> None:
         sleep_card, sleep_layout = _make_card()
         sleep_title = QLabel("Sleep / Wake Reliability")
         sleep_title.setObjectName("card-title")
@@ -427,5 +441,3 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._sleep_fix_status.setWordWrap(True)
         sleep_layout.addWidget(self._sleep_fix_status)
         self._add(sleep_card)
-
-        self._stretch()

@@ -6,6 +6,7 @@ from .services.appimages import (
     appimage_entry_from_desktop_text, flatpak_uninstall_command,
     is_user_appimage_path, safe_home_targets, uninstall_app_detail,
 )
+from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
 from .services.launch import popen
 from .core_base import _restyle
 from .services.runtime import Worker, _finish_worker
@@ -194,8 +195,7 @@ class _InstalledTabMixin:
             "        echo \"Removed $target\"\n"
             "    fi\n"
             "done\n"
-            "update-desktop-database \"$HOME/.local/share/applications\" 2>/dev/null || true\n"
-            "kbuildsycoca6 --noincremental 2>/dev/null || true\n",
+            f"{REFRESH_DESKTOP_DATABASE_SH}\n",
             "kyth-remove-appimage",
             *safe_targets,
         ]
