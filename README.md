@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 20:23:00 UTC
+- Last refreshed (UTC): 2026-07-25 20:37:28 UTC
 - Current branch: testing
-- HEAD commit: 3b1c218
-- Last commit title: Refactor legacy shell utilities to Python
-- Last commit date: 2026-07-25T16:21:14-04:00
+- HEAD commit: 079014a
+- Last commit title: Use tarfile data filter for safe extraction
+- Last commit date: 2026-07-25T16:23:00-04:00
 - CI workflow files: 8
 - Build script files: 20
 

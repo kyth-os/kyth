@@ -108,6 +108,21 @@ class UpdaterTests(unittest.TestCase):
             extract_archive(tar_path, dest)
             self.assertEqual((dest / "test.txt").read_text(), "inside tar")
 
+    def test_extract_archive_tar_xz_traversal_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = pathlib.Path(tmpdir)
+            tar_path = td / "test.tar.xz"
+            with tarfile.open(tar_path, "w:xz") as tar:
+                info = tarfile.TarInfo(name="../escape.txt")
+                content = b"escape"
+                info.size = len(content)
+                tar.addfile(info, io.BytesIO(content))
+
+            dest = td / "extracted"
+            with self.assertRaises(ValueError) as context:
+                extract_archive(tar_path, dest)
+            self.assertIn("Directory traversal attempt", str(context.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

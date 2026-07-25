@@ -1,5 +1,5 @@
 name: Resolve versions
-description: Resolve dependency versions using resolve-versions.sh
+description: Resolve dependency versions using resolve-versions.py
 inputs:
   dependency:
     description: Dependency name (e.g. cachyos-kernel, proton-cachyos, thirdparty-versions)
@@ -21,7 +21,7 @@ runs:
         DEPENDENCY: ${{ inputs.dependency }}
         GITHUB_TOKEN: ${{ github.token }}
       run: |
-        VERSION="$(./build_files/scripts/resolve-versions.sh "${DEPENDENCY}")"
+        VERSION="$(python3 ./build_files/scripts/resolve-versions.py "${DEPENDENCY}")"
         echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
         HASH="$(printf '%s' "${VERSION}" | sha256sum | cut -c1-16)"
         echo "hash=${HASH}" >> "$GITHUB_OUTPUT"

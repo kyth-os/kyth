@@ -76,22 +76,27 @@ def verify_checksum_file(checksum_file: Path, target_dir: Path, algorithm: str =
 
 def extract_archive(archive_path: Path, dest_dir: Path) -> None:
     """Extract a ZIP or TAR archive to the destination directory."""
-    import sys
     dest_dir.mkdir(parents=True, exist_ok=True)
     if archive_path.suffix == ".zip":
         with zipfile.ZipFile(archive_path, "r") as zip_ref:
             zip_ref.extractall(dest_dir)
     else:
-        kwargs = {}
-        if sys.version_info >= (3, 12):
-            kwargs["filter"] = "data"
-        
+        def safe_extract(tar_ref: tarfile.TarFile) -> None:
+            resolved_dest = dest_dir.resolve()
+            members = []
+            for member in tar_ref.getmembers():
+                target_path = (resolved_dest / member.name).resolve()
+                if not target_path.is_relative_to(resolved_dest):
+                    raise ValueError(f"Directory traversal attempt detected: {member.name}")
+                members.append(member)
+            tar_ref.extractall(resolved_dest, members=members)
+
         if archive_path.name.endswith(".tar.xz") or archive_path.suffix == ".xz":
             with tarfile.open(archive_path, "r:xz") as tar_ref:
-                tar_ref.extractall(dest_dir, **kwargs)
+                safe_extract(tar_ref)
         elif archive_path.name.endswith(".tar.gz") or archive_path.suffix == ".gz":
             with tarfile.open(archive_path, "r:gz") as tar_ref:
-                tar_ref.extractall(dest_dir, **kwargs)
+                safe_extract(tar_ref)
         else:
             with tarfile.open(archive_path, "r:*") as tar_ref:
-                tar_ref.extractall(dest_dir, **kwargs)
+                safe_extract(tar_ref)

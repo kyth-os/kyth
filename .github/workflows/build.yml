@@ -201,7 +201,7 @@ jobs:
         with:
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Version resolution lives in build_files/scripts/resolve-versions.sh,
+      # Version resolution lives in build_files/scripts/resolve-versions.py,
       # shared with the Justfile so the parsing logic exists in one place.
       - name: Resolve latest CachyOS kernel version
         id: cachyos_kernel
