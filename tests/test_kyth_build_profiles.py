@@ -51,7 +51,7 @@ class BuildProfileTests(unittest.TestCase):
         self.assertNotIn('check_optional_command smbclient', smoke)
 
     def test_third_party_downloads_use_exact_resolved_tags(self):
-        resolver = _read("build_files/scripts/resolve-versions.sh")
+        resolver = _read("build_files/scripts/resolve-versions.py")
         self.assertIn("thirdparty-versions", resolver)
         self.assertNotIn("thirdparty-hash", resolver)
 

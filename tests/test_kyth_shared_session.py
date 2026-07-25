@@ -17,6 +17,7 @@ from kyth_shared.session import (
     marker_path,
     write_chromium_flags,
     write_code_argv,
+    generate_session_snapshot,
 )
 
 
@@ -92,6 +93,27 @@ class SessionTests(unittest.TestCase):
                 "ready",
                 "Steam, launchers, Bottles, and save backup tools are installed.",
             )
+
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which")
+    def test_generate_session_snapshot(self, mock_which, mock_run) -> None:
+        import tempfile
+        mock_which.side_effect = lambda cmd: "/dummy/bin/" + cmd if cmd == "kyth-nvidia-status" else None
+        mock_run.return_value = mock.Mock(returncode=0, stdout="mocked stdout\n", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = pathlib.Path(tmpdir)
+            snapshot_path = generate_session_snapshot(out_dir)
+            self.assertTrue(snapshot_path.is_file())
+            content = snapshot_path.read_text(encoding="utf-8")
+            self.assertIn("KythOS Session Snapshot", content)
+            self.assertIn("== System ==", content)
+            self.assertIn("== Desktop ==", content)
+            self.assertIn("== Installed Flatpaks ==", content)
+            self.assertIn("== Gaming Paths ==", content)
+            self.assertIn("== KythOS Checks ==", content)
+            self.assertIn("== Restore Notes ==", content)
+            self.assertIn("$ kyth-nvidia-status", content)
 
 
 if __name__ == "__main__":

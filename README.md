@@ -354,12 +354,12 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 15:49:10 UTC
+- Last refreshed (UTC): 2026-07-25 20:21:14 UTC
 - Current branch: testing
-- HEAD commit: 83fd3e2
-- Last commit title: fix: bind-mount kyth_shared into the sysconfig-static build layer
-- Last commit date: 2026-07-25T11:02:17-04:00
+- HEAD commit: dbdea30
+- Last commit title: refactoring
+- Last commit date: 2026-07-25T11:49:10-04:00
 - CI workflow files: 8
-- Build script files: 21
+- Build script files: 20
 
 <!-- AUTO-README-END -->

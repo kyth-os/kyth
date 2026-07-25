@@ -208,3 +208,119 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
             )
 
     return 0
+
+
+def generate_session_snapshot(out_dir: Path | None = None) -> Path:
+    """Collect environment diagnostics, configurations, and write a session snapshot file."""
+    import socket
+    import getpass
+    from datetime import datetime
+
+    if out_dir is None:
+        out_dir = Path.home() / "Documents" / "KythOS"
+    
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = out_dir / f"kyth-session-snapshot-{ts}.txt"
+
+    def write_section(title: str) -> None:
+        try:
+            with out.open("a", encoding="utf-8") as f:
+                f.write(f"\n== {title} ==\n")
+        except Exception:
+            pass
+
+    def run_cmd(args: list[str]) -> None:
+        try:
+            with out.open("a", encoding="utf-8") as f:
+                f.write(f"$ {' '.join(args)}\n")
+            res = subprocess.run(args, capture_output=True, text=True, check=False)
+            output = res.stdout
+            if res.stderr:
+                output += res.stderr
+            with out.open("a", encoding="utf-8") as f:
+                f.write(output)
+                if not output.endswith("\n"):
+                    f.write("\n")
+        except Exception as e:
+            try:
+                with out.open("a", encoding="utf-8") as f:
+                    f.write(f"Execution failed: {e}\n")
+            except Exception:
+                pass
+
+    # Header
+    now_iso = datetime.now().astimezone().isoformat()
+    user = getpass.getuser() or "unknown"
+    try:
+        host = socket.gethostname()
+    except Exception:
+        host = "unknown"
+
+    try:
+        with out.open("w", encoding="utf-8") as f:
+            f.write("KythOS Session Snapshot\n")
+            f.write(f"Generated: {now_iso}\n")
+            f.write(f"User: {user}\n")
+            f.write(f"Host: {host}\n")
+    except Exception:
+        pass
+
+    # System Section
+    write_section("System")
+    run_cmd(["cat", "/etc/os-release"])
+    run_cmd(["uname", "-a"])
+    run_cmd(["bootc", "status"])
+
+    # Desktop Section
+    write_section("Desktop")
+    run_cmd(["xdg-user-dir"])
+    run_cmd(["xdg-mime", "query", "default", "application/x-ms-dos-executable"])
+    run_cmd(["xdg-mime", "query", "default", "application/x-msi"])
+
+    # Installed Flatpaks Section
+    write_section("Installed Flatpaks")
+    run_cmd(["flatpak", "list", "--app", "--columns=application,name,version,branch"])
+
+    # Gaming Paths Section
+    write_section("Gaming Paths")
+    gaming_paths = [
+        Path.home() / ".local/share/Steam/steamapps",
+        Path.home() / ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps",
+        Path.home() / "Games",
+        Path.home() / "Applications",
+    ]
+    try:
+        with out.open("a", encoding="utf-8") as f:
+            for p in gaming_paths:
+                if p.exists():
+                    f.write(f"{p}\n")
+    except Exception:
+        pass
+
+    # KythOS Checks Section
+    write_section("KythOS Checks")
+    for cmd in ("kyth-controller-check", "kyth-resume-check", "kyth-nvidia-status"):
+        if shutil.which(cmd):
+            run_cmd([cmd])
+
+    # Restore Notes Section
+    write_section("Restore Notes")
+    notes = (
+        "- Reinstall Flatpaks with: flatpak install flathub APP_ID\n"
+        "- Keep source code, saves, and documents in /home or synced storage.\n"
+        "- System image changes are handled through KythOS updates and bootc rollback.\n"
+        "- Do not paste this file publicly without reviewing paths and usernames.\n"
+    )
+    try:
+        with out.open("a", encoding="utf-8") as f:
+            f.write(notes)
+    except Exception:
+        pass
+
+    return out
+

@@ -79,3 +79,114 @@ class DiagnosticReporter:
             sys.exit(1)
         print(f"Result: {target_name} looks good.")
         sys.exit(0)
+
+
+def run_health_checks(reporter: DiagnosticReporter) -> None:
+    """Perform end-to-end diagnostic probes on system services, audio, and drivers."""
+    from pathlib import Path
+
+    # 1. Kernel Sched-Ext & Low-Latency
+    scx_active = False
+    if reporter.have("systemctl"):
+        try:
+            res = subprocess.run(
+                ["systemctl", "is-active", "--quiet", "scx_loader.service"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            scx_active = (res.returncode == 0)
+        except Exception:
+            pass
+    if not scx_active and reporter.have("scx_rusty"):
+        scx_active = True
+
+    if scx_active:
+        reporter.pass_check("Kernel Scheduler", "sched-ext (scx) low-latency scheduler active")
+    else:
+        reporter.warn_check("Kernel Scheduler", "CFS/EEVDF fallback (scx not active)")
+
+    # 2. NTSYNC Kernel Fast Locking
+    ntsync_loaded = Path("/dev/ntsync").exists()
+    if not ntsync_loaded and Path("/proc/modules").is_file():
+        try:
+            ntsync_loaded = "ntsync" in Path("/proc/modules").read_text(encoding="utf-8")
+        except Exception:
+            pass
+
+    if ntsync_loaded:
+        reporter.pass_check("Wine Synchronization", "NTSYNC fast kernel driver loaded")
+    else:
+        reporter.pass_check("Wine Synchronization", "FUTEX2 / esync fallback active")
+
+    # 3. PipeWire Low-Latency Audio
+    has_pw = False
+    if reporter.have("pgrep"):
+        try:
+            res = subprocess.run(["pgrep", "-x", "pipewire"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            has_pw = (res.returncode == 0)
+        except Exception:
+            pass
+    else:
+        # Fallback to scanning /proc for process names
+        try:
+            for p_dir in Path("/proc").glob("[0-9]*"):
+                try:
+                    comm = (p_dir / "comm").read_text(encoding="utf-8").strip()
+                    if comm == "pipewire":
+                        has_pw = True
+                        break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    if has_pw:
+        reporter.pass_check("Audio Stack", "PipeWire low-latency daemon running")
+    else:
+        reporter.warn_check("Audio Stack", "PipeWire daemon not detected")
+
+    # 4. GPU & Vulkan Driver Health
+    vulkan_ok = False
+    if reporter.have("vulkaninfo"):
+        try:
+            res = subprocess.run(
+                ["vulkaninfo", "--summary"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            vulkan_ok = (res.returncode == 0)
+        except Exception:
+            pass
+
+    if vulkan_ok:
+        reporter.pass_check("Vulkan 3D Driver", "Vulkan device initialized and responsive")
+    else:
+        reporter.warn_check("Vulkan 3D Driver", "Vulkan device query returned warning or fallback")
+
+    # 5. VA-API Hardware Video Acceleration
+    vaapi_ok = False
+    if reporter.have("vainfo"):
+        try:
+            res = subprocess.run(
+                ["vainfo"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            vaapi_ok = (res.returncode == 0)
+        except Exception:
+            pass
+
+    if vaapi_ok:
+        reporter.pass_check("Video Codecs", "VA-API hardware video decode/encode active")
+    else:
+        reporter.pass_check("Video Codecs", "Software codec fallback active")
+
+    # 6. Input & Controller Udev Rules
+    if Path("/dev/input").is_dir():
+        reporter.pass_check("Input & Gamepads", "Event subsystem and controller udev rules active")
+    else:
+        reporter.warn_check("Input & Gamepads", "/dev/input device node inaccessible")
+

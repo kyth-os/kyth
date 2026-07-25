@@ -1,64 +1,32 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""kyth-session-snapshot — Collect environment diagnostics, configurations, and write a session snapshot file."""
+from __future__ import annotations
 
-out_dir="${1:-${HOME}/Documents/KythOS}"
-mkdir -p "${out_dir}"
-ts="$(date +%Y%m%d-%H%M%S)"
-out="${out_dir}/kyth-session-snapshot-${ts}.txt"
+import sys
+from pathlib import Path
 
-section() {
-    printf '\n== %s ==\n' "$1" >> "${out}"
-}
 
-run() {
-    printf '$ %s\n' "$*" >> "${out}"
-    "$@" >> "${out}" 2>&1 || true
-}
+def _ensure_kyth_shared_path() -> None:
+    """Add build_files/kyth_shared to sys.path when running from a repo checkout."""
+    here = Path(__file__).resolve().parent
+    for candidate_dir in (here, here.parent):
+        candidate = candidate_dir / "kyth_shared"
+        if (candidate / "kyth_shared").is_dir():
+            path = str(candidate)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            return
 
-{
-    echo "KythOS Session Snapshot"
-    echo "Generated: $(date -Is)"
-    echo "User: ${USER:-unknown}"
-    echo "Host: $(hostname 2>/dev/null || echo unknown)"
-} > "${out}"
 
-section "System"
-run cat /etc/os-release
-run uname -a
-run bootc status
+_ensure_kyth_shared_path()
+from kyth_shared.session import generate_session_snapshot  # noqa: E402
 
-section "Desktop"
-run xdg-user-dir
-run xdg-mime query default application/x-ms-dos-executable
-run xdg-mime query default application/x-msi
 
-section "Installed Flatpaks"
-run flatpak list --app --columns=application,name,version,branch
+def main() -> None:
+    out_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else None
+    snapshot_path = generate_session_snapshot(out_dir)
+    print(snapshot_path)
 
-section "Gaming Paths"
-for path in \
-    "${HOME}/.local/share/Steam/steamapps" \
-    "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps" \
-    "${HOME}/Games" \
-    "${HOME}/Applications"; do
-    if [[ -e "${path}" ]]; then
-        printf '%s\n' "${path}" >> "${out}"
-    fi
-done
 
-section "KythOS Checks"
-for cmd in kyth-controller-check kyth-resume-check kyth-nvidia-status; do
-    if command -v "${cmd}" >/dev/null 2>&1; then
-        run "${cmd}"
-    fi
-done
-
-section "Restore Notes"
-cat >> "${out}" <<'EOF'
-- Reinstall Flatpaks with: flatpak install flathub APP_ID
-- Keep source code, saves, and documents in /home or synced storage.
-- System image changes are handled through KythOS updates and bootc rollback.
-- Do not paste this file publicly without reviewing paths and usernames.
-EOF
-
-echo "${out}"
+if __name__ == "__main__":
+    main()

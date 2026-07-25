@@ -10,7 +10,7 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
-from kyth_shared.diagnostics import DiagnosticReporter
+from kyth_shared.diagnostics import DiagnosticReporter, run_health_checks
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -69,6 +69,47 @@ class DiagnosticsTests(unittest.TestCase):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+
+    @mock.patch("subprocess.run")
+    @mock.patch("pathlib.Path.is_dir")
+    @mock.patch("pathlib.Path.exists")
+    @mock.patch("shutil.which")
+    def test_run_health_checks_all_pass(self, mock_which, mock_exists, mock_is_dir, mock_run) -> None:
+        mock_which.return_value = "/bin/dummy"
+        mock_exists.return_value = True
+        mock_is_dir.return_value = True
+        mock_run.return_value = mock.Mock(returncode=0)
+
+        reporter = DiagnosticReporter("Subsystem Health")
+        run_health_checks(reporter)
+        
+        self.assertEqual(reporter.warnings, 0)
+        self.assertEqual(reporter.failures, 0)
+        check_names = [res[1] for res in reporter.results]
+        self.assertIn("Kernel Scheduler", check_names)
+        self.assertIn("Wine Synchronization", check_names)
+        self.assertIn("Audio Stack", check_names)
+        self.assertIn("Vulkan 3D Driver", check_names)
+        self.assertIn("Video Codecs", check_names)
+        self.assertIn("Input & Gamepads", check_names)
+
+    @mock.patch("subprocess.run")
+    @mock.patch("pathlib.Path.is_dir")
+    @mock.patch("pathlib.Path.exists")
+    @mock.patch("pathlib.Path.glob")
+    @mock.patch("shutil.which")
+    def test_run_health_checks_warnings(self, mock_which, mock_glob, mock_exists, mock_is_dir, mock_run) -> None:
+        mock_which.return_value = None
+        mock_exists.return_value = False
+        mock_is_dir.return_value = False
+        mock_glob.return_value = []
+        mock_run.return_value = mock.Mock(returncode=1)
+
+        reporter = DiagnosticReporter("Subsystem Health")
+        run_health_checks(reporter)
+        
+        self.assertEqual(reporter.warnings, 4)
+        self.assertEqual(reporter.failures, 0)
 
 
 if __name__ == "__main__":
