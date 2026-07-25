@@ -1,0 +1,222 @@
+"""Shared utilities for desktop shortcuts, menus, and flatpak exports."""
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+
+def safe_id(name: str) -> str:
+    """Sanitize application name to be safe for filenames."""
+    s = name.lower()
+    s = re.sub(r"[^a-z0-9._-]+", "-", s)
+    s = s.strip("-")
+    return s
+
+
+def copy_steam_icon(icon_name: str, src_icons_root: Path, dst_icons_root: Path) -> bool:
+    """Copy matching game icon from Steam flatpak directory to host hicolor icon directory."""
+    if not icon_name or not src_icons_root.is_dir():
+        return False
+
+    copied = False
+    # Walk all files under src_icons_root looking for pattern "*/apps/{icon_name}.*"
+    for path in src_icons_root.glob("**/apps/*"):
+        if path.is_file() and path.stem == icon_name:
+            try:
+                # Resolve relative path to src_icons_root
+                rel_path = path.relative_to(src_icons_root)
+                dest_path = dst_icons_root / rel_path
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, dest_path)
+                copied = True
+            except Exception:
+                pass
+    return copied
+
+
+def rewrite_steam_exec(exec_line: str) -> str | None:
+    """Rewrite steam Exec= commands to launch correctly via Flatpak Steam."""
+    target = exec_line.split("=", 1)[1].strip()
+
+    # Match steam://rungameid/[0-9]+
+    m = re.search(r"steam://rungameid/([0-9]+)", target)
+    if m:
+        return f"Exec=flatpak run com.valvesoftware.Steam steam://rungameid/{m.group(1)}"
+
+    # Match -applaunch [0-9]+
+    m = re.search(r"-applaunch\s+([0-9]+)", target)
+    if m:
+        return f"Exec=flatpak run com.valvesoftware.Steam steam://rungameid/{m.group(1)}"
+
+    return None
+
+
+def export_steam_games() -> tuple[int, int]:
+    """Export Flatpak Steam game shortcuts to the host system."""
+    home = Path.home()
+    data_home = Path(os.environ.get("XDG_DATA_HOME", home / ".local/share"))
+    steam_data = home / ".var/app/com.valvesoftware.Steam/.local/share"
+    src_apps = steam_data / "applications"
+    src_icons = steam_data / "icons/hicolor"
+    dst_apps = data_home / "applications"
+    dst_icons = data_home / "icons/hicolor"
+
+    if not src_apps.is_dir():
+        return 0, 0
+
+    dst_apps.mkdir(parents=True, exist_ok=True)
+
+    exported = 0
+    skipped = 0
+
+    for src_file in src_apps.glob("*.desktop"):
+        try:
+            name = None
+            icon = None
+            exec_line = None
+
+            with open(src_file, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if line.startswith("Name="):
+                        name = line.split("=", 1)[1].strip()
+                    elif line.startswith("Icon="):
+                        icon = line.split("=", 1)[1].strip()
+                    elif line.startswith("Exec="):
+                        exec_line = line.strip()
+
+            if not name or not exec_line:
+                skipped += 1
+                continue
+
+            # Extract app ID
+            m_id = re.search(r"rungameid/([0-9]+)", exec_line)
+            if not m_id:
+                m_id = re.search(r"-applaunch\s+([0-9]+)", exec_line)
+
+            if not m_id:
+                skipped += 1
+                continue
+
+            appid = m_id.group(1)
+            dst_file = dst_apps / f"kyth-steam-{appid}.desktop"
+
+            # Parse and rewrite content
+            new_lines = []
+            saw_exec = False
+            saw_categories = False
+
+            with open(src_file, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line_strip = line.strip()
+                    if line_strip.startswith("Exec="):
+                        rewritten = rewrite_steam_exec(line_strip)
+                        if rewritten:
+                            new_lines.append(rewritten + "\n")
+                            saw_exec = True
+                        else:
+                            new_lines.append(line)
+                    elif line_strip.startswith("Categories="):
+                        new_lines.append("Categories=Game;\n")
+                        saw_categories = True
+                    elif line_strip.startswith("NoDisplay=") or line_strip.startswith("Hidden="):
+                        # skip hidden flags
+                        continue
+                    else:
+                        new_lines.append(line)
+
+            if not saw_exec:
+                skipped += 1
+                continue
+
+            if not saw_categories:
+                new_lines.append("Categories=Game;\n")
+
+            new_lines.append("X-KythExportedSteamGame=true\n")
+            new_lines.append("X-Flatpak=com.valvesoftware.Steam\n")
+
+            # Write out
+            with open(dst_file, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+
+            # Copy icon
+            if icon:
+                copy_steam_icon(icon, src_icons, dst_icons)
+
+            exported += 1
+            print(f"Exported {name}")
+        except Exception:
+            skipped += 1
+
+    # Update database and caches
+    if shutil.which("update-desktop-database"):
+        try:
+            subprocess.run(["update-desktop-database", str(dst_apps)], capture_output=True, check=False)
+        except Exception:
+            pass
+
+    if shutil.which("gtk-update-icon-cache") and dst_icons.is_dir():
+        try:
+            subprocess.run(["gtk-update-icon-cache", "-q", "-t", str(dst_icons)], capture_output=True, check=False)
+        except Exception:
+            pass
+
+    return exported, skipped
+
+
+def categorize_web_apps() -> bool:
+    """Scan and categorize web apps under ~/.local/share/applications."""
+    home = Path.home()
+    app_dir = home / ".local/share/applications"
+    if not app_dir.is_dir():
+        return False
+
+    changed = False
+    globs = [
+        "chrome-*.desktop",
+        "chromium-*.desktop",
+        "brave-*.desktop",
+        "msedge-*.desktop",
+        "com.google.Chrome.flextop.*.desktop",
+        "org.chromium.Chromium.flextop.*.desktop",
+        "com.brave.Browser.flextop.*.desktop",
+        "com.microsoft.Edge.flextop.*.desktop",
+    ]
+
+    for pattern in globs:
+        for desktop_file in app_dir.glob(pattern):
+            try:
+                content = desktop_file.read_text(encoding="utf-8", errors="replace")
+
+                # Match --app or --app-id
+                if not re.search(r"--app(-id)?=", content):
+                    continue
+
+                # If Categories= is already present, skip
+                if re.search(r"^Categories=", content, re.MULTILINE):
+                    continue
+
+                # Insert Categories=X-KythWebApp; right after [Desktop Entry]
+                lines = content.splitlines()
+                updated_lines = []
+                inserted = False
+                for line in lines:
+                    updated_lines.append(line)
+                    if line.strip() == "[Desktop Entry]" and not inserted:
+                        updated_lines.append("Categories=X-KythWebApp;")
+                        inserted = True
+
+                desktop_file.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+                changed = True
+            except Exception:
+                pass
+
+    if changed and shutil.which("kbuildsycoca6"):
+        try:
+            subprocess.run(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False)
+        except Exception:
+            pass
+
+    return changed

@@ -1,35 +1,42 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""KythOS Deduplication Utility."""
+from __future__ import annotations
 
-log() {
-    printf 'kyth-duperemove: %s\n' "$*"
-}
+import sys
+from pathlib import Path
 
-supports_dedupe() {
-    local path="$1"
-    local fstype
-    fstype=$(findmnt -no FSTYPE -T "$path" 2>/dev/null || true)
-    [[ "$fstype" == "btrfs" || "$fstype" == "xfs" ]]
-}
 
-mapfile -t targets < <(
-    find /var/home -mindepth 4 -maxdepth 7 -type d \
-        \( -path '*/Steam/steamapps/compatdata' -o -path '*/Steam/steamapps/shadercache' \) 2>/dev/null \
-        | sort -u
-)
+def _ensure_kyth_shared_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
 
-if [[ ${#targets[@]} -eq 0 ]]; then
-    log "no Steam compatdata/shadercache directories found"
-    exit 0
-fi
 
-for dir in "${targets[@]}"; do
-    if ! supports_dedupe "$dir"; then
-        log "skipping unsupported filesystem for $dir"
-        continue
-    fi
+_ensure_kyth_shared_path()
+from kyth_shared.maintenance import dedupe_directory, find_dedupe_targets, supports_dedupe  # noqa: E402
 
-    hash_name=$(printf '%s' "$dir" | tr '/ ' '__')
-    log "deduping $dir"
-    ionice -c3 nice -n 19 duperemove -rdh --hashfile "/var/tmp/${hash_name}.duperemove.hash" "$dir" || true
-done
+
+def log(msg: str) -> None:
+    print(f"kyth-duperemove: {msg}")
+
+
+def main() -> None:
+    targets = find_dedupe_targets()
+    if not targets:
+        log("no Steam compatdata/shadercache directories found")
+        sys.exit(0)
+
+    for target in targets:
+        if not supports_dedupe(target):
+            log(f"skipping unsupported filesystem for {target}")
+            continue
+
+        log(f"deduping {target}")
+        dedupe_directory(target)
+
+
+if __name__ == "__main__":
+    main()

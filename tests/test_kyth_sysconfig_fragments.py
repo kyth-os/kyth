@@ -113,7 +113,8 @@ class SysconfigFragmentTests(unittest.TestCase):
         body = (ROOT / "build_files" / "kyth-firstboot-app-status").read_text(
             encoding="utf-8"
         )
-        self.assertTrue(body.rstrip().endswith("exit 0"))
+        self.assertIn("check_firstboot_app_status", body)
+        self.assertTrue(body.rstrip().endswith("main()"))
 
 
 if __name__ == "__main__":

@@ -1,97 +1,42 @@
-#!/usr/bin/env bash
-# User-session notifier for default app setup progress.
+#!/usr/bin/env python3
+"""User-session notifier for default app setup progress."""
+from __future__ import annotations
 
-set -uo pipefail
+import argparse
+import os
+import sys
+from pathlib import Path
 
-STAMP_DIR="${HOME}/.local/share/kyth"
-STAMP="${STAMP_DIR}/firstboot-app-status-v1"
-STATUS="${STAMP_DIR}/first-run-apps.status"
-DEFAULT_DONE="/var/lib/kyth/default-flatpaks-v10-done"
 
-# shellcheck source=kyth-diagnostics-common.sh disable=SC1091
-source /usr/libexec/kyth-diagnostics-common.sh
+def _ensure_kyth_shared_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
 
-if grep -qw 'kyth.live' /proc/cmdline 2>/dev/null; then
-    exit 0
-fi
 
-notify() {
-    _kyth_notify_send "$1" "$2"
-}
+_ensure_kyth_shared_path()
+from kyth_shared.session import check_firstboot_app_status  # noqa: E402
 
-write_status() {
-    local state="$1"
-    local message="$2"
-    mkdir -p "${STAMP_DIR}"
-    {
-        printf 'state=%q\n' "${state}"
-        printf 'message=%q\n' "${message}"
-        printf 'updated=%q\n' "$(date -Is 2>/dev/null || date)"
-    } > "${STATUS}" 2>/dev/null || true
-}
 
-flatpak_ok() {
-    flatpak info "$1" >/dev/null 2>&1
-}
+def main() -> None:
+    parser = argparse.ArgumentParser(description="KythOS Firstboot App Status Notifier")
+    parser.add_argument("--force", action="store_true", help="Force status evaluation")
+    args = parser.parse_args()
 
-missing_apps() {
-    local missing_ids=()
-    for app in \
-        com.valvesoftware.Steam \
-        net.lutris.Lutris \
-        com.heroicgameslauncher.hgl \
-        com.usebottles.bottles \
-        com.github.mtkennerly.ludusavi; do
-        flatpak_ok "$app" || missing_ids+=("$app")
-    done
-    printf '%s\n' "${missing_ids[@]}"
-}
+    # Get env delay and notify configs
+    try:
+        delay = int(os.environ.get("KYTH_APP_STATUS_DELAY", "20"))
+    except ValueError:
+        delay = 20
 
-mkdir -p "${STAMP_DIR}"
+    notify_ready = os.environ.get("KYTH_APP_STATUS_NOTIFY_READY", "0") == "1"
 
-if [[ "${1:-}" != "--force" && -f "${STAMP}" && -f "${DEFAULT_DONE}" ]]; then
-    exit 0
-fi
+    ret = check_firstboot_app_status(force=args.force, delay=delay, notify_ready=notify_ready)
+    sys.exit(ret)
 
-sleep "${KYTH_APP_STATUS_DELAY:-20}"
 
-if ! have flatpak; then
-    write_status "needs_attention" "Flatpak is not available. Open System Hub > Repair for details."
-    exit 2
-fi
-
-missing_output="$(missing_apps)"
-if [[ -z "${missing_output}" ]]; then
-    write_status "ready" "Steam, launchers, Bottles, and save backup tools are installed."
-    if [[ "${1:-}" == "--force" || "${KYTH_APP_STATUS_NOTIFY_READY:-0}" == "1" ]]; then
-        notify "KythOS apps are ready" "Steam, launchers, Bottles, and save backup tools are installed."
-    fi
-    touch "${STAMP}"
-    exit 0
-fi
-
-service_state="unknown"
-if have systemctl; then
-    service_state="$(systemctl is-active kyth-default-flatpaks.service 2>/dev/null || true)"
-fi
-
-case "${service_state}" in
-    active|activating)
-        write_status "setting_up" "Game launchers and migration tools are installing in the background."
-        ;;
-    failed)
-        write_status "failed" "Some default apps are missing. Open System Hub > Repair and retry Game Apps."
-        ;;
-    *)
-        if have sudo && sudo -n systemctl start kyth-default-flatpaks.service >/dev/null 2>&1; then
-            write_status "setting_up" "Game launchers and migration tools have started installing in the background."
-        else
-            write_status "needs_attention" "Some default apps are missing. Connect to the network, then open System Hub > Repair and retry Game Apps."
-        fi
-        ;;
-esac
-
-# Missing applications are a handled first-boot state, not a notifier failure.
-# The status file and notification carry the actionable result; returning
-# nonzero makes systemd report a failed desktop-autostart unit on normal boots.
-exit 0
+if __name__ == "__main__":
+    main()

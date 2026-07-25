@@ -1,144 +1,220 @@
-#!/usr/bin/env bash
-# Read-only confidence check shown once per booted deployment after login.
+#!/usr/bin/env python3
+"""Read-only confidence check shown once per booted deployment after login."""
+from __future__ import annotations
 
-set -uo pipefail
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
 
-APP_NAME="KythOS Post-Update Check"
-STAMP_DIR="${HOME}/.local/share/kyth"
-WELCOME_DONE="${HOME}/.config/kyth-welcome-done"
-FORCE=0
-NOTIFY=1
 
-# shellcheck source=kyth-diagnostics-common.sh disable=SC1091
-source /usr/libexec/kyth-diagnostics-common.sh
+def _ensure_kyth_shared_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
 
-if grep -qw 'kyth.live' /proc/cmdline 2>/dev/null; then
-    exit 0
-fi
 
-notify() {
-    [[ "$NOTIFY" -eq 1 ]] || return 0
-    _kyth_notify_send "$1" "$2"
-}
+_ensure_kyth_shared_path()
+from kyth_shared.diagnostics import DiagnosticReporter  # noqa: E402
 
-deployment_id() {
-    if have ostree; then
-        ostree admin status 2>/dev/null | awk '/^\*/ {print $2"."$3; exit}'
-        return
-    fi
-    if have bootc; then
-        bootc status --format json 2>/dev/null \
-            | python3 -c 'import json,sys
-s=json.load(sys.stdin)
-print(s.get("status",{}).get("booted",{}).get("image",{}).get("imageDigest",""))' 2>/dev/null
-        return
-    fi
-    uname -r
-}
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --force) FORCE=1 ;;
-        --no-notify) NOTIFY=0 ;;
-        --help|-h)
-            echo "Usage: kyth-post-update-check [--force] [--no-notify]"
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1" >&2
-            exit 64
-            ;;
-    esac
-    shift
-done
+def is_live_image() -> bool:
+    try:
+        with open("/proc/cmdline", "r", encoding="utf-8") as f:
+            cmdline = f.read()
+            if "kyth.live" in cmdline.split():
+                return True
+    except Exception:
+        pass
+    return False
 
-# First login belongs to the onboarding wizard. Run automatic confidence checks
-# after the user has completed or skipped it; --force keeps manual diagnostics
-# available from the System Hub and ujust.
-if [[ "$FORCE" -ne 1 && ! -f "${WELCOME_DONE}" ]]; then
-    exit 0
-fi
 
-CAN_STAMP=1
-mkdir -p "${STAMP_DIR}" 2>/dev/null || CAN_STAMP=0
-dep="$(deployment_id)"
-dep="${dep:-unknown-$(uname -r)}"
-stamp="${STAMP_DIR}/post-update-check-${dep//[^A-Za-z0-9_.-]/_}"
+def get_deployment_id(reporter: DiagnosticReporter) -> str:
+    if reporter.have("ostree"):
+        try:
+            res = subprocess.run(["ostree", "admin", "status"], capture_output=True, text=True, check=False)
+            for line in res.stdout.splitlines():
+                if line.strip().startswith("*"):
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        return f"{parts[1]}.{parts[2]}"
+        except Exception:
+            pass
+    if reporter.have("bootc"):
+        try:
+            res = subprocess.run(["bootc", "status", "--format", "json"], capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                data = json.loads(res.stdout)
+                digest = data.get("status", {}).get("booted", {}).get("image", {}).get("imageDigest", "")
+                if digest:
+                    return digest
+        except Exception:
+            pass
+    return subprocess.run(["uname", "-r"], capture_output=True, text=True, check=False).stdout.strip()
 
-if [[ "$FORCE" -ne 1 && "$CAN_STAMP" -eq 1 && -f "${stamp}" ]]; then
-    exit 0
-fi
 
-failures=()
-warnings=()
+def check_gpu_modules(reporter: DiagnosticReporter) -> None:
+    if reporter.have("lspci"):
+        res = subprocess.run(["lspci", "-nn"], capture_output=True, text=True, check=False)
+        gpus = [line for line in res.stdout.splitlines() if any(k in line.lower() for k in ("vga", "3d", "display"))]
+        if gpus:
+            gpu_line = gpus[0].lower()
+            # Read loaded modules
+            loaded_mods = set()
+            try:
+                with open("/proc/modules", "r", encoding="utf-8") as f:
+                    for line in f:
+                        parts = line.split()
+                        if parts:
+                            loaded_mods.add(parts[0])
+            except Exception:
+                pass
 
-if have ostree; then
-    deployments="$(ostree admin status 2>/dev/null | grep -Ec '^\*? +[A-Za-z0-9_-]+ ' || true)"
-    [[ "${deployments:-0}" -ge 2 ]] || warnings+=("Rollback deployment not visible yet.")
-elif have bootc; then
-    bootc status >/dev/null 2>&1 || warnings+=("bootc status needs root; rollback was not checked here.")
-else
-    failures+=("No deployment tool found.")
-fi
+            if "nvidia" in gpu_line:
+                if "nvidia" not in loaded_mods:
+                    reporter.warn_check("GPU drivers", "NVIDIA hardware detected but proprietary module is not loaded.")
+                else:
+                    reporter.pass_check("GPU drivers", "NVIDIA module loaded")
+            elif any(k in gpu_line for k in ("amd", "ati")):
+                if "amdgpu" not in loaded_mods:
+                    reporter.warn_check("GPU drivers", "AMD GPU detected but amdgpu is not loaded.")
+                else:
+                    reporter.pass_check("GPU drivers", "amdgpu loaded")
+            elif "intel" in gpu_line:
+                if not any(m in loaded_mods for m in ("i915", "xe")):
+                    reporter.warn_check("GPU drivers", "Intel GPU detected but i915/xe is not loaded.")
+                else:
+                    reporter.pass_check("GPU drivers", "Intel driver loaded")
+            else:
+                reporter.pass_check("GPU drivers", "Generic display controller active")
+        else:
+            reporter.warn_check("GPU drivers", "No GPU was detected by lspci.")
+    else:
+        reporter.warn_check("GPU drivers", "lspci is missing, so GPU drivers were not checked.")
 
-if have lspci && lspci -nn 2>/dev/null | grep -Eiq 'vga|3d|display'; then
-    gpu_line="$(lspci -nn 2>/dev/null | grep -Ei 'vga|3d|display' | sed -n '1p')"
-    if grep -qi nvidia <<<"${gpu_line}"; then
-        lsmod 2>/dev/null | grep -q '^nvidia ' \
-            || warnings+=("NVIDIA hardware detected but proprietary module is not loaded.")
-    elif grep -Eiq 'amd|ati' <<<"${gpu_line}"; then
-        lsmod 2>/dev/null | grep -q '^amdgpu' \
-            || warnings+=("AMD GPU detected but amdgpu is not loaded.")
-    elif grep -qi intel <<<"${gpu_line}"; then
-        lsmod 2>/dev/null | grep -q '^i915\|^xe' \
-            || warnings+=("Intel GPU detected but i915/xe is not loaded.")
-    fi
-else
-    warnings+=("No GPU was detected by lspci.")
-fi
 
-if have vulkaninfo; then
-    timeout 10 vulkaninfo --summary >/dev/null 2>&1 \
-        || warnings+=("Vulkan check failed after update.")
-else
-    warnings+=("vulkaninfo is missing, so Vulkan was not checked.")
-fi
+def main() -> None:
+    if is_live_image():
+        sys.exit(0)
 
-if ! have flatpak; then
-    failures+=("Flatpak is missing.")
-fi
+    parser = argparse.ArgumentParser(description="KythOS Post-Update Check")
+    parser.add_argument("--force", action="store_true", help="Force execution")
+    parser.add_argument("--no-notify", action="store_true", help="Do not trigger desktop notifications")
+    args = parser.parse_args()
 
-if have systemctl; then
-    systemctl --user is-active --quiet pipewire.service 2>/dev/null \
-        || warnings+=("PipeWire is not active in this login session.")
-    systemctl --user is-active --quiet wireplumber.service 2>/dev/null \
-        || warnings+=("WirePlumber is not active in this login session.")
-fi
+    # Onboarding wizard check
+    welcome_done = Path("~/.config/kyth-welcome-done").expanduser()
+    if not args.force and not welcome_done.exists():
+        sys.exit(0)
 
-if [[ "${#failures[@]}" -gt 0 ]]; then
-    title="${APP_NAME}: needs attention"
-    body="$(printf '%s\n' "${failures[@]}" "${warnings[@]}" | sed '/^$/d' | head -5 | paste -sd ' ' -)"
-    echo "$title"
-    printf 'FAIL  %s\n' "${failures[@]}"
-    [[ "${#warnings[@]}" -eq 0 ]] || printf 'WARN  %s\n' "${warnings[@]}"
-    notify "$title" "${body:-Run ujust smoke-check for details.}"
-    exit 2
-fi
+    reporter = DiagnosticReporter("Post-Update Check")
 
-if [[ "${#warnings[@]}" -gt 0 ]]; then
-    title="${APP_NAME}: review recommended"
-    body="$(printf '%s\n' "${warnings[@]}" | head -5 | paste -sd ' ' -)"
-    echo "$title"
-    printf 'WARN  %s\n' "${warnings[@]}"
-    notify "$title" "${body:-Run ujust smoke-check for details.}"
-    [[ "$CAN_STAMP" -eq 1 ]] && touch "${stamp}" 2>/dev/null || true
-    exit 1
-fi
+    # Resolve deployment ID & stamp
+    dep = get_deployment_id(reporter)
+    sanitized_dep = re.sub(r"[^A-Za-z0-9_.-]", "_", dep)
+    stamp_dir = Path("~/.local/share/kyth").expanduser()
+    stamp_path = stamp_dir / f"post-update-check-{sanitized_dep}"
 
-echo "${APP_NAME}: ready"
-echo "PASS  Update looks healthy. Rollback is available, gaming services are present, and core desktop audio is active."
-if [[ "$FORCE" -eq 1 ]]; then
-    notify "${APP_NAME}: ready" "Update looks healthy. Rollback is available, gaming services are present, and core desktop audio is active."
-fi
-[[ "$CAN_STAMP" -eq 1 ]] && touch "${stamp}" 2>/dev/null || true
-exit 0
+    if not args.force and stamp_path.exists():
+        sys.exit(0)
+
+    failures: list[str] = []
+    warnings: list[str] = []
+
+    # 1. Deployment tool check
+    if reporter.have("ostree"):
+        try:
+            res = subprocess.run(["ostree", "admin", "status"], capture_output=True, text=True, check=False)
+            deployments_count = sum(1 for line in res.stdout.splitlines() if re.match(r"^\*?\s+[A-Za-z0-9_-]+\s", line))
+            if deployments_count < 2:
+                warnings.append("Rollback deployment not visible yet.")
+        except Exception:
+            warnings.append("Failed to query ostree admin status.")
+    elif reporter.have("bootc"):
+        # bootc status needs root, but we run read-only check here. We check if bootc status succeeds or fails
+        res = subprocess.run(["bootc", "status"], capture_output=True, check=False)
+        if res.returncode != 0:
+            warnings.append("bootc status needs root; rollback was not checked here.")
+    else:
+        failures.append("No deployment tool found.")
+
+    # 2. GPU modules
+    check_gpu_modules(reporter)
+
+    # 3. Vulkan
+    if reporter.have("vulkaninfo"):
+        try:
+            res = subprocess.run(["vulkaninfo", "--summary"], capture_output=True, timeout=10, check=False)
+            if res.returncode != 0:
+                warnings.append("Vulkan check failed after update.")
+        except subprocess.TimeoutExpired:
+            warnings.append("Vulkan check timed out after 10s.")
+    else:
+        warnings.append("vulkaninfo is missing, so Vulkan was not checked.")
+
+    # 4. Flatpak
+    if not reporter.have("flatpak"):
+        failures.append("Flatpak is missing.")
+
+    # 5. PipeWire & WirePlumber
+    if reporter.have("systemctl"):
+        pw_res = subprocess.run(["systemctl", "--user", "is-active", "pipewire.service"], capture_output=True, check=False)
+        if pw_res.returncode != 0:
+            warnings.append("PipeWire is not active in this login session.")
+        wp_res = subprocess.run(["systemctl", "--user", "is-active", "wireplumber.service"], capture_output=True, check=False)
+        if wp_res.returncode != 0:
+            warnings.append("WirePlumber is not active in this login session.")
+
+    # Format output/notify based on failures and warnings
+    app_name = "KythOS Post-Update Check"
+    if failures:
+        title = f"{app_name}: needs attention"
+        body = " ".join((failures + warnings)[:5])
+        print(title)
+        for f in failures:
+            print(f"FAIL  {f}")
+        for w in warnings:
+            print(f"WARN  {w}")
+        if not args.no_notify:
+            reporter.notify(title, body or "Run ujust smoke-check for details.")
+        sys.exit(2)
+
+    if warnings:
+        title = f"{app_name}: review recommended"
+        body = " ".join(warnings[:5])
+        print(title)
+        for w in warnings:
+            print(f"WARN  {w}")
+        if not args.no_notify:
+            reporter.notify(title, body or "Run ujust smoke-check for details.")
+        try:
+            stamp_dir.mkdir(parents=True, exist_ok=True)
+            stamp_path.touch(exist_ok=True)
+        except Exception:
+            pass
+        sys.exit(1)
+
+    # All pass
+    print(f"{app_name}: ready")
+    print("PASS  Update looks healthy. Rollback is available, gaming services are present, and core desktop audio is active.")
+    if args.force and not args.no_notify:
+        reporter.notify(
+            f"{app_name}: ready",
+            "Update looks healthy. Rollback is available, gaming services are present, and core desktop audio is active.",
+        )
+    try:
+        stamp_dir.mkdir(parents=True, exist_ok=True)
+        stamp_path.touch(exist_ok=True)
+    except Exception:
+        pass
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

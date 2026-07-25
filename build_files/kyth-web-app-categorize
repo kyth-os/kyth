@@ -1,26 +1,27 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Automatically categorize Web App launchers under ~/.local/share/applications."""
+from __future__ import annotations
 
-app_dir="${HOME}/.local/share/applications"
-[[ -d "${app_dir}" ]] || exit 0
+import sys
+from pathlib import Path
 
-changed=0
-shopt -s nullglob
-for launcher in \
-    "${app_dir}"/chrome-*.desktop \
-    "${app_dir}"/chromium-*.desktop \
-    "${app_dir}"/brave-*.desktop \
-    "${app_dir}"/msedge-*.desktop \
-    "${app_dir}"/com.google.Chrome.flextop.*.desktop \
-    "${app_dir}"/org.chromium.Chromium.flextop.*.desktop \
-    "${app_dir}"/com.brave.Browser.flextop.*.desktop \
-    "${app_dir}"/com.microsoft.Edge.flextop.*.desktop; do
-    grep -Eq -- '--app(-id)?=' "${launcher}" || continue
-    grep -q '^Categories=' "${launcher}" && continue
-    sed -i '/^\[Desktop Entry\]$/a Categories=X-KythWebApp;' "${launcher}"
-    changed=1
-done
 
-if (( changed )) && command -v kbuildsycoca6 >/dev/null 2>&1; then
-    kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
-fi
+def _ensure_kyth_shared_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+
+
+_ensure_kyth_shared_path()
+from kyth_shared.desktop.shortcut import categorize_web_apps  # noqa: E402
+
+
+def main() -> None:
+    categorize_web_apps()
+
+
+if __name__ == "__main__":
+    main()

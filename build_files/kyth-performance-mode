@@ -1,217 +1,172 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Switch and manage KythOS performance presets and KDE composition parameters."""
+from __future__ import annotations
 
-STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-STATE_FILE="${STATE_DIR}/kyth-performance-mode.state"
+import os
+import re
+import sys
+from pathlib import Path
 
-read_kde_value() {
-    local file=$1
-    local group=$2
-    local key=$3
 
-    if command -v kreadconfig6 >/dev/null 2>&1; then
-        kreadconfig6 --file "$file" --group "$group" --key "$key" 2>/dev/null || true
-    fi
-}
+def _ensure_kyth_shared_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
 
-write_kde_value() {
-    local file=$1
-    local group=$2
-    local key=$3
-    local value=$4
 
-    if command -v kwriteconfig6 >/dev/null 2>&1; then
-        kwriteconfig6 --file "$file" --group "$group" --key "$key" "$value" >/dev/null 2>&1 || true
-    fi
-}
+_ensure_kyth_shared_path()
+from kyth_shared.desktop.plasma import get_qdbus_command, kreadconfig, kwriteconfig  # noqa: E402
+from kyth_shared.performance import (  # noqa: E402
+    get_current_epp,
+    get_power_profile,
+    set_epp,
+    set_power_profile,
+)
 
-save_state() {
-    mkdir -p "$STATE_DIR"
+# Resolve state file location
+runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+if not runtime_dir:
+    runtime_dir = f"/run/user/{os.getuid()}"
+STATE_FILE = Path(runtime_dir) / "kyth-performance-mode.state"
 
-    local power_profile=""
-    if command -v powerprofilesctl >/dev/null 2>&1; then
-        power_profile=$(powerprofilesctl get 2>/dev/null || true)
-    fi
 
-    local anim_factor=""
-    anim_factor=$(read_kde_value kdeglobals KDE AnimationDurationFactor)
+def reconfigure_kwin() -> None:
+    qdbus = get_qdbus_command()
+    if qdbus:
+        import subprocess
+        try:
+            subprocess.run(
+                [qdbus, "org.kde.KWin", "/KWin", "reconfigure"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except Exception:
+            pass
 
-    local blur_enabled=""
-    blur_enabled=$(read_kde_value kwinrc Plugins blurEnabled)
 
-    # Save current EPP from cpu0 — all cores share the same value under ppd
-    local epp=""
-    epp=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null || true)
+def save_state() -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    power_profile = get_power_profile()
+    anim_factor = kreadconfig("kdeglobals", "KDE", "AnimationDurationFactor") or ""
+    blur_enabled = kreadconfig("kwinrc", "Plugins", "blurEnabled") or ""
+    epp = get_current_epp()
 
-    cat > "$STATE_FILE" <<EOF
-POWER_PROFILE=${power_profile}
-ANIMATION_DURATION_FACTOR=${anim_factor}
-BLUR_ENABLED=${blur_enabled}
-EPP=${epp}
-EOF
-}
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        f.write(f"POWER_PROFILE={power_profile}\n")
+        f.write(f"ANIMATION_DURATION_FACTOR={anim_factor}\n")
+        f.write(f"BLUR_ENABLED={blur_enabled}\n")
+        f.write(f"EPP={epp}\n")
 
-reconfigure_kwin() {
-    if command -v qdbus6 >/dev/null 2>&1; then
-        qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-    elif command -v qdbus-qt6 >/dev/null 2>&1; then
-        qdbus-qt6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-    elif command -v qdbus >/dev/null 2>&1; then
-        qdbus org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-    fi
-}
 
-set_epp() {
-    local epp=$1
-    if command -v sudo >/dev/null 2>&1 && sudo -n /usr/bin/kyth-set-epp "$epp" 2>/dev/null; then
-        return 0
-    fi
-    # Fallback: try direct write (works if running as root or via polkit)
-    for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
-        [[ -f "$f" ]] && echo "$epp" > "$f" 2>/dev/null || true
-    done
-}
+def read_state_key(key: str) -> str:
+    if not STATE_FILE.is_file():
+        return ""
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith(f"{key}="):
+                    val = line.split("=", 1)[1].strip()
+                    # Sanitize to allow only safe characters
+                    if re.match(r"^[A-Za-z0-9_. -]*$", val):
+                        return val
+    except Exception:
+        pass
+    return ""
 
-apply_mode() {
-    local mode=$1
 
-    case "$mode" in
-        max)
-            # Nuclear performance mode: all CPU cores at max EPP, animations off entirely.
-            # Use for CPU-heavy games or when you want zero compositor overhead.
-            if command -v powerprofilesctl >/dev/null 2>&1; then
-                powerprofilesctl set performance >/dev/null 2>&1 || true
-            fi
-            set_epp performance
-            write_kde_value kdeglobals KDE AnimationDurationFactor 0
-            write_kde_value kwinrc Plugins blurEnabled false
-            ;;
-        gaming)
-            if command -v powerprofilesctl >/dev/null 2>&1; then
-                powerprofilesctl set performance >/dev/null 2>&1 || true
-            fi
-            # Force EPP=performance on all cores — bypasses ppd for AMD pstate-active
-            # systems where ppd may leave EPP at balance_performance even in perf mode
-            set_epp performance
-            write_kde_value kdeglobals KDE AnimationDurationFactor 0.5
-            write_kde_value kwinrc Plugins blurEnabled false
-            ;;
-        performance)
-            if command -v powerprofilesctl >/dev/null 2>&1; then
-                powerprofilesctl set performance >/dev/null 2>&1 || true
-            fi
-            set_epp performance
-            write_kde_value kdeglobals KDE AnimationDurationFactor 0.75
-            write_kde_value kwinrc Plugins blurEnabled false
-            ;;
-        balanced)
-            if command -v powerprofilesctl >/dev/null 2>&1; then
-                powerprofilesctl set balanced >/dev/null 2>&1 || true
-            fi
-            set_epp balance_performance
-            write_kde_value kdeglobals KDE AnimationDurationFactor 1
-            write_kde_value kwinrc Plugins blurEnabled true
-            ;;
-        powersave)
-            if command -v powerprofilesctl >/dev/null 2>&1; then
-                powerprofilesctl set power-saver >/dev/null 2>&1 || true
-            fi
-            set_epp power
-            write_kde_value kdeglobals KDE AnimationDurationFactor 1.25
-            write_kde_value kwinrc Plugins blurEnabled true
-            ;;
-        *)
-            echo "Unknown mode: $mode" >&2
-            echo "Usage: kyth-performance-mode [save|restore|status|max|gaming|performance|balanced|powersave]" >&2
-            return 1
-            ;;
-    esac
+def restore_state() -> None:
+    if not STATE_FILE.is_file():
+        return
 
-    reconfigure_kwin
-}
+    power_profile = read_state_key("POWER_PROFILE")
+    anim_factor = read_state_key("ANIMATION_DURATION_FACTOR")
+    blur_enabled = read_state_key("BLUR_ENABLED")
+    epp = read_state_key("EPP")
 
-read_state_key() {
-    local key=$1
-    # Extract VALUE from KEY=VALUE lines; only allows alphanumeric, underscore,
-    # hyphen, and dot in values — prevents code injection from a modified file.
-    grep -m1 "^${key}=" "$STATE_FILE" 2>/dev/null \
-        | sed 's/^[^=]*=//' \
-        | grep -Eo '^[A-Za-z0-9_. -]*' \
-        || true
-}
+    if power_profile:
+        set_power_profile(power_profile)
+    if anim_factor:
+        kwriteconfig("kdeglobals", "KDE", "AnimationDurationFactor", anim_factor)
+    if blur_enabled:
+        kwriteconfig("kwinrc", "Plugins", "blurEnabled", blur_enabled)
+    if epp:
+        set_epp(epp)
 
-restore_state() {
-    if [[ ! -f "$STATE_FILE" ]]; then
-        return 0
-    fi
+    reconfigure_kwin()
+    try:
+        STATE_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
-    local POWER_PROFILE ANIMATION_DURATION_FACTOR BLUR_ENABLED EPP
-    POWER_PROFILE=$(read_state_key POWER_PROFILE)
-    ANIMATION_DURATION_FACTOR=$(read_state_key ANIMATION_DURATION_FACTOR)
-    BLUR_ENABLED=$(read_state_key BLUR_ENABLED)
-    EPP=$(read_state_key EPP)
 
-    if [[ -n "${POWER_PROFILE}" ]] && command -v powerprofilesctl >/dev/null 2>&1; then
-        powerprofilesctl set "$POWER_PROFILE" >/dev/null 2>&1 || true
-    fi
+def apply_mode(mode: str) -> None:
+    if mode == "max":
+        set_power_profile("performance")
+        set_epp("performance")
+        kwriteconfig("kdeglobals", "KDE", "AnimationDurationFactor", "0")
+        kwriteconfig("kwinrc", "Plugins", "blurEnabled", "false")
+    elif mode == "gaming":
+        set_power_profile("performance")
+        set_epp("performance")
+        kwriteconfig("kdeglobals", "KDE", "AnimationDurationFactor", "0.5")
+        kwriteconfig("kwinrc", "Plugins", "blurEnabled", "false")
+    elif mode == "performance":
+        set_power_profile("performance")
+        set_epp("performance")
+        kwriteconfig("kdeglobals", "KDE", "AnimationDurationFactor", "0.75")
+        kwriteconfig("kwinrc", "Plugins", "blurEnabled", "false")
+    elif mode == "balanced":
+        set_power_profile("balanced")
+        set_epp("balance_performance")
+        kwriteconfig("kdeglobals", "KDE", "AnimationDurationFactor", "1")
+        kwriteconfig("kwinrc", "Plugins", "blurEnabled", "true")
+    elif mode == "powersave":
+        set_power_profile("power-saver")
+        set_epp("power")
+        kwriteconfig("kdeglobals", "KDE", "AnimationDurationFactor", "1.25")
+        kwriteconfig("kwinrc", "Plugins", "blurEnabled", "true")
+    else:
+        print(f"Unknown mode: {mode}", file=sys.stderr)
+        print("Usage: kyth-performance-mode [save|restore|status|max|gaming|performance|balanced|powersave]", file=sys.stderr)
+        sys.exit(1)
 
-    if [[ -n "${ANIMATION_DURATION_FACTOR}" ]]; then
-        write_kde_value kdeglobals KDE AnimationDurationFactor "$ANIMATION_DURATION_FACTOR"
-    fi
+    reconfigure_kwin()
 
-    if [[ -n "${BLUR_ENABLED}" ]]; then
-        write_kde_value kwinrc Plugins blurEnabled "$BLUR_ENABLED"
-    fi
 
-    if [[ -n "${EPP}" ]]; then
-        set_epp "${EPP}"
-    fi
+def status_mode() -> None:
+    power_profile = get_power_profile()
+    epp = get_current_epp()
+    anim_factor = kreadconfig("kdeglobals", "KDE", "AnimationDurationFactor") or "default"
+    blur_enabled = kreadconfig("kwinrc", "Plugins", "blurEnabled") or "default"
 
-    reconfigure_kwin
-    rm -f "$STATE_FILE"
-}
+    print(f"Power profile: {power_profile}")
+    print(f"CPU EPP: {epp}")
+    print(f"KDE animation factor: {anim_factor}")
+    print(f"KWin blur enabled: {blur_enabled}")
 
-status_mode() {
-    local power_profile="n/a"
-    if command -v powerprofilesctl >/dev/null 2>&1; then
-        power_profile=$(powerprofilesctl get 2>/dev/null || echo unknown)
-    fi
 
-    local anim_factor
-    anim_factor=$(read_kde_value kdeglobals KDE AnimationDurationFactor)
-    [[ -n "$anim_factor" ]] || anim_factor="default"
+def main() -> None:
+    cmd = "status"
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1]
 
-    local blur_enabled
-    blur_enabled=$(read_kde_value kwinrc Plugins blurEnabled)
-    [[ -n "$blur_enabled" ]] || blur_enabled="default"
+    if cmd == "save":
+        save_state()
+    elif cmd == "restore":
+        restore_state()
+    elif cmd == "status":
+        status_mode()
+    elif cmd in ("max", "gaming", "performance", "balanced", "powersave"):
+        apply_mode(cmd)
+    else:
+        print(f"Unknown option: {cmd}", file=sys.stderr)
+        print("Usage: kyth-performance-mode [save|restore|status|max|gaming|performance|balanced|powersave]", file=sys.stderr)
+        sys.exit(1)
 
-    local epp="n/a"
-    if [[ -f /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference ]]; then
-        epp=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null || echo unknown)
-    fi
 
-    echo "Power profile: ${power_profile}"
-    echo "CPU EPP: ${epp}"
-    echo "KDE animation factor: ${anim_factor}"
-    echo "KWin blur enabled: ${blur_enabled}"
-}
-
-cmd="${1:-status}"
-case "$cmd" in
-    save)
-        save_state
-        ;;
-    restore)
-        restore_state
-        ;;
-    status)
-        status_mode
-        ;;
-    max|gaming|performance|balanced|powersave)
-        apply_mode "$cmd"
-        ;;
-    *)
-        echo "Usage: kyth-performance-mode [save|restore|status|gaming|performance|balanced|powersave]" >&2
-        exit 1
-        ;;
-esac
+if __name__ == "__main__":
+    main()

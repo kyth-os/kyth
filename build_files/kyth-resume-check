@@ -1,69 +1,158 @@
-#!/usr/bin/env bash
-# Read-only suspend/resume confidence check.
+#!/usr/bin/env python3
+"""Read-only suspend/resume confidence check."""
+from __future__ import annotations
 
-set -uo pipefail
+import os
+import re
+import subprocess
+from pathlib import Path
 
-# shellcheck source=kyth-diagnostics-common.sh disable=SC1091
-source /usr/libexec/kyth-diagnostics-common.sh
 
-print_header "Resume Check"
+def _ensure_kyth_shared_path() -> None:
+    import sys
+    here = Path(__file__).resolve().parent
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
 
-if have loginctl && loginctl show-session "${XDG_SESSION_ID:-self}" >/dev/null 2>&1; then
-    pass "Login session" "logind can see this session"
-else
-    warn "Login session" "session not visible through loginctl"
-fi
 
-if have nmcli; then
-    state="$(nmcli -t -f STATE general 2>/dev/null || true)"
-    [[ "$state" == connected* ]] && pass "Network" "$state" || warn "Network" "${state:-unknown}"
-else
-    warn "Network" "nmcli unavailable"
-fi
+_ensure_kyth_shared_path()
+from kyth_shared.diagnostics import DiagnosticReporter  # noqa: E402
 
-if have systemctl; then
-    systemctl --user is-active --quiet pipewire.service 2>/dev/null \
-        && pass "PipeWire" "active" || warn "PipeWire" "not active"
-    systemctl --user is-active --quiet wireplumber.service 2>/dev/null \
-        && pass "WirePlumber" "active" || warn "WirePlumber" "not active"
-    systemctl is-active --quiet bluetooth.service 2>/dev/null \
-        && pass "Bluetooth service" "active" || warn "Bluetooth service" "not active"
-fi
 
-if compgen -G "/sys/class/bluetooth/hci*" >/dev/null; then
-    pass "Bluetooth adapter" "controller present"
-else
-    warn "Bluetooth adapter" "no hci controller visible"
-fi
+def check_loginctl(reporter: DiagnosticReporter) -> None:
+    if reporter.have("loginctl"):
+        session_id = os.environ.get("XDG_SESSION_ID", "self")
+        res = subprocess.run(["loginctl", "show-session", session_id], capture_output=True, check=False)
+        if res.returncode == 0:
+            reporter.pass_check("Login session", "logind can see this session")
+        else:
+            reporter.warn_check("Login session", "session not visible through loginctl")
+    else:
+        reporter.warn_check("Login session", "loginctl command not found")
 
-if have lspci && lspci -nn 2>/dev/null | grep -Eiq 'vga|3d|display'; then
-    gpu="$(lspci -nn 2>/dev/null | grep -Ei 'vga|3d|display' | sed -n '1p')"
-    pass "GPU detected" "$gpu"
-else
-    warn "GPU detected" "no GPU found via lspci"
-fi
 
-if have vulkaninfo; then
-    timeout 10 vulkaninfo --summary >/dev/null 2>&1 \
-        && pass "Vulkan" "responding" || warn "Vulkan" "failed after resume"
-else
-    warn "Vulkan" "vulkaninfo unavailable"
-fi
+def check_network(reporter: DiagnosticReporter) -> None:
+    if reporter.have("nmcli"):
+        res = subprocess.run(["nmcli", "-t", "-f", "STATE", "general"], capture_output=True, text=True, check=False)
+        state = res.stdout.strip()
+        if state.startswith("connected"):
+            reporter.pass_check("Network", state)
+        else:
+            reporter.warn_check("Network", state or "unknown")
+    else:
+        reporter.warn_check("Network", "nmcli unavailable")
 
-if have kscreen-doctor; then
-    connected="$(kscreen-doctor -o 2>/dev/null | grep -c ' connected' || true)"
-    [[ "${connected:-0}" -gt 0 ]] && pass "Displays" "${connected} connected output(s)" || warn "Displays" "no connected output reported"
-else
-    warn "Displays" "kscreen-doctor unavailable"
-fi
 
-if journalctl -b --since '-10 minutes' -p err --no-pager >/tmp/kyth-resume-journal.$$ 2>/dev/null; then
-    errs="$(grep -Ec 'amdgpu|nvidia|i915|xe|bluetooth|NetworkManager|pipewire|wireplumber|kwin' /tmp/kyth-resume-journal.$$ || true)"
-    [[ "${errs:-0}" -eq 0 ]] && pass "Recent critical logs" "no matching errors in last 10 minutes" \
-        || warn "Recent critical logs" "${errs} matching error(s) in last 10 minutes"
-else
-    warn "Recent critical logs" "journalctl unavailable"
-fi
-rm -f /tmp/kyth-resume-journal.$$
+def check_services(reporter: DiagnosticReporter) -> None:
+    if reporter.have("systemctl"):
+        pw_res = subprocess.run(["systemctl", "--user", "is-active", "pipewire.service"], capture_output=True, check=False)
+        if pw_res.returncode == 0:
+            reporter.pass_check("PipeWire", "active")
+        else:
+            reporter.warn_check("PipeWire", "not active")
 
-print_result "resume readiness"
+        wp_res = subprocess.run(["systemctl", "--user", "is-active", "wireplumber.service"], capture_output=True, check=False)
+        if wp_res.returncode == 0:
+            reporter.pass_check("WirePlumber", "active")
+        else:
+            reporter.warn_check("WirePlumber", "not active")
+
+        bt_res = subprocess.run(["systemctl", "is-active", "bluetooth.service"], capture_output=True, check=False)
+        if bt_res.returncode == 0:
+            reporter.pass_check("Bluetooth service", "active")
+        else:
+            reporter.warn_check("Bluetooth service", "not active")
+
+
+def check_bluetooth_adapter(reporter: DiagnosticReporter) -> None:
+    bt_dir = Path("/sys/class/bluetooth")
+    if bt_dir.is_dir() and list(bt_dir.glob("hci*")):
+        reporter.pass_check("Bluetooth adapter", "controller present")
+    else:
+        reporter.warn_check("Bluetooth adapter", "no hci controller visible")
+
+
+def check_gpu(reporter: DiagnosticReporter) -> None:
+    if reporter.have("lspci"):
+        res = subprocess.run(["lspci", "-nn"], capture_output=True, text=True, check=False)
+        gpus = [line for line in res.stdout.splitlines() if any(k in line.lower() for k in ("vga", "3d", "display"))]
+        if gpus:
+            reporter.pass_check("GPU detected", gpus[0].strip())
+        else:
+            reporter.warn_check("GPU detected", "no GPU found via lspci")
+    else:
+        reporter.warn_check("GPU detected", "lspci command not found")
+
+
+def check_vulkan(reporter: DiagnosticReporter) -> None:
+    if reporter.have("vulkaninfo"):
+        try:
+            res = subprocess.run(["vulkaninfo", "--summary"], capture_output=True, timeout=10, check=False)
+            if res.returncode == 0:
+                reporter.pass_check("Vulkan", "responding")
+            else:
+                reporter.warn_check("Vulkan", "failed after resume")
+        except subprocess.TimeoutExpired:
+            reporter.warn_check("Vulkan", "failed after resume (timeout)")
+    else:
+        reporter.warn_check("Vulkan", "vulkaninfo unavailable")
+
+
+def check_displays(reporter: DiagnosticReporter) -> None:
+    if reporter.have("kscreen-doctor"):
+        res = subprocess.run(["kscreen-doctor", "-o"], capture_output=True, text=True, check=False)
+        # Count lines containing ' connected'
+        connected_count = sum(1 for line in res.stdout.splitlines() if " connected" in line)
+        if connected_count > 0:
+            reporter.pass_check("Displays", f"{connected_count} connected output(s)")
+        else:
+            reporter.warn_check("Displays", "no connected output reported")
+    else:
+        reporter.warn_check("Displays", "kscreen-doctor unavailable")
+
+
+def check_journal_errors(reporter: DiagnosticReporter) -> None:
+    if reporter.have("journalctl"):
+        res = subprocess.run(
+            ["journalctl", "-b", "--since", "-10 minutes", "-p", "err", "--no-pager"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode == 0:
+            keywords = ("amdgpu", "nvidia", "i915", "xe", "bluetooth", "networkmanager", "pipewire", "wireplumber", "kwin")
+            err_lines = [
+                line for line in res.stdout.splitlines()
+                if any(kw in line.lower() for kw in keywords)
+            ]
+            if not err_lines:
+                reporter.pass_check("Recent critical logs", "no matching errors in last 10 minutes")
+            else:
+                reporter.warn_check("Recent critical logs", f"{len(err_lines)} matching error(s) in last 10 minutes")
+        else:
+            reporter.warn_check("Recent critical logs", "journalctl query failed")
+    else:
+        reporter.warn_check("Recent critical logs", "journalctl unavailable")
+
+
+def main() -> None:
+    reporter = DiagnosticReporter("Resume Check")
+    reporter.print_header()
+
+    check_loginctl(reporter)
+    check_network(reporter)
+    check_services(reporter)
+    check_bluetooth_adapter(reporter)
+    check_gpu(reporter)
+    check_vulkan(reporter)
+    check_displays(reporter)
+    check_journal_errors(reporter)
+
+    reporter.print_result("resume readiness")
+
+
+if __name__ == "__main__":
+    main()
