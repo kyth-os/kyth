@@ -40,7 +40,7 @@ def _ensure_kyth_shared_path() -> None:
 
 
 _ensure_kyth_shared_path()
-from kyth_shared.config import load_toml_config  # noqa: E402
+from kyth_shared.daemon import BaseDaemon  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -60,12 +60,6 @@ DEFAULT_CONFIG = {
 }
 
 
-def load_config() -> dict:
-    return load_toml_config(
-        "telem.toml",
-        default_config=DEFAULT_CONFIG,
-        section_name="telemetry",
-    )
 
 # ---------------------------------------------------------------------------
 # MangoHud config injection
@@ -470,47 +464,37 @@ def scan(conn: sqlite3.Connection, min_file_age: int = 15) -> int:
     return ingested
 
 
+class TelemetryDaemon(BaseDaemon):
+    def __init__(self) -> None:
+        super().__init__(
+            "kyth-telem",
+            config_filename="telem.toml",
+            config_section="telemetry",
+            default_config=DEFAULT_CONFIG,
+            poll_interval_key="scan_interval",
+            default_poll_interval=10.0,
+        )
+        self.conn = None
+
+    def on_start(self) -> None:
+        ensure_mangohud_output()
+        self.conn = open_db()
+        self.logger.info("Started — watching %s", SESSIONS_DIR)
+
+    def poll(self) -> None:
+        min_file_age = self.config.get("min_file_age", 15)
+        n = scan(self.conn, min_file_age=min_file_age)
+        if n:
+            self.logger.info("Ingested %d new session(s)", n)
+
+    def on_stop(self) -> None:
+        if self.conn:
+            self.conn.close()
+
+
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(name)s: %(levelname)s %(message)s",
-        stream=sys.stderr,
-    )
-
-    ensure_mangohud_output()
-
-    conn = open_db()
-    force_scan = False
-    cfg = load_config()
-    scan_interval = cfg.get("scan_interval", 10)
-    min_file_age = cfg.get("min_file_age", 15)
-
-    def on_sighup(signum, frame):
-        nonlocal force_scan, cfg, scan_interval, min_file_age
-        LOG.info("SIGHUP — reloading config and re-scanning immediately")
-        cfg = load_config()
-        scan_interval = cfg.get("scan_interval", 10)
-        min_file_age = cfg.get("min_file_age", 15)
-        force_scan = True
-
-    signal.signal(signal.SIGHUP, on_sighup)
-
-    LOG.info("Started — watching %s", SESSIONS_DIR)
-
-    while True:
-        try:
-            n = scan(conn, min_file_age=min_file_age)
-            if n:
-                LOG.info("Ingested %d new session(s)", n)
-        except Exception as exc:
-            LOG.exception("Scan error: %s", exc)
-
-        force_scan = False
-        # Sleep in small chunks so SIGHUP wakes us promptly
-        for _ in range(scan_interval * 2):
-            if force_scan:
-                break
-            time.sleep(0.5)
+    daemon = TelemetryDaemon()
+    sys.exit(daemon.run())
 
 
 if __name__ == "__main__":

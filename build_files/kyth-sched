@@ -41,7 +41,7 @@ def _ensure_kyth_shared_path() -> None:
 
 _ensure_kyth_shared_path()
 from kyth_shared.gaming import check_gaming_reason  # noqa: E402
-from kyth_shared.config import load_toml_config  # noqa: E402
+from kyth_shared.daemon import BaseDaemon  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -63,16 +63,7 @@ DEFAULT_CONFIG: dict = {
 
 
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
 
-def load_config() -> dict:
-    return load_toml_config(
-        "sched-profiles.toml",
-        default_config=DEFAULT_CONFIG,
-        section_name="scheduler",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -186,77 +177,75 @@ def write_status(profile: str, scheduler: str, gaming: bool, override: bool) -> 
         LOG.debug("Could not write status: %s", exc)
 
 
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
+class SchedDaemon(BaseDaemon):
+    def __init__(self) -> None:
+        super().__init__(
+            "kyth-sched",
+            config_filename="sched-profiles.toml",
+            config_section="scheduler",
+            default_config=DEFAULT_CONFIG,
+            poll_interval_key="poll_interval",
+            default_poll_interval=5.0,
+        )
+        self.profile = "desktop"
+        self.gaming_prev = False
+        self.manual_override: str | None = None
+
+    def setup_signals(self) -> None:
+        super().setup_signals()
+
+        def force_gaming(signum, frame):
+            self.logger.info("Manual override → gaming (SIGUSR1)")
+            self.manual_override = "gaming"
+            self.wakeup()
+
+        def force_desktop(signum, frame):
+            self.logger.info("Manual override cleared (SIGUSR2)")
+            self.manual_override = None
+            self.wakeup()
+
+        signal.signal(signal.SIGUSR1, force_gaming)
+        signal.signal(signal.SIGUSR2, force_desktop)
+
+    def on_start(self) -> None:
+        set_scheduler(self.config["desktop_scheduler"])
+        self.logger.info(
+            "Started — desktop=%s  gaming=%s  poll=%ds",
+            self.config["desktop_scheduler"],
+            self.config["gaming_scheduler"],
+            self.get_poll_interval(),
+        )
+
+    def poll(self) -> None:
+        effective = self.manual_override or ("gaming" if is_gaming() else "desktop")
+        gaming_now = (effective == "gaming")
+
+        if gaming_now != self.gaming_prev:
+            if gaming_now:
+                set_scheduler(self.config["gaming_scheduler"])
+                if self.config.get("integrate_perf_mode"):
+                    enter_gaming_perf_mode()
+                self.profile = "gaming"
+                self.logger.info("→ gaming profile (%s)", self.config["gaming_scheduler"])
+            else:
+                set_scheduler(self.config["desktop_scheduler"])
+                if self.config.get("integrate_perf_mode"):
+                    perf_mode("restore")
+                self.profile = "desktop"
+                self.logger.info("→ desktop profile (%s)", self.config["desktop_scheduler"])
+            self.gaming_prev = gaming_now
+
+        write_status(
+            self.profile,
+            current_scheduler(),
+            gaming_now,
+            self.manual_override is not None,
+        )
+
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(name)s: %(levelname)s %(message)s",
-        stream=sys.stderr,
-    )
-
-    cfg = load_config()
-    profile = "desktop"
-    gaming_prev = False
-    manual_override: str | None = None   # "gaming" | "desktop" | None
-
-    def reload_config(signum, frame):
-        nonlocal cfg
-        LOG.info("Reloading config (SIGHUP)")
-        cfg = load_config()
-
-    def force_gaming(signum, frame):
-        nonlocal manual_override
-        LOG.info("Manual override → gaming (SIGUSR1)")
-        manual_override = "gaming"
-
-    def force_desktop(signum, frame):
-        nonlocal manual_override
-        LOG.info("Manual override cleared (SIGUSR2)")
-        manual_override = None
-
-    signal.signal(signal.SIGHUP,  reload_config)
-    signal.signal(signal.SIGUSR1, force_gaming)
-    signal.signal(signal.SIGUSR2, force_desktop)
-
-    # Apply initial scheduler profile. Do not force kyth-performance-mode
-    # balanced at login: that overwrites the user's chosen power/compositor
-    # state even before a game has run.
-    set_scheduler(cfg["desktop_scheduler"])
-
-    LOG.info(
-        "Started — desktop=%s  gaming=%s  poll=%ds",
-        cfg["desktop_scheduler"], cfg["gaming_scheduler"], cfg["poll_interval"],
-    )
-
-    while True:
-        try:
-            effective = manual_override or ("gaming" if is_gaming() else "desktop")
-            gaming_now = (effective == "gaming")
-
-            if gaming_now != gaming_prev:
-                if gaming_now:
-                    set_scheduler(cfg["gaming_scheduler"])
-                    if cfg.get("integrate_perf_mode"):
-                        enter_gaming_perf_mode()
-                    profile = "gaming"
-                    LOG.info("→ gaming profile (%s)", cfg["gaming_scheduler"])
-                else:
-                    set_scheduler(cfg["desktop_scheduler"])
-                    if cfg.get("integrate_perf_mode"):
-                        perf_mode("restore")
-                    profile = "desktop"
-                    LOG.info("→ desktop profile (%s)", cfg["desktop_scheduler"])
-                gaming_prev = gaming_now
-
-            write_status(profile, current_scheduler(), gaming_now, manual_override is not None)
-
-        except Exception as exc:
-            LOG.exception("Poll error: %s", exc)
-
-        time.sleep(cfg["poll_interval"])
+    daemon = SchedDaemon()
+    sys.exit(daemon.run())
 
 
 if __name__ == "__main__":
