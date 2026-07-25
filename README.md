@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 20:21:14 UTC
+- Last refreshed (UTC): 2026-07-25 20:23:00 UTC
 - Current branch: testing
-- HEAD commit: dbdea30
-- Last commit title: refactoring
-- Last commit date: 2026-07-25T11:49:10-04:00
+- HEAD commit: 3b1c218
+- Last commit title: Refactor legacy shell utilities to Python
+- Last commit date: 2026-07-25T16:21:14-04:00
 - CI workflow files: 8
 - Build script files: 20
 
