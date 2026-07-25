@@ -41,6 +41,7 @@ def _ensure_kyth_shared_path() -> None:
 
 _ensure_kyth_shared_path()
 from kyth_shared.gaming import check_gaming_reason  # noqa: E402
+from kyth_shared.config import load_toml_config  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -67,19 +68,11 @@ DEFAULT_CONFIG: dict = {
 # ---------------------------------------------------------------------------
 
 def load_config() -> dict:
-    candidates = [
-        Path.home() / ".config/kyth/sched-profiles.toml",
-        Path("/etc/kyth/sched-profiles.toml"),
-    ]
-    for p in candidates:
-        if p.exists():
-            try:
-                with open(p, "rb") as f:
-                    data = tomllib.load(f)
-                return {**DEFAULT_CONFIG, **data.get("scheduler", data)}
-            except Exception as exc:
-                LOG.warning("Could not read config %s: %s", p, exc)
-    return DEFAULT_CONFIG.copy()
+    return load_toml_config(
+        "sched-profiles.toml",
+        default_config=DEFAULT_CONFIG,
+        section_name="scheduler",
+    )
 
 
 # ---------------------------------------------------------------------------

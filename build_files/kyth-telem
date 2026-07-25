@@ -29,6 +29,19 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+
+def _ensure_kyth_shared_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+
+
+_ensure_kyth_shared_path()
+from kyth_shared.config import load_toml_config  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -41,8 +54,18 @@ MANGOHUD_CONF = _HOME / ".config/MangoHud/MangoHud.conf"
 
 LOG = logging.getLogger("kyth-telem")
 
-_SCAN_INTERVAL = 10      # seconds between filesystem polls
-_MIN_FILE_AGE  = 15      # seconds old before we consider a CSV stable/complete
+DEFAULT_CONFIG = {
+    "scan_interval": 10,
+    "min_file_age": 15,
+}
+
+
+def load_config() -> dict:
+    return load_toml_config(
+        "telem.toml",
+        default_config=DEFAULT_CONFIG,
+        section_name="telemetry",
+    )
 
 # ---------------------------------------------------------------------------
 # MangoHud config injection
@@ -426,7 +449,7 @@ def ingest_csv(conn: sqlite3.Connection, path: Path) -> bool:
 # Main loop
 # ---------------------------------------------------------------------------
 
-def scan(conn: sqlite3.Connection) -> int:
+def scan(conn: sqlite3.Connection, min_file_age: int = 15) -> int:
     """Scan SESSIONS_DIR for stable new CSVs. Returns count ingested."""
     ingested = 0
     now = time.time()
@@ -438,7 +461,7 @@ def scan(conn: sqlite3.Connection) -> int:
                 age = now - entry.stat().st_mtime
             except OSError:
                 continue
-            if age < _MIN_FILE_AGE:
+            if age < min_file_age:
                 continue  # still being written
             if ingest_csv(conn, entry):
                 ingested += 1
@@ -458,10 +481,16 @@ def main() -> None:
 
     conn = open_db()
     force_scan = False
+    cfg = load_config()
+    scan_interval = cfg.get("scan_interval", 10)
+    min_file_age = cfg.get("min_file_age", 15)
 
     def on_sighup(signum, frame):
-        nonlocal force_scan
-        LOG.info("SIGHUP — re-scanning immediately")
+        nonlocal force_scan, cfg, scan_interval, min_file_age
+        LOG.info("SIGHUP — reloading config and re-scanning immediately")
+        cfg = load_config()
+        scan_interval = cfg.get("scan_interval", 10)
+        min_file_age = cfg.get("min_file_age", 15)
         force_scan = True
 
     signal.signal(signal.SIGHUP, on_sighup)
@@ -470,7 +499,7 @@ def main() -> None:
 
     while True:
         try:
-            n = scan(conn)
+            n = scan(conn, min_file_age=min_file_age)
             if n:
                 LOG.info("Ingested %d new session(s)", n)
         except Exception as exc:
@@ -478,7 +507,7 @@ def main() -> None:
 
         force_scan = False
         # Sleep in small chunks so SIGHUP wakes us promptly
-        for _ in range(_SCAN_INTERVAL * 2):
+        for _ in range(scan_interval * 2):
             if force_scan:
                 break
             time.sleep(0.5)
