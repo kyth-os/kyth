@@ -1,6 +1,3 @@
-import json
-from urllib.request import Request, urlopen
-
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
     _IS_LIVE, _release_worker_when_finished, _restyle,
@@ -9,7 +6,7 @@ from .services.diagnostics import _command_stdout
 from .services.workers import GitHubIssueWorker
 from .core_base import _bootc_image_digest, _current_branch
 from .qt import (
-    QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl, Signal,
+    QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl,
 )
 from .widgets import (
     Page, _make_card,

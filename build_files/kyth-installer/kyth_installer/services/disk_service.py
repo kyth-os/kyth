@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from pathlib import Path
 from ..runner import run_command
 from ..system import _as_root, _settle
 

@@ -3,11 +3,11 @@ import shutil
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _release_worker_when_finished
 from .services.workers import ControllerProbeWorker
-from .services.hardware import _detect_controllers, controller_status_view
+from .services.hardware import controller_status_view
 from .services.runtime import Worker
 from .services.privileged import AuthFrontend, helper_action
 from .qt import (
-    QHBoxLayout, QLabel, QMessageBox, QPushButton, Signal,
+    QHBoxLayout, QLabel, QMessageBox, QPushButton,
 )
 from .services.launch import flatpak_run, popen, systemsettings
 from .widgets import (

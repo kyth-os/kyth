@@ -6,7 +6,6 @@ partition table is backed up for rollback via sgdisk.
 """
 
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -14,11 +13,9 @@ from typing import Optional
 # pylint: disable-next=unused-import
 from .config import FILESYSTEM_OPTIONS, _FILESYSTEM  # noqa: F401 — re-exported for server.py
 from .disk import (
-    _normal_device_path, list_partitions, _safe_int, _block_size_bytes, _partition_number,
+    _normal_device_path, list_partitions, _safe_int, _partition_number,
     _partition_start_bytes, _human_size, _latest_partition_on_disk,
 )
-from .runner import run_command
-from .system import _as_root, _settle
 from .services.disk_service import DiskService
 
 def _require_sgdisk(log=None):

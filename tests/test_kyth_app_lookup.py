@@ -3,7 +3,7 @@ import os
 import tempfile
 import json
 
-from kyth_shared import load_app_db, suggest_app
+from kyth_shared import suggest_app
 
 
 class TestKythAppLookup(unittest.TestCase):
@@ -29,7 +29,10 @@ class TestKythAppLookup(unittest.TestCase):
             self.assertEqual(flatpak_id, "org.foobar.FooBar")
 
     def test_exe_handler_lookup_integration(self):
-        # Import the build_files/kyth-exe-handler module dynamically
+        # Import the build_files/kyth-exe-handler module dynamically. It has
+        # no .py suffix, so spec_from_file_location needs an explicit loader
+        # to recognize it as source rather than failing to infer one.
+        import importlib.util
         from importlib.machinery import SourceFileLoader
         import sys
         from unittest.mock import MagicMock
@@ -39,10 +42,12 @@ class TestKythAppLookup(unittest.TestCase):
 
         handler_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "build_files", "kyth-exe-handler")
         loader = SourceFileLoader("kyth_exe_handler", handler_path)
-        kyth_exe_handler = loader.load_module()
+        spec = importlib.util.spec_from_file_location("kyth_exe_handler", handler_path, loader=loader)
+        kyth_exe_handler = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(kyth_exe_handler)
 
         # Test normalisation + lookup
-        app_name, suggestion, flatpak_id = kyth_exe_handler._lookup("Setup_Discord-x64.exe")
+        app_name, _suggestion, flatpak_id = kyth_exe_handler._lookup("Setup_Discord-x64.exe")
         self.assertEqual(app_name, "Discord")
         self.assertEqual(flatpak_id, "com.discordapp.Discord")
 

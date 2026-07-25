@@ -1,24 +1,18 @@
-import json
-import os
 from typing import ClassVar
-from urllib.request import Request, urlopen
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.workers import CompatRefreshWorker
 from .services.gaming import compat_data
 from .services.gaming.compat_data import (
     CompatGame,
-    _COMPAT_CACHE_PATH,
     _COMPAT_GAMES,
-    _COMPAT_REMOTE_URL,
     _COMPAT_STALE_DAYS,
-    _parse_compat_payload,
     replace_compat_games,
     calculate_data_age_days,
     calculate_compat_stats,
 )
 from .qt import (
-    QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt, Signal,
+    QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
 )
 from .widgets import (
     Page, _make_card,
