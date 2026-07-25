@@ -37,6 +37,33 @@ def copy_steam_icon(icon_name: str, src_icons_root: Path, dst_icons_root: Path) 
     return copied
 
 
+def refresh_desktop_database(desktop_dir: Path | str) -> None:
+    """Refresh the freedesktop MIME/desktop-file database for a directory of .desktop files."""
+    if shutil.which("update-desktop-database"):
+        try:
+            subprocess.run(["update-desktop-database", str(desktop_dir)], capture_output=True, check=False)
+        except Exception:
+            pass
+
+
+def refresh_icon_cache(icons_dir: Path | str) -> None:
+    """Refresh the GTK icon cache for a hicolor icon theme directory."""
+    if shutil.which("gtk-update-icon-cache"):
+        try:
+            subprocess.run(["gtk-update-icon-cache", "-q", "-t", str(icons_dir)], capture_output=True, check=False)
+        except Exception:
+            pass
+
+
+def refresh_kde_sycoca() -> None:
+    """Rebuild KDE Plasma's application/service cache (kbuildsycoca6)."""
+    if shutil.which("kbuildsycoca6"):
+        try:
+            subprocess.run(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False)
+        except Exception:
+            pass
+
+
 def rewrite_steam_exec(exec_line: str) -> str | None:
     """Rewrite steam Exec= commands to launch correctly via Flatpak Steam."""
     target = exec_line.split("=", 1)[1].strip()
@@ -151,17 +178,9 @@ def export_steam_games() -> tuple[int, int]:
             skipped += 1
 
     # Update database and caches
-    if shutil.which("update-desktop-database"):
-        try:
-            subprocess.run(["update-desktop-database", str(dst_apps)], capture_output=True, check=False)
-        except Exception:
-            pass
-
-    if shutil.which("gtk-update-icon-cache") and dst_icons.is_dir():
-        try:
-            subprocess.run(["gtk-update-icon-cache", "-q", "-t", str(dst_icons)], capture_output=True, check=False)
-        except Exception:
-            pass
+    refresh_desktop_database(dst_apps)
+    if dst_icons.is_dir():
+        refresh_icon_cache(dst_icons)
 
     return exported, skipped
 
@@ -213,10 +232,7 @@ def categorize_web_apps() -> bool:
             except Exception:
                 pass
 
-    if changed and shutil.which("kbuildsycoca6"):
-        try:
-            subprocess.run(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False)
-        except Exception:
-            pass
+    if changed:
+        refresh_kde_sycoca()
 
     return changed

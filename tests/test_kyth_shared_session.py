@@ -10,14 +10,40 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.session import (
+    already_run,
     check_firstboot_app_status,
     disable_vscode_brave_wallet_prompts,
+    mark_run,
+    marker_path,
     write_chromium_flags,
     write_code_argv,
 )
 
 
 class SessionTests(unittest.TestCase):
+    @mock.patch("pathlib.Path.home")
+    def test_marker_path(self, mock_home) -> None:
+        mock_home.return_value = pathlib.Path("/dummy/home")
+        self.assertEqual(marker_path("some-stamp"), pathlib.Path("/dummy/home/.local/share/kyth/some-stamp"))
+
+    @mock.patch("pathlib.Path.is_file")
+    def test_already_run(self, mock_is_file) -> None:
+        mock_is_file.return_value = True
+        self.assertTrue(already_run("some-stamp"))
+        mock_is_file.return_value = False
+        self.assertFalse(already_run("some-stamp"))
+
+    @mock.patch("pathlib.Path.touch")
+    @mock.patch("pathlib.Path.mkdir")
+    def test_mark_run(self, mock_mkdir, mock_touch) -> None:
+        mark_run("some-stamp")
+        mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+        mock_touch.assert_called_once_with(exist_ok=True)
+
+    @mock.patch("pathlib.Path.mkdir")
+    def test_mark_run_ignores_errors(self, mock_mkdir) -> None:
+        mock_mkdir.side_effect = OSError
+        mark_run("some-stamp")
     @mock.patch("pathlib.Path.is_file")
     @mock.patch("pathlib.Path.read_text")
     @mock.patch("pathlib.Path.write_text")

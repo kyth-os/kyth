@@ -19,9 +19,15 @@ from pathlib import Path
 
 
 def _ensure_kyth_shared_path() -> None:
-    source_path = Path(__file__).resolve().parent.parent / "kyth_shared"
-    if (source_path / "kyth_shared").is_dir() and str(source_path) not in sys.path:
-        sys.path.insert(0, str(source_path))
+    """Add build_files/kyth_shared to sys.path when running from a repo checkout."""
+    here = Path(__file__).resolve().parent
+    for candidate_dir in (here, here.parent):
+        candidate = candidate_dir / "kyth_shared"
+        if (candidate / "kyth_shared").is_dir():
+            path = str(candidate)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            return
 
 
 _ensure_kyth_shared_path()

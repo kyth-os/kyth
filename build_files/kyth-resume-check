@@ -5,21 +5,25 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
 def _ensure_kyth_shared_path() -> None:
-    import sys
+    """Add build_files/kyth_shared to sys.path when running from a repo checkout."""
     here = Path(__file__).resolve().parent
-    candidate = here / "kyth_shared"
-    if (candidate / "kyth_shared").is_dir():
-        path = str(candidate)
-        if path not in sys.path:
-            sys.path.insert(0, path)
+    for candidate_dir in (here, here.parent):
+        candidate = candidate_dir / "kyth_shared"
+        if (candidate / "kyth_shared").is_dir():
+            path = str(candidate)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            return
 
 
 _ensure_kyth_shared_path()
 from kyth_shared.diagnostics import DiagnosticReporter  # noqa: E402
+from kyth_shared.system.gpu import lspci_gpu_lines  # noqa: E402
 
 
 def check_loginctl(reporter: DiagnosticReporter) -> None:
@@ -77,8 +81,7 @@ def check_bluetooth_adapter(reporter: DiagnosticReporter) -> None:
 
 def check_gpu(reporter: DiagnosticReporter) -> None:
     if reporter.have("lspci"):
-        res = subprocess.run(["lspci", "-nn"], capture_output=True, text=True, check=False)
-        gpus = [line for line in res.stdout.splitlines() if any(k in line.lower() for k in ("vga", "3d", "display"))]
+        gpus = lspci_gpu_lines()
         if gpus:
             reporter.pass_check("GPU detected", gpus[0].strip())
         else:

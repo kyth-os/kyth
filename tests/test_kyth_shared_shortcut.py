@@ -15,6 +15,9 @@ from kyth_shared.desktop.shortcut import (
     categorize_web_apps,
     copy_steam_icon,
     export_steam_games,
+    refresh_desktop_database,
+    refresh_icon_cache,
+    refresh_kde_sycoca,
     rewrite_steam_exec,
     safe_id,
 )
@@ -82,6 +85,38 @@ class ShortcutTests(unittest.TestCase):
             exported, skipped = export_steam_games()
             self.assertEqual(exported, 1)
             self.assertEqual(skipped, 0)
+
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which")
+    def test_refresh_desktop_database(self, mock_which, mock_run) -> None:
+        mock_which.return_value = "/usr/bin/update-desktop-database"
+        refresh_desktop_database("/tmp/apps")
+        mock_run.assert_called_once_with(
+            ["update-desktop-database", "/tmp/apps"], capture_output=True, check=False
+        )
+
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which")
+    def test_refresh_desktop_database_missing_binary(self, mock_which, mock_run) -> None:
+        mock_which.return_value = None
+        refresh_desktop_database("/tmp/apps")
+        mock_run.assert_not_called()
+
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which")
+    def test_refresh_icon_cache(self, mock_which, mock_run) -> None:
+        mock_which.return_value = "/usr/bin/gtk-update-icon-cache"
+        refresh_icon_cache("/tmp/icons")
+        mock_run.assert_called_once_with(
+            ["gtk-update-icon-cache", "-q", "-t", "/tmp/icons"], capture_output=True, check=False
+        )
+
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which")
+    def test_refresh_kde_sycoca(self, mock_which, mock_run) -> None:
+        mock_which.return_value = "/usr/bin/kbuildsycoca6"
+        refresh_kde_sycoca()
+        mock_run.assert_called_once_with(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False)
 
     def test_categorize_web_apps(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

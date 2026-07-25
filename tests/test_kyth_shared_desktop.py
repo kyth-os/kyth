@@ -71,6 +71,28 @@ class DesktopPlasmaTests(unittest.TestCase):
             check=False,
         )
 
+    @mock.patch("subprocess.run")
+    @mock.patch("shutil.which")
+    def test_kwriteconfig_nested_group(self, mock_which, mock_run):
+        mock_which.return_value = "/usr/bin/kwriteconfig6"
+        mock_run.return_value = mock.Mock(returncode=0)
+        self.assertTrue(
+            plasma.kwriteconfig(
+                "file", ["Containments", "1", "Applets", "2", "General"], "key", "value"
+            )
+        )
+        mock_run.assert_called_once_with(
+            [
+                "/usr/bin/kwriteconfig6", "--file", "file",
+                "--group", "Containments", "--group", "1",
+                "--group", "Applets", "--group", "2", "--group", "General",
+                "--key", "key", "value",
+            ],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+
     @mock.patch("kyth_shared.desktop.plasma.evaluate_plasma_script")
     @mock.patch("kyth_shared.desktop.plasma.kwriteconfig")
     @mock.patch("kyth_shared.desktop.plasma.filter_available_launchers")

@@ -110,12 +110,16 @@ def kreadconfig(file: str, group: str, key: str) -> str | None:
     return None
 
 
-def kwriteconfig(file: str, group: str, key: str, value: str, value_type: str | None = None) -> bool:
-    """Write a KDE configuration key."""
+def kwriteconfig(file: str, group: str | list[str], key: str, value: str, value_type: str | None = None) -> bool:
+    """Write a KDE configuration key. ``group`` may be a nested group path, e.g. ``["Containments", "1", "General"]``."""
     cmd = shutil.which("kwriteconfig6") or shutil.which("kwriteconfig")
     if not cmd:
         return False
-    args = [cmd, "--file", file, "--group", group, "--key", key]
+    groups = [group] if isinstance(group, str) else group
+    args = [cmd, "--file", file]
+    for g in groups:
+        args.extend(["--group", g])
+    args.extend(["--key", key])
     if value_type:
         args.extend(["--type", value_type])
     args.append(value)

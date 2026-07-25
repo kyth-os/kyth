@@ -4,32 +4,29 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
 def _ensure_kyth_shared_path() -> None:
-    import sys
+    """Add build_files/kyth_shared to sys.path when running from a repo checkout."""
     here = Path(__file__).resolve().parent
-    candidate = here / "kyth_shared"
-    if (candidate / "kyth_shared").is_dir():
-        path = str(candidate)
-        if path not in sys.path:
-            sys.path.insert(0, path)
+    for candidate_dir in (here, here.parent):
+        candidate = candidate_dir / "kyth_shared"
+        if (candidate / "kyth_shared").is_dir():
+            path = str(candidate)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            return
 
 
 _ensure_kyth_shared_path()
 from kyth_shared.diagnostics import DiagnosticReporter  # noqa: E402
-
-
-def check_nvidia_loaded() -> bool:
-    try:
-        with open("/proc/modules", "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("nvidia "):
-                    return True
-    except Exception:
-        pass
-    return False
+from kyth_shared.system.gpu import (  # noqa: E402
+    is_kernel_module_loaded,
+    rpm_package_installed,
+    run_lspci_nn,
+)
 
 
 def main() -> None:
@@ -42,8 +39,7 @@ def main() -> None:
         return
 
     # Check for NVIDIA GPU
-    lspci_res = subprocess.run(["lspci", "-nn"], capture_output=True, text=True, check=False)
-    nvidia_gpus = [line for line in lspci_res.stdout.splitlines() if "nvidia" in line.lower()]
+    nvidia_gpus = [line for line in run_lspci_nn() if "nvidia" in line.lower()]
 
     if not nvidia_gpus:
         reporter.pass_check("NVIDIA hardware", "no NVIDIA GPU detected")
@@ -54,8 +50,7 @@ def main() -> None:
     reporter.pass_check("NVIDIA hardware", gpu)
 
     # Check akmod-nvidia package
-    rpm_res = subprocess.run(["rpm", "-q", "akmod-nvidia"], capture_output=True, check=False)
-    if rpm_res.returncode == 0:
+    if rpm_package_installed("akmod-nvidia"):
         reporter.pass_check("akmod-nvidia", "installed")
     else:
         reporter.fail_check("akmod-nvidia", "missing from image")
@@ -68,7 +63,7 @@ def main() -> None:
         reporter.warn_check("Kernel module built", "not built for current kernel yet")
 
     # Check if loaded
-    if check_nvidia_loaded():
+    if is_kernel_module_loaded("nvidia"):
         reporter.pass_check("Kernel module loaded", "nvidia loaded")
     else:
         reporter.warn_check("Kernel module loaded", "not loaded; reboot may be required after build")

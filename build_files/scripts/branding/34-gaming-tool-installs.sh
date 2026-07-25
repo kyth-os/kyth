@@ -11,4 +11,6 @@ install -m 0755 /ctx/low-latency-run /usr/bin/low-latency-run
 install -m 0644 /ctx/kyth-perf-report-common.sh /usr/libexec/kyth-perf-report-common.sh
 install -m 0755 /ctx/kyth-kerver /usr/bin/kyth-kerver
 install -m 0755 /ctx/kyth-snappy-bench /usr/bin/kyth-snappy-bench
+# Sourced (not executed directly) by kyth-device-info and kyth-creator-check.
+install -m 0644 /ctx/kyth-report-common.sh /usr/libexec/kyth-report-common.sh
 install -m 0755 /ctx/kyth-device-info /usr/bin/kyth-device-info

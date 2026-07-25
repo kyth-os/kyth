@@ -8,6 +8,8 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
+from pathlib import Path
 
 VERSION = "v13"
 
@@ -31,25 +33,22 @@ VERSION = "v13"
 # PreviewSettings
 
 
-def kwriteconfig(file: str, group: str, key: str, value: str, type_str: str | None = None) -> None:
-    if shutil.which("kwriteconfig6"):
-        cmd = ["kwriteconfig6", "--file", file, "--group", group, "--key", key]
-        if type_str:
-            cmd += ["--type", type_str]
-        cmd.append(str(value))
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def _ensure_kyth_shared_path() -> None:
+    """Add build_files/kyth_shared to sys.path when running from a repo checkout."""
+    here = Path(__file__).resolve().parent
+    for candidate_dir in (here, here.parent):
+        candidate = candidate_dir / "kyth_shared"
+        if (candidate / "kyth_shared").is_dir():
+            path = str(candidate)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            return
 
 
-def kreadconfig(file: str, group: str, key: str) -> str:
-    if shutil.which("kreadconfig6"):
-        res = subprocess.run(
-            ["kreadconfig6", "--file", file, "--group", group, "--key", key],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True
-        )
-        return res.stdout.strip()
-    return ""
+_ensure_kyth_shared_path()
+from kyth_shared.desktop.plasma import kreadconfig, kwriteconfig  # noqa: E402
+from kyth_shared.desktop.shortcut import refresh_kde_sycoca  # noqa: E402
+from kyth_shared.session import already_run, mark_run  # noqa: E402
 
 
 def ensure_place(places_file: str, href: str, title: str, icon: str) -> None:
@@ -82,7 +81,7 @@ def main() -> None:
     args = parser.parse_args()
 
     stamp_dir = os.path.expanduser("~/.local/share/kyth")
-    stamp = os.path.join(stamp_dir, f"user-polish-{VERSION}")
+    stamp_name = f"user-polish-{VERSION}"
     old_autostart = os.path.expanduser("~/.config/autostart/kyth-windows-friendly-defaults.desktop")
     new_autostart = os.path.expanduser("~/.config/autostart/kyth-user-polish.desktop")
 
@@ -91,7 +90,7 @@ def main() -> None:
         if glob.glob(os.path.join(stamp_dir, "user-polish-*")):
             had_polish_stamp = 1
 
-    if os.path.isfile(stamp) and not args.force:
+    if already_run(stamp_name) and not args.force:
         try:
             if os.path.isfile(old_autostart):
                 os.remove(old_autostart)
@@ -301,13 +300,11 @@ def main() -> None:
 
             wp = "/usr/share/wallpapers/kyth/contents/images/1920x1080.svg"
             if os.path.isfile(wp):
-                # Write to plasma-org.kde.plasma.desktop-appletsrc
-                cmd = [
-                    "kwriteconfig6", "--file", "plasma-org.kde.plasma.desktop-appletsrc",
-                    "--group", "Containments", "--group", "1", "--group", "Wallpaper",
-                    "--group", "org.kde.image", "--group", "General", "--key", "Image", wp
-                ]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                kwriteconfig(
+                    "plasma-org.kde.plasma.desktop-appletsrc",
+                    ["Containments", "1", "Wallpaper", "org.kde.image", "General"],
+                    "Image", wp,
+                )
 
         if args.force or not current_favorites:
             favs = (
@@ -334,12 +331,11 @@ def main() -> None:
         if has_mission_center:
             # Group keys in kglobalshortcutsrc
             # services -> io.missioncenter.MissionCenter.desktop -> _launch
-            cmd1 = [
-                "kwriteconfig6", "--file", "kglobalshortcutsrc",
-                "--group", "services", "--group", "io.missioncenter.MissionCenter.desktop",
-                "--key", "_launch", "Ctrl+Shift+Esc"
-            ]
-            subprocess.run(cmd1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            kwriteconfig(
+                "kglobalshortcutsrc",
+                ["services", "io.missioncenter.MissionCenter.desktop"],
+                "_launch", "Ctrl+Shift+Esc",
+            )
             kwriteconfig("kglobalshortcutsrc", "org.kde.plasma-systemmonitor.desktop", "_launch", "none,none,System Monitor")
         else:
             kwriteconfig("kglobalshortcutsrc", "org.kde.plasma-systemmonitor.desktop", "_launch", "Ctrl+Shift+Esc,none,System Monitor")
@@ -351,12 +347,11 @@ def main() -> None:
 
         kwriteconfig("kglobalshortcutsrc", "org.kde.klipper.desktop", "show_clipboard_history", "Meta+V,Ctrl+Alt+V,Show Clipboard History")
         
-        cmd2 = [
-            "kwriteconfig6", "--file", "kglobalshortcutsrc",
-            "--group", "services", "--group", "org.kde.dolphin.desktop",
-            "--key", "_launch", "Meta+E"
-        ]
-        subprocess.run(cmd2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        kwriteconfig(
+            "kglobalshortcutsrc",
+            ["services", "org.kde.dolphin.desktop"],
+            "_launch", "Meta+E",
+        )
 
         kwriteconfig("kglobalshortcutsrc", "org.kde.spectacle.desktop", "RectangularRegionScreenShot", "Meta+Shift+S,Meta+Shift+S,Capture Rectangular Region")
 
@@ -371,12 +366,11 @@ def main() -> None:
         kwriteconfig("kscreenlockerrc", "Daemon", "Timeout", "15")
 
         wp = "/usr/share/wallpapers/kyth/contents/images/1920x1080.svg"
-        cmd3 = [
-            "kwriteconfig6", "--file", "kscreenlockerrc",
-            "--group", "Greeter", "--group", "Wallpaper", "--group", "org.kde.image", "--group", "General",
-            "--key", "Image", wp
-        ]
-        subprocess.run(cmd3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        kwriteconfig(
+            "kscreenlockerrc",
+            ["Greeter", "Wallpaper", "org.kde.image", "General"],
+            "Image", wp,
+        )
 
         kwriteconfig("kwinrc", "TabBox", "LayoutName", "thumbnail_grid")
         kwriteconfig("kwinrc", "TabBox", "ShowDesktop", "false", "bool")
@@ -453,8 +447,7 @@ def main() -> None:
         elif had_polish_stamp == 0:
             subprocess.run(["/usr/bin/kyth-apply-desktop-layout", "--initial"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    if shutil.which("kbuildsycoca6"):
-        subprocess.run(["kbuildsycoca6", "--noincremental"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    refresh_kde_sycoca()
 
     if shutil.which("/usr/bin/kyth-steam-game-export"):
         subprocess.run(["/usr/bin/kyth-steam-game-export"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -494,9 +487,8 @@ def main() -> None:
             except OSError:
                 pass
 
+    mark_run(stamp_name)
     try:
-        with open(stamp, "w", encoding="utf-8") as f:
-            f.write("")
         if os.path.isfile(old_autostart):
             os.remove(old_autostart)
         if os.path.isfile(new_autostart):

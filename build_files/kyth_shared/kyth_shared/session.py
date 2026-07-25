@@ -77,6 +77,26 @@ def disable_vscode_brave_wallet_prompts(home: Path) -> None:
         write_chromium_flags(flags_path)
 
 
+def marker_path(name: str) -> Path:
+    """Path to a ~/.local/share/kyth stamp file used to gate run-once-unless-force behavior."""
+    return Path.home() / ".local/share/kyth" / name
+
+
+def already_run(name: str) -> bool:
+    """Check whether the named marker stamp exists."""
+    return marker_path(name).is_file()
+
+
+def mark_run(name: str) -> None:
+    """Create (or touch) the named marker stamp, creating its parent directory if needed."""
+    path = marker_path(name)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+    except Exception:
+        pass
+
+
 def write_app_status(status_file: Path, state: str, message: str) -> None:
     """Write firstboot setup status variables to a file."""
     status_file.parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +126,6 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
 
     home = Path.home()
     stamp_dir = home / ".local/share/kyth"
-    stamp = stamp_dir / "firstboot-app-status-v1"
     status_file = stamp_dir / "first-run-apps.status"
     default_done = Path("/var/lib/kyth/default-flatpaks-v10-done")
 
@@ -118,7 +137,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
     except Exception:
         pass
 
-    if not force and stamp.is_file() and default_done.is_file():
+    if not force and already_run("firstboot-app-status-v1") and default_done.is_file():
         return 0
 
     time.sleep(delay)
@@ -145,11 +164,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
         write_app_status(status_file, "ready", "Steam, launchers, Bottles, and save backup tools are installed.")
         if force or notify_ready:
             reporter.notify("KythOS apps are ready", "Steam, launchers, Bottles, and save backup tools are installed.")
-        try:
-            stamp.parent.mkdir(parents=True, exist_ok=True)
-            stamp.touch(exist_ok=True)
-        except Exception:
-            pass
+        mark_run("firstboot-app-status-v1")
         return 0
 
     # Query systemd service status

@@ -12,16 +12,21 @@ from pathlib import Path
 
 
 def _ensure_kyth_shared_path() -> None:
+    """Add build_files/kyth_shared to sys.path when running from a repo checkout."""
     here = Path(__file__).resolve().parent
-    candidate = here / "kyth_shared"
-    if (candidate / "kyth_shared").is_dir():
-        path = str(candidate)
-        if path not in sys.path:
-            sys.path.insert(0, path)
+    for candidate_dir in (here, here.parent):
+        candidate = candidate_dir / "kyth_shared"
+        if (candidate / "kyth_shared").is_dir():
+            path = str(candidate)
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            return
 
 
 _ensure_kyth_shared_path()
 from kyth_shared.diagnostics import DiagnosticReporter  # noqa: E402
+from kyth_shared.session import already_run, mark_run  # noqa: E402
+from kyth_shared.system.gpu import loaded_kernel_modules, lspci_gpu_lines  # noqa: E402
 
 
 def is_live_image() -> bool:
@@ -61,20 +66,10 @@ def get_deployment_id(reporter: DiagnosticReporter) -> str:
 
 def check_gpu_modules(reporter: DiagnosticReporter) -> None:
     if reporter.have("lspci"):
-        res = subprocess.run(["lspci", "-nn"], capture_output=True, text=True, check=False)
-        gpus = [line for line in res.stdout.splitlines() if any(k in line.lower() for k in ("vga", "3d", "display"))]
+        gpus = lspci_gpu_lines()
         if gpus:
             gpu_line = gpus[0].lower()
-            # Read loaded modules
-            loaded_mods = set()
-            try:
-                with open("/proc/modules", "r", encoding="utf-8") as f:
-                    for line in f:
-                        parts = line.split()
-                        if parts:
-                            loaded_mods.add(parts[0])
-            except Exception:
-                pass
+            loaded_mods = loaded_kernel_modules()
 
             if "nvidia" in gpu_line:
                 if "nvidia" not in loaded_mods:
@@ -118,10 +113,9 @@ def main() -> None:
     # Resolve deployment ID & stamp
     dep = get_deployment_id(reporter)
     sanitized_dep = re.sub(r"[^A-Za-z0-9_.-]", "_", dep)
-    stamp_dir = Path("~/.local/share/kyth").expanduser()
-    stamp_path = stamp_dir / f"post-update-check-{sanitized_dep}"
+    stamp_name = f"post-update-check-{sanitized_dep}"
 
-    if not args.force and stamp_path.exists():
+    if not args.force and already_run(stamp_name):
         sys.exit(0)
 
     failures: list[str] = []
@@ -193,11 +187,7 @@ def main() -> None:
             print(f"WARN  {w}")
         if not args.no_notify:
             reporter.notify(title, body or "Run ujust smoke-check for details.")
-        try:
-            stamp_dir.mkdir(parents=True, exist_ok=True)
-            stamp_path.touch(exist_ok=True)
-        except Exception:
-            pass
+        mark_run(stamp_name)
         sys.exit(1)
 
     # All pass
@@ -208,11 +198,7 @@ def main() -> None:
             f"{app_name}: ready",
             "Update looks healthy. Rollback is available, gaming services are present, and core desktop audio is active.",
         )
-    try:
-        stamp_dir.mkdir(parents=True, exist_ok=True)
-        stamp_path.touch(exist_ok=True)
-    except Exception:
-        pass
+    mark_run(stamp_name)
     sys.exit(0)
 
 

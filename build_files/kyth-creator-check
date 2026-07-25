@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-section() {
-    echo
-    echo "== $1 =="
-}
-
-safe_cmd() {
-    "$@" 2>/dev/null || true
-}
+# shellcheck source=kyth-report-common.sh disable=SC1091
+source /usr/libexec/kyth-report-common.sh
 
 echo "KythOS Creator Check"
 echo "Generated: $(date -Is)"
