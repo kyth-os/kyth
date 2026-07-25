@@ -1,12 +1,16 @@
+import logging
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.launch import popen
-from ..services.software import _chromium_app_window_cmd, _is_flatpak_installed
-from ..qt import (  # noqa: E501
+from ..services.browser_apps import _chromium_app_window_cmd
+from ..services.flatpak import _is_flatpak_installed
+from ..qt import (
     QCheckBox, QComboBox, QDBusConnection, QDBusInterface, QHBoxLayout, QLabel, QPushButton,
 )
 from ..widgets import _make_card
+
+_logger = logging.getLogger(__name__)
 
 
 class _FocusMixin:
@@ -93,7 +97,7 @@ class _FocusMixin:
                 self._focus_notification_cookie = int(args[0])
                 return True
         except Exception:
-            pass
+            _logger.debug("_inhibit_notifications: D-Bus Inhibit call failed", exc_info=True)
         return False
 
     def _release_notification_inhibit(self):
@@ -104,7 +108,7 @@ class _FocusMixin:
         try:
             self._notifications_interface().call("UnInhibit", cookie)
         except Exception:
-            pass
+            _logger.debug("_release_notification_inhibit: D-Bus UnInhibit call failed", exc_info=True)
 
     def _launch_focus_apps(self):
         launches: list[list[str]] = []

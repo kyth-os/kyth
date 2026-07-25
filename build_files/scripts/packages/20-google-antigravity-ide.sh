@@ -2,42 +2,31 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-# ── Google Antigravity IDE ────────────────────────────────────────────────────
-# Bake Google Antigravity IDE native RPM into the image so it has full access to the local
-# filesystem and terminal without the sandboxing constraints of a Flatpak.
-# The Google repository signing key is vendored in-repo (build_files/RPM-GPG-KEY-google-antigravity)
-# and bind-mounted at /ctx, so the build has no DNS-dependent rpm --import call.
-install -Dm 0644 /ctx/RPM-GPG-KEY-google-antigravity /etc/pki/rpm-gpg/RPM-GPG-KEY-google-antigravity
-# Skip importing key into RPM database because Fedora's strict crypto policy/Sequoia
-# rejects the key format (No binding signature at time ...). Since Google Artifact
-# Registry repositories are served over HTTPS, gpgcheck is disabled instead.
-cat >/etc/yum.repos.d/antigravity.repo <<'EOF'
-[antigravity-rpm]
-name=Antigravity RPM Repository
-baseurl=https://us-central1-yum.pkg.dev/projects/antigravity-auto-updater-dev/antigravity-rpm
-enabled=1
-gpgcheck=0
-repo_gpgcheck=0
-EOF
-dnf5 install -y antigravity
-# Disable so the Antigravity repo is not active in the running OS;
-# self-updates are not meaningful in an immutable image.
-dnf5 config-manager setopt antigravity-rpm.enabled=0
+# ── Google Antigravity Host Wrapper ───────────────────────────────────────────
+# Google Antigravity IDE is provided via the kyth-ai-dev container to keep the immutable core slim.
+# Host wrapper transparently delegates to the container or prompts setup on first run.
 
-# Workaround for Electron's node.mojom.NodeService crashing on exit. Keep shell
-# quoting out of Desktop Entry Exec fields: backslash-escaped quotes are not a
-# valid desktop-entry escape and make KDE repeatedly reject/reparse the files.
-install -d -m 0755 /usr/libexec
-cat >/usr/libexec/kyth-antigravity <<'ANTIGRAVITYWRAPPEREOF'
-#!/usr/bin/bash
-ulimit -c 0
-exec /usr/share/antigravity/antigravity "$@"
-ANTIGRAVITYWRAPPEREOF
-chmod 0755 /usr/libexec/kyth-antigravity
-if [ -f /usr/share/applications/antigravity.desktop ]; then
-	sed -i -E 's|^Exec=/usr/share/antigravity/antigravity|Exec=/usr/libexec/kyth-antigravity|' /usr/share/applications/antigravity*.desktop
+install -Dm 0755 /dev/stdin /usr/bin/antigravity <<'WRAPPEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x "${HOME}/.local/bin/antigravity" ]]; then
+	exec "${HOME}/.local/bin/antigravity" "$@"
 fi
-if [ -f /usr/share/antigravity/bin/antigravity ]; then
-	# Insert 'ulimit -c 0' right after the shebang line.
-	sed -i '2i ulimit -c 0' /usr/share/antigravity/bin/antigravity
+
+box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
+if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
+	exec distrobox enter "${box}" -- antigravity "$@"
+else
+	echo "Google Antigravity IDE is managed in the KythOS AI Developer container (${box})."
+	echo "Initializing ${box} environment..."
+	kyth-ai-dev setup
+	exec distrobox enter "${box}" -- antigravity "$@"
 fi
+WRAPPEREOF
+
+# No GUI launcher is installed here: setup (triggered by the CLI wrapper above,
+# or `ujust ai-dev-setup`) can take several minutes on first run with no visible
+# progress in a menu-launched GUI app, which reads as a broken/hung icon.
+# distrobox-export (kyth-ai-dev setup) installs the real "Google Antigravity (on
+# kyth-ai-dev)" launcher once the container actually has Antigravity installed.

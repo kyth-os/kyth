@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import atexit
+import logging
 import shutil
 import subprocess
+from typing import ClassVar
+
+_logger = logging.getLogger(__name__)
 
 
 class GameNightManager:
     _inhibit_proc = None
-    _action_procs: list[subprocess.Popen] = []
+    _action_procs: ClassVar[list[subprocess.Popen]] = []
     _started = False
 
     @classmethod
@@ -57,7 +61,7 @@ class GameNightManager:
                 cls._inhibit_proc.terminate()
                 cls._inhibit_proc.wait(timeout=5)
             except Exception:
-                pass
+                _logger.debug("stop: terminating the idle-inhibit process failed", exc_info=True)
             cls._inhibit_proc = None
         if cls._started:
             cls._spawn_action(["kyth-performance-mode", "restore"])
@@ -79,7 +83,7 @@ def _cleanup_game_night():
                 proc.wait()
         GameNightManager._action_procs.clear()
     except Exception:
-        pass
+        _logger.debug("_cleanup_game_night: cleanup at exit failed", exc_info=True)
 
 
 atexit.register(_cleanup_game_night)

@@ -12,66 +12,63 @@ JUST_VERSION="${JUST_VERSION:-1.52.0}"
 ZIZMOR_VERSION="${ZIZMOR_VERSION:-1.25.2}"
 ZIZMOR_SHA256="${ZIZMOR_SHA256:-aa1facd105f0d83fe5c55b1adcd9d7417de5d83aa27471f91dc0b66cf3803577}"
 
-install_actionlint() {
-	local target="${bin_dir}/actionlint"
+download_and_verify() {
+	local name="$1"
+	local archive="$2"
+	local base_url="$3"
+	local sha256_or_file="$4"
+	local bin_in_archive="$5"
+	local target="${bin_dir}/${name}"
+
 	[[ -x "${target}" ]] && return
-	local work archive base
+
+	local work
 	work="$(mktemp -d)"
-	archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-	base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
-	curl -fsSL -o "${work}/${archive}" "${base}/${archive}"
-	curl -fsSL -o "${work}/checksums.txt" "${base}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
-	(cd "${work}" && grep " ${archive}$" checksums.txt | sha256sum -c -)
-	tar -xzf "${work}/${archive}" -C "${work}" actionlint
-	install -m 0755 "${work}/actionlint" "${target}"
+	curl -fsSL -o "${work}/${archive}" "${base_url}/${archive}"
+
+	if [[ -n "${sha256_or_file}" ]]; then
+		if [[ "${#sha256_or_file}" -eq 64 && "${sha256_or_file}" =~ ^[0-9a-fA-F]+$ ]]; then
+			echo "${sha256_or_file}  ${work}/${archive}" | sha256sum -c -
+		else
+			local check_file
+			check_file="$(basename "${sha256_or_file}")"
+			curl -fsSL -o "${work}/${check_file}" "${base_url}/${sha256_or_file}"
+			if [[ "${check_file}" == *.sha256 ]]; then
+				(cd "${work}" && sha256sum -c "${check_file}")
+			else
+				(cd "${work}" && grep " ${archive}$" "${check_file}" | sha256sum -c -)
+			fi
+		fi
+	fi
+
+	if [[ "${archive}" == *.tar.gz ]]; then
+		tar -xzf "${work}/${archive}" -C "${work}" "${bin_in_archive}"
+		install -m 0755 "${work}/${bin_in_archive}" "${target}"
+	else
+		install -m 0755 "${work}/${archive}" "${target}"
+	fi
+
 	rm -rf "${work}"
 }
 
-install_hadolint() {
-	local target="${bin_dir}/hadolint"
-	[[ -x "${target}" ]] && return
-	local work binary base
-	work="$(mktemp -d)"
-	binary="hadolint-linux-x86_64"
-	base="https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}"
-	curl -fsSL -o "${work}/${binary}" "${base}/${binary}"
-	curl -fsSL -o "${work}/${binary}.sha256" "${base}/${binary}.sha256"
-	(cd "${work}" && sha256sum -c "${binary}.sha256")
-	install -m 0755 "${work}/${binary}" "${target}"
-	rm -rf "${work}"
-}
+download_and_verify "actionlint" \
+	"actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+	"https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}" \
+	"actionlint_${ACTIONLINT_VERSION}_checksums.txt" "actionlint"
 
-install_just() {
-	local target="${bin_dir}/just"
-	[[ -x "${target}" ]] && return
-	local work archive base
-	work="$(mktemp -d)"
-	archive="just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz"
-	base="https://github.com/casey/just/releases/download/${JUST_VERSION}"
-	curl -fsSL -o "${work}/${archive}" "${base}/${archive}"
-	curl -fsSL -o "${work}/SHA256SUMS" "${base}/SHA256SUMS"
-	(cd "${work}" && grep " ${archive}$" SHA256SUMS | sha256sum -c -)
-	tar -xzf "${work}/${archive}" -C "${work}" just
-	install -m 0755 "${work}/just" "${target}"
-	rm -rf "${work}"
-}
+download_and_verify "hadolint" \
+	"hadolint-linux-x86_64" \
+	"https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}" \
+	"hadolint-linux-x86_64.sha256" ""
 
-install_zizmor() {
-	local target="${bin_dir}/zizmor"
-	[[ -x "${target}" ]] && return
-	local work archive base
-	work="$(mktemp -d)"
-	archive="zizmor-x86_64-unknown-linux-gnu.tar.gz"
-	base="https://github.com/woodruffw/zizmor/releases/download/v${ZIZMOR_VERSION}"
-	curl -fsSL -o "${work}/${archive}" "${base}/${archive}"
-	echo "${ZIZMOR_SHA256}  ${work}/${archive}" | sha256sum -c -
-	tar -xzf "${work}/${archive}" -C "${work}" zizmor
-	install -m 0755 "${work}/zizmor" "${target}"
-	rm -rf "${work}"
-}
+download_and_verify "just" \
+	"just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+	"https://github.com/casey/just/releases/download/${JUST_VERSION}" \
+	"SHA256SUMS" "just"
 
-install_actionlint
-install_hadolint
-install_just
-install_zizmor
+download_and_verify "zizmor" \
+	"zizmor-x86_64-unknown-linux-gnu.tar.gz" \
+	"https://github.com/woodruffw/zizmor/releases/download/v${ZIZMOR_VERSION}" \
+	"${ZIZMOR_SHA256}" "zizmor"
+
 printf '%s\n' "${bin_dir}"

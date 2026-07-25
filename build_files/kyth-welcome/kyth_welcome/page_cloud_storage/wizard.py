@@ -1,5 +1,6 @@
 import os
 import re
+from typing import ClassVar
 
 from ..core_base import _restyle
 from ..services.cloud_sync import (
@@ -8,7 +9,7 @@ from ..services.cloud_sync import (
     rclone_usage_hints,
     rclone_verify_remote,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QDesktopServices, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )
 from ..widgets import _make_card
@@ -19,7 +20,7 @@ class RcloneSetupWizard(QDialog):
 
     finished_ok = Signal(str, str, str)  # (remote_name, remote_type, local_folder)
 
-    _SERVICES: dict[str, dict] = {
+    _SERVICES: ClassVar[dict[str, dict]] = {
         "drive": {
             "label": "Google Drive",
             "description": "Google Drive via Google OAuth. Includes Shared Drives.",

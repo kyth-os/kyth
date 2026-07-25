@@ -1,6 +1,9 @@
+import logging
 import os
 import json
 import tempfile
+
+_logger = logging.getLogger(__name__)
 
 def load_json_config(path: str, default=None) -> dict:
     """Safely loads a JSON configuration file. Returns default if file does not exist or is invalid."""
@@ -9,7 +12,7 @@ def load_json_config(path: str, default=None) -> dict:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception:
-        pass
+        _logger.warning("load_json_config: %s is unreadable or invalid — using defaults", path, exc_info=True)
     return default if default is not None else {}
 
 def save_json_config(path: str, data: dict, mode: int = None) -> bool:

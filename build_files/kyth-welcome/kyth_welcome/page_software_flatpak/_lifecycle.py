@@ -2,7 +2,7 @@ import shlex
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.launch import flatpak_run
-from ..services.software import Worker, _finish_worker
+from ..services.runtime import Worker, _finish_worker
 from ..qt import QMessageBox, QPushButton
 from ..widgets import _set_log_panel
 

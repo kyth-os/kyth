@@ -30,10 +30,10 @@ from .core_base import (
     _IS_LIVE, _is_first_run, _prefer_xwayland_if_wayland_plugin_missing, _remove_autostart, _shutdown_threads,
     _wait_for_display_setup,
 )
-from .qt import (  # noqa: E501
+from .qt import (
     QApplication, QIcon,
 )
-from .theme import (  # noqa: E501
+from .theme import (
     QSS,
 )
 from .windows import MainWindow

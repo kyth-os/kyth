@@ -16,9 +16,14 @@ LABEL org.osbuild.version="44"
 LABEL org.osbuild.branding.release="KythOS 44"
 
 ### MODIFICATIONS
-ARG ENABLE_ANANICY=1
 ARG ENABLE_SCX=1
 ARG ENABLE_MESA_GIT=0
+ARG ENABLE_GAMING_PERIPHERALS=0
+ARG ENABLE_VIRTUALIZATION_HOST=0
+ARG ENABLE_KSM=0
+LABEL org.kyth.profile.gaming-peripherals="${ENABLE_GAMING_PERIPHERALS}"
+LABEL org.kyth.profile.virtualization-host="${ENABLE_VIRTUALIZATION_HOST}"
+LABEL org.kyth.profile.ksm="${ENABLE_KSM}"
 
 # Build cache boundary: all RPM package installs (~2-3 GB).
 # Stable — only re-run when packages-static.sh or packages/*.sh fragments
@@ -32,57 +37,36 @@ RUN --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
-    ENABLE_ANANICY=${ENABLE_ANANICY} \
+    ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS}" \
+    ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST}" \
+    ENABLE_KSM="${ENABLE_KSM}" \
+    ENABLE_SCX="${ENABLE_SCX}" \
     bash /ctx/packages-static.sh
 
-# Current Node LTS for developer CLIs. Fedora 44's default Node 22 packages
-# remain installed for RPM dependency consistency; the verified upstream
-# runtime supplies the user-facing commands.
-ARG NODEJS_VERSION=24.15.0
-RUN --mount=type=bind,source=build_files/scripts/nodejs.sh,target=/ctx/nodejs.sh \
-    --mount=type=tmpfs,dst=/tmp \
-    NODEJS_VERSION=${NODEJS_VERSION} bash /ctx/nodejs.sh
-
-# Headroom context compression CLI/proxy for AI coding workflows.
-# Installed into its own virtualenv so PyPI dependencies do not modify Fedora's
-# system Python. Bump HEADROOM_VERSION when KythOS intentionally updates it.
-ARG HEADROOM_VERSION=0.27.0
-ARG HEADROOM_EXTRAS=proxy,code,relevance
-RUN --mount=type=bind,source=build_files/scripts/headroom.sh,target=/ctx/headroom.sh \
-    --mount=type=cache,id=kyth-var-cache,target=/var/cache \
-    --mount=type=cache,id=kyth-pip-cache,target=/var/cache/kyth-pip \
-    --mount=type=tmpfs,dst=/tmp \
-    HEADROOM_VERSION=${HEADROOM_VERSION} \
-    HEADROOM_EXTRAS=${HEADROOM_EXTRAS} \
-    PIP_CACHE_DIR=/var/cache/kyth-pip \
-    bash /ctx/headroom.sh
-
-# Build cache boundary: Proton-CachyOS (~700 MB).
-# Placed before the daily upgrade layer so its cache is only busted when
-# proton-cachyos.sh changes or PROTON_CACHYOS_VER changes — not on every daily
-# dnf upgrade run. Proton-CachyOS is a fully self-contained wine bundle with no
-# system library dependencies, so ordering before the upgrade is safe.
-ARG PROTON_CACHYOS_VER=
+# Proton-CachyOS is an offline fallback for fresh installs. The build must use
+# the exact release tag resolved by CI; the mutable user-side updater may fetch
+# newer versions later while retaining a rollback copy.
+ARG PROTON_CACHYOS_VER
 RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/proton-cachyos.sh \
-    --mount=type=bind,source=build_files/scripts/lib/curl-common.sh,target=/ctx/lib/curl-common.sh \
-    --mount=type=tmpfs,dst=/tmp \
+    --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=secret,id=github_token \
-    PROTON_CACHYOS_VER=${PROTON_CACHYOS_VER} bash /ctx/proton-cachyos.sh
+    test -n "${PROTON_CACHYOS_VER}" && \
+    PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" bash /ctx/proton-cachyos.sh
 
-# Third-party binaries — topgrade, winetricks, SCX schedulers (~100 MB).
+# Third-party binary — umu launcher.
 # Placed before BUILD_DATE so the layer is only re-run when a tool ships a new
-# release. THIRDPARTY_VERSIONS_HASH is resolved in CI by querying the GitHub
-# releases API for each tool; when all versions are unchanged the layer is a
-# registry cache hit and no downloads occur. The binaries are self-contained and
-# have no dependency on daily-upgraded RPMs, so ordering before the upgrade is safe.
+# release. Exact tags are resolved once by CI and used for both cache identity
+# and downloads; installers never re-resolve "latest" inside the build.
 ARG THIRDPARTY_VERSIONS_HASH=unset
+ARG UMU_VERSION
 RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/thirdparty.sh \
     --mount=type=bind,source=build_files/scripts/thirdparty,target=/ctx/thirdparty \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=tmpfs,dst=/tmp \
     --mount=type=secret,id=github_token \
     : "cache-bust=${THIRDPARTY_VERSIONS_HASH}" && \
-    ENABLE_SCX=${ENABLE_SCX} bash /ctx/thirdparty.sh
+    UMU_VERSION="${UMU_VERSION}" \
+    bash /ctx/thirdparty.sh
 
 # Plymouth boot splash + initramfs rebuild.
 # COPY (not bind-mount) is intentional: COPY includes file content hashes in the
@@ -105,7 +89,7 @@ RUN bash /tmp/plymouth-setup.sh && \
 
 # kyth-vscode-wallet and kyth-ai-dev are needed by both sysconfig-static and
 # sysconfig layers. COPY once so neither layer needs a redundant bind-mount.
-COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev /ctx/
+COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev build_files/kyth-game-boost build_files/kyth-ntfs-repair build_files/kyth-shader-preheat build_files/kyth-health-check /ctx/
 
 # Static system configuration — sysctl, kernel modules, PipeWire, Proton env
 # vars, gamemode, MangoHud, vkBasalt, bluetooth, and kyth-* service units.
@@ -156,12 +140,17 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/syscon
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig.sh
 
-# kyth_shared — shared Python helpers used by kyth-welcome at runtime.
-# COPY (not bind-mount) is intentional: COPY includes file content hashes in the
-# cache key, so every kyth_shared content change busts the cache here rather than
-# silently shipping a stale layer cached from a previous successful build.
-# See the sibling comment for plymouth for the same reasoning.
-COPY build_files/kyth_shared/kyth_shared /usr/kyth_shared/kyth_shared/
+# Install the shared Python distribution from a COPY-backed source so content
+# changes invalidate BuildKit's cache. The later /ctx bind mount alone does not
+# participate in the cache key.
+COPY build_files/kyth_shared /tmp/kyth-shared-package
+RUN python3 -m pip install \
+        --no-cache-dir \
+        --no-deps \
+        --no-build-isolation \
+        --prefix=/usr \
+        /tmp/kyth-shared-package && \
+    rm -rf /tmp/kyth-shared-package
 
 # Build cache boundary: Secure Boot signing, branding, helper app, and Plymouth.
 # These operations share one raw BuildKit layer; legacy-rechunk repartitions the

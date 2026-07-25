@@ -10,13 +10,17 @@ import shutil
 import subprocess
 from typing import Sequence
 
+from .privileged import PrivilegedAction
+
 
 def popen(cmd: Sequence[str], *, env: dict[str, str] | None = None) -> subprocess.Popen | None:
     """Fire-and-forget process start; returns None if the binary is missing."""
     if not cmd:
         return None
     binary = cmd[0]
-    if binary not in ("flatpak", "sudo", "bash", "env") and not os.path.isabs(binary):
+    if binary in {"sudo", "pkexec"}:
+        raise ValueError("privileged commands must use popen_privileged()")
+    if binary not in ("flatpak", "bash", "env") and not os.path.isabs(binary):
         if shutil.which(binary) is None:
             return None
     try:
@@ -25,6 +29,20 @@ def popen(cmd: Sequence[str], *, env: dict[str, str] | None = None) -> subproces
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=env,
+            start_new_session=True,
+        )
+    except OSError:
+        return None
+
+
+def popen_privileged(action: PrivilegedAction) -> subprocess.Popen | None:
+    """Launch a command that has passed the centralized privilege policy."""
+    cmd = action.command()
+    try:
+        return subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
     except OSError:

@@ -10,19 +10,17 @@ from ..core_base import (
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.software import (
-    _install_flatpak_inline,
-)
+from ..actions import _install_flatpak_inline
 from ..services.windows_migration import (
     _scan_windows_bookmarks,
     _scan_windows_extras,
     _windows_folder_dest,
     _write_bookmarks_html,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QDesktopServices, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 

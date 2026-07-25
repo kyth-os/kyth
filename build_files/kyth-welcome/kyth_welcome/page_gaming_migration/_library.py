@@ -1,7 +1,7 @@
 import os
 
 # __KYTH_GENERATED_IMPORTS__
-from ..qt import (  # noqa: E501
+from ..qt import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QTextEdit, QVBoxLayout,
 )
 from ..widgets import _make_card, _set_log_panel

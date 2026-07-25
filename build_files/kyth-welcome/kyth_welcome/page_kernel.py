@@ -3,17 +3,16 @@
 from .services.launch import reboot
 from .core_base import (
     _bootc_cancel_block_reason, _branch_display_name, _current_kernel_flavor, _image_tag_for_kernel,
-    _parse_update_phase, _restyle, _set_session_inhibit, _with_idle_inhibit,
+    _parse_update_phase, _restyle, _run_worker, _set_session_inhibit, _with_idle_inhibit,
 )
 from .services.diagnostics import _command_stdout
-from .services.software import (
-    Worker, _finish_worker,
-)
+from .services.runtime import Worker, _finish_worker
+from .services.privileged import bootc_action
 from .core_base import REGISTRY, _current_branch
-from .qt import (  # noqa: E501
-    QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QTimer,
+from .qt import (
+    QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card, _set_log_panel,
 )
 
@@ -137,7 +136,7 @@ class KernelPage(Page):
         if self._initial_refresh_started:
             return
         self._initial_refresh_started = True
-        QTimer.singleShot(0, self._refresh)
+        single_shot(self, 0, self._refresh)
 
     def _refresh(self):
         flavor = _current_kernel_flavor()
@@ -184,11 +183,16 @@ class KernelPage(Page):
         for btn in self._kernel_buttons.values():
             btn.setEnabled(False)
 
-        self._worker = Worker(_with_idle_inhibit(["sudo", "bootc", "switch", ref], "KythOS is switching kernel image"))
-        _set_session_inhibit(self, "KythOS is switching kernel image")
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            _with_idle_inhibit(
+                bootc_action("switch", ref).command(),
+                "KythOS is switching kernel image",
+            ),
+            session_inhibit_reason="KythOS is switching kernel image",
+            on_line=self._on_line,
+            on_done=self._on_done,
+        )
 
     def _on_line(self, text: str):
         phase = _parse_update_phase(text.strip(), "switch")

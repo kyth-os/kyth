@@ -53,14 +53,11 @@ build: build-base
     BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
 
-    _pc_tmp=$(mktemp) _tp_tmp=$(mktemp)
-    ( ./build_files/scripts/resolve-versions.sh proton-cachyos > "${_pc_tmp}" ) &
-    ( ./build_files/scripts/resolve-versions.sh thirdparty-hash > "${_tp_tmp}" ) &
-    wait
-    PROTON_CACHYOS_VER=$(cat "${_pc_tmp}"); rm -f "${_pc_tmp}"
-    THIRDPARTY_VERSIONS_HASH=$(cat "${_tp_tmp}"); rm -f "${_tp_tmp}"
-    echo "Proton-CachyOS: ${PROTON_CACHYOS_VER:-latest}"
-    echo "Thirdparty hash: ${THIRDPARTY_VERSIONS_HASH}"
+    PROTON_CACHYOS_VER=$(./build_files/scripts/resolve-versions.sh proton-cachyos)
+    [[ -n "${PROTON_CACHYOS_VER}" ]] || { echo "Unable to pin Proton-CachyOS" >&2; exit 1; }
+    UMU_VERSION=$(./build_files/scripts/resolve-versions.sh thirdparty-versions)
+    THIRDPARTY_VERSIONS_HASH=$(printf '%s' "${UMU_VERSION}" | sha256sum | cut -c1-16)
+    echo "Pinned third-party release: umu=${UMU_VERSION}"
     MOK_SECRET_ARG=()
     SECUREBOOT_SIGNING_REQUESTED=0
     if [[ -n "${MOK_KEY_FILE:-}" && ! -f "${MOK_KEY_FILE}" ]]; then
@@ -79,9 +76,12 @@ build: build-base
         echo "Secure Boot: MOK key not set — signing skipped (set MOK_KEY_FILE to enable)"
     fi
     docker buildx build \
-        --build-arg ENABLE_ANANICY="${ENABLE_ANANICY:-1}" \
         --build-arg ENABLE_SCX="${ENABLE_SCX:-1}" \
+        --build-arg ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS:-0}" \
+        --build-arg ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST:-0}" \
+        --build-arg ENABLE_KSM="${ENABLE_KSM:-0}" \
         --build-arg PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" \
+        --build-arg UMU_VERSION="${UMU_VERSION}" \
         --build-arg THIRDPARTY_VERSIONS_HASH="${THIRDPARTY_VERSIONS_HASH}" \
         --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
         --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
@@ -110,12 +110,13 @@ build-live-iso source_tag="latest":
     set -euo pipefail
     SOURCE_TAG={{ source_tag }} bash build_files/build-live-iso.sh
 
+# Identical to build-live-iso — build_files/build-live-iso.sh always does a
+# full rebuild, there's no separate incremental path. Kept as its own recipe
+# name for discoverability ("rebuild" reads more naturally once a live ISO
+# already exists); delegates so there's only one real implementation.
 # Rebuild the live ISO payload and assemble it with Titanoboa.
 [group('Build Virtual Machine Image')]
-rebuild-live-iso source_tag="latest":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    SOURCE_TAG={{ source_tag }} bash build_files/build-live-iso.sh
+rebuild-live-iso source_tag="latest": (build-live-iso source_tag)
 
 # Build a live ISO from localhost/kyth:latest for local QEMU testing.
 [group('Build Virtual Machine Image')]

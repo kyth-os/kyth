@@ -111,3 +111,7 @@ class _NetStatsTracker:
             "speed": avg_speed,
             "eta_sec": eta_sec,
         }
+
+
+from .apps import load_app_db, suggest_app
+

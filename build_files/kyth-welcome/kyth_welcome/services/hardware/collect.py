@@ -1,6 +1,8 @@
 """Aggregate hardware probes (pure). Qt worker: services.workers.hardware."""
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .types import HardwareProbe
 from .nvidia import _gpu_probe
 from .io import (
@@ -50,6 +52,49 @@ def _collect_hardware_probes() -> list[HardwareProbe]:
             _system_hub_probe(),
         ]
     return _probe_cached("hardware-probes", 5.0, fetch)
+
+
+@dataclass(frozen=True)
+class HardwareSummaryView:
+    """What page_hardware.py's status line and summary card should show
+    after a probe run — no Qt, so the decision tree is testable without
+    a display."""
+    status_text: str
+    status_style: str
+    summary_card_style: str
+    summary_title: str
+    summary_body: str
+
+
+def hardware_summary_view(probes: list[HardwareProbe]) -> HardwareSummaryView:
+    levels = {p.status for p in probes}
+    errs = [p for p in probes if p.status == "err"]
+    warns = [p for p in probes if p.status == "warn"]
+    oks = [p for p in probes if p.status == "ok"]
+
+    if "err" in levels:
+        return HardwareSummaryView(
+            status_text="One or more issues need attention.",
+            status_style="status-err",
+            summary_card_style="card-accent-err",
+            summary_title=f"{len(errs)} hardware issue{'s' if len(errs) != 1 else ''} found",
+            summary_body="Start with the issue cards below; each one includes the safest next action when KythOS knows one.",
+        )
+    if "warn" in levels:
+        return HardwareSummaryView(
+            status_text="Mostly healthy — a few items worth checking.",
+            status_style="status-warn",
+            summary_card_style="card-accent-warn",
+            summary_title=f"{len(warns)} hardware warning{'s' if len(warns) != 1 else ''}",
+            summary_body="The system is usable, but some device, display, driver, or platform checks have recommended follow-up.",
+        )
+    return HardwareSummaryView(
+        status_text="All checks passed.",
+        status_style="status-ok",
+        summary_card_style="card-accent-ok",
+        summary_title=f"All {len(oks)} hardware checks passed",
+        summary_body="Graphics, firmware, audio, networking, storage, and platform checks look ready.",
+    )
 
 
 def __getattr__(name: str):

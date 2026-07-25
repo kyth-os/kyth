@@ -88,3 +88,24 @@ deploy-opticscaler gamedir="":
     echo "  Copied ${dll_count} file(s)."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  OptiScaler deployed. Set Steam launch option: WINEDLLOVERRIDES=\"nvngx=n,b\" %command%"
+
+# Show KythOS Adaptive Game & Performance Governor status.
+[group('KythOS')]
+game-boost:
+    @/usr/bin/kyth-game-boost
+
+# Pre-compile Vulkan & Mesa shaders to eliminate in-game stutter.
+[group('KythOS')]
+preheat-shaders:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-shader-preheat
+
+# Run end-to-end subsystem health and low-latency diagnostics.
+[group('KythOS')]
+health-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-health-check
+
+

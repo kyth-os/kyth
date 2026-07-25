@@ -3,7 +3,7 @@ from .core_base import _restyle
 from .services.gaming import (
     _find_ntfs_drives, _gamescope_installed, _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed,
 )
-from .services.software import _is_flatpak_installed
+from .services.flatpak import _is_flatpak_installed
 from .qt import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt
 from .widgets import StatusBadge
 

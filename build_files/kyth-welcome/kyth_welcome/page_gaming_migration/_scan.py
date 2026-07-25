@@ -3,13 +3,13 @@ import re
 # __KYTH_GENERATED_IMPORTS__
 from ..core_base import _release_worker_when_finished, _restyle
 from ..services.process import _run_command
-from ..services.gaming import (  # noqa: E501
+from ..services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _find_ntfs_drives, _find_steam_libraries,
     _load_protondb_cache, _save_protondb_cache, _scan_steamapps_manifests, blocked_compat_lookup,
 )
 from ..services.cloud_sync import SteamCopyWorker
 from ..services.gaming import _COMPAT_GAMES
-from ..qt import (  # noqa: E501
+from ..qt import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel,
 )
 from ..widgets import _set_log_panel

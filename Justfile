@@ -38,6 +38,21 @@ check-dockerfile check_base_image="ghcr.io/ublue-os/kinoite-main:44":
 test:
     python3 -m unittest discover -s tests
 
+# Run Python unit tests with a statement coverage report.
+[group('Quality')]
+test-coverage:
+    #!/usr/bin/env bash
+    set -eou pipefail
+    if ! python3 -m coverage --version &> /dev/null; then
+        echo "coverage.py could not be found. Install it with: pip install --user coverage"
+        exit 1
+    fi
+    python3 -m coverage run --source=build_files -m unittest discover -s tests
+    python3 -m coverage report -m
+    python3 -m coverage html -d /tmp/kyth-coverage-html
+    echo ""
+    echo "HTML report: /tmp/kyth-coverage-html/index.html"
+
 # Run the complete validation suite used by GitHub Actions and pre-push.
 [group('Quality')]
 validate:

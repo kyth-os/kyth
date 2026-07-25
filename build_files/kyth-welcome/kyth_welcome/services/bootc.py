@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -99,7 +100,7 @@ def _active_bootc_operation() -> str | None:
 def _default_phase(mode: str) -> str:
     return {
         "update": "Pulling OS image from container registry…",
-        "topgrade": "Running full system update…",
+        "full-update": "Running full system update…",
         "rollback": "Staging rollback deployment…",
     }.get(mode, "Operation in progress…")
 
@@ -109,7 +110,7 @@ def _bootc_proxy_running() -> bool:
     try:
         r = subprocess.run(
             ["pgrep", "-f", "skopeo.*image-proxy"],
-            capture_output=True, timeout=2,
+            capture_output=True, timeout=2, check=False,
         )
         return r.returncode == 0
     except Exception:
@@ -149,7 +150,7 @@ def _parse_update_phase(line: str, mode: str) -> str | None:
         return "Already on the latest image — nothing to download."
     if "queued" in lo and "boot" in lo:
         return "Staged — new image ready for next reboot."
-    if mode == "topgrade" and line.startswith("――"):
+    if mode == "full-update" and line.startswith("――"):
         m = re.match(r"――\s*[\d:]+\s*-\s*(.+?)\s*――", line)
         if m:
             section = m.group(1).strip()
@@ -339,3 +340,101 @@ def _bootc_image_digest(section: str) -> tuple[str, str] | None:
         return None
     full = value[7:]  # strip "sha256:"
     return full[:12], full
+
+
+@dataclass(frozen=True)
+class BranchCardView:
+    object_name: str
+    button_text: str
+    build_label_text: str
+    build_label_visible: bool
+
+
+@dataclass(frozen=True)
+class BranchesView:
+    """What page_branches.py's Stable/Testing selector cards should show —
+    no Qt, so the decision tree is testable without a display."""
+    stable: BranchCardView
+    testing: BranchCardView
+
+
+def branches_view(tag: str | None, booted_ts: str | None) -> BranchesView:
+    build_text = f"Running: built {booted_ts}" if booted_ts else ""
+    inactive_stable = BranchCardView("branch-inactive", "Switch to Stable", "", False)
+    inactive_testing = BranchCardView("branch-inactive", "Switch to Testing", "", False)
+
+    if tag in ("latest", "latest-cachy"):
+        return BranchesView(
+            stable=BranchCardView("branch-active", "On Stable  (current)", build_text, bool(booted_ts)),
+            testing=inactive_testing,
+        )
+    if tag in ("testing", "testing-cachy"):
+        return BranchesView(
+            stable=inactive_stable,
+            testing=BranchCardView("branch-active", "On Testing  (current)", build_text, bool(booted_ts)),
+        )
+    return BranchesView(stable=inactive_stable, testing=inactive_testing)
+
+
+@dataclass(frozen=True)
+class UpdateAvailabilityView:
+    """What page_update_availability.py's hero card should show — no Qt, so
+    the decision tree is testable without a display."""
+    card_style: str
+    icon_text: str
+    icon_color: str
+    title: str
+    body: str
+    update_btn_visible: bool
+    restart_btn_visible: bool
+
+
+def update_availability_view(
+    *, staged: bool, check_state: str, flatpak_count: int,
+    check_ts: str, check_ts_details: str, staged_ts: str | None,
+) -> UpdateAvailabilityView:
+    ts_hint = f"  ·  Checked at {check_ts}"
+    built = f"  ·  built {check_ts_details}" if check_ts_details else ""
+
+    if staged:
+        built_staged = f"  ·  built {staged_ts}" if staged_ts else ""
+        flatpak_part = ""
+        if flatpak_count > 0:
+            noun = "update" if flatpak_count == 1 else "updates"
+            flatpak_part = f" Additionally, {flatpak_count} Flatpak {noun} can be installed."
+        return UpdateAvailabilityView(
+            "card-accent-ok", "↻", "#4fc1ff", "Restart required",
+            f"A new image is staged and waiting{built_staged}.{flatpak_part} "
+            f"Restart now or later — your current system stays available as a fallback.{ts_hint}",
+            False, True,
+        )
+    if check_state == "available":
+        flatpak_part = ""
+        if flatpak_count > 0:
+            noun = "update" if flatpak_count == 1 else "updates"
+            flatpak_part = f" and {flatpak_count} Flatpak {noun} are pending"
+        return UpdateAvailabilityView(
+            "card-accent-warn", "↓", "#d4a843", "Update available",
+            f"A new system image is ready{built}{flatpak_part}. "
+            f"Run a full update to download and install them.{ts_hint}",
+            True, False,
+        )
+    if flatpak_count > 0:
+        noun = "update is" if flatpak_count == 1 else "updates are"
+        return UpdateAvailabilityView(
+            "card-accent-warn", "↓", "#d4a843", "App updates available",
+            f"Your system OS is up to date, but {flatpak_count} Flatpak app {noun} available. "
+            f"Run a full update to install them.{ts_hint}",
+            True, False,
+        )
+    if check_state == "uptodate":
+        return UpdateAvailabilityView(
+            "card-accent-ok", "✓", "#4caf50", "Up to date",
+            f"Running the latest image{built}.{ts_hint}",
+            False, False,
+        )
+    return UpdateAvailabilityView(
+        "card", "⚠", "#888888", "Check unavailable",
+        f"Could not reach the update server — check your network connection.{ts_hint}",
+        False, False,
+    )

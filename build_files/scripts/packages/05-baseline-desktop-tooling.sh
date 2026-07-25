@@ -27,26 +27,15 @@ dnf5 install -y --skip-unavailable \
 	ntfs-3g \
 	ntfsprogs \
 	libpst \
-	cifs-utils \
 	rsync \
-	xorriso \
-	squashfs-tools \
 	fuse \
 	fuse-libs \
 	fuse3 \
 	mtools \
 	dosfstools \
 	sbsigntools \
-	qemu-char-spice \
-	qemu-device-display-virtio-gpu \
-	qemu-device-display-virtio-vga \
-	qemu-device-usb-redirect \
-	qemu-img \
-	qemu-system-aarch64 \
-	qemu-system-x86-core \
 	util-linux-script \
 	tmux \
-	gh \
 	openssl \
 	fwupd \
 	hyperfine

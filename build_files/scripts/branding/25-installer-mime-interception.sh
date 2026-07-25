@@ -8,11 +8,13 @@
 install -m 0755 /ctx/kyth-exe-handler /usr/bin/kyth-exe-handler
 install -m 0644 /ctx/kyth-exe-handler.desktop \
 	/usr/share/applications/kyth-exe-handler.desktop
+mkdir -p /usr/share/kyth
+install -m 0644 /ctx/exe-handler-apps.json /usr/share/kyth/exe-handler-apps.json
 
 # Keep expert tools installed without crowding a new user's app launcher.
 # System Hub still exposes the relevant guided actions, and every binary remains
 # available from a terminal. /usr/local/share takes precedence over RPM entries.
-mkdir -p /usr/local/share/applications
+mkdir -p "$(realpath -m /usr/local)/share/applications"
 for _hidden_desktop in \
 	com.gerbilsoft.rom-properties.rp-config.desktop \
 	htop.desktop \

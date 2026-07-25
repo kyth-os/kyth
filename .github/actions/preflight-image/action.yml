@@ -1,0 +1,18 @@
+name: Preflight image availability
+description: Confirm the target OCI image exists in the registry.
+inputs:
+  image-tag:
+    description: Tag of the image to check.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Inspect remote image manifest
+      shell: bash
+      env:
+        SOURCE_TAG: ${{ inputs.image-tag }}
+      run: |
+        set -euo pipefail
+        image="ghcr.io/${GITHUB_REPOSITORY,,}:${SOURCE_TAG}"
+        echo "Checking ${image} availability..."
+        docker manifest inspect "${image}" >/dev/null

@@ -5,9 +5,10 @@ from pathlib import Path
 from .core_base import _restyle
 from .services.gaming import opticscaler_deploy_command
 from .services.launch import popen
-from .services.software import Worker, _finish_worker, _install_flatpak_inline
-from .qt import (  # noqa: E501
-    QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit, QTimer, QVBoxLayout, Qt,
+from .actions import _install_flatpak_inline
+from .services.runtime import Worker, _finish_worker
+from .qt import (
+    QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, Qt, single_shot,
 )
 from .widgets import ActionRow, CommandResultPanel, _copy_text, _make_card
 
@@ -182,7 +183,7 @@ class _CaptureToolsMixin:
     def _copy_opticscaler_launch_opt(self, btn: QPushButton):
         _copy_text('WINEDLLOVERRIDES="nvngx=n,b" %command%')
         btn.setText("Copied!")
-        QTimer.singleShot(2000, lambda: btn.setText("Copy Launch Option"))
+        single_shot(btn, 2000, lambda: btn.setText("Copy Launch Option"))
 
     def _deploy_opticscaler(self, btn: QPushButton):
         if self._opticscaler_worker and self._opticscaler_worker.isRunning():

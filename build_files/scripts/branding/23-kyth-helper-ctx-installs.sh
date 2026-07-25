@@ -1,18 +1,17 @@
 # shellcheck shell=bash
-# ── KythOS Helper app — /ctx file installs ──────────────────────────────────────
-install -m 0755 /ctx/kyth-welcome/kyth-welcome /usr/bin/kyth-welcome
-# /usr/bin/kyth-welcome is a thin shim; the application package lives here.
-mkdir -p /usr/lib/kyth-welcome
-cp -a /ctx/kyth-welcome/kyth_welcome /usr/lib/kyth-welcome/
-rm -rf /usr/lib/kyth-welcome/kyth_welcome/__pycache__
-# kyth_welcome.__init__ resolves kyth_shared via sys.path at
-# (file parent).parent.parent / "kyth_shared" → /usr/kyth_shared.
-mkdir -p -v /usr/kyth_shared
-cp -a -v /ctx/kyth_shared/kyth_shared /usr/kyth_shared/
-rm -rf /usr/kyth_shared/kyth_shared/__pycache__
-ls -la /usr/kyth_shared/kyth_shared/
-find /usr/lib/kyth-welcome -type d -exec chmod 0755 {} +
-find /usr/lib/kyth-welcome -type f -exec chmod 0644 {} +
+# ── KythOS Helper app — packaged Python install ───────────────────────────────
+# /ctx is a read-only BuildKit bind mount. Setuptools creates build metadata
+# beside a local project, so stage the package in the writable build tmpfs.
+welcome_package_dir="$(mktemp -d /tmp/kyth-welcome-package.XXXXXX)"
+cp -a /ctx/kyth-welcome/. "${welcome_package_dir}/"
+python3 -m pip install \
+	--no-cache-dir \
+	--no-deps \
+	--no-build-isolation \
+	--prefix=/usr \
+	"${welcome_package_dir}"
+rm -rf "${welcome_package_dir}"
+unset welcome_package_dir
 install -m 0755 /ctx/kyth-welcome/kyth-welcome-launch /usr/bin/kyth-welcome-launch
 install -m 0644 /ctx/kyth-welcome/kyth-welcome.desktop \
 	/usr/share/applications/kyth-welcome.desktop
@@ -31,6 +30,9 @@ StartupNotify=true
 StartupWMClass=kyth-welcome
 APPSTOREEOF
 install -m 0755 /ctx/kyth-partition-install.sh /usr/bin/kyth-partition-install
+install -m 0755 /ctx/kyth-network-share /usr/libexec/kyth-network-share
+install -m 0755 /ctx/kyth-set-sleep-mode /usr/libexec/kyth-set-sleep-mode
+install -m 0755 /ctx/kyth-retry-hardware-setup /usr/libexec/kyth-retry-hardware-setup
 
 # Place System Hub on the desktop for all new users. The executable bit is
 # required so KDE Plasma 6 treats it as trusted without prompting the user.

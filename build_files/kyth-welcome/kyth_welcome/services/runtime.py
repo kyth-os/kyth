@@ -5,14 +5,18 @@ Domain services should not own thread base classes — import them from here.
 from __future__ import annotations
 
 import atexit
+import logging
 import os
 import signal
 import subprocess
+import threading
 import time
 
 from ..qt import QThread, Signal
 from kyth_shared import _NetStatsTracker, _get_rx_bytes
-from .process import _invalidate_probe_caches
+from .process import _invalidate_probe_caches, _parse_size_bytes
+
+_logger = logging.getLogger(__name__)
 
 _ACTIVE_THREADS: set = set()
 
@@ -51,7 +55,7 @@ def _shutdown_threads(timeout_ms: int = 15000) -> None:
             try:
                 stop()
             except Exception:
-                pass
+                _logger.debug("_shutdown_threads: stop() on %r failed", t, exc_info=True)
     deadline = time.monotonic() + timeout_ms / 1000
     while running := _running_threads():
         remaining_ms = int((deadline - time.monotonic()) * 1000)
@@ -79,9 +83,10 @@ class Worker(TrackedThread):
     line = Signal(str)
     done = Signal(int)
 
-    def __init__(self, cmd: list[str]):
+    def __init__(self, cmd: list[str], *, input_text: str | None = None):
         super().__init__()
         self._cmd = cmd
+        self._input_text = input_text
         self._proc: subprocess.Popen[str] | None = None
         self._cancel_requested = False
 
@@ -113,16 +118,21 @@ class Worker(TrackedThread):
             env["LC_ALL"] = "en_US.UTF-8"
             proc = subprocess.Popen(
                 self._cmd,
+                stdin=subprocess.PIPE if self._input_text is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 errors="replace",
                 bufsize=1,
                 env=env,
-                cwd="/tmp",
+                cwd="/tmp",  # noqa: S108 — subprocess cwd only, nothing opened here at a predictable path
                 start_new_session=True,
             )
             self._proc = proc
+            if self._input_text is not None and proc.stdin is not None:
+                proc.stdin.write(self._input_text)
+                proc.stdin.close()
+                self._input_text = None
             for ln in proc.stdout:
                 self.line.emit(ln.rstrip())
             proc.wait()
@@ -149,7 +159,7 @@ class Worker(TrackedThread):
                 if "bootc" in cmd0:
                     invalidate_after_bootc_change()
             except Exception:
-                pass
+                _logger.debug("Worker.run: targeted disk-cache invalidation failed", exc_info=True)
 
 
 class DownloadMonitor(TrackedThread):
@@ -160,16 +170,65 @@ class DownloadMonitor(TrackedThread):
     def __init__(self, total_bytes: int, rx_start: int):
         super().__init__()
         self._tracker = _NetStatsTracker(total_bytes, rx_start)
-        self._stop = False
+        # threading.Event rather than a bool flag: stop() wakes the loop
+        # immediately instead of leaving callers' unbounded .wait() blocking
+        # the GUI thread for up to the full 1s poll interval.
+        self._stop_event = threading.Event()
 
     def stop(self):
-        self._stop = True
+        self._stop_event.set()
+
+    def update_total(self, total_bytes: int) -> None:
+        """Raise the expected download size when a later phase reports more."""
+        self._tracker._total = total_bytes
 
     def run(self):
-        while not self._stop:
-            time.sleep(1)
+        while not self._stop_event.is_set():
+            if self._stop_event.wait(1):
+                break
             stats = self._tracker.tick(_get_rx_bytes())
             self.stats.emit(stats["downloaded"], stats["total"], stats["speed"], stats["eta_sec"])
+
+
+def _stop_download_monitor(monitor: DownloadMonitor | None) -> None:
+    """Stop and dispose of a running DownloadMonitor thread, if any."""
+    if monitor is not None:
+        monitor.stop()
+        monitor.wait()
+        monitor.deleteLater()
+
+
+def _start_or_extend_dl_monitor(
+    text: str, monitor: DownloadMonitor | None, total: int,
+) -> tuple[DownloadMonitor | None, int, bool, bool]:
+    """Parse a bootc "layers needed: ... (SIZE)" line and start a new
+    DownloadMonitor, or raise an already-running one's total if a later
+    phase reports a bigger download.
+
+    Returns (monitor, total, started, progress_ready):
+      - ``started`` is True only when a new monitor was created and the
+        caller still needs to connect ``.stats`` and call ``.start()``.
+      - ``progress_ready`` is True whenever the total changed (new or
+        extended monitor) and the caller should switch its progress bar to
+        determinate mode.
+    """
+    if "layers needed:" not in text:
+        return monitor, total, False, False
+    try:
+        after = text.split("layers needed:")[1]
+        size_str = after.split("(")[1].rstrip(")") if "(" in after else ""
+        new_total = _parse_size_bytes(size_str)
+    except Exception:
+        _logger.debug("_start_or_extend_dl_monitor: failed to parse download size from %r", text, exc_info=True)
+        return monitor, total, False, False
+    if new_total <= 0:
+        return monitor, total, False, False
+    if monitor is None:
+        return DownloadMonitor(new_total, _get_rx_bytes()), new_total, True, True
+    if new_total > total:
+        monitor.update_total(new_total)
+        return monitor, new_total, False, True
+    return monitor, total, False, False
 
 
 class DataWorker(TrackedThread):

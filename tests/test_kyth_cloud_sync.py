@@ -16,7 +16,7 @@ from kyth_welcome.services.cloud_sync import (  # noqa: E402
 )
 HAS_QT = any(importlib.util.find_spec(binding) for binding in ("PySide6", "PyQt6"))
 if HAS_QT:
-    from kyth_welcome.services.workers.cloud_sync import (  # noqa: E402
+    from kyth_welcome.services.workers.cloud_sync import (
         RcloneAuthorizeWorker,
         RcloneSyncWorker,
     )
@@ -52,7 +52,7 @@ Paste the following into your remote machine --->
 
     @unittest.skipUnless(HAS_QT, "PySide6/PyQt6 is not installed on this validation runner")
     def test_sync_worker_stop_terminates_retained_process(self):
-        worker = RcloneSyncWorker("gdrive", "/tmp/drive")
+        worker = RcloneSyncWorker("gdrive", "/tmp/drive")  # noqa: S108 — fixture string, not a real path opened on disk
         proc = MagicMock()
         proc.poll.return_value = None
         worker._proc = proc

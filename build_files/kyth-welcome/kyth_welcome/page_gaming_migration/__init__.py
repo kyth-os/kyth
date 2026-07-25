@@ -6,7 +6,7 @@ from ._scan import _ScanMixin
 from ._win_lib import _WinLibMixin
 from ..core_base import _release_worker_when_finished
 from ..services.workers.windows_migration import WindowsLibraryWorker
-from ..qt import QTimer
+from ..qt import single_shot
 
 
 class _MigrationMixin(_LibraryMixin, _SavesMixin, _ModsMixin, _ScanMixin, _WinLibMixin):
@@ -14,7 +14,7 @@ class _MigrationMixin(_LibraryMixin, _SavesMixin, _ModsMixin, _ScanMixin, _WinLi
         super().showEvent(event)
         if not self._dashboard_loaded and "dashboard" not in self._data_workers:
             self._refresh_gaming_dashboard()
-        QTimer.singleShot(80, self._refresh_status)
+        single_shot(self, 80, self._refresh_status)
         if not self._win_lib_probed:
             self._win_lib_probed = True
             worker = WindowsLibraryWorker()

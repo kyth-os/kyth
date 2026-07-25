@@ -21,7 +21,7 @@ import subprocess
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .qt import (  # noqa: E501
+from .qt import (
     QLabel, QPushButton, QTextEdit, QWidget,
 )
 
@@ -30,6 +30,9 @@ from .services.process import (  # noqa: F401
     _BOOTC_CACHE_TTL,
     _FLATPAK_CACHE_TTL,
     _command_stdout,
+    _format_dl_progress_line,
+    _format_elapsed,
+    _format_eta,
     _get_disk_write_bytes,
     _get_rx_bytes,
     _human_bytes,
@@ -67,6 +70,7 @@ from .services.bootc import (  # noqa: F401
     _nested_get,
     _parse_update_phase,
     _walk_strings,
+    update_availability_view,
 )
 
 # ── Re-exports: runtime (Qt workers) ──────────────────────────────────────────
@@ -79,12 +83,13 @@ from .services.runtime import (  # noqa: F401
     _release_worker_when_finished,
     _running_threads,
     _shutdown_threads,
+    _start_or_extend_dl_monitor,
+    _stop_download_monitor,
 )
 
 # ── Constants still used by pages ─────────────────────────────────────────────
 _CLOUD_SYNC_CONFIG = os.path.expanduser("~/.config/kyth-cloud-sync.json")
 _SYNC_INTERVAL_MS = 5 * 60 * 1000  # 5 minutes
-_WIZARD_SENTINEL = os.path.expanduser("~/.config/kyth-welcome-done")
 _SMB_CONFIG = os.path.expanduser("~/.config/kyth-smb-shares.json")
 _SMB_CREDS_DIR = "/etc/kyth-smb-creds"
 
@@ -209,6 +214,33 @@ def _set_session_inhibit(owner: object, reason: str | None = None) -> None:
         owner._screen_inhibit_cookie = int(match.group(1))
 
 
+def _run_worker(
+    owner: object,
+    cmd: list[str],
+    *,
+    on_line,
+    on_done,
+    attr: str = "_worker",
+    input_text: str | None = None,
+    session_inhibit_reason: str | None = None,
+) -> Worker:
+    """Construct, wire, and start a Worker stored on owner.<attr>.
+
+    Collapses the ubiquitous ``self._worker = Worker(cmd);
+    self._worker.line.connect(on_line); self._worker.done.connect(on_done);
+    self._worker.start()`` sequence — optionally preceded by a session-inhibit
+    call, in the same order pages already issue it — repeated across pages.
+    """
+    worker = Worker(cmd, input_text=input_text)
+    setattr(owner, attr, worker)
+    if session_inhibit_reason is not None:
+        _set_session_inhibit(owner, session_inhibit_reason)
+    worker.line.connect(on_line)
+    worker.done.connect(on_done)
+    worker.start()
+    return worker
+
+
 def _remove_autostart():
     path = os.path.expanduser("~/.config/autostart/kyth-welcome.desktop")
     try:
@@ -218,15 +250,8 @@ def _remove_autostart():
 
 
 def _is_first_run() -> bool:
-    return not os.path.exists(_WIZARD_SENTINEL)
-
-
-def _mark_wizard_done():
-    try:
-        os.makedirs(os.path.dirname(_WIZARD_SENTINEL), exist_ok=True)
-        open(_WIZARD_SENTINEL, "w").close()
-    except OSError:
-        pass
+    from .services.setup_state import is_first_run
+    return is_first_run()
 
 
 # ── Usage profile (everyday / gaming) ─────────────────────────────────────────

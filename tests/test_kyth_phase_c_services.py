@@ -12,9 +12,9 @@ from kyth_welcome.services import repair, sched, telem  # noqa: E402
 class RepairServiceTests(unittest.TestCase):
     def test_command_builders(self):
         self.assertEqual(repair.session_snapshot_command()[0], "/usr/bin/kyth-session-snapshot")
-        export = repair.setup_export_command("/tmp/out")
+        export = repair.setup_export_command("/tmp/out")  # noqa: S108 — fixture string, not a real path opened on disk
         self.assertEqual(export[1], "export")
-        self.assertEqual(export[2], "/tmp/out")
+        self.assertEqual(export[2], "/tmp/out")  # noqa: S108 — fixture string, not a real path opened on disk
         rollback = repair.rollback_command()
         self.assertIn("bootc", rollback)
         self.assertIn("rollback", rollback)
@@ -30,7 +30,7 @@ class SchedServiceTests(unittest.TestCase):
         with patch("kyth_welcome.services.sched.subprocess.run", side_effect=FileNotFoundError):
             with patch("kyth_welcome.services.sched.glob.glob", return_value=[]):
                 names = sched.list_schedulers()
-        self.assertIn("scx_lavd", names)
+        self.assertIn("scx_rusty", names)
 
     def test_read_sched_status_missing(self):
         with patch.object(sched, "status_file_path", return_value=pathlib.Path("/no/such/status.json")):
@@ -50,7 +50,7 @@ class TelemServiceTests(unittest.TestCase):
             avg_fps=120.4,
             p1_low_fps=90.1,
             stutter_count=2,
-            scheduler="scx_lavd",
+            scheduler="scx_rusty",
         )
         self.assertEqual(row.duration_label, "2m 05s")
         self.assertIn("/", row.fps_label)
@@ -66,6 +66,7 @@ class WizardPackageTests(unittest.TestCase):
         expected = {
             "window.py": "WizardWindow",
             "steps_welcome.py": "_WelcomeStepMixin",
+            "steps_machine.py": "_MachineStepMixin",
             "steps_apps.py": "_AppsStepMixin",
             "steps_gaming.py": "_GamingStepMixin",
             "steps_finish.py": "_FinishStepMixin",
@@ -82,10 +83,10 @@ class WizardPackageTests(unittest.TestCase):
         window_src = (wizard_dir / "window.py").read_text(encoding="utf-8")
         for method in (
             "_make_welcome_step",
+            "_make_machine_step",
             "_make_first_run_apps_step",
             "_make_gaming_step",
             "_make_finish_step",
-            "_wrap_step",
         ):
             # Methods live on mixins or shell; package as a whole must define them.
             found = any(

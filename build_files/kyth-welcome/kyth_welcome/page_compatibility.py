@@ -1,24 +1,20 @@
-import json
-import os
-from datetime import datetime
-from urllib.request import Request, urlopen
+from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from .services.gaming import TrackedThread
+from .services.workers import CompatRefreshWorker
+from .services.gaming import compat_data
 from .services.gaming.compat_data import (
     CompatGame,
-    _COMPAT_CACHE_PATH,
-    _COMPAT_DATA_UPDATED,
     _COMPAT_GAMES,
-    _COMPAT_REMOTE_URL,
     _COMPAT_STALE_DAYS,
-    _parse_compat_payload,
     replace_compat_games,
+    calculate_data_age_days,
+    calculate_compat_stats,
 )
-from .qt import (  # noqa: E501
-    QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt, Signal,
+from .qt import (
+    QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 
@@ -26,38 +22,8 @@ from .widgets import (  # noqa: E501
 def _adopt_compat_data(updated: str, games: list[CompatGame]) -> None:
     # Mutate the shared service list so all importers see the refresh.
     replace_compat_games(updated, games)
-    # Keep page-local name bound for age checks that read this module's global.
-    global _COMPAT_DATA_UPDATED
-    _COMPAT_DATA_UPDATED = updated
 
 
-def _compat_data_age_days() -> int | None:
-    try:
-        return (datetime.now() - datetime.strptime(_COMPAT_DATA_UPDATED, "%Y-%m-%d")).days
-    except ValueError:
-        return None
-
-
-class _CompatRefreshWorker(TrackedThread):
-    """Fetch newer compatibility data from the repo and cache it per-user."""
-    refreshed = Signal(str, list)   # (updated, list[CompatGame])
-    unchanged = Signal()
-
-    def run(self):
-        try:
-            req = Request(_COMPAT_REMOTE_URL, headers={"User-Agent": "KythOS-Compat/1.0"})
-            with urlopen(req, timeout=10) as resp:
-                raw = resp.read().decode("utf-8")
-            updated, games = _parse_compat_payload(json.loads(raw))
-            if not games or updated <= _COMPAT_DATA_UPDATED:
-                self.unchanged.emit()
-                return
-            os.makedirs(os.path.dirname(_COMPAT_CACHE_PATH), exist_ok=True)
-            with open(_COMPAT_CACHE_PATH, "w", encoding="utf-8") as fh:
-                fh.write(raw)
-            self.refreshed.emit(updated, games)
-        except Exception:
-            self.unchanged.emit()
 
 
 
@@ -84,7 +50,7 @@ _COMPAT_AC_EXPLAINERS: list[tuple[str, str, str]] = [
 # ── Page: Compatibility ───────────────────────────────────────────────────────
 class CompatibilityPage(Page):
 
-    _STATUS_STYLE: dict[str, tuple[str, str, str]] = {
+    _STATUS_STYLE: ClassVar[dict[str, tuple[str, str, str]]] = {
         # status → (badge_text, badge_css, row_left_border_color)
         "native":  ("Native",       "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
         "proton":  ("Works",        "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
@@ -329,7 +295,7 @@ class CompatibilityPage(Page):
 
         # Refresh the compatibility data in the background so blocked/working
         # status stays current between OS image updates.
-        self._refresh_worker = _CompatRefreshWorker()
+        self._refresh_worker = CompatRefreshWorker()
         self._refresh_worker.refreshed.connect(self._on_compat_refreshed)
         self._refresh_worker.unchanged.connect(self._on_compat_unchanged)
         self._refresh_worker.start()
@@ -337,29 +303,26 @@ class CompatibilityPage(Page):
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _update_summary(self, refresh_note: str = ""):
-        works   = sum(1 for game in _COMPAT_GAMES if game.status in ("native", "proton", "tweaks"))
-        blocked = sum(1 for game in _COMPAT_GAMES if game.status == "blocked")
-        total   = len(_COMPAT_GAMES)
-        oldest_check = min((game.checked for game in _COMPAT_GAMES), default="unknown")
+        stats = calculate_compat_stats(_COMPAT_GAMES)
         self._sum_title.setText(
-            f"{works} of the {total} listed games work on KythOS — "
+            f"{stats.works} of the {stats.total} listed games work on KythOS — "
             f"including most of the Steam top 100."
         )
         self._sum_copy.setText(
-            f"The {blocked} blocked titles are tracked conservatively: if a publisher blocks "
+            f"The {stats.blocked} blocked titles are tracked conservatively: if a publisher blocks "
             "or refuses SteamOS/Proton, KythOS marks it blocked until release validation proves "
-            f"otherwise. Oldest source check in this list: {oldest_check}."
+            f"otherwise. Oldest source check in this list: {stats.oldest_check}."
         )
-        age = _compat_data_age_days()
+        age = calculate_data_age_days(compat_data._COMPAT_DATA_UPDATED)
         if age is not None and age > _COMPAT_STALE_DAYS:
             self._freshness_lbl.setStyleSheet("font-size:11px; color:#d4a843;")
             note = (
-                f"⚠ Compatibility data is {age} days old (updated {_COMPAT_DATA_UPDATED}). "
+                f"⚠ Compatibility data is {age} days old (updated {compat_data._COMPAT_DATA_UPDATED}). "
                 "Double-check ProtonDB before relying on a specific title."
             )
         else:
             self._freshness_lbl.setStyleSheet("font-size:11px; color:#858585;")
-            note = f"Compatibility data updated {_COMPAT_DATA_UPDATED or 'unknown'}."
+            note = f"Compatibility data updated {compat_data._COMPAT_DATA_UPDATED or 'unknown'}."
         if refresh_note:
             note += f"  {refresh_note}"
         self._freshness_lbl.setText(note)

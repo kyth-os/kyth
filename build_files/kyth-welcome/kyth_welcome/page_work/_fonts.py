@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..services.software import Worker
+from ..services.runtime import Worker
 from ..services.work import _ms_fonts_installed
 from ..qt import QHBoxLayout, QLabel, QPushButton
 from ..widgets import _make_card

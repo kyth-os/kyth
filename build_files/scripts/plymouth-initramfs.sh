@@ -6,6 +6,8 @@ set -euo pipefail
 
 # shellcheck source=lib/find-kver.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/lib/find-kver.sh"
+# shellcheck source=lib/plymouth-initrd-checks.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-initrd-checks.sh"
 
 /usr/libexec/kyth-plymouth-branding-guard /ctx/branding/transparent-watermark.svg
 
@@ -33,70 +35,48 @@ echo "=== POST-DRACUT: plymouthd.defaults from initramfs ===" >&2
 (lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" 2>/dev/null || echo "MISSING") >&2
 
 if command -v lsinitrd >/dev/null 2>&1; then
+	initramfs="/usr/lib/modules/${KVER}/initramfs"
 	initrd_listing="$(mktemp)"
-	lsinitrd "/usr/lib/modules/${KVER}/initramfs" >"${initrd_listing}"
+	lsinitrd "${initramfs}" >"${initrd_listing}"
 
-	grep -q 'usr/share/plymouth/themes/kyth/kyth.plymouth' "${initrd_listing}" ||
-		{
-			echo "ERROR: branded initramfs does not contain KythOS Plymouth theme" >&2
-			exit 1
-		}
-	grep -q 'usr/share/plymouth/themes/kyth/kyth.script' "${initrd_listing}" ||
-		{
-			echo "ERROR: branded initramfs does not contain KythOS Plymouth script" >&2
-			exit 1
-		}
-	grep -q 'usr/share/plymouth/themes/kyth/kyth-logo.png' "${initrd_listing}" ||
-		{
-			echo "ERROR: branded initramfs does not contain KythOS Plymouth logo" >&2
-			exit 1
-		}
-	lsinitrd -f /usr/share/pixmaps/system-logo-white.png "/usr/lib/modules/${KVER}/initramfs" | cmp -s - /usr/share/kyth/branding/transparent-watermark.png ||
-		{
-			echo "ERROR: branded initramfs still contains distro Plymouth system logo" >&2
-			exit 1
-		}
-	grep -q 'usr/share/plymouth/themes/default.plymouth' "${initrd_listing}" ||
-		{
-			echo "ERROR: branded initramfs does not force the KythOS Plymouth default theme" >&2
-			exit 1
-		}
-	lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" | grep -q '^Theme=kyth$' ||
-		{
-			echo "ERROR: branded initramfs Plymouth defaults do not force Theme=kyth" >&2
-			exit 1
-		}
-	lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" | grep -q '^ShowDelay=0$' ||
-		{
-			echo "ERROR: branded initramfs Plymouth defaults do not draw immediately" >&2
-			exit 1
-		}
-	lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" | grep -q '^DeviceTimeout=8$' ||
-		{
-			echo "ERROR: branded initramfs Plymouth defaults are missing DeviceTimeout=8" >&2
-			exit 1
-		}
-	lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" | grep -q '^UseFirmwareBackground=false$' ||
-		{
-			echo "ERROR: branded initramfs Plymouth defaults do not suppress BGRT firmware background" >&2
-			exit 1
-		}
-	grep -Eq 'usr/(lib64|lib)/plymouth/script\.so' "${initrd_listing}" ||
-		{
-			echo "ERROR: branded initramfs does not contain plymouth/script.so — kyth script theme will silently fail and fall back to BGRT firmware logo" >&2
-			exit 1
-		}
-	for account_file in etc/passwd etc/group; do
-		grep -Eq "(^|[[:space:]])${account_file}$" "${initrd_listing}" ||
-			{
-				echo "ERROR: branded initramfs is missing /${account_file}; early udev/tmpfiles account lookup will fail" >&2
-				exit 1
-			}
+	# Each entry is "pattern|message"; message is appended to the standard
+	# "ERROR: branded initramfs ..." prefix.
+	listing_checks=(
+		'usr/share/plymouth/themes/kyth/kyth.plymouth|does not contain KythOS Plymouth theme'
+		'usr/share/plymouth/themes/kyth/kyth.script|does not contain KythOS Plymouth script'
+		'usr/share/plymouth/themes/kyth/kyth-logo.png|does not contain KythOS Plymouth logo'
+		'usr/share/plymouth/themes/default.plymouth|does not force the KythOS Plymouth default theme'
+	)
+	for entry in "${listing_checks[@]}"; do
+		plymouth_require_pattern "${initrd_listing}" "${entry%%|*}" "branded initramfs ${entry#*|}"
 	done
-	if grep -Ei 'usr/share/plymouth/themes/(bgrt-fedora|bgrt|spinner)(/|$)' "${initrd_listing}" >&2; then
-		echo "ERROR: Plymouth fallback theme leaked into branded initramfs" >&2
-		exit 1
-	fi
+
+	plymouth_require_match \
+		<(lsinitrd -f /usr/share/pixmaps/system-logo-white.png "${initramfs}") \
+		/usr/share/kyth/branding/transparent-watermark.png \
+		"branded initramfs still contains distro Plymouth system logo"
+
+	daemon_patterns=(
+		'^Theme=kyth$|do not force Theme=kyth'
+		'^ShowDelay=0$|do not draw immediately'
+		'^DeviceTimeout=8$|are missing DeviceTimeout=8'
+		'^UseFirmwareBackground=false$|do not suppress BGRT firmware background'
+	)
+	for entry in "${daemon_patterns[@]}"; do
+		plymouth_require_pattern \
+			<(lsinitrd -f /usr/share/plymouth/plymouthd.defaults "${initramfs}") \
+			"${entry%%|*}" "branded initramfs Plymouth defaults ${entry#*|}"
+	done
+
+	plymouth_require_pattern_ere "${initrd_listing}" 'usr/(lib64|lib)/plymouth/script\.so' \
+		"branded initramfs does not contain plymouth/script.so — kyth script theme will silently fail and fall back to BGRT firmware logo"
+
+	for account_file in etc/passwd etc/group; do
+		plymouth_require_pattern_ere "${initrd_listing}" "(^|[[:space:]])${account_file}$" \
+			"branded initramfs is missing /${account_file}; early udev/tmpfiles account lookup will fail"
+	done
+
+	plymouth_forbid_fallback_theme "${initrd_listing}" "Plymouth fallback theme leaked into branded initramfs"
 
 	rm -f "${initrd_listing}"
 fi

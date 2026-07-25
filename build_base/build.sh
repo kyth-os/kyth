@@ -52,7 +52,21 @@ install_cachyos_kernel() {
 	dnf5 install -y --setopt=tsflags=noscripts kernel-cachyos-modules
 
 	local kver
-	kver=$(basename "$(echo /usr/lib/modules/*cachyos*)")
+	# Collect real matches into an array rather than `echo`-globbing into a
+	# single string: if more than one *cachyos* module dir is ever present
+	# (e.g. a leftover from a previous kernel-cachyos-modules install), `echo`
+	# would space-join them into one bogus multi-path string that basename
+	# mangles silently instead of erroring. sort -V picks the highest version.
+	local -a cachyos_dirs=()
+	local d
+	for d in /usr/lib/modules/*cachyos*; do
+		[[ -d "${d}" ]] && cachyos_dirs+=("${d}")
+	done
+	if [[ ${#cachyos_dirs[@]} -eq 0 ]]; then
+		echo "ERROR: no CachyOS kernel module directory found after installing kernel-cachyos-modules." >&2
+		exit 1
+	fi
+	kver=$(basename "$(printf '%s\n' "${cachyos_dirs[@]}" | sort -V | tail -n 1)")
 
 	dnf5 install -y --setopt=tsflags=noscripts --skip-unavailable \
 		kernel-cachyos \

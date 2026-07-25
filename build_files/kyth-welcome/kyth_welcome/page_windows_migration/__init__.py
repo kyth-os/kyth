@@ -6,18 +6,16 @@ import os
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.software import (
-    Worker,
-)
+from ..services.runtime import Worker
 from ..services.launch import popen
 from ..services.windows_migration import (
     UserFilesCopyWorker,
     WindowsLibraryWorker,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QCheckBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     Page, _make_card, _make_flow_step,
 )
 
@@ -181,7 +179,7 @@ class WindowsMigrationPage(
         for win_tool, linux_equiv in [
             ("cmd / PowerShell", "Konsole with zsh/fish — autosuggestions + syntax highlighting"),
             ("Terminal tabs", "Konsole profiles or zellij (modern terminal multiplexer)"),
-            ("Everything (search)", "fd / ripgrep — 10–100× faster, respects .gitignore"),
+            ("Everything (search)", "fd / ripgrep — 10–100× faster, respects .gitignore"),  # noqa: RUF001 — en dash + multiplication sign, deliberate typography
             ("notepad.exe", "helix (hx) — modal editor with LSP, no config needed"),
             ("grep / findstr", "rg (ripgrep) — alias: search <pattern>"),
         ]:

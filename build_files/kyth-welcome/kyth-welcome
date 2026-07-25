@@ -1,28 +1,9 @@
 #!/usr/bin/env python3
 """kyth-welcome — KythOS System Hub entry point.
 
-The application lives in the kyth_welcome package, installed at
-/usr/lib/kyth-welcome on the OS image. A source checkout keeps the
-package next to this script, which takes precedence for development.
+The production entry point is generated from pyproject.toml. This source-tree
+shim remains convenient for development and imports the adjacent package.
 """
-
-import os
-import sys
-
-_here = os.path.dirname(os.path.realpath(__file__))
-for _candidate in (_here, "/usr/lib/kyth-welcome"):
-    if os.path.isdir(os.path.join(_candidate, "kyth_welcome")):
-        if _candidate not in sys.path:
-            sys.path.insert(0, _candidate)
-        break
-
-# kyth_shared lives next to the kyth-welcome source tree, or at
-# /usr/kyth_shared in the installed container image.
-_shared_dir = os.path.join(os.path.dirname(_here), "kyth_shared")
-if not os.path.isdir(os.path.join(_shared_dir, "kyth_shared")):
-    _shared_dir = "/usr/kyth_shared"
-if os.path.isdir(os.path.join(_shared_dir, "kyth_shared")) and _shared_dir not in sys.path:
-    sys.path.insert(0, _shared_dir)
 
 from kyth_welcome.app import main
 

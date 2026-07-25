@@ -68,117 +68,31 @@ write_target_file() {
 	as_root tee "$path" >/dev/null <<<"$contents"
 }
 
-append_missing_records() {
-	local source="$1"
-	local dest="$2"
-	local line name
-
-	[[ -r "$source" ]] || return 0
-	as_root touch "$dest"
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		[[ -n "$line" ]] || continue
-		name="${line%%:*}"
-		[[ -n "$name" ]] || continue
-		if ! as_root grep -q "^${name}:" "$dest"; then
-			printf '%s\n' "$line" | as_root tee -a "$dest" >/dev/null
-		fi
-	done < <(as_root cat "$source")
-}
-
-ensure_line_by_name() {
-	local name="$1"
-	local line="$2"
-	local dest="$3"
-
-	if ! as_root grep -q "^${name}:" "$dest"; then
-		printf '%s\n' "$line" | as_root tee -a "$dest" >/dev/null
-	fi
-}
-
+# The graphical kyth-installer applies this exact same repair to a target
+# tree's account databases; both call the shared implementation in
+# kyth_shared.accounts (installed system-wide alongside this script) instead
+# of keeping two independently-drifting reimplementations in sync by hand.
 ensure_system_accounts() {
 	local deploy_root="$1"
-	local passwd_path="$deploy_root/etc/passwd"
-	local group_path="$deploy_root/etc/group"
-	local shadow_path="$deploy_root/etc/shadow"
-	local name
-
-	append_missing_records "$deploy_root/usr/lib/group" "$group_path"
-	append_missing_records "$deploy_root/usr/lib/passwd" "$passwd_path"
-
-	ensure_line_by_name sddm "sddm:x:959:" "$group_path"
-	ensure_line_by_name sddm \
-		"sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin" \
-		"$passwd_path"
-
-	if [[ -e "$shadow_path" ]]; then
-		while IFS=: read -r name _; do
-			[[ -n "$name" && "$name" != "root" ]] || continue
-			if ! as_root grep -q "^${name}:" "$shadow_path"; then
-				printf '%s:!*:19700:0:99999:7:::\n' "$name" |
-					as_root tee -a "$shadow_path" >/dev/null
-			fi
-		done < <(as_root cat "$passwd_path")
-	fi
-
-	as_root chmod 0644 "$passwd_path" "$group_path"
-	[[ ! -e "$shadow_path" ]] || as_root chmod 0000 "$shadow_path" || true
-	as_root mkdir -p "$deploy_root/var/lib/sddm"
-	as_root chown sddm:sddm "$deploy_root/var/lib/sddm" || true
-	as_root restorecon "$passwd_path" "$group_path" "$shadow_path" "$deploy_root/var/lib/sddm" || true
+	as_root python3 -m kyth_shared.accounts "$deploy_root"
 }
 
+# The graphical kyth-installer creates its admin user the same way; both
+# call the shared implementation in kyth_shared.accounts (see
+# ensure_system_accounts above) instead of keeping two independently-
+# drifting reimplementations in sync by hand.
 create_user() {
 	local root_mnt="$1"
 	local deploy_etc="$2"
 	local username="$3"
 	local password="$4"
-	local deploy_root shadow_path pw_hash uid gid var_home skel tmp_shadow
+	local deploy_root pw_hash
 
 	[[ -n "$username" && -n "$password" ]] || return 0
 
 	deploy_root="$(dirname "$deploy_etc")"
-	as_root useradd --root "$deploy_root" \
-		-M \
-		-G wheel,video,audio,render \
-		-s /bin/bash \
-		"$username"
-
 	pw_hash="$(openssl passwd -6 -stdin <<<"$password")"
-	shadow_path="$deploy_etc/shadow"
-	tmp_shadow="$(mktemp)"
-	# shellcheck disable=SC2016
-	as_root awk -F: -v OFS=: -v user="$username" -v hash="$pw_hash" '
-		$1 == user { $2 = hash; found = 1 }
-		{ print }
-		END { if (!found) exit 42 }
-	' "$shadow_path" >"$tmp_shadow" ||
-		{
-			rm -f "$tmp_shadow"
-			die "Failed to update password hash for ${username}"
-		}
-	as_root tee "$shadow_path" >/dev/null <"$tmp_shadow"
-	rm -f "$tmp_shadow"
-
-	uid="1000"
-	gid="1000"
-	while IFS=: read -r name _ pass_uid pass_gid _; do
-		if [[ "$name" == "$username" ]]; then
-			uid="$pass_uid"
-			gid="$pass_gid"
-			break
-		fi
-	done < <(as_root cat "$deploy_etc/passwd")
-
-	var_home="$root_mnt/ostree/deploy/default/var/home/$username"
-	as_root mkdir -p "$var_home"
-	as_root chown "$uid:$gid" "$var_home"
-	as_root chmod 700 "$var_home"
-
-	skel="$deploy_root/etc/skel"
-	if [[ -d "$skel" ]]; then
-		as_root cp -rT "$skel" "$var_home"
-		as_root chown -R "$uid:$gid" "$var_home"
-	fi
+	as_root python3 -m kyth_shared.accounts create-user "$deploy_root" "$root_mnt" "$username" "$pw_hash"
 }
 
 usage() {
@@ -192,7 +106,7 @@ usage() {
 }
 [[ -b "$TARGET_PART" ]] || die "$TARGET_PART is not a block device."
 
-for cmd in bootc lsblk mkfs.btrfs mount umount findmnt blkid; do
+for cmd in bootc lsblk mkfs.btrfs mount umount findmnt blkid python3; do
 	command -v "$cmd" >/dev/null 2>&1 || die "Required command not found: $cmd"
 done
 

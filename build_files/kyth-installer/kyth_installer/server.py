@@ -1,20 +1,53 @@
 """Authenticated local HTTP transport for the installer application."""
 
 import json
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 from . import config
 from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, _IS_LIVE_SESSION
-from .context import DEFAULT_CONTEXT, InstallerContext
+from .context import InstallerContext
 from .disk import list_disks, list_partitions, list_free_space
 from .partition_ops import FILESYSTEM_OPTIONS, get_journal
-from .plan import ROUTES, RouteSpec
 from .post_routes import PostRouteService
 from .system import list_timezones
 
 _WEBUI_DIR = Path(__file__).parent / "webui"
+
+
+@dataclass(frozen=True)
+class RouteSpec:
+    method: str
+    path: str
+    requires_auth: bool = True
+    requires_same_origin: bool = False
+
+
+ROUTES = {
+    "index": RouteSpec("GET", "/", requires_auth=False),
+    "config": RouteSpec("GET", "/api/config"),
+    "disks": RouteSpec("GET", "/api/disks"),
+    "partitions": RouteSpec("GET", "/api/partitions"),
+    "free_space": RouteSpec("GET", "/api/free-space"),
+    "stream": RouteSpec("GET", "/api/stream"),
+    "log": RouteSpec("GET", "/api/log"),
+    "timezones": RouteSpec("GET", "/api/timezones"),
+    "start": RouteSpec("POST", "/api/start", requires_same_origin=True),
+    "reboot": RouteSpec("POST", "/api/reboot", requires_same_origin=True),
+    # Manual partition management
+    "partition_pending": RouteSpec("GET", "/api/disk/pending"),
+    "filesystems": RouteSpec("GET", "/api/disk/filesystems"),
+    "new_table": RouteSpec("POST", "/api/disk/new-table", requires_same_origin=True),
+    "create_partition": RouteSpec("POST", "/api/disk/create", requires_same_origin=True),
+    "delete_partition": RouteSpec("POST", "/api/disk/delete", requires_same_origin=True),
+    "resize_partition": RouteSpec("POST", "/api/disk/resize", requires_same_origin=True),
+    "format_partition": RouteSpec("POST", "/api/disk/format", requires_same_origin=True),
+    "set_mountpoint": RouteSpec("POST", "/api/disk/set-mountpoint", requires_same_origin=True),
+    "commit_partitions": RouteSpec("POST", "/api/disk/commit", requires_same_origin=True),
+    "rollback_partitions": RouteSpec("POST", "/api/disk/rollback", requires_same_origin=True),
+}
 
 
 def _read_webui(name: str) -> str:
@@ -44,7 +77,10 @@ def _route_for(method: str, path: str) -> RouteSpec | None:
 class Handler(BaseHTTPRequestHandler):
     @property
     def context(self) -> InstallerContext:
-        return getattr(getattr(self, "server", None), "context", DEFAULT_CONTEXT)
+        context = getattr(getattr(self, "server", None), "context", None)
+        if context is None:
+            raise RuntimeError("Installer HTTP handler has no runtime context")
+        return context
 
     def log_message(self, *_):
         pass
@@ -54,13 +90,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("X-Kyth-Session-Token", "") == SESSION_TOKEN:
             return True
         # Check cookie
-        cookie_header = self.headers.get("Cookie", "")
-        if cookie_header:
-            for pair in cookie_header.split(";"):
-                if "=" in pair:
-                    k, v = pair.strip().split("=", 1)
-                    if k == "bootstrap_auth" and v == SESSION_TOKEN:
-                        return True
+        cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
+        if cookies.get("bootstrap_auth") == SESSION_TOKEN:
+            return True
         self.send_error(403, "Forbidden")
         return False
 
@@ -158,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
             disk = (qs.get("disk") or [""])[0]
             self._json(list_free_space(disk) if disk else [])
         elif route == ROUTES["partition_pending"]:
-            journal = get_journal()
+            journal = get_journal(self.context)
             self._json(journal.pending() if journal else [])
         elif route == ROUTES["filesystems"]:
             self._json(FILESYSTEM_OPTIONS)
@@ -239,6 +271,6 @@ class _Server(ThreadingHTTPServer):
     # and left a TIME_WAIT socket — prevents EADDRINUSE on rapid restarts.
     allow_reuse_address = True
 
-    def __init__(self, server_address, handler_class, context=DEFAULT_CONTEXT):
-        self.context = context
+    def __init__(self, server_address, handler_class, context: InstallerContext | None = None):
+        self.context = context or InstallerContext()
         super().__init__(server_address, handler_class)

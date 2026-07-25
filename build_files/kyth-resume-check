@@ -3,17 +3,10 @@
 
 set -uo pipefail
 
-have() { command -v "$1" >/dev/null 2>&1; }
-pass() { printf 'PASS  %-28s %s\n' "$1" "$2"; }
-warn() { printf 'WARN  %-28s %s\n' "$1" "$2"; WARNINGS=$((WARNINGS + 1)); }
-fail() { printf 'FAIL  %-28s %s\n' "$1" "$2"; FAILURES=$((FAILURES + 1)); }
+# shellcheck source=kyth-diagnostics-common.sh disable=SC1091
+source /usr/libexec/kyth-diagnostics-common.sh
 
-WARNINGS=0
-FAILURES=0
-
-echo "KythOS Resume Check"
-echo "Generated: $(date -Is)"
-echo
+print_header "Resume Check"
 
 if have loginctl && loginctl show-session "${XDG_SESSION_ID:-self}" >/dev/null 2>&1; then
     pass "Login session" "logind can see this session"
@@ -73,15 +66,4 @@ else
 fi
 rm -f /tmp/kyth-resume-journal.$$
 
-if [[ "$FAILURES" -gt 0 ]]; then
-    echo
-    echo "Result: resume readiness has failures."
-    exit 2
-fi
-if [[ "$WARNINGS" -gt 0 ]]; then
-    echo
-    echo "Result: resume readiness has warnings."
-    exit 1
-fi
-echo
-echo "Result: resume readiness looks good."
+print_result "resume readiness"

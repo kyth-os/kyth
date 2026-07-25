@@ -9,18 +9,16 @@ from ..core_base import (
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.software import (
-    _install_flatpak_inline,
-    _is_flatpak_installed,
-)
+from ..actions import _install_flatpak_inline
+from ..services.flatpak import _is_flatpak_installed
 from ..services.launch import flatpak_run, popen, systemsettings, kcmshell
 from ..services.windows_migration import (
     _collect_hw_sanity,
 )
-from ..qt import (  # noqa: E501
-    QFileDialog, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout,
+from ..qt import (
+    QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, single_shot,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 
@@ -154,7 +152,7 @@ class _LocalSendMiscMixin:
         hw_layout.addLayout(hw_btns)
         self._add(hw_card)
         # Pages are built eagerly at startup; defer the subprocess probes.
-        QTimer.singleShot(900, self._run_hw_sanity)
+        single_shot(self, 900, self._run_hw_sanity)
 
 
 

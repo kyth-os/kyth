@@ -23,88 +23,20 @@ import sys
 
 os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
-    QPushButton, QVBoxLayout,
+def _ensure_kyth_shared_path() -> None:
+    from pathlib import Path
+    source_path = Path(__file__).resolve().parent / "kyth_shared"
+    if (source_path / "kyth_shared").is_dir() and str(source_path) not in sys.path:
+        sys.path.insert(0, str(source_path))
+
+_ensure_kyth_shared_path()
+
+from kyth_shared.qt import (
+    Qt, QUrl, QDesktopServices, QApplication, QCheckBox, QDialog,
+    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
 
-# (filename_pattern, display_name, suggestion_text, flathub_id_or_None)
-# Patterns matched case-insensitively against the installer stem after stripping
-# common setup/version suffixes (e.g. "MicrosoftTeams-x64.exe" → "microsoftteams").
-_APP_DB = [
-    # Microsoft Office
-    (r"word|winword",           "Microsoft Word",           "Use LibreOffice Writer — fully compatible with .docx files.",          "org.libreoffice.LibreOffice"),
-    (r"excel",                  "Microsoft Excel",          "Use LibreOffice Calc — reads and writes .xlsx files.",                 "org.libreoffice.LibreOffice"),
-    (r"powerpnt|powerpoint",    "Microsoft PowerPoint",     "Use LibreOffice Impress — reads and writes .pptx files.",              "org.libreoffice.LibreOffice"),
-    (r"outlook",                "Microsoft Outlook",        "Use Betterbird for desktop email and calendar.",                       "eu.betterbird.Betterbird"),
-    (r"onenote",                "Microsoft OneNote",        "Access OneNote at onenote.com, or use Obsidian for local notes.",      None),
-    (r"teams",                  "Microsoft Teams",          "Use Teams in the browser, or pin it as a Web App via WebApp Manager.", "io.github.vikdevelop.WebApp"),
-    (r"onedrive",               "OneDrive",                 "Access OneDrive through KDE's Online Accounts in System Settings.",    None),
-    (r"visio",                  "Microsoft Visio",          "Use diagrams.net in the browser, or install LibreOffice Draw.",        "org.libreoffice.LibreOffice"),
-    (r"project",                "Microsoft Project",        "Use ProjectLibre or browser-based project tools for project plans.",   None),
-    # Communication
-    (r"discord",                "Discord",                  "Install the native Linux Discord app.",                                "com.discordapp.Discord"),
-    (r"slack",                  "Slack",                    "Install Slack from Flathub.",                                         "com.slack.Slack"),
-    (r"zoom",                   "Zoom",                     "Install Zoom from Flathub.",                                          "us.zoom.Zoom"),
-    (r"skype",                  "Skype",                    "Install Skype from Flathub.",                                         "com.skype.Skype"),
-    (r"signal",                 "Signal",                   "Install Signal from Flathub.",                                        "org.signal.Signal"),
-    (r"telegram",               "Telegram",                 "Install Telegram from Flathub.",                                      "org.telegram.desktop"),
-    (r"whatsapp",               "WhatsApp",                 "Pin WhatsApp Web as a desktop app via WebApp Manager.",               "io.github.vikdevelop.WebApp"),
-    (r"messenger",              "Messenger",                "Use Messenger in the browser, or pin it with WebApp Manager.",        "io.github.vikdevelop.WebApp"),
-    # Browsers
-    (r"chrome|googlechrome",    "Google Chrome",            "Install Chrome from Flathub.",                                        "com.google.Chrome"),
-    (r"firefox",                "Firefox",                  "Firefox is available from Flathub.",                                  "org.mozilla.firefox"),
-    (r"brave",                  "Brave",                    "Install Brave from Flathub.",                                         "com.brave.Browser"),
-    (r"opera",                  "Opera",                    "Install Opera from Flathub.",                                         "com.opera.Opera"),
-    # Adobe Creative Cloud
-    (r"photoshop",              "Adobe Photoshop",          "Use GIMP for photo editing — it handles many Photoshop files.",       "org.gimp.GIMP"),
-    (r"premiere",               "Adobe Premiere",           "Use Kdenlive or DaVinci Resolve for video editing.",                  "org.kde.kdenlive"),
-    (r"after.?e?f?fects|afterfx","Adobe After Effects",     "Use Blender for motion graphics and visual effects.",                 "org.blender.Blender"),
-    (r"audition",               "Adobe Audition",           "Use Audacity for audio editing.",                                     "org.audacityteam.Audacity"),
-    (r"lightroom",              "Adobe Lightroom",          "Use Darktable for raw photo processing.",                             "org.darktable.Darktable"),
-    (r"illustrator",            "Adobe Illustrator",        "Use Inkscape for vector graphics.",                                   "org.inkscape.Inkscape"),
-    # Gaming launchers
-    (r"steam",                  "Steam",                    "Steam is already installed on KythOS.",                               "com.valvesoftware.Steam"),
-    (r"epicgames|epicinstaller","Epic Games Launcher",      "Use Heroic Games Launcher to access your Epic library.",              "com.heroicgameslauncher.hgl"),
-    (r"galaxyclient|gog",       "GOG Galaxy",               "Use Heroic Games Launcher to access your GOG library.",               "com.heroicgameslauncher.hgl"),
-    (r"battle.?net|blizzard",   "Battle.net",               "Run Battle.net through Lutris or Bottles.",                          "net.lutris.Lutris"),
-    (r"origin|eaapp|ea.?app",   "EA App / Origin",          "Use Heroic Games Launcher to access your EA library.",                "com.heroicgameslauncher.hgl"),
-    (r"uplay|ubisoft.?connect", "Ubisoft Connect",          "Use Heroic Games Launcher to access your Ubisoft library.",           "com.heroicgameslauncher.hgl"),
-    (r"curseforge",             "CurseForge",               "Use Prism Launcher for Minecraft modpacks when possible.",            "org.prismlauncher.PrismLauncher"),
-    (r"minecraft",              "Minecraft Launcher",       "Use Prism Launcher for Minecraft and modpacks.",                      "org.prismlauncher.PrismLauncher"),
-    (r"vortex|nexusmods?",      "Vortex / Nexus Mods",      "Use SteamTinkerLaunch for per-game MO2, or Bottles for standalone mod tools.", None),
-    (r"modorganizer|mo2",       "Mod Organizer 2",          "Install MO2 per game through SteamTinkerLaunch, or isolate it in Bottles.", None),
-    # Productivity / tools
-    (r"notepad\+\+|npp\b",      "Notepad++",                "Use Kate (already installed) or VS Code for text editing.",           None),
-    (r"code|vscode|visual.?studio.?code", "Visual Studio Code", "VS Code is available from the app menu or KythOS System Hub.",       None),
-    (r"visual.?studio(?!.*code)", "Visual Studio",           "Use VS Code, JetBrains Toolbox, or a Windows VM for full Visual Studio projects.", None),
-    (r"putty",                  "PuTTY",                    "Use Konsole with ssh, or search Flathub if you specifically want PuTTY.", None),
-    (r"winscp",                 "WinSCP",                   "Use Dolphin's sftp:// support or FileZilla from Flathub.",            "org.filezillaproject.Filezilla"),
-    (r"7z|7-?zip",              "7-Zip",                    "p7zip is already installed — right-click any archive in Dolphin.",    None),
-    (r"winrar",                 "WinRAR",                   "p7zip is already installed — right-click any archive in Dolphin.",    None),
-    (r"obs.?studio|obs64",      "OBS Studio",               "Install OBS Studio from Flathub.",                                    "com.obsproject.Studio"),
-    (r"vlc",                    "VLC",                      "Install VLC from Flathub.",                                           "org.videolan.VLC"),
-    (r"spotify",                "Spotify",                   "Install Spotify from Flathub.",                                      "com.spotify.Client"),
-    (r"bitwarden",              "Bitwarden",                "Install Bitwarden from Flathub.",                                     "com.bitwarden.desktop"),
-    (r"1password",              "1Password",                "Install 1Password from Flathub.",                                     "com.onepassword.OnePassword"),
-    (r"obsidian",               "Obsidian",                 "Install Obsidian from Flathub.",                                      "md.obsidian.Obsidian"),
-    (r"notion",                 "Notion",                   "Use Notion in the browser, or pin it as a Web App.",                  "io.github.vikdevelop.WebApp"),
-    (r"qbittorrent",            "qBittorrent",              "Install qBittorrent from Flathub.",                                   "org.qbittorrent.qBittorrent"),
-    (r"plex",                   "Plex",                     "Install Plex Desktop from Flathub.",                                  "tv.plex.PlexDesktop"),
-    (r"calibre",                "Calibre",                  "Install Calibre from Flathub.",                                      "com.calibre_ebook.calibre"),
-    (r"audacity",               "Audacity",                 "Install Audacity from Flathub.",                                     "org.audacityteam.Audacity"),
-    (r"resolve|davinci",        "DaVinci Resolve",          "Install DaVinci Resolve via KythOS System Hub → Software.",           None),
-    (r"gimp",                   "GIMP",                     "Install GIMP from Flathub.",                                          "org.gimp.GIMP"),
-    (r"inkscape",               "Inkscape",                 "Install Inkscape from Flathub.",                                      "org.inkscape.Inkscape"),
-    (r"blender",                "Blender",                  "Install Blender from Flathub.",                                       "org.blender.Blender"),
-    # Hardware utilities that often have no clean Linux equivalent.
-    (r"logi|logitech|ghub|g.?hub", "Logitech G HUB",         "Use Piper or OpenRGB when your device is supported.",                 "org.freedesktop.Piper"),
-    (r"razer|synapse",          "Razer Synapse",            "Use OpenRGB for lighting and OpenRazer-supported tools where available.", "org.openrgb.OpenRGB"),
-    (r"elgato|stream.?deck",    "Elgato / Stream Deck",     "Use OpenDeck from KythOS System Hub for Stream Deck workflows.",       None),
-    (r"voicemeeter|go.?xlr",    "Audio routing utility",    "Use PipeWire audio routing tools; check System Settings > Audio first.", None),
-]
+from kyth_shared import suggest_app
 
 _QSS = """
 * { font-family: "Noto Sans", "Segoe UI", sans-serif; font-size: 13px; color: #cccccc; }
@@ -146,10 +78,10 @@ def _normalise(filename: str) -> str:
 
 def _lookup(filepath: str):
     stem = _normalise(filepath)
-    for pattern, app_name, suggestion, flatpak_id in _APP_DB:
-        if re.search(pattern, stem, re.IGNORECASE):
-            return app_name, suggestion, flatpak_id
-    return None, None, None
+    local_json = os.path.join(os.path.dirname(__file__), "exe-handler-apps.json")
+    if os.path.exists(local_json):
+        return suggest_app(stem, path=local_json)
+    return suggest_app(stem)
 
 
 def _is_rpm_installer(filepath: str) -> bool:

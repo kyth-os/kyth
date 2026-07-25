@@ -8,26 +8,19 @@
 # 2026-07-17 the ublue-os/obs-vkcapture COPR's fedora-44-i386 (and f43/rawhide
 # i386) build is broken upstream — only f42-i386 still succeeds — so the i686
 # package genuinely does not exist to install, not a mirror desync. Hard-
-# failing the build over it would be wrong: unlike mimalloc (unconditional
-# global LD_PRELOAD, boot-critical), a missing i686 capture layer only means
+# failing the build over it would be wrong: a missing i686 capture layer only means
 # OBS can't game-capture 32-bit titles — a degraded feature, not a crash.
 # Revisit and re-add once ublue-os/obs-vkcapture's i386 chroot builds again.
 KYTH_MULTILIB_PAIRS=(
 	mangohud vkBasalt libFAudio
-	gamemode libXScrnSaver libatomic nss mimalloc
+	gamemode libXScrnSaver libatomic nss
 )
 
 # Fails loudly if any package in the given list is installed for only one of
 # x86_64/i686. A `dnf5 install --skip-unavailable ... || true` pattern can
 # silently drop just one arch of a pair without failing the build — that's
-# exactly what shipped a July 2026 image with libmimalloc.so.i686 and no
-# x86_64 counterpart. Because /etc/environment.d/20-mimalloc.conf sets
-# LD_PRELOAD=libmimalloc.so unconditionally for every desktop session
-# (see sysconfig/46-mimalloc-preload.sh), every x86_64 process failed its
-# preload at launch, cascading into a full Plasma crash loop on first login.
-# mimalloc's own install line has since been hardened to fail outright
-# instead of skipping (see packages.sh) — this guard stays as defense in
-# depth for it and for the other explicit multilib pairs above, in case a
+# exactly what previously allowed one architecture of a required pair to ship
+# without its counterpart. This guard stays as defense in depth in case a
 # future edit reintroduces --skip-unavailable somewhere in this list. Uses
 # exit codes, not `rpm -q` output, since some rpm builds print "package ...
 # is not installed" to stdout rather than stderr — capturing that text would

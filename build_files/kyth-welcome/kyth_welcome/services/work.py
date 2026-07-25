@@ -10,7 +10,7 @@ import shlex
 import subprocess
 
 from .gaming import _find_ntfs_drives
-from .software import _chromium_app_window_cmd
+from .browser_apps import chromium_app_window_command
 
 WORK_APPS = [
     ("org.libreoffice.LibreOffice", "LibreOffice",
@@ -59,7 +59,7 @@ _m365_icon = m365_icon
 
 
 def m365_desktop_entry(name: str, url: str, comment: str) -> str | None:
-    launch = _chromium_app_window_cmd(url)
+    launch = chromium_app_window_command(url)
     if launch is None:
         return None
     cmd, wm_class = launch
@@ -131,7 +131,7 @@ def convert_pst(path: str) -> tuple[bool, str]:
         os.makedirs(dest, exist_ok=True)
         r = subprocess.run(
             ["readpst", "-r", "-o", dest, path],
-            capture_output=True, text=True, timeout=3600,
+            capture_output=True, text=True, timeout=3600, check=False,
         )
     except FileNotFoundError:
         return False, "readpst is not installed — update KythOS to the latest image."

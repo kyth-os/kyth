@@ -3,17 +3,18 @@ import time
 # __KYTH_GENERATED_IMPORTS__
 from .services.launch import reboot
 from .core_base import (
-    DownloadMonitor, _bootc_image_timestamp, _branch_display_name, _get_rx_bytes, _human_bytes, _human_bytes_pair,
-    _image_tag_for_channel, _parse_size_bytes, _restyle, _set_session_inhibit, _with_idle_inhibit,
+    _bootc_image_timestamp, _branch_display_name, _format_dl_progress_line, _format_elapsed,
+    _image_tag_for_channel, _restyle, _run_worker, _set_session_inhibit, _start_or_extend_dl_monitor,
+    _stop_download_monitor, _with_idle_inhibit,
 )
-from .services.software import (
-    Worker, _finish_worker,
-)
+from .services.runtime import _finish_worker
+from .services.privileged import bootc_action
 from .core_base import REGISTRY, _bootc_image_digest, _current_branch
-from .qt import (  # noqa: E501
+from .services.bootc import branches_view
+from .qt import (
     QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card, _set_log_panel,
 )
 
@@ -183,29 +184,15 @@ class BranchesPage(Page):
             self._state_copy_btn.hide()
 
         # Branch cards
-        if tag in ("latest", "latest-cachy"):
-            self._stable_btn.setObjectName("branch-active")
-            self._stable_btn.setText("On Stable  (current)")
-            self._stable_build_lbl.setText(f"Running: built {booted_ts}" if booted_ts else "")
-            self._stable_build_lbl.setVisible(bool(booted_ts))
-            self._testing_btn.setObjectName("branch-inactive")
-            self._testing_btn.setText("Switch to Testing")
-            self._testing_build_lbl.hide()
-        elif tag in ("testing", "testing-cachy"):
-            self._stable_btn.setObjectName("branch-inactive")
-            self._stable_btn.setText("Switch to Stable")
-            self._stable_build_lbl.hide()
-            self._testing_btn.setObjectName("branch-active")
-            self._testing_btn.setText("On Testing  (current)")
-            self._testing_build_lbl.setText(f"Running: built {booted_ts}" if booted_ts else "")
-            self._testing_build_lbl.setVisible(bool(booted_ts))
-        else:
-            self._stable_btn.setObjectName("branch-inactive")
-            self._stable_btn.setText("Switch to Stable")
-            self._stable_build_lbl.hide()
-            self._testing_btn.setObjectName("branch-inactive")
-            self._testing_btn.setText("Switch to Testing")
-            self._testing_build_lbl.hide()
+        view = branches_view(tag, booted_ts)
+        self._stable_btn.setObjectName(view.stable.object_name)
+        self._stable_btn.setText(view.stable.button_text)
+        self._stable_build_lbl.setText(view.stable.build_label_text)
+        self._stable_build_lbl.setVisible(view.stable.build_label_visible)
+        self._testing_btn.setObjectName(view.testing.object_name)
+        self._testing_btn.setText(view.testing.button_text)
+        self._testing_build_lbl.setText(view.testing.build_label_text)
+        self._testing_build_lbl.setVisible(view.testing.build_label_visible)
 
         _restyle(self._stable_btn)
         _restyle(self._testing_btn)
@@ -232,35 +219,32 @@ class BranchesPage(Page):
         self._stable_btn.setEnabled(False)
         self._testing_btn.setEnabled(False)
 
-        self._worker = Worker(_with_idle_inhibit(["sudo", "bootc", "switch", ref], "KythOS is switching branch"))
-        _set_session_inhibit(self, "KythOS is switching the system branch")
-        self._worker.line.connect(self._on_line)
-        self._worker.done.connect(self._on_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            _with_idle_inhibit(
+                bootc_action("switch", ref).command(),
+                "KythOS is switching branch",
+            ),
+            session_inhibit_reason="KythOS is switching the system branch",
+            on_line=self._on_line,
+            on_done=self._on_done,
+        )
         self._update_activity()
         self._heartbeat.start()
 
     def _stop_dl_monitor(self):
-        if self._dl_monitor is not None:
-            self._dl_monitor.stop()
-            self._dl_monitor.wait()
-            self._dl_monitor.deleteLater()
-            self._dl_monitor = None
+        _stop_download_monitor(self._dl_monitor)
+        self._dl_monitor = None
 
     def _on_line(self, text: str):
-        if "layers needed:" in text and self._dl_monitor is None:
-            try:
-                m = text.split("layers needed:")[1]
-                size_str = m.split("(")[1].rstrip(")") if "(" in m else ""
-                total = _parse_size_bytes(size_str)
-                if total > 0:
-                    self._dl_total = total
-                    self._progress.setRange(0, 1000)
-                    self._dl_monitor = DownloadMonitor(total, _get_rx_bytes())
-                    self._dl_monitor.stats.connect(self._on_dl_stats)
-                    self._dl_monitor.start()
-            except Exception:
-                pass
+        self._dl_monitor, self._dl_total, started, progress_ready = _start_or_extend_dl_monitor(
+            text, self._dl_monitor, self._dl_total,
+        )
+        if progress_ready:
+            self._progress.setRange(0, 1000)
+        if started:
+            self._dl_monitor.stats.connect(self._on_dl_stats)
+            self._dl_monitor.start()
         self._log.append(text)
         self._log.ensureCursorVisible()
 
@@ -270,28 +254,13 @@ class BranchesPage(Page):
         if total > 0:
             self._progress.setValue(int(min(downloaded / total, 1.0) * 1000))
         if speed_bps > 100_000:
-            dl_dl, dl_total = _human_bytes_pair(downloaded, total)
-            dl_str = f"{dl_dl} / {dl_total}"
-            speed_str = f"{_human_bytes(speed_bps)}/s"
-            if eta_sec > 60:
-                eta_mins, eta_secs = divmod(eta_sec, 60)
-                eta_str = f"~{eta_mins}m {eta_secs:02d}s remaining"
-            elif eta_sec > 0:
-                eta_str = f"~{eta_sec}s remaining"
-            else:
-                eta_str = ""
-            parts = [dl_str, speed_str]
-            if eta_str:
-                parts.append(eta_str)
-            self._activity_lbl.setText("  ·  ".join(parts))
+            self._activity_lbl.setText(_format_dl_progress_line(downloaded, total, speed_bps, eta_sec))
             self._activity_lbl.show()
 
     def _update_activity(self):
         elapsed = int(time.monotonic() - self._op_start_ts) if self._op_start_ts else 0
-        mins, secs = divmod(elapsed, 60)
-        elapsed_str = f"{mins}m {secs:02d}s" if mins else f"{secs}s"
         phase = self._current_phase or "Switching branch…"
-        self._activity_lbl.setText(f"{phase}  ·  {elapsed_str} elapsed")
+        self._activity_lbl.setText(f"{phase}  ·  {_format_elapsed(elapsed)} elapsed")
         self._activity_lbl.show()
 
     def _heartbeat_tick(self):

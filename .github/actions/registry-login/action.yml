@@ -1,0 +1,56 @@
+name: Registry Login
+description: Authenticate Docker and/or Podman to a container registry.
+inputs:
+  registry:
+    description: Registry to login to.
+    required: false
+    default: ghcr.io
+  username:
+    description: Username for authentication.
+    required: false
+    default: ${{ github.actor }}
+  password:
+    description: Password/token for authentication.
+    required: true
+  docker:
+    description: Log in with Docker client.
+    required: false
+    default: "true"
+  podman:
+    description: Log in with rootless Podman.
+    required: false
+    default: "false"
+  sudo-podman:
+    description: Log in with rootful Podman (sudo podman).
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Login with Docker
+      if: inputs.docker == 'true'
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Login with rootless Podman
+      if: inputs.podman == 'true'
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        USERNAME: ${{ inputs.username }}
+        PASSWORD: ${{ inputs.password }}
+      run: |
+        printf '%s' "${PASSWORD}" | podman login "${REGISTRY}" --username "${USERNAME}" --password-stdin
+
+    - name: Login with rootful Podman
+      if: inputs.sudo-podman == 'true'
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        USERNAME: ${{ inputs.username }}
+        PASSWORD: ${{ inputs.password }}
+      run: |
+        printf '%s' "${PASSWORD}" | sudo podman login "${REGISTRY}" --username "${USERNAME}" --password-stdin

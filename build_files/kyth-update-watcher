@@ -14,7 +14,6 @@ Design: oneshot script — examine conditions, run or skip, write status, exit.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import pwd
@@ -51,6 +50,11 @@ from kyth_welcome.services.bootc import (  # noqa: E402
 from kyth_welcome.services.registry import (  # noqa: E402
     remote_digest_for_ref,
 )
+from kyth_shared.update_status import (  # noqa: E402
+    UpdateSnapshot,
+    read_update_snapshot,
+    write_update_snapshot,
+)
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -59,6 +63,7 @@ from kyth_welcome.services.registry import (  # noqa: E402
 LOG = logging.getLogger("kyth-update-watcher")
 
 STATUS_PATH = Path("/var/lib/kyth/update-watcher-status.json")
+_STATUS_IDENTITY: dict[str, str] = {}
 
 DEFAULT_CONFIG: dict = {
     "enabled":            True,
@@ -381,24 +386,28 @@ def write_status(
     ts: int | None = None,
     flatpak_updates: int = 0,
 ) -> None:
-    STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
-        STATUS_PATH.write_text(json.dumps({
-            "result":          result,   # "skipped" | "upgraded" | "error" | "no_change"
-            "reason":          reason,
-            "output":          output[-2000:],
-            "ts":              ts or int(time.time()),
-            "flatpak_updates": flatpak_updates,
-        }))
+        write_update_snapshot(
+            UpdateSnapshot(
+                result=result,
+                reason=reason,
+                output=output[-2000:],
+                ts=ts or int(time.time()),
+                flatpak_updates=flatpak_updates,
+                image_ref=_STATUS_IDENTITY.get("image_ref", ""),
+                booted_digest=_STATUS_IDENTITY.get("booted_digest", ""),
+                staged_digest=_STATUS_IDENTITY.get("staged_digest", ""),
+                remote_digest=_STATUS_IDENTITY.get("remote_digest", ""),
+            ),
+            STATUS_PATH,
+        )
     except OSError as exc:
         LOG.warning("Could not write status: %s", exc)
 
 
 def read_last_status() -> dict:
-    try:
-        return json.loads(STATUS_PATH.read_text())
-    except Exception:
-        return {}
+    snapshot = read_update_snapshot(STATUS_PATH)
+    return snapshot.to_dict() if snapshot else {}
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +425,7 @@ def main() -> None:
         LOG.error("kyth-update-watcher must run as root")
         sys.exit(1)
 
+    _STATUS_IDENTITY.clear()
     cfg = load_config()
 
     checks = [
@@ -451,11 +461,17 @@ def main() -> None:
         if ref:
             booted_digest = image_digest_from_status(status_data, "booted")
             staged_digest = image_digest_from_status(status_data, "staged")
+            _STATUS_IDENTITY.update(
+                image_ref=ref,
+                booted_digest=booted_digest or "",
+                staged_digest=staged_digest or "",
+            )
 
             LOG.info("Booted digest: %s, Staged digest: %s", booted_digest, staged_digest)
 
             remote_digest = get_remote_digest(ref)
             if remote_digest:
+                _STATUS_IDENTITY["remote_digest"] = remote_digest
                 LOG.info("Remote registry digest: %s", remote_digest)
                 if staged_digest and remote_digest == staged_digest:
                     LOG.info("System already has staged update matching latest remote digest. Skipping bootc upgrade.")
@@ -480,6 +496,8 @@ def main() -> None:
                 _notify_updates(os_staged=False, flatpak_count=flatpak_count)
         else:
             LOG.info("Upgrade staged successfully")
+            if _STATUS_IDENTITY.get("remote_digest"):
+                _STATUS_IDENTITY["staged_digest"] = _STATUS_IDENTITY["remote_digest"]
             write_status("upgraded", None, output, start_ts, flatpak_count)
             _notify_updates(os_staged=True, flatpak_count=flatpak_count)
             try:

@@ -13,7 +13,16 @@ WEBUI_DIR = INSTALLER_ROOT / "kyth_installer/webui"
 if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
-from kyth_installer import disk, install, plan, post_routes, server, system  # noqa: E402
+from kyth_installer import (  # noqa: E402
+    disk,
+    install,
+    partition_ops,
+    plan,
+    post_routes,
+    runner as command_runner,
+    server,
+    system,
+)
 from kyth_installer.context import InstallerContext  # noqa: E402
 
 
@@ -62,7 +71,7 @@ class InstallerWebuiTests(unittest.TestCase):
             ("GET", "/api/log"),
             ("POST", "/api/start"),
         }
-        actual = {(route.method, route.path) for route in plan.ROUTES.values()}
+        actual = {(route.method, route.path) for route in server.ROUTES.values()}
 
         self.assertTrue(expected.issubset(actual))
 
@@ -97,7 +106,15 @@ class InstallerCommandTests(unittest.TestCase):
         ]
 
         with patch.object(install, "_as_root", side_effect=lambda cmd: cmd), \
-             patch.object(install, "_get_rx_bytes", return_value=0):
+             patch.object(install, "_get_rx_bytes", return_value=0), \
+             patch(
+                 "kyth_installer.runner._ALLOWED_EXECUTABLES",
+                 new={
+                     *command_runner._ALLOWED_EXECUTABLES,
+                     Path(sys.executable).name,
+                     Path(sys.executable).resolve().name,
+                 },
+             ):
             install._run_cmd(
                 command, 5, 90, logs.append, progress.append,
                 stall_timeout=2, absolute_timeout=None,
@@ -128,7 +145,7 @@ class InstallerStorageTests(unittest.TestCase):
         }
 
         with patch.object(self.disk, "_protected_install_disks", return_value={"/dev/sdb"}), \
-             patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+             patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             disks = self.disk.list_disks()
 
         self.assertEqual([d["name"] for d in disks], ["/dev/nvme0n1"])
@@ -144,7 +161,7 @@ class InstallerStorageTests(unittest.TestCase):
         with patch.object(self.disk, "_protected_install_disks", return_value=set()), \
              patch.object(self.disk, "_running_system_disk", return_value="/dev/nvme0n1"), \
              patch.object(self.disk, "_parent_disk", return_value="/dev/nvme0n1"), \
-             patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+             patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             disks = {d["name"]: d for d in self.disk.list_disks()}
 
         self.assertTrue(disks["/dev/nvme0n1"]["current"])
@@ -157,7 +174,7 @@ class InstallerStorageTests(unittest.TestCase):
         ]}
         with patch.object(self.disk, "_protected_install_disks", return_value=set()), \
              patch.object(self.disk, "_running_system_disk", return_value=""), \
-             patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+             patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             disks = self.disk.list_disks()
 
         self.assertEqual([item["name"] for item in disks], ["/dev/sdb"])
@@ -175,15 +192,15 @@ class InstallerStorageTests(unittest.TestCase):
             ("lsblk", "-n", "-o", "TYPE", "/dev/nvme0n1"): "disk\n",
         }
 
-        def fake_check_output(cmd, **_kwargs):
+        def fake_run_command(cmd, **_kwargs):
             key = tuple(cmd)
             if key not in chain:
                 raise AssertionError(f"unexpected lsblk invocation: {cmd}")
-            return chain[key]
+            return SimpleNamespace(stdout=chain[key], returncode=0)
 
         normalize = lambda p: p if p.startswith("/dev/") else f"/dev/{p}"
         with patch.object(self.disk, "_normal_device_path", side_effect=normalize), \
-             patch.object(self.disk.subprocess, "check_output", side_effect=fake_check_output):
+             patch.object(self.disk, "run_command", side_effect=fake_run_command):
             result = self.disk._parent_disk("/dev/mapper/kyth-root")
 
         self.assertEqual(result, "/dev/nvme0n1")
@@ -205,7 +222,7 @@ class InstallerStorageTests(unittest.TestCase):
             }]
         }
 
-        with patch.object(self.disk.subprocess, "check_output", return_value=json.dumps(payload)):
+        with patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             parts = {p["name"]: p for p in self.disk.list_partitions("/dev/nvme0n1")}
 
         self.assertFalse(parts["/dev/nvme0n1p1"]["alongside_candidate"])
@@ -227,7 +244,7 @@ class InstallerStorageTests(unittest.TestCase):
 
     def test_find_efi_partition_falls_back_to_findmnt_when_no_partition_flagged(self):
         with patch.object(self.disk, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "efi": False}]), \
-             patch.object(self.disk.subprocess, "check_output", return_value="/dev/nvme0n1p1\n"):
+             patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout="/dev/nvme0n1p1\n", returncode=0)):
             result = self.disk.find_efi_partition("/dev/nvme0n1")
 
         self.assertEqual(result, "/dev/nvme0n1p1")
@@ -470,7 +487,7 @@ class InstallerPlanTests(unittest.TestCase):
         # ---pretend-input-tty and "Yes" on stdin instead.
         shrink_calls = [
             (cmd, kwargs)
-            for cmd, kwargs in zip(flattened, run_kwargs)
+            for cmd, kwargs in zip(flattened, run_kwargs, strict=True)
             if "resizepart 3" in cmd
         ]
         self.assertEqual(len(shrink_calls), 1)
@@ -479,7 +496,7 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertNotIn(" -s ", shrink_cmd)
         self.assertEqual(shrink_kwargs.get("input"), "Yes\n")
         ntfs_shrink = next(
-            kwargs for cmd, kwargs in zip(flattened, run_kwargs)
+            kwargs for cmd, kwargs in zip(flattened, run_kwargs, strict=True)
             if "ntfsresize --size" in cmd and "--no-action" not in cmd
         )
         self.assertEqual(ntfs_shrink.get("input"), "y\n")
@@ -635,6 +652,96 @@ class InstallerPlanTests(unittest.TestCase):
                 )
 
 
+class JournalValidateTests(unittest.TestCase):
+    """Journal.validate() gates real partitioning safety properties (no
+    overlaps, exactly one Btrfs root, never touch a mounted/in-use partition)
+    but previously had no direct test coverage of its own."""
+
+    def _journal(self, current_parts=()):
+        with patch.object(partition_ops, "list_partitions", return_value=list(current_parts)):
+            return partition_ops.Journal("/dev/nvme0n1")
+
+    def test_empty_journal_is_rejected(self):
+        journal = self._journal()
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertIn("No partition operations have been added.", errors)
+
+    def test_missing_root_partition_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fs_type": "btrfs", "mountpoint": "",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("No root partition" in e for e in errors))
+
+    def test_root_partition_must_be_btrfs(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fs_type": "ext4", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("must use the Btrfs filesystem" in e for e in errors))
+        # Still flagged as satisfying "has a root", so this must be the only error.
+        self.assertEqual(len(errors), 1)
+
+    def test_overlapping_creates_are_rejected(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        journal.add_op("create", {
+            "start_bytes": 5 * 1024**3, "size_bytes": 10 * 1024**3, "fs_type": "ext4", "mountpoint": "",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("overlaps with existing region" in e for e in errors))
+
+    def test_valid_single_root_partition_has_no_errors(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertEqual(errors, [])
+
+    def test_new_table_op_resets_prior_allocations_and_root_flag(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        journal.add_op("new_table", {"table_type": "gpt"})
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        # The new_table wipes the earlier root, so validate must complain
+        # about a missing root rather than silently accepting the stale one.
+        self.assertTrue(any("No root partition" in e for e in errors))
+
+    def test_format_of_mounted_partition_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        journal.add_op("format", {"partition": "/dev/nvme0n1p3", "fs_type": "ext4"})
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p3", "current": True},
+        ]):
+            errors = journal.validate()
+        self.assertTrue(any("currently mounted or in use" in e for e in errors))
+
+    def test_set_mountpoint_root_on_in_use_partition_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p3", "mountpoint": "/"})
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p3", "in_use": True},
+        ]):
+            errors = journal.validate()
+        self.assertTrue(any("Cannot set /dev/nvme0n1p3 as the root partition" in e for e in errors))
+
+
 class InstallerServerConfirmationTests(unittest.TestCase):
     """/api/start must re-check the review-page acknowledgement checkboxes
     server-side, not just trust the frontend to keep "Install Now" disabled."""
@@ -767,9 +874,11 @@ class InstallerSystemTests(unittest.TestCase):
                 os.chmod(test_file, 0o600)
                 self.assertEqual(test_file.read_text(), "secret1\nsecret2\n")
             finally:
+                # Best-effort so TemporaryDirectory's own cleanup can still
+                # delete the 0o000 file; nothing meaningful to log in a test.
                 try:
                     os.chmod(test_file, 0o600)
-                except Exception:
+                except Exception:  # noqa: S110
                     pass
 
     def test_write_lines_uses_elevated_mkdir_tee_chmod(self):
@@ -809,36 +918,90 @@ class InstallerSystemTests(unittest.TestCase):
 
     def test_format_install_error_wraps_permission_error(self):
         err = PermissionError(30, "Read-only file system")
-        err.filename = "/var/tmp/kyth-install-root"
+        err.filename = "/var/tmp/kyth-install-root"  # noqa: S108 — fixture string, not a real path opened on disk
         text = system.format_install_error(err)
         self.assertIn("PermissionError", text)
         self.assertIn("Read-only file system", text)
-        self.assertIn("/var/tmp/kyth-install-root", text)
+        self.assertIn("/var/tmp/kyth-install-root", text)  # noqa: S108 — fixture string, not a real path opened on disk
+
+    def test_require_no_symlink_rejects_symlink(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real = os.path.join(tmpdir, "real")
+            link = os.path.join(tmpdir, "link")
+            os.makedirs(real)
+            os.symlink(real, link)
+            with self.assertRaisesRegex(RuntimeError, "already exists as a symlink"):
+                system._require_no_symlink(link)
+
+    def test_require_no_symlink_allows_real_dir_and_missing_path(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real = os.path.join(tmpdir, "real")
+            os.makedirs(real)
+            system._require_no_symlink(real)  # does not raise
+            system._require_no_symlink(os.path.join(tmpdir, "does-not-exist"))  # does not raise
 
 
 class InstallerGptDiskTests(unittest.TestCase):
-    @patch("kyth_installer.plan.subprocess.check_output")
-    def test_is_gpt_disk_via_blkid(self, mock_check_output):
-        mock_check_output.return_value = "gpt\n"
+    @patch("kyth_installer.plan.run_command")
+    def test_is_gpt_disk_via_blkid(self, mock_run):
+        mock_run.return_value = SimpleNamespace(stdout="gpt\n", returncode=0)
         self.assertTrue(plan._is_gpt_disk("/dev/sda"))
-        mock_check_output.assert_called_once_with(
+        mock_run.assert_called_once_with(
             ["blkid", "-o", "value", "-s", "PTTYPE", "/dev/sda"],
-            text=True, stderr=plan.subprocess.DEVNULL, timeout=5
+            capture_output=True, text=True, check=True, timeout=5,
         )
 
-    @patch("kyth_installer.plan.subprocess.check_output")
-    def test_is_gpt_disk_via_parted(self, mock_check_output):
-        mock_check_output.side_effect = [
-            plan.subprocess.CalledProcessError(1, "blkid"),
-            "Model: Virtual Disk\nPartition Table: gpt\n"
+    @patch("kyth_installer.plan.run_command")
+    def test_is_gpt_disk_via_parted(self, mock_run):
+        mock_run.side_effect = [
+            RuntimeError("blkid failed"),
+            SimpleNamespace(stdout="Model: Virtual Disk\nPartition Table: gpt\n", returncode=0),
         ]
         self.assertTrue(plan._is_gpt_disk("/dev/sda"))
-        self.assertEqual(mock_check_output.call_count, 2)
+        self.assertEqual(mock_run.call_count, 2)
 
-    @patch("kyth_installer.plan.subprocess.check_output")
-    def test_is_gpt_disk_non_gpt(self, mock_check_output):
-        mock_check_output.return_value = "dos\n"
+    @patch("kyth_installer.plan.run_command")
+    def test_is_gpt_disk_non_gpt(self, mock_run):
+        mock_run.return_value = SimpleNamespace(stdout="dos\n", returncode=0)
         self.assertFalse(plan._is_gpt_disk("/dev/sda"))
+
+
+class InstallerDiskServiceTests(unittest.TestCase):
+    def test_disk_service_dry_run_collects_journal(self):
+        from kyth_installer.services.disk_service import DiskService
+        svc = DiskService(dry_run=True)
+        svc.create_label("/dev/sda", "gpt")
+        svc.create_partition("/dev/sda", 1024**2, 10 * 1024**3, "btrfs", "KythOS")
+        svc.delete_partition("/dev/sda", 1)
+        svc.resize_partition("/dev/sda", 2, 1024**2, 20 * 1024**3)
+        svc.format_filesystem("/dev/sda2", "ext4", "mydata")
+
+        # Verify command journal
+        self.assertEqual(len(svc.journal), 5)
+        self.assertIn("mklabel gpt", " ".join(svc.journal[0]))
+        self.assertIn("mkpart KythOS btrfs", " ".join(svc.journal[1]))
+        self.assertIn("rm 1", " ".join(svc.journal[2]))
+        self.assertIn("resizepart 2", " ".join(svc.journal[3]))
+        self.assertIn("mkfs.ext4", " ".join(svc.journal[4]))
+
+    def test_journal_with_dry_run_disk_service_executes_safely(self):
+        from kyth_installer.services.disk_service import DiskService
+        svc = DiskService(dry_run=True)
+        # Mock normal device path and disk block size
+        with patch("kyth_installer.partition_ops._normal_device_path", return_value="/dev/sda"):
+            journal = partition_ops.Journal("/dev/sda", disk_service=svc)
+            journal.add_op("new_table", {"table_type": "gpt"})
+            journal.add_op("create", {
+                "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+            })
+            # Verify we can validate and commit without throwing any command execution errors
+            errors = journal.validate()
+            self.assertEqual(errors, [])
+            root_part = journal.commit(lambda _msg: None)
+            self.assertEqual(root_part, "/dev/sdap99")
+            self.assertGreater(len(svc.journal), 0)
 
 
 if __name__ == "__main__":

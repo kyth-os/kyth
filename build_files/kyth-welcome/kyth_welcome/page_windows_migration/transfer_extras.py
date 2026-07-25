@@ -11,9 +11,7 @@ from ..services.process import _run_command
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.software import (
-    Worker,
-)
+from ..services.runtime import Worker
 from ..services.launch import popen
 from ..services.windows_migration import (
     _copy_game_saves,
@@ -23,10 +21,10 @@ from ..services.windows_migration import (
     _import_rdp_bookmarks,
     _windows_folder_dest,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QComboBox, QDesktopServices, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 

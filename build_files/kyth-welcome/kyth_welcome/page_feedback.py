@@ -1,17 +1,14 @@
-import json
-from urllib.request import Request, urlopen
-
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
     _IS_LIVE, _release_worker_when_finished, _restyle,
 )
 from .services.diagnostics import _command_stdout
-from .services.gaming import TrackedThread
+from .services.workers import GitHubIssueWorker
 from .core_base import _bootc_image_digest, _current_branch
-from .qt import (  # noqa: E501
-    QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl, Signal,
+from .qt import (
+    QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 
@@ -43,42 +40,6 @@ def _collect_system_info() -> str:
         lines.append("**Session:** Live ISO")
     return "\n".join(lines)
 
-
-class _GitHubIssueWorker(TrackedThread):
-    success = Signal(str)
-    failed = Signal(str)
-
-    def __init__(self, title: str, body: str, labels: list, token: str):
-        super().__init__()
-        self._title = title
-        self._body = body
-        self._labels = labels
-        self._token = token
-
-    def run(self):
-        payload = json.dumps({
-            "title": self._title,
-            "body": self._body,
-            "labels": self._labels,
-        }).encode("utf-8")
-        req = Request(
-            f"https://api.github.com/repos/{_GITHUB_REPO}/issues",
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {self._token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "Content-Type": "application/json",
-                "User-Agent": "KythOS-Feedback/1.0",
-            },
-            method="POST",
-        )
-        try:
-            with urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                self.success.emit(data.get("html_url", ""))
-        except Exception as exc:
-            self.failed.emit(str(exc))
 
 
 class FeedbackPage(Page):
@@ -201,7 +162,7 @@ class FeedbackPage(Page):
         if token:
             self._submit_btn.setEnabled(False)
             self._set_status("Submitting…")
-            self._worker = _GitHubIssueWorker(title, body, labels, token)
+            self._worker = GitHubIssueWorker(title, body, labels, token)
             self._worker.success.connect(self._on_success)
             self._worker.failed.connect(self._on_fail)
             _release_worker_when_finished(self, "_worker", self._worker)

@@ -3,6 +3,7 @@ import pathlib
 import subprocess
 import sys
 import unittest
+from unittest.mock import mock_open, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
@@ -11,10 +12,21 @@ from kyth_welcome.services.bootc import (  # noqa: E402
     REGISTRY,
     image_digest_from_status,
     image_reference_from_status,
+    _bootc_cancel_block_reason,
     _branch_from_ref,
     _branch_display_name,
+    branches_view,
+    _current_kernel_flavor,
+    _default_phase,
+    _image_tag_for_channel,
+    _image_tag_for_kernel,
+    _parse_update_phase,
+    update_availability_view,
 )
 from kyth_welcome.services.process import (  # noqa: E402
+    _format_dl_progress_line,
+    _format_elapsed,
+    _format_eta,
     _human_bytes,
     _human_bytes_pair,
     _parse_size_bytes,
@@ -38,6 +50,21 @@ class ProcessHelpersTests(unittest.TestCase):
     def test_parse_size_bytes(self):
         self.assertEqual(_parse_size_bytes("8.0 GB"), 8 * 1024**3)
         self.assertEqual(_parse_size_bytes("bad"), 0)
+
+    def test_format_elapsed(self):
+        self.assertEqual(_format_elapsed(45), "45s")
+        self.assertEqual(_format_elapsed(65), "1m 05s")
+
+    def test_format_eta(self):
+        self.assertEqual(_format_eta(0), "")
+        self.assertEqual(_format_eta(45), "~45s remaining")
+        self.assertEqual(_format_eta(125), "~2m 05s remaining")
+
+    def test_format_dl_progress_line(self):
+        line = _format_dl_progress_line(512 * 1024, 2 * 1024**2, 300_000, 30)
+        self.assertIn("/", line)
+        self.assertIn(f"{_human_bytes(300_000)}/s", line)
+        self.assertIn("~30s remaining", line)
 
 
 class BootcHelpersTests(unittest.TestCase):
@@ -71,6 +98,212 @@ class BootcHelpersTests(unittest.TestCase):
         self.assertEqual(_branch_from_ref(f"{REGISTRY}:testing-cachy"), "testing-cachy")
         self.assertEqual(_branch_display_name("latest"), "Stable (latest)")
         self.assertEqual(_branch_display_name("testing"), "Testing")
+
+
+class KernelFlavorTests(unittest.TestCase):
+    """page_kernel.py's current-kernel label and switch-target image tag both
+    come from these functions. _probe_cached is bypassed (call fetch directly)
+    so tests exercise the fetch logic itself rather than a shared, ordering-
+    sensitive in-memory cache."""
+
+    def _fetch_flavor(self, file_content=None, file_error=False, uname="6.1.0-300.fc44.x86_64"):
+        open_patch = (
+            patch("builtins.open", side_effect=OSError("no such file"))
+            if file_error
+            else patch("builtins.open", mock_open(read_data=file_content))
+        )
+        with patch("kyth_welcome.services.bootc._probe_cached", side_effect=lambda key, ttl, fetch: fetch()), \
+             open_patch, \
+             patch("kyth_welcome.services.bootc._command_stdout", return_value=uname):
+            return _current_kernel_flavor()
+
+    def test_flavor_from_marker_file(self):
+        self.assertEqual(self._fetch_flavor(file_content="cachy\n"), "cachy")
+        self.assertEqual(self._fetch_flavor(file_content="fedora\n"), "fedora")
+
+    def test_flavor_falls_back_to_uname_when_marker_missing(self):
+        self.assertEqual(
+            self._fetch_flavor(file_error=True, uname="6.1.0-300.cachy.fc44.x86_64"), "cachy",
+        )
+        self.assertEqual(
+            self._fetch_flavor(file_error=True, uname="6.1.0-300.fc44.x86_64"), "fedora",
+        )
+
+    def test_flavor_falls_back_to_uname_when_marker_content_invalid(self):
+        self.assertEqual(
+            self._fetch_flavor(file_content="bogus\n", uname="6.1.0-300.cachy.fc44.x86_64"), "cachy",
+        )
+
+    def test_image_tag_for_channel(self):
+        self.assertEqual(_image_tag_for_channel("latest", flavor="fedora"), "latest")
+        self.assertEqual(_image_tag_for_channel("latest", flavor="cachy"), "latest-cachy")
+        self.assertEqual(_image_tag_for_channel("testing", flavor="fedora"), "testing")
+        self.assertEqual(_image_tag_for_channel("testing", flavor="cachy"), "testing-cachy")
+        # Anything other than the literal "testing" channel name is treated as stable.
+        self.assertEqual(_image_tag_for_channel("unknown", flavor="fedora"), "latest")
+
+    def test_image_tag_for_kernel(self):
+        with patch("kyth_welcome.services.bootc._current_branch", return_value="latest"):
+            self.assertEqual(_image_tag_for_kernel("fedora"), "latest")
+            self.assertEqual(_image_tag_for_kernel("cachy"), "latest-cachy")
+        with patch("kyth_welcome.services.bootc._current_branch", return_value="testing-cachy"):
+            self.assertEqual(_image_tag_for_kernel("fedora"), "testing")
+            self.assertEqual(_image_tag_for_kernel("cachy"), "testing-cachy")
+        with patch("kyth_welcome.services.bootc._current_branch", return_value=None):
+            self.assertEqual(_image_tag_for_kernel("fedora"), "latest")
+
+
+class UpdatePhaseParsingTests(unittest.TestCase):
+    """page_update_ops.py's status label and cancel-safety gating both come
+    from these pure functions — drives the Update page's progress display and,
+    more importantly, decides when it's no longer safe to let a user cancel
+    (once bootc has started writing/staging the new image)."""
+
+    def test_default_phase_per_mode(self):
+        self.assertEqual(_default_phase("update"), "Pulling OS image from container registry…")
+        self.assertEqual(_default_phase("full-update"), "Running full system update…")
+        self.assertEqual(_default_phase("rollback"), "Staging rollback deployment…")
+        self.assertEqual(_default_phase("unknown-mode"), "Operation in progress…")
+
+    def test_parse_update_phase_recognizes_known_lines(self):
+        cases = [
+            ("Pulling sha256:abcdef from ghcr.io", "Downloading image layers…"),
+            ("Unpacking layer 3/5", "Unpacking image layers…"),
+            ("Checking out tree onto filesystem", "Importing image into system storage…"),
+            ("Writing manifest to image destination", "Storing image manifest…"),
+            ("Composing final image", "Writing new OS image to disk…"),
+            ("rpmdb: verifying package database", "Updating package database in the new image…"),
+            ("Generating initramfs for kernel 6.x", "Preparing boot files for the new image…"),
+            ("Deploying commit abc123", "Deploying new OS image…"),
+            ("Transaction complete", "Staging new image for next reboot…"),
+            ("No update available.", "Already on the latest image — nothing to download."),
+        ]
+        for line, expected in cases:
+            self.assertEqual(_parse_update_phase(line, "update"), expected, msg=line)
+
+    def test_parse_update_phase_returns_none_for_unrecognized_line(self):
+        self.assertIsNone(_parse_update_phase("some unrelated log noise", "update"))
+
+    def test_parse_update_phase_full_update_section_header(self):
+        line = "―― 12:34:01 - Flatpaks ――"
+        self.assertEqual(
+            _parse_update_phase(line, "full-update"),
+            "Updating Flatpaks…",
+        )
+        # The same section-header format is only meaningful in full-update mode.
+        self.assertIsNone(_parse_update_phase(line, "update"))
+
+    def test_cancel_blocked_once_writing_or_staging(self):
+        for phase in (
+            "Unpacking image layers…",
+            "Writing new OS image to disk…",
+            "Staging new image for next reboot…",
+        ):
+            self.assertNotEqual(_bootc_cancel_block_reason("update", phase), "")
+
+    def test_cancel_allowed_while_still_downloading(self):
+        self.assertEqual(_bootc_cancel_block_reason("update", "Downloading image layers…"), "")
+        self.assertEqual(_bootc_cancel_block_reason("update", "Resolving OS image version…"), "")
+
+    def test_rollback_never_cancellable(self):
+        # Rollback has no safe early phase to cancel from at all.
+        self.assertNotEqual(_bootc_cancel_block_reason("rollback", "Staging rollback deployment…"), "")
+        self.assertNotEqual(_bootc_cancel_block_reason("rollback", ""), "")
+
+
+class BranchesViewTests(unittest.TestCase):
+    """page_branches.py's Stable/Testing selector cards are driven entirely
+    by this decision tree — no Qt, so it's testable directly."""
+
+    def test_on_stable_marks_stable_active(self):
+        view = branches_view("latest", "2026-07-20")
+        self.assertEqual(view.stable.object_name, "branch-active")
+        self.assertEqual(view.stable.button_text, "On Stable  (current)")
+        self.assertIn("built 2026-07-20", view.stable.build_label_text)
+        self.assertTrue(view.stable.build_label_visible)
+        self.assertEqual(view.testing.object_name, "branch-inactive")
+        self.assertEqual(view.testing.button_text, "Switch to Testing")
+        self.assertFalse(view.testing.build_label_visible)
+
+    def test_on_stable_cachy_flavor_also_marks_stable_active(self):
+        view = branches_view("latest-cachy", "2026-07-20")
+        self.assertEqual(view.stable.object_name, "branch-active")
+
+    def test_on_testing_marks_testing_active(self):
+        view = branches_view("testing", "2026-07-21")
+        self.assertEqual(view.testing.object_name, "branch-active")
+        self.assertEqual(view.testing.button_text, "On Testing  (current)")
+        self.assertIn("built 2026-07-21", view.testing.build_label_text)
+        self.assertTrue(view.testing.build_label_visible)
+        self.assertEqual(view.stable.object_name, "branch-inactive")
+        self.assertFalse(view.stable.build_label_visible)
+
+    def test_on_testing_cachy_flavor_also_marks_testing_active(self):
+        view = branches_view("testing-cachy", "2026-07-21")
+        self.assertEqual(view.testing.object_name, "branch-active")
+
+    def test_unrecognized_branch_marks_neither_active(self):
+        view = branches_view("some-other-branch", "2026-07-21")
+        self.assertEqual(view.stable.object_name, "branch-inactive")
+        self.assertEqual(view.testing.object_name, "branch-inactive")
+        self.assertFalse(view.stable.build_label_visible)
+        self.assertFalse(view.testing.build_label_visible)
+
+    def test_missing_booted_timestamp_hides_build_label(self):
+        view = branches_view("latest", None)
+        self.assertFalse(view.stable.build_label_visible)
+        self.assertEqual(view.stable.build_label_text, "")
+
+
+class UpdateAvailabilityViewTests(unittest.TestCase):
+    """page_update_availability.py's hero card (icon/title/body/buttons) is
+    driven entirely by this decision tree — no Qt, so it's testable directly."""
+
+    def _view(self, **overrides):
+        base = dict(
+            staged=False, check_state="uptodate", flatpak_count=0,
+            check_ts="14:00", check_ts_details="", staged_ts=None,
+        )
+        base.update(overrides)
+        return update_availability_view(**base)
+
+    def test_staged_takes_priority_and_offers_restart(self):
+        view = self._view(staged=True, staged_ts="2026-07-20", check_state="uptodate", flatpak_count=2)
+        self.assertEqual(view.card_style, "card-accent-ok")
+        self.assertEqual(view.title, "Restart required")
+        self.assertTrue(view.restart_btn_visible)
+        self.assertFalse(view.update_btn_visible)
+        self.assertIn("built 2026-07-20", view.body)
+        self.assertIn("2 Flatpak updates can be installed", view.body)
+
+    def test_system_update_available(self):
+        view = self._view(check_state="available", check_ts_details="2026-07-21")
+        self.assertEqual(view.title, "Update available")
+        self.assertTrue(view.update_btn_visible)
+        self.assertFalse(view.restart_btn_visible)
+        self.assertIn("built 2026-07-21", view.body)
+
+    def test_only_flatpaks_pending(self):
+        view = self._view(check_state="uptodate", flatpak_count=1)
+        self.assertEqual(view.title, "App updates available")
+        self.assertIn("1 Flatpak app update is available", view.body)
+        self.assertTrue(view.update_btn_visible)
+
+    def test_up_to_date(self):
+        view = self._view(check_state="uptodate", flatpak_count=0)
+        self.assertEqual(view.title, "Up to date")
+        self.assertFalse(view.update_btn_visible)
+        self.assertFalse(view.restart_btn_visible)
+
+    def test_check_unavailable(self):
+        view = self._view(check_state="", flatpak_count=0)
+        self.assertEqual(view.title, "Check unavailable")
+        self.assertFalse(view.update_btn_visible)
+        self.assertFalse(view.restart_btn_visible)
+
+    def test_singular_flatpak_wording_on_staged_branch(self):
+        view = self._view(staged=True, flatpak_count=1)
+        self.assertIn("1 Flatpak update can be installed", view.body)
 
 
 class RegistrySharedTests(unittest.TestCase):

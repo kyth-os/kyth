@@ -8,6 +8,8 @@ by ``kyth-probe`` (and write-through on live fetch) warms cold Hub starts.
 """
 from __future__ import annotations
 
+import logging
+import re
 import shutil
 import subprocess
 import threading
@@ -15,6 +17,8 @@ import time
 from typing import Callable, TypeVar
 
 T = TypeVar("T")
+
+_logger = logging.getLogger(__name__)
 
 
 def _is_live_session() -> bool:
@@ -47,7 +51,7 @@ _DISK_BACKED_KEYS = frozenset({
 
 def _run_command(cmd: list[str], timeout: int = 5) -> subprocess.CompletedProcess[str] | None:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
     except Exception:
         return None
 
@@ -57,6 +61,11 @@ def _command_stdout(cmd: list[str], timeout: int = 5) -> str:
     if result is None:
         return ""
     return result.stdout.strip()
+
+
+def _strip_ansi(text: str) -> str:
+    """Strip ANSI CSI escape sequences (color, cursor movement, etc.)."""
+    return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
 
 
 def _with_idle_inhibit(cmd: list[str], reason: str) -> list[str]:
@@ -73,7 +82,7 @@ def _invalidate_probe_caches() -> None:
         from .probe import invalidate_disk_sections
         invalidate_disk_sections(_DISK_BACKED_KEYS)
     except Exception:
-        pass
+        _logger.warning("_invalidate_probe_caches: disk cache invalidation failed — stale values may be served", exc_info=True)
 
 
 def _disk_section_usable(key: str, data: object) -> bool:
@@ -111,7 +120,7 @@ def _probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
                     _PROBE_CACHE[key] = (time.monotonic(), disk_hit)
                 return disk_hit  # type: ignore[return-value]
         except Exception:
-            pass
+            _logger.debug("_probe_cached: disk cache read for %r failed", key, exc_info=True)
 
     value = fetch()
     with _PROBE_CACHE_LOCK:
@@ -126,7 +135,7 @@ def _probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
 
             update_sections({key: value})
         except Exception:
-            pass
+            _logger.debug("_probe_cached: disk cache write for %r failed", key, exc_info=True)
     return value
 
 
@@ -146,3 +155,28 @@ def _get_disk_write_bytes() -> int:
 
 # pylint: disable-next=unused-import
 from kyth_shared import _get_rx_bytes, _human_bytes, _human_bytes_pair, _parse_size_bytes  # noqa: F401
+
+
+def _format_elapsed(seconds: int) -> str:
+    """Render whole seconds as "Xm YYs", or just "Ys" under a minute."""
+    mins, secs = divmod(max(0, seconds), 60)
+    return f"{mins}m {secs:02d}s" if mins else f"{secs}s"
+
+
+def _format_eta(seconds: int) -> str:
+    """Render a download ETA, or "" when there's nothing worth showing."""
+    if seconds > 60:
+        return f"~{_format_elapsed(seconds)} remaining"
+    if seconds > 0:
+        return f"~{seconds}s remaining"
+    return ""
+
+
+def _format_dl_progress_line(downloaded: int, total: int, speed_bps: int, eta_sec: int) -> str:
+    """Render a live "downloaded / total  ·  speed  ·  eta" activity line."""
+    dl_downloaded, dl_total = _human_bytes_pair(downloaded, total)
+    parts = [f"{dl_downloaded} / {dl_total}", f"{_human_bytes(speed_bps)}/s"]
+    eta_str = _format_eta(eta_sec)
+    if eta_str:
+        parts.append(eta_str)
+    return "  ·  ".join(parts)

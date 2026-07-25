@@ -32,7 +32,7 @@ def unlock_bitlocker_drive(dev: str, key: str) -> tuple[bool, str]:
     try:
         r = subprocess.run(
             ["udisksctl", "unlock", "-b", dev, "--key-file", "/dev/stdin"],
-            input=key, capture_output=True, text=True, timeout=180,
+            input=key, capture_output=True, text=True, timeout=180, check=False,
         )
     except Exception as exc:
         return False, str(exc)
@@ -45,7 +45,7 @@ def unlock_bitlocker_drive(dev: str, key: str) -> tuple[bool, str]:
     try:
         rm = subprocess.run(
             ["udisksctl", "mount", "-b", m.group(1)],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=60, check=False,
         )
     except Exception as exc:
         return False, str(exc)

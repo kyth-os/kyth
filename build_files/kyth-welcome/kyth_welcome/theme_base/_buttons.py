@@ -1,104 +1,116 @@
-"""Buttons QSS styles."""
+"""Buttons QSS styles.
 
-BUTTONS_QSS = """
+Kyth Theme: tokenized. Note QPushButton's base rule here is superseded for
+most pages by theme_hub_overlay.py's own QPushButton rule (applied later in
+the cascade) — this file's base rule is the fallback/pre-overlay state, kept
+in sync on the same tokens rather than removed, since #danger/#btn-secondary/
+#branch-* below have no overlay equivalent and are genuinely load-bearing.
+"""
+from ..ui_tokens import (
+    KYTH_BLUE, KYTH_BLUE_DIM, KYTH_BLUE_LIGHT, KYTH_DANGER, KYTH_DANGER_LIGHT,
+    KYTH_GROUND, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_TEXT,
+    KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
+)
+
+BUTTONS_QSS = f"""
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
-QPushButton {
-    background: #181b28;
-    color: #e8e8e8;
-    border: 1px solid #26293a;
+QPushButton {{
+    background: {KYTH_SURFACE_RAISED};
+    color: {KYTH_TEXT};
+    border: 1px solid {KYTH_HAIRLINE};
     border-radius: 5px;
     padding: 7px 16px;
     font-size: 13px;
     font-weight: 400;
-}
+}}
 
-QPushButton:hover {
-    background: #1f2335;
-    color: #ffffff;
-    border-color: #454545;
-}
+QPushButton:hover {{
+    background: {KYTH_HAIRLINE};
+    color: {KYTH_TEXT};
+    border-color: {KYTH_TEXT_FAINT};
+}}
 
-QPushButton:pressed {
-    background: #1e2230;
-    color: #cfcfcf;
-}
+QPushButton:pressed {{
+    background: {KYTH_SURFACE};
+    color: {KYTH_TEXT_MUTED};
+}}
 
-QPushButton:disabled {
-    background: #12141f;
-    color: #6b6b6b;
-    border-color: #303030;
-}
+QPushButton:disabled {{
+    background: {KYTH_GROUND};
+    color: {KYTH_TEXT_FAINT};
+    border-color: {KYTH_HAIRLINE};
+}}
 
 QPushButton#primary,
-QPushButton#btn-secondary {
-    background: #4f8cff;
-    color: #ffffff;
-    border: 1px solid #8fb8ff;
+QPushButton#btn-secondary {{
+    background: {KYTH_BLUE};
+    color: {KYTH_TEXT};
+    border: 1px solid {KYTH_BLUE_LIGHT};
     font-weight: 600;
     padding: 8px 20px;
     letter-spacing: 0.3px;
-}
+}}
 
 QPushButton#primary:hover,
-QPushButton#btn-secondary:hover {
-    background: #8fb8ff;
-    border-color: #8fb8ff;
-}
+QPushButton#btn-secondary:hover {{
+    background: {KYTH_BLUE_LIGHT};
+    border-color: {KYTH_BLUE_LIGHT};
+}}
 
 QPushButton#primary:pressed,
-QPushButton#btn-secondary:pressed {
-    background: #3a6fd1;
-}
+QPushButton#btn-secondary:pressed {{
+    background: {KYTH_BLUE_DIM};
+}}
 
 QPushButton#primary:disabled,
-QPushButton#btn-secondary:disabled {
-    background: #181b28;
-    color: #6b6b6b;
-    border-color: #303030;
-}
+QPushButton#btn-secondary:disabled {{
+    background: {KYTH_SURFACE_RAISED};
+    color: {KYTH_TEXT_FAINT};
+    border-color: {KYTH_HAIRLINE};
+}}
 
-QPushButton#danger {
-    background: #c42b1c;
-    color: #ffffff;
-    border: 1px solid #d13438;
+QPushButton#danger {{
+    background: {KYTH_DANGER};
+    color: {KYTH_TEXT};
+    border: 1px solid {KYTH_DANGER_LIGHT};
     font-weight: 600;
-}
+}}
 
-QPushButton#danger:hover {
-    background: #d13438;
+QPushButton#danger:hover {{
+    background: {KYTH_DANGER_LIGHT};
     border-color: #ff6b6b;
-}
+}}
 
-QPushButton#danger:pressed {
+QPushButton#danger:pressed {{
     background: #a72015;
-}
+}}
 
-QPushButton#danger:disabled {
+QPushButton#danger:disabled {{
     background: #2d1d1c;
     color: #6b5252;
     border-color: #3a2a29;
-}
+}}
 
-QPushButton#branch-active {
-    background: #4f8cff;
-    color: #ffffff;
+QPushButton#branch-active {{
+    background: {KYTH_BLUE};
+    color: {KYTH_TEXT};
     font-weight: 600;
-    border: 1px solid #8fb8ff;
+    border: 1px solid {KYTH_BLUE_LIGHT};
     border-radius: 5px;
     padding: 9px 22px;
-}
+}}
 
-QPushButton#branch-inactive {
-    background: #181b28;
-    color: #a6a6a6;
-    border: 1px solid #26293a;
+QPushButton#branch-inactive {{
+    background: {KYTH_SURFACE_RAISED};
+    color: {KYTH_TEXT_MUTED};
+    border: 1px solid {KYTH_HAIRLINE};
     border-radius: 5px;
     padding: 9px 22px;
-}
+}}
 
-QPushButton#branch-inactive:hover {
-    background: #1f2335;
-    color: #e8e8e8;
-    border-color: #454545;
-}
+QPushButton#branch-inactive:hover {{
+    background: {KYTH_HAIRLINE};
+    color: {KYTH_TEXT};
+    border-color: {KYTH_TEXT_FAINT};
+}}
 """

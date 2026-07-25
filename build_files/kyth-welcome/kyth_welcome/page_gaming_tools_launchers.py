@@ -6,7 +6,8 @@ from datetime import datetime
 from .core_base import _cancel_worker, _restyle
 from .services.gaming import heroic_epic_launcher_command, lutris_installer_command
 from .services.launch import popen
-from .services.software import Worker, _finish_worker, _is_flatpak_installed
+from .services.flatpak import _is_flatpak_installed
+from .services.runtime import Worker, _finish_worker
 from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
 from .widgets import _make_card, _set_log_panel
 

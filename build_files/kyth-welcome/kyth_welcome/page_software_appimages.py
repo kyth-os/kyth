@@ -2,7 +2,7 @@ import os
 import re
 import shutil
 from .core_base import _restyle
-from .qt import (  # noqa: E501
+from .qt import (
     QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QUrl,
     QVBoxLayout, QWidget, Qt,
 )
@@ -229,5 +229,5 @@ class _AppImageTabMixin:
             os.chmod(desktop_path, 0o600)
         except OSError:
             return
-        from .services.software import refresh_desktop_database
+        from .services.desktop import refresh_desktop_database
         refresh_desktop_database(desktop_dir)

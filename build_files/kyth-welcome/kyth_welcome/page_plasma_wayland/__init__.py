@@ -4,9 +4,7 @@ from ._profiles import _ProfilesMixin
 from ._polish import _PolishMixin
 from ._repair import _RepairMixin
 from ._refresh import _RefreshMixin
-from ..qt import (  # noqa: E501
-    QFrame, QHBoxLayout, QLabel, QTimer, QVBoxLayout, Qt,
-)
+from ..qt import QLabel, QVBoxLayout, single_shot
 from ..widgets import ActionRow, Page, _make_card
 
 
@@ -59,4 +57,4 @@ class PlasmaWaylandPage(Page, _CardsMixin, _ProfilesMixin, _PolishMixin, _Repair
         if self._initial_refresh_started:
             return
         self._initial_refresh_started = True
-        QTimer.singleShot(0, self.refresh)
+        single_shot(self, 0, self.refresh)

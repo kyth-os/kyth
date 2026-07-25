@@ -2,6 +2,14 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+# shellcheck source=../lib/packages-helpers.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/packages-helpers.sh"
+
+if ! is_enabled "${ENABLE_KSM:-0}"; then
+	echo "KSM profile is disabled; skipping global memory deduplication."
+	exit 0
+fi
+
 # ── ksmtuned memory deduplication ────────────────────────────────────────────
 # Dynamically controls Kernel Samepage Merging (KSM) to merge duplicate memory
 # pages, reducing RAM usage and memory footprint under multi-app/gaming workloads.

@@ -1,11 +1,16 @@
+import logging
 import os
-import shlex
+import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 
-from ..core_base import _CLOUD_SYNC_CONFIG, _SMB_CONFIG, _SMB_CREDS_DIR
+from ..core_base import _CLOUD_SYNC_CONFIG, _SMB_CONFIG
 from .config import load_json_config, save_json_config
+from .network_share_helper import _mount_point
 from .process import _run_command
+
+_logger = logging.getLogger(__name__)
 
 def _rclone_available() -> bool:
     return shutil.which("rclone") is not None
@@ -51,12 +56,12 @@ def _systemd_escape_mount_path(path: str) -> str:
     try:
         r = subprocess.run(
             ["systemd-escape", "--path", "--suffix=mount", path],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, check=False,
         )
         if r.returncode == 0:
             return r.stdout.strip()
     except Exception:
-        pass
+        _logger.debug("_systemd_escape_mount_path: systemd-escape probe of %s failed", path, exc_info=True)
     # Fallback: strip leading /, replace / with -, append .mount
     return path.lstrip("/").replace("/", "-") + ".mount"
  # _systemd_escape_mount_path
@@ -69,97 +74,72 @@ def _is_mounted(path: str) -> bool:
     try:
         r = subprocess.run(
             ["findmnt", "--noheadings", "--target", path],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, check=False,
         )
         return r.returncode == 0 and bool(r.stdout.strip())
     except Exception:
         return False
  # _is_mounted
 
-def _build_add_share_script(share: dict, mount_now: bool) -> str:
-    import base64 as _b64
-    name       = share["name"]
-    server     = share["server"]
-    share_path = share["share_path"].lstrip("/")
-    mount_pt   = share["mount_point"]
-    username   = share["username"]
-    password   = share.get("password", "")
-    domain     = share.get("domain", "")
-    auto_mount = share.get("auto_mount", False)
-    uid        = os.getuid()
-    gid        = os.getgid()
 
-    unit_name  = _systemd_escape_mount_path(mount_pt)
-    cred_file  = f"{_SMB_CREDS_DIR}/{name}"
-    unc        = f"//{server}/{share_path}"
-    opts       = (
-        f"credentials={cred_file},uid={uid},gid={gid},"
-        "iocharset=utf8,vers=3.0,nofail,_netdev"
-    )
+@dataclass(frozen=True)
+class ShareFormResult:
+    """Either `share` (validation passed) or both error fields are set —
+    no Qt, so page_network_shares.py's add/reconnect form validation is
+    testable without a display."""
+    share: dict | None = None
+    error_title: str = ""
+    error_message: str = ""
 
-    creds = f"username={username}\npassword={password}\n"
-    if domain:
-        creds += f"domain={domain}\n"
-    creds_b64 = _b64.b64encode(creds.encode()).decode()
 
-    unit = "\n".join([
-        "[Unit]",
-        f"Description=SMB Share {unc}",
-        "After=network-online.target",
-        "Wants=network-online.target",
-        "",
-        "[Mount]",
-        f"What={unc}",
-        f"Where={mount_pt}",
-        "Type=cifs",
-        f"Options={opts}",
-        "TimeoutSec=30",
-        "",
-        "[Install]",
-        "WantedBy=multi-user.target",
-    ])
-    unit_b64 = _b64.b64encode(unit.encode()).decode()
-    creds_dir_q = shlex.quote(_SMB_CREDS_DIR)
-    cred_file_q = shlex.quote(cred_file)
-    mount_pt_q = shlex.quote(mount_pt)
-    unit_path_q = shlex.quote(f"/etc/systemd/system/{unit_name}")
-    unit_name_q = shlex.quote(unit_name)
+def validate_share_form(
+    *, name: str, server: str, share_path: str, mount_pt: str, username: str,
+    password: str, domain: str, auto_mount: bool,
+    existing_names: set[str], reconnect_name: str | None,
+) -> ShareFormResult:
+    """Validate already-stripped form field values. `mount_pt` may be empty
+    (defaulted from `name`) but every other field is required."""
+    if not name:
+        return ShareFormResult(error_title="Missing Field", error_message="Please enter a Share Name.")
+    if not server:
+        return ShareFormResult(error_title="Missing Field", error_message="Please enter a Server address.")
+    if not share_path:
+        return ShareFormResult(error_title="Missing Field", error_message="Please enter the Share Path.")
+    if not username:
+        return ShareFormResult(error_title="Missing Field", error_message="Please enter a Username.")
 
-    lines = [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        f"mkdir -p {creds_dir_q}",
-        f"chmod 700 {creds_dir_q}",
-        f"echo '{creds_b64}' | base64 -d > {cred_file_q}",
-        f"chmod 600 {cred_file_q}",
-        f"mkdir -p {mount_pt_q}",
-        f"echo '{unit_b64}' | base64 -d > {unit_path_q}",
-        "systemctl daemon-reload",
-    ]
-    if auto_mount:
-        lines.append(f"systemctl enable {unit_name_q}")
-    if mount_now:
-        lines.append(f"systemctl start {unit_name_q} || true")
+    safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", name)
+    if not mount_pt:
+        mount_pt = f"/mnt/kyth/{safe_name}"
+    mount_pt = os.path.expanduser(mount_pt)
+    # Same validation the root-side add/remove helper enforces (it runs as
+    # root and creates this directory, so mounting over /etc or /usr would
+    # corrupt the system) — checked here too so bad input gets a friendly
+    # message immediately instead of a less-clear failure from the helper.
+    try:
+        mount_pt = _mount_point(mount_pt)
+    except ValueError:
+        return ShareFormResult(
+            error_title="Invalid Mount Point",
+            error_message=(
+                "Mount point must be under /mnt/, /media/, /run/media/, or /home/, "
+                "and contain only letters, numbers, spaces, '.', '_', '-', or '/'."
+            ),
+        )
 
-    return "\n".join(lines)
- # _build_add_share_script
+    if safe_name in existing_names and safe_name != reconnect_name:
+        return ShareFormResult(
+            error_title="Duplicate Name",
+            error_message=f'A share named "{safe_name}" already exists. Remove it first or use a different name.',
+        )
 
-def _build_remove_share_script(share: dict) -> str:
-    name      = share["name"]
-    mount_pt  = share["mount_point"]
-    unit_name = _systemd_escape_mount_path(mount_pt)
-    cred_file = f"{_SMB_CREDS_DIR}/{name}"
-    unit_name_q = shlex.quote(unit_name)
-    unit_path_q = shlex.quote(f"/etc/systemd/system/{unit_name}")
-    cred_file_q = shlex.quote(cred_file)
-
-    return "\n".join([
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        f"systemctl stop {unit_name_q} 2>/dev/null || true",
-        f"systemctl disable {unit_name_q} 2>/dev/null || true",
-        f"rm -f {unit_path_q}",
-        "systemctl daemon-reload",
-        f"rm -f {cred_file_q}",
-    ])
- # _build_remove_share_script
+    return ShareFormResult(share={
+        "name":       safe_name,
+        "server":     server,
+        "share_path": share_path.lstrip("/"),
+        "mount_point": mount_pt,
+        "username":   username,
+        "password":   password,
+        "domain":     domain,
+        "auto_mount": auto_mount,
+    })

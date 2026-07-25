@@ -1,0 +1,41 @@
+name: Free disk space
+description: >
+  Remove preinstalled tool payloads (Android SDK, .NET, GHC) that GitHub's
+  hosted runners ship by default but this repo never uses, to reclaim disk
+  space before large Docker/Podman builds.
+inputs:
+  extra-docker-cleanup:
+    description: >
+      Also prune all Docker/Podman state and disable swap. Used by the live
+      ISO build job, which needs the extra headroom for its sparse btrfs
+      image; other jobs don't need this and it would be wasteful there.
+    required: false
+    default: 'false'
+  report:
+    description: Print `df -h` disk usage before and after cleanup.
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Report disk usage before cleanup
+      if: inputs.report == 'true'
+      shell: bash
+      run: df -h
+
+    - name: Remove preinstalled tool payloads
+      shell: bash
+      run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+
+    - name: Extra Docker/Podman cleanup
+      if: inputs.extra-docker-cleanup == 'true'
+      shell: bash
+      run: |
+        sudo docker system prune --all --force --volumes || true
+        sudo swapoff -a || true
+        sudo rm -f /mnt/swapfile || true
+
+    - name: Report disk usage after cleanup
+      if: inputs.report == 'true'
+      shell: bash
+      run: df -h

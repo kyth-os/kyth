@@ -40,3 +40,8 @@ rtk pip list            rtk pnpm install        rtk npm run <script>
 - For debugging, use raw command without rtk prefix
 - `rtk proxy <cmd>` runs command without filtering but tracks usage
 <!-- /headroom:rtk-instructions -->
+
+# Repository publishing workflow
+
+- Never open a pull request for this repository.
+- Commit approved changes directly to the `testing` branch and push them to `origin/testing`.

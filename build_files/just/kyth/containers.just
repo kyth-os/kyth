@@ -10,37 +10,26 @@ install-boxbuddy: (_install-flatpak "io.github.dvlv.boxbuddyrs" "BoxBuddy")
     @echo "Use it to manage your distrobox containers."
 
 [group('KythOS')]
-ai-dev-status:
+[private]
+_ai-dev cmd:
     #!/usr/bin/env bash
     set -euo pipefail
-    kyth-ai-dev status
+    kyth-ai-dev {{ cmd }}
 
 [group('KythOS')]
-ai-dev-setup:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    kyth-ai-dev setup
+ai-dev-status: (_ai-dev "status")
 
 [group('KythOS')]
-ai-dev-enter:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    kyth-ai-dev enter
+ai-dev-setup: (_ai-dev "setup")
 
 [group('KythOS')]
-ai-dev-start:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    kyth-ai-dev start
+ai-dev-enter: (_ai-dev "enter")
 
 [group('KythOS')]
-ai-dev-stop:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    kyth-ai-dev stop
+ai-dev-start: (_ai-dev "start")
 
 [group('KythOS')]
-ai-dev-remove:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    kyth-ai-dev remove
+ai-dev-stop: (_ai-dev "stop")
+
+[group('KythOS')]
+ai-dev-remove: (_ai-dev "remove")

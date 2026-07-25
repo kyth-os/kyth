@@ -1,0 +1,40 @@
+name: Wait for OCI Image
+description: Wait for a specific container image digest to become available in the registry.
+
+inputs:
+  image:
+    description: Container image registry path
+    required: true
+  digest:
+    description: Container image digest
+    required: true
+  max-attempts:
+    description: Maximum number of polling attempts
+    required: false
+    default: "10"
+  delay-seconds:
+    description: Number of seconds to sleep between attempts
+    required: false
+    default: "30"
+
+runs:
+  using: composite
+  steps:
+    - name: Wait for image to be available
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        DIGEST: ${{ inputs.digest }}
+        MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        DELAY: ${{ inputs.delay-seconds }}
+      run: |
+        for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
+          if docker buildx imagetools inspect "${IMAGE}@${DIGEST}" >/dev/null 2>&1; then
+            echo "Image ${IMAGE}@${DIGEST} is available (attempt ${attempt}/${MAX_ATTEMPTS})"
+            exit 0
+          fi
+          echo "Image not yet available (attempt ${attempt}/${MAX_ATTEMPTS}); retrying in ${DELAY}s..."
+          sleep "${DELAY}"
+        done
+        echo "::error::Image ${IMAGE}@${DIGEST} was not available after ${MAX_ATTEMPTS} attempts"
+        exit 1

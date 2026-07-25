@@ -6,14 +6,16 @@ from .services.hardware import (
     HardwareProbeWorker,
     bt_audio_device_summary,
     force_ldac_reconnect,
+    hardware_summary_view,
+    hdr_vrr_status_text,
     switch_to_bt_audio_output,
 )
 from .services.launch import kcmshell, popen
-from .services.software import _finish_worker
-from .qt import (  # noqa: E501
-    QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer, QUrl, QVBoxLayout, QWidget, Signal,
+from .services.runtime import _finish_worker
+from .qt import (
+    QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QUrl, QVBoxLayout, QWidget, Signal, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     HardwareCard, Page, _make_card,
 )
 
@@ -98,39 +100,8 @@ class HardwarePage(Page):
         if self._initial_refresh_started:
             return
         self._initial_refresh_started = True
-        QTimer.singleShot(0, self.refresh)
-        QTimer.singleShot(0, self._refresh_display_status)
-
-    def _display_status_text(self, raw: str) -> str:
-        hdr_outputs: list[tuple[str, str]] = []   # (name, hdr_state)
-        vrr_outputs: list[tuple[str, str]] = []   # (name, vrr_state)
-        if raw:
-            cur_name = ""
-            for line in raw.splitlines():
-                stripped = line.strip()
-                if stripped.startswith("Output:") or (stripped and not line.startswith(" ")):
-                    parts = stripped.split()
-                    if len(parts) >= 2:
-                        cur_name = parts[-1].rstrip(":")
-                elif stripped.lower().startswith("hdr:") and cur_name:
-                    hdr_outputs.append((cur_name, stripped.split(":", 1)[1].strip()))
-                elif stripped.lower().startswith("vrr:") and cur_name:
-                    vrr_outputs.append((cur_name, stripped.split(":", 1)[1].strip()))
-
-        if hdr_outputs or vrr_outputs:
-            lines = []
-            seen = set()
-            for name, hdr in hdr_outputs:
-                seen.add(name)
-                vrr = next((v for n, v in vrr_outputs if n == name), "unknown")
-                hdr_str = "HDR on" if hdr == "enabled" else "HDR off"
-                vrr_str = f"VRR {vrr}" if vrr not in ("unknown", "") else "VRR unknown"
-                lines.append(f"{name}: {hdr_str}  ·  {vrr_str}")
-            for name, vrr in vrr_outputs:
-                if name not in seen:
-                    lines.append(f"{name}: VRR {vrr}")
-            return "\n".join(lines)
-        return "Display info unavailable — kscreen not running or no outputs detected."
+        single_shot(self, 0, self.refresh)
+        single_shot(self, 0, self._refresh_display_status)
 
     def _refresh_display_status(self):
         if self._display_worker is not None or self._display_status_lbl is None:
@@ -146,7 +117,7 @@ class HardwarePage(Page):
 
     def _on_display_status_ready(self, _key: str, raw: object):
         if self._display_status_lbl is not None:
-            self._display_status_lbl.setText(self._display_status_text(str(raw or "")))
+            self._display_status_lbl.setText(hdr_vrr_status_text(str(raw or "")))
 
     def _on_display_status_failed(self, _key: str, _message: str):
         if self._display_status_lbl is not None:
@@ -301,28 +272,12 @@ class HardwarePage(Page):
         self._replace_cards(probes)
         self._last_probes = probes
 
-        levels = {p.status for p in probes}
-        errs = [p for p in probes if p.status == "err"]
-        warns = [p for p in probes if p.status == "warn"]
-        oks = [p for p in probes if p.status == "ok"]
-        if "err" in levels:
-            self._status_lbl.setText("One or more issues need attention.")
-            self._status_lbl.setObjectName("status-err")
-            self._summary_card.setObjectName("card-accent-err")
-            self._summary_title.setText(f"{len(errs)} hardware issue{'s' if len(errs) != 1 else ''} found")
-            self._summary_body.setText("Start with the issue cards below; each one includes the safest next action when KythOS knows one.")
-        elif "warn" in levels:
-            self._status_lbl.setText("Mostly healthy — a few items worth checking.")
-            self._status_lbl.setObjectName("status-warn")
-            self._summary_card.setObjectName("card-accent-warn")
-            self._summary_title.setText(f"{len(warns)} hardware warning{'s' if len(warns) != 1 else ''}")
-            self._summary_body.setText("The system is usable, but some device, display, driver, or platform checks have recommended follow-up.")
-        else:
-            self._status_lbl.setText("All checks passed.")
-            self._status_lbl.setObjectName("status-ok")
-            self._summary_card.setObjectName("card-accent-ok")
-            self._summary_title.setText(f"All {len(oks)} hardware checks passed")
-            self._summary_body.setText("Graphics, firmware, audio, networking, storage, and platform checks look ready.")
+        view = hardware_summary_view(probes)
+        self._status_lbl.setText(view.status_text)
+        self._status_lbl.setObjectName(view.status_style)
+        self._summary_card.setObjectName(view.summary_card_style)
+        self._summary_title.setText(view.summary_title)
+        self._summary_body.setText(view.summary_body)
         _restyle(self._status_lbl)
         _restyle(self._summary_card)
         self._summary_card.show()
@@ -331,7 +286,7 @@ class HardwarePage(Page):
             self._wire_wizard_action_buttons(probes)
 
     def _wire_wizard_action_buttons(self, probes: list[HardwareProbe]):
-        for card, probe in zip(self._cards, probes):
+        for card, probe in zip(self._cards, probes, strict=True):
             if probe.action_page_key:
                 key = probe.action_page_key
                 card.set_action_fn(
@@ -349,7 +304,7 @@ class HardwarePage(Page):
 
     def _run_inline_cmd(self, cmd: list[str]):
         popen(cmd)
-        QTimer.singleShot(1500, self.refresh)
+        single_shot(self, 1500, self.refresh)
 
     def _on_failed(self, message: str):
         self._progress.hide()

@@ -176,6 +176,7 @@ def _health_command_report() -> str:
                 text=True,
                 timeout=timeout,
                 env=env,
+                check=False,
             )
             output = (r.stdout or "").strip()
             err = (r.stderr or "").strip()
@@ -330,7 +331,7 @@ def collect_signin_status() -> list[tuple[str, str, str]]:
 
     try:
         result = subprocess.run(
-            ["fprintd-list", user], capture_output=True, text=True, timeout=12,
+            ["fprintd-list", user], capture_output=True, text=True, timeout=12, check=False,
         )
         detail = (result.stdout + result.stderr).strip()
     except FileNotFoundError:

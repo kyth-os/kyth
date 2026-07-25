@@ -1,6 +1,8 @@
 # shellcheck shell=bash
 install_umu() {
-	local UMU_REPO_API="https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest"
+	: "${UMU_VERSION:?UMU_VERSION must be an exact release tag}"
+	require_release_tag UMU_VERSION "${UMU_VERSION}"
+	local UMU_REPO_API="https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/tags/${UMU_VERSION}"
 	local TMPDIR_UMU
 	TMPDIR_UMU=$(mktemp -d)
 	local release_json="${TMPDIR_UMU}/release.json"
@@ -40,13 +42,19 @@ install_umu() {
 				fi
 				echo "umu-launcher: installed $(umu-run --version 2>/dev/null || echo 'unknown version')"
 			else
-				echo "umu-launcher: umu-run binary not found at expected path in archive; skipping." >&2
+				echo "ERROR: umu-launcher: umu-run binary not found in pinned release ${UMU_VERSION}." >&2
+				rm -rf "${TMPDIR_UMU}"
+				return 1
 			fi
 		else
-			echo "umu-launcher: no installable tarball found in release assets; skipping."
+			echo "ERROR: umu-launcher: pinned release ${UMU_VERSION} has no installable tarball." >&2
+			rm -rf "${TMPDIR_UMU}"
+			return 1
 		fi
 	else
-		echo "umu-launcher: failed to fetch release info from GitHub; skipping."
+		echo "ERROR: umu-launcher: failed to fetch pinned release ${UMU_VERSION}." >&2
+		rm -rf "${TMPDIR_UMU}"
+		return 1
 	fi
 	rm -rf "${TMPDIR_UMU}"
 }

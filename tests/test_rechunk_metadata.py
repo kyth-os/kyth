@@ -29,8 +29,6 @@ class RechunkMetadataTests(unittest.TestCase):
     def test_large_independent_payloads_are_dedicated(self):
         expected = {
             "kyth-initramfs": ["/usr/lib/modules/*/initramfs"],
-            "proton-cachyos": ["/usr/share/steam/compatibilitytools.d/*"],
-            "headroom": ["/usr/lib/headroom/*", "/usr/bin/headroom"],
             "rpmdb": ["/usr/share/rpm/rpmdb.sqlite"],
         }
         for name, paths in expected.items():
@@ -51,7 +49,7 @@ class RechunkMetadataTests(unittest.TestCase):
 
     def test_custom_groups_precede_upstream_default_groups(self):
         names = list(self.groups)
-        custom = ["kyth-initramfs", "proton-cachyos", "headroom", "rpmdb", "kyth"]
+        custom = ["kyth-initramfs", "rpmdb", "kyth"]
         self.assertEqual(names[: len(custom)], custom)
         self.assertIn("initramfs", self.groups)
         self.assertIn("kernel", self.groups)
@@ -59,6 +57,27 @@ class RechunkMetadataTests(unittest.TestCase):
         self.assertIn("plymouth", self.groups)
         self.assertIn("nvidia-xorg", self.groups)
         self.assertGreater(len(self.groups), 75)
+
+    def test_workflow_rechunk_groups_match_metadata(self):
+        match = re.search(r"for group in ([^;]+); do", self.workflow)
+        self.assertIsNotNone(match, "Could not find 'for group in ...' loop in build.yml")
+        workflow_groups = match.group(1).split()
+        for g in workflow_groups:
+            self.assertIn(
+                g,
+                self.groups,
+                f"Workflow build.yml asserts rechunk group '{g}' which is missing from rechunk-meta.json",
+            )
+
+    def test_supply_chain_workflow_matches_carved_out_components(self):
+        supply_chain_path = ROOT / ".github" / "workflows" / "supply-chain.yml"
+        self.assertTrue(supply_chain_path.exists())
+        content = supply_chain_path.read_text(encoding="utf-8")
+        self.assertNotIn(
+            'test -n "${PROTON_CACHYOS_VERSION}"',
+            content,
+            "supply-chain.yml contains strict non-empty assertion for carved-out PROTON_CACHYOS_VERSION",
+        )
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ SCRIPTS = ROOT / "build_files" / "scripts"
 FRAG_DIR = SCRIPTS / "sysconfig"
 RUNNER = SCRIPTS / "sysconfig-static.sh"
 SYSCTL_DATA = ROOT / "build_files" / "data" / "sysctl.d" / "99-kyth.conf"
+BRANDING_FRAG_DIR = SCRIPTS / "branding"
 
 
 class SysconfigFragmentTests(unittest.TestCase):
@@ -21,7 +22,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertNotIn("99-kyth.conf", text)
 
     def test_fragments_present_and_named(self):
-        frags = sorted(FRAG_DIR.glob("*.sh"))
+        frags = sorted(FRAG_DIR.rglob("*.sh"))
         self.assertGreaterEqual(len(frags), 20)
         for frag in frags:
             self.assertRegex(frag.name, r"^\d{2}-.+\.sh$")
@@ -34,7 +35,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         # instead of embedding them in a heredoc — same pattern as every other
         # extracted config in this refactor. The values themselves are checked
         # against that data file, not the fragment script.
-        path = FRAG_DIR / "01-kernel-sysctl-parameters.sh"
+        path = FRAG_DIR / "kernel" / "01-kernel-sysctl-parameters.sh"
         self.assertTrue(path.is_file())
         body = path.read_text(encoding="utf-8")
         self.assertIn("99-kyth.conf", body)
@@ -42,7 +43,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn("vm.swappiness", SYSCTL_DATA.read_text(encoding="utf-8"))
 
     def test_boot_log_regression_guards(self):
-        guards = (FRAG_DIR / "09-autostart-log-noise-guards.sh").read_text(
+        guards = (FRAG_DIR / "desktop" / "09-autostart-log-noise-guards.sh").read_text(
             encoding="utf-8"
         )
         self.assertIn("groupadd --system plugdev", guards)
@@ -53,7 +54,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertNotIn('TEST{0002}!="/sys%p/charge_', guards)
 
     def test_openrgb_is_not_unconditionally_autostarted(self):
-        body = (FRAG_DIR / "39-openrgb-rgb-peripheral-control.sh").read_text(
+        body = (FRAG_DIR / "peripherals" / "39-openrgb-rgb-peripheral-control.sh").read_text(
             encoding="utf-8"
         )
         self.assertIn("rm -f /etc/skel/.config/autostart/openrgb.desktop", body)
@@ -65,13 +66,38 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn('install_items+=" /etc/passwd /etc/group "', setup)
         self.assertIn("etc/passwd etc/group", final)
 
+    def test_late_plasma_splash_is_kyth_owned(self):
+        fragment = (BRANDING_FRAG_DIR / "12-kyth-session-splash.sh").read_text(
+            encoding="utf-8"
+        )
+        qml = (
+            ROOT
+            / "build_files"
+            / "branding"
+            / "plasma-splash"
+            / "contents"
+            / "splash"
+            / "Splash.qml"
+        ).read_text(encoding="utf-8")
+        polish = (ROOT / "build_files" / "kyth-user-polish").read_text(
+            encoding="utf-8"
+        )
+        guard = (ROOT / "build_files" / "kyth-session-splash-guard").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Theme=org.kythos.desktop", fragment)
+        self.assertIn("ExecStartPre=/usr/bin/kyth-session-splash-guard", fragment)
+        self.assertIn('source: "images/kyth-logo.svg"', qml)
+        self.assertNotIn("fedora", qml.lower())
+        self.assertIn("--key Theme org.kythos.desktop", polish)
+        self.assertIn("--key Theme org.kythos.desktop", guard)
+
     def test_antigravity_uses_desktop_safe_wrapper(self):
         body = (SCRIPTS / "packages" / "20-google-antigravity-ide.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn("/usr/libexec/kyth-antigravity", body)
-        self.assertIn('exec /usr/share/antigravity/antigravity "$@"', body)
-        self.assertNotIn('Exec=sh -c "ulimit', body)
+        self.assertIn("/usr/bin/antigravity", body)
+        self.assertIn("kyth-ai-dev", body)
 
     def test_bootc_sudoers_allows_status_without_arguments(self):
         body = (ROOT / "build_files" / "kyth-bootc-sudo").read_text(

@@ -3,9 +3,13 @@ import os
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .services.gaming import GameNightManager, _gamescope_installed, _mangohud_installed, _proton_cachyos_version
+from .services.gaming import (
+    GameNightManager, _gamescope_installed, _mangohud_installed, _proton_cachyos_version,
+    gaming_readiness_view, ready_status_prefix,
+)
 from .services.launch import flatpak_run, popen
-from .services.software import _install_flatpak_inline, _is_flatpak_installed
+from .actions import _install_flatpak_inline
+from .services.flatpak import _is_flatpak_installed
 from .qt import QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, Qt
 from .widgets import ActionRow, _make_card
 
@@ -200,22 +204,14 @@ class _SetupSectionMixin:
         )
 
     def _make_gaming_ready_panel(self) -> QFrame:
-        steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
-        pc_ver = _proton_cachyos_version()
-        vulkan_hint = bool(glob.glob("/dev/dri/renderD*")) or shutil.which("vulkaninfo") is not None
-        ntsync_ok = os.path.exists("/dev/ntsync")
-        items = [
-            ("ok" if steam_ok else "warn", "Steam", "Installed." if steam_ok else "Install Steam for your library."),
-            ("ok" if pc_ver else "err", "Proton-CachyOS", pc_ver or "Update Proton-CachyOS before testing PC games."),
-            ("ok" if vulkan_hint else "err", "Vulkan", "Render device found." if vulkan_hint else "No Vulkan render device found."),
-            ("ok" if ntsync_ok else "warn", "NTSYNC", "Ready." if ntsync_ok else "Not active; Proton can fall back safely."),
-            ("ok" if _gamescope_installed() else "warn", "Gamescope", "Ready." if _gamescope_installed() else "Install for scaling, HDR, and frame pacing presets."),
-            ("ok" if _mangohud_installed() else "warn", "MangoHud", "Ready." if _mangohud_installed() else "Install for the performance overlay."),
-        ]
-        ok_count = sum(1 for status, _, _ in items if status == "ok")
-        issue_count = sum(1 for status, _, _ in items if status == "err")
-        warn_count = sum(1 for status, _, _ in items if status == "warn")
-        total = len(items)
+        view = gaming_readiness_view(
+            steam_ok=_is_flatpak_installed("com.valvesoftware.Steam"),
+            pc_ver=_proton_cachyos_version(),
+            vulkan_ok=bool(glob.glob("/dev/dri/renderD*")) or shutil.which("vulkaninfo") is not None,
+            ntsync_ok=os.path.exists("/dev/ntsync"),
+            gamescope_ok=_gamescope_installed(),
+            mangohud_ok=_mangohud_installed(),
+        )
 
         card, layout = _make_card("ready-panel")
         layout.setContentsMargins(22, 20, 22, 20)
@@ -226,8 +222,8 @@ class _SetupSectionMixin:
 
         score_col = QVBoxLayout()
         score_col.setSpacing(2)
-        score = QLabel(f"{ok_count}/{total}")
-        score.setObjectName("ready-score-err" if issue_count else "ready-score-warn" if warn_count else "ready-score")
+        score = QLabel(f"{view.ok_count}/{view.total}")
+        score.setObjectName(view.score_style)
         score_col.addWidget(score)
         score_label = QLabel("gaming checks ready")
         score_label.setObjectName("stat-label")
@@ -239,13 +235,7 @@ class _SetupSectionMixin:
         title = QLabel("Gaming readiness")
         title.setObjectName("card-title")
         copy_col.addWidget(title)
-        if issue_count:
-            summary = "A couple of core pieces need attention before PC games will feel smooth."
-        elif warn_count:
-            summary = "The core stack is close. Review the yellow items before benchmarking or migrating."
-        else:
-            summary = "The important pieces are in place. Scroll down for launchers, Proton, and game tools."
-        body = QLabel(summary)
+        body = QLabel(view.summary_text)
         body.setObjectName("card-copy")
         body.setWordWrap(True)
         copy_col.addWidget(body)
@@ -257,7 +247,7 @@ class _SetupSectionMixin:
         for start in (0, 3):
             row = QHBoxLayout()
             row.setSpacing(8)
-            for item in items[start:start + 3]:
+            for item in view.items[start:start + 3]:
                 row.addWidget(self._make_ready_pill(*item), 1)
             pill_grid.addLayout(row)
         layout.addLayout(pill_grid)
@@ -265,12 +255,7 @@ class _SetupSectionMixin:
         return card
 
     def _make_ready_pill(self, status: str, name: str, summary: str) -> QLabel:
-        prefix = {
-            "ok": "Ready",
-            "warn": "Check",
-            "err": "Fix",
-            "dim": "Optional",
-        }.get(status, "Info")
+        prefix = ready_status_prefix(status)
         label = QLabel(f"{prefix}: {name}\n{summary}")
         label.setObjectName(f"ready-row-{status if status in {'ok', 'warn', 'err', 'dim'} else 'dim'}")
         label.setWordWrap(True)

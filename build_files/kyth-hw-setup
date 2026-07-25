@@ -26,25 +26,8 @@ log() { echo "kyth-hw-setup: $*"; }
 if command -v scx_loader >/dev/null 2>&1 && [[ -d /sys/kernel/sched_ext ]]; then
     vendor_id=$(awk -F': ' '/^vendor_id/ {print $2; exit}' /proc/cpuinfo | tr -d ' ')
 
-    case "$vendor_id" in
-        AuthenticAMD)
-            # scx_lavd is tuned for AMD CCX/SMT topologies and excels at
-            # gaming latency on Zen 2+. Prefer it over the generic bpfland.
-            scheduler_order=(scx_lavd scx_bpfland scx_rusty)
-            cpu_label="AMD"
-            ;;
-        GenuineIntel)
-            # scx_bpfland handles the P+E core asymmetry of Alder Lake+
-            # more conservatively; use it first on all Intel hardware.
-            scheduler_order=(scx_bpfland scx_lavd scx_rusty)
-            cpu_label="Intel"
-            ;;
-        *)
-            # Unknown vendor (VM, ARM, etc.): bpfland is the safest default.
-            scheduler_order=(scx_bpfland scx_rusty)
-            cpu_label="unknown"
-            ;;
-    esac
+    scheduler_order=(scx_rusty)
+    cpu_label="${vendor_id:-unknown}"
 
     SCHEDULER=""
     for sched in "${scheduler_order[@]}"; do

@@ -19,10 +19,10 @@ from ..services.runtime import (
     DataWorker,
 )
 from ..services.launch import popen, systemsettings, kcmshell
-from ..qt import (  # noqa: E501
-    QCheckBox, QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QTimer, QUrl,
+from ..qt import (
+    QCheckBox, QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QUrl, single_shot,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 
@@ -172,7 +172,7 @@ class _ShortcutsPhoneMixin:
         phone_btns.addStretch()
         phone_layout.addLayout(phone_btns)
         self._add(phone_card)
-        QTimer.singleShot(0, self._refresh_phone_devices)
+        single_shot(self, 0, self._refresh_phone_devices)
 
 
 

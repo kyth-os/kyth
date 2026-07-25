@@ -83,34 +83,7 @@ setup-kali-box tools="headless":
                 app=$(basename "$f" .desktop); distrobox-export --app "$app" 2>/dev/null && exported=$((exported+1)) || true
             done < <(find /usr/share/applications -name "*.desktop" -print0)
             echo "  Exported ${exported} desktop entries."'
-        _appdir="${HOME}/.local/share/applications"; _patched=0
-        for _f in "${_appdir}/"*.desktop; do
-            [[ -f "${_f}" ]] || continue
-            grep -qE '\-\-name[[:space:]]+kali|-n[[:space:]]+kali' "${_f}" 2>/dev/null || continue
-            [[ $? -ne 0 ]] && continue
-            if grep -q '^Categories=' "${_f}"; then
-                sed -i 's|^Categories=.*|Categories=X-KythSecurity;|' "${_f}"
-            else
-                printf '\nCategories=X-KythSecurity;\n' >> "${_f}"
-            fi
-            _patched=$((_patched+1))
-        done
-        echo "  Patched Categories=X-KythSecurity; on ${_patched} entries."
-        for _f in "${_appdir}/"*.desktop; do
-            [[ -f "${_f}" ]] || continue
-            grep -qE '\-\-name[[:space:]]+kali|-n[[:space:]]+kali' "${_f}" 2>/dev/null || continue
-            sed -i '/^NoDisplay[[:space:]]*=[[:space:]]*true/Id' "${_f}"
-            sed -i '/^OnlyShowIn[[:space:]]*=/d' "${_f}"
-            sed -i '/^NotShowIn[[:space:]]*=/d' "${_f}"
-        done
-        for _f in "${_appdir}/"*zenmap*.desktop; do
-            [[ -f "${_f}" ]] || continue
-            grep -qE '\-\-name[[:space:]]+kali|-n[[:space:]]+kali|kyth-distrobox-root-launch' "${_f}" 2>/dev/null || [[ "${_f##*/}" == kali* ]] || continue
-            sed -i -E 's|^Exec=.*$|Exec=kyth-distrobox-root-launch --root kali /usr/bin/zenmap|' "${_f}"
-            sed -i -E 's|^TryExec=.*$|TryExec=kyth-distrobox-root-launch|' "${_f}"
-        done
-        update-desktop-database "${_appdir}" 2>/dev/null || true
-        kbuildsycoca6 --noincremental 2>/dev/null || true
+        kyth-kali-desktop-fixup
     fi
     echo; echo "Done. Enter with: distrobox enter --root kali"
 
@@ -133,24 +106,5 @@ export-kali-apps:
             distrobox-export --app "$app" 2>/dev/null && exported=$((exported+1)) || true
         done < <(find /usr/share/applications -name "*.desktop" -print0)
         echo "  Exported ${exported} entries."'
-    _appdir="${HOME}/.local/share/applications"
-    for _f in "${_appdir}/"*.desktop; do
-        [[ -f "${_f}" ]] || continue
-        grep -qE '\-\-name[[:space:]]+kali|-n[[:space:]]+kali' "${_f}" 2>/dev/null || continue
-        sed -i 's|^Categories=.*|Categories=X-KythSecurity;|' "${_f}"
-        sed -i '/^NoDisplay[[:space:]]*=[[:space:]]*true/Id' "${_f}"
-        sed -i '/^OnlyShowIn[[:space:]]*=/d' "${_f}"
-        sed -i '/^NotShowIn[[:space:]]*=/d' "${_f}"
-        if grep -qE 'pkexec|kdesu|gksu|gksudo' "${_f}" 2>/dev/null; then
-            sed -i -E 's/(pkexec|kdesu|gksu|gksudo)[[:space:]]+/sudo -E /g' "${_f}"
-        fi
-    done
-    for _f in "${_appdir}/"*zenmap*.desktop; do
-        [[ -f "${_f}" ]] || continue
-        grep -qE '\-\-name[[:space:]]+kali|-n[[:space:]]+kali|kyth-distrobox-root-launch' "${_f}" 2>/dev/null || continue
-        sed -i -E 's|^Exec=.*$|Exec=kyth-distrobox-root-launch --root kali /usr/bin/zenmap|' "${_f}"
-        sed -i -E 's|^TryExec=.*$|TryExec=kyth-distrobox-root-launch|' "${_f}"
-    done
-    update-desktop-database "${_appdir}" 2>/dev/null || true
-    kbuildsycoca6 --noincremental 2>/dev/null || true
+    kyth-kali-desktop-fixup
     echo "Done. Kali tools should appear under 'Security' in the app launcher."

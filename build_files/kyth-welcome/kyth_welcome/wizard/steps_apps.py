@@ -4,7 +4,8 @@ from __future__ import annotations
 import shlex
 
 from ..core_base import _cancel_worker, _restyle
-from ..services.software import Worker, _finish_worker, _is_flatpak_installed
+from ..services.flatpak import _is_flatpak_installed
+from ..services.runtime import Worker, _finish_worker
 from ..qt import (
     QCheckBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QMessageBox,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QUrl,
@@ -12,36 +13,58 @@ from ..qt import (
 )
 from ..widgets import _make_card, _set_log_panel
 
+_GAMING_APP_IDS = {
+    "com.valvesoftware.Steam", "com.discordapp.Discord", "com.obsproject.Studio",
+    "org.freedesktop.Piper", "com.moonlight_stream.Moonlight",
+    "com.github.mtkennerly.ludusavi",
+}
+_EVERYDAY_APP_IDS = {
+    "com.brave.Browser", "org.libreoffice.LibreOffice", "eu.betterbird.Betterbird",
+    "org.videolan.VLC",
+}
+# Apps that stay opt-in even when otherwise profile-relevant: still float to
+# the top of the list for a gaming profile, but never pre-ticked on first boot.
+_NEVER_PRECHECKED = {"com.obsproject.Studio"}
+
+
+def _default_checked_ids(profile: str) -> set[str]:
+    relevant = _GAMING_APP_IDS if profile == "gaming" else _EVERYDAY_APP_IDS
+    return relevant - _NEVER_PRECHECKED
+
 
 class _AppsStepMixin:
     def _make_first_run_apps_step(self) -> QWidget:
         page = QWidget()
-        page.setObjectName("content-area")
+        page.setObjectName("wiz-body")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(56, 34, 56, 28)
-        layout.setSpacing(16)
+        layout.setContentsMargins(52, 40, 52, 28)
+        layout.setSpacing(14)
 
-        title = QLabel("Choose Your Extras")
-        title.setObjectName("heading")
+        pill = QLabel("GET APPS")
+        pill.setObjectName("wiz-pill")
+        layout.addWidget(pill)
+
+        title = QLabel("Add what you actually use.")
+        title.setObjectName("wiz-heading")
         layout.addWidget(title)
 
         subtitle = QLabel(
             "Your core gaming setup is already handled. Pick anything else you want now; "
             "you can install or remove these later from the System Hub."
         )
-        subtitle.setObjectName("subheading")
+        subtitle.setObjectName("wiz-subheading")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
-        core_card, core_layout = _make_card("card-accent-ok")
+        core_card, core_layout = _make_card("wiz-card-ok")
         core_title = QLabel("Game-ready defaults")
-        core_title.setObjectName("card-title")
+        core_title.setObjectName("wiz-card-title")
         core_layout.addWidget(core_title)
         core_copy = QLabel(
             "Heroic Games Launcher, Lutris, ProtonUp-Qt, and protontricks install automatically "
             "as soon as networking is available."
         )
-        core_copy.setObjectName("card-copy")
+        core_copy.setObjectName("wiz-card-copy")
         core_copy.setWordWrap(True)
         core_layout.addWidget(core_copy)
         layout.addWidget(core_card)
@@ -49,16 +72,16 @@ class _AppsStepMixin:
         prep_row = QHBoxLayout()
         prep_row.setSpacing(12)
 
-        install_model, install_model_layout = _make_card("card-accent-ok")
+        install_model, install_model_layout = _make_card("wiz-card-ok")
         install_model_title = QLabel("Install apps the KythOS way")
-        install_model_title.setObjectName("card-title")
+        install_model_title.setObjectName("wiz-card-title")
         install_model_layout.addWidget(install_model_title)
         install_model_copy = QLabel(
             "Use App Store or Flathub first. Standalone .exe and .msi installers "
             "belong in Bottles, while downloaded .rpm packages are system packages for "
             "mutable Fedora-style installs and are usually the wrong path on KythOS."
         )
-        install_model_copy.setObjectName("card-copy")
+        install_model_copy.setObjectName("wiz-card-copy")
         install_model_copy.setWordWrap(True)
         install_model_layout.addWidget(install_model_copy)
         install_model_btns = QHBoxLayout()
@@ -72,9 +95,9 @@ class _AppsStepMixin:
         install_model_layout.addLayout(install_model_btns)
         prep_row.addWidget(install_model, 1)
 
-        gaps_card, gaps_layout = _make_card()
+        gaps_card, gaps_layout = _make_card("wiz-card")
         gaps_title = QLabel("Check daily-driver gaps now")
-        gaps_title.setObjectName("card-title")
+        gaps_title.setObjectName("wiz-card-title")
         gaps_layout.addWidget(gaps_title)
         gaps_copy = QLabel(
             "Game Pass is browser/cloud-first here, Microsoft 365 and OneDrive use web "
@@ -82,28 +105,32 @@ class _AppsStepMixin:
             "Synapse, and SteelSeries GG become OpenRGB, Piper, or vendor-limited "
             "workflows depending on the device."
         )
-        gaps_copy.setObjectName("card-copy")
+        gaps_copy.setObjectName("wiz-card-copy")
         gaps_copy.setWordWrap(True)
         gaps_layout.addWidget(gaps_copy)
         prep_row.addWidget(gaps_card, 1)
         layout.addLayout(prep_row)
 
-        self._wizard_extra_apps = [
-            ("com.valvesoftware.Steam",      "Steam",         "Valve's game store and Proton launcher for your Steam library."),
-            ("com.discordapp.Discord",       "Discord",       "Voice, text, and community chat — used by almost every gaming community."),
-            ("com.brave.Browser",            "Brave Browser", "Fast, privacy-friendly browser with good media support."),
-            ("com.obsproject.Studio",        "OBS Studio",    "Record and stream your gameplay."),
-            ("org.videolan.VLC",             "VLC",           "Plays virtually every video and audio format without extra codecs."),
-            ("org.libreoffice.LibreOffice",  "LibreOffice",   "Open Word, Excel, and PowerPoint files — full office suite."),
-            ("eu.betterbird.Betterbird",     "Betterbird",    "Work email, calendar, and contacts — connects to Microsoft 365, Gmail, and IMAP."),
-            ("com.github.mtkennerly.ludusavi","Ludusavi",      "Back up and restore game saves before migration or modding."),
-            ("org.freedesktop.Piper",         "Piper",         "Configure supported gaming mice for DPI, buttons, and LEDs."),
-            ("com.moonlight_stream.Moonlight","Moonlight",     "Stream games from another PC or NVIDIA Shield on your network."),
+        catalog = [
+            ("com.valvesoftware.Steam",       "Steam",          "Valve's game store and Proton launcher for your Steam library."),
+            ("com.discordapp.Discord",        "Discord",        "Voice, text, and community chat — used by almost every gaming community."),
+            ("com.brave.Browser",             "Brave Browser",  "Fast, privacy-friendly browser with good media support."),
+            ("com.obsproject.Studio",         "OBS Studio",     "Record and stream your gameplay."),
+            ("org.videolan.VLC",              "VLC",            "Plays virtually every video and audio format without extra codecs."),
+            ("org.libreoffice.LibreOffice",   "LibreOffice",    "Open Word, Excel, and PowerPoint files — full office suite."),
+            ("eu.betterbird.Betterbird",      "Betterbird",     "Work email, calendar, and contacts — connects to Microsoft 365, Gmail, and IMAP."),
+            ("com.github.mtkennerly.ludusavi","Ludusavi",       "Back up and restore game saves before migration or modding."),
+            ("org.freedesktop.Piper",         "Piper",          "Configure supported gaming mice for DPI, buttons, and LEDs."),
+            ("com.moonlight_stream.Moonlight","Moonlight",      "Stream games from another PC or NVIDIA Shield on your network."),
         ]
+        # Profile-relevant apps float to the top; nothing is hidden, since any
+        # checkbox can still be selected regardless of the chosen profile.
+        relevant = _GAMING_APP_IDS if self._profile == "gaming" else _EVERYDAY_APP_IDS
+        self._wizard_extra_apps = sorted(catalog, key=lambda item: item[0] not in relevant)
 
-        extras_card, extras_layout = _make_card()
+        extras_card, extras_layout = _make_card("wiz-card")
         extras_title = QLabel("Optional apps")
-        extras_title.setObjectName("card-title")
+        extras_title.setObjectName("wiz-card-title")
         extras_layout.addWidget(extras_title)
 
         apps_view = QScrollArea()
@@ -116,6 +143,7 @@ class _AppsStepMixin:
         apps_layout.setContentsMargins(0, 0, 8, 0)
         apps_layout.setSpacing(10)
 
+        checked_ids = _default_checked_ids(self._profile)
         self._wizard_extra_checks = []
         for app_id, name, desc in self._wizard_extra_apps:
             row = QWidget()
@@ -127,7 +155,7 @@ class _AppsStepMixin:
 
             already_installed = _is_flatpak_installed(app_id)
             check = QCheckBox()
-            check.setChecked(not already_installed and app_id in {"com.valvesoftware.Steam", "com.discordapp.Discord"})
+            check.setChecked(not already_installed and app_id in checked_ids)
             check.setEnabled(not already_installed)
             self._wizard_extra_checks.append((check, app_id, name))
             row_layout.addWidget(check, 0, Qt.AlignmentFlag.AlignTop)
@@ -135,10 +163,10 @@ class _AppsStepMixin:
             text_col = QVBoxLayout()
             text_col.setSpacing(2)
             name_lbl = QLabel(name)
-            name_lbl.setObjectName("card-title")
+            name_lbl.setObjectName("wiz-card-title")
             name_lbl.setStyleSheet("font-size: 13px;")
             desc_lbl = QLabel("Already installed." if already_installed else desc)
-            desc_lbl.setObjectName("card-copy")
+            desc_lbl.setObjectName("wiz-card-copy")
             desc_lbl.setWordWrap(True)
             text_col.addWidget(name_lbl)
             text_col.addWidget(desc_lbl)
@@ -166,7 +194,7 @@ class _AppsStepMixin:
         extras_layout.addLayout(btn_row)
 
         self._wizard_install_status = QLabel("Select apps above, or continue if you only want the gaming defaults.")
-        self._wizard_install_status.setObjectName("subheading")
+        self._wizard_install_status.setObjectName("wiz-subheading")
         extras_layout.addWidget(self._wizard_install_status)
 
         self._wizard_install_progress = QProgressBar()
@@ -218,7 +246,7 @@ class _AppsStepMixin:
         self._wizard_install_total = len(selected)
         self._wizard_install_done = 0
         self._wizard_install_status.setText(f"Preparing to install {names}...")
-        self._wizard_install_status.setObjectName("subheading")
+        self._wizard_install_status.setObjectName("wiz-subheading")
         _restyle(self._wizard_install_status)
         self._wizard_install_progress.setRange(0, len(selected))
         self._wizard_install_progress.setValue(0)
@@ -276,7 +304,7 @@ class _AppsStepMixin:
             current = getattr(self, "_wizard_install_done", 0) + 1
             total = max(1, getattr(self, "_wizard_install_total", 1))
             self._wizard_install_status.setText(f"Installing {name} ({current} of {total})...")
-            self._wizard_install_status.setObjectName("subheading")
+            self._wizard_install_status.setObjectName("wiz-subheading")
             _restyle(self._wizard_install_status)
             return
         if line.startswith("__KYTH_APP_DONE__:"):
@@ -317,4 +345,3 @@ class _AppsStepMixin:
         self._wizard_install_btn.setEnabled(True)
         _restyle(self._wizard_install_status)
         self._update_nav()
-

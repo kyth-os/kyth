@@ -1,0 +1,81 @@
+name: Upload to Cloudflare R2
+description: Upload ISO build artifacts to Cloudflare R2 bucket.
+inputs:
+  r2-access-key-id:
+    description: Access key ID for R2 bucket.
+    required: true
+  r2-secret-access-key:
+    description: Secret access key for R2 bucket.
+    required: true
+  r2-endpoint-url:
+    description: Cloudflare R2 S3 endpoint URL.
+    required: false
+  r2-account-id:
+    description: Cloudflare Account ID (to construct endpoint if r2-endpoint-url is not set).
+    required: false
+  iso-basename:
+    description: Filename of the built ISO.
+    required: true
+  channel-basename:
+    description: Filename of the channel ISO.
+    required: true
+  source-dir:
+    description: Directory where built artifacts reside.
+    required: false
+    default: output/live-iso
+  bucket:
+    description: R2 bucket name.
+    required: false
+    default: kyth-releases
+runs:
+  using: composite
+  steps:
+    - name: Run R2 upload script
+      shell: bash
+      env:
+        AWS_ACCESS_KEY_ID: ${{ inputs.r2-access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.r2-secret-access-key }}
+        R2_ENDPOINT_URL: ${{ inputs.r2-endpoint-url }}
+        R2_ACCOUNT_ID: ${{ inputs.r2-account-id }}
+        ISO_BASENAME: ${{ inputs.iso-basename }}
+        CHANNEL_BASENAME: ${{ inputs.channel-basename }}
+        SOURCE_DIR: ${{ inputs.source-dir }}
+        BUCKET: ${{ inputs.bucket }}
+      run: |
+        set -euo pipefail
+
+        if [[ -n "${R2_ENDPOINT_URL:-}" ]]; then
+          R2_ENDPOINT="${R2_ENDPOINT_URL%/}"
+        elif [[ "${R2_ACCOUNT_ID:-}" == https://* ]]; then
+          R2_ENDPOINT="${R2_ACCOUNT_ID%/}"
+        elif [[ -n "${R2_ACCOUNT_ID:-}" ]]; then
+          R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+        else
+          echo "::error::Set r2-endpoint-url or r2-account-id."
+          exit 1
+        fi
+
+        if [[ ! "${R2_ENDPOINT}" =~ ^https://[A-Za-z0-9.-]+\.r2\.cloudflarestorage\.com$ ]]; then
+          echo "::error::Invalid R2 endpoint URL: ${R2_ENDPOINT}"
+          echo "::error::Expected a value like https://<account-id>.r2.cloudflarestorage.com"
+          exit 1
+        fi
+
+        ISO="${SOURCE_DIR}/${ISO_BASENAME}"
+        CHANNEL="${SOURCE_DIR}/${CHANNEL_BASENAME}"
+
+        for artifact in "${ISO}" "${ISO}-CHECKSUM" "${ISO}.sig" "${ISO}.bundle" "${ISO}.intoto.jsonl" "${ISO}.json"; do
+          aws s3 cp "${artifact}" \
+            "s3://${BUCKET}/$(basename "${artifact}")" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --no-progress
+        done
+
+        aws s3 cp "${ISO}" "s3://${BUCKET}/$(basename "${CHANNEL}")" \
+          --endpoint-url "${R2_ENDPOINT}" --no-progress
+        for suffix in -CHECKSUM .sig .bundle .intoto.jsonl .json; do
+          aws s3 cp "${CHANNEL}${suffix}" \
+            "s3://${BUCKET}/$(basename "${CHANNEL}${suffix}")" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --no-progress
+        done

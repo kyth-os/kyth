@@ -13,7 +13,9 @@ from .services.repair import (
     setup_summary_command,
     setup_transfer_helper,
 )
-from .services.software import Worker, _finish_worker, _install_flatpak_inline, _is_flatpak_installed
+from .actions import _install_flatpak_inline
+from .services.flatpak import _is_flatpak_installed
+from .services.runtime import Worker, _finish_worker
 from .qt import QFileDialog, QMessageBox
 
 
@@ -167,5 +169,4 @@ class _AssistMixin:
         self._snapshot_btn.setEnabled(True)
         if code != 0:
             self._snapshot_status.setText(f"Snapshot failed (exit {code}).")
-
 

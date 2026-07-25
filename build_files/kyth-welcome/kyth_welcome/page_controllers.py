@@ -2,22 +2,18 @@ import shutil
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _release_worker_when_finished
-from .services.gaming import TrackedThread
-from .services.hardware import _detect_controllers
-from .services.software import Worker
-from .qt import (  # noqa: E501
-    QHBoxLayout, QLabel, QMessageBox, QPushButton, Signal,
+from .services.workers import ControllerProbeWorker
+from .services.hardware import controller_status_view
+from .services.runtime import Worker
+from .services.privileged import AuthFrontend, helper_action
+from .qt import (
+    QHBoxLayout, QLabel, QMessageBox, QPushButton,
 )
 from .services.launch import flatpak_run, popen, systemsettings
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 
-class ControllerProbeWorker(TrackedThread):
-    result = Signal(dict)
-
-    def run(self) -> None:
-        self.result.emit(_detect_controllers())
 
 
 class ControllerPage(Page):
@@ -215,64 +211,18 @@ class ControllerPage(Page):
 
     def _on_probe_result(self, info: dict) -> None:
         self._refresh_btn.setEnabled(True)
+        view = controller_status_view(info)
 
-        # ── Connected controllers status ───────────────────────────────────────
-        lines: list[str] = []
-        for name, _ in info["usb_controllers"]:
-            lines.append(f"  ✓  {name}")
-        for node in info["input_nodes"]:
-            label = node.replace("usb-", "").replace("_", " ")
-            lines.append(f"  ✓  {label}  (input node)")
-        if not lines:
-            self._status_lbl.setText("No controllers detected. Connect a controller and press Refresh.")
-        else:
-            mods = []
-            if info["xpadneo_loaded"]:   mods.append("xpadneo")
-            if info["xone_loaded"]:      mods.append("xone_hid")
-            if info["hid_ps_loaded"]:    mods.append("hid_playstation")
-            mod_line = f"\n  Active drivers: {', '.join(mods)}" if mods else ""
-            self._status_lbl.setText("\n".join(lines) + mod_line)
+        self._status_lbl.setText(view.status_text)
 
-        # ── xone dongle status ─────────────────────────────────────────────────
-        if info["xone_dongle"] and not info["xone_loaded"]:
-            self._xone_status_lbl.setText(
-                "Xbox Wireless Adapter detected — firmware not yet flashed. "
-                "Click the button below to complete setup (requires password)."
-            )
-            self._xone_status_lbl.setStyleSheet("color: #d4a843;")
-            self._xone_btn.show()
-        elif info["xone_dongle"] and info["xone_loaded"]:
-            self._xone_status_lbl.setText(
-                "✓  Xbox Wireless Adapter is ready. Press the sync button on the "
-                "adapter and controller together to pair."
-            )
-            self._xone_status_lbl.setStyleSheet("color: #4fc1ff;")
-            self._xone_btn.hide()
-        else:
-            self._xone_status_lbl.setText(
-                "No Xbox Wireless Adapter detected. "
-                "If you have one, plug it in and press Refresh."
-            )
-            self._xone_status_lbl.setStyleSheet("")
-            self._xone_btn.hide()
+        self._xone_status_lbl.setText(view.xone_status_text)
+        self._xone_status_lbl.setStyleSheet(view.xone_status_style)
+        self._xone_btn.setVisible(view.xone_button_visible)
 
-        # ── DualSense status ───────────────────────────────────────────────────
-        if info["dualsense_found"] and info["dualsensectl_out"]:
-            self._ds_status_lbl.setText(
-                "DualSense connected — " + info["dualsensectl_out"].strip().splitlines()[0]
-            )
-            self._ds_status_lbl.show()
-        elif info["dualsense_found"]:
-            self._ds_status_lbl.setText("✓  DualSense connected.")
-            self._ds_status_lbl.show()
-        else:
-            self._ds_status_lbl.hide()
+        self._ds_status_lbl.setText(view.dualsense_status_text)
+        self._ds_status_lbl.setVisible(view.dualsense_status_visible)
 
-        # ── Secure Boot warning ────────────────────────────────────────────────
-        if info["secure_boot"] and (info["xone_dongle"] or not info["xpadneo_loaded"]):
-            self._sb_warn_lbl.show()
-        else:
-            self._sb_warn_lbl.hide()
+        self._sb_warn_lbl.setVisible(view.secure_boot_warning_visible)
 
     # ── Actions ────────────────────────────────────────────────────────────────
 
@@ -283,7 +233,11 @@ class ControllerPage(Page):
             return
         self._xone_btn.setEnabled(False)
         self._xone_status_lbl.setText("Flashing firmware…")
-        worker = Worker(["pkexec", cmd])
+        helper = "xone-dongle-install" if cmd.endswith("xone-dongle-install") else "xone-firmware-install"
+        worker = Worker(helper_action(
+            helper,
+            frontend=AuthFrontend.PKEXEC,
+        ).command())
         worker.done.connect(self._on_xone_done)
         worker.start()
         self._xone_worker = worker

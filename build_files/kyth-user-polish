@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="v12"
+version="v13"
 stamp_dir="${HOME}/.local/share/kyth"
 stamp="${stamp_dir}/user-polish-${version}"
 old_autostart="${HOME}/.config/autostart/kyth-windows-friendly-defaults.desktop"
@@ -207,6 +207,11 @@ ensure_place "trash:/" "Trash" "user-trash"
 ensure_place "network:/" "Network" "network-workgroup"
 
 if command -v kwriteconfig6 >/dev/null 2>&1; then
+    # KSplash is a separate late-session boot stage. Pin it independently of
+    # the user's color/look-and-feel choice so upstream branding cannot return.
+    kwriteconfig6 --file ksplashrc --group KSplash --key Engine KSplashQML
+    kwriteconfig6 --file ksplashrc --group KSplash --key Theme org.kythos.desktop
+
     kwriteconfig6 --file plasma-localerc --group Translations --key LANGUAGE "en_US"
     kwriteconfig6 --file plasma-localerc --group Formats --key LC_TIME "en_US.UTF-8"
 

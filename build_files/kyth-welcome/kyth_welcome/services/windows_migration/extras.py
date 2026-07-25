@@ -302,7 +302,7 @@ def copy_windows_fonts(font_dirs: list[str]) -> tuple[int, int]:
                 copied += 1
             except OSError:
                 skipped += 1
-    subprocess.run(["fc-cache", "-f", dest], capture_output=True, timeout=120)
+    subprocess.run(["fc-cache", "-f", dest], capture_output=True, timeout=120, check=False)
     return copied, skipped
 
 
@@ -352,15 +352,19 @@ _export_sticky_notes = export_sticky_notes
 
 def import_rdp_bookmarks(connections: list[dict]) -> tuple[int, int]:
     """Add rdp:// bookmarks to KRDC's bookmarks.xbel; returns (added, dupes)."""
-    import defusedxml.ElementTree as ET
+    import xml.etree.ElementTree as std_ET
+    try:
+        import defusedxml.ElementTree as ET
+    except ImportError:
+        ET = std_ET
     path = os.path.expanduser("~/.local/share/krdc/bookmarks.xbel")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.isfile(path):
         tree = ET.parse(path)
         root = tree.getroot()
     else:
-        root = ET.Element("xbel", {"folded": "no"})
-        tree = ET.ElementTree(root)
+        root = std_ET.Element("xbel", {"folded": "no"})
+        tree = std_ET.ElementTree(root)
     existing = {bm.get("href") for bm in root.iter("bookmark")}
     added = dupes = 0
     for conn in connections:
@@ -369,8 +373,8 @@ def import_rdp_bookmarks(connections: list[dict]) -> tuple[int, int]:
         if href in existing:
             dupes += 1
             continue
-        bm = ET.SubElement(root, "bookmark", {"href": href})
-        title = ET.SubElement(bm, "title")
+        bm = std_ET.SubElement(root, "bookmark", {"href": href})
+        title = std_ET.SubElement(bm, "title")
         title.text = conn["name"]
         existing.add(href)
         added += 1

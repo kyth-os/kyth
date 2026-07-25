@@ -2,6 +2,9 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+# shellcheck source=../lib/gaming-coprs.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/gaming-coprs.sh"
+
 # ── VRAM foreground prioritization + Vulkan low-latency layer ────────────────
 # dmemcg-booster (Valve, gitlab.steamos.cloud/holo/dmemcg-booster) enables the
 # kernel dmem cgroup controller across the systemd hierarchy and sets dmem.low
@@ -24,22 +27,25 @@ set -euo pipefail
 # as an active package source in the final image.
 # shellcheck disable=SC2016 # $releasever is a dnf repo variable, not a shell expansion
 if dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release; then
-	dnf5 install -y \
+	# --skip-unavailable and the enable guards below match every other
+	# optional-feature fragment in this directory: a transient Terra mirror
+	# desync on one of these three packages must not hard-fail the whole
+	# image build the way an unguarded `dnf5 install` under `set -e` would.
+	if dnf5 install -y --skip-unavailable \
 		dmemcg-booster \
 		plasma-foreground-booster-dmemcg \
-		vulkan-low-latency-layer
-	systemctl enable dmemcg-booster-system.service
-	systemctl --global enable dmemcg-booster-user.service
+		vulkan-low-latency-layer; then
+		systemctl enable dmemcg-booster-system.service 2>/dev/null || true
+		systemctl --global enable dmemcg-booster-user.service 2>/dev/null || true
+	else
+		echo "WARNING: dmemcg-booster/vulkan-low-latency-layer install failed; skipping." >&2
+	fi
 	dnf5 config-manager setopt terra.enabled=0
 else
 	echo "WARNING: Terra repo bootstrap failed; skipping VRAM booster + low-latency layer." >&2
 fi
 
 # Disable COPRs so they don't persist in the final image
-dnf5 copr disable -y ublue-os/bazzite
-dnf5 copr disable -y ublue-os/bazzite-multilib
-dnf5 copr disable -y ublue-os/staging
-dnf5 copr disable -y ublue-os/packages
-dnf5 copr disable -y ublue-os/obs-vkcapture
-dnf5 copr disable -y lukenukem/asus-linux
-dnf5 copr disable -y ycollet/audinux
+for copr in "${KYTH_GAMING_COPRS[@]}"; do
+	dnf5 copr disable -y "${copr}"
+done

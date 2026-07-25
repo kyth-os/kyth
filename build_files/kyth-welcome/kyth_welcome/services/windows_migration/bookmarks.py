@@ -4,10 +4,13 @@ from __future__ import annotations
 import glob
 import html
 import json
+import logging
 import os
 import shutil
 import sqlite3
 import tempfile
+
+_logger = logging.getLogger(__name__)
 
 _CHROMIUM_BOOKMARK_STORES = (
     ("Chrome", "AppData/Local/Google/Chrome/User Data"),
@@ -89,6 +92,7 @@ def scan_windows_bookmarks(profiles: list[dict]) -> list[dict]:
             try:
                 entries = read_chromium_bookmarks(path)
             except Exception:
+                _logger.debug("scan_windows_bookmarks: reading %s failed", path, exc_info=True)
                 continue
             if not entries:
                 continue
@@ -99,6 +103,7 @@ def scan_windows_bookmarks(profiles: list[dict]) -> list[dict]:
             try:
                 entries = read_firefox_bookmarks(places)
             except Exception:
+                _logger.debug("scan_windows_bookmarks: reading %s failed", places, exc_info=True)
                 continue
             if entries:
                 sources.append({"browser": "Firefox", "user": user, "entries": entries})

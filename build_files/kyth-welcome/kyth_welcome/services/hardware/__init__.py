@@ -1,6 +1,7 @@
 """Hardware probes package (GPU, display, controllers, platform, …)."""
 from .types import HardwareProbe, _status_palette
 from .nvidia import (
+    NvidiaStatusView,
     _akmod_nvidia_built,
     _akmod_nvidia_installed,
     _detect_nvidia,
@@ -8,6 +9,7 @@ from .nvidia import (
     _hw_setup_done,
     _hw_setup_service_state,
     _nvidia_module_loaded,
+    nvidia_status_view,
 )
 from .io import (
     _audio_probe,
@@ -22,6 +24,7 @@ from .display import (
     _format_display_mode,
     _parse_kscreen_output,
     _strip_ansi,
+    hdr_vrr_status_text,
 )
 from .system import (
     _cpu_probe,
@@ -43,7 +46,8 @@ from .bluetooth_audio import (
     force_ldac_reconnect,
     switch_to_bt_audio_output,
 )
-from .collect import _collect_hardware_probes
+from .collect import HardwareSummaryView, _collect_hardware_probes, hardware_summary_view
+from .controllers import ControllerStatusView, controller_status_view
 from .drives import _detect_controllers, _find_ntfs_drives
 
 # pylint: disable=undefined-all-variable
@@ -61,8 +65,13 @@ __all__ = [
     "_audio_probe",
     "_codec_probe",
     "_collect_hardware_probes",
+    "HardwareSummaryView",
+    "hardware_summary_view",
+    "_compact_vaapi_failure_details",
     "_connectivity_probe",
     "_controller_probe",
+    "ControllerStatusView",
+    "controller_status_view",
     "_cpu_probe",
     "_detect_controllers",
     "_detect_nvidia",
@@ -70,6 +79,7 @@ __all__ = [
     "force_ldac_reconnect",
     "switch_to_bt_audio_output",
     "_display_probe",
+    "hdr_vrr_status_text",
     "_displaylink_probe",
     "_find_ntfs_drives",
     "_firmware_probe",
@@ -78,6 +88,7 @@ __all__ = [
     "_hw_setup_done",
     "_hw_setup_service_state",
     "_memory_probe",
+    "_mesa_vaapi_failure_context",
     "_nvidia_module_loaded",
     "_parse_kscreen_output",
     "_peripheral_probe",
@@ -85,7 +96,10 @@ __all__ = [
     "_status_palette",
     "_storage_probe",
     "_strip_ansi",
+    "_successful_vaapi_probe",
     "_thermal_probe",
+    "_vaapi_failure_summary",
+    "_vaapi_profiles",
 ]
 # pylint: enable=undefined-all-variable
 

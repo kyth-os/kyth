@@ -1,0 +1,35 @@
+name: Resolve image tag
+description: >
+  Map a branch name and kernel flavor to this repo's image tag scheme:
+  main -> latest, everything else -> the branch name, with -cachy appended
+  for the CachyOS kernel flavor.
+inputs:
+  branch:
+    description: Git branch name (matrix.branch).
+    required: true
+  kernel-flavor:
+    description: Kernel flavor (matrix.kernel_flavor) — fedora or cachy.
+    required: true
+outputs:
+  tag:
+    description: Resolved image tag, e.g. "latest", "testing-cachy".
+    value: ${{ steps.resolve.outputs.tag }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve tag from branch and kernel flavor
+      id: resolve
+      shell: bash
+      env:
+        BRANCH: ${{ inputs.branch }}
+        KERNEL_FLAVOR: ${{ inputs.kernel-flavor }}
+      run: |
+        TAG="${BRANCH}"
+        if [[ "${TAG}" == main ]]; then
+          TAG=latest
+        fi
+        case "${KERNEL_FLAVOR}" in
+          fedora) SUFFIX="" ;;
+          cachy)  SUFFIX="-cachy" ;;
+        esac
+        echo "tag=${TAG}${SUFFIX}" >> "$GITHUB_OUTPUT"

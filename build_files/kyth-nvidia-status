@@ -3,17 +3,10 @@
 
 set -uo pipefail
 
-have() { command -v "$1" >/dev/null 2>&1; }
-pass() { printf 'PASS  %-28s %s\n' "$1" "$2"; }
-warn() { printf 'WARN  %-28s %s\n' "$1" "$2"; WARNINGS=$((WARNINGS + 1)); }
-fail() { printf 'FAIL  %-28s %s\n' "$1" "$2"; FAILURES=$((FAILURES + 1)); }
+# shellcheck source=kyth-diagnostics-common.sh disable=SC1091
+source /usr/libexec/kyth-diagnostics-common.sh
 
-WARNINGS=0
-FAILURES=0
-
-echo "KythOS NVIDIA Status"
-echo "Generated: $(date -Is)"
-echo
+print_header "NVIDIA Status"
 
 if ! have lspci || ! lspci 2>/dev/null | grep -qi nvidia; then
     pass "NVIDIA hardware" "no NVIDIA GPU detected"
@@ -66,13 +59,4 @@ else
     warn "nvidia-smi" "not available until proprietary driver is active"
 fi
 
-echo
-if [[ "$FAILURES" -gt 0 ]]; then
-    echo "Result: NVIDIA setup has failures."
-    exit 2
-fi
-if [[ "$WARNINGS" -gt 0 ]]; then
-    echo "Result: NVIDIA setup needs attention or a reboot."
-    exit 1
-fi
-echo "Result: NVIDIA setup looks good."
+print_result "NVIDIA setup" "NVIDIA setup needs attention or a reboot."

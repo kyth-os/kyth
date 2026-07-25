@@ -296,17 +296,21 @@ read_deployment_status() {
     local dest="$1"
     DEPLOYMENT_STATUS_SOURCE=""
 
-    if have bootc && bootc status >"$dest" 2>/dev/null; then
+    capture_status() {
+        "$@" >"$dest"
+    }
+
+    if have bootc && capture_status bootc status 2>/dev/null; then
         DEPLOYMENT_STATUS_SOURCE="bootc"
         return 0
     fi
 
-    if have sudo && sudo -n bootc status >"$dest" 2>/dev/null; then
+    if have sudo && capture_status sudo -n bootc status 2>/dev/null; then
         DEPLOYMENT_STATUS_SOURCE="bootc-sudo"
         return 0
     fi
 
-    if have ostree && ostree admin status >"$dest" 2>/dev/null; then
+    if have ostree && capture_status ostree admin status 2>/dev/null; then
         DEPLOYMENT_STATUS_SOURCE="ostree"
         return 0
     fi
@@ -437,6 +441,13 @@ check_file_contains /etc/skel/.config/kwalletrc "Enabled=true" "KWallet enabled 
 check_file_contains /etc/skel/.config/kwalletrc "Default Wallet=kdewallet" "KWallet default wallet" "new users use the PAM-unlocked kdewallet"
 check_file_contains /etc/skel/.config/kwalletrc "Leave Open=true" "KWallet session persistence" "wallet stays open after apps start using it"
 check_file /usr/bin/kyth-user-polish "User comfort polish"
+check_file /usr/share/plasma/look-and-feel/org.kythos.desktop/contents/splash/Splash.qml "KythOS Plasma session splash"
+check_file /usr/share/plasma/look-and-feel/org.kythos.desktop/contents/splash/images/kyth-logo.svg "KythOS session splash logo"
+check_file_contains /etc/xdg/ksplashrc "Theme=org.kythos.desktop" "System session splash" "late Plasma startup uses KythOS branding"
+check_file_contains /etc/skel/.config/ksplashrc "Theme=org.kythos.desktop" "New-user session splash" "new accounts use KythOS branding after login"
+check_file /usr/bin/kyth-session-splash-guard "Existing-user pre-splash branding guard"
+check_file_contains /usr/lib/systemd/user/plasma-ksplash.service.d/20-kyth-branding.conf "ExecStartPre=/usr/bin/kyth-session-splash-guard" "Pre-splash branding migration" "existing accounts are repaired before the first post-update splash"
+check_file_contains /usr/bin/kyth-user-polish "Theme org.kythos.desktop" "Existing-user session splash migration" "upgraded accounts stop using inherited session branding"
 check_file_contains /usr/bin/kyth-user-polish "highlightNewlyInstalledApps" "User launcher badge quieting" "new-app badges disabled after updates"
 check_file /usr/bin/kyth-apply-desktop-layout "KythOS default layout helper"
 check_file_contains /usr/bin/kyth-apply-desktop-layout "qdbus-qt6" "KythOS layout qdbus fallback" "desktop layout restore works on Fedora qdbus-qt6 installs"
@@ -592,8 +603,6 @@ if is_live_session; then
     check_file /usr/share/applications/code.desktop "VS Code launcher"
     check_command antigravity "Google Antigravity IDE command"
     check_file /usr/share/applications/antigravity.desktop "Google Antigravity IDE launcher"
-    check_command headroom "Headroom command"
-    check_file /usr/lib/headroom/bin/headroom "Headroom virtualenv entrypoint"
     check_file_contains "${HOME}/.config/kickoffrc" "/usr/share/applications/kyth-welcome.desktop" "System Hub favorite" "pinned in launcher favorites"
     check_file_contains "${HOME}/.config/kickoffrc" "/usr/share/applications/kyth-install.desktop" "Installer favorite" "pinned in launcher favorites"
     check_file_contains "${HOME}/.config/kickoffrc" "/usr/share/applications/code.desktop" "VS Code favorite" "pinned in launcher favorites"
@@ -712,12 +721,6 @@ check_file_contains /etc/environment.d/proton-radv.conf "PROTON_USE_NTSYNC=1" "N
 check_file_contains /etc/environment.d/proton-radv.conf "VKD3D_CONFIG=dxr11,dxr" "VKD3D ray tracing" "DX12 RT enabled in VKD3D-Proton"
 check_file_contains /etc/environment.d/proton-radv.conf "WINEFSYNC=1" "FSYNC fallback" "fsync fallback when NTSYNC unavailable"
 
-if [[ -f /usr/share/vulkan/implicit_layer.d/latencyflex_layer.json ]]; then
-    pass "LatencyFleX layer" "Vulkan implicit layer installed"
-else
-    warn "LatencyFleX layer" "not installed — anti-stutter latency-flex layer missing"
-fi
-
 if [[ -f /usr/share/vulkan/implicit_layer.d/VkLowLatencyLayer.json ]] \
    || ls /usr/share/vulkan/implicit_layer.d/VkLowLatency* >/dev/null 2>&1; then
     pass "vulkan-low-latency-layer" "AMD Anti-Lag2 / Reflex implicit layer present"
@@ -781,7 +784,7 @@ if systemctl is-enabled cups-browsed.service &>/dev/null; then
 else
     warn "cups-browsed" "not enabled — printers require manual add"
 fi
-check_optional_command smbclient "SMB client"
+check_command smbclient "SMB client"
 check_file_contains /usr/share/applications/kyth-exe-handler.desktop "application/x-ms-dos-executable" ".exe handler registered" ".exe files open in Bottles/Wine selector"
 if flatpak info io.missioncenter.MissionCenter &>/dev/null 2>&1; then
     pass "Mission Center" "GPU-accelerated Task Manager installed"
@@ -811,8 +814,7 @@ check_system_unit_enabled kyth-flathub-setup.service "Flathub setup"
 check_system_unit_enabled kyth-default-flatpaks.service "Default Flatpaks"
 check_system_unit_enabled kyth-proton-cachyos-update.timer "Proton-CachyOS timer"
 check_system_unit_enabled kyth-duperemove.timer "Game cache dedupe timer"
-check_system_unit_enabled kyth-topgrade-migrate.service "Topgrade migration"
-check_file_contains /etc/skel/.config/topgrade.toml "no_self_update = true" "Topgrade image ownership" "self-update disabled; image updates refresh topgrade"
+check_command kyth-full-update "KythOS full updater"
 check_system_unit_enabled kyth-local-bin-migrate.service "Local bin migration"
 check_file_contains /usr/lib/systemd/system/kyth-update-watcher.service "IOSchedulingClass=idle" "Update watcher priority" "automatic OS staging runs at idle I/O priority"
 check_file_contains /usr/lib/systemd/system/kyth-update-watcher.timer "OnBootSec=20min" "Update watcher boot grace" "automatic OS staging waits after boot"
@@ -822,6 +824,9 @@ check_file_contains /etc/pipewire/pipewire.conf.d/99-kyth.conf "default.clock.qu
 check_file_contains /etc/environment.d/obs-vkcapture.conf "OBS_VKCAPTURE intentionally" "OBS capture config present" "per-user opt-in via ujust install-obs"
 check_file_contains /usr/bin/kyth-sched "Do not include launcher shells" "Scheduler launcher calm" "idle launchers do not pin gaming mode"
 check_file_contains /usr/bin/kyth-performance-mode "save|restore" "Performance mode recovery" "performance mode exposes save and restore"
+check_command scx_rusty "Fedora sched-ext scheduler"
+check_file /usr/bin/scx_loader "KythOS sched-ext launcher"
+check_file /usr/lib/systemd/system/scx_loader.service "KythOS sched-ext service"
 check_file /usr/share/ublue-os/just/75-kyth.just "KythOS ujust recipes"
 check_optional_command kyth-ai-dev "AI developer environment helper"
 check_file_contains /usr/share/ublue-os/just/75-kyth.just "ai-dev-setup" "AI dev setup recipe" "opt-in local AI developer environment recipe is available"
@@ -843,7 +848,6 @@ check_optional_command delta       "git-delta (better diff)"
 check_optional_command hx          "helix editor"
 check_optional_command fish        "fish shell"
 check_optional_command zellij      "zellij (terminal mux)"
-check_optional_command topgrade    "topgrade"
 if command -v fish >/dev/null 2>&1; then
     if [[ -f /etc/skel/.config/fish/config.fish ]]; then
         pass "fish skel config" "/etc/skel/.config/fish/config.fish"

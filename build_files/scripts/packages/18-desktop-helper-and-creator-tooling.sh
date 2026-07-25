@@ -13,8 +13,7 @@ dnf5 install -y --skip-unavailable \
 	python3-pyqt6 \
 	python3-pyqt6-webengine \
 	python3-pip \
-	python3-devel \
-	python3-pytest \
+	python3-setuptools \
 	python3-defusedxml \
 	curl \
 	qt6-qtwayland \
@@ -24,22 +23,54 @@ dnf5 install -y --skip-unavailable \
 	distrobox \
 	unzip \
 	git \
-	ShellCheck \
-	shfmt \
 	spice-vdagent \
 	virt-viewer \
 	kscreen \
 	neovim \
 	zsh \
-	nodejs \
-	npm \
 	openconnect \
 	vpnc \
 	kde-connect \
 	plasma-browser-integration \
 	cups-browsed
 
-# Atomic systems map /usr/local to the root-owned /var/usrlocal.  npm's
+# Generic Distrobox wrapper — delegates to kyth-ai-dev container dynamically
+install -Dm 0755 /dev/stdin /usr/libexec/kyth-distrobox-wrapper <<'WRAPPEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
+tool="$(basename "$0")"
+
+# Mapping human-readable descriptions of tools
+declare -A descriptions=(
+	[shellcheck]="shellcheck"
+	[shfmt]="shfmt"
+	[gh]="GitHub CLI"
+	[hx]="Helix editor"
+	[zellij]="Zellij"
+)
+desc="${descriptions[$tool]:-$tool}"
+
+if [[ -x "${HOME}/.local/bin/${tool}" ]]; then
+	exec "${HOME}/.local/bin/${tool}" "$@"
+fi
+
+box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
+if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
+	exec distrobox enter "${box}" -- "${tool}" "$@"
+fi
+
+echo "${desc} is managed in the KythOS AI Developer container (${box})."
+echo "Initializing ${box} environment..."
+kyth-ai-dev setup
+exec distrobox enter "${box}" -- "${tool}" "$@"
+WRAPPEREOF
+
+# Create host symlinks to the generic distrobox wrapper
+for tool in shellcheck shfmt gh hx zellij; do
+	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
+done
+
+# Atomic systems map /usr/local to the root-owned /var/usrlocal. npm's
 # system default therefore makes `npm install -g` fail for desktop users.
 # npmrc supports environment expansion, and ~/.local/bin is already on the
 # Fedora user PATH, so global CLI tools belong in the user's home directory.
@@ -56,6 +87,7 @@ if ! command -v pip >/dev/null 2>&1; then
 		echo "ERROR: python3-pip installed without pip3 on PATH." >&2
 		exit 1
 	fi
+	mkdir -p "$(realpath -m /usr/local)/bin"
 	ln -s "${pip3_path}" /usr/local/bin/pip
 fi
 pip --version
@@ -83,9 +115,6 @@ optional_desktop_packages=(
 	zoxide
 	git-delta
 	starship
-	helix
-	gh
-	docker-compose
 	direnv
 	jq
 	yq
@@ -95,8 +124,6 @@ optional_desktop_packages=(
 	# fish shell — out-of-box syntax highlighting and autosuggestions with no config.
 	# Good first shell for Windows migrants; veterans can chsh -s /usr/bin/fish.
 	fish
-	# zellij — modern terminal multiplexer; tmux-compatible with a friendlier UI.
-	zellij
 	# btop — interactive resource/process monitor (better htop).
 	btop
 	# fastfetch — system info display (neofetch replacement, actively maintained).

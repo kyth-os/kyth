@@ -7,19 +7,12 @@ source "${HERE}/lib/thirdparty-common.sh"
 
 # Each per-tool fragment defines its own install_<name> function.
 for _fragment in "${HERE}/thirdparty"/*.sh; do
+	# shellcheck source=/dev/null
 	source "${_fragment}"
 done
 unset _fragment
 
 # ── Parallel download + install ───────────────────────────────────────────────
-_launch topgrade install_topgrade
-_launch winetricks install_winetricks
 _launch umu install_umu
-_launch latencyflex install_latencyflex
-_launch opticscaler install_opticscaler
-_launch msfonts install_msfonts
-if is_enabled "${ENABLE_SCX:-1}"; then
-	_launch scx install_scx
-fi
 
 _wait_and_report

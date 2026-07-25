@@ -7,10 +7,10 @@ from .services.sched import (
     set_sched_daemon_enabled,
 )
 from .services.telem import recent_sessions
-from .qt import (  # noqa: E501
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt,
+from .qt import (
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 
@@ -21,7 +21,7 @@ class PerformancePage(Page):
         self._page_header(
             "Gaming",
             "Scheduler & Performance",
-            "kyth-sched auto-switches between scx_lavd (gaming) and scx_bpfland (desktop) "
+            "kyth-sched enables scx_rusty for gaming and restores the kernel scheduler for desktop use "
             "based on active game detection. Session history is captured by kyth-telem "
             "from MangoHud logs.",
         )
@@ -112,7 +112,7 @@ class PerformancePage(Page):
         self._perf_timer.setInterval(5000)
         self._perf_timer.timeout.connect(self._perf_refresh)
         self._perf_timer.start()
-        QTimer.singleShot(150, self._perf_refresh)
+        single_shot(self, 150, self._perf_refresh)
 
     def _populate_sched_combo(self) -> None:
         self._perf_sched_combo.clear()

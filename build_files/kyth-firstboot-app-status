@@ -8,20 +8,15 @@ STAMP="${STAMP_DIR}/firstboot-app-status-v1"
 STATUS="${STAMP_DIR}/first-run-apps.status"
 DEFAULT_DONE="/var/lib/kyth/default-flatpaks-v10-done"
 
-have() { command -v "$1" >/dev/null 2>&1; }
+# shellcheck source=kyth-diagnostics-common.sh disable=SC1091
+source /usr/libexec/kyth-diagnostics-common.sh
 
 if grep -qw 'kyth.live' /proc/cmdline 2>/dev/null; then
     exit 0
 fi
 
 notify() {
-    local title="$1"
-    local body="$2"
-    if have notify-send; then
-        notify-send --app-name="KythOS" "$title" "$body" >/dev/null 2>&1 || true
-    elif have kdialog; then
-        kdialog --title "$title" --passivepopup "$body" 12 >/dev/null 2>&1 || true
-    fi
+    _kyth_notify_send "$1" "$2"
 }
 
 write_status() {

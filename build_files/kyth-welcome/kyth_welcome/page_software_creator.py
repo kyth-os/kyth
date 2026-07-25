@@ -2,11 +2,12 @@ import os
 import shutil
 from .services.launch import flatpak_run, popen
 from .core_base import _apply_install_badge, _restyle
-from .services.software import (
-    Worker, _davinci_download_dir, _davinci_flatpak_app_id, _davinci_zip_candidates, _finish_worker,
-    _is_flatpak_installed,
+from .services.flatpak import _is_flatpak_installed
+from .services.runtime import Worker, _finish_worker
+from .services.creator import (
+    davinci_download_dir, davinci_flatpak_app_id, davinci_zip_candidates,
 )
-from .qt import (  # noqa: E501
+from .qt import (
     QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
     QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
 )
@@ -195,7 +196,7 @@ class _CreatorTabMixin:
             refs["uninstall"].setVisible(installed)
 
         if hasattr(self, "_dv_badge"):
-            dv_installed = _davinci_flatpak_app_id() is not None
+            dv_installed = davinci_flatpak_app_id() is not None
             _apply_install_badge(self._dv_badge, dv_installed)
             self._dv_install_btn.setVisible(not dv_installed)
             self._dv_launch_btn.setVisible(dv_installed)
@@ -315,7 +316,7 @@ class _CreatorTabMixin:
         self._refresh_cr_status()
 
     def _pick_davinci_zip(self):
-        start_dir = self._dv_selected_zip or _davinci_download_dir()
+        start_dir = self._dv_selected_zip or davinci_download_dir()
         if os.path.isfile(start_dir):
             start_dir = os.path.dirname(start_dir)
         path, _ = QFileDialog.getOpenFileName(
@@ -338,19 +339,19 @@ class _CreatorTabMixin:
             return
 
         self._dv_selected_zip = None
-        candidates = _davinci_zip_candidates()
+        candidates = davinci_zip_candidates()
         if candidates:
             self._dv_zip_hint.setText(f"Auto-detected ZIP: {candidates[0]}")
             self._dv_zip_hint.setObjectName("status-dim")
         else:
             self._dv_zip_hint.setText(
-                f"No DaVinci ZIP found yet. Download it to {_davinci_download_dir()} or click Choose ZIP…"
+                f"No DaVinci ZIP found yet. Download it to {davinci_download_dir()} or click Choose ZIP…"
             )
             self._dv_zip_hint.setObjectName("status-warn")
         _restyle(self._dv_zip_hint)
 
     def _launch_davinci(self):
-        app_id = _davinci_flatpak_app_id()
+        app_id = davinci_flatpak_app_id()
         if not app_id:
             QMessageBox.warning(self, "DaVinci Resolve", "DaVinci Resolve is not installed yet.")
             return
@@ -376,13 +377,13 @@ class _CreatorTabMixin:
 
         zip_path = self._dv_selected_zip if self._dv_selected_zip and os.path.isfile(self._dv_selected_zip) else ""
         if not zip_path:
-            candidates = _davinci_zip_candidates()
+            candidates = davinci_zip_candidates()
             zip_path = candidates[0] if candidates else ""
         if not zip_path:
             self._dv_log.clear()
             self._dv_log.append("No DaVinci Resolve Linux ZIP was found.\n")
             self._dv_log.append(
-                f"Download the ZIP from Blackmagic to {_davinci_download_dir()} or click Choose ZIP… and retry.\n"
+                f"Download the ZIP from Blackmagic to {davinci_download_dir()} or click Choose ZIP… and retry.\n"
             )
             self._dv_log_toggle.show()
             _set_log_panel(self._dv_log_toggle, self._dv_log, False)
@@ -431,7 +432,7 @@ class _CreatorTabMixin:
             refs["install"].setEnabled(True)
         self._dv_install_btn.setEnabled(True)
         self._dv_choose_btn.setEnabled(True)
-        installed = _davinci_flatpak_app_id() is not None
+        installed = davinci_flatpak_app_id() is not None
         if code == 0 and installed:
             self._dv_op_status.setText("DaVinci Resolve installed. Launch it from here or the app menu.")
             self._dv_op_status.setObjectName("status-ok")

@@ -1,5 +1,8 @@
-"""Install-plan/route-spec data types and the target-validation + destructive
+"""Install-plan data types and the target-validation + destructive
 free-space/NTFS-shrink partition preparation orchestration.
+
+The HTTP route table lives in server.py, the module that actually uses it —
+not here.
 
 install_mode invariants:
   "wipe"        — bootc install to-disk. Requires disk in list_disks() (safe-scan
@@ -33,6 +36,7 @@ Both resize_ntfs and free_space are thin front-ends onto the alongside path:
 whatever protections/flags apply to "alongside" (see above) apply to them too.
 """
 
+import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -58,45 +62,14 @@ from .partition_ops import get_journal
 from .system import _as_root, _settle, unmount_target_disk
 from .runner import run_command
 
+_logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class InstallPlan:
     mode: str
     disk: Optional[str] = None
     target_partition: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class RouteSpec:
-    method: str
-    path: str
-    requires_auth: bool = True
-    requires_same_origin: bool = False
-
-
-ROUTES = {
-    "index": RouteSpec("GET", "/", requires_auth=False),
-    "config": RouteSpec("GET", "/api/config"),
-    "disks": RouteSpec("GET", "/api/disks"),
-    "partitions": RouteSpec("GET", "/api/partitions"),
-    "free_space": RouteSpec("GET", "/api/free-space"),
-    "stream": RouteSpec("GET", "/api/stream"),
-    "log": RouteSpec("GET", "/api/log"),
-    "timezones": RouteSpec("GET", "/api/timezones"),
-    "start": RouteSpec("POST", "/api/start", requires_same_origin=True),
-    "reboot": RouteSpec("POST", "/api/reboot", requires_same_origin=True),
-    # Manual partition management
-    "partition_pending": RouteSpec("GET", "/api/disk/pending"),
-    "filesystems": RouteSpec("GET", "/api/disk/filesystems"),
-    "new_table": RouteSpec("POST", "/api/disk/new-table", requires_same_origin=True),
-    "create_partition": RouteSpec("POST", "/api/disk/create", requires_same_origin=True),
-    "delete_partition": RouteSpec("POST", "/api/disk/delete", requires_same_origin=True),
-    "resize_partition": RouteSpec("POST", "/api/disk/resize", requires_same_origin=True),
-    "format_partition": RouteSpec("POST", "/api/disk/format", requires_same_origin=True),
-    "set_mountpoint": RouteSpec("POST", "/api/disk/set-mountpoint", requires_same_origin=True),
-    "commit_partitions": RouteSpec("POST", "/api/disk/commit", requires_same_origin=True),
-    "rollback_partitions": RouteSpec("POST", "/api/disk/rollback", requires_same_origin=True),
-}
 
 
 def _normalized_install_mode(state: dict) -> str:
@@ -119,7 +92,25 @@ def _apply_install_plan(state: dict, plan: InstallPlan) -> None:
         state["target_partition"] = plan.target_partition
 
 
-def _validate_install_target(config: dict) -> tuple[str, str | None]:
+def _validate_partition_target(disk: str, target: str, label: str) -> dict:
+    """Validate `target` is a real, unmounted, adequately-sized, non-EFI
+    partition on `disk`, using `list_partitions()`'s post-scan state.
+    `label` (e.g. "target partition", "root partition") is substituted into
+    the error messages. Returns the matching partition dict on success."""
+    partitions = {p["name"]: p for p in list_partitions(disk)}
+    part = partitions.get(target)
+    if not part:
+        raise RuntimeError(f"The selected {label} was not found during the final disk scan.")
+    if part.get("efi"):
+        raise RuntimeError(f"The EFI system partition cannot be used as the KythOS {label}.")
+    if part.get("current") or part.get("in_use"):
+        raise RuntimeError(f"The selected {label} is mounted or has active encrypted/LVM mappings.")
+    if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
+        raise RuntimeError(f"The {label} is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
+    return part
+
+
+def _validate_install_target(config: dict, context=None) -> tuple[str, str | None]:
     mode = str(config.get("install_mode") or "wipe").strip().lower()
     disk = _normal_device_path(config.get("disk"))
     if not disk:
@@ -141,16 +132,7 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
             raise RuntimeError("No target partition was selected for alongside installation.")
         if _parent_disk(target) != disk:
             raise RuntimeError("The selected partition does not belong to the selected disk.")
-        partitions = {p["name"]: p for p in list_partitions(disk)}
-        part = partitions.get(target)
-        if not part:
-            raise RuntimeError("The selected partition was not found during the final disk scan.")
-        if part.get("efi"):
-            raise RuntimeError("The EFI system partition cannot be used as the KythOS target partition.")
-        if part.get("current") or part.get("in_use"):
-            raise RuntimeError("The selected partition is mounted or has active encrypted/LVM mappings.")
-        if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
-            raise RuntimeError(f"The target partition is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
+        _validate_partition_target(disk, target, "target partition")
         if _is_gpt_disk(disk) and not _has_bios_boot_partition(disk):
             raise RuntimeError(
                 "This GPT disk has no BIOS boot partition required by the KythOS bootloader. "
@@ -161,7 +143,9 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
         return disk, target
 
     if mode == "manual":
-        journal = get_journal()
+        if context is None:
+            raise RuntimeError("Manual installation requires an installer session context.")
+        journal = get_journal(context)
         if not journal or not journal.committed:
             raise RuntimeError("Partition changes have not been committed. Return to the disk step and apply your partition layout.")
         target = _normal_device_path(journal.root_partition or config.get("target_partition"))
@@ -169,6 +153,13 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
             raise RuntimeError("No root partition (/) found in the committed partition layout.")
         if _parent_disk(target) != disk:
             raise RuntimeError("The root partition does not belong to the selected disk.")
+        # Re-validate the resolved root partition against the post-commit disk
+        # state, same as the "alongside" branch above. journal.root_partition
+        # is derived from a set-mountpoint op and is not necessarily the same
+        # partition a create/format op in the journal actually touched, so it
+        # could point at a pre-existing, still-mounted/in-use partition on the
+        # same disk — never trust it without re-checking here.
+        _validate_partition_target(disk, target, "root partition")
         if not find_efi_partition(disk):
             raise RuntimeError("Manual installation requires an EFI system partition on the system. Create one in the partition editor.")
         return disk, target
@@ -178,19 +169,21 @@ def _validate_install_target(config: dict) -> tuple[str, str | None]:
 
 def _is_gpt_disk(disk: str) -> bool:
     try:
-        out = subprocess.check_output(
+        result = run_command(
             ["blkid", "-o", "value", "-s", "PTTYPE", disk],
-            text=True, stderr=subprocess.DEVNULL, timeout=5
+            capture_output=True, text=True, check=True, timeout=5,
         )
+        out = result.stdout
         if out.strip().lower() == "gpt":
             return True
     except Exception:
-        pass
+        _logger.debug("_is_gpt_disk: blkid probe of %s failed", disk, exc_info=True)
     try:
-        out = subprocess.check_output(
+        result = run_command(
             ["parted", "-s", disk, "print"],
-            text=True, stderr=subprocess.DEVNULL, timeout=5
+            capture_output=True, text=True, check=True, timeout=5,
         )
+        out = result.stdout
         return "Partition Table: gpt" in out
     except Exception:
         return False
@@ -417,7 +410,7 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     return disk, created
 
 
-def _prepare_install_plan(state: dict, log) -> InstallPlan:
+def _prepare_install_plan(state: dict, log, context=None) -> InstallPlan:
     plan = _install_plan_from_state(state)
     if plan.mode == "resize_ntfs":
         _validate_resize_ntfs_target(state)
@@ -428,15 +421,15 @@ def _prepare_install_plan(state: dict, log) -> InstallPlan:
         disk, target_partition = _prepare_free_space_target(state, log)
         plan = InstallPlan("alongside", disk=disk, target_partition=target_partition)
     else:
-        disk, target_partition = _validate_install_target(state)
+        disk, target_partition = _validate_install_target(state, context)
         plan = InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
     _apply_install_plan(state, plan)
     return plan
 
 
-def _get_manual_mounts() -> list[dict]:
+def _get_manual_mounts(context) -> list[dict]:
     """Return non-root partition mount assignments from the committed journal."""
-    journal = get_journal()
+    journal = get_journal(context)
     if not journal or not journal.committed:
         return []
     mounts: list[dict] = []
@@ -465,7 +458,7 @@ def _get_manual_mounts() -> list[dict]:
     return mounts
 
 
-def _validate_storage_intent(state: dict) -> None:
+def _validate_storage_intent(state: dict, context=None) -> None:
     """Validate a review-page storage choice without changing the machine."""
     mode = _normalized_install_mode(state)
     if mode == "resize_ntfs":
@@ -473,6 +466,6 @@ def _validate_storage_intent(state: dict) -> None:
     elif mode == "free_space":
         _validate_free_space_target(state)
     elif mode == "manual":
-        _validate_install_target(state)
+        _validate_install_target(state, context)
     else:
-        _validate_install_target(state)
+        _validate_install_target(state, context)

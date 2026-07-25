@@ -1,0 +1,14 @@
+[Unit]
+Description=KythOS sched-ext scheduler launcher
+Documentation=https://github.com/sched-ext/scx
+ConditionPathExists=/sys/kernel/sched_ext
+After=basic.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/scx_loader
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

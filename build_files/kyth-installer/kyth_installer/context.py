@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import TYPE_CHECKING
 from typing import TypedDict
+
+if TYPE_CHECKING:
+    from .partition_ops import Journal
 
 
 class InstallationState(TypedDict, total=False):
@@ -22,6 +27,15 @@ class InstallationState(TypedDict, total=False):
     password_hash: str
     kernel: str
     mok_password: str
+
+
+class InstallLifecycle(str, Enum):
+    IDLE = "idle"
+    VALIDATED = "validated"
+    PARTITIONING = "partitioning"
+    INSTALLING = "installing"
+    DONE = "done"
+    FAILED = "failed"
 
 
 def default_installation_state() -> InstallationState:
@@ -61,6 +75,14 @@ class InstallerContext:
     state: InstallationState = field(default_factory=default_installation_state)
     events: EventBroker = field(default_factory=EventBroker)
     install_lock: threading.Lock = field(default_factory=threading.Lock)
+    state_lock: threading.RLock = field(default_factory=threading.RLock)
+    journal: "Journal | None" = None
+    lifecycle: InstallLifecycle = InstallLifecycle.IDLE
 
+    def transition(self, lifecycle: InstallLifecycle) -> None:
+        with self.state_lock:
+            self.lifecycle = lifecycle
 
-DEFAULT_CONTEXT = InstallerContext()
+    def replace_state(self, state: InstallationState) -> None:
+        with self.state_lock:
+            self.state = state

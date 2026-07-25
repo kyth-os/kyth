@@ -1,0 +1,57 @@
+name: Pull SBOM referrer
+description: >
+  Discover and pull the Syft SBOM attached as an OCI referrer to an image
+  digest, if one exists. Used for both "current" and "previous" image SBOMs
+  in the live-ISO and supply-chain CVE-diff changelogs. Requires ORAS to
+  already be installed and logged in to the registry. Outputs an empty path
+  when no matching referrer is found — callers decide whether that's fatal
+  and what message to show, since each call site's skip semantics differ.
+inputs:
+  image-ref:
+    description: Fully-qualified `image@digest` reference to discover referrers for.
+    required: true
+  dest-dir:
+    description: Directory to pull the SBOM into.
+    required: true
+  version:
+    description: Optional image version to match via referrer annotations.
+    required: false
+    default: ""
+outputs:
+  path:
+    description: Path to the pulled SBOM JSON file, or empty if none found.
+    value: ${{ steps.pull.outputs.path }}
+runs:
+  using: composite
+  steps:
+    - name: Discover and pull SBOM referrer
+      id: pull
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        DEST_DIR: ${{ inputs.dest-dir }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        if [[ -n "${VERSION}" ]]; then
+          SBOM_DIGEST="$(oras discover --format json "${IMAGE_REF}" \
+            | jq -r --arg version "${VERSION}" '
+                [.referrers[] | select(.artifactType | contains("syft"))] as $all
+                | [$all[] | select(.annotations["org.opencontainers.image.version"] == $version)] as $matching
+                | if ($matching | length) == 1 then $matching[0].digest
+                  elif ($matching | length) == 0 and ($all | length) == 1 then $all[0].digest
+                  else empty
+                  end' 2>/dev/null || true)"
+        else
+          SBOM_DIGEST="$(oras discover --format json "${IMAGE_REF}" \
+            | jq -r '[.referrers[] | select(.artifactType | contains("syft"))] | .[0].digest // empty' \
+            2>/dev/null || true)"
+        fi
+        if [[ -z "${SBOM_DIGEST}" ]]; then
+          exit 0
+        fi
+        IMAGE_NAME="${IMAGE_REF%@*}"
+        mkdir -p "${DEST_DIR}"
+        oras pull "${IMAGE_NAME}@${SBOM_DIGEST}" -o "${DEST_DIR}/"
+        SBOM="$(find "${DEST_DIR}" -name '*.json' -type f | head -1)"
+        [[ -n "${SBOM}" ]] && echo "path=${SBOM}" >> "$GITHUB_OUTPUT"
+

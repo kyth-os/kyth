@@ -27,7 +27,7 @@ class UserFilesCopyWorker(TrackedThread):
     """Copies selected profile folders into the home directory via rsync."""
     BLOCKS_CLOSE = True
     status = Signal(str)
-    overall = Signal(int)          # 0–100 across all folders
+    overall = Signal(int)          # 0–100 across all folders  # noqa: RUF003 — en dash, deliberate typography
     done = Signal(int, int, bool)  # (ok, failed, cancelled)
 
     def __init__(self, jobs: list[tuple[str, str, str]]):

@@ -45,18 +45,22 @@ do
 	fi
 done
 
-if sudo -n env "${ENV_ARGS[@]}" /usr/bin/kyth-installer "$@" >> "${LAUNCH_LOG}" 2>&1; then
+run_logged() {
+	"$@" >> "${LAUNCH_LOG}" 2>&1
+}
+
+if run_logged sudo -n env "${ENV_ARGS[@]}" /usr/bin/kyth-installer "$@"; then
 	exit 0
 fi
 
 if command -v pkexec >/dev/null 2>&1; then
-	if pkexec env "SUDO_USER=$(id -un)" "${ENV_ARGS[@]}" /usr/bin/kyth-installer "$@" >> "${LAUNCH_LOG}" 2>&1; then
+	if run_logged pkexec env "SUDO_USER=$(id -un)" "${ENV_ARGS[@]}" /usr/bin/kyth-installer "$@"; then
 		exit 0
 	fi
 fi
 
 if command -v sudo >/dev/null 2>&1; then
-	if sudo env "${ENV_ARGS[@]}" /usr/bin/kyth-installer "$@" >> "${LAUNCH_LOG}" 2>&1; then
+	if run_logged sudo env "${ENV_ARGS[@]}" /usr/bin/kyth-installer "$@"; then
 		exit 0
 	fi
 fi

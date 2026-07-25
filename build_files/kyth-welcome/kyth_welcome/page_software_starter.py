@@ -1,11 +1,11 @@
 import shlex
-from .services.launch import popen
 from .core_base import _restyle
-from .services.software import (
-    Worker, _chromium_app_window_cmd, _finish_worker, _install_flatpak_inline, _is_flatpak_installed,
-)
-from .qt import (  # noqa: E501
-    QCheckBox, QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar,
+from .actions import _install_flatpak_inline, _open_chromium_webapp
+from .services.flatpak import _is_flatpak_installed
+from .services.software import find_familiar_app_match
+from .services.runtime import Worker, _finish_worker
+from .qt import (
+    QCheckBox, QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QProgressBar,
     QPushButton, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
 )
 from .widgets import _make_card, _set_log_panel
@@ -145,7 +145,9 @@ class _StarterPackTabMixin:
             btn = QPushButton(name)
             btn.setToolTip(f"{tip} — opens in a dedicated Chromium window")
             btn.clicked.connect(
-                lambda _=False, u=url, n=name: self._open_m365_webapp(u, n)
+                lambda _=False, u=url: _open_chromium_webapp(
+                    self, u, extra_hint="Install one from the Flatpak tab and try again.",
+                )
             )
             btns.addWidget(btn)
         btns.addStretch()
@@ -160,21 +162,6 @@ class _StarterPackTabMixin:
         note.setStyleSheet("color: #858585; font-size: 11px;")
         layout.addWidget(note)
         return card
-
-    def _open_m365_webapp(self, url: str, name: str) -> None:
-        launch = _chromium_app_window_cmd(url)
-        if launch is None:
-            QMessageBox.warning(
-                self, "No browser found",
-                "Opening web app shortcuts needs a Chromium-family browser "
-                "(Brave, Chromium, Edge, or Chrome), but none was found.\n\n"
-                "Install one from the Flatpak tab and try again.",
-            )
-            return
-        try:
-            popen(launch[0])
-        except OSError as exc:
-            QMessageBox.warning(self, "Could not open web app", str(exc))
 
     def _make_install_hierarchy_card(self) -> QFrame:
         card, layout = _make_card()
@@ -257,12 +244,7 @@ class _StarterPackTabMixin:
 
     def _find_familiar_app(self):
         query = self._familiar_combo.currentText().strip()
-        lower = query.lower()
-        match = None
-        for name, desc, app_id in self._FAMILIAR_APPS:
-            if lower in name.lower() or name.lower() in lower:
-                match = (name, desc, app_id)
-                break
+        match = find_familiar_app_match(query, self._FAMILIAR_APPS)
         if not match:
             self._familiar_result.setText(
                 f"No curated path for “{query}” yet. Search Flathub first; use Bottles only when a native/web path does not exist."

@@ -5,9 +5,26 @@
 
 set -euo pipefail
 
-# Install the optional AI developer helper when the build context provides it.
+# Install optional helpers when provided by build context.
 if [[ -f /ctx/kyth-ai-dev ]]; then
 	install -Dm0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
+fi
+
+if [[ -f /ctx/kyth-game-boost ]]; then
+	install -Dm0755 /ctx/kyth-game-boost /usr/bin/kyth-game-boost
+	ln -sf /usr/bin/kyth-game-boost /usr/bin/game-performance
+fi
+
+if [[ -f /ctx/kyth-ntfs-repair ]]; then
+	install -Dm0755 /ctx/kyth-ntfs-repair /usr/bin/kyth-ntfs-repair
+fi
+
+if [[ -f /ctx/kyth-shader-preheat ]]; then
+	install -Dm0755 /ctx/kyth-shader-preheat /usr/bin/kyth-shader-preheat
+fi
+
+if [[ -f /ctx/kyth-health-check ]]; then
+	install -Dm0755 /ctx/kyth-health-check /usr/bin/kyth-health-check
 fi
 
 # Repair accounts/groups that may be missing after layering package changes.
@@ -28,8 +45,12 @@ ln -sf /etc/systemd/system/display-manager.service /etc/systemd/system/graphical
 ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
 
 # Service masks/disables that are intentionally runtime-layer policy.
+# NetworkManager-wait-online.service is deliberately NOT disabled here — it is
+# enabled later in branding/31-ujust-recipes.sh (which runs after this script
+# in the Dockerfile) so kyth-flathub-setup/kyth-default-flatpaks don't race DNS
+# at boot. Do not re-add a disable for it here; the two would silently fight
+# over the same unit depending on layer order.
 systemctl mask systemd-remount-fs.service
-systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl disable packagekit.service 2>/dev/null || true
 systemctl disable rpm-ostree-countme.timer 2>/dev/null || true
 systemctl disable fedora-atomic-desktop-appstream-cache-refresh.service 2>/dev/null || true

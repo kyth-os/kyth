@@ -1,19 +1,20 @@
+import json
 import os
-import re
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
-    _apply_install_badge, _restyle,
+    _apply_install_badge, _restyle, _run_worker,
 )
 from .services.network import (
-    _build_add_share_script, _build_remove_share_script, _is_cifs_available, _is_mounted, _load_smb_config,
-    _save_smb_config, _systemd_escape_mount_path,
+    _is_cifs_available, _is_mounted, _load_smb_config,
+    _save_smb_config, _systemd_escape_mount_path, validate_share_form,
 )
-from .services.software import Worker
-from .qt import (  # noqa: E501
+from .services.privileged import helper_action, systemctl_action
+from .services.runtime import Worker
+from .qt import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card,
 )
 
@@ -276,61 +277,22 @@ class NetworkSharesPage(Page):
     # ── Form validation ───────────────────────────────────────────────────────
 
     def _validate_form(self) -> dict | None:
-        name       = self._f_name.text().strip()
-        server     = self._f_server.text().strip()
-        share_path = self._f_share.text().strip()
-        mount_pt   = self._f_mount.text().strip()
-        username   = self._f_user.text().strip()
-        password   = self._f_pass.text()
-        domain     = self._f_domain.text().strip()
-        auto_mount = self._f_auto.isChecked()
-
-        if not name:
-            QMessageBox.warning(self, "Missing Field", "Please enter a Share Name.")
+        result = validate_share_form(
+            name=self._f_name.text().strip(),
+            server=self._f_server.text().strip(),
+            share_path=self._f_share.text().strip(),
+            mount_pt=self._f_mount.text().strip(),
+            username=self._f_user.text().strip(),
+            password=self._f_pass.text(),
+            domain=self._f_domain.text().strip(),
+            auto_mount=self._f_auto.isChecked(),
+            existing_names={s["name"] for s in self._shares},
+            reconnect_name=self._reconnect_name,
+        )
+        if result.share is None:
+            QMessageBox.warning(self, result.error_title, result.error_message)
             return None
-        if not server:
-            QMessageBox.warning(self, "Missing Field", "Please enter a Server address.")
-            return None
-        if not share_path:
-            QMessageBox.warning(self, "Missing Field", "Please enter the Share Path.")
-            return None
-        if not username:
-            QMessageBox.warning(self, "Missing Field", "Please enter a Username.")
-            return None
-
-        safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", name)
-        if not mount_pt:
-            mount_pt = f"/mnt/kyth/{safe_name}"
-        mount_pt = os.path.normpath(os.path.expanduser(mount_pt))
-        # Restrict mount points to safe prefixes — the add-share script runs as
-        # root and creates the directory, so mounting over /etc or /usr would
-        # corrupt the system.
-        _SAFE_MOUNT_PREFIXES = ("/mnt/", "/media/", "/run/media/", "/home/")
-        if not any(mount_pt.startswith(p) for p in _SAFE_MOUNT_PREFIXES):
-            QMessageBox.warning(
-                self, "Invalid Mount Point",
-                "Mount point must be under /mnt/, /media/, /run/media/, or /home/.",
-            )
-            return None
-
-        existing = {s["name"] for s in self._shares}
-        if safe_name in existing and safe_name != self._reconnect_name:
-            QMessageBox.warning(
-                self, "Duplicate Name",
-                f'A share named "{safe_name}" already exists. Remove it first or use a different name.',
-            )
-            return None
-
-        return {
-            "name":       safe_name,
-            "server":     server,
-            "share_path": share_path.lstrip("/"),
-            "mount_point": mount_pt,
-            "username":   username,
-            "password":   password,
-            "domain":     domain,
-            "auto_mount": auto_mount,
-        }
+        return result.share
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
@@ -341,12 +303,20 @@ class NetworkSharesPage(Page):
         if not share:
             return
         mount_now = self._mount_now_chk.isChecked()
-        script = _build_add_share_script(share, mount_now)
+        payload = {
+            **share,
+            "mount_now": mount_now,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+        }
         self._begin_op(f"Adding share {share['name']}…")
-        self._worker = Worker(["sudo", "-A", "bash", "-c", script])
-        self._worker.line.connect(self._op_log.append)
-        self._worker.done.connect(lambda code, s=share: self._on_add_done(code, s))
-        self._worker.start()
+        _run_worker(
+            self,
+            helper_action("network-share", "add").command(),
+            input_text=json.dumps(payload),
+            on_line=self._op_log.append,
+            on_done=lambda code, s=share: self._on_add_done(code, s),
+        )
 
     def _on_add_done(self, code: int, share: dict):
         self._op_progress.hide()
@@ -375,13 +345,13 @@ class NetworkSharesPage(Page):
         if self._worker and self._worker.isRunning():
             return
         unit = _systemd_escape_mount_path(share["mount_point"])
-        self._run_sudo(["systemctl", "start", unit], f"Mounting {share['name']}…")
+        self._run_systemctl("start", unit, f"Mounting {share['name']}…")
 
     def _unmount_share(self, share: dict):
         if self._worker and self._worker.isRunning():
             return
         unit = _systemd_escape_mount_path(share["mount_point"])
-        self._run_sudo(["systemctl", "stop", unit], f"Unmounting {share['name']}…")
+        self._run_systemctl("stop", unit, f"Unmounting {share['name']}…")
 
     def _toggle_auto_mount(self, share: dict, enabled: bool):
         if self._worker and self._worker.isRunning():
@@ -393,7 +363,7 @@ class NetworkSharesPage(Page):
         unit   = _systemd_escape_mount_path(share["mount_point"])
         action = "enable" if enabled else "disable"
         label  = "Enabling" if enabled else "Disabling"
-        self._run_sudo(["systemctl", action, unit], f"{label} auto-mount for {share['name']}…")
+        self._run_systemctl(action, unit, f"{label} auto-mount for {share['name']}…")
 
     def _remove_share(self, share: dict):
         reply = QMessageBox.question(
@@ -405,12 +375,17 @@ class NetworkSharesPage(Page):
             return
         if self._worker and self._worker.isRunning():
             return
-        script = _build_remove_share_script(share)
         self._begin_op(f"Removing {share['name']}…")
-        self._worker = Worker(["sudo", "-A", "bash", "-c", script])
-        self._worker.line.connect(self._op_log.append)
-        self._worker.done.connect(lambda code, s=share: self._on_remove_done(code, s))
-        self._worker.start()
+        _run_worker(
+            self,
+            helper_action("network-share", "remove").command(),
+            input_text=json.dumps({
+                "name": share["name"],
+                "mount_point": share["mount_point"],
+            }),
+            on_line=self._op_log.append,
+            on_done=lambda code, s=share: self._on_remove_done(code, s),
+        )
 
     def _on_remove_done(self, code: int, share: dict):
         self._op_progress.hide()
@@ -425,12 +400,14 @@ class NetworkSharesPage(Page):
         _restyle(self._op_status)
         self._rebuild_shares_list()
 
-    def _run_sudo(self, cmd: list[str], status_msg: str):
+    def _run_systemctl(self, action: str, unit: str, status_msg: str):
         self._begin_op(status_msg)
-        self._worker = Worker(["sudo", "-A"] + cmd)
-        self._worker.line.connect(self._op_log.append)
-        self._worker.done.connect(self._on_generic_done)
-        self._worker.start()
+        _run_worker(
+            self,
+            systemctl_action(action, unit).command(),
+            on_line=self._op_log.append,
+            on_done=self._on_generic_done,
+        )
 
     def _on_generic_done(self, code: int):
         self._op_progress.hide()

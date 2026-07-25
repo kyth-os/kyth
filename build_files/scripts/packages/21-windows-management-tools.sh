@@ -3,39 +3,33 @@
 set -euo pipefail
 
 # ── Windows environment management tools ─────────────────────────────────────
-# Tools for users who manage Windows hosts, Azure, or Active Directory from
-# KythOS. Reuses the already-vendored Microsoft signing key written to
-# /etc/pki/rpm-gpg/RPM-GPG-KEY-microsoft by packages/19-vscode.sh.
+# RDP, Active Directory, Kerberos, and SMB tooling in standard Fedora repos.
+# Azure CLI is provided via the kyth-ai-dev container to keep the core OS slim.
 
-# Azure CLI — same Microsoft key, different repo.
-cat >/etc/yum.repos.d/azure-cli.repo <<'AZUREREPOEOF'
-[azure-cli]
-name=Azure CLI
-baseurl=https://packages.microsoft.com/yumrepos/azure-cli
-enabled=1
-gpgcheck=1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-microsoft
-AZUREREPOEOF
+install -Dm 0755 /dev/stdin /usr/bin/az <<'WRAPPEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
 
-dnf5 install -y azure-cli
-rpm -q azure-cli
+if [[ -x "${HOME}/.local/bin/az" ]]; then
+	exec "${HOME}/.local/bin/az" "$@"
+fi
 
-# Disable update checks — same reason as VS Code: immutable image.
-dnf5 config-manager setopt azure-cli.enabled=0
+box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
+if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
+	exec distrobox enter "${box}" -- az "$@"
+else
+	echo "Azure CLI is managed in the KythOS AI Developer container (${box})."
+	echo "Initializing ${box} environment..."
+	kyth-ai-dev setup
+	exec distrobox enter "${box}" -- az "$@"
+fi
+WRAPPEREOF
 
-# RDP, Active Directory, Kerberos, and SMB tooling — all in standard Fedora repos.
+# RDP and SMB tooling — standard Fedora repos. samba-client is a required base
+# capability alongside cifs-utils: it supplies smbclient/net/wbinfo for share
+# diagnostics and Windows-domain interoperability, while mount.cifs handles
+# persistent mounts and libsmbclient backs desktop browsing.
 # freerdp: best-in-class RDP client; powers Remmina's RDP backend.
-# realmd/sssd/adcli: domain join, AD auth, and LDAP/Kerberos enrollment.
-# krb5-workstation: kinit, klist, kdestroy — Kerberos ticket management.
-# samba-client: smbclient + net ads + wbinfo for SMB share browsing and AD queries.
-#   (cifs-utils for mounting is already installed in the baseline block above.)
-dnf5 install -y --skip-unavailable \
-	freerdp \
-	realmd \
-	sssd \
-	sssd-ad \
-	sssd-tools \
-	adcli \
-	krb5-workstation \
-	samba-client \
-	openldap-clients
+# samba-client: smbclient + net ads + wbinfo for SMB share browsing.
+dnf5 install -y cifs-utils libsmbclient samba-client
+dnf5 install -y --skip-unavailable freerdp

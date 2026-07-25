@@ -1,10 +1,11 @@
 import re
+from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _restyle
 from .services.hardware import HardwareProbe
-from .qt import (  # noqa: E501
-    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QTimer, QVBoxLayout, QWidget, Qt,
+from .qt import (
+    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .ui_tokens import STATUS_ERROR, STATUS_OK, STATUS_WARN
 
@@ -58,7 +59,7 @@ def _copy_text(text: str):
 
 class StatusBadge(QLabel):
     """Compact shared status label for page and task feedback."""
-    _STATE_NAMES = {
+    _STATE_NAMES: ClassVar[dict[str, str]] = {
         "idle": "task-status-idle",
         "running": "task-status-running",
         "ok": "task-status-ok",
@@ -205,7 +206,7 @@ class CommandResultPanel(QFrame):
     def _copy_details(self) -> None:
         QApplication.clipboard().setText(self._details_text)
         self._copy_btn.setText("Copied")
-        QTimer.singleShot(1200, lambda: self._copy_btn.setText("Copy details"))
+        single_shot(self, 1200, lambda: self._copy_btn.setText("Copy details"))
 
 
 def _make_flow_step(number: int, title: str, copy: str) -> QFrame:
@@ -305,13 +306,13 @@ def _set_log_panel(toggle: QPushButton, log: QTextEdit, expanded: bool):
 
 # ── Hardware card widget ───────────────────────────────────────────────────────
 class HardwareCard(QFrame):
-    _CARD_NAME = {
+    _CARD_NAME: ClassVar[dict[str, str]] = {
         "ok":   "hw-card-ok",
         "warn": "hw-card-warn",
         "err":  "hw-card-err",
         "dim":  "hw-card-dim",
     }
-    _BADGE_STYLE = {
+    _BADGE_STYLE: ClassVar[dict[str, tuple[str, str]]] = {
         "ok":   ("background: #0e2218; color: #34d399; border: 1px solid #10b981;",  "OK"),
         "warn": ("background: #241808; color: #fbbf24; border: 1px solid #d97706;",  "Warning"),
         "err":  ("background: #2d1418; color: #f87171; border: 1px solid #ef4444;",  "Issue"),

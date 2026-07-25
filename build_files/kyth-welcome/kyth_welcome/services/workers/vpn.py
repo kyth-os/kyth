@@ -34,7 +34,7 @@ class VpnConnectWorker(TrackedThread):
                 text=True,
                 bufsize=1,
                 env=env,
-                cwd="/tmp",
+                cwd="/tmp",  # noqa: S108 — subprocess cwd only, nothing opened here at a predictable path
             )
             if self._password and self._proc.stdin:
                 self._proc.stdin.write(self._password + "\n")

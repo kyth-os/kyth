@@ -12,8 +12,9 @@ from .services.gaming import (
 from .services.hardware import _detect_nvidia
 from .services.launch import reboot
 from .services.process import _command_stdout, _run_command
-from .services.software import _is_flatpak_installed as _flatpak_installed
+from .services.flatpak import _is_flatpak_installed as _flatpak_installed
 from .core_base import _current_branch
+from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (
     FIRST_WEEK_MAX_DAYS as _FIRST_WEEK_MAX_DAYS,
     FIRST_WEEK_MIN_DAYS as _FIRST_WEEK_MIN_DAYS,
@@ -24,11 +25,12 @@ from .services.welcome import (
     _first_week_days,
     _kdeconnect_configured,
     _printer_configured,
+    home_hero_view,
 )
-from .qt import (  # noqa: E501
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QTimer, QVBoxLayout, QWidget, Qt, Signal,
+from .qt import (
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
-from .widgets import (  # noqa: E501
+from .widgets import (
     Page, _make_card, _theme_icon,
 )
 
@@ -55,6 +57,7 @@ class WelcomePage(Page):
         kernel = uname.release or "unknown"
         hostname = uname.nodename or "This PC"
         windows_found = bool(_find_ntfs_drives())
+        hero_view = home_hero_view(staged, rollback, windows_found)
 
         # ── 1. The Dynamic Gen Z Hero Banner ──────────────────────────────────
         hero_card = QFrame()
@@ -77,14 +80,15 @@ class WelcomePage(Page):
 
         # Status Pill Badge
         status_pill = QLabel()
-        if staged:
-            status_pill.setText("RESTART REQUIRED")
-            status_pill.setObjectName("glowing-pill-warn")
-        else:
-            status_pill.setText("SYSTEM UP-TO-DATE")
-            status_pill.setObjectName("glowing-pill-ok")
+        status_pill.setText(hero_view.pill_text)
+        status_pill.setObjectName(hero_view.pill_object_name)
         hero_layout.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
         self._add(hero_card)
+
+        # ── 1b. Finish setup (resumable first-boot wizard steps) ──────────────
+        incomplete = [] if _IS_LIVE else incomplete_steps(self._profile)
+        if incomplete:
+            self._add(self._make_setup_resume_card(incomplete))
 
         # ── 2. Segmented Focus Vibe Selector ──────────────────────────────────
         vibe_row = QWidget()
@@ -197,35 +201,18 @@ class WelcomePage(Page):
         title4.setObjectName("hud-title")
         layout4.addWidget(title4)
 
-        if staged:
-            rec_text = "Restart to apply staged updates."
-            rec_btn_label = "Restart Now"
-            rec_target = "reboot"
-        elif rollback:
-            rec_text = "Previous build is saved in case of bugs."
-            rec_btn_label = "Manage Rollbacks"
-            rec_target = "Update"
-        elif windows_found:
-            rec_text = "Import games and documents from Windows."
-            rec_btn_label = "Transfer Files"
-            rec_target = "Move Files"
-        else:
-            rec_text = "System is up-to-date. Ready for configuration."
-            rec_btn_label = "Configure Games"
-            rec_target = "Gaming"
-
-        desc4 = QLabel(rec_text)
+        desc4 = QLabel(hero_view.rec_text)
         desc4.setObjectName("hud-desc")
         desc4.setWordWrap(True)
         layout4.addWidget(desc4)
 
-        btn4 = QPushButton(rec_btn_label)
+        btn4 = QPushButton(hero_view.rec_btn_label)
         btn4.setObjectName("primary")
         btn4.setCursor(Qt.CursorShape.PointingHandCursor)
-        if rec_target == "reboot":
+        if hero_view.rec_target == "reboot":
             btn4.clicked.connect(lambda _=False: reboot())
         else:
-            btn4.clicked.connect(lambda _=False: self._navigate(rec_target))
+            btn4.clicked.connect(lambda _=False: self._navigate(hero_view.rec_target))
         layout4.addWidget(btn4)
         hud_grid.addWidget(card4, 1, 1)
 
@@ -235,7 +222,7 @@ class WelcomePage(Page):
         self._ntfs_library_insert_index = self._layout.count()
         self._ntfs_library_worker = None
         if not _IS_LIVE:
-            QTimer.singleShot(0, self._refresh_ntfs_library_warning)
+            single_shot(self, 0, self._refresh_ntfs_library_warning)
 
         # ── First-week tips ───────────────────────────────────────────────────
         days = None if _IS_LIVE else _first_week_days()
@@ -346,6 +333,40 @@ class WelcomePage(Page):
         card = self._make_ntfs_library_card(list(libs))
         self._layout.insertWidget(self._ntfs_library_insert_index, card)
         _restyle(card)
+
+    def _make_setup_resume_card(self, incomplete: list[tuple[str, str]]) -> QFrame:
+        card, layout = _make_card("card-accent-warn")
+        title = QLabel("Finish setup")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+
+        body = QLabel(
+            "A few things from first-boot setup are still open. Pick up where you left off "
+            "whenever you're ready."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+
+        for key, status in incomplete:
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            badge = QLabel("Skipped" if status == "skipped" else "Not started")
+            badge.setObjectName("task-status-warn" if status == "skipped" else "task-status-idle")
+            row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+
+            label = QLabel(STEP_LABELS.get(key, key))
+            label.setObjectName("card-copy")
+            row.addWidget(label, 1)
+
+            page_key = STEP_RESUME_PAGE.get(key)
+            btn = QPushButton("Resume" if page_key else "Not available yet")
+            btn.setEnabled(bool(page_key))
+            if page_key:
+                btn.clicked.connect(lambda _=False, k=page_key: self._navigate(k))
+            row.addWidget(btn, 0, Qt.AlignmentFlag.AlignTop)
+            layout.addLayout(row)
+        return card
 
     def _make_first_week_card(self, days: int) -> QFrame:
         card, layout = _make_card("card-accent-ok")

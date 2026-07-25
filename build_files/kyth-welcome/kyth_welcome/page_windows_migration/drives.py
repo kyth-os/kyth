@@ -9,17 +9,15 @@ from ..core_base import (
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.software import (
-    _finish_worker,
-)
+from ..services.runtime import _finish_worker
 from ..services.windows_migration import (
     WindowsLibraryWorker,
     _unlock_bitlocker_drive,
 )
-from ..qt import (  # noqa: E501
+from ..qt import (
     QDesktopServices, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QProgressBar, QPushButton, QUrl, QVBoxLayout,
 )
-from ..widgets import (  # noqa: E501
+from ..widgets import (
     _make_card,
 )
 
@@ -44,15 +42,20 @@ class _DrivesMixin:
         drives_desc.setObjectName("card-copy")
         drives_desc.setWordWrap(True)
         drives_layout.addWidget(drives_desc)
-        ntfs_warn = QLabel(
-            "⚠  Browse and copy files from PC drives freely — but don't add one as a Steam "
-            "library or launch games from it. Proton needs a Linux-formatted disk; games run "
-            "straight off NTFS break in confusing ways. Use Copy Games to KythOS instead."
+        ntfs_info = QLabel(
+            "⚡ KythOS NTFS Game Playback: To play games directly off your Windows NTFS drive without redownloading or copying files, "
+            "click 'Fix NTFS Games'. This mounts the drive with Linux-safe permissions and symlinks Proton prefixes to native storage."
         )
-        ntfs_warn.setObjectName("card-copy")
-        ntfs_warn.setWordWrap(True)
-        ntfs_warn.setStyleSheet("color: #d4a843;")
-        drives_layout.addWidget(ntfs_warn)
+        ntfs_info.setObjectName("card-copy")
+        ntfs_info.setWordWrap(True)
+        ntfs_info.setStyleSheet("color: #43a047;")
+        drives_layout.addWidget(ntfs_info)
+
+        ntfs_fix_btn = QPushButton("Fix NTFS Games")
+        ntfs_fix_btn.setObjectName("primary")
+        ntfs_fix_btn.setToolTip("Runs /usr/bin/kyth-ntfs-repair to enable direct Steam game playback off NTFS drives")
+        ntfs_fix_btn.clicked.connect(lambda _=False: self._run_ujust("fix-ntfs-drives", ntfs_fix_btn))
+        drives_top.addWidget(ntfs_fix_btn)
         self._drive_status = QLabel("Click Scan Drives to look for system partitions.")
         self._drive_status.setObjectName("card-copy")
         self._drive_status.setWordWrap(True)
@@ -227,7 +230,7 @@ class _DrivesMixin:
             "Microsoft account used on the Windows PC)."
         )
         unlock_btn.clicked.connect(
-            lambda _=False, d=part.get("device", ""), b=unlock_btn: self._unlock_bitlocker(d, b)
+            lambda _=False, p=part, b=unlock_btn: self._unlock_bitlocker(p.get("device", ""), b)
         )
         row.layout().addWidget(unlock_btn)
         return row

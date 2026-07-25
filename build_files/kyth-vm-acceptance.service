@@ -1,0 +1,14 @@
+[Unit]
+Description=KythOS unattended VM acceptance guest
+After=network-online.target display-manager.service
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecCondition=/usr/libexec/kyth-vm-acceptance-guest enabled
+ExecStart=/usr/libexec/kyth-vm-acceptance-guest run
+TimeoutStartSec=infinity
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=graphical.target

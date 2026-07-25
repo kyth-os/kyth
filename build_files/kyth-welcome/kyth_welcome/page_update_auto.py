@@ -1,11 +1,16 @@
-import json
+import logging
 from datetime import datetime
+
+from kyth_shared.update_status import read_update_snapshot
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.dbus_utils import is_systemd_unit_enabled
-from .services.launch import popen
+from .services.launch import popen_privileged
+from .services.privileged import AuthFrontend, systemctl_action
 from .qt import QCheckBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt
 from .widgets import _make_card
+
+_logger = logging.getLogger(__name__)
 
 
 class _AutoUpdateMixin:
@@ -60,12 +65,12 @@ class _AutoUpdateMixin:
         self._add(auto_card)
 
     def _refresh_auto_update_status(self) -> None:
-        status = {}
-        try:
-            with open("/var/lib/kyth/update-watcher-status.json") as f:
-                status = json.load(f)
-        except Exception:
-            pass
+        snapshot = read_update_snapshot()
+        if snapshot is None:
+            _logger.debug("_refresh_auto_update_status: watcher status is unavailable")
+            status = {}
+        else:
+            status = snapshot.to_dict()
 
         ts = status.get("ts", 0)
         if ts:
@@ -100,7 +105,16 @@ class _AutoUpdateMixin:
 
     def _toggle_auto_update(self, state: int) -> None:
         cmd = "enable" if state else "disable"
-        popen(["pkexec", "systemctl", cmd, "--now", "kyth-update-watcher.timer"])
+        popen_privileged(systemctl_action(
+            cmd,
+            "kyth-update-watcher.timer",
+            now=True,
+            frontend=AuthFrontend.PKEXEC,
+        ))
 
     def _run_auto_update_now(self) -> None:
-        popen(["pkexec", "systemctl", "start", "kyth-update-watcher.service"])
+        popen_privileged(systemctl_action(
+            "start",
+            "kyth-update-watcher.service",
+            frontend=AuthFrontend.PKEXEC,
+        ))

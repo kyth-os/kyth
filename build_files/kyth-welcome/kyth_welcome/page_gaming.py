@@ -1,15 +1,17 @@
+from typing import ClassVar
+
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import _apply_install_badge, _restyle
 from .services.diagnostics import _command_stdout
-from .services.gaming import (  # noqa: E501
+from .services.gaming import (
     DataWorker, GameNightManager, _ProtonDbBatchWorker, _collect_gaming_dashboard, _compat_tool_version,
     _gamescope_installed, _gaming_health_items, _gaming_migration_checklist_items,
     _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed
 )
-from .services.software import _is_flatpak_installed
+from .services.flatpak import _is_flatpak_installed
 from .services.workers.windows_migration import WindowsLibraryWorker
-from .qt import (  # noqa: E501
-    QFrame, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt
+from .qt import (
+    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt, single_shot
 )
 from .lazy_page import compose_on_first_init
 from .widgets import Page, StatusBadge
@@ -33,7 +35,7 @@ def _load_gaming_mixins() -> tuple[type, ...]:
 # orchestration and the cross-section data-refresh plumbing.
 @compose_on_first_init(_load_gaming_mixins)
 class GamingPage(Page):
-    _SECTION_LABELS = {
+    _SECTION_LABELS: ClassVar[dict[str, str]] = {
         "all": "All",
         "setup": "Setup",
         "library": "Library",
@@ -156,7 +158,7 @@ class GamingPage(Page):
         self._ensure_gaming_section(seed)
         self._switch_gaming_section(self._current_gaming_section)
         self._kick_section_refresh(seed)
-        QTimer.singleShot(80, self._refresh_status)
+        single_shot(self, 80, self._refresh_status)
 
     def _ensure_gaming_section(self, key: str) -> None:
         """Build widgets for a gaming hub section the first time it is shown."""
@@ -212,7 +214,7 @@ class GamingPage(Page):
                 self._health_rows_layout,
                 "Checking launchers, Vulkan, Proton, controllers, and game drives…",
             )
-            QTimer.singleShot(0, self._refresh_gaming_dashboard)
+            single_shot(self, 0, self._refresh_gaming_dashboard)
         if key == "fixes" and hasattr(self, "_streaming_rows_layout"):
             self._set_rows_loading(
                 self._streaming_rows_layout,

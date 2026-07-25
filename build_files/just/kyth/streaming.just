@@ -7,16 +7,16 @@ setup-sunshine:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if ! command -v sunshine >/dev/null 2>&1; then
-        echo "Sunshine is not installed. Installing via rpm-ostree..."
-        sudo rpm-ostree install --idempotent sunshine
-        echo
-        echo "Reboot required to activate. Then run 'ujust setup-sunshine' again."
-        exit 0
+    if ! flatpak info dev.lizardbyte.app.Sunshine >/dev/null 2>&1; then
+        echo "Installing Sunshine game streaming server via Flatpak..."
+        flatpak install -y flathub dev.lizardbyte.app.Sunshine
     fi
 
-    # Enable and start Sunshine as a user service
-    systemctl --user enable --now sunshine.service
+    # Grant necessary host uinput/display permissions for Flatpak game streaming
+    flatpak override --user --filesystem=host dev.lizardbyte.app.Sunshine 2>/dev/null || true
+
+    echo "Starting Sunshine via Flatpak..."
+    flatpak run dev.lizardbyte.app.Sunshine &
 
     # Open the web UI
     echo
@@ -70,6 +70,16 @@ setup-vr:
 setup-tailscale:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    if ! command -v tailscale >/dev/null 2>&1; then
+        echo "Tailscale is not installed. Installing Tailscale..."
+        sudo dnf5 config-manager setopt tailscale-stable.enabled=1
+        sudo rpm-ostree install --idempotent tailscale
+        sudo dnf5 config-manager setopt tailscale-stable.enabled=0
+        echo "Reboot required to activate tailscaled service."
+        exit 0
+    fi
+
     echo "Enabling tailscaled service..."
     sudo systemctl enable --now tailscaled.service
     echo
@@ -77,3 +87,4 @@ setup-tailscale:
     sudo tailscale up --accept-routes
     echo
     echo "Done. Check your Tailscale network at https://login.tailscale.com/admin/machines"
+

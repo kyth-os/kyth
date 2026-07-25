@@ -111,26 +111,17 @@ jobs:
           echo "artifact_name=${ARTIFACT_NAME}" >&3
 
       - name: Prepare live ISO build space
+        # /, /mnt, Docker, and rootful Podman all share /dev/root on GitHub's
+        # hosted runner. Reclaim both preinstalled tool payloads and Docker data
+        # before allocating the sparse btrfs image used by the ISO build.
+        uses: ./.github/actions/free-disk-space
+        with:
+          report: 'true'
+          extra-docker-cleanup: 'true'
+
+      - name: Verify available space for live ISO build
         run: |
           set -euo pipefail
-
-          show_space() {
-            echo "==> Disk space: $1"
-            df -h / /mnt /var/lib/containers 2>/dev/null || true
-          }
-
-          show_space "before cleanup"
-
-          # /, /mnt, Docker, and rootful Podman all share /dev/root on GitHub's
-          # hosted runner. Reclaim both preinstalled tool payloads and Docker data
-          # before allocating the sparse btrfs image used by the ISO build.
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
-          sudo docker system prune --all --force --volumes || true
-          sudo swapoff -a || true
-          sudo rm -f /mnt/swapfile || true
-
-          show_space "after cleanup"
-
           available_kb="$(df --output=avail /mnt | awk 'NR == 2 {print $1}')"
           # podman-storage.img is intentionally sparse: its 65 GiB logical size
           # does not need 65 GiB of physical backing. Successful builds produce
@@ -144,13 +135,7 @@ jobs:
           fi
 
       - name: Mount compressed Podman storage
-        run: |
-          sudo truncate -s 65G /mnt/podman-storage.img
-          sudo mkfs.btrfs -f /mnt/podman-storage.img
-          sudo podman system reset --force
-          sudo systemctl stop podman.service
-          sudo mount -o compress-force=zstd:2 /mnt/podman-storage.img /var/lib/containers/storage
-          sudo systemctl start podman.service
+        uses: ./.github/actions/setup-compressed-storage
 
       # When called from build.yml, this run already carries the immutable
       # build metadata artifact — use its digest so the ISO is built from the
@@ -175,37 +160,26 @@ jobs:
           METADATA="${RUNNER_TEMP}/build-metadata/image.json"
           jq -e . "${METADATA}" >/dev/null
           DIGEST="$(jq -r .digest "${METADATA}")"
-          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${DIGEST}"
           echo "Pinned source digest from build metadata: ${DIGEST}"
           echo "digest=${DIGEST}" >&3
 
       - name: Resolve source image digest
         id: source_image
+        uses: ./.github/actions/fetch-image-metadata
+        with:
+          image-tag: ${{ inputs.source_tag }}
+          expected-digest: ${{ inputs.source_digest || steps.build_metadata.outputs.digest }}
+
+      - name: Verify source image revision matches checkout
         env:
-          SOURCE_TAG: ${{ inputs.source_tag }}
-          EXPECTED_DIGEST: ${{ inputs.source_digest || steps.build_metadata.outputs.digest }}
+          REVISION: ${{ steps.source_image.outputs.revision }}
         run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
-          TAGGED_IMAGE="${IMAGE}:${SOURCE_TAG}"
-          if [[ -n "${EXPECTED_DIGEST}" ]]; then
-            [[ "${EXPECTED_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
-            DIGEST="${EXPECTED_DIGEST}"
-            # Confirm the immutable manifest exists and belongs to this repository.
-            sudo skopeo inspect "docker://${IMAGE}@${DIGEST}" >/dev/null
-          else
-            echo "::warning::No source_digest supplied; resolving the moving ${SOURCE_TAG} tag for this manual build."
-            DIGEST="$(sudo skopeo inspect --format '{{.Digest}}' "docker://${TAGGED_IMAGE}")"
-          fi
-          REVISION="$(sudo skopeo inspect "docker://${IMAGE}@${DIGEST}" | jq -r '.Labels["org.opencontainers.image.revision"] // empty')"
           EXPECTED_REVISION="$(git rev-parse HEAD)"
           if [[ "${REVISION}" != "${EXPECTED_REVISION}" ]]; then
-            echo "::error::Source image ${IMAGE}@${DIGEST} was built from revision '${REVISION:-<missing>}', but this ISO workflow checked out '${EXPECTED_REVISION}'. Re-run the image build for this commit, then pass its digest as source_digest."
+            echo "::error::Source image built from revision '${REVISION:-<missing>}', but this ISO workflow checked out '${EXPECTED_REVISION}'. Re-run the image build for this commit, then pass its digest as source_digest."
             exit 1
           fi
-          echo "name=${IMAGE}" >&3
-          echo "digest=${DIGEST}" >&3
-          echo "pinned=${IMAGE}@${DIGEST}" >&3
 
       - name: Build live payload container
         env:
@@ -299,56 +273,34 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.build.outputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install ORAS
-        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      - name: Setup ORAS
+        uses: ./.github/actions/setup-oras
         with:
-          version: 1.3.1
-
-      - name: Login to GHCR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "${GH_TOKEN}" | oras login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Grype
         id: setup_grype
-        env:
-          GRYPE_VERSION: 0.88.0
-        run: |
-          ARCHIVE="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
-          BASE="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
-          curl --fail --location --silent --show-error \
-            --output "${RUNNER_TEMP}/${ARCHIVE}" "${BASE}/${ARCHIVE}"
-          curl --fail --location --silent --show-error \
-            --output "${RUNNER_TEMP}/grype_checksums.txt" \
-            "${BASE}/grype_${GRYPE_VERSION}_checksums.txt"
-          (cd "${RUNNER_TEMP}" && grep " ${ARCHIVE}$" grype_checksums.txt | sha256sum --check --strict -)
-          tar --extract --gzip --file "${RUNNER_TEMP}/${ARCHIVE}" --directory "${RUNNER_TEMP}" grype
-          chmod +x "${RUNNER_TEMP}/grype"
-          echo "cmd=${RUNNER_TEMP}/grype" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/setup-anchore-tool
+        with:
+          tool: grype
+          version: 0.88.0
 
       - name: Pull source image SBOM
         id: current_sbom
-        env:
-          SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
-          SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
-        run: |
-          SBOM_DIGEST="$(oras discover --format json "${SOURCE_IMAGE}@${SOURCE_DIGEST}" \
-            | jq -r '[.referrers[] | select(.artifactType | contains("syft"))] | .[0].digest // empty' \
-            2>/dev/null || true)"
-          if [[ -z "${SBOM_DIGEST}" ]]; then
-            echo "::warning::No SBOM attached to source image; CVE section will be skipped"
-            exit 0
-          fi
-          mkdir -p "${RUNNER_TEMP}/current-sbom"
-          oras pull "${SOURCE_IMAGE}@${SBOM_DIGEST}" -o "${RUNNER_TEMP}/current-sbom/"
-          SBOM="$(find "${RUNNER_TEMP}/current-sbom" -name '*.json' -type f | head -1)"
-          [[ -n "${SBOM}" ]] && echo "path=${SBOM}" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/pull-sbom-referrer
+        with:
+          image-ref: ${{ needs.build.outputs.source_image }}@${{ needs.build.outputs.source_digest }}
+          dest-dir: ${{ runner.temp }}/current-sbom
+
+      - name: Warn if source image has no SBOM
+        if: steps.current_sbom.outputs.path == ''
+        run: echo "::warning::No SBOM attached to source image; CVE section will be skipped"
 
       - name: Scan source image with Grype
         id: grype_current
@@ -362,15 +314,15 @@ jobs:
             echo "::warning::Grype scan failed; security section will be limited"
           [[ -f "${OUT}" ]] && echo "path=${OUT}" >> "$GITHUB_OUTPUT"
 
-      - name: Pull previous ISO source image SBOM
-        id: previous_sbom
+      - name: Resolve previous release image digest
+        id: previous_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
           SOURCE_TAG: ${{ inputs.source_tag }}
           IMMUTABLE_TAG: ${{ needs.build.outputs.immutable_tag }}
         run: |
+          exec 3>>"${GITHUB_OUTPUT}"
           PREV_DIGEST=""
           PREV_TAG="$(gh release list --limit 30 --json tagName \
             -q ".[] | .tagName | select(startswith(\"iso-${SOURCE_TAG}-\"))" \
@@ -384,21 +336,23 @@ jobs:
           print(m.group(1) if m else '', end='')
           " <<< "${RELEASE_BODY}" || true)"
           fi
-          if [[ -z "${PREV_DIGEST}" || ! "${PREV_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          if [[ -n "${PREV_DIGEST}" ]] && build_files/scripts/validate-digest.sh "${PREV_DIGEST}" 2>/dev/null; then
+            echo "digest=${PREV_DIGEST}" >&3
+          else
             echo "No previous source digest found; CVE diff will be skipped"
-            exit 0
           fi
-          PREV_SBOM_DIGEST="$(oras discover --format json "${SOURCE_IMAGE}@${PREV_DIGEST}" \
-            | jq -r '[.referrers[] | select(.artifactType | contains("syft"))] | .[0].digest // empty' \
-            2>/dev/null || true)"
-          if [[ -z "${PREV_SBOM_DIGEST}" ]]; then
-            echo "No previous SBOM found; CVE diff will be skipped"
-            exit 0
-          fi
-          mkdir -p "${RUNNER_TEMP}/prev-sbom"
-          oras pull "${SOURCE_IMAGE}@${PREV_SBOM_DIGEST}" -o "${RUNNER_TEMP}/prev-sbom/"
-          PREV_SBOM="$(find "${RUNNER_TEMP}/prev-sbom" -name '*.json' -type f | head -1)"
-          [[ -n "${PREV_SBOM}" ]] && echo "path=${PREV_SBOM}" >> "$GITHUB_OUTPUT"
+
+      - name: Pull previous ISO source image SBOM
+        id: previous_sbom
+        if: steps.previous_release.outputs.digest != ''
+        uses: ./.github/actions/pull-sbom-referrer
+        with:
+          image-ref: ${{ needs.build.outputs.source_image }}@${{ steps.previous_release.outputs.digest }}
+          dest-dir: ${{ runner.temp }}/prev-sbom
+
+      - name: Warn if previous release has no SBOM
+        if: steps.previous_release.outputs.digest != '' && steps.previous_sbom.outputs.path == ''
+        run: echo "No previous SBOM found; CVE diff will be skipped"
 
       - name: Scan previous source image with Grype
         id: grype_previous
@@ -427,69 +381,29 @@ jobs:
           IMAGE_VERSION="$(skopeo inspect --no-creds \
             "docker://${SOURCE_IMAGE}@${SOURCE_DIGEST}" 2>/dev/null \
             | jq -r '.Labels["org.opencontainers.image.version"] // empty' || true)"
-          export IMAGE_VERSION NOTES
-          python3 - <<'PY'
-          import json, os, sys
-          from pathlib import Path
-          sys.path.insert(0, '.github/scripts')
-          from kyth_changelog import security_section
-
-          repo = os.environ.get("GH_REPO", "")
-          tag = os.environ.get("SOURCE_TAG", "")
-          source_sha = os.environ.get("SOURCE_SHA", "")
-          source_image = os.environ.get("SOURCE_IMAGE", "")
-          source_digest = os.environ.get("SOURCE_DIGEST", "")
-          image_version = os.environ.get("IMAGE_VERSION", "")
-          grype_current = os.environ.get("GRYPE_CURRENT") or None
-          grype_previous = os.environ.get("GRYPE_PREVIOUS") or None
-          notes_path = os.environ["NOTES"]
-
-          lines = [
-              "### What this ISO installs",
-              "",
-              f"Bootable installer for KythOS from the **{tag}** channel. "
-              "Boot from USB and click **Install KythOS** to set up your system.",
-              "",
-              f"- Source image: `{source_image}@{source_digest}`",
-              f"- Source commit: `{source_sha}`",
-              "",
-          ]
-
-          sec = security_section(grype_current, grype_previous)
-          if sec:
-              lines.append(sec.rstrip())
-              lines.append("")
-
-          if image_version:
-              release_tag = "image-" + image_version.replace(".", "-")
-              image_url = f"https://github.com/{repo}/releases/tag/{release_tag}"
-              lines += [f"Full package changelog: [{release_tag}]({image_url})", ""]
-          else:
-              lines += [
-                  f"Full package changelog: [image releases]"
-                  f"(https://github.com/{repo}/releases?q=image-{tag})",
-                  "",
-              ]
-
-          Path(notes_path).write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-          PY
+          python3 .github/scripts/kyth_changelog.py \
+            --mode iso \
+            --repo "${GH_REPO}" \
+            --branch "${SOURCE_TAG}" \
+            --current-sha "${SOURCE_SHA}" \
+            --image "${SOURCE_IMAGE}" \
+            --current-digest "${SOURCE_DIGEST}" \
+            --image-version "${IMAGE_VERSION}" \
+            --grype-current "${GRYPE_CURRENT:-}" \
+            --grype-previous "${GRYPE_PREVIOUS:-}" \
+            --output "${NOTES}"
           echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
 
       - name: Free disk space
-        run: |
-          df -h
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
-          df -h
+        uses: ./.github/actions/free-disk-space
+        with:
+          report: 'true'
 
       - name: Download built ISO
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh run download "${{ github.run_id }}" -n "${{ needs.build.outputs.artifact_name }}" -D output/live-iso
-          if [ -d "output/live-iso/${{ needs.build.outputs.artifact_name }}" ]; then
-            mv "output/live-iso/${{ needs.build.outputs.artifact_name }}"/* output/live-iso/
-            rmdir "output/live-iso/${{ needs.build.outputs.artifact_name }}"
-          fi
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: output/live-iso
 
       - name: Verify transferred artifact
         run: |
@@ -499,25 +413,15 @@ jobs:
         env:
           NEEDS_BUILD_OUTPUTS_ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: v2.6.1
+      - name: Setup Cosign
+        uses: ./.github/actions/setup-cosign
 
-      - name: Sign ISO
-        run: |
-          ISO="output/live-iso/${NEEDS_BUILD_OUTPUTS_ISO_BASENAME}"
-          cosign sign-blob -y "${ISO}" \
-            --output-signature "${ISO}.sig" \
-            --bundle "${ISO}.bundle"
-        env:
-          NEEDS_BUILD_OUTPUTS_ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
-
-      - name: Attest ISO build provenance
+      - name: Sign and Attest ISO
         id: attest_iso
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        uses: ./.github/actions/attest-artifact
         with:
           subject-path: output/live-iso/${{ needs.build.outputs.iso_basename }}
+          cosign-sign: "true"
 
       - name: Generate signed release metadata
         env:
@@ -530,54 +434,27 @@ jobs:
           SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
           SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
           SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           ISO="output/live-iso/${ISO_BASENAME}"
           SHA256="$(sha256sum "${ISO}" | awk '{print $1}')"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          export SHA256 BUILD_DATE
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
 
-          tag = os.environ["SOURCE_TAG"]
-          iso = Path("output/live-iso") / os.environ["ISO_BASENAME"]
-          channel = os.environ["CHANNEL_BASENAME"]
-          base_url = "https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev"
-          metadata = {
-              "iso": iso.name,
-              "sha256": os.environ["SHA256"],
-              "signature": iso.name + ".sig",
-              "bundle": iso.name + ".bundle",
-              "provenance": iso.name + ".intoto.jsonl",
-              "checksum": iso.name + "-CHECKSUM",
-              "attestation_url": os.environ["ATTESTATION_URL"],
-              "source_image": os.environ["SOURCE_IMAGE"],
-              "source_image_digest": os.environ["SOURCE_DIGEST"],
-              "pinned_source_image": os.environ["SOURCE_IMAGE"] + "@" + os.environ["SOURCE_DIGEST"],
-              "source_commit": os.environ["SOURCE_SHA"],
-              "source_tag": tag,
-              "build_date": os.environ["BUILD_DATE"],
-              "release_tag": os.environ["IMMUTABLE_TAG"],
-              "download_url": f"{base_url}/{iso.name}",
-              "workflow_run": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
-          }
-          Path(str(iso) + ".json").write_text(json.dumps(metadata, indent=2) + "\n")
-
-          channel_metadata = dict(metadata)
-          channel_metadata.update({
-              "iso": channel,
-              "signature": channel + ".sig",
-              "bundle": channel + ".bundle",
-              "provenance": channel + ".intoto.jsonl",
-              "checksum": channel + "-CHECKSUM",
-              "download_url": f"{base_url}/{channel}",
-              "immutable_download_url": metadata["download_url"],
-          })
-          Path("output/live-iso", channel + ".json").write_text(
-              json.dumps(channel_metadata, indent=2) + "\n"
-          )
-          PY
+          python3 build_files/scripts/generate-release-metadata.py \
+            --source-tag "${SOURCE_TAG}" \
+            --iso-basename "${ISO_BASENAME}" \
+            --channel-basename "${CHANNEL_BASENAME}" \
+            --sha256 "${SHA256}" \
+            --attestation-url "${ATTESTATION_URL}" \
+            --immutable-tag "${IMMUTABLE_TAG}" \
+            --source-sha "${SOURCE_SHA}" \
+            --source-image "${SOURCE_IMAGE}" \
+            --source-digest "${SOURCE_DIGEST}" \
+            --build-date "${BUILD_DATE}" \
+            --github-repository "${GITHUB_REPOSITORY}" \
+            --github-run-id "${GITHUB_RUN_ID}" \
+            --output-dir "output/live-iso"
 
           cp "${ISO}.sig" "output/live-iso/${CHANNEL_BASENAME}.sig"
           cp "${ISO}.bundle" "output/live-iso/${CHANNEL_BASENAME}.bundle"
@@ -586,51 +463,14 @@ jobs:
           cp "${ATTESTATION_BUNDLE_PATH}" "output/live-iso/${CHANNEL_BASENAME}.intoto.jsonl"
 
       - name: Upload ISO to Cloudflare R2
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          NEEDS_BUILD_OUTPUTS_ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
-          NEEDS_BUILD_OUTPUTS_CHANNEL_BASENAME: ${{ needs.build.outputs.channel_basename }}
-        run: |
-          set -euo pipefail
-
-          if [[ -n "${R2_ENDPOINT_URL:-}" ]]; then
-            R2_ENDPOINT="${R2_ENDPOINT_URL%/}"
-          elif [[ "${R2_ACCOUNT_ID:-}" == https://* ]]; then
-            R2_ENDPOINT="${R2_ACCOUNT_ID%/}"
-          elif [[ -n "${R2_ACCOUNT_ID:-}" ]]; then
-            R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          else
-            echo "::error::Set R2_ENDPOINT_URL to the Cloudflare R2 S3 endpoint URL or set R2_ACCOUNT_ID."
-            exit 1
-          fi
-
-          if [[ ! "${R2_ENDPOINT}" =~ ^https://[A-Za-z0-9.-]+\.r2\.cloudflarestorage\.com$ ]]; then
-            echo "::error::Invalid R2 endpoint URL: ${R2_ENDPOINT}"
-            echo "::error::Expected a value like https://<account-id>.r2.cloudflarestorage.com"
-            exit 1
-          fi
-
-          ISO="output/live-iso/${NEEDS_BUILD_OUTPUTS_ISO_BASENAME}"
-          CHANNEL="output/live-iso/${NEEDS_BUILD_OUTPUTS_CHANNEL_BASENAME}"
-
-          for artifact in "${ISO}" "${ISO}-CHECKSUM" "${ISO}.sig" "${ISO}.bundle" "${ISO}.intoto.jsonl" "${ISO}.json"; do
-            aws s3 cp "${artifact}" \
-              "s3://kyth-releases/$(basename "${artifact}")" \
-              --endpoint-url "${R2_ENDPOINT}" \
-              --no-progress
-          done
-
-          aws s3 cp "${ISO}" "s3://kyth-releases/$(basename "${CHANNEL}")" \
-            --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" --no-progress
-          for suffix in -CHECKSUM .sig .bundle .intoto.jsonl .json; do
-            aws s3 cp "${CHANNEL}${suffix}" \
-              "s3://kyth-releases/$(basename "${CHANNEL}${suffix}")" \
-              --endpoint-url "${R2_ENDPOINT}" \
-              --no-progress
-          done
+        uses: ./.github/actions/upload-r2
+        with:
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-endpoint-url: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          iso-basename: ${{ needs.build.outputs.iso_basename }}
+          channel-basename: ${{ needs.build.outputs.channel_basename }}
 
       - name: Publish GitHub releases
         env:
@@ -646,72 +486,19 @@ jobs:
           ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
           CHANNEL_BASENAME: ${{ needs.build.outputs.channel_basename }}
           ISO_CHANGELOG: ${{ steps.iso_changelog.outputs.path }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          ISO="output/live-iso/${ISO_BASENAME}"
-          CHANNEL="output/live-iso/${CHANNEL_BASENAME}"
-          PUBLIC_BASE="https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev"
-          IMMUTABLE_ISO_URL="${PUBLIC_BASE}/${ISO_BASENAME}"
-          CHANNEL_ISO_URL="${PUBLIC_BASE}/${CHANNEL_BASENAME}"
-          IMMUTABLE_RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${IMMUTABLE_TAG}"
-
-          if [[ "${SOURCE_TAG}" == "testing" ]]; then
-            CHANNEL_TITLE="Kyth Live ISO - Testing"
-            IMMUTABLE_TITLE="Kyth Live ISO - Testing - ${RELEASE_ID}"
-            PRERELEASE="--prerelease"
-            LATEST=""
-          else
-            CHANNEL_TITLE="Kyth Live ISO - Stable"
-            IMMUTABLE_TITLE="Kyth Live ISO - Stable - ${RELEASE_ID}"
-            PRERELEASE=""
-            LATEST="--latest"
-          fi
-
-          IMMUTABLE_NOTES="$(mktemp)"
-          {
-            echo "Permanent KythOS ISO build from **${SOURCE_TAG}**."
-            echo ""
-            cat "${ISO_CHANGELOG:-/dev/null}" 2>/dev/null || true
-            echo "---"
-            echo "**[Download immutable ISO](${IMMUTABLE_ISO_URL})** | [Checksum](${IMMUTABLE_ISO_URL}-CHECKSUM)"
-            echo ""
-            echo "- Source commit: **${SOURCE_SHA}**"
-            echo "- Source image digest: **${SOURCE_DIGEST}**"
-            echo "- Workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo "- Build provenance: ${ATTESTATION_URL}"
-            echo ""
-            echo "The checksum, Cosign signature and bundle, metadata, and GitHub build provenance are attached to this release."
-          } > "${IMMUTABLE_NOTES}"
-
-          gh release create "${IMMUTABLE_TAG}" \
-            --target "${SOURCE_SHA}" \
-            --title "${IMMUTABLE_TITLE}" \
-            --notes-file "${IMMUTABLE_NOTES}" \
-            ${PRERELEASE}
-          gh release upload "${IMMUTABLE_TAG}" \
-            "${ISO}-CHECKSUM" "${ISO}.sig" "${ISO}.bundle" "${ISO}.intoto.jsonl" "${ISO}.json"
-
-          CHANNEL_NOTES="$(mktemp)"
-          {
-            echo "This is the moving **${SOURCE_TAG}** channel pointer."
-            echo ""
-            cat "${ISO_CHANGELOG:-/dev/null}" 2>/dev/null || true
-            echo "---"
-            echo "**[Download current ISO](${CHANNEL_ISO_URL})** | [Checksum](${CHANNEL_ISO_URL}-CHECKSUM)"
-            echo ""
-            echo "Current immutable release: [${IMMUTABLE_TAG}](${IMMUTABLE_RELEASE_URL})"
-            echo ""
-            echo "- Source commit: **${SOURCE_SHA}**"
-            echo "- Source image digest: **${SOURCE_DIGEST}**"
-            echo "- Build provenance: ${ATTESTATION_URL}"
-          } > "${CHANNEL_NOTES}"
-
-          if gh release view "${CHANNEL_TAG}" >/dev/null 2>&1; then
-            gh release delete "${CHANNEL_TAG}" --yes
-          fi
-          gh release create "${CHANNEL_TAG}" \
-            --target "${SOURCE_SHA}" \
-            --title "${CHANNEL_TITLE}" \
-            --notes-file "${CHANNEL_NOTES}" \
-            ${PRERELEASE} ${LATEST}
-          gh release upload "${CHANNEL_TAG}" --clobber \
-            "${CHANNEL}-CHECKSUM" "${CHANNEL}.sig" "${CHANNEL}.bundle" "${CHANNEL}.intoto.jsonl" "${CHANNEL}.json"
+          python3 build_files/scripts/publish-release.py \
+            --repo "${GH_REPO}" \
+            --source-tag "${SOURCE_TAG}" \
+            --channel-tag "${CHANNEL_TAG}" \
+            --immutable-tag "${IMMUTABLE_TAG}" \
+            --release-id "${RELEASE_ID}" \
+            --source-sha "${SOURCE_SHA}" \
+            --source-digest "${SOURCE_DIGEST}" \
+            --attestation-url "${ATTESTATION_URL}" \
+            --iso-basename "${ISO_BASENAME}" \
+            --channel-basename "${CHANNEL_BASENAME}" \
+            --iso-changelog "${ISO_CHANGELOG}" \
+            --source-dir "output/live-iso" \
+            --run-id "${RUN_ID}"

@@ -32,6 +32,7 @@ def default_inspect_runner(ref: str) -> subprocess.CompletedProcess[bytes]:
         ["skopeo", "inspect", "--raw", "--no-creds", f"docker://{ref}"],
         capture_output=True,
         timeout=45,
+        check=False,
     )
 
 

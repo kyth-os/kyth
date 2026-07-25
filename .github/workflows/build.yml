@@ -81,25 +81,12 @@ jobs:
         id: prep
         env:
           MATRIX_BRANCH: ${{ matrix.branch }}
-          MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
           exec 4>>"${GITHUB_ENV}"
           [[ "${MATRIX_BRANCH}" == main || "${MATRIX_BRANCH}" == testing ]]
           echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >&4
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >&4
-          # main → :latest, everything else → :<branch-name>
-          TAG="${MATRIX_BRANCH}"
-          if [[ "${TAG}" == main ]]; then
-            TAG=latest
-          fi
-          case "${MATRIX_KERNEL_FLAVOR}" in
-            fedora) SUFFIX="" ;;
-            cachy)  SUFFIX="-cachy" ;;
-          esac
-          echo "DEFAULT_TAG=${TAG}" >&4
-          echo "KERNEL_TAG_SUFFIX=${SUFFIX}" >&4
-          echo "default_tag=${TAG}${SUFFIX}" >&3
           DATE_SHORT="$(date -u +%Y%m%d)"
           echo "date_short=${DATE_SHORT}" >&3
 
@@ -110,6 +97,16 @@ jobs:
           ref: ${{ matrix.branch }}
           persist-credentials: false
 
+      # Local composite actions resolve from the checked-out working tree, so
+      # this must run after Checkout — unlike the old inline run: step it
+      # replaced, which needed no repo files and could run before it.
+      - name: Resolve default tag
+        id: resolve_tag
+        uses: ./.github/actions/resolve-image-tag
+        with:
+          branch: ${{ matrix.branch }}
+          kernel-flavor: ${{ matrix.kernel_flavor }}
+
       - name: Capture checked-out commit
         id: checkout_sha
         run: |
@@ -119,15 +116,14 @@ jobs:
           echo "short_sha=${SHA:0:8}" >&3
           echo "image_version=${STEPS_PREP_OUTPUTS_DEFAULT_TAG}.${STEPS_PREP_OUTPUTS_DATE_SHORT}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.${SHA:0:8}" >&3
         env:
-          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.prep.outputs.default_tag }}
+          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_PREP_OUTPUTS_DATE_SHORT: ${{ steps.prep.outputs.date_short }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Maximize build space
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+        uses: ./.github/actions/free-disk-space
 
       - name: Prepare Docker auth config
         run: |
@@ -153,7 +149,7 @@ jobs:
           # This generates all the tags for your image, you can add custom tags here too!
           # Default tags are "$DEFAULT_TAG" and "$DEFAULT_TAG.$date".
           tags: |
-            type=raw,value=${{ steps.prep.outputs.default_tag }}
+            type=raw,value=${{ steps.resolve_tag.outputs.tag }}
             type=raw,value=${{ steps.checkout_sha.outputs.image_version }}
             type=raw,value=${{ steps.prep.outputs.date_short }}.${{ github.run_number }}.${{ github.run_attempt }}.${{ steps.checkout_sha.outputs.short_sha }},enable=${{ matrix.branch == 'main' && matrix.kernel_flavor == 'fedora' }}
           labels: |
@@ -178,10 +174,8 @@ jobs:
           sep-annotations: "\n"
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: ./.github/actions/registry-login
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Version resolution lives in build_files/scripts/resolve-versions.sh,
@@ -189,31 +183,21 @@ jobs:
       - name: Resolve latest CachyOS kernel version
         id: cachyos_kernel
         if: matrix.kernel_flavor == 'cachy'
-        run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          KVER=$(./build_files/scripts/resolve-versions.sh cachyos-kernel)
-          echo "version=${KVER}" >&3
-          echo "Resolved CachyOS kernel: ${KVER}"
+        uses: ./.github/actions/resolve-versions
+        with:
+          dependency: cachyos-kernel
 
       - name: Resolve latest Proton-CachyOS version
         id: proton_cachyos
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          PC_VER=$(./build_files/scripts/resolve-versions.sh proton-cachyos)
-          echo "version=${PC_VER}" >&3
-          echo "Resolved Proton-CachyOS: ${PC_VER:-latest}"
+        uses: ./.github/actions/resolve-versions
+        with:
+          dependency: proton-cachyos
 
       - name: Resolve thirdparty tool versions
         id: thirdparty_versions
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          HASH=$(./build_files/scripts/resolve-versions.sh thirdparty-hash)
-          echo "hash=${HASH}" >&3
-          echo "Resolved thirdparty hash: ${HASH}"
+        uses: ./.github/actions/resolve-versions
+        with:
+          dependency: thirdparty-versions
 
       - name: Resolve upstream base image digest
         id: upstream_base
@@ -221,7 +205,7 @@ jobs:
           exec 3>>"${GITHUB_OUTPUT}"
           IMAGE="ghcr.io/ublue-os/kinoite-main:44"
           DIGEST="$(docker buildx imagetools inspect "${IMAGE}" --format '{{ .Manifest.Digest }}')"
-          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${DIGEST}"
           echo "image=${IMAGE}" >&3
           echo "digest=${DIGEST}" >&3
           echo "pinned=${IMAGE}@${DIGEST}" >&3
@@ -246,7 +230,7 @@ jobs:
             build_base/
 
           BASE_DIGEST="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/base-build-metadata.json")"
-          [[ "${BASE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${BASE_DIGEST}"
           echo "image=${BASE_IMAGE_REF}" >&3
           echo "digest=${BASE_DIGEST}" >&3
           echo "pinned=${BASE_IMAGE_REF}@${BASE_DIGEST}" >&3
@@ -254,7 +238,7 @@ jobs:
           MATRIX_BRANCH: ${{ matrix.branch }}
           MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           CACHYOS_KERNEL_VERSION: ${{ steps.cachyos_kernel.outputs.version || 'unused' }}
-          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.prep.outputs.default_tag }}
+          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_UPSTREAM_BASE_OUTPUTS_PINNED: ${{ steps.upstream_base.outputs.pinned }}
 
       - name: Build final image
@@ -275,6 +259,7 @@ jobs:
             --label "org.kyth.build.upstream-base=${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}"
             --label "org.kyth.build.proton-cachyos-version=${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}"
             --label "org.kyth.build.thirdparty-versions-hash=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}"
+            --label "org.kyth.build.umu-version=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU}"
             --label "org.kyth.build.kernel-flavor=${MATRIX_KERNEL_FLAVOR}"
             --label "org.kyth.build.cachyos-kernel-version=${CACHYOS_KERNEL_VERSION}"
           )
@@ -297,7 +282,11 @@ jobs:
             "${MOK_SECRET_ARG[@]}" \
             --build-arg BASE_IMAGE="${STEPS_BUILD_BASE_OUTPUTS_PINNED}" \
             --build-arg PROTON_CACHYOS_VER="${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}" \
+            --build-arg UMU_VERSION="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU}" \
             --build-arg THIRDPARTY_VERSIONS_HASH="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}" \
+            --build-arg ENABLE_GAMING_PERIPHERALS=0 \
+            --build-arg ENABLE_VIRTUALIZATION_HOST=0 \
+            --build-arg ENABLE_KSM=0 \
             --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
             --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
             --cache-from "type=registry,ref=${FINAL_CACHE_REF}" \
@@ -309,7 +298,7 @@ jobs:
             .
 
           DIGEST="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/final-build-metadata.json")"
-          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${DIGEST}"
           REVISION="$(docker buildx imagetools inspect "${RAW_IMAGE_REF}@${DIGEST}" --format '{{ index .Image.Config.Labels "org.opencontainers.image.revision" }}')"
           test "${REVISION}" = "${STEPS_CHECKOUT_SHA_OUTPUTS_SHA}"
           echo "image=${IMAGE_FULL}" >&3
@@ -326,21 +315,23 @@ jobs:
           MATRIX_BRANCH: ${{ matrix.branch }}
           MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           CACHYOS_KERNEL_VERSION: ${{ steps.cachyos_kernel.outputs.version || 'unused' }}
-          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.prep.outputs.default_tag }}
+          STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_METADATA_OUTPUTS_LABELS: ${{ steps.metadata.outputs.labels }}
           STEPS_BUILD_BASE_OUTPUTS_IMAGE: ${{ steps.build_base.outputs.image }}
           STEPS_BUILD_BASE_OUTPUTS_DIGEST: ${{ steps.build_base.outputs.digest }}
           STEPS_UPSTREAM_BASE_OUTPUTS_PINNED: ${{ steps.upstream_base.outputs.pinned }}
           STEPS_PROTON_CACHYOS_OUTPUTS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
+          STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU: ${{ steps.thirdparty_versions.outputs.version }}
           STEPS_BUILD_BASE_OUTPUTS_PINNED: ${{ steps.build_base.outputs.pinned }}
           STEPS_CHECKOUT_SHA_OUTPUTS_SHA: ${{ steps.checkout_sha.outputs.sha }}
 
       - name: Login rootful Podman to GHCR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '%s' "${GH_TOKEN}" | sudo podman login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+        uses: ./.github/actions/registry-login
+        with:
+          password: ${{ secrets.GITHUB_TOKEN }}
+          docker: "false"
+          sudo-podman: "true"
 
       - name: Free disk space before rechunking
         run: |
@@ -368,7 +359,7 @@ jobs:
         with:
           rechunk: ghcr.io/mrtrick37/legacy-rechunk@sha256:ed2e0c0749cae465284b14c61c2106d7d929d5f270b838f27a251d31fcacf800
           ref: ${{ steps.build_final.outputs.raw_ref }}
-          prev-ref: ${{ steps.build_final.outputs.image }}:${{ steps.prep.outputs.default_tag }}
+          prev-ref: ${{ steps.build_final.outputs.image }}:${{ steps.resolve_tag.outputs.tag }}
           meta: build_files/rechunk-meta.json
           max-layers: '64'
           skip_compression: true
@@ -382,6 +373,7 @@ jobs:
             org.kyth.build.upstream-base=${{ steps.upstream_base.outputs.pinned }}
             org.kyth.build.proton-cachyos-version=${{ steps.proton_cachyos.outputs.version }}
             org.kyth.build.thirdparty-versions-hash=${{ steps.thirdparty_versions.outputs.hash }}
+            org.kyth.build.umu-version=${{ steps.thirdparty_versions.outputs.version }}
             org.kyth.build.kernel-flavor=${{ matrix.kernel_flavor }}
             org.kyth.build.cachyos-kernel-version=${{ steps.cachyos_kernel.outputs.version || 'unused' }}
 
@@ -407,7 +399,7 @@ jobs:
             jq -r '.layers[][] | sub("^dedi:"; "") | sub("^meta:"; "")' \
               <<<"${RECHUNK_INFO}"
           )"
-          for group in kyth-initramfs proton-cachyos headroom rpmdb kyth; do
+          for group in kyth-initramfs rpmdb kyth; do
             grep -Fxq "${group}" <<<"${NORMALIZED_GROUPS}" || {
               echo "Missing required rechunk group: ${group}" >&2
               exit 1
@@ -430,7 +422,7 @@ jobs:
         env:
           IMAGE_FULL: ${{ steps.build_final.outputs.image }}
           SOURCE_REF: ${{ steps.rechunk.outputs.ref }}
-          PRIMARY_TAG: ${{ steps.prep.outputs.default_tag }}
+          PRIMARY_TAG: ${{ steps.resolve_tag.outputs.tag }}
           TAGS: ${{ steps.metadata.outputs.tags }}
           EXPECTED_VERSION: ${{ steps.checkout_sha.outputs.image_version }}
           EXPECTED_REVISION: ${{ steps.checkout_sha.outputs.sha }}
@@ -459,7 +451,7 @@ jobs:
             "docker://${PRIMARY_REF}"
 
           DIGEST="$(cat "${DIGEST_FILE}")"
-          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${DIGEST}"
           for tag in ${TAGS}; do
             if [[ "${tag}" != "${PRIMARY_TAG}" ]]; then
               docker buildx imagetools create \
@@ -491,49 +483,36 @@ jobs:
           DIGEST: ${{ steps.publish_final.outputs.digest }}
           VERSION: ${{ steps.publish_final.outputs.version }}
           SOURCE_SHA: ${{ steps.checkout_sha.outputs.sha }}
-          SOURCE_TAG: ${{ steps.prep.outputs.default_tag }}
+          SOURCE_TAG: ${{ steps.resolve_tag.outputs.tag }}
           UPSTREAM_BASE: ${{ steps.upstream_base.outputs.pinned }}
           BUILD_BASE: ${{ steps.build_base.outputs.pinned }}
           PROTON_CACHYOS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           THIRDPARTY_VERSIONS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
+          UMU_VERSION: ${{ steps.thirdparty_versions.outputs.version }}
           KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           WORKFLOW_GITHUB_SHA: ${{ github.sha }}
         run: |
-          mkdir -p output/build-metadata
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          metadata = {
-              "image": os.environ["IMAGE"],
-              "digest": os.environ["DIGEST"],
-              "version": os.environ["VERSION"],
-              "source_sha": os.environ["SOURCE_SHA"],
-              # GITHUB_SHA is the triggering commit recorded in the build provenance
-              # attestation. For schedule runs it equals the default branch HEAD and
-              # may differ from source_sha when building a non-default branch.
-              "github_sha": os.environ["WORKFLOW_GITHUB_SHA"],
-              "source_tag": os.environ["SOURCE_TAG"],
-              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
-              "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
-              "materials": {
-                  "upstream_base": os.environ["UPSTREAM_BASE"],
-                  "build_base": os.environ["BUILD_BASE"],
-                  "proton_cachyos_version": os.environ["PROTON_CACHYOS_VERSION"],
-                  "thirdparty_versions_hash": os.environ["THIRDPARTY_VERSIONS_HASH"],
-                  "kernel_flavor": os.environ["KERNEL_FLAVOR"],
-              },
-          }
-          Path("output/build-metadata/image.json").write_text(
-              json.dumps(metadata, indent=2) + "\n"
-          )
-          PY
+          python3 build_files/scripts/generate-metadata.py \
+            --image "${IMAGE}" \
+            --digest "${DIGEST}" \
+            --version "${VERSION}" \
+            --source-sha "${SOURCE_SHA}" \
+            --github-sha "${WORKFLOW_GITHUB_SHA}" \
+            --source-tag "${SOURCE_TAG}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --upstream-base "${UPSTREAM_BASE}" \
+            --build-base "${BUILD_BASE}" \
+            --proton-cachyos-version "${PROTON_CACHYOS_VERSION}" \
+            --thirdparty-versions-hash "${THIRDPARTY_VERSIONS_HASH}" \
+            --umu-version "${UMU_VERSION}" \
+            --kernel-flavor "${KERNEL_FLAVOR}" \
+            --output output/build-metadata/image.json
 
       - name: Upload immutable build metadata
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: image-build-metadata-${{ steps.prep.outputs.default_tag }}
+          name: image-build-metadata-${{ steps.resolve_tag.outputs.tag }}
           path: output/build-metadata/image.json
           if-no-files-found: error
           retention-days: 7
@@ -541,7 +520,7 @@ jobs:
   build_live_iso:
     name: Build Live ISO (${{ matrix.branch == 'main' && 'latest' || matrix.branch }})
     needs: build_push
-    if: ${{ always() && github.event_name != 'pull_request' && needs.build_push.result != 'cancelled' }}
+    if: ${{ github.event_name != 'pull_request' && needs.build_push.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -569,7 +548,7 @@ jobs:
   finalize:
     name: Attest and dispatch (${{ matrix.branch }}, ${{ matrix.kernel_flavor }})
     needs: build_push
-    if: always() && needs.build_push.result != 'cancelled'
+    if: needs.build_push.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -585,22 +564,21 @@ jobs:
       attestations: write
 
     steps:
+      # This job previously needed no repo files (its one step was a pure
+      # run: block), but a local composite action resolves from the checked-
+      # out working tree, so Checkout is now required here too.
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ matrix.branch }}
+          persist-credentials: false
+
       - name: Prepare artifact identity
         id: prep
-        env:
-          MATRIX_BRANCH: ${{ matrix.branch }}
-          MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
-        run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          TAG="${MATRIX_BRANCH}"
-          if [[ "${TAG}" == main ]]; then
-            TAG=latest
-          fi
-          case "${MATRIX_KERNEL_FLAVOR}" in
-            fedora) SUFFIX="" ;;
-            cachy) SUFFIX="-cachy" ;;
-          esac
-          echo "tag=${TAG}${SUFFIX}" >&3
+        uses: ./.github/actions/resolve-image-tag
+        with:
+          branch: ${{ matrix.branch }}
+          kernel-flavor: ${{ matrix.kernel_flavor }}
 
       - name: Download immutable build metadata
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -632,18 +610,16 @@ jobs:
           echo "github_sha=${GITHUB_SHA_META}" >&3
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: ./.github/actions/registry-login
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Attest image build provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        uses: ./.github/actions/attest-artifact
         with:
           subject-name: ${{ steps.image.outputs.image }}
           subject-digest: ${{ steps.image.outputs.digest }}
-          push-to-registry: true
+          push-to-registry: "true"
 
       # Supply-chain metadata (SBOM attach, image release, CVE scan dispatch)
       # runs only against the Fedora-flavor image and needs the immutable

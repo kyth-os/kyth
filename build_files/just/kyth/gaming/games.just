@@ -64,48 +64,23 @@ install-ubisoft-connect:
 
 # Install Steam.
 [group('KythOS')]
-install-steam:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub com.valvesoftware.Steam
-    echo; echo "Steam installed. Launch it from the app menu."
+install-steam: (_install-flatpak "com.valvesoftware.Steam" "Steam")
 
 # Install Lutris.
 [group('KythOS')]
-install-lutris:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub net.lutris.Lutris
-    echo; echo "Lutris installed. Launch it from the app menu."
+install-lutris: (_install-flatpak "net.lutris.Lutris" "Lutris")
 
 # Install Heroic Games Launcher.
 [group('KythOS')]
-install-heroic:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub com.heroicgameslauncher.hgl
-    echo; echo "Heroic installed. Launch it from the app menu."
+install-heroic: (_install-flatpak "com.heroicgameslauncher.hgl" "Heroic")
 
 # Install Bottles.
 [group('KythOS')]
-install-bottles:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub com.usebottles.bottles
-    echo; echo "Bottles installed."
+install-bottles: (_install-flatpak "com.usebottles.bottles" "Bottles")
 
 # Install Prism Launcher — Minecraft.
 [group('KythOS')]
-install-prismlauncher:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y flathub org.prismlauncher.PrismLauncher
-    echo; echo "Prism Launcher installed."
+install-prismlauncher: (_install-flatpak "org.prismlauncher.PrismLauncher" "Prism Launcher")
 
 # Install Itch.io desktop app.
 [group('KythOS')]

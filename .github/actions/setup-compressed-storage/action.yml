@@ -1,0 +1,31 @@
+name: Setup Compressed Storage
+description: Provision and mount a compressed loopback BTRFS image for Podman storage
+inputs:
+  size:
+    description: Logical size of the loopback image (e.g. 65G)
+    required: false
+    default: 65G
+  mount-point:
+    description: Storage path for containers
+    required: false
+    default: /var/lib/containers/storage
+  image-path:
+    description: Physical file path for loopback image
+    required: false
+    default: /mnt/podman-storage.img
+runs:
+  using: composite
+  steps:
+    - name: Mount compressed loopback image
+      shell: bash
+      env:
+        SIZE: ${{ inputs.size }}
+        MOUNT_POINT: ${{ inputs.mount-point }}
+        IMAGE_PATH: ${{ inputs.image-path }}
+      run: |
+        sudo truncate -s "${SIZE}" "${IMAGE_PATH}"
+        sudo mkfs.btrfs -f "${IMAGE_PATH}"
+        sudo podman system reset --force
+        sudo systemctl stop podman.service
+        sudo mount -o compress-force=zstd:2 "${IMAGE_PATH}" "${MOUNT_POINT}"
+        sudo systemctl start podman.service

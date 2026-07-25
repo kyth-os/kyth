@@ -1,8 +1,11 @@
 """Windows partition probe for game library migration."""
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
+
+_logger = logging.getLogger(__name__)
 
 
 def _probe_windows_partitions() -> list[dict]:
@@ -69,7 +72,7 @@ def _probe_windows_partitions() -> list[dict]:
         try:
             r = subprocess.run(
                 ["ntfsfix", "--no-action", path],
-                capture_output=True, text=True, timeout=8,
+                capture_output=True, text=True, timeout=8, check=False,
             )
             combined = (r.stdout + r.stderr).lower()
             if "unclean" in combined or "dirty" in combined:
@@ -78,7 +81,7 @@ def _probe_windows_partitions() -> list[dict]:
             # ntfsfix not present — fall back to mount-attempt heuristic below
             pass
         except Exception:
-            pass
+            _logger.debug("_probe_windows_partitions: ntfsfix check of %s failed", path, exc_info=True)
 
         # Resolve mountpoint from lsblk JSON
         raw_mounts: list = dev.get("mountpoints") or []

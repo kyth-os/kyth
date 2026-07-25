@@ -1,6 +1,18 @@
-"""Cards QSS styles."""
+"""Cards QSS styles.
 
-CARDS_QSS = """
+Kyth Theme: tokenized. #card/#card-accent-*/#card-title/#card-summary/
+#card-copy are also set by theme_hub_overlay.py (wins, later in cascade) —
+kept here in sync on the same tokens rather than removed, since this file's
+other selectors (home-recommend-card, store-*, drop-*, home-action-*,
+home-next-*, starter-pack-*) have no overlay equivalent and are load-bearing.
+"""
+from ..ui_tokens import (
+    KYTH_BLUE, KYTH_BLUE_DIM, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_SURFACE,
+    KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
+    STATUS_ERROR, STATUS_OK, STATUS_WARN,
+)
+
+CARDS_QSS = f"""
 /* ── Cards ───────────────────────────────────────────────────────────────── */
 QFrame#card,
 QFrame#home-recommend-card,
@@ -9,197 +21,192 @@ QFrame#stat-tile,
 QFrame#starter-pack,
 QFrame#ready-panel,
 QFrame#store-app-card,
-QFrame#store-category-card {
-    background: #151722;
-    border: 1px solid #26293a;
+QFrame#store-category-card {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
     border-radius: 10px;
-}
+}}
 
 QFrame#card:hover,
 QFrame#home-recommend-card:hover,
 QFrame#home-action-card:hover,
 QFrame#stat-tile:hover,
 QFrame#store-app-card:hover,
-QFrame#store-category-card:hover {
-    background: #1f2335;
-    border-color: #2e324c;
-}
+QFrame#store-category-card:hover {{
+    background: {KYTH_SURFACE_RAISED};
+    border-color: {KYTH_TEXT_FAINT};
+}}
 
-QLabel#card-title {
+QLabel#card-title {{
     font-size: 14px;
     font-weight: 600;
-    color: #ffffff;
-}
+    color: {KYTH_TEXT};
+}}
 
-QLabel#card-subtitle {
+QLabel#card-subtitle {{
     font-size: 13px;
     font-weight: 600;
-    color: #ffffff;
-}
+    color: {KYTH_TEXT};
+}}
 
-QLabel#card-summary {
-    color: #e8e8e8;
+QLabel#card-summary {{
+    color: {KYTH_TEXT};
     font-weight: 600;
-}
+}}
 
-QLabel#card-action {
-    color: #8fb8ff;
-}
+QLabel#card-action {{
+    color: {KYTH_BLUE_LIGHT};
+}}
 
-QLabel#card-copy {
-    color: #a6a6a6;
-    line-height: 1.6;
-}
+QLabel#card-copy {{
+    color: {KYTH_TEXT_MUTED};
+}}
 
-QFrame#home-recommend-card {
-    background: #1c253d;
-    border: 1px solid #3d5d8a;
-    border-left: 5px solid #4f8cff;
+QFrame#home-recommend-card {{
+    background: {KYTH_SURFACE_RAISED};
+    border: 1px solid {KYTH_BLUE_DIM};
+    border-left: 5px solid {KYTH_BLUE};
     border-radius: 10px;
-}
+}}
 
-QLabel#home-kicker {
-    color: #8fb8ff;
+QLabel#home-kicker {{
+    color: {KYTH_BLUE_LIGHT};
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 1.5px;
-}
+}}
 
-QFrame#home-section {
+QFrame#home-section {{
     background: transparent;
     border: none;
-}
+}}
 
-QLabel#home-section-title {
-    color: #ffffff;
+QLabel#home-section-title {{
+    color: {KYTH_TEXT};
     font-size: 15px;
     font-weight: 700;
-}
+}}
 
-QLabel#home-section-copy {
-    color: #8a8a8a;
+QLabel#home-section-copy {{
+    color: {KYTH_TEXT_FAINT};
     font-size: 12px;
-    line-height: 1.4;
-}
+}}
 
-QFrame#card-accent-ok {
-    background: #0f2018;
-    border: 1px solid #10b981;
+QFrame#card-accent-ok {{
+    background: rgba(16, 185, 129, 20);
+    border: 1px solid {STATUS_OK};
     border-radius: 10px;
-}
+}}
 
-QFrame#card-accent-warn {
-    background: #22160a;
-    border: 1px solid #f59e0b;
+QFrame#card-accent-warn {{
+    background: rgba(245, 158, 11, 20);
+    border: 1px solid {STATUS_WARN};
     border-radius: 10px;
-}
+}}
 
-QFrame#card-accent-err {
-    background: #271416;
-    border: 1px solid #5e3338;
+QFrame#card-accent-err {{
+    background: rgba(247, 118, 142, 20);
+    border: 1px solid {STATUS_ERROR};
     border-radius: 10px;
-}
+}}
 
-QLabel#home-action-icon {
+QLabel#home-action-icon {{
     font-size: 13px;
     font-weight: 600;
-    color: #8fb8ff;
-}
+    color: {KYTH_BLUE_LIGHT};
+}}
 
-QLabel#home-action-title {
+QLabel#home-action-title {{
     font-size: 15px;
     font-weight: 600;
-    color: #ffffff;
-}
+    color: {KYTH_TEXT};
+}}
 
-QLabel#home-action-copy {
-    color: #a6a6a6;
-    line-height: 1.45;
-}
+QLabel#home-action-copy {{
+    color: {KYTH_TEXT_MUTED};
+}}
 
-QLabel#home-next-title {
+QLabel#home-next-title {{
     font-size: 24px;
     font-weight: 750;
-    color: #ffffff;
-}
+    color: {KYTH_TEXT};
+}}
 
-QLabel#home-next-copy {
-    color: #c5c5c5;
-    line-height: 1.5;
-}
+QLabel#home-next-copy {{
+    color: {KYTH_TEXT_MUTED};
+}}
 
-QLabel#home-next-meta {
-    color: #c2d9ff;
-    line-height: 1.45;
-}
+QLabel#home-next-meta {{
+    color: {KYTH_BLUE_LIGHT};
+}}
 
-QPushButton#starter-pack-header {
+QPushButton#starter-pack-header {{
     background: transparent;
     border: none;
-    color: #ffffff;
+    color: {KYTH_TEXT};
     text-align: left;
     font-size: 14px;
     font-weight: 600;
     padding: 0;
-}
+}}
 
-QPushButton#starter-pack-header:hover {
-    color: #8fb8ff;
-}
+QPushButton#starter-pack-header:hover {{
+    color: {KYTH_BLUE_LIGHT};
+}}
 
-QLabel#starter-pack-meta {
-    color: #8fb8ff;
+QLabel#starter-pack-meta {{
+    color: {KYTH_BLUE_LIGHT};
     font-size: 11px;
     font-weight: 600;
-}
+}}
 
-QWidget#starter-pack-details {
+QWidget#starter-pack-details {{
     background: transparent;
-}
+}}
 
-QFrame#store-hero {
-    background: #151722;
-    border: 1px solid #26293a;
+QFrame#store-hero {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
     border-radius: 6px;
-}
+}}
 
-QLabel#store-hero-title {
+QLabel#store-hero-title {{
     font-size: 20px;
     font-weight: 600;
-    color: #ffffff;
-}
+    color: {KYTH_TEXT};
+}}
 
-QLabel#store-kicker {
-    color: #8fb8ff;
+QLabel#store-kicker {{
+    color: {KYTH_BLUE_LIGHT};
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 1px;
-}
+}}
 
-QFrame#drop-card {
-    background: #12141f;
-    border: 1px dashed #2e324c;
+QFrame#drop-card {{
+    background: {KYTH_SURFACE};
+    border: 1px dashed {KYTH_HAIRLINE};
     border-radius: 10px;
-}
+}}
 
-QFrame#drop-card-active {
-    background: #1c253d;
-    border: 2px dashed #8fb8ff;
+QFrame#drop-card-active {{
+    background: {KYTH_SURFACE_RAISED};
+    border: 2px dashed {KYTH_BLUE_LIGHT};
     border-radius: 10px;
-}
+}}
 
-QLabel#drop-glyph {
-    background: #181b28;
-    color: #8fb8ff;
-    border: 1px solid #26293a;
+QLabel#drop-glyph {{
+    background: {KYTH_SURFACE_RAISED};
+    color: {KYTH_BLUE_LIGHT};
+    border: 1px solid {KYTH_HAIRLINE};
     border-radius: 8px;
     font-size: 12px;
     font-weight: 600;
-}
+}}
 
-QLabel#drop-title {
+QLabel#drop-title {{
     font-size: 18px;
     font-weight: 600;
-    color: #ffffff;
-}
+    color: {KYTH_TEXT};
+}}
 """

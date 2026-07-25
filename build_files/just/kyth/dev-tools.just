@@ -9,38 +9,7 @@
 setup-kyth-dev-box:
     #!/usr/bin/env bash
     set -euo pipefail
-
-    box="kyth-dev"
-    image="${KYTH_DEV_IMAGE:-registry.fedoraproject.org/fedora-toolbox:44}"
-    packages=(
-        git gh just jq yq skopeo podman buildah
-        python3 python3-pip python3-virtualenv
-        ShellCheck shfmt ripgrep fd-find
-        vim-enhanced neovim
-    )
-
-    if ! command -v distrobox >/dev/null 2>&1; then
-        echo "ERROR: distrobox is not installed." >&2
-        echo "Install it first, then rerun this recipe." >&2
-        exit 1
-    fi
-
-    kyth-vscode-wallet
-
-    if distrobox list --no-color 2>/dev/null | grep -q "^${box}\b"; then
-        echo "${box} already exists."
-        echo "Enter it with: distrobox enter ${box}"
-        exit 0
-    fi
-
-    echo "━━━ Setting up KythOS development box ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  Image: ${image}"
-    echo
-    distrobox create --image "${image}" --name "${box}" --yes
-    distrobox enter "${box}" -- sudo dnf install -y "${packages[@]}"
-    echo
-    echo "Done. Enter it with: distrobox enter ${box}"
-    echo "VS Code launch command: code"
+    exec kyth-ai-dev setup
 
 # Configure VS Code and Brave to avoid KWallet prompts.
 [group('KythOS')]
@@ -49,7 +18,7 @@ install-vscode:
     set -euo pipefail
     kyth-vscode-wallet
     echo
-    echo "VS Code and Headroom are baked into the image."
+    echo "VS Code and Headroom are managed via the KythOS AI Developer container."
     echo "Launch VS Code from the app menu or run: code"
     echo "Run Headroom with: headroom"
 

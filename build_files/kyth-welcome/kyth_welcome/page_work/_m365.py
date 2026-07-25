@@ -1,8 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..services.launch import popen
-from ..services.software import _chromium_app_window_cmd
+from ..actions import _open_chromium_webapp
 from ..services.work import _M365_APPS, _create_m365_shortcuts, _m365_shortcuts_present, _refresh_m365_shortcuts
-from ..qt import QHBoxLayout, QLabel, QMessageBox, QPushButton
+from ..qt import QHBoxLayout, QLabel, QPushButton
 from ..widgets import _make_card
 
 
@@ -37,26 +36,12 @@ class _M365Mixin:
             open_btn = QPushButton(f"Open {name}")
             open_btn.setToolTip(f"{tip} \u2014 opens in a dedicated window")
             open_btn.clicked.connect(
-                lambda _=False, u=url, n=name: self._open_m365_webapp(u, n)
+                lambda _=False, u=url: _open_chromium_webapp(self, u)
             )
             btns.addWidget(open_btn)
         btns.addStretch()
         layout.addLayout(btns)
         return card
-
-    def _open_m365_webapp(self, url: str, name: str) -> None:
-        launch = _chromium_app_window_cmd(url)
-        if launch is None:
-            QMessageBox.warning(
-                self, "No browser found",
-                "Opening web app shortcuts needs a Chromium-family browser "
-                "(Brave, Chromium, Edge, or Chrome), but none was found.",
-            )
-            return
-        try:
-            popen(launch[0])
-        except OSError as exc:
-            QMessageBox.warning(self, "Could not open web app", str(exc))
 
     def _on_add_m365(self):
         written = _create_m365_shortcuts()

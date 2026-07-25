@@ -2,10 +2,13 @@
 reachability preflight, and kernel-flavor image derivation.
 """
 
+import logging
 import socket
 
 from .config import SOURCE_IMAGE, TARGET_IMAGE
 from .runner import run_command
+
+_logger = logging.getLogger(__name__)
 
 
 def _source_imgref(image: str) -> str:
@@ -57,7 +60,7 @@ def _network_preflight(imgref: str) -> str | None:
             return _friendly_network_error("No active default network route was found.")
     except Exception:
         # Keep going: DNS/connect checks below are a better user-facing signal.
-        pass
+        _logger.debug("_network_preflight: default-route check failed", exc_info=True)
 
     try:
         socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)

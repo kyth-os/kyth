@@ -1,6 +1,7 @@
 """Load and refresh curated game compatibility data (pure, no Qt)."""
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import os
 from dataclasses import dataclass
@@ -74,8 +75,13 @@ _COMPAT_DATA_UPDATED, _COMPAT_GAMES = load_compat_games()
 
 
 def replace_compat_games(updated: str, games: list[CompatGame]) -> None:
-    """Update the shared in-memory list (call sites hold the same list object)."""
-    global _COMPAT_DATA_UPDATED
+    """Update the shared in-memory list (call sites hold the same list object).
+
+    This module is the single owner of _COMPAT_DATA_UPDATED — other modules
+    should read it via `compat_data._COMPAT_DATA_UPDATED`, never import the
+    name by value (which snapshots it and desyncs from this update).
+    """
+    global _COMPAT_DATA_UPDATED  # noqa: PLW0603
     _COMPAT_DATA_UPDATED = updated
     _COMPAT_GAMES[:] = games
 
@@ -85,3 +91,35 @@ _COMPAT_BUNDLED_PATH = _COMPAT_BUNDLED_PATH
 _COMPAT_CACHE_PATH = _COMPAT_CACHE_PATH
 _COMPAT_REMOTE_URL = _COMPAT_REMOTE_URL
 _COMPAT_STALE_DAYS = _COMPAT_STALE_DAYS
+
+
+@dataclass(frozen=True)
+class CompatStats:
+    works: int
+    blocked: int
+    total: int
+    oldest_check: str
+
+
+def calculate_data_age_days(updated_date_str: str, now: datetime | None = None) -> int | None:
+    """Calculates data age in days since updated_date_str."""
+    if now is None:
+        now = datetime.now()
+    try:
+        return (now - datetime.strptime(updated_date_str, "%Y-%m-%d")).days
+    except (ValueError, TypeError):
+        return None
+
+
+def calculate_compat_stats(games: list[CompatGame]) -> CompatStats:
+    """Computes summary statistics for game compatibility data."""
+    works = sum(1 for game in games if game.status in ("native", "proton", "tweaks"))
+    blocked = sum(1 for game in games if game.status == "blocked")
+    total = len(games)
+    oldest_check = min((game.checked for game in games), default="unknown")
+    return CompatStats(
+        works=works,
+        blocked=blocked,
+        total=total,
+        oldest_check=oldest_check
+    )
