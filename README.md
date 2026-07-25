@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 00:48:16 UTC
+- Last refreshed (UTC): 2026-07-25 00:48:29 UTC
 - Current branch: testing
-- HEAD commit: 33a0e4e
-- Last commit title: Refactor 1-5: Modularize core services, consolidate distrobox wrappers, introduce DiskService layer, and externalize app database
-- Last commit date: 2026-07-24T08:08:33-04:00
+- HEAD commit: 8dacb32
+- Last commit title: ci: fix missing checkout in supply-chain.yml publish job
+- Last commit date: 2026-07-24T20:48:16-04:00
 - CI workflow files: 8
 - Build script files: 21
 

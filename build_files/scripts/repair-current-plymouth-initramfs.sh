@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+# shellcheck source=lib/plymouth-initrd-checks.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-initrd-checks.sh"
+
 if [[ "${EUID}" -ne 0 ]]; then
 	printf 'ERROR: run as root, for example: run0 --pty /usr/bin/bash %q\n' "$0" >&2
 	exit 1
@@ -101,27 +104,34 @@ for image in "${images[@]}"; do
 	lsinitrd -f /usr/share/plymouth/plymouthd.defaults "${image}" >"${defaults}"
 	lsinitrd -f /usr/share/pixmaps/system-logo-white.png "${image}" >"${logo}"
 	lsinitrd "${image}" >"${listing}"
-	grep -q 'usr/share/plymouth/themes/kyth/kyth.plymouth' "${listing}"
-	grep -q 'usr/share/plymouth/themes/kyth/kyth.script' "${listing}"
-	grep -q 'usr/share/plymouth/themes/kyth/kyth-logo.png' "${listing}"
-	cmp -s "${logo}" "${include_root}/usr/share/pixmaps/system-logo-white.png"
-	grep -q '^Theme=kyth$' "${defaults}"
-	grep -q '^ShowDelay=0$' "${defaults}"
-	grep -q '^DeviceTimeout=8$' "${defaults}"
-	grep -q '^UseFirmwareBackground=false$' "${defaults}" ||
-		{
-			echo "ERROR: repaired initramfs Plymouth defaults do not suppress BGRT firmware background" >&2
-			exit 1
-		}
-	grep -Eq 'usr/(lib64|lib)/plymouth/script\.so' "${listing}" ||
-		{
-			echo "ERROR: repaired initramfs does not contain plymouth/script.so — kyth theme will silently fail and fall back to BGRT firmware logo" >&2
-			exit 1
-		}
-	if grep -Ei 'usr/share/plymouth/themes/(bgrt-fedora|bgrt|spinner)(/|$)' "${listing}" >&2; then
-		echo "ERROR: Plymouth fallback theme leaked into repaired initramfs" >&2
-		exit 1
-	fi
+
+	listing_checks=(
+		'usr/share/plymouth/themes/kyth/kyth.plymouth|does not contain KythOS Plymouth theme'
+		'usr/share/plymouth/themes/kyth/kyth.script|does not contain KythOS Plymouth script'
+		'usr/share/plymouth/themes/kyth/kyth-logo.png|does not contain KythOS Plymouth logo'
+	)
+	for entry in "${listing_checks[@]}"; do
+		plymouth_require_pattern "${listing}" "${entry%%|*}" "repaired initramfs ${entry#*|}"
+	done
+
+	plymouth_require_match "${logo}" "${include_root}/usr/share/pixmaps/system-logo-white.png" \
+		"repaired initramfs still contains distro Plymouth system logo"
+
+	daemon_patterns=(
+		'^Theme=kyth$|do not force Theme=kyth'
+		'^ShowDelay=0$|do not draw immediately'
+		'^DeviceTimeout=8$|are missing DeviceTimeout=8'
+		'^UseFirmwareBackground=false$|do not suppress BGRT firmware background'
+	)
+	for entry in "${daemon_patterns[@]}"; do
+		plymouth_require_pattern "${defaults}" "${entry%%|*}" "repaired initramfs Plymouth defaults ${entry#*|}"
+	done
+
+	plymouth_require_pattern_ere "${listing}" 'usr/(lib64|lib)/plymouth/script\.so' \
+		"repaired initramfs does not contain plymouth/script.so — kyth theme will silently fail and fall back to BGRT firmware logo"
+
+	plymouth_forbid_fallback_theme "${listing}" "Plymouth fallback theme leaked into repaired initramfs"
+
 	rm -f "${defaults}" "${listing}" "${logo}"
 
 	echo "Repaired ${image}"

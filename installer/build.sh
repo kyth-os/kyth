@@ -4,6 +4,9 @@
 
 set -exo pipefail
 
+# shellcheck source=build_files/scripts/lib/plymouth-initrd-checks.sh disable=SC1091
+source /src/build_files/scripts/lib/plymouth-initrd-checks.sh
+
 # Tools required by the live installer's NTFS shrink-and-install path.
 if command -v dnf5 >/dev/null 2>&1; then
 	dnf5 install -y ntfs-3g parted btrfs-progs
@@ -104,129 +107,8 @@ Hidden=true
 EOF
 ln -sf /dev/null /etc/systemd/user/plasma-kwallet-pam.service
 
-install -Dm755 /dev/stdin /usr/libexec/kyth-live-owe-wifi-setup <<'EOF'
-#!/usr/bin/bash
-set -euo pipefail
-
-if ! grep -qw 'kyth.live=1' /proc/cmdline 2>/dev/null; then
-    exit 0
-fi
-
-command -v nmcli >/dev/null 2>&1 || exit 0
-
-LOG_FILE="/var/log/kyth-live-owe-wifi-setup.log"
-
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "${LOG_FILE}"
-}
-
-log "Starting OWE Wi-Fi profile setup"
-
-# Wait for NetworkManager to be fully operational
-for _try in 1 2 3 4 5 6 7 8 9 10; do
-    if nmcli general status 2>/dev/null | grep -q 'connected\|disconnected'; then
-        log "NetworkManager is ready (attempt $_try/10)"
-        break
-    fi
-    if [[ $_try -eq 10 ]]; then
-        log "ERROR: NetworkManager did not become ready after 10 attempts (20 seconds)"
-        exit 1
-    fi
-    sleep 2
-done
-
-# OWE/OWE transition-mode networks can look like plain open Wi-Fi in Plasma.
-# Seed explicit Enhanced Open profiles in the ephemeral live session so guest
-# networks of this type can be activated correctly.
-if ! nmcli radio wifi on 2>/dev/null; then
-    log "WARNING: nmcli radio wifi on failed"
-fi
-sleep 1
-
-# Scan for OWE networks
-declare -A owe_ssids=()
-for _try in 1 2 3 4 5 6; do
-    log "Scan attempt $_try/6"
-    while IFS=: read -r ssid security; do
-        [[ -n "${ssid}" && "${ssid}" != "--" ]] || continue
-        [[ "${security}" == *OWE* ]] || continue
-        owe_ssids["${ssid}"]=1
-        log "Found OWE network: ${ssid}"
-    done < <(nmcli --escape no -t -f SSID,SECURITY device wifi list --rescan yes 2>/dev/null || true)
-
-    if [[ "${#owe_ssids[@]}" -gt 0 ]]; then
-        log "Found OWE networks on attempt $_try/6, proceeding"
-        break
-    fi
-    sleep 2
-done
-
-if [[ "${#owe_ssids[@]}" -eq 0 ]]; then
-    log "No OWE networks found after 6 scans, exiting"
-    exit 0
-fi
-
-log "Found ${#owe_ssids[@]} OWE network(s), setting up profiles"
-
-for ssid in "${!owe_ssids[@]}"; do
-    con_name="Kyth OWE ${ssid}"
-    log "Processing SSID: ${ssid} (connection: ${con_name})"
-    
-    # Always delete and recreate to avoid state corruption on reboot
-    if nmcli connection delete "${con_name}" 2>/dev/null; then
-        log "Deleted existing connection: ${con_name}"
-    fi
-
-    # Create the OWE profile with all required settings
-    if nmcli connection add \
-        type wifi \
-        ifname "*" \
-        con-name "${con_name}" \
-        ssid "${ssid}" \
-        wifi-sec.key-mgmt owe \
-        ipv4.method auto \
-        ipv4.dhcp-send-hostname yes \
-        ipv4.ignore-auto-dns no \
-        connection.autoconnect no \
-        connection.permissions "" \
-        2>/tmp/kyth-owe-error.log; then
-        
-        # Validate the profile was created with correct settings
-        key_mgmt=$(nmcli -g 802-11-wireless-security.key-mgmt connection show "${con_name}" 2>/dev/null || echo "ERROR")
-        ipv4_method=$(nmcli -g ipv4.method connection show "${con_name}" 2>/dev/null || echo "ERROR")
-        
-        if [[ "${key_mgmt}" == "owe" && "${ipv4_method}" == "auto" ]]; then
-            log "✓ Profile created successfully: ${con_name}"
-        else
-            log "ERROR: Profile validation failed for ${con_name}"
-            log "  key-mgmt: ${key_mgmt}"
-            log "  ipv4.method: ${ipv4_method}"
-        fi
-    else
-        log "ERROR: Failed to create connection ${con_name}"
-        cat /tmp/kyth-owe-error.log >> "${LOG_FILE}" 2>/dev/null || true
-    fi
-done
-
-# Auto-connect if exactly one OWE network and no WiFi connected
-wifi_connected=$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | grep -c ':wifi:connected' || echo 0)
-if [[ "${#owe_ssids[@]}" -eq 1 && "${wifi_connected}" -eq 0 ]]; then
-    for ssid in "${!owe_ssids[@]}"; do
-        con_name="Kyth OWE ${ssid}"
-        log "Single OWE network with no WiFi connected, attempting auto-connect: ${con_name}"
-        if nmcli connection up "${con_name}" 2>/tmp/kyth-owe-error.log; then
-            log "✓ Successfully brought up connection: ${con_name}"
-        else
-            log "ERROR: Failed to bring up ${con_name}"
-            cat /tmp/kyth-owe-error.log >> "${LOG_FILE}" 2>/dev/null || true
-        fi
-    done
-else
-    log "Skipping auto-connect: ${#owe_ssids[@]} OWE networks, ${wifi_connected} WiFi connections active"
-fi
-
-log "OWE Wi-Fi profile setup complete"
-EOF
+install -Dm755 /src/build_files/scripts/kyth-live-owe-wifi-setup.sh \
+	/usr/libexec/kyth-live-owe-wifi-setup
 
 cat >/etc/systemd/system/kyth-live-owe-wifi.service <<'EOF'
 [Unit]
@@ -351,61 +233,52 @@ rm -rf "${kyth_plymouth_include_root}"
 
 initrd_listing="$(mktemp)"
 if command -v lsinitrd >/dev/null 2>&1; then
-	lsinitrd "/usr/lib/modules/${kernel}/initramfs.img" >"${initrd_listing}"
-	grep -q 'usr/share/plymouth/themes/kyth/kyth.plymouth' "${initrd_listing}" || {
-		echo "ERROR: live initramfs does not contain KythOS Plymouth theme" >&2
-		exit 1
-	}
-	grep -q 'usr/share/plymouth/themes/kyth/kyth.script' "${initrd_listing}" || {
-		echo "ERROR: live initramfs does not contain KythOS Plymouth script" >&2
-		exit 1
-	}
-	grep -q 'usr/share/plymouth/themes/kyth/kyth-logo.png' "${initrd_listing}" || {
-		echo "ERROR: live initramfs does not contain KythOS Plymouth logo" >&2
-		exit 1
-	}
-	lsinitrd -f /usr/share/pixmaps/system-logo-white.png "/usr/lib/modules/${kernel}/initramfs.img" | cmp -s - /usr/share/kyth/branding/transparent-watermark.png || {
-		echo "ERROR: live initramfs still contains distro Plymouth system logo" >&2
-		exit 1
-	}
-	grep -q 'usr/share/plymouth/themes/default.plymouth' "${initrd_listing}" || {
-		echo "ERROR: live initramfs does not force the KythOS Plymouth default theme" >&2
-		exit 1
-	}
-	lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${kernel}/initramfs.img" | grep -q '^Theme=kyth$' || {
-		echo "ERROR: live initramfs Plymouth defaults do not force Theme=kyth" >&2
-		exit 1
-	}
-	lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${kernel}/initramfs.img" | grep -q '^ShowDelay=0$' || {
-		echo "ERROR: live initramfs Plymouth defaults do not draw immediately" >&2
-		exit 1
-	}
-	lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${kernel}/initramfs.img" | grep -q '^DeviceTimeout=8$' || {
-		echo "ERROR: live initramfs Plymouth defaults are missing DeviceTimeout=8" >&2
-		exit 1
-	}
+	initrd_img="/usr/lib/modules/${kernel}/initramfs.img"
+	lsinitrd "${initrd_img}" >"${initrd_listing}"
+
+	# Each entry is "pattern|message"; message is appended to the standard
+	# "ERROR: live initramfs ..." prefix.
+	listing_checks=(
+		'usr/share/plymouth/themes/kyth/kyth.plymouth|does not contain KythOS Plymouth theme'
+		'usr/share/plymouth/themes/kyth/kyth.script|does not contain KythOS Plymouth script'
+		'usr/share/plymouth/themes/kyth/kyth-logo.png|does not contain KythOS Plymouth logo'
+		'usr/share/plymouth/themes/default.plymouth|does not force the KythOS Plymouth default theme'
+	)
+	for entry in "${listing_checks[@]}"; do
+		plymouth_require_pattern "${initrd_listing}" "${entry%%|*}" "live initramfs ${entry#*|}"
+	done
+
+	plymouth_require_match \
+		<(lsinitrd -f /usr/share/pixmaps/system-logo-white.png "${initrd_img}") \
+		/usr/share/kyth/branding/transparent-watermark.png \
+		"live initramfs still contains distro Plymouth system logo"
+
+	# Theme=kyth/ShowDelay=0/DeviceTimeout=8 must hold in both the Plymouth
+	# defaults baked into the initramfs and the daemon config that overrides
+	# them, so the same three patterns are checked against both sources.
+	daemon_patterns=(
+		'^Theme=kyth$|does not force Theme=kyth'
+		'^ShowDelay=0$|does not draw immediately'
+		'^DeviceTimeout=8$|is missing DeviceTimeout=8'
+	)
+	for entry in "${daemon_patterns[@]}"; do
+		plymouth_require_pattern \
+			<(lsinitrd -f /usr/share/plymouth/plymouthd.defaults "${initrd_img}") \
+			"${entry%%|*}" "live initramfs Plymouth defaults ${entry#*|}"
+	done
+
 	initrd_extract="$(mktemp -d)"
-	(cd "${initrd_extract}" && lsinitrd --unpack "/usr/lib/modules/${kernel}/initramfs.img" etc/plymouth/plymouthd.conf)
-	grep -q '^Theme=kyth$' "${initrd_extract}/etc/plymouth/plymouthd.conf" || {
-		echo "ERROR: live initramfs Plymouth daemon config does not force Theme=kyth" >&2
-		rm -rf "${initrd_extract}"
-		exit 1
-	}
-	grep -q '^ShowDelay=0$' "${initrd_extract}/etc/plymouth/plymouthd.conf" || {
-		echo "ERROR: live initramfs Plymouth daemon config does not draw immediately" >&2
-		rm -rf "${initrd_extract}"
-		exit 1
-	}
-	grep -q '^DeviceTimeout=8$' "${initrd_extract}/etc/plymouth/plymouthd.conf" || {
-		echo "ERROR: live initramfs Plymouth daemon config is missing DeviceTimeout=8" >&2
-		rm -rf "${initrd_extract}"
-		exit 1
-	}
+	(cd "${initrd_extract}" && lsinitrd --unpack "${initrd_img}" etc/plymouth/plymouthd.conf)
+	for entry in "${daemon_patterns[@]}"; do
+		grep -q "${entry%%|*}" "${initrd_extract}/etc/plymouth/plymouthd.conf" || {
+			echo "ERROR: live initramfs Plymouth daemon config ${entry#*|}" >&2
+			rm -rf "${initrd_extract}"
+			exit 1
+		}
+	done
 	rm -rf "${initrd_extract}"
-	if grep -Ei 'usr/share/plymouth/themes/(bgrt-fedora|bgrt|spinner)(/|$)' "${initrd_listing}" >&2; then
-		echo "ERROR: Plymouth fallback theme leaked into live initramfs" >&2
-		exit 1
-	fi
+
+	plymouth_forbid_fallback_theme "${initrd_listing}" "Plymouth fallback theme leaked into live initramfs"
 fi
 rm -f "${initrd_listing}"
 
