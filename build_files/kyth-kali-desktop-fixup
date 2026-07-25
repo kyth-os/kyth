@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# kyth-kali-desktop-fixup — fix up .desktop launchers exported from the
+# rootful "kali" distrobox for the host application menu.
+#
+# Run once after any bulk `distrobox-export --app ...` from the kali box:
+# tags Kali-exported launchers with a distinct menu category, strips
+# NoDisplay/OnlyShowIn/NotShowIn so they actually surface in the host menu,
+# rewrites any pkexec/kdesu/gksu escalation to `sudo -E` (Kali's own sudoers
+# policy lives inside the rootful container, not on the host), and repoints
+# Zenmap specifically through kyth-distrobox-root-launch so its own internal
+# re-exec-as-root works when launched from the host menu.
+#
+# Shared by both the `ujust setup-kali-box`/`export-kali-apps` CLI recipes
+# and the System Hub Security page's GUI install/export flow, so both entry
+# points fix up launchers identically instead of maintaining independent
+# copies of this logic.
+set -euo pipefail
+
+_d="$HOME/.local/share/applications"
+
+for _f in "${_d}/"*.desktop; do
+	[[ -f "${_f}" ]] || continue
+	grep -qE -- '--name kali|-n kali' "${_f}" 2>/dev/null || continue
+	if grep -q '^Categories=' "${_f}"; then
+		sed -i 's|^Categories=.*|Categories=X-KythSecurity;|' "${_f}"
+	else
+		printf '\nCategories=X-KythSecurity;\n' >>"${_f}"
+	fi
+	sed -i '/^NoDisplay[[:space:]]*=[[:space:]]*true/Id' "${_f}"
+	sed -i '/^OnlyShowIn[[:space:]]*=/d' "${_f}"
+	sed -i '/^NotShowIn[[:space:]]*=/d' "${_f}"
+	if grep -qE 'pkexec|kdesu|gksu|gksudo' "${_f}" 2>/dev/null; then
+		sed -i -E 's/(pkexec|kdesu|gksu|gksudo)[[:space:]]+/sudo -E /g' "${_f}"
+	fi
+done
+
+# Zenmap's own launcher re-execs itself as root; insert a `sudo -E` ahead of
+# that re-exec so the root re-exec actually has privilege to gain, rather
+# than silently failing under an unprivileged user.
+for _f in "${_d}/"*zenmap*.desktop; do
+	[[ -f "${_f}" ]] || continue
+	grep -qE -- '--name kali|-n kali' "${_f}" 2>/dev/null || continue
+	grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec' "${_f}" 2>/dev/null || continue
+	grep -q ' sudo ' "${_f}" && continue
+	sed -i -E 's|[[:space:]]--[[:space:]]+| -- sudo -E |' "${_f}"
+done
+
+# Then fully repoint any remaining/root Zenmap launcher through
+# kyth-distrobox-root-launch, which sets up X11/xhost access for root GUI
+# apps before re-execing into the container as root.
+for _f in "${_d}/"*zenmap*.desktop; do
+	[[ -f "${_f}" ]] || continue
+	grep -qE -- '--name kali|-n kali|^Exec=.*sudo -E' "${_f}" 2>/dev/null || continue
+	grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec|sudo -E' "${_f}" 2>/dev/null || continue
+	sed -i -E 's|^Exec=.*$|Exec=kyth-distrobox-root-launch --root kali /usr/bin/zenmap|' "${_f}"
+	sed -i -E 's|^TryExec=.*$|TryExec=kyth-distrobox-root-launch|' "${_f}"
+done
+
+update-desktop-database "${_d}" 2>/dev/null || true
+kbuildsycoca6 --noincremental 2>/dev/null || true

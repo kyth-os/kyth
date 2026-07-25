@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -60,13 +61,17 @@ class SecurityServiceTests(unittest.TestCase):
         cmd = security.build_kali_create_command("kali", "img", "kali-linux-default", True)
         script = cmd[2]
         self.assertIn("distrobox-export --app", script)
-        self.assertIn("Categories=X-KythSecurity", script)
+        # Desktop-file fixup (Categories, NoDisplay, pkexec rewrite, zenmap
+        # Exec rewrite) lives in build_files/kyth-kali-desktop-fixup, shared
+        # with export-kali-apps below and the `ujust` CLI recipes, instead of
+        # being duplicated inline here.
+        self.assertIn("kyth-kali-desktop-fixup", script)
 
     def test_kali_export_command_shape(self):
         cmd = security.build_kali_export_command("kali")
         self.assertEqual(cmd[:2], ["bash", "-c"])
         self.assertIn("EXPORTED:$n", cmd[2])
-        self.assertIn("Categories=X-KythSecurity", cmd[2])
+        self.assertIn("kyth-kali-desktop-fixup", cmd[2])
 
     def test_kali_remove_command_shape(self):
         cmd = security.build_kali_remove_command("kali")
@@ -74,6 +79,29 @@ class SecurityServiceTests(unittest.TestCase):
         self.assertIn("box='kali'", cmd[2])
         self.assertIn("distrobox rm --force", cmd[2])
         self.assertIn("distrobox rm --root --force", cmd[2])
+
+    def test_kali_command_builders_generate_syntactically_valid_bash(self):
+        # These scripts are assembled via string concatenation/f-strings with
+        # heavy quote nesting and no on-disk .sh file for
+        # test_shell_scripts_validation.py to catch — unlike real .sh files,
+        # nothing else runs bash -n over this output. A quoting bug here would
+        # otherwise only surface by actually running it inside a live
+        # distrobox.
+        scripts = [
+            security.build_kali_create_command("kali", "docker.io/kalilinux/kali-rolling", "kali-linux-headless", False)[2],
+            security.build_kali_create_command("kali", "docker.io/kalilinux/kali-rolling", "kali-linux-default", True)[2],
+            security.build_kali_create_command("kali", "docker.io/kalilinux/kali-rolling", "kali-linux-everything", True)[2],
+            security.build_kali_export_command("kali")[2],
+            security.build_kali_remove_command("kali")[2],
+        ]
+        for script in scripts:
+            with self.subTest(script=script[:60]):
+                result = subprocess.run(
+                    ["bash", "-n", "-c", script],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class DiagnosticsDrainTests(unittest.TestCase):

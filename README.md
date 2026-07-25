@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 00:48:44 UTC
+- Last refreshed (UTC): 2026-07-25 00:48:57 UTC
 - Current branch: testing
-- HEAD commit: bd9fceb
-- Last commit title: test: guard hostname regex against installer bash/Python drift
-- Last commit date: 2026-07-24T20:48:39-04:00
+- HEAD commit: df87ccd
+- Last commit title: test: add coverage for services/dbus_utils.py
+- Last commit date: 2026-07-24T20:48:44-04:00
 - CI workflow files: 8
 - Build script files: 21
 

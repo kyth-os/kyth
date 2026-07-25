@@ -52,45 +52,12 @@ _is_socket_capable_kali_box = is_socket_capable_kali_box
 # Run once after any bulk `distrobox-export --app ...`: tags Kali-exported
 # launchers with a distinct menu category, strips NoDisplay/OnlyShowIn/
 # NotShowIn so they actually surface in the host menu, rewrites any
-# pkexec/kdesu/gksu escalation to `sudo -E` (Kali's own sudoers policy lives
-# inside the rootful container, not on the host), and repoints Zenmap
-# specifically through kyth-distrobox-root-launch so its own internal
-# re-exec-as-root works when launched from the host menu. Shared verbatim
-# between the create and export flows, which both run a bulk export.
-_DESKTOP_FILE_REWRITE_SCRIPT = (
-    "_d=\"$HOME/.local/share/applications\"\n"
-    "for _f in \"$_d/\"*.desktop; do\n"
-    "    [[ -f \"$_f\" ]] || continue\n"
-    "    grep -qE -- '--name kali|-n kali' \"$_f\" 2>/dev/null || continue\n"
-    "    if grep -q '^Categories=' \"$_f\"; then\n"
-    "        sed -i 's|^Categories=.*|Categories=X-KythSecurity;|' \"$_f\"\n"
-    "    else\n"
-    "        printf '\\nCategories=X-KythSecurity;\\n' >> \"$_f\"\n"
-    "    fi\n"
-    "    sed -i '/^NoDisplay[[:space:]]*=[[:space:]]*true/Id' \"$_f\"\n"
-    "    sed -i '/^OnlyShowIn[[:space:]]*=/d' \"$_f\"\n"
-    "    sed -i '/^NotShowIn[[:space:]]*=/d' \"$_f\"\n"
-    "    if grep -qE 'pkexec|kdesu|gksu|gksudo' \"$_f\" 2>/dev/null; then\n"
-    "        sed -i -E 's/(pkexec|kdesu|gksu|gksudo)[[:space:]]+/sudo -E /g' \"$_f\"\n"
-    "    fi\n"
-    "done\n"
-    "for _f in \"$_d/\"*zenmap*.desktop; do\n"
-    "    [[ -f \"$_f\" ]] || continue\n"
-    "    grep -qE -- '--name kali|-n kali' \"$_f\" 2>/dev/null || continue\n"
-    "    grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec' \"$_f\" 2>/dev/null || continue\n"
-    "    grep -q ' sudo ' \"$_f\" && continue\n"
-    "    sed -i -E 's|[[:space:]]--[[:space:]]+| -- sudo -E |' \"$_f\"\n"
-    "done\n"
-    "for _f in \"$_d/\"*zenmap*.desktop; do\n"
-    "    [[ -f \"$_f\" ]] || continue\n"
-    "    grep -qE -- '--name kali|-n kali|^Exec=.*sudo -E' \"$_f\" 2>/dev/null || continue\n"
-    "    grep -qiE '^Name=.*root|zenmap-root|su-to-zenmap|pkexec|sudo -E' \"$_f\" 2>/dev/null || continue\n"
-    "    sed -i -E 's|^Exec=.*$|Exec=kyth-distrobox-root-launch --root kali /usr/bin/zenmap|' \"$_f\"\n"
-    "    sed -i -E 's|^TryExec=.*$|TryExec=kyth-distrobox-root-launch|' \"$_f\"\n"
-    "done\n"
-    "update-desktop-database \"$_d\" 2>/dev/null || true\n"
-    "kbuildsycoca6 --noincremental 2>/dev/null || true"
-)
+# pkexec/kdesu/gksu escalation to `sudo -E`, and repoints Zenmap through
+# kyth-distrobox-root-launch. Lives in build_files/kyth-kali-desktop-fixup
+# (installed to /usr/bin) so this GUI flow and the `ujust setup-kali-box`/
+# `export-kali-apps` CLI recipes fix up launchers identically instead of
+# each keeping an independently-drifting copy of this logic.
+_DESKTOP_FILE_REWRITE_SCRIPT = "kyth-kali-desktop-fixup"
 
 
 def build_kali_create_command(
@@ -268,230 +235,231 @@ class KaliInstallProgressTracker:
         self.progress_value = 2
         self.status_message: str | None = None
 
-    def parse_line(self, ln: str) -> tuple[str | None, int | None]:
-        lo = ln.lower()
+    def _set_status(self, val: str) -> bool:
+        if self.status_message != val:
+            self.status_message = val
+            return True
+        return False
+
+    def _set_progress(self, val: int) -> bool:
+        if self.progress_value != val:
+            self.progress_value = val
+            return True
+        return False
+
+    def _result(self, msg_changed: bool, progress_changed: bool) -> tuple[str | None, int | None]:
+        return (
+            self.status_message if msg_changed else None,
+            self.progress_value if progress_changed else None,
+        )
+
+    def _parse_pull_phase(self, ln: str, lo: str) -> tuple[str | None, int | None] | None:
+        """Phase 0/1: pulling the Kali image, storing its manifest, and
+        creating the container. Returns None if `ln` doesn't match any
+        pattern recognized in this phase, so the caller falls through to
+        (None, None) instead of advancing phase/progress."""
+        if any(
+            k in lo
+            for k in (
+                "trying to pull",
+                "pulling image",
+                "getting image source",
+                "copying blob",
+                "copying config",
+            )
+        ):
+            self.phase = 1
+            if "copying blob" in lo:
+                digest = ln.split()[-1] if ln.split() else ""
+                short = digest[:19] if digest else ""
+                msg = (
+                    f"Pulling image layer {short}…"
+                    if short
+                    else "Pulling Kali image layers…"
+                )
+            elif "copying config" in lo:
+                msg = "Pulling image config…"
+            else:
+                msg = "Pulling kalilinux/kali-rolling from registry…"
+            msg_changed = self._set_status(msg)
+            progress_changed = False
+            if self.progress_value < 40:
+                progress_changed = self._set_progress(self.progress_value + 1)
+            return self._result(msg_changed, progress_changed)
+
+        if "writing manifest" in lo or "storing signatures" in lo:
+            self.phase = 1
+            msg_changed = self._set_status("Storing image manifest…")
+            progress_changed = self._set_progress(42)
+            return self._result(msg_changed, progress_changed)
+
+        if any(
+            k in lo
+            for k in (
+                "container kali",
+                "creating container",
+                "starting container",
+                "image is now available",
+                "image already present",
+            )
+        ) or (self.phase == 1 and "distrobox" in lo and "creat" in lo):
+            self.phase = 2
+            msg_changed = self._set_status("Creating Kali distrobox container…")
+            progress_changed = self._set_progress(max(self.progress_value, 44))
+            return self._result(msg_changed, progress_changed)
+
+        return None
+
+    def _parse_bootstrap_phase(self, ln: str, lo: str) -> tuple[str | None, int | None]:
+        """Phase 2: bootstrapping the base Kali environment."""
         msg_changed = False
         progress_changed = False
+        if any(k in lo for k in ("installing basic", "bootstrapping", "reading package")):
+            self.phase = 3
+            msg_changed = self._set_status("Bootstrapping Kali environment…")
+            progress_changed = self._set_progress(max(self.progress_value, 55))
+        elif self.progress_value < 54:
+            progress_changed = self._set_progress(self.progress_value + 1)
+        return self._result(msg_changed, progress_changed)
 
-        def set_status(val: str):
-            nonlocal msg_changed
-            if self.status_message != val:
-                self.status_message = val
-                msg_changed = True
+    def _parse_package_list_phase(self, ln: str, lo: str) -> tuple[str | None, int | None]:
+        """Phase 3: fetching/resolving the apt package list for the chosen
+        metapackage, until apt reports how much it needs to download."""
+        msg_changed = False
+        progress_changed = False
+        if any(
+            k in lo
+            for k in ("reading package lists", "building dependency", "reading state information")
+        ):
+            msg_changed |= self._set_status("Fetching Kali package lists…")
+            if self.progress_value < 59:
+                progress_changed |= self._set_progress(self.progress_value + 1)
+        elif any(
+            k in lo
+            for k in ("following new package", "following additional", "will be installed")
+        ):
+            msg_changed |= self._set_status("Resolving package dependencies…")
+            progress_changed |= self._set_progress(max(self.progress_value, 58))
 
-        def set_progress(val: int):
-            nonlocal progress_changed
-            if self.progress_value != val:
-                self.progress_value = val
-                progress_changed = True
+        m = re.search(r"(\d+) newly installed", ln)
+        if m:
+            self.total_packages = int(m.group(1))
+
+        m2 = re.search(r"need to get (.+?) of archives", ln, re.IGNORECASE)
+        if m2:
+            self.phase = 4
+            size_str = m2.group(1)
+            count_str = f" ({self.total_packages} packages)" if self.total_packages else ""
+            msg_changed |= self._set_status(f"Downloading {size_str} of packages{count_str}…")
+            progress_changed |= self._set_progress(max(self.progress_value, 60))
+        elif "need to get" in lo and "archive" in lo:
+            self.phase = 4
+            msg_changed |= self._set_status("Downloading packages…")
+            progress_changed |= self._set_progress(max(self.progress_value, 60))
+        return self._result(msg_changed, progress_changed)
+
+    def _parse_download_phase(self, ln: str, lo: str) -> tuple[str | None, int | None]:
+        """Phase 4: downloading resolved packages (Get:N lines), until
+        dpkg starts unpacking the first one."""
+        msg_changed = False
+        progress_changed = False
+        m = re.match(r"Get:(\d+)\s+\S+\s+\S+\s+\S+\s+(\S+)", ln)
+        if m:
+            n = int(m.group(1))
+            pkg = m.group(2)
+            if self.total_packages > 0:
+                frac = min(1.0, n / self.total_packages)
+                progress_changed |= self._set_progress(max(self.progress_value, int(60 + frac * 15)))
+                msg_changed |= self._set_status(f"Downloading {pkg}… ({n} / {self.total_packages})")
+            else:
+                if self.progress_value < 74:
+                    progress_changed |= self._set_progress(self.progress_value + 1)
+                msg_changed |= self._set_status(f"Downloading {pkg}…")
+
+        if ln.startswith("Selecting previously") or ln.startswith("Preparing to unpack"):
+            self.phase = 5
+            total_str = f" / {self.total_packages}" if self.total_packages else ""
+            msg_changed |= self._set_status(f"Unpacking packages… (0{total_str})")
+            progress_changed |= self._set_progress(max(self.progress_value, 75))
+        return self._result(msg_changed, progress_changed)
+
+    def _parse_unpack_phase(self, ln: str, lo: str) -> tuple[str | None, int | None]:
+        """Phase 5: dpkg unpacking downloaded packages, until the first
+        `Setting up` line starts configuration."""
+        msg_changed = False
+        progress_changed = False
+        if ln.startswith("Unpacking "):
+            self.unpack_count += 1
+            pkg = ln.split()[1] if len(ln.split()) > 1 else ""
+            pkg = pkg.split(":")[0]
+            total_str = f" / {self.total_packages}" if self.total_packages else ""
+            msg_changed |= self._set_status(f"Unpacking {pkg}… ({self.unpack_count}{total_str})")
+            if self.total_packages > 0:
+                frac = min(1.0, self.unpack_count / self.total_packages)
+                progress_changed |= self._set_progress(max(self.progress_value, int(75 + frac * 13)))
+            elif self.progress_value < 87:
+                progress_changed |= self._set_progress(self.progress_value + 1)
+
+        if ln.startswith("Setting up "):
+            self.phase = 6
+            pkg = ln.split()[2] if len(ln.split()) > 2 else ""
+            pkg = pkg.split(":")[0]
+            self.setup_count = 1
+            total_str = f" / {self.total_packages}" if self.total_packages else ""
+            msg_changed |= self._set_status(f"Configuring {pkg}… (1{total_str})")
+            if self.total_packages > 0:
+                frac = min(1.0, 1 / self.total_packages)
+                progress_changed |= self._set_progress(max(self.progress_value, int(88 + frac * 10)))
+            else:
+                progress_changed |= self._set_progress(max(self.progress_value, 88))
+        return self._result(msg_changed, progress_changed)
+
+    def _parse_configure_phase(self, ln: str, lo: str) -> tuple[str | None, int | None]:
+        """Phase 6: dpkg configuring installed packages, then apt's
+        post-install trigger processing."""
+        msg_changed = False
+        progress_changed = False
+        if ln.startswith("Setting up "):
+            self.setup_count += 1
+            pkg = ln.split()[2] if len(ln.split()) > 2 else ""
+            pkg = pkg.split(":")[0]
+            total_str = f" / {self.total_packages}" if self.total_packages else ""
+            msg_changed |= self._set_status(f"Configuring {pkg}… ({self.setup_count}{total_str})")
+            if self.total_packages > 0:
+                frac = min(1.0, self.setup_count / self.total_packages)
+                progress_changed |= self._set_progress(max(self.progress_value, int(88 + frac * 10)))
+            elif self.progress_value < 97:
+                progress_changed |= self._set_progress(self.progress_value + 1)
+
+        if "processing triggers" in lo:
+            pkg_m = re.search(r"processing triggers for (\S+)", lo)
+            trigger_pkg = pkg_m.group(1) if pkg_m else ""
+            msg = (
+                f"Running post-install triggers ({trigger_pkg})…"
+                if trigger_pkg
+                else "Running post-install triggers…"
+            )
+            msg_changed |= self._set_status(msg)
+            progress_changed |= self._set_progress(max(self.progress_value, 98))
+
+        return self._result(msg_changed, progress_changed)
+
+    _PHASE_PARSERS = {
+        2: "_parse_bootstrap_phase",
+        3: "_parse_package_list_phase",
+        4: "_parse_download_phase",
+        5: "_parse_unpack_phase",
+        6: "_parse_configure_phase",
+    }
+
+    def parse_line(self, ln: str) -> tuple[str | None, int | None]:
+        lo = ln.lower()
 
         if self.phase <= 1:
-            if any(
-                k in lo
-                for k in (
-                    "trying to pull",
-                    "pulling image",
-                    "getting image source",
-                    "copying blob",
-                    "copying config",
-                )
-            ):
-                self.phase = 1
-                if "copying blob" in lo:
-                    digest = ln.split()[-1] if ln.split() else ""
-                    short = digest[:19] if digest else ""
-                    msg = (
-                        f"Pulling image layer {short}…"
-                        if short
-                        else "Pulling Kali image layers…"
-                    )
-                elif "copying config" in lo:
-                    msg = "Pulling image config…"
-                else:
-                    msg = "Pulling kalilinux/kali-rolling from registry…"
-                set_status(msg)
-                if self.progress_value < 40:
-                    set_progress(self.progress_value + 1)
-                return (
-                    self.status_message if msg_changed else None,
-                    self.progress_value if progress_changed else None,
-                )
+            result = self._parse_pull_phase(ln, lo)
+            return result if result is not None else (None, None)
 
-            if "writing manifest" in lo or "storing signatures" in lo:
-                self.phase = 1
-                set_status("Storing image manifest…")
-                set_progress(42)
-                return (
-                    self.status_message if msg_changed else None,
-                    self.progress_value if progress_changed else None,
-                )
-
-            if any(
-                k in lo
-                for k in (
-                    "container kali",
-                    "creating container",
-                    "starting container",
-                    "image is now available",
-                    "image already present",
-                )
-            ) or (self.phase == 1 and "distrobox" in lo and "creat" in lo):
-                self.phase = 2
-                set_status("Creating Kali distrobox container…")
-                set_progress(max(self.progress_value, 44))
-                return (
-                    self.status_message if msg_changed else None,
-                    self.progress_value if progress_changed else None,
-                )
-
-        if self.phase == 2:
-            if any(
-                k in lo
-                for k in ("installing basic", "bootstrapping", "reading package")
-            ):
-                self.phase = 3
-                set_status("Bootstrapping Kali environment…")
-                set_progress(max(self.progress_value, 55))
-            else:
-                if self.progress_value < 54:
-                    set_progress(self.progress_value + 1)
-            return (
-                self.status_message if msg_changed else None,
-                self.progress_value if progress_changed else None,
-            )
-
-        if self.phase == 3:
-            if any(
-                k in lo
-                for k in (
-                    "reading package lists",
-                    "building dependency",
-                    "reading state information",
-                )
-            ):
-                set_status("Fetching Kali package lists…")
-                if self.progress_value < 59:
-                    set_progress(self.progress_value + 1)
-            elif any(
-                k in lo
-                for k in (
-                    "following new package",
-                    "following additional",
-                    "will be installed",
-                )
-            ):
-                set_status("Resolving package dependencies…")
-                set_progress(max(self.progress_value, 58))
-
-            m = re.search(r"(\d+) newly installed", ln)
-            if m:
-                self.total_packages = int(m.group(1))
-
-            m2 = re.search(r"need to get (.+?) of archives", ln, re.IGNORECASE)
-            if m2:
-                self.phase = 4
-                size_str = m2.group(1)
-                count_str = (
-                    f" ({self.total_packages} packages)"
-                    if self.total_packages
-                    else ""
-                )
-                set_status(f"Downloading {size_str} of packages{count_str}…")
-                set_progress(max(self.progress_value, 60))
-            elif "need to get" in lo and "archive" in lo:
-                self.phase = 4
-                set_status("Downloading packages…")
-                set_progress(max(self.progress_value, 60))
-            return (
-                self.status_message if msg_changed else None,
-                self.progress_value if progress_changed else None,
-            )
-
-        if self.phase == 4:
-            m = re.match(r"Get:(\d+)\s+\S+\s+\S+\s+\S+\s+(\S+)", ln)
-            if m:
-                n = int(m.group(1))
-                pkg = m.group(2)
-                if self.total_packages > 0:
-                    frac = min(1.0, n / self.total_packages)
-                    set_progress(max(self.progress_value, int(60 + frac * 15)))
-                    set_status(f"Downloading {pkg}… ({n} / {self.total_packages})")
-                else:
-                    if self.progress_value < 74:
-                        set_progress(self.progress_value + 1)
-                    set_status(f"Downloading {pkg}…")
-
-            if ln.startswith("Selecting previously") or ln.startswith(
-                "Preparing to unpack"
-            ):
-                self.phase = 5
-                total_str = f" / {self.total_packages}" if self.total_packages else ""
-                set_status(f"Unpacking packages… (0{total_str})")
-                set_progress(max(self.progress_value, 75))
-            return (
-                self.status_message if msg_changed else None,
-                self.progress_value if progress_changed else None,
-            )
-
-        if self.phase == 5:
-            if ln.startswith("Unpacking "):
-                self.unpack_count += 1
-                pkg = ln.split()[1] if len(ln.split()) > 1 else ""
-                pkg = pkg.split(":")[0]
-                total_str = f" / {self.total_packages}" if self.total_packages else ""
-                set_status(f"Unpacking {pkg}… ({self.unpack_count}{total_str})")
-                if self.total_packages > 0:
-                    frac = min(1.0, self.unpack_count / self.total_packages)
-                    set_progress(max(self.progress_value, int(75 + frac * 13)))
-                else:
-                    if self.progress_value < 87:
-                        set_progress(self.progress_value + 1)
-
-            if ln.startswith("Setting up "):
-                self.phase = 6
-                pkg = ln.split()[2] if len(ln.split()) > 2 else ""
-                pkg = pkg.split(":")[0]
-                self.setup_count = 1
-                total_str = f" / {self.total_packages}" if self.total_packages else ""
-                set_status(f"Configuring {pkg}… (1{total_str})")
-                if self.total_packages > 0:
-                    frac = min(1.0, 1 / self.total_packages)
-                    set_progress(max(self.progress_value, int(88 + frac * 10)))
-                else:
-                    set_progress(max(self.progress_value, 88))
-            return (
-                self.status_message if msg_changed else None,
-                self.progress_value if progress_changed else None,
-            )
-
-        if self.phase == 6:
-            if ln.startswith("Setting up "):
-                self.setup_count += 1
-                pkg = ln.split()[2] if len(ln.split()) > 2 else ""
-                pkg = pkg.split(":")[0]
-                total_str = f" / {self.total_packages}" if self.total_packages else ""
-                set_status(f"Configuring {pkg}… ({self.setup_count}{total_str})")
-                if self.total_packages > 0:
-                    frac = min(1.0, self.setup_count / self.total_packages)
-                    set_progress(max(self.progress_value, int(88 + frac * 10)))
-                else:
-                    if self.progress_value < 97:
-                        set_progress(self.progress_value + 1)
-
-            if "processing triggers" in lo:
-                pkg_m = re.search(r"processing triggers for (\S+)", lo)
-                trigger_pkg = pkg_m.group(1) if pkg_m else ""
-                msg = (
-                    f"Running post-install triggers ({trigger_pkg})…"
-                    if trigger_pkg
-                    else "Running post-install triggers…"
-                )
-                set_status(msg)
-                set_progress(max(self.progress_value, 98))
-
-            return (
-                self.status_message if msg_changed else None,
-                self.progress_value if progress_changed else None,
-            )
-
-        return (None, None)
+        parser_name = self._PHASE_PARSERS.get(self.phase)
+        if parser_name is None:
+            return (None, None)
+        return getattr(self, parser_name)(ln, lo)
