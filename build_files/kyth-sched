@@ -29,6 +29,19 @@ import time
 import tomllib
 from pathlib import Path
 
+
+def _ensure_kyth_shared_path() -> None:
+    here = Path(__file__).resolve().parent
+    candidate = here / "kyth_shared"
+    if (candidate / "kyth_shared").is_dir():
+        path = str(candidate)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+
+
+_ensure_kyth_shared_path()
+from kyth_shared.gaming import check_gaming_reason  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
@@ -46,15 +59,7 @@ DEFAULT_CONFIG: dict = {
     "integrate_perf_mode": True,   # also call kyth-performance-mode on switch
 }
 
-# Process names that indicate an actual game/session even without GameMode.
-# Do not include launcher shells like steam, heroic, lutris, bottles, or
-# steamwebhelper here: users often leave them open all day, and treating them as
-# games pins the desktop in gaming scheduler/performance mode indefinitely.
-GAMING_PROCS = frozenset({
-    "gamescope",
-    "wine", "wine64", "wineserver", "wine-preloader",
-    "pressure-vessel-wrap",
-})
+
 
 
 # ---------------------------------------------------------------------------
@@ -139,47 +144,8 @@ def available_schedulers() -> list[str]:
 # Gaming detection
 # ---------------------------------------------------------------------------
 
-def gamemode_active() -> bool:
-    """Ask GameMode daemon whether any game is registered."""
-    ok, out = _run(
-        "busctl", "--user", "call",
-        "com.feralinteractive.GameMode",
-        "/com/feralinteractive/GameMode",
-        "com.feralinteractive.GameMode",
-        "QueryStatus", "i", "0",
-        timeout=3,
-    )
-    if ok and out:
-        try:
-            return int(out.split()[-1]) > 0
-        except (ValueError, IndexError):
-            pass
-    return False
-
-
-def proc_gaming_active() -> bool:
-    """Fallback: scan /proc for known gaming executables."""
-    try:
-        for entry in os.scandir("/proc"):
-            if not entry.name.isdigit():
-                continue
-            try:
-                exe = os.readlink(f"/proc/{entry.name}/exe")
-                if Path(exe).name.lower() in GAMING_PROCS:
-                    return True
-            except OSError:
-                pass
-    except OSError:
-        pass
-    return False
-
-
-def gamescope_session_active() -> bool:
-    return (_RUNTIME_DIR / "gamescope-session.lock").exists()
-
-
 def is_gaming() -> bool:
-    return gamescope_session_active() or gamemode_active() or proc_gaming_active()
+    return check_gaming_reason(uid=_UID) is not None
 
 
 # ---------------------------------------------------------------------------

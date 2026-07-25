@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 14:01:23 UTC
+- Last refreshed (UTC): 2026-07-25 14:02:22 UTC
 - Current branch: testing
-- HEAD commit: f83955d
-- Last commit title: Refactor: extract system services (bootc, process, registry, probe) from kyth-welcome to kyth_shared
-- Last commit date: 2026-07-25T10:00:33-04:00
+- HEAD commit: 41365a4
+- Last commit title: Refactor: Consolidate KDE/Plasma layout, pins and role presets configuration into kyth_shared.desktop
+- Last commit date: 2026-07-25T10:01:23-04:00
 - CI workflow files: 8
 - Build script files: 21
 

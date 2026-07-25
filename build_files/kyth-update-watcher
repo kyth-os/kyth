@@ -49,6 +49,7 @@ from kyth_shared.update_status import (  # noqa: E402
     read_update_snapshot,
     write_update_snapshot,
 )
+from kyth_shared.gaming import check_gaming_reason  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -163,52 +164,7 @@ def _active_uids() -> list[int]:
 def check_gaming(cfg: dict) -> str | None:
     if not cfg.get("skip_if_gaming", True):
         return None
-
-    # Check gamescope-session.lock for every active user
-    for uid in _active_uids():
-        lock = Path(f"/run/user/{uid}/gamescope-session.lock")
-        if lock.exists():
-            return f"gamescope session active (uid {uid})"
-
-    # Check GameMode via busctl for every active user session
-    for uid in _active_uids():
-        try:
-            env = {**os.environ, "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"}
-            r = subprocess.run(
-                [
-                    "busctl", "--user",
-                    "--address", f"unix:path=/run/user/{uid}/bus",
-                    "call",
-                    "com.feralinteractive.GameMode",
-                    "/com/feralinteractive/GameMode",
-                    "com.feralinteractive.GameMode",
-                    "QueryStatus", "i", "0",
-                ],
-                capture_output=True, text=True, timeout=3, env=env, check=False,
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                val = r.stdout.strip().split()[-1]
-                if int(val) > 0:
-                    return f"GameMode active (uid {uid})"
-        except Exception:
-            pass
-
-    # Scan /proc for gamescope or pressure-vessel (indicates game running)
-    gaming_exes = frozenset({"gamescope", "pressure-vessel-wrap"})
-    try:
-        for entry in os.scandir("/proc"):
-            if not entry.name.isdigit():
-                continue
-            try:
-                exe = Path(os.readlink(f"/proc/{entry.name}/exe")).name
-                if exe in gaming_exes:
-                    return "gaming process detected (/proc scan)"
-            except OSError:
-                pass
-    except OSError:
-        pass
-
-    return None
+    return check_gaming_reason(check_all_uids=True)
 
 
 def check_metered(cfg: dict) -> str | None:
