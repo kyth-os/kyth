@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 14:04:07 UTC
+- Last refreshed (UTC): 2026-07-25 14:09:31 UTC
 - Current branch: testing
-- HEAD commit: d325f82
-- Last commit title: Refactor: Standardize configuration management for daemons using kyth_shared.config
-- Last commit date: 2026-07-25T10:03:08-04:00
+- HEAD commit: 8df79a1
+- Last commit title: Refactor: Standardize daemon process & lifecycle management using BaseDaemon
+- Last commit date: 2026-07-25T10:04:07-04:00
 - CI workflow files: 8
 - Build script files: 21
 
