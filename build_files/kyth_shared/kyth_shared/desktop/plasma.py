@@ -4,7 +4,6 @@ Ported from bash helpers (kyth-apply-desktop-layout, kyth-refresh-taskbar-pins, 
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 from pathlib import Path

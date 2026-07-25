@@ -6,7 +6,6 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import unquote
 
 
 def prune_trash(days: int = 30) -> None:

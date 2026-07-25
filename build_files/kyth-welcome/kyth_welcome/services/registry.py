@@ -4,7 +4,8 @@ Pure stdlib — shared by System Hub update checks and kyth-update-watcher.
 """
 from __future__ import annotations
 
-from kyth_shared.system.registry import (
+# pylint: disable=unused-import
+from kyth_shared.system.registry import (  # noqa: F401 — re-export pure API for existing imports
     InspectRunner,
     UpdateCheckResult,
     booted_image_digest,
@@ -14,3 +15,4 @@ from kyth_shared.system.registry import (
     remote_digest_and_timestamp,
     remote_digest_for_ref,
 )
+# pylint: enable=unused-import

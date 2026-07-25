@@ -75,7 +75,6 @@ class BaseDaemon(ABC):
 
     def on_config_reloaded(self) -> None:
         """Hook for subclasses to handle configuration reloading."""
-        pass
 
     def setup_signals(self) -> None:
         """Register signal handlers for SIGHUP, SIGTERM, and SIGINT."""
@@ -98,16 +97,13 @@ class BaseDaemon(ABC):
     @abstractmethod
     def on_start(self) -> None:
         """Hook called exactly once before the main loop starts."""
-        pass
 
     @abstractmethod
     def poll(self) -> None:
         """Hook called periodically in the main loop."""
-        pass
 
     def on_stop(self) -> None:
         """Hook called exactly once after the main loop exits."""
-        pass
 
     def run(self) -> int:
         """Start the daemon execution flow. Returns process exit code."""

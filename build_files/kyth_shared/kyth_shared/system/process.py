@@ -142,7 +142,9 @@ def _get_disk_write_bytes() -> int:
         return 0
 
 
-from kyth_shared import _get_rx_bytes, _human_bytes, _human_bytes_pair, _parse_size_bytes
+# pylint: disable=unused-import
+from kyth_shared import _get_rx_bytes, _human_bytes, _human_bytes_pair, _parse_size_bytes  # noqa: F401 — re-export pure API for existing imports
+# pylint: enable=unused-import
 
 
 def _format_elapsed(seconds: int) -> str:

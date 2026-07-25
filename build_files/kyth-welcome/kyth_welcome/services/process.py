@@ -4,7 +4,8 @@ Pure stdlib utilities shared by System Hub services and CLI helpers. No Qt.
 """
 from __future__ import annotations
 
-from kyth_shared.system.process import (
+# pylint: disable=unused-import
+from kyth_shared.system.process import (  # noqa: F401 — re-export pure API for existing imports
     _BOOTC_CACHE_TTL,
     _DISK_BACKED_KEYS,
     _FLATPAK_CACHE_TTL,
@@ -23,4 +24,5 @@ from kyth_shared.system.process import (
     _strip_ansi,
     _with_idle_inhibit,
 )
-from kyth_shared import _get_rx_bytes, _human_bytes, _human_bytes_pair, _parse_size_bytes
+from kyth_shared import _get_rx_bytes, _human_bytes, _human_bytes_pair, _parse_size_bytes  # noqa: F401 — re-export pure API for existing imports
+# pylint: enable=unused-import

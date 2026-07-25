@@ -4,7 +4,8 @@ Pure stdlib — safe to import from CLI tools (update-watcher) without Qt.
 """
 from __future__ import annotations
 
-from kyth_shared.system.bootc import (
+# pylint: disable=unused-import
+from kyth_shared.system.bootc import (  # noqa: F401 — re-export pure API for existing imports
     REGISTRY,
     BranchCardView,
     BranchesView,
@@ -39,3 +40,4 @@ from kyth_shared.system.bootc import (
     update_availability_view,
     walk_strings,
 )
+# pylint: enable=unused-import

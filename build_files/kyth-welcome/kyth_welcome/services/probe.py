@@ -5,7 +5,8 @@ CLI tools read it before spawning ``bootc`` / ``flatpak`` / ``lspci``.
 """
 from __future__ import annotations
 
-from kyth_shared.system.probe import (
+# pylint: disable=unused-import
+from kyth_shared.system.probe import (  # noqa: F401 — re-export pure API for existing imports
     CACHE_VERSION,
     COLLECT_SECTIONS,
     DISK_TTL,
@@ -27,3 +28,4 @@ from kyth_shared.system.probe import (
     user_runtime_cache_path,
     write_cache_file,
 )
+# pylint: enable=unused-import
