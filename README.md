@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 00:48:29 UTC
+- Last refreshed (UTC): 2026-07-25 00:48:35 UTC
 - Current branch: testing
-- HEAD commit: 8dacb32
-- Last commit title: ci: fix missing checkout in supply-chain.yml publish job
-- Last commit date: 2026-07-24T20:48:16-04:00
+- HEAD commit: bd1fab7
+- Last commit title: Extract live-ISO OWE wifi script; unify Plymouth initramfs verification
+- Last commit date: 2026-07-24T20:48:29-04:00
 - CI workflow files: 8
 - Build script files: 21
 

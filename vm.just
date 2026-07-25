@@ -2,19 +2,37 @@
 # Imported by Justfile.
 import "_vars.just"
 
-# Run a virtual machine with the specified image type and configuration
+# Run a virtual machine with the specified image type. "live-iso" builds via
+# `just build-live-iso $tag` (only a source tag, no target image) and skips
+# TPM emulation and the "prefer newer" pull policy that the bootc-image-builder
+# outputs (qcow2/raw/iso) use; every other type shares one docker/qemux/qemu
+# invocation.
 [private]
-_run-vm $target_image $tag $type $config:
+_run-vm $target_image $tag $type:
     #!/usr/bin/bash
     set -eoux pipefail
 
-    image_file="output/${type}/disk.${type}"
-    if [[ $type == iso ]]; then
+    case "$type" in
+    live-iso)
+        image_file="output/live-iso/kyth-live-${tag}.iso"
+        boot_target="iso"
+        ;;
+    iso)
         image_file="output/bootiso/kyth-installer.iso"
-    fi
+        boot_target="iso"
+        ;;
+    *)
+        image_file="output/${type}/disk.${type}"
+        boot_target="$type"
+        ;;
+    esac
 
     if [[ ! -f "${image_file}" ]]; then
-        just "build-${type}" "$target_image" "$tag"
+        if [[ "$type" == live-iso ]]; then
+            just build-live-iso "$tag"
+        else
+            just "build-${type}" "$target_image" "$tag"
+        fi
     fi
 
     port=$(just _find-free-port 8006)
@@ -23,15 +41,21 @@ _run-vm $target_image $tag $type $config:
 
     run_args=()
     run_args+=(--rm --privileged)
-    run_args+=(--pull=newer)
+    if [[ "$type" == live-iso ]]; then
+        run_args+=(--pull missing)
+    else
+        run_args+=(--pull=newer)
+    fi
     run_args+=(--publish "127.0.0.1:${port}:8006")
     run_args+=(--env "CPU_CORES=4")
     run_args+=(--env "RAM_SIZE=8G")
     run_args+=(--env "DISK_SIZE=64G")
-    run_args+=(--env "TPM=Y")
+    if [[ "$type" != live-iso ]]; then
+        run_args+=(--env "TPM=Y")
+    fi
     run_args+=(--env "GPU=Y")
     run_args+=(--device=/dev/kvm)
-    run_args+=(--volume "${PWD}/${image_file}":"/boot.${type}")
+    run_args+=(--volume "${PWD}/${image_file}":"/boot.${boot_target}")
     run_args+=(docker.io/qemux/qemu)
 
     (sleep 30 && xdg-open http://localhost:"$port") &
@@ -39,43 +63,19 @@ _run-vm $target_image $tag $type $config:
 
 # Run a virtual machine from a QCOW2 image
 [group('Run Virtual Machine')]
-run-vm-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "qcow2" "disk_config/disk.toml")
+run-vm-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "qcow2")
 
 # Run a virtual machine from a RAW image
 [group('Run Virtual Machine')]
-run-vm-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "raw" "disk_config/disk.toml")
+run-vm-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "raw")
 
 # Run a virtual machine from an ISO
 [group('Run Virtual Machine')]
-run-vm-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "iso" "disk_config/iso.toml")
+run-vm-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "iso")
 
 # Boot the live ISO in a VM (BIOS, web UI at http://localhost:PORT).
 [group('Run Virtual Machine')]
-run-live-iso source_tag="latest":
-    #!/usr/bin/bash
-    set -eoux pipefail
-
-    image_file="output/live-iso/kyth-live-{{ source_tag }}.iso"
-    if [[ ! -f "${image_file}" ]]; then
-        just build-live-iso {{ source_tag }}
-    fi
-
-    port=$(just _find-free-port 8006)
-    echo "Using Port: ${port}"
-    echo "Connect to http://localhost:${port}"
-
-    (sleep 30 && xdg-open http://localhost:"$port") &
-    docker run \
-        --rm --privileged \
-        --pull missing \
-        --publish "127.0.0.1:${port}:8006" \
-        --env "CPU_CORES=4" \
-        --env "RAM_SIZE=8G" \
-        --env "DISK_SIZE=64G" \
-        --env "GPU=Y" \
-        --device=/dev/kvm \
-        --volume "${PWD}/${image_file}:/boot.iso" \
-        docker.io/qemux/qemu
+run-live-iso source_tag="latest": && (_run-vm "" source_tag "live-iso")
 
 # Boot the live ISO directly in native QEMU (SPICE window, better clipboard).
 [group('Run Virtual Machine')]
