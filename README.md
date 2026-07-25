@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 02:15:13 UTC
+- Last refreshed (UTC): 2026-07-25 13:52:32 UTC
 - Current branch: testing
-- HEAD commit: 3d8468f
-- Last commit title: Fix ISO build failure and app lookup test import path
-- Last commit date: 2026-07-24T22:04:51-04:00
+- HEAD commit: 6dbca73
+- Last commit title: Refactor KythOS infrastructure, decouple installer services, migrate user-polish to Python, and improve unit testing
+- Last commit date: 2026-07-25T09:50:59-04:00
 - CI workflow files: 8
 - Build script files: 21
 

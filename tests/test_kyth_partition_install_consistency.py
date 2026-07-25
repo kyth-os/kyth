@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PARTITION_SCRIPT = ROOT / "build_files" / "kyth-partition-install.sh"
-POST_ROUTES = ROOT / "build_files" / "kyth-installer" / "kyth_installer" / "post_routes.py"
+INSTALLER_SERVICE = ROOT / "build_files" / "kyth-installer" / "kyth_installer" / "services" / "installer_service.py"
 
 # (hostname, expected valid) — shared by both the bash CLI installer and the
 # graphical installer's regex.
@@ -26,7 +26,7 @@ HOSTNAME_CASES = [
 
 class HostnameValidationConsistencyTests(unittest.TestCase):
     """kyth-partition-install.sh (the bash dual-boot CLI installer) and
-    post_routes.py (the graphical installer) each validate hostnames with
+    installer_service.py (the graphical installer) each validate hostnames with
     their own regex literal — there is no shared source of truth across the
     bash/Python boundary. These tests catch the two silently drifting apart
     rather than asserting the literal strings stay byte-identical, since the
@@ -41,9 +41,9 @@ class HostnameValidationConsistencyTests(unittest.TestCase):
         return f"^{match.group(1)}$"
 
     def _python_pattern(self) -> str:
-        text = POST_ROUTES.read_text()
+        text = INSTALLER_SERVICE.read_text()
         match = re.search(r're\.fullmatch\(r"(.+?)", hostname\)', text)
-        self.assertIsNotNone(match, "could not locate hostname regex in post_routes.py")
+        self.assertIsNotNone(match, "could not locate hostname regex in installer_service.py")
         return match.group(1)
 
     def test_hostname_regexes_agree(self):

@@ -114,4 +114,5 @@ class _NetStatsTracker:
 
 
 from .apps import load_app_db, suggest_app
+from .system_probe import SystemProbe
 

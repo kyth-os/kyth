@@ -15,7 +15,86 @@ from .runner import spawn_command
 from .server import Handler, _Server
 
 
+def run_headless() -> None:
+    import argparse
+    import sys
+    from kyth_installer.context import InstallerContext, InstallLifecycle
+    from kyth_installer.services import InstallerService
+
+    parser = argparse.ArgumentParser(description="KythOS Installer Headless CLI")
+    parser.add_argument("--headless", action="store_true", required=True)
+    parser.add_argument("--disk", required=True, help="Target disk path (e.g. /dev/sda)")
+    parser.add_argument("--install-mode", default="wipe", choices=["wipe", "alongside", "resize_ntfs", "free_space", "manual"])
+    parser.add_argument("--username", required=True)
+    parser.add_argument("--password", required=True)
+    parser.add_argument("--hostname", default="kyth")
+    parser.add_argument("--timezone", default="UTC")
+    parser.add_argument("--kernel", default="fedora")
+    parser.add_argument("--mok-password", default="")
+    parser.add_argument("--confirm-backup", action="store_true")
+    parser.add_argument("--confirm-erase", action="store_true")
+    parser.add_argument("--confirm-current", action="store_true")
+
+    args, _ = parser.parse_known_args()
+
+    context = InstallerContext()
+    service = InstallerService(context)
+
+    body = {
+        "disk": args.disk,
+        "install_mode": args.install_mode,
+        "username": args.username,
+        "password": args.password,
+        "hostname": args.hostname,
+        "timezone": args.timezone,
+        "kernel": args.kernel,
+        "mok_password": args.mok_password,
+        "confirm_backup": args.confirm_backup,
+        "confirm_erase": args.confirm_erase,
+        "confirm_current": args.confirm_current,
+    }
+
+    res = service.start_install(body)
+    if not res.get("started"):
+        print(f"Error: {res.get('message')}")
+        sys.exit(1)
+
+    print("Installation started...")
+    last_idx = 0
+    while True:
+        with context.events.condition:
+            context.events.condition.wait_for(
+                lambda: len(context.events.events) > last_idx or context.lifecycle in (InstallLifecycle.DONE, InstallLifecycle.FAILED),
+                timeout=1.0
+            )
+            events = list(context.events.events)
+        
+        while last_idx < len(events):
+            evt = events[last_idx]
+            last_idx += 1
+            if evt.get("type") == "log":
+                print(evt.get("text"))
+            elif evt.get("type") == "progress":
+                print(f"Progress: {evt.get('value')}%")
+            elif evt.get("type") == "error":
+                print(f"Error: {evt.get('message')}")
+                sys.exit(1)
+            elif evt.get("type") == "done":
+                print(f"Installation finished successfully. MOK state: {evt.get('mok_state')}")
+                sys.exit(0)
+
+        if context.lifecycle == InstallLifecycle.DONE:
+            sys.exit(0)
+        if context.lifecycle == InstallLifecycle.FAILED:
+            sys.exit(1)
+
+
 def main() -> None:
+    import sys
+    if "--headless" in sys.argv:
+        run_headless()
+        return
+
     config._bootstrap_token = secrets.token_urlsafe(32)
 
     server = _Server(("127.0.0.1", PORT), Handler)

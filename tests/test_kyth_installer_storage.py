@@ -18,7 +18,6 @@ from kyth_installer import (  # noqa: E402
     install,
     partition_ops,
     plan,
-    post_routes,
     runner as command_runner,
     server,
     system,
@@ -770,8 +769,8 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_backup": True,
             "confirm_erase": False,
         })
-        with patch.object(post_routes, "list_disks", return_value=disks), \
-             patch.object(post_routes, "_validate_storage_intent"), \
+        with patch.object(disk, "list_disks", return_value=disks), \
+             patch.object(plan, "_validate_storage_intent"), \
              patch.object(install, "_run_install") as run_install:
             handler.do_POST()
 
@@ -792,9 +791,9 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_backup": True,
             "confirm_erase": True,
         })
-        with patch.object(post_routes, "list_disks", return_value=disks), \
-             patch.object(post_routes, "_validate_storage_intent"), \
-             patch.object(post_routes, "list_timezones", return_value=["UTC"]), \
+        with patch.object(disk, "list_disks", return_value=disks), \
+             patch.object(plan, "_validate_storage_intent"), \
+             patch.object(system, "list_timezones", return_value=["UTC"]), \
              patch.object(install, "_run_install"):
             handler.do_POST()
 
@@ -819,9 +818,9 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_backup": True,
             "confirm_erase": True,
         })
-        with patch.object(post_routes, "list_disks", return_value=disks), \
-             patch.object(post_routes, "_validate_storage_intent"), \
-             patch.object(post_routes, "list_timezones", return_value=["UTC"]), \
+        with patch.object(disk, "list_disks", return_value=disks), \
+             patch.object(plan, "_validate_storage_intent"), \
+             patch.object(system, "list_timezones", return_value=["UTC"]), \
              patch.object(install, "_run_install"):
             handler.do_POST()
 

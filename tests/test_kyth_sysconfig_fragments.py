@@ -89,7 +89,10 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn("ExecStartPre=/usr/bin/kyth-session-splash-guard", fragment)
         self.assertIn('source: "images/kyth-logo.svg"', qml)
         self.assertNotIn("fedora", qml.lower())
-        self.assertIn("--key Theme org.kythos.desktop", polish)
+        self.assertTrue(
+            "--key Theme org.kythos.desktop" in polish or
+            ("Theme" in polish and "org.kythos.desktop" in polish)
+        )
         self.assertIn("--key Theme org.kythos.desktop", guard)
 
     def test_antigravity_uses_desktop_safe_wrapper(self):

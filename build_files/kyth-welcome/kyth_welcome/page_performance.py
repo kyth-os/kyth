@@ -6,7 +6,6 @@ from .services.sched import (
     read_sched_status,
     set_sched_daemon_enabled,
 )
-from .services.telem import recent_sessions
 from .qt import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
 )
@@ -18,6 +17,7 @@ from .widgets import (
 class PerformancePage(Page):
     def __init__(self):
         super().__init__()
+        self._telemetry_worker = None
         self._page_header(
             "Gaming",
             "Scheduler & Performance",
@@ -147,8 +147,16 @@ class PerformancePage(Page):
         self._perf_auto_toggle.blockSignals(False)
 
     def _refresh_session_history(self) -> None:
-        rows = recent_sessions(limit=15)
+        if hasattr(self, "_telemetry_worker") and self._telemetry_worker is not None:
+            if self._telemetry_worker.isRunning():
+                return
 
+        from .services.workers import TelemetryWorker
+        self._telemetry_worker = TelemetryWorker(limit=15, parent=self)
+        self._telemetry_worker.loaded.connect(self._on_sessions_loaded)
+        self._telemetry_worker.start()
+
+    def _on_sessions_loaded(self, rows: list) -> None:
         while self._perf_sessions_layout.count():
             item = self._perf_sessions_layout.takeAt(0)
             if item.widget():
