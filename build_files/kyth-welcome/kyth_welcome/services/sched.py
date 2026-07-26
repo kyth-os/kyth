@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import subprocess
+
+from kyth_welcome.services.command import run_sync
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +32,7 @@ def read_sched_status() -> dict[str, Any]:
 
 def list_schedulers() -> list[str]:
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["kyth-scx", "list"],
             capture_output=True, text=True, timeout=5, check=False,
         )
@@ -51,7 +53,7 @@ def list_schedulers() -> list[str]:
 
 def is_sched_daemon_active() -> bool:
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["systemctl", "--user", "is-active", "kyth-sched.service"],
             capture_output=True, text=True, timeout=3, check=False,
         )

@@ -6,7 +6,7 @@ import os
 import re
 import shutil
 import sqlite3
-import subprocess
+from kyth_welcome.services.command import run_sync
 import tempfile
 
 from .storage import windows_folder_dest
@@ -302,7 +302,7 @@ def copy_windows_fonts(font_dirs: list[str]) -> tuple[int, int]:
                 copied += 1
             except OSError:
                 skipped += 1
-    subprocess.run(["fc-cache", "-f", dest], capture_output=True, timeout=120, check=False)
+    run_sync(["fc-cache", "-f", dest], capture_output=True, timeout=120, check=False)
     return copied, skipped
 
 

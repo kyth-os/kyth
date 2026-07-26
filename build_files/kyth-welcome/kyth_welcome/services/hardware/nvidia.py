@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+from kyth_welcome.services.command import run_sync
 from dataclasses import dataclass
 
 from .types import HardwareProbe
@@ -12,7 +12,7 @@ from ..process import _probe_cached
 def _detect_nvidia() -> bool:
     def fetch() -> bool:
         try:
-            r = subprocess.run(["lspci"], capture_output=True, text=True, timeout=5, check=False)
+            r = run_sync(["lspci"], capture_output=True, text=True, timeout=5, check=False)
             return "nvidia" in r.stdout.lower()
         except Exception:
             return False
@@ -21,7 +21,7 @@ def _detect_nvidia() -> bool:
 
 def _nvidia_module_loaded() -> bool:
     try:
-        r = subprocess.run(["lsmod"], capture_output=True, text=True, timeout=5, check=False)
+        r = run_sync(["lsmod"], capture_output=True, text=True, timeout=5, check=False)
         return "nvidia" in r.stdout.lower()
     except Exception:
         return False
@@ -29,7 +29,7 @@ def _nvidia_module_loaded() -> bool:
 
 def _akmod_nvidia_built() -> bool:
     try:
-        r = subprocess.run(["modinfo", "nvidia"], capture_output=True, text=True, timeout=5, check=False)
+        r = run_sync(["modinfo", "nvidia"], capture_output=True, text=True, timeout=5, check=False)
         return r.returncode == 0
     except Exception:
         return False
@@ -37,7 +37,7 @@ def _akmod_nvidia_built() -> bool:
 
 def _akmod_nvidia_installed() -> bool:
     try:
-        r = subprocess.run(["rpm", "-q", "akmod-nvidia"], capture_output=True, text=True, timeout=5, check=False)
+        r = run_sync(["rpm", "-q", "akmod-nvidia"], capture_output=True, text=True, timeout=5, check=False)
         return r.returncode == 0
     except Exception:
         return False
@@ -47,7 +47,7 @@ def _hw_setup_service_state() -> str:
     """Returns the systemd active state of kyth-hw-setup.service.
     Possible values: 'activating' (running), 'active' (done), 'failed', 'inactive', or ''."""
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["systemctl", "is-active", "kyth-hw-setup.service"],
             capture_output=True, text=True, timeout=5, check=False,
         )

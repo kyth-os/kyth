@@ -38,6 +38,10 @@ class PythonPackagingTests(unittest.TestCase):
             "kyth_shared.smoke_check:main",
         )
         self.assertEqual(
+            shared["project"]["scripts"]["kyth-setup-transfer"],
+            "kyth_shared.setup_transfer:main",
+        )
+        self.assertEqual(
             installer["project"]["scripts"]["kyth-installer"],
             "kyth_installer.app:main",
         )
@@ -103,6 +107,16 @@ class PythonPackagingTests(unittest.TestCase):
                 direct_callers.append(str(module.relative_to(shared_root)))
 
         self.assertEqual(direct_callers, ["accounts.py"])
+
+    def test_welcome_bounded_commands_use_service_adapter(self):
+        welcome_root = ROOT / "build_files/kyth-welcome/kyth_welcome"
+        direct_callers = []
+        for module in welcome_root.rglob("*.py"):
+            text = module.read_text()
+            if "subprocess.run(" in text or "subprocess.check_output(" in text:
+                direct_callers.append(str(module.relative_to(welcome_root)))
+
+        self.assertEqual(direct_callers, [])
 
 
 if __name__ == "__main__":

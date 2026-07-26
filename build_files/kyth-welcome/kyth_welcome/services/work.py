@@ -7,7 +7,7 @@ from __future__ import annotations
 import glob
 import os
 import shlex
-import subprocess
+from kyth_welcome.services.command import run_sync
 
 from .gaming import _find_ntfs_drives
 from .browser_apps import chromium_app_window_command
@@ -129,7 +129,7 @@ def convert_pst(path: str) -> tuple[bool, str]:
     dest = os.path.join(PST_IMPORT_DIR, name)
     try:
         os.makedirs(dest, exist_ok=True)
-        r = subprocess.run(
+        r = run_sync(
             ["readpst", "-r", "-o", dest, path],
             capture_output=True, text=True, timeout=3600, check=False,
         )

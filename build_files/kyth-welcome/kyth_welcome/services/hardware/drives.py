@@ -5,7 +5,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
+from kyth_welcome.services.command import run_sync
 
 from ..process import _command_stdout, _probe_cached
 
@@ -13,7 +13,7 @@ from ..process import _command_stdout, _probe_cached
 def _find_ntfs_drives() -> list[dict]:
     """Return other system NTFS and locked BitLocker partitions visible to lsblk."""
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["lsblk", "--json", "--output", "NAME,FSTYPE,SIZE,LABEL,MOUNTPOINT,PATH"],
             capture_output=True, text=True, timeout=10, check=False,
         )

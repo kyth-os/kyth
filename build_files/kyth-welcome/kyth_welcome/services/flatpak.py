@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
-import subprocess
+from kyth_welcome.services.command import run_sync
 
 from .process import _FLATPAK_CACHE_TTL, _probe_cached, _run_command
 
@@ -37,7 +37,7 @@ def list_installed_apps() -> list[dict[str, str]]:
         return []
     env = {**os.environ, "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"}
     try:
-        result = subprocess.run(
+        result = run_sync(
             ["flatpak", "list", "--app", "--columns=application,name,origin,installation"],
             capture_output=True,
             text=True,

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
+from kyth_welcome.services.command import run_sync
 
 from kyth_shared.system.gpu import lspci_gpu_lines
 
@@ -18,7 +18,7 @@ KDE_PORTAL_UNITS = ("plasma-xdg-desktop-portal-kde.service", "xdg-desktop-portal
 
 def run_text(cmd: list[str], timeout: int = 5) -> tuple[int, str, str]:
     try:
-        result = subprocess.run(
+        result = run_sync(
             cmd, capture_output=True, text=True, timeout=timeout, check=False,
         )
         return result.returncode, result.stdout.strip(), result.stderr.strip()

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
+from kyth_welcome.services.command import run_sync
 
 _logger = logging.getLogger(__name__)
 
@@ -13,11 +13,11 @@ def _probe_windows_partitions() -> list[dict]:
     Returns list of dicts safe to call from a non-main thread."""
     import json as _json
     try:
-        raw = subprocess.check_output(
+        result = run_sync(
             ["lsblk", "--json", "-o", "NAME,FSTYPE,LABEL,MOUNTPOINTS,SIZE,PATH"],
-            text=True, timeout=8,
+            capture_output=True, text=True, timeout=8, check=True,
         )
-        data = _json.loads(raw)
+        data = _json.loads(result.stdout)
     except Exception:
         return []
 
@@ -70,7 +70,7 @@ def _probe_windows_partitions() -> list[dict]:
         is_dirty = False
         is_hibernated = False
         try:
-            r = subprocess.run(
+            r = run_sync(
                 ["ntfsfix", "--no-action", path],
                 capture_output=True, text=True, timeout=8, check=False,
             )

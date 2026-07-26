@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
+from kyth_welcome.services.command import run_sync
 import time
 
 # __KYTH_GENERATED_IMPORTS__
@@ -186,7 +186,7 @@ def _set_session_inhibit(owner: object, reason: str | None = None) -> None:
             str(current),
         ]
         try:
-            subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
+            run_sync(cmd, capture_output=True, text=True, timeout=5, check=False)
         finally:
             owner._screen_inhibit_cookie = None
         return
@@ -202,7 +202,7 @@ def _set_session_inhibit(owner: object, reason: str | None = None) -> None:
         "kyth-welcome", reason,
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
+        result = run_sync(cmd, capture_output=True, text=True, timeout=5, check=False)
     except OSError:
         return
 

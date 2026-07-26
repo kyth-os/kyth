@@ -3,6 +3,8 @@ import re
 import shlex
 import shutil
 import subprocess
+
+from kyth_welcome.services.command import run_sync
 from datetime import datetime
 
 from .bootc import (
@@ -371,7 +373,7 @@ def collect_signin_status() -> list[tuple[str, str, str]]:
     user = getpass.getuser()
 
     try:
-        result = subprocess.run(
+        result = run_sync(
             ["fprintd-list", user], capture_output=True, text=True, timeout=12, check=False,
         )
         detail = (result.stdout + result.stderr).strip()

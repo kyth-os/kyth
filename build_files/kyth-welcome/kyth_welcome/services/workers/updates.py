@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
+from kyth_welcome.services.command import run_sync
 
 from kyth_shared.update_status import read_update_snapshot
 
@@ -73,7 +73,7 @@ class ChangelogWorker(TrackedThread):
         if "@sha256:" in ref and ref in _BOOTED_ANNOTATIONS_CACHE:
             return _BOOTED_ANNOTATIONS_CACHE[ref]
         try:
-            r = subprocess.run(
+            r = run_sync(
                 ["skopeo", "inspect", "--raw", "--no-creds", f"docker://{ref}"],
                 capture_output=True, timeout=30, check=False,
             )

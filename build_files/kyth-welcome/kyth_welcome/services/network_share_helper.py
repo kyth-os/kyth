@@ -5,6 +5,8 @@ import json
 import os
 import re
 import subprocess
+
+from kyth_welcome.services.command import run_sync
 import sys
 import tempfile
 from pathlib import Path
@@ -40,7 +42,7 @@ def _mount_point(value: object) -> str:
 
 
 def _unit_name(mount_point: str) -> str:
-    result = subprocess.run(
+    result = run_sync(
         ["systemd-escape", "--path", "--suffix=mount", mount_point],
         capture_output=True,
         text=True,
@@ -149,13 +151,13 @@ def add_share(share: dict) -> None:
     Path(mount_point).mkdir(parents=True, exist_ok=True)
     _atomic_write(credential_path, credentials, 0o600)
     _atomic_write(unit_path, unit_text, 0o644)
-    subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=30)
+    run_sync(["systemctl", "daemon-reload"], check=True, timeout=30)
     if auto_mount:
-        subprocess.run(["systemctl", "enable", unit], check=True, timeout=30)
+        run_sync(["systemctl", "enable", unit], check=True, timeout=30)
     else:
-        subprocess.run(["systemctl", "disable", unit], check=False, timeout=30)
+        run_sync(["systemctl", "disable", unit], check=False, timeout=30)
     if mount_now:
-        subprocess.run(["systemctl", "start", unit], check=True, timeout=45)
+        run_sync(["systemctl", "start", unit], check=True, timeout=45)
 
 
 def remove_share(share: dict) -> None:
@@ -164,15 +166,15 @@ def remove_share(share: dict) -> None:
         raise ValueError("name contains unsupported characters")
     mount_point = _mount_point(share.get("mount_point"))
     unit = _unit_name(mount_point)
-    subprocess.run(["systemctl", "stop", unit], check=False, timeout=30)
-    subprocess.run(["systemctl", "disable", unit], check=False, timeout=30)
+    run_sync(["systemctl", "stop", unit], check=False, timeout=30)
+    run_sync(["systemctl", "disable", unit], check=False, timeout=30)
     unit_path = UNIT_DIR / unit
     credential_path = CREDS_DIR / name
     if unit_path.is_symlink() or credential_path.is_symlink():
         raise ValueError("refusing to remove a symlinked share artifact")
     unit_path.unlink(missing_ok=True)
     credential_path.unlink(missing_ok=True)
-    subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=30)
+    run_sync(["systemctl", "daemon-reload"], check=True, timeout=30)
 
 
 def main(argv: list[str] | None = None) -> int:

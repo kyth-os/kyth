@@ -2,7 +2,7 @@ import logging
 import os
 import re
 import shutil
-import subprocess
+from kyth_welcome.services.command import run_sync
 from dataclasses import dataclass
 
 from ..core_base import _CLOUD_SYNC_CONFIG, _SMB_CONFIG
@@ -54,7 +54,7 @@ def _save_smb_config(shares: list[dict]) -> None:
 def _systemd_escape_mount_path(path: str) -> str:
     """Return the systemd .mount unit filename for a given absolute mount path."""
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["systemd-escape", "--path", "--suffix=mount", path],
             capture_output=True, text=True, timeout=5, check=False,
         )
@@ -72,7 +72,7 @@ def _is_cifs_available() -> bool:
 
 def _is_mounted(path: str) -> bool:
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["findmnt", "--noheadings", "--target", path],
             capture_output=True, text=True, timeout=5, check=False,
         )

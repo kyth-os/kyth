@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 [project.scripts]
 kyth-ai-dev = "kyth_shared.ai_dev:main"
 kyth-smoke-check = "kyth_shared.smoke_check:main"
+kyth-setup-transfer = "kyth_shared.setup_transfer:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

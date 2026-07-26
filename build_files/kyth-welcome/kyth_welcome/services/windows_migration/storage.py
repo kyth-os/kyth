@@ -8,6 +8,8 @@ import os
 import re
 import subprocess
 
+from kyth_welcome.services.command import run_sync
+
 from ..process import _command_stdout
 
 # The source system stores profile folders under their English names on disk
@@ -30,7 +32,7 @@ def unlock_bitlocker_drive(dev: str, key: str) -> tuple[bool, str]:
     recovery key as the passphrase. Runs on a worker thread (polkit may prompt).
     """
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["udisksctl", "unlock", "-b", dev, "--key-file", "/dev/stdin"],
             input=key, capture_output=True, text=True, timeout=180, check=False,
         )
@@ -43,7 +45,7 @@ def unlock_bitlocker_drive(dev: str, key: str) -> tuple[bool, str]:
     if not m:
         return True, "Unlocked — rescan to mount the drive."
     try:
-        rm = subprocess.run(
+        rm = run_sync(
             ["udisksctl", "mount", "-b", m.group(1)],
             capture_output=True, text=True, timeout=60, check=False,
         )
@@ -79,11 +81,12 @@ def folder_sizes_calc(paths: dict[str, str]):
         sizes: dict[str, int] = {}
         for name, path in paths.items():
             try:
-                out = subprocess.check_output(
-                    ["du", "-sb", path], text=True, timeout=600,
+                result = run_sync(
+                    ["du", "-sb", path], text=True, timeout=600, check=True,
+                    stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
                 )
-                sizes[name] = int(out.split()[0])
+                sizes[name] = int(result.stdout.split()[0])
             except Exception:
                 sizes[name] = -1
         return sizes
