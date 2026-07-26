@@ -1,12 +1,12 @@
 """Shared utilities for managing system storage drives and NTFS compatibility links."""
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
 
 from ..commands import run as run_command
+from ..runtime_output import parse_ntfs_devices
 import time
 from pathlib import Path
 
@@ -20,23 +20,9 @@ def get_ntfs_devices() -> list[dict]:
             text=True,
             check=True,
         )
-        data = json.loads(res.stdout)
     except Exception:
         return []
-
-    devices = []
-
-    def walk(devs: list[dict]) -> None:
-        for d in devs:
-            fstype = d.get("fstype")
-            if fstype and "ntfs" in fstype.lower():
-                devices.append(d)
-            children = d.get("children")
-            if children:
-                walk(children)
-
-    walk(data.get("blockdevices", []))
-    return devices
+    return parse_ntfs_devices(res.stdout)
 
 
 def repair_ntfs_drives() -> None:

@@ -6,6 +6,7 @@ import logging
 from kyth_welcome.services.command import run_sync
 
 from kyth_shared.update_status import read_update_snapshot
+from kyth_shared.runtime_output import count_fwupd_updates
 
 from ...qt import Signal
 from ..bootc import REGISTRY, _bootc_image_digest, _bootc_status_data, _current_branch
@@ -76,7 +77,14 @@ class FirmwareCheckWorker(TrackedThread):
                     )
                 )
                 return
-            count = max(1, updates.stdout.count("Device ID:"))
+            count = count_fwupd_updates(updates.stdout)
+            if count == 0:
+                self.result.emit(
+                    UpdateProbeResult.error(
+                        "firmware", "fwupdmgr output did not contain a recognizable update.",
+                    )
+                )
+                return
             self.result.emit(
                 UpdateProbeResult.success("firmware", count, detail=updates.stdout.strip())
             )

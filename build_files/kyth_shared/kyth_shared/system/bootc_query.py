@@ -5,10 +5,10 @@ policy belong in :mod:`bootc_policy`.
 """
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime
 from typing import Any
+from kyth_shared.runtime_output import parse_json_object
 
 from kyth_shared.system.process import (
     _BOOTC_CACHE_TTL,
@@ -60,10 +60,9 @@ def fetch_status_data() -> dict | None:
         result = _run_command(cmd, timeout=10)
         if result is None or result.returncode != 0 or not result.stdout.strip():
             continue
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError:
-            continue
+        parsed = parse_json_object(result.stdout)
+        if parsed is not None:
+            return parsed
     return None
 
 

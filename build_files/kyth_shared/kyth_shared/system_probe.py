@@ -7,6 +7,7 @@ import shutil
 import subprocess
 
 from .commands import run as run_command
+from .runtime_output import parse_secure_boot_state, parse_systemd_state
 
 
 class SystemProbe:
@@ -22,7 +23,7 @@ class SystemProbe:
                 text=True,
                 timeout=5
             )
-            return res.stdout.strip()
+            return parse_systemd_state(res.stdout)
         except Exception:
             return "inactive"
 
@@ -50,7 +51,7 @@ class SystemProbe:
                 text=True,
                 timeout=5
             )
-            return res.stdout.strip().lower()
+            return parse_secure_boot_state(res.stdout)
         except Exception:
             return ""
 

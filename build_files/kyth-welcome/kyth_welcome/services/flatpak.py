@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 from kyth_welcome.services.command import run_sync
+from kyth_shared.runtime_output import parse_flatpak_apps
 
 from .process import _FLATPAK_CACHE_TTL, _probe_cached, _run_command
 
@@ -49,23 +50,7 @@ def list_installed_apps() -> list[dict[str, str]]:
         return []
     if result.returncode != 0:
         return []
-    apps: list[dict[str, str]] = []
-    for line in result.stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 4:
-            continue
-        app_id, name, origin, installation = (part.strip() for part in parts[:4])
-        if app_id:
-            apps.append(
-                {
-                    "kind": "flatpak",
-                    "app_id": app_id,
-                    "name": name or app_id,
-                    "origin": origin or "unknown",
-                    "installation": installation or "system",
-                }
-            )
-    return apps
+    return parse_flatpak_apps(result.stdout)
 
 
 def pending_update_count() -> int | None:

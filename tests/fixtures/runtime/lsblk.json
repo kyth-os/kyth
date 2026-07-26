@@ -1,0 +1,13 @@
+{
+  "blockdevices": [
+    {
+      "name": "nvme0n1",
+      "fstype": null,
+      "children": [
+        {"name": "nvme0n1p1", "fstype": "vfat", "mountpoint": "/boot/efi"},
+        {"name": "nvme0n1p3", "fstype": "btrfs", "mountpoint": "/"},
+        {"name": "nvme0n1p4", "fstype": "ntfs3", "label": "Games", "uuid": "ABCD-EF01"}
+      ]
+    }
+  ]
+}
