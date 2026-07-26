@@ -37,7 +37,11 @@ class NodeToolingTests(unittest.TestCase):
 
     def test_headroom_is_isolated_to_the_ai_dev_environment(self):
         self.assertNotIn("/usr/bin/headroom", self.package_script)
-        self.assertIn("uv tool install --upgrade headroom", self.ai_dev_module)
+        self.assertIn(
+            'uv tool install --python 3.13 --upgrade "headroom-ai[all]"',
+            self.ai_dev_module,
+        )
+        self.assertIn('"rtk": "RTK CLI"', self.ai_dev_module)
         self.assertNotIn("pip install --user --upgrade pipx", self.ai_dev_module)
 
 

@@ -44,7 +44,7 @@ else
 fi
 sudo npm install -g @anthropic-ai/claude-code @openai/codex || true
 if command -v uv >/dev/null 2>&1; then
-  uv tool install --upgrade headroom || echo "WARNING: Headroom installation failed; continuing without it."
+  uv tool install --python 3.13 --upgrade "headroom-ai[all]" || echo "WARNING: Headroom installation failed; continuing without it."
 else
   echo "WARNING: uv is unavailable; continuing without Headroom."
 fi
@@ -169,7 +169,7 @@ class AiDev:
         print(f"\nDeveloper & AI environment ({self.config.box}) is ready.")
         print("Exported to host: VS Code, Antigravity, Node.js, Azure CLI, GitHub CLI, "
               "Claude Code, Codex CLI, Helix, Zellij, ShellCheck, shfmt.")
-        print("Optional Distrobox tool in the shared user PATH: Headroom.")
+        print("Optional Distrobox tools in the shared user PATH: Headroom and RTK.")
         print(f"Enter environment manually with: distrobox enter {self.config.box}")
 
     def status(self) -> None:
@@ -183,7 +183,8 @@ class AiDev:
         print("Box: present")
         labels = {
             "code": "VS Code", "antigravity": "Google Antigravity IDE",
-            "node": "Node.js", "headroom": "Headroom CLI", "hx": "Helix Editor",
+            "node": "Node.js", "headroom": "Headroom CLI", "rtk": "RTK CLI",
+            "hx": "Helix Editor",
             "zellij": "Zellij Multiplexer", "gh": "GitHub CLI",
             "claude": "Claude Code", "codex": "Codex CLI", "ollama": "Ollama",
         }
