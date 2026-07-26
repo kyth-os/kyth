@@ -66,6 +66,14 @@ class ShippedCommandContracts(unittest.TestCase):
 
 
 class BuildAssemblyContracts(unittest.TestCase):
+    def test_packaged_installer_is_the_only_installation_entry_point(self):
+        self.assertFalse((BUILD_FILES / "kyth-install.sh").exists())
+        self.assertFalse((BUILD_FILES / "kyth-manual-install.sh").exists())
+        installer = BUILD_FILES / "kyth-installer/pyproject.toml"
+        launcher = BUILD_FILES / "kyth-launch-installer"
+        self.assertIn('kyth-installer = "kyth_installer.app:main"', installer.read_text())
+        self.assertIn("/usr/bin/kyth-installer", launcher.read_text())
+
     def test_installer_web_assets_referenced_by_html_and_server_exist(self):
         webui = BUILD_FILES / "kyth-installer/kyth_installer/webui"
         html = (webui / "index.html").read_text(encoding="utf-8")
