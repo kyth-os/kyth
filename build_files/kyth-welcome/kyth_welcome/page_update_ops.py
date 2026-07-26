@@ -12,7 +12,7 @@ from .services.launch import reboot
 from .services.runtime import Worker, _finish_worker
 from .services.privileged import bootc_action
 from .services.updates import (
-    UpdateOperationController, failed_operation_label, full_update_operation,
+    UpdateOperationController, full_update_operation,
     image_update_operation, rollback_operation,
 )
 from .core_base import _current_branch
@@ -398,10 +398,14 @@ class _UpdateOpsMixin:
         _set_session_inhibit(self, None)
         self._update_activity()
         self._set_buttons_enabled(True)
+        completion = self._operation.completion(
+            code,
+            staged=code == 0 and _has_staged_update(),
+        )
 
         if code == Worker.CANCELLED:
-            self._status_lbl.setText("Update cancelled. The running operation was stopped.")
-            self._status_lbl.setObjectName("status-warn")
+            self._status_lbl.setText(completion.message)
+            self._status_lbl.setObjectName(completion.style)
             self._log.append("\nCancelled. You can start the update again when ready.")
             self._check_for_update(force_refresh=True)
         elif code == 0:
@@ -444,9 +448,8 @@ class _UpdateOpsMixin:
                 self._log.append("\nNo OS image update was staged. System is current.")
                 self._check_for_update(force_refresh=True)
         else:
-            label = failed_operation_label(self._mode)
-            self._status_lbl.setText(f"{label} failed (exit code {code}).")
-            self._status_lbl.setObjectName("status-err")
+            self._status_lbl.setText(completion.message)
+            self._status_lbl.setObjectName(completion.style)
 
         _restyle(self._status_lbl)
         self._refresh_summary()

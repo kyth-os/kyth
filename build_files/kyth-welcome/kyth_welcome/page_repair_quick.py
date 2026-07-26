@@ -9,6 +9,7 @@ from .services.repair import (
     enable_clipboard_history,
     force_deep_sleep,
     set_exe_mime_defaults,
+    quick_fix_completion,
     wakeup_sources_text,
 )
 from .actions import _install_flatpak_inline
@@ -137,12 +138,11 @@ class _QuickFixMixin:
         _finish_worker(self)
         self._confirm_edit.setEnabled(True)
         self._on_confirm_text(self._confirm_edit.text())
-        if code == 0:
-            self._status_lbl.setText(f"{label} complete.")
-            self._status_lbl.setObjectName("status-ok")
+        view = quick_fix_completion(label, code)
+        self._status_lbl.setText(view.message)
+        self._status_lbl.setObjectName(view.style)
+        if view.state == "succeeded":
             self._log.append("\nDone.")
-        else:
-            self._status_lbl.setText(f"{label} failed (exit code {code}).")
-            self._status_lbl.setObjectName("status-err")
+        if view.expand_log:
             _set_log_panel(self._log_toggle, self._log, True)
         _restyle(self._status_lbl)

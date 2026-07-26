@@ -228,3 +228,70 @@ class UpdateOperationController:
             return 0
         timestamp = time.monotonic() if now is None else now
         return max(0, int(timestamp - self.started_at))
+
+    def completion(self, code: int, *, staged: bool = False) -> "OperationView":
+        """Translate process completion into a UI-independent result."""
+        if code == 130:
+            return OperationView(
+                "cancelled",
+                "Update cancelled. The running operation was stopped.",
+                "status-warn",
+                False,
+            )
+        if code != 0:
+            label = failed_operation_label(self.mode)
+            return OperationView(
+                "failed",
+                f"{label} failed (exit code {code}).",
+                "status-err",
+                False,
+            )
+        if self.mode == "firmware":
+            return OperationView(
+                "succeeded",
+                "Firmware updates queued — reboot to flash.",
+                "status-ok",
+                True,
+            )
+        if self.mode == "rollback":
+            return OperationView(
+                "succeeded",
+                "Rollback staged — restart to return to the previous system.",
+                "status-warn",
+                True,
+            )
+        if self.mode == "switch":
+            return OperationView(
+                "succeeded",
+                "Branch staged — restart to apply the new channel.",
+                "status-ok",
+                True,
+            )
+        if staged:
+            return OperationView(
+                "succeeded",
+                "Update staged — restart when you're ready to apply it.",
+                "status-ok",
+                True,
+            )
+        if self.mode == "full-update":
+            return OperationView(
+                "succeeded",
+                "Update complete — everything is up to date.",
+                "status-ok",
+                False,
+            )
+        return OperationView(
+            "succeeded",
+            "Already on the latest deployment — no image update was staged.",
+            "status-ok",
+            False,
+        )
+
+
+@dataclass(frozen=True)
+class OperationView:
+    state: str
+    message: str
+    style: str
+    reboot_visible: bool

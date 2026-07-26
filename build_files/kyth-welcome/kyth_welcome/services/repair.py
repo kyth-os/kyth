@@ -202,3 +202,23 @@ def printer_setup_commands() -> list[list[str]]:
         elif binary == "systemsettings" and shutil.which("systemsettings"):
             cmds.append(["systemsettings"])
     return cmds
+@dataclass(frozen=True)
+class RepairOperationView:
+    state: str
+    message: str
+    style: str
+    expand_log: bool
+
+
+def quick_fix_completion(label: str, code: int) -> RepairOperationView:
+    """Return presentation state for a completed repair operation."""
+    if code == 0:
+        return RepairOperationView(
+            "succeeded", f"{label} complete.", "status-ok", False
+        )
+    return RepairOperationView(
+        "failed",
+        f"{label} failed (exit code {code}).",
+        "status-err",
+        True,
+    )

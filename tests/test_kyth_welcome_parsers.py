@@ -113,6 +113,29 @@ class UpdateOperationControllerTests(unittest.TestCase):
 
         self.assertEqual(controller.heartbeat_phase(now=111.0), "Processing image layers…")
 
+    def test_operation_completion_is_typed_for_success_failure_and_cancel(self):
+        controller = updates.UpdateOperationController()
+        controller.start("update", now=100.0)
+
+        staged = controller.completion(0, staged=True)
+        failed = controller.completion(7)
+        cancelled = controller.completion(130)
+
+        self.assertEqual(staged.state, "succeeded")
+        self.assertTrue(staged.reboot_visible)
+        self.assertEqual(failed.state, "failed")
+        self.assertIn("exit code 7", failed.message)
+        self.assertEqual(cancelled.state, "cancelled")
+
+    def test_repair_completion_is_independent_of_qt(self):
+        success = repair.quick_fix_completion("Restart Audio", 0)
+        failure = repair.quick_fix_completion("Restart Audio", 4)
+
+        self.assertEqual(success.state, "succeeded")
+        self.assertFalse(success.expand_log)
+        self.assertEqual(failure.style, "status-err")
+        self.assertTrue(failure.expand_log)
+
     def test_parse_steam_acf_text(self):
         acf = gaming._parse_steam_acf_text(
             '"appid" "620"\n"name" "Portal 2"\n"installdir" "Portal 2"\n'
