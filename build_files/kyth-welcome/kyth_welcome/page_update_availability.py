@@ -6,6 +6,7 @@ from .core_base import (
     update_availability_view,
 )
 from .services.launch import reboot
+from .services.updates import AvailabilityCheckResult, UpdateProbeResult
 from .services.workers.updates import FlatpakCheckWorker, UpdateCheckWorker
 from .qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt
 from .widgets import _make_card
@@ -81,8 +82,7 @@ class _UpdateAvailabilityMixin:
         self._update_now_btn.hide()
         self._restart_now_btn.hide()
 
-        self._system_checked = False
-        self._flatpak_checked = False
+        self._check_coordinator.begin()
         self._flatpak_count = 0
         self._remote_manifest = ""
 
@@ -98,23 +98,24 @@ class _UpdateAvailabilityMixin:
         _release_worker_when_finished(self, "_flatpak_check_worker", self._flatpak_check_worker)
         self._flatpak_check_worker.start()
 
-    def _on_system_check_result(self, state: str, remote_ts: str, manifest_raw: str):
-        self._system_checked = True
-        self._check_state = state
-        self._check_ts = datetime.now().strftime("%H:%M")
-        self._check_ts_details = remote_ts
-        self._remote_manifest = manifest_raw
-        self._update_ui_after_check()
+    def _on_system_check_result(self, result: UpdateProbeResult):
+        self._accept_update_probe(result)
 
-    def _on_flatpak_check_result(self, count: int):
-        self._flatpak_checked = True
-        self._flatpak_count = count
-        self._update_ui_after_check()
+    def _on_flatpak_check_result(self, result: UpdateProbeResult):
+        self._accept_update_probe(result)
 
-    def _update_ui_after_check(self):
-        if not self._system_checked or not self._flatpak_checked:
+    def _accept_update_probe(self, result: UpdateProbeResult):
+        completed = self._check_coordinator.accept(result)
+        if completed is None:
             return
+        self._finish_availability_check(completed)
 
+    def _finish_availability_check(self, completed: AvailabilityCheckResult):
+        self._check_state = completed.system_state
+        self._check_ts = datetime.now().strftime("%H:%M")
+        self._check_ts_details = completed.system_detail
+        self._remote_manifest = completed.manifest_raw
+        self._flatpak_count = completed.flatpak_count
         self._check_btn.setEnabled(True)
         flatpak_count = self._flatpak_count
         staged = _has_staged_update()

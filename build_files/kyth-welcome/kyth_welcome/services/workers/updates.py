@@ -13,6 +13,7 @@ from ..process import _run_command
 from ..registry import check_registry_update
 from ..runtime import TrackedThread
 from ..updates import firmware_check_commands
+from ..updates import UpdateProbeResult
 
 _logger = logging.getLogger(__name__)
 
@@ -21,49 +22,67 @@ _BOOTED_ANNOTATIONS_CACHE: dict[str, dict] = {}
 
 class UpdateCheckWorker(TrackedThread):
     """Compare local booted digest to remote manifest via skopeo inspect."""
-    result = Signal(str, str, str)
+    result = Signal(object)
 
     def __init__(self, *, use_cached_snapshot: bool = True):
         super().__init__()
         self._use_cached_snapshot = use_cached_snapshot
 
     def run(self):
-        if self._use_cached_snapshot:
-            snapshot = read_update_snapshot(max_age=300)
-            if snapshot is not None and snapshot.system_state != "unknown":
-                self.result.emit(snapshot.system_state, "", "")
-                return
-        result = check_registry_update(
-            status_data=_bootc_status_data() or {},
-            branch=_current_branch() or "latest",
-            registry=REGISTRY,
-        )
-        self.result.emit(
-            result.state,
-            result.detail,
-            result.manifest_raw.decode("utf-8", errors="ignore"),
-        )
+        try:
+            if self._use_cached_snapshot:
+                snapshot = read_update_snapshot(max_age=300)
+                if snapshot is not None and snapshot.system_state != "unknown":
+                    self.result.emit(UpdateProbeResult.success("system", snapshot.system_state))
+                    return
+            result = check_registry_update(
+                status_data=_bootc_status_data() or {},
+                branch=_current_branch() or "latest",
+                registry=REGISTRY,
+            )
+            manifest_raw = result.manifest_raw.decode("utf-8", errors="ignore")
+            if result.state == "error":
+                self.result.emit(UpdateProbeResult.error("system", result.detail))
+            else:
+                self.result.emit(
+                    UpdateProbeResult.success(
+                        "system", result.state, detail=result.detail, manifest_raw=manifest_raw,
+                    )
+                )
+        except Exception as exc:
+            _logger.warning("System update probe failed: %s", exc)
+            self.result.emit(UpdateProbeResult.error("system", str(exc)))
 
 
 class FirmwareCheckWorker(TrackedThread):
     """Query fwupd for pending firmware updates (non-blocking)."""
-    result = Signal(int, str)
+    result = Signal(object)
 
     def run(self):
-        refresh_cmd, updates_cmd = firmware_check_commands(refresh=True)
-        _run_command(refresh_cmd, timeout=30)
-        updates = _run_command(updates_cmd, timeout=20)
-        if updates is None:
-            self.result.emit(-1, "fwupd not available.")
-            return
-        if updates.returncode == 2 or not updates.stdout.strip():
-            self.result.emit(0, "")
-            return
-        if updates.returncode != 0:
-            self.result.emit(-1, updates.stdout.strip() or "fwupdmgr get-updates failed.")
-            return
-        count = max(1, updates.stdout.count("Device ID:"))
-        self.result.emit(count, updates.stdout.strip())
+        try:
+            refresh_cmd, updates_cmd = firmware_check_commands(refresh=True)
+            _run_command(refresh_cmd, timeout=30)
+            updates = _run_command(updates_cmd, timeout=20)
+            if updates is None:
+                self.result.emit(UpdateProbeResult.error("firmware", "fwupd not available."))
+                return
+            if updates.returncode == 2 or not updates.stdout.strip():
+                self.result.emit(UpdateProbeResult.success("firmware"))
+                return
+            if updates.returncode != 0:
+                self.result.emit(
+                    UpdateProbeResult.error(
+                        "firmware", updates.stdout.strip() or "fwupdmgr get-updates failed.",
+                    )
+                )
+                return
+            count = max(1, updates.stdout.count("Device ID:"))
+            self.result.emit(
+                UpdateProbeResult.success("firmware", count, detail=updates.stdout.strip())
+            )
+        except Exception as exc:
+            _logger.warning("Firmware update probe failed: %s", exc)
+            self.result.emit(UpdateProbeResult.error("firmware", str(exc)))
 
 
 class ChangelogWorker(TrackedThread):
@@ -129,10 +148,16 @@ class ChangelogWorker(TrackedThread):
 
 class FlatpakCheckWorker(TrackedThread):
     """Query flatpak for pending system and user updates (uses probe cache)."""
-    result = Signal(int)
+    result = Signal(object)
 
     def run(self):
         from ..flatpak import _pending_flatpak_update_count
 
-        count = _pending_flatpak_update_count()
-        self.result.emit(0 if count is None else int(count))
+        try:
+            count = _pending_flatpak_update_count()
+            self.result.emit(
+                UpdateProbeResult.success("flatpak", 0 if count is None else int(count))
+            )
+        except Exception as exc:
+            _logger.warning("Flatpak update probe failed: %s", exc)
+            self.result.emit(UpdateProbeResult.error("flatpak", str(exc)))

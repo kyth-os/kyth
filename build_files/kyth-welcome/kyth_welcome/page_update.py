@@ -5,6 +5,7 @@ from .page_update_auto import _AutoUpdateMixin
 from .page_update_availability import _UpdateAvailabilityMixin
 from .page_update_firmware import _FirmwareUpdateMixin
 from .page_update_ops import _UpdateOpsMixin
+from .services.updates import UpdateCheckCoordinator
 
 # ── Page: Update ──────────────────────────────────────────────────────────────
 class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _FirmwareUpdateMixin, Page):
@@ -34,8 +35,7 @@ class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _F
         self._heartbeat.timeout.connect(self._heartbeat_tick)
         self._check_worker = None
         self._flatpak_check_worker = None
-        self._flatpak_checked = False
-        self._system_checked = False
+        self._check_coordinator = UpdateCheckCoordinator()
         self._flatpak_count = 0
         self._remote_manifest = ""
         self._check_state = "idle"   # idle | checking | available | uptodate | error

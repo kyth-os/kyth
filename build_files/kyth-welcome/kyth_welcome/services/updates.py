@@ -34,6 +34,70 @@ def firmware_check_commands(refresh: bool = True) -> list[list[str]]:
 
 
 @dataclass(frozen=True)
+class UpdateProbeResult:
+    """Typed result envelope shared by update probe workers."""
+
+    probe: str
+    state: str
+    value: int | str = 0
+    detail: str = ""
+    manifest_raw: str = ""
+
+    @classmethod
+    def success(
+        cls,
+        probe: str,
+        value: int | str = 0,
+        *,
+        detail: str = "",
+        manifest_raw: str = "",
+    ) -> "UpdateProbeResult":
+        return cls(probe, "ok", value, detail, manifest_raw)
+
+    @classmethod
+    def error(cls, probe: str, detail: str) -> "UpdateProbeResult":
+        return cls(probe, "error", 0, detail)
+
+
+@dataclass(frozen=True)
+class AvailabilityCheckResult:
+    system_state: str
+    system_detail: str
+    flatpak_count: int
+    manifest_raw: str
+    flatpak_detail: str = ""
+
+
+class UpdateCheckCoordinator:
+    """Collect independent availability probes into one completion event."""
+
+    REQUIRED_PROBES = frozenset({"system", "flatpak"})
+
+    def __init__(self) -> None:
+        self._results: dict[str, UpdateProbeResult] = {}
+
+    def begin(self) -> None:
+        self._results.clear()
+
+    def accept(self, result: UpdateProbeResult) -> AvailabilityCheckResult | None:
+        if result.probe not in self.REQUIRED_PROBES:
+            raise ValueError(f"Unexpected availability probe: {result.probe}")
+        self._results[result.probe] = result
+        if not self.REQUIRED_PROBES <= self._results.keys():
+            return None
+
+        system = self._results["system"]
+        flatpak = self._results["flatpak"]
+        return AvailabilityCheckResult(
+            system_state=str(system.value) if system.state == "ok" else "error",
+            system_detail=system.detail,
+            flatpak_count=max(0, int(flatpak.value)) if flatpak.state == "ok" else 0,
+            manifest_raw=system.manifest_raw,
+            flatpak_detail=flatpak.detail if flatpak.state == "error" else "",
+        )
+
+
+@dataclass(frozen=True)
 class UpdateOperation:
     mode: str
     label: str

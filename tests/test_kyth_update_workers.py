@@ -57,7 +57,8 @@ class UpdateCheckWorkerTests(unittest.TestCase):
 
         read_snapshot.assert_called_once_with(max_age=300)
         registry_check.assert_not_called()
-        worker.result.emit.assert_called_once_with("uptodate", "", "")
+        emitted = worker.result.emit.call_args.args[0]
+        self.assertEqual((emitted.probe, emitted.state, emitted.value), ("system", "ok", "uptodate"))
 
     def test_forced_check_bypasses_valid_snapshot(self):
         result = Mock(state="available", detail="new", manifest_raw=b"manifest")
@@ -73,7 +74,11 @@ class UpdateCheckWorkerTests(unittest.TestCase):
 
         read_snapshot.assert_not_called()
         registry_check.assert_called_once()
-        worker.result.emit.assert_called_once_with("available", "new", "manifest")
+        emitted = worker.result.emit.call_args.args[0]
+        self.assertEqual(
+            (emitted.probe, emitted.state, emitted.value, emitted.detail, emitted.manifest_raw),
+            ("system", "ok", "available", "new", "manifest"),
+        )
 
     def test_unknown_snapshot_falls_back_to_registry(self):
         snapshot = Mock(system_state="unknown")
@@ -88,7 +93,22 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         ):
             worker.run()
 
-        worker.result.emit.assert_called_once_with("error", "timed out", "")
+        emitted = worker.result.emit.call_args.args[0]
+        self.assertEqual(
+            (emitted.probe, emitted.state, emitted.detail),
+            ("system", "error", "timed out"),
+        )
+
+    def test_unexpected_failure_still_emits_completion_result(self):
+        worker = self._worker(use_cached_snapshot=False)
+        with patch.object(updates, "_bootc_status_data", side_effect=RuntimeError("broken probe")):
+            worker.run()
+
+        emitted = worker.result.emit.call_args.args[0]
+        self.assertEqual(
+            (emitted.probe, emitted.state, emitted.detail),
+            ("system", "error", "broken probe"),
+        )
 
 
 if __name__ == "__main__":

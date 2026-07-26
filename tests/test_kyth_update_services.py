@@ -9,6 +9,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 
 from kyth_welcome.services.updates import (  # noqa: E402
+    UpdateCheckCoordinator,
+    UpdateProbeResult,
     booted_image_digest,
     check_registry_update,
     firmware_check_commands,
@@ -16,6 +18,40 @@ from kyth_welcome.services.updates import (  # noqa: E402
 
 
 class UpdateServiceTests(unittest.TestCase):
+    def test_coordinator_completes_after_both_probes_in_any_order(self):
+        coordinator = UpdateCheckCoordinator()
+        coordinator.begin()
+        self.assertIsNone(
+            coordinator.accept(UpdateProbeResult.success("flatpak", 2))
+        )
+
+        completed = coordinator.accept(
+            UpdateProbeResult.success(
+                "system", "available", detail="today", manifest_raw="manifest",
+            )
+        )
+
+        self.assertIsNotNone(completed)
+        self.assertEqual(completed.system_state, "available")
+        self.assertEqual(completed.flatpak_count, 2)
+        self.assertEqual(completed.manifest_raw, "manifest")
+
+    def test_coordinator_turns_probe_failures_into_completed_error_state(self):
+        coordinator = UpdateCheckCoordinator()
+        coordinator.begin()
+        coordinator.accept(UpdateProbeResult.error("flatpak", "flatpak timed out"))
+        completed = coordinator.accept(UpdateProbeResult.error("system", "registry timed out"))
+
+        self.assertEqual(completed.system_state, "error")
+        self.assertEqual(completed.system_detail, "registry timed out")
+        self.assertEqual(completed.flatpak_count, 0)
+        self.assertEqual(completed.flatpak_detail, "flatpak timed out")
+
+    def test_coordinator_rejects_unrelated_probe(self):
+        coordinator = UpdateCheckCoordinator()
+        with self.assertRaises(ValueError):
+            coordinator.accept(UpdateProbeResult.success("firmware"))
+
     def test_booted_image_digest_reads_nested_status(self):
         status = {
             "status": {
