@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from collections.abc import Callable
 import time
 
-from kyth_shared.system.bootc import _bootc_cancel_block_reason, _parse_update_phase
+from kyth_shared.system.bootc_policy import cancel_block_reason, parse_update_phase
+
+_bootc_cancel_block_reason = cancel_block_reason
+_parse_update_phase = parse_update_phase
 
 # pylint: disable=unused-import
 from .registry import (  # noqa: F401 — re-export pure API for existing imports

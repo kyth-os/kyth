@@ -37,6 +37,22 @@ class WorkServiceTests(unittest.TestCase):
 
 
 class SecurityServiceTests(unittest.TestCase):
+    def test_kali_container_parser_exposes_capability_policy(self):
+        from kyth_welcome.services.security_container import parse_kali_inspect_output
+
+        info = parse_kali_inspect_output(
+            "docker.io/kalilinux/kali-rolling\ntrue\n"
+            "label=disable seccomp=unconfined\n",
+        )
+        self.assertTrue(info.socket_capable)
+        self.assertIn("seccomp=unconfined", info.security_options)
+
+    def test_kali_container_policy_rejects_non_kali_image(self):
+        from kyth_welcome.services.security_container import parse_kali_inspect_output
+
+        info = parse_kali_inspect_output("docker.io/fedora\ntrue\nlabel=disable\n")
+        self.assertFalse(info.socket_capable)
+
     def test_kali_box_false_on_failure(self):
         with mock.patch.object(security, "_run_command", return_value=None):
             self.assertFalse(security.is_socket_capable_kali_box("kali"))

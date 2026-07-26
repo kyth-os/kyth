@@ -35,6 +35,7 @@ from kyth_shared.system.process import (  # noqa: E402
 from kyth_shared.system.registry import (  # noqa: E402
     check_registry_update,
 )
+from kyth_shared.system import bootc_policy, bootc_query  # noqa: E402
 
 
 class ProcessHelpersTests(unittest.TestCase):
@@ -69,6 +70,23 @@ class ProcessHelpersTests(unittest.TestCase):
 
 
 class BootcHelpersTests(unittest.TestCase):
+    def test_query_parser_is_independent_from_command_execution(self):
+        status = {
+            "status": {
+                "booted": {"image": {"reference": f"{REGISTRY}:testing"}},
+            },
+        }
+        self.assertEqual(
+            bootc_query.image_reference_from_status(status),
+            f"{REGISTRY}:testing",
+        )
+
+    def test_policy_layer_computes_kernel_target_without_probing(self):
+        self.assertEqual(
+            bootc_policy.image_tag_for_kernel("cachy", "testing"),
+            "testing-cachy",
+        )
+
     def test_image_reference_from_status_nested(self):
         status = {
             "status": {

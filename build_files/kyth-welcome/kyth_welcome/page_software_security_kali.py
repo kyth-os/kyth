@@ -4,11 +4,13 @@ import shutil
 from .core_base import _apply_install_badge, _restyle
 from .services.launch import popen
 from .services.security import (
-    _is_socket_capable_kali_box,
     build_kali_create_command,
     build_kali_export_command,
     build_kali_remove_command,
     KaliInstallProgressTracker,
+)
+from .services.security_container import (
+    is_socket_capable_kali_box as _is_socket_capable_kali_box,
 )
 from .services.runtime import Worker, _finish_worker
 from .qt import (

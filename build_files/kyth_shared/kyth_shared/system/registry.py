@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
-from kyth_shared.system.bootc import image_digest_from_status, nested_get
+from kyth_shared.system.bootc_query import image_digest_from_status, nested_get
 
 InspectRunner = Callable[[str], subprocess.CompletedProcess[bytes]]
 

@@ -1,79 +1,49 @@
-"""bootc status, image reference, branch, and deployment helpers.
+"""Compatibility façade for bootc query, policy, and operation helpers.
 
-Pure stdlib — safe to import from CLI tools without Qt.
+New code should import pure decisions from ``bootc_policy`` and system-facing
+queries from ``bootc_query``.  Existing private names remain available while
+callers migrate.
 """
 from __future__ import annotations
 
-import json
-import re
-import subprocess
-
 from ..commands import run as run_command
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
-
-from kyth_shared.system.process import (
-    _BOOTC_CACHE_TTL,
-    _command_stdout,
-    _probe_cached,
-    _run_command,
+from kyth_shared.system.process import _BOOTC_CACHE_TTL, _command_stdout, _probe_cached
+from kyth_shared.system import bootc_query as query
+from kyth_shared.system.bootc_policy import (
+    BranchCardView,
+    BranchesView,
+    REGISTRY,
+    UpdateAvailabilityView,
+    branch_display_name,
+    branch_from_ref,
+    branches_view,
+    cancel_block_reason,
+    default_phase,
+    image_tag_for_channel,
+    image_tag_for_kernel,
+    parse_update_phase,
+    update_availability_view,
 )
 
-REGISTRY = "ghcr.io/mrtrick37/kyth"
-
-
-def nested_get(data: object, path: tuple[str, ...]) -> Any:
-    current: Any = data
-    for key in path:
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    return current
-
-
+nested_get = query.nested_get
 _nested_get = nested_get
-
-
-def walk_strings(data: object):
-    if isinstance(data, str):
-        yield data
-        return
-    if isinstance(data, dict):
-        for value in data.values():
-            yield from walk_strings(value)
-        return
-    if isinstance(data, list):
-        for value in data:
-            yield from walk_strings(value)
-
-
+walk_strings = query.walk_strings
 _walk_strings = walk_strings
+image_reference_from_status = query.image_reference_from_status
+image_digest_from_status = query.image_digest_from_status
 
 
 def _fetch_bootc_status_text() -> str:
-    for cmd in (["sudo", "-n", "bootc", "status"], ["bootc", "status"]):
-        result = _run_command(cmd, timeout=10)
-        if result is None or result.returncode != 0 or not result.stdout.strip():
-            continue
-        return result.stdout.strip()
-    return ""
+    return query.fetch_status_text()
 
 
 def _bootc_status_text() -> str:
+    # Keep patchable compatibility boundaries used by probes and tests.
     return _probe_cached("bootc-status-text", _BOOTC_CACHE_TTL, _fetch_bootc_status_text)
 
 
 def _fetch_bootc_status_data() -> dict | None:
-    for cmd in (["sudo", "-n", "bootc", "status", "--json"], ["bootc", "status", "--json"]):
-        result = _run_command(cmd, timeout=10)
-        if result is None or result.returncode != 0 or not result.stdout.strip():
-            continue
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError:
-            continue
-    return None
+    return query.fetch_status_data()
 
 
 def _bootc_status_data() -> dict | None:
@@ -81,181 +51,62 @@ def _bootc_status_data() -> dict | None:
 
 
 def fetch_bootc_status_data_uncached() -> dict | None:
-    """Root/CLI path: always re-query bootc (no probe cache)."""
     return _fetch_bootc_status_data()
 
 
 def _active_bootc_operation() -> str | None:
-    result = _run_command(["ps", "-eo", "pid=,args="], timeout=5)
-    if result is None or result.returncode != 0 or not result.stdout.strip():
-        return None
-    for line in result.stdout.splitlines():
-        text = line.strip()
-        if not text or " bootc " not in f" {text} ":
-            continue
-        if any(op in text for op in (" bootc upgrade", " bootc switch", " bootc rollback", " bootc reset")):
-            return text
-    return None
+    return query.active_operation()
 
 
 def _default_phase(mode: str) -> str:
-    return {
-        "update": "Pulling OS image from container registry…",
-        "full-update": "Running full system update…",
-        "rollback": "Staging rollback deployment…",
-    }.get(mode, "Operation in progress…")
+    return default_phase(mode)
 
 
 def _bootc_proxy_running() -> bool:
     try:
-        r = run_command(
+        result = run_command(
             ["pgrep", "-f", "skopeo.*image-proxy"],
             capture_output=True, timeout=2, check=False,
         )
-        return r.returncode == 0
+        return result.returncode == 0
     except Exception:
         return False
 
 
 def _parse_update_phase(line: str, mode: str) -> str | None:
-    lo = line.lower()
-    if "layers already present" in lo or "layers needed" in lo:
-        return "Checking for new image layers…"
-    if "resolved" in lo and ("image" in lo or REGISTRY in lo):
-        return "Resolving OS image version…"
-    if "fetching" in lo and ("manifest" in lo or "sha256" in lo):
-        return "Fetching image manifest…"
-    if any(k in lo for k in ("pulling", "copying", "fetching")) and any(
-        k in lo for k in ("sha256", "blob", "layer", "ghcr.io", "registry")
-    ):
-        return "Downloading image layers…"
-    if "unpacking" in lo or "extracting" in lo:
-        return "Unpacking image layers…"
-    if "checking out" in lo or "checkout" in lo or "importing" in lo:
-        return "Importing image into system storage…"
-    if "writing manifest" in lo or "manifest to image destination" in lo:
-        return "Storing image manifest…"
-    if "writing" in lo or "composing" in lo or "committing" in lo:
-        return "Writing new OS image to disk…"
-    if "rpmdb" in lo:
-        return "Updating package database in the new image…"
-    if "initramfs" in lo or "kernel" in lo:
-        return "Preparing boot files for the new image…"
-    if "deploying" in lo:
-        return "Deploying new OS image…"
-    if "staging" in lo or "staged" in lo or "transaction complete" in lo:
-        return "Staging new image for next reboot…"
-    if "no update available" in lo or "already booted" in lo:
-        return "Already on the latest image — nothing to download."
-    if "queued" in lo and "boot" in lo:
-        return "Staged — new image ready for next reboot."
-    if mode == "full-update" and line.startswith("――"):
-        m = re.match(r"――\s*[\d:]+\s*-\s*(.+?)\s*――", line)
-        if m:
-            section = m.group(1).strip()
-            if section:
-                return f"Updating {section}…"
-    return None
+    return parse_update_phase(line, mode)
 
 
 def _bootc_cancel_block_reason(mode: str, phase: str) -> str:
-    if mode == "rollback":
-        return "Rollback is already staging the previous deployment. Let it finish, then reboot or update again."
-    if phase in {
-        "Unpacking image layers…",
-        "Download complete — processing image layers…",
-        "Processing image layers…",
-        "Importing image into system storage…",
-        "Storing image manifest…",
-        "Writing new OS image to disk…",
-        "Updating package database in the new image…",
-        "Preparing boot files for the new image…",
-        "Deploying new OS image…",
-        "Staging new image for next reboot…",
-        "Staged — new image ready for next reboot.",
-    }:
-        return "The operation is past the safe cancel point and is writing or staging the new image. Let it finish."
-    if "writing image to disk" in phase.lower() or "committing image" in phase.lower():
-        return "The operation is writing the new image. Let it finish."
-    return ""
-
-
-def image_reference_from_status(data: dict | None, *, status_text: str = "") -> str | None:
-    data = data or {}
-    candidates = (
-        ("status", "booted", "image", "reference"),
-        ("status", "booted", "image", "image", "reference"),
-        ("status", "booted", "image", "image", "image"),
-        ("status", "booted", "image", "image"),
-        ("status", "booted", "image"),
-        ("spec", "image", "image"),
-        ("spec", "image", "reference"),
-    )
-    for path in candidates:
-        value = nested_get(data, path)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    for value in walk_strings(data):
-        stripped = value.strip()
-        if REGISTRY in stripped:
-            return stripped
-    if status_text:
-        pattern = re.compile(rf"({re.escape(REGISTRY)}(?::[A-Za-z0-9._-]+)?(?:@sha256:[a-fA-F0-9]+)?)")
-        match = pattern.search(status_text)
-        if match:
-            return match.group(1)
-    return None
+    return cancel_block_reason(mode, phase)
 
 
 def _bootc_image_reference() -> str | None:
     data = _bootc_status_data() or {}
-    ref = image_reference_from_status(data)
+    ref = query.image_reference_from_status(data)
     if ref:
         return ref
-    text = _bootc_status_text()
-    ref = image_reference_from_status(data, status_text=text)
+    ref = query.image_reference_from_status(data, status_output=_bootc_status_text())
     if ref:
         return ref
-    rpmostree = _run_command(["rpm-ostree", "status"], timeout=10)
-    if rpmostree and rpmostree.returncode == 0:
-        pattern = re.compile(rf"({re.escape(REGISTRY)}(?::[A-Za-z0-9._-]+)?(?:@sha256:[a-fA-F0-9]+)?)")
-        match = pattern.search(rpmostree.stdout)
-        if match:
-            return match.group(1)
-    return None
+    # Preserve the compatibility module's patchable status seams while
+    # delegating the fallback query to the query adapter.
+    return query.image_reference()
 
 
 def _branch_from_ref(ref: str | None) -> str | None:
-    if not ref:
-        return None
-    ref = ref.strip()
-    if not ref:
-        return None
-    base = ref.split("@", 1)[0] if "@" in ref else ref
-    if ":" in base:
-        tag = base.rsplit(":", 1)[-1]
-        if tag:
-            return tag
-    return None
+    return branch_from_ref(ref)
 
 
 def _branch_display_name(tag: str | None) -> str:
-    if tag == "latest":
-        return "Stable (latest)"
-    if tag == "testing":
-        return "Testing"
-    if tag == "latest-cachy":
-        return "Stable + CachyOS kernel"
-    if tag == "testing-cachy":
-        return "Testing + CachyOS kernel"
-    return tag or "unknown"
+    return branch_display_name(tag)
 
 
 def _current_branch() -> str | None:
-    def fetch() -> str | None:
-        return _branch_from_ref(_bootc_image_reference())
-
-    return _probe_cached("bootc-branch", _BOOTC_CACHE_TTL, fetch)
+    return _probe_cached(
+        "bootc-branch", _BOOTC_CACHE_TTL,
+        lambda: branch_from_ref(_bootc_image_reference()),
+    )
 
 
 def _current_kernel_flavor() -> str:
@@ -267,164 +118,45 @@ def _current_kernel_flavor() -> str:
                     return flavor
         except OSError:
             pass
-        kernel = _command_stdout(["uname", "-r"]).lower()
-        if "cachy" in kernel:
-            return "cachy"
-        return "fedora"
+        return "cachy" if "cachy" in _command_stdout(["uname", "-r"]).lower() else "fedora"
 
     return _probe_cached("kernel-flavor", 60.0, fetch)
 
 
 def _image_tag_for_channel(channel: str, flavor: str | None = None) -> str:
-    base = "testing" if channel == "testing" else "latest"
-    flavor = flavor or _current_kernel_flavor()
-    suffix = "-cachy" if flavor == "cachy" else ""
-    return f"{base}{suffix}"
+    return image_tag_for_channel(channel, flavor or _current_kernel_flavor())
 
 
 def _image_tag_for_kernel(flavor: str) -> str:
-    channel = "testing" if (_current_branch() or "").startswith("testing") else "latest"
-    if flavor == "cachy":
-        return f"{channel}-cachy"
-    return channel
+    return image_tag_for_kernel(flavor, _current_branch())
 
 
 def _has_staged_update() -> bool:
-    data = _bootc_status_data() or {}
-    return data.get("status", {}).get("staged") is not None
+    return nested_get(_bootc_status_data() or {}, ("status", "staged")) is not None
 
 
 def _has_rollback_deployment() -> bool:
-    data = _bootc_status_data() or {}
-    return data.get("status", {}).get("rollback") is not None
-
-
-def image_digest_from_status(status_data: dict | None, section: str) -> str | None:
-    data = status_data or {}
-    section_data = nested_get(data, ("status", section)) or {}
-    for path in (
-        ("image", "imageDigest"),
-        ("image", "digest"),
-        ("imageDigest",),
-        ("digest",),
-    ):
-        value = nested_get(section_data, path)
-        if isinstance(value, str) and value.startswith("sha256:"):
-            return value
-    return None
+    return nested_get(_bootc_status_data() or {}, ("status", "rollback")) is not None
 
 
 def _bootc_image_timestamp(section: str) -> str | None:
+    # Query through the compatibility status function so existing cache/test
+    # injection remains effective.
     data = _bootc_status_data() or {}
-    section_data = nested_get(data, ("status", section)) or {}
+    deployment = nested_get(data, ("status", section)) or {}
+    from datetime import datetime
+
     for path in (("image", "timestamp"), ("timestamp",)):
-        value = nested_get(section_data, path)
+        value = nested_get(deployment, path)
         if isinstance(value, str) and value.strip():
             try:
-                dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00")).astimezone()
-                return dt.strftime("%Y-%m-%d %H:%M %Z")
-            except Exception:
+                parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00")).astimezone()
+                return parsed.strftime("%Y-%m-%d %H:%M %Z")
+            except (ValueError, OverflowError):
                 return value.strip()
     return None
 
 
 def _bootc_image_digest(section: str) -> tuple[str, str] | None:
     value = image_digest_from_status(_bootc_status_data(), section)
-    if value is None:
-        return None
-    full = value[7:]
-    return full[:12], full
-
-
-@dataclass(frozen=True)
-class BranchCardView:
-    object_name: str
-    button_text: str
-    build_label_text: str
-    build_label_visible: bool
-
-
-@dataclass(frozen=True)
-class BranchesView:
-    stable: BranchCardView
-    testing: BranchCardView
-
-
-def branches_view(tag: str | None, booted_ts: str | None) -> BranchesView:
-    build_text = f"Running: built {booted_ts}" if booted_ts else ""
-    inactive_stable = BranchCardView("branch-inactive", "Switch to Stable", "", False)
-    inactive_testing = BranchCardView("branch-inactive", "Switch to Testing", "", False)
-
-    if tag in ("latest", "latest-cachy"):
-        return BranchesView(
-            stable=BranchCardView("branch-active", "On Stable  (current)", build_text, bool(booted_ts)),
-            testing=inactive_testing,
-        )
-    if tag in ("testing", "testing-cachy"):
-        return BranchesView(
-            stable=inactive_stable,
-            testing=BranchCardView("branch-active", "On Testing  (current)", build_text, bool(booted_ts)),
-        )
-    return BranchesView(stable=inactive_stable, testing=inactive_testing)
-
-
-@dataclass(frozen=True)
-class UpdateAvailabilityView:
-    card_style: str
-    icon_text: str
-    icon_color: str
-    title: str
-    body: str
-    update_btn_visible: bool
-    restart_btn_visible: bool
-
-
-def update_availability_view(
-    *, staged: bool, check_state: str, flatpak_count: int,
-    check_ts: str, check_ts_details: str, staged_ts: str | None,
-) -> UpdateAvailabilityView:
-    ts_hint = f"  ·  Checked at {check_ts}"
-    built = f"  ·  built {check_ts_details}" if check_ts_details else ""
-
-    if staged:
-        built_staged = f"  ·  built {staged_ts}" if staged_ts else ""
-        flatpak_part = ""
-        if flatpak_count > 0:
-            noun = "update" if flatpak_count == 1 else "updates"
-            flatpak_part = f" Additionally, {flatpak_count} Flatpak {noun} can be installed."
-        return UpdateAvailabilityView(
-            "card-accent-ok", "↻", "#4fc1ff", "Restart required",
-            f"A new image is staged and waiting{built_staged}.{flatpak_part} "
-            f"Restart now or later — your current system stays available as a fallback.{ts_hint}",
-            False, True,
-        )
-    if check_state == "available":
-        flatpak_part = ""
-        if flatpak_count > 0:
-            noun = "update" if flatpak_count == 1 else "updates"
-            flatpak_part = f" and {flatpak_count} Flatpak {noun} are pending"
-        return UpdateAvailabilityView(
-            "card-accent-warn", "↓", "#d4a843", "Update available",
-            f"A new system image is ready{built}{flatpak_part}. "
-            f"Run a full update to download and install them.{ts_hint}",
-            True, False,
-        )
-    if flatpak_count > 0:
-        noun = "update is" if flatpak_count == 1 else "updates are"
-        return UpdateAvailabilityView(
-            "card-accent-warn", "↓", "#d4a843", "App updates available",
-            f"Your system OS is up to date, but {flatpak_count} Flatpak app {noun} available. "
-            f"Run a full update to install them.{ts_hint}",
-            True, False,
-        )
-    if check_state == "uptodate":
-        return UpdateAvailabilityView(
-            "card-accent-ok", "✓", "#4caf50", "Up to date",
-            f"Running the latest image{built}.{ts_hint}",
-            False, False,
-        )
-    return UpdateAvailabilityView(
-        "card", "⚠", "#888888", "Check unavailable",
-        f"Could not reach the update server — check your network connection.{ts_hint}",
-        False, False,
-    )
+    return None if value is None else (value[7:19], value[7:])
