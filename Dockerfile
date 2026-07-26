@@ -91,19 +91,27 @@ RUN bash /tmp/plymouth-setup.sh && \
 # sysconfig layers. COPY once so neither layer needs a redundant bind-mount.
 COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev build_files/kyth-game-boost build_files/kyth-ntfs-repair build_files/kyth-shader-preheat build_files/kyth-health-check /ctx/
 
+# Install the shared Python distribution before any build-time helper imports
+# it. Runtime scripts can then use normal package imports without mutating
+# sys.path to support the repository layout.
+COPY build_files/kyth_shared /tmp/kyth-shared-package
+RUN python3 -m pip install \
+        --no-cache-dir \
+        --no-deps \
+        --no-build-isolation \
+        --prefix=/usr \
+        /tmp/kyth-shared-package && \
+    rm -rf /tmp/kyth-shared-package
+
 # Static system configuration — sysctl, kernel modules, PipeWire, Proton env
 # vars, gamemode, MangoHud, vkBasalt, bluetooth, and kyth-* service units.
 # Stable — only re-runs when sysconfig-static.sh or config defaults change,
 # not on every daily dnf5 upgrade. This keeps the post-upgrade layer chain
 # short and avoids users pulling a new sysconfig layer when only packages changed.
-# kyth_shared is bind-mounted (not yet pip-installed at this point in the build —
-# that happens further down) so kyth-vscode-wallet can import it when the
-# 24-vs-code-avoid-kwallet-password-prompts.sh fragment runs it against /etc/skel.
 RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx/sysconfig-static.sh \
     --mount=type=bind,source=build_files/scripts/sysconfig,target=/ctx/sysconfig \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/data,target=/ctx/data \
-    --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig-static.sh
 
@@ -143,18 +151,6 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
 RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/sysconfig.sh \
     --mount=type=tmpfs,dst=/tmp \
     bash /ctx/sysconfig.sh
-
-# Install the shared Python distribution from a COPY-backed source so content
-# changes invalidate BuildKit's cache. The later /ctx bind mount alone does not
-# participate in the cache key.
-COPY build_files/kyth_shared /tmp/kyth-shared-package
-RUN python3 -m pip install \
-        --no-cache-dir \
-        --no-deps \
-        --no-build-isolation \
-        --prefix=/usr \
-        /tmp/kyth-shared-package && \
-    rm -rf /tmp/kyth-shared-package
 
 # Build cache boundary: Secure Boot signing, branding, helper app, and Plymouth.
 # These operations share one raw BuildKit layer; legacy-rechunk repartitions the

@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+
+from .commands import run as run_command
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,7 +64,7 @@ def cleanup_flatpaks() -> None:
     """Uninstall unused flatpak packages in non-interactive mode."""
     if shutil.which("flatpak"):
         try:
-            subprocess.run(
+            run_command(
                 ["flatpak", "uninstall", "--unused", "-y", "--noninteractive"],
                 check=False,
                 stdout=subprocess.DEVNULL,
@@ -76,7 +78,7 @@ def vacuum_user_journals(days: int = 30) -> None:
     """Vacuum systemd user journal files older than specified days."""
     if shutil.which("journalctl"):
         try:
-            subprocess.run(
+            run_command(
                 ["journalctl", "--user", f"--vacuum-time={days}d"],
                 check=False,
                 stdout=subprocess.DEVNULL,
@@ -91,7 +93,7 @@ def supports_dedupe(path: str) -> bool:
     if not shutil.which("findmnt"):
         return False
     try:
-        res = subprocess.run(
+        res = run_command(
             ["findmnt", "-no", "FSTYPE", "-T", path],
             capture_output=True,
             text=True,
@@ -146,6 +148,6 @@ def dedupe_directory(dir_path: str) -> None:
         cmd = ["ionice", "-c3"] + cmd
 
     try:
-        subprocess.run(cmd, check=False)
+        run_command(cmd, check=False)
     except Exception:
         pass

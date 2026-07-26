@@ -5,6 +5,8 @@ import os
 import re
 import shutil
 import subprocess
+
+from ..commands import run as run_command
 from pathlib import Path
 
 
@@ -41,7 +43,7 @@ def refresh_desktop_database(desktop_dir: Path | str) -> None:
     """Refresh the freedesktop MIME/desktop-file database for a directory of .desktop files."""
     if shutil.which("update-desktop-database"):
         try:
-            subprocess.run(["update-desktop-database", str(desktop_dir)], capture_output=True, check=False)
+            run_command(["update-desktop-database", str(desktop_dir)], capture_output=True, check=False)
         except Exception:
             pass
 
@@ -50,7 +52,7 @@ def refresh_icon_cache(icons_dir: Path | str) -> None:
     """Refresh the GTK icon cache for a hicolor icon theme directory."""
     if shutil.which("gtk-update-icon-cache"):
         try:
-            subprocess.run(["gtk-update-icon-cache", "-q", "-t", str(icons_dir)], capture_output=True, check=False)
+            run_command(["gtk-update-icon-cache", "-q", "-t", str(icons_dir)], capture_output=True, check=False)
         except Exception:
             pass
 
@@ -59,7 +61,7 @@ def refresh_kde_sycoca() -> None:
     """Rebuild KDE Plasma's application/service cache (kbuildsycoca6)."""
     if shutil.which("kbuildsycoca6"):
         try:
-            subprocess.run(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False)
+            run_command(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False)
         except Exception:
             pass
 

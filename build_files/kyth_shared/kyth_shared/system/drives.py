@@ -5,6 +5,8 @@ import json
 import os
 import shutil
 import subprocess
+
+from ..commands import run as run_command
 import time
 from pathlib import Path
 
@@ -12,7 +14,7 @@ from pathlib import Path
 def get_ntfs_devices() -> list[dict]:
     """Retrieve details of all NTFS partitions connected to the system using lsblk."""
     try:
-        res = subprocess.run(
+        res = run_command(
             ["lsblk", "-J", "-o", "NAME,FSTYPE,LABEL,UUID,MOUNTPOINT"],
             capture_output=True,
             text=True,
@@ -79,16 +81,16 @@ def repair_ntfs_drives() -> None:
             mount = f"/var/mnt/ntfs_{uuid_safe}"
             print(f"[kyth-ntfs-repair] Drive not mounted. Mounting to {mount}...")
             try:
-                subprocess.run(["sudo", "mkdir", "-p", mount], check=False)
+                run_command(["sudo", "mkdir", "-p", mount], check=False)
                 # Try mounting with ntfs-3g
-                res = subprocess.run(
+                res = run_command(
                     ["sudo", "mount", "-t", "ntfs-3g", "-o", opts, dev_path, mount],
                     capture_output=True,
                     check=False,
                 )
                 if res.returncode != 0:
                     # Fallback to generic mount
-                    subprocess.run(
+                    run_command(
                         ["sudo", "mount", "-o", opts, dev_path, mount],
                         capture_output=True,
                         check=False,

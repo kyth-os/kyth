@@ -6,6 +6,8 @@ import glob
 import shutil
 import subprocess
 
+from .commands import run as run_command
+
 
 class SystemProbe:
     """Facade for read-only system state detection."""
@@ -13,7 +15,7 @@ class SystemProbe:
     @staticmethod
     def get_firewall_status() -> str:
         try:
-            res = subprocess.run(
+            res = run_command(
                 ["systemctl", "is-active", "firewalld"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -27,7 +29,7 @@ class SystemProbe:
     @staticmethod
     def get_selinux_status() -> str:
         try:
-            res = subprocess.run(
+            res = run_command(
                 ["getenforce"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -41,7 +43,7 @@ class SystemProbe:
     @staticmethod
     def get_secure_boot_status() -> str:
         try:
-            res = subprocess.run(
+            res = run_command(
                 ["mokutil", "--sb-state"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -67,7 +69,7 @@ class SystemProbe:
     def _kreadconfig(file: str, group: str, key: str) -> str:
         if shutil.which("kreadconfig6"):
             try:
-                res = subprocess.run(
+                res = run_command(
                     ["kreadconfig6", "--file", file, "--group", group, "--key", key],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,

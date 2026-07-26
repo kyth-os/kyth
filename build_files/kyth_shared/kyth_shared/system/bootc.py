@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+
+from ..commands import run as run_command
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -106,7 +108,7 @@ def _default_phase(mode: str) -> str:
 
 def _bootc_proxy_running() -> bool:
     try:
-        r = subprocess.run(
+        r = run_command(
             ["pgrep", "-f", "skopeo.*image-proxy"],
             capture_output=True, timeout=2, check=False,
         )

@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+
+from .commands import run as run_command
 from pathlib import Path
 
 
@@ -36,7 +38,7 @@ def has_3d_vcache() -> bool:
 
     if shutil.which("lscpu"):
         try:
-            res = subprocess.run(["lscpu"], capture_output=True, text=True, check=False)
+            res = run_command(["lscpu"], capture_output=True, text=True, check=False)
             if "3d" in res.stdout.lower():
                 return True
         except Exception:
@@ -88,7 +90,7 @@ def set_epp(epp_value: str) -> bool:
     # Try calling kyth-set-epp helper via sudo if available
     if shutil.which("sudo"):
         try:
-            res = subprocess.run(
+            res = run_command(
                 ["sudo", "-n", "/usr/bin/kyth-set-epp", epp_value],
                 capture_output=True,
                 check=False,
@@ -125,7 +127,7 @@ def set_power_profile(profile: str) -> bool:
     """Set the system power profile using powerprofilesctl."""
     if shutil.which("powerprofilesctl"):
         try:
-            res = subprocess.run(["powerprofilesctl", "set", profile], capture_output=True, check=False)
+            res = run_command(["powerprofilesctl", "set", profile], capture_output=True, check=False)
             return res.returncode == 0
         except Exception:
             pass
@@ -136,7 +138,7 @@ def get_power_profile() -> str:
     """Get current active system power profile."""
     if shutil.which("powerprofilesctl"):
         try:
-            res = subprocess.run(["powerprofilesctl", "get"], capture_output=True, text=True, check=False)
+            res = run_command(["powerprofilesctl", "get"], capture_output=True, text=True, check=False)
             return res.stdout.strip()
         except Exception:
             pass
@@ -168,6 +170,6 @@ def switch_sched_ext_profile(profile: str) -> None:
     """Switch sched-ext low-latency scheduler profile using kyth-scx helper."""
     if shutil.which("scx_rusty") and shutil.which("sudo"):
         try:
-            subprocess.run(["sudo", "-n", "/usr/bin/kyth-scx", "set", profile], capture_output=True, check=False)
+            run_command(["sudo", "-n", "/usr/bin/kyth-scx", "set", profile], capture_output=True, check=False)
         except Exception:
             pass

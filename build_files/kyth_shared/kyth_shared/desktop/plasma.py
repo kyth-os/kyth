@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+
+from ..commands import run as run_command
 from pathlib import Path
 
 LAYOUT_VERSION = "kyth-comfort-v4"
@@ -72,7 +74,7 @@ def evaluate_plasma_script(script: str) -> bool:
     if not qdbus:
         return False
     try:
-        res = subprocess.run(
+        res = run_command(
             [
                 qdbus,
                 "org.kde.plasmashell",
@@ -96,7 +98,7 @@ def kreadconfig(file: str, group: str, key: str) -> str | None:
     if not cmd:
         return None
     try:
-        res = subprocess.run(
+        res = run_command(
             [cmd, "--file", file, "--group", group, "--key", key],
             capture_output=True,
             text=True,
@@ -124,7 +126,7 @@ def kwriteconfig(file: str, group: str | list[str], key: str, value: str, value_
         args.extend(["--type", value_type])
     args.append(value)
     try:
-        res = subprocess.run(
+        res = run_command(
             args,
             capture_output=True,
             timeout=5,
@@ -454,7 +456,7 @@ for (var p = 0; p < panelIds.length; ++p) {{
     kbuildsycoca = shutil.which("kbuildsycoca6") or shutil.which("kbuildsycoca")
     if kbuildsycoca:
         try:
-            subprocess.run([kbuildsycoca, "--noincremental"], capture_output=True, timeout=10)
+            run_command([kbuildsycoca, "--noincremental"], capture_output=True, timeout=10)
         except Exception:
             pass
 

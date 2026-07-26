@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+
+from .commands import run as run_command
 import sys
 from datetime import datetime
 
@@ -48,7 +50,7 @@ class DiagnosticReporter:
         """Send a desktop notification using notify-send or kdialog."""
         if self.have("notify-send"):
             try:
-                subprocess.run(
+                run_command(
                     ["notify-send", "--app-name=KythOS", title, body],
                     check=False,
                     stdout=subprocess.DEVNULL,
@@ -58,7 +60,7 @@ class DiagnosticReporter:
                 pass
         elif self.have("kdialog"):
             try:
-                subprocess.run(
+                run_command(
                     ["kdialog", "--title", title, "--passivepopup", body, "12"],
                     check=False,
                     stdout=subprocess.DEVNULL,
@@ -89,7 +91,7 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     scx_active = False
     if reporter.have("systemctl"):
         try:
-            res = subprocess.run(
+            res = run_command(
                 ["systemctl", "is-active", "--quiet", "scx_loader.service"],
                 check=False,
                 stdout=subprocess.DEVNULL,
@@ -123,7 +125,7 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     has_pw = False
     if reporter.have("pgrep"):
         try:
-            res = subprocess.run(["pgrep", "-x", "pipewire"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            res = run_command(["pgrep", "-x", "pipewire"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             has_pw = (res.returncode == 0)
         except Exception:
             pass
@@ -150,7 +152,7 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     vulkan_ok = False
     if reporter.have("vulkaninfo"):
         try:
-            res = subprocess.run(
+            res = run_command(
                 ["vulkaninfo", "--summary"],
                 check=False,
                 stdout=subprocess.DEVNULL,
@@ -169,7 +171,7 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     vaapi_ok = False
     if reporter.have("vainfo"):
         try:
-            res = subprocess.run(
+            res = run_command(
                 ["vainfo"],
                 check=False,
                 stdout=subprocess.DEVNULL,

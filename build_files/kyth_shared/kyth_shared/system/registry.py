@@ -7,6 +7,8 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+
+from ..commands import run as run_command
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
@@ -28,7 +30,7 @@ def booted_image_digest(status_data: dict[str, Any]) -> str | None:
 
 
 def default_inspect_runner(ref: str) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
+    return run_command(
         ["skopeo", "inspect", "--raw", "--no-creds", f"docker://{ref}"],
         capture_output=True,
         timeout=45,

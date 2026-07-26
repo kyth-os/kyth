@@ -8,8 +8,6 @@ import re
 import shlex
 import shutil
 import subprocess
-import sys
-from pathlib import Path
 
 VERSION = "v13"
 
@@ -33,19 +31,7 @@ VERSION = "v13"
 # PreviewSettings
 
 
-def _ensure_kyth_shared_path() -> None:
-    """Add build_files/kyth_shared to sys.path when running from a repo checkout."""
-    here = Path(__file__).resolve().parent
-    for candidate_dir in (here, here.parent):
-        candidate = candidate_dir / "kyth_shared"
-        if (candidate / "kyth_shared").is_dir():
-            path = str(candidate)
-            if path not in sys.path:
-                sys.path.insert(0, path)
-            return
 
-
-_ensure_kyth_shared_path()
 from kyth_shared.desktop.plasma import kreadconfig, kwriteconfig  # noqa: E402
 from kyth_shared.desktop.shortcut import refresh_kde_sycoca  # noqa: E402
 from kyth_shared.session import already_run, mark_run  # noqa: E402

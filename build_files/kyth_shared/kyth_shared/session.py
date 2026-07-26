@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+
+from .commands import run as run_command
 import time
 from pathlib import Path
 
@@ -156,7 +158,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
         "com.usebottles.bottles",
         "com.github.mtkennerly.ludusavi",
     ):
-        res = subprocess.run(["flatpak", "info", app], capture_output=True, check=False)
+        res = run_command(["flatpak", "info", app], capture_output=True, check=False)
         if res.returncode != 0:
             missing_ids.append(app)
 
@@ -170,7 +172,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
     # Query systemd service status
     service_state = "unknown"
     if shutil.which("systemctl"):
-        res = subprocess.run(
+        res = run_command(
             ["systemctl", "is-active", "kyth-default-flatpaks.service"],
             capture_output=True,
             text=True,
@@ -186,7 +188,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
         # Try starting
         started = False
         if shutil.which("sudo"):
-            res = subprocess.run(
+            res = run_command(
                 ["sudo", "-n", "systemctl", "start", "kyth-default-flatpaks.service"],
                 capture_output=True,
                 check=False,
@@ -238,7 +240,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
         try:
             with out.open("a", encoding="utf-8") as f:
                 f.write(f"$ {' '.join(args)}\n")
-            res = subprocess.run(args, capture_output=True, text=True, check=False)
+            res = run_command(args, capture_output=True, text=True, check=False)
             output = res.stdout
             if res.stderr:
                 output += res.stderr

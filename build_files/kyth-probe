@@ -20,21 +20,9 @@ import argparse
 import json
 import logging
 import sys
-from pathlib import Path
 
 LOG = logging.getLogger("kyth-probe")
 
-
-def _ensure_kyth_shared_path() -> None:
-    """Add build_files/kyth_shared to sys.path when running from a repo checkout."""
-    here = Path(__file__).resolve().parent
-    for candidate_dir in (here, here.parent):
-        candidate = candidate_dir / "kyth_shared"
-        if (candidate / "kyth_shared").is_dir():
-            path = str(candidate)
-            if path not in sys.path:
-                sys.path.insert(0, path)
-            return
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,7 +57,6 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
 
-    _ensure_kyth_shared_path()
     from kyth_shared.system.probe import (  # noqa: E402
         collect_snapshot,
         refresh_cache,
