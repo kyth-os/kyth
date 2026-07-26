@@ -22,6 +22,19 @@ def _all_build_text() -> str:
     return "\n".join(parts)
 
 
+class ValidationToolContracts(unittest.TestCase):
+    def test_installer_exports_cached_bin_for_later_actions_steps(self):
+        installer = (
+            BUILD_FILES / "scripts/install-validation-tools.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('if [[ -n "${GITHUB_PATH:-}" ]]', installer)
+        self.assertIn(
+            'printf \'%s\\n\' "${bin_dir}" >>"${GITHUB_PATH}"',
+            installer,
+        )
+
+
 class ShippedCommandContracts(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -71,4 +71,10 @@ download_and_verify "zizmor" \
 	"https://github.com/woodruffw/zizmor/releases/download/v${ZIZMOR_VERSION}" \
 	"${ZIZMOR_SHA256}" "zizmor"
 
+# Shell environment changes do not cross GitHub Actions step boundaries.
+# Publish the cached tool directory for subsequent steps, including cache hits.
+if [[ -n "${GITHUB_PATH:-}" ]]; then
+	printf '%s\n' "${bin_dir}" >>"${GITHUB_PATH}"
+fi
+
 printf '%s\n' "${bin_dir}"
