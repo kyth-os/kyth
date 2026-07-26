@@ -212,8 +212,8 @@ def _prepare_install_storage(
             # SKIP_FETCH_CHECK env toggle, which controls the unrelated
             # network-preflight check below): this target mountpoint already
             # has other partitions (e.g. a bind-mounted /boot/efi) mounted
-            # under it, which is exactly the case kyth-partition-install.sh
-            # always passes the same flag for. See plan.py's install_mode
+            # under it, which is exactly the case the partition CLI exercises.
+            # See plan.py's install_mode
             # docstring for the "alongside" mode.
             extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@", "--skip-fetch-check"],
         )

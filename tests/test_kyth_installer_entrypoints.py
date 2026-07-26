@@ -23,10 +23,11 @@ class InstallerEntrypointTests(unittest.TestCase):
         self.assertTrue(imports_main)
 
     def test_installer_package_imports_without_starting_browser(self):
-        from kyth_installer import app, server  # noqa: PLC0415
+        from kyth_installer import app, partition_cli, server  # noqa: PLC0415
 
         self.assertEqual(app.PORT, 7777)
         self.assertTrue(hasattr(server, "Handler"))
+        self.assertTrue(callable(partition_cli.main))
 
     def test_desktop_launcher_shell_syntax(self):
         import subprocess  # noqa: PLC0415

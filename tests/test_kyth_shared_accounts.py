@@ -1,7 +1,7 @@
 """Canonical account-database repair used by both install paths.
 
 kyth_installer.system.ensure_system_accounts and
-build_files/kyth-partition-install.sh's ensure_system_accounts both delegate
+the graphical and partition installer entry points both delegate
 to kyth_shared.accounts now instead of independently reimplementing this
 logic; these tests exercise the shared implementation directly.
 """

@@ -122,3 +122,80 @@ def validate_install_request(body: dict, context: InstallerContext) -> Installat
         "kernel": body.get("kernel", "fedora") or "fedora",
         "mok_password": body.get("mok_password", "") or "",
     }
+
+
+def validate_partition_install_request(
+    *,
+    target_partition: str,
+    efi_partition: str,
+    hostname: str,
+    timezone: str,
+    username: str,
+    password: str,
+    context: InstallerContext,
+) -> InstallationState:
+    """Normalize the blank-partition CLI request through installer policy."""
+    target = disk._normal_device_path(target_partition)
+    if not target:
+        raise InstallRequestError("Invalid target partition.")
+    target_disk = disk._parent_disk(target)
+    if not target_disk:
+        raise InstallRequestError(
+            f"Could not determine parent disk for {target_partition}."
+        )
+    if efi_partition:
+        normalized_efi = disk._normal_device_path(efi_partition)
+        if not normalized_efi:
+            raise InstallRequestError("Invalid EFI partition.")
+        if normalized_efi == target:
+            raise InstallRequestError(
+                "EFI partition and target partition must be different."
+            )
+        efi_disk = disk._parent_disk(normalized_efi)
+        efi_info = next(
+            (
+                part
+                for part in disk.list_partitions(efi_disk)
+                if part.get("name") == normalized_efi
+            ),
+            None,
+        )
+        if not efi_info or not efi_info.get("efi"):
+            raise InstallRequestError(
+                "The selected EFI partition is not an EFI System Partition."
+            )
+        efi_partition = normalized_efi
+
+    state, _disk_info = _storage_state(
+        {
+            "disk": target_disk,
+            "install_mode": "alongside",
+            "target_partition": target,
+            "efi_partition": efi_partition,
+        },
+        context,
+    )
+    if not HOSTNAME_PATTERN.fullmatch(hostname):
+        raise InstallRequestError("Invalid hostname.")
+    if timezone not in set(system.list_timezones()):
+        raise InstallRequestError(f"Invalid timezone: {timezone}")
+    if username and not USERNAME_PATTERN.fullmatch(username):
+        raise InstallRequestError("Invalid username.")
+    if bool(username) != bool(password):
+        raise InstallRequestError(
+            "An admin username and password must either both be supplied or both be blank."
+        )
+    try:
+        password_hash = system._hash_password(password) if password else ""
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        raise InstallRequestError(f"Could not hash password: {exc}") from exc
+
+    return {
+        **state,
+        "hostname": hostname,
+        "timezone": timezone,
+        "username": username,
+        "password_hash": password_hash,
+        "kernel": "fedora",
+        "mok_password": "",
+    }

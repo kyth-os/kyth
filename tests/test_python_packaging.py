@@ -46,6 +46,10 @@ class PythonPackagingTests(unittest.TestCase):
             "kyth_installer.app:main",
         )
         self.assertEqual(
+            installer["project"]["scripts"]["kyth-partition-install"],
+            "kyth_installer.partition_cli:main",
+        )
+        self.assertEqual(
             welcome["project"]["scripts"]["kyth-welcome"],
             "kyth_welcome.app:main",
         )
@@ -74,6 +78,8 @@ class PythonPackagingTests(unittest.TestCase):
         self.assertIn("/ctx/kyth-welcome", helper_build)
         self.assertIn("mktemp -d /tmp/kyth-welcome-package", helper_build)
         self.assertIn('"${welcome_package_dir}"', helper_build)
+        self.assertIn('"${welcome_package_dir}/kyth-installer"', helper_build)
+        self.assertNotIn("kyth-partition-install.sh", helper_build)
         self.assertNotIn("/usr/lib/kyth-installer", installer_build)
         self.assertNotIn("/usr/lib/kyth-welcome", helper_build)
 

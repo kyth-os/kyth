@@ -13,8 +13,8 @@ install_mode invariants:
                   Btrfs partition (list_partitions() alongside_candidate). Needs
                   --acknowledge-destructive alongside --skip-fetch-check because
                   the target mountpoint already has other partitions (e.g. a
-                  populated /boot/efi) mounted under it; kyth-partition-install.sh
-                  passes the same flag for the same reason. Verified in a
+                  populated /boot/efi) mounted under it; the partition CLI uses
+                  this same code path. Verified in a
                   container repro (loop-mounted GPT disk, foreign-OS ESP content,
                   real bootc) that this flag does not change behavior on a clean
                   target — it exists for parity with the shell fallback, not

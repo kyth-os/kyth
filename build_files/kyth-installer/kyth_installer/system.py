@@ -136,8 +136,8 @@ def find_deploy_etc(root_mount: str) -> Optional[str]:
 
 
 # The actual account-database repair algorithm lives in kyth_shared.accounts
-# so kyth-partition-install.sh (a separate, bash-based install path) can run
-# the identical logic instead of an independently-drifting reimplementation.
+# so every installer entry point runs identical logic instead of an
+# independently-drifting reimplementation.
 # These wrappers keep this module's historical call signatures — used
 # directly by tests and by install.py — by injecting a run() that carries
 # this package's own _as_root escalation and OSError formatting.

@@ -350,7 +350,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         # bootc install to-filesystem onto an alongside/manual target mounts
         # other partitions (e.g. /boot/efi) under it before running; per
         # plan.py's install_mode docstring this needs --skip-fetch-check
-        # unconditionally, the same as kyth-partition-install.sh, regardless
+        # unconditionally for the partition CLI as well, regardless
         # of the unrelated SKIP_FETCH_CHECK network-preflight env toggle.
         context = InstallerContext()
         context.state.update({

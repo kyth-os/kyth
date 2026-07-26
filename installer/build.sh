@@ -39,7 +39,6 @@ python3 -m pip install \
 	"${installer_package_root}/kyth-installer"
 rm -rf "${installer_package_root}"
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
-install -Dm755 /src/build_files/kyth-partition-install.sh /usr/bin/kyth-partition-install
 install -Dm755 /src/build_files/scripts/plymouth-branding-guard.sh \
 	/usr/libexec/kyth-plymouth-branding-guard
 
