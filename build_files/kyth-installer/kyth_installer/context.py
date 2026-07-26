@@ -38,6 +38,15 @@ class InstallLifecycle(str, Enum):
     FAILED = "failed"
 
 
+class InstallPhase(str, Enum):
+    PREPARE = "prepare"
+    STORAGE = "storage"
+    IMAGE = "image"
+    CONFIGURE = "configure"
+    SECURE_BOOT = "secure_boot"
+    COMPLETE = "complete"
+
+
 def default_installation_state() -> InstallationState:
     return InstallationState(
         disk="",
@@ -78,6 +87,8 @@ class InstallerContext:
     state_lock: threading.RLock = field(default_factory=threading.RLock)
     journal: "Journal | None" = None
     lifecycle: InstallLifecycle = InstallLifecycle.IDLE
+    phase: InstallPhase = InstallPhase.PREPARE
+    cleanup_mounts: list[str] = field(default_factory=list)
 
     def transition(self, lifecycle: InstallLifecycle) -> None:
         with self.state_lock:
@@ -86,3 +97,17 @@ class InstallerContext:
     def replace_state(self, state: InstallationState) -> None:
         with self.state_lock:
             self.state = state
+
+    def enter_phase(self, phase: InstallPhase) -> None:
+        with self.state_lock:
+            self.phase = phase
+
+    def register_mount(self, mountpoint: str) -> None:
+        with self.state_lock:
+            if mountpoint not in self.cleanup_mounts:
+                self.cleanup_mounts.append(mountpoint)
+
+    def release_mount(self, mountpoint: str) -> None:
+        with self.state_lock:
+            if mountpoint in self.cleanup_mounts:
+                self.cleanup_mounts.remove(mountpoint)

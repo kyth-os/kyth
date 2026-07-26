@@ -14,6 +14,9 @@ from typing import Optional
 SOURCE_IMAGE = os.environ.get("KYTH_SOURCE_IMAGE", "ghcr.io/mrtrick37/kyth:latest")
 TARGET_IMAGE = os.environ.get("KYTH_TARGET_IMAGE", SOURCE_IMAGE)
 LOG_FILE     = Path(os.environ.get("KYTH_INSTALLER_LOG", "/tmp/kyth-installer.log"))  # noqa: S108 — created with O_EXCL|O_NOFOLLOW in install.py
+FAILURE_SUMMARY_FILE = Path(
+    os.environ.get("KYTH_INSTALLER_FAILURE_SUMMARY", "/tmp/kyth-installer-failure.json")
+)  # noqa: S108 — support artifact with mode 0600
 PORT         = 7777
 SESSION_TOKEN = secrets.token_urlsafe(32)
 _bootstrap_token: Optional[str] = None

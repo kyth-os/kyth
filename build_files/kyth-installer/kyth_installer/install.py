@@ -5,13 +5,14 @@ import subprocess
 import traceback
 from pathlib import Path
 
-from .config import LOG_FILE, SKIP_FETCH_CHECK
+from .config import FAILURE_SUMMARY_FILE, LOG_FILE, SKIP_FETCH_CHECK
 from .cleanup import clear_secrets_and_orphan_mount, unmount_configuration
-from .context import InstallLifecycle, InstallerContext
+from .context import InstallLifecycle, InstallerContext, InstallPhase
 from .disk import get_root_partition
 from .imagesrc import _friendly_network_error, _install_images, _network_preflight
 from .plan import _get_manual_mounts, _prepare_install_plan, _validate_install_target, _validate_storage_intent
 from .runner import run_command
+from .recovery import cleanup_registered_mounts, write_failure_summary
 from .streaming import StreamingCommandRunner
 from kyth_shared import _get_rx_bytes
 from kyth_shared.accounts import create_installer_user as _shared_create_installer_user
@@ -109,6 +110,7 @@ def _run_cmd(
     )
 
 def _prepare_install_context(log, context: InstallerContext):
+    context.enter_phase(InstallPhase.PREPARE)
     state = context.state
     kernel = state.get("kernel", "fedora")
     src_ref, tgt_ref = _install_images(kernel)
@@ -141,6 +143,7 @@ def _prepare_install_storage(
     disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount,
     context: InstallerContext,
 ):
+    context.enter_phase(InstallPhase.STORAGE)
     state = context.state
     target_part = ""
     root_part = ""
@@ -168,6 +171,7 @@ def _prepare_install_storage(
         run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=False, capture_output=True)
         _require_no_symlink(btrfs_temp_root)
         run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
+        context.register_mount(btrfs_temp_root)
         run_command(_as_root(["mount", target_part, btrfs_temp_root]), check=True)
         try:
             run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
@@ -176,15 +180,18 @@ def _prepare_install_storage(
             run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
         finally:
             run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=True)
+            context.release_mount(btrfs_temp_root)
 
         _require_no_symlink(alongside_mount)
         run_command(_as_root(["mkdir", "-p", alongside_mount]), check=True)
+        context.register_mount(alongside_mount)
         run_command(_as_root(["mount", "-o", "subvol=@", target_part, alongside_mount]), check=True)
         progress(11)
 
         if efi_part:
             efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
             run_command(_as_root(["mkdir", "-p", str(efi_mountpoint)]), check=True)
+            context.register_mount(str(efi_mountpoint))
             try:
                 result = run_command(
                     ["findmnt", "-n", "-o", "MOUNTPOINT", efi_part],
@@ -217,6 +224,7 @@ def _prepare_install_storage(
             # docstring for the "alongside" mode.
             extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@", "--skip-fetch-check"],
         )
+        context.enter_phase(InstallPhase.IMAGE)
         _run_cmd(
             install_cmd, 12, 90, log, progress,
             stall_timeout=3600, absolute_timeout=None,
@@ -231,6 +239,7 @@ def _prepare_install_storage(
             "to-disk", src_ref, tgt_ref, disk,
             extra_flags=["--filesystem", "btrfs", "--wipe"],
         )
+        context.enter_phase(InstallPhase.IMAGE)
         _run_cmd(
             install_cmd, 5, 90, log, progress,
             stall_timeout=3600, absolute_timeout=None,
@@ -369,6 +378,7 @@ def _configure_installed_system(
     root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress,
     context: InstallerContext,
 ):
+    context.enter_phase(InstallPhase.CONFIGURE)
     state = context.state
     try:
         etc = find_deploy_etc(config_root)
@@ -395,6 +405,12 @@ def _configure_installed_system(
     finally:
         progress(99)
         unmount_configuration(config_root, alongside_mount, run=run_command)
+        if alongside_mount:
+            for mountpoint in list(context.cleanup_mounts):
+                if mountpoint == alongside_mount or mountpoint.startswith(f"{alongside_mount}/"):
+                    context.release_mount(mountpoint)
+        else:
+            context.release_mount(config_root)
 
 def _run_install_worker(
     log, progress, alongside_mount, context: InstallerContext,
@@ -419,6 +435,7 @@ def _run_install_worker(
             run_command(_as_root(["mkdir", "-p", config_root]), check=True)
             # Detach any stale mount left by a previously crashed install attempt.
             run_command(_as_root(["umount", "-l", config_root]), check=False, capture_output=True)
+            context.register_mount(config_root)
             run_command(_as_root(["mount", root_part, config_root]), check=True)
 
         progress(93)
@@ -428,9 +445,11 @@ def _run_install_worker(
         )
 
         log("── Phase 3: Staging Secure Boot enrollment ───────────────────────")
+        context.enter_phase(InstallPhase.SECURE_BOOT)
         mok_state = _try_stage_mok_enrollment(log, kernel, state["mok_password"])
 
         progress(100)
+        context.enter_phase(InstallPhase.COMPLETE)
         context.transition(InstallLifecycle.DONE)
         _push({"type": "done", "mok_state": mok_state}, context)
 
@@ -450,11 +469,16 @@ def _run_install_worker(
             message = f"{message} (also failed writing installer log {LOG_FILE}: {log_exc})"
         log(f"ERROR: {message}")
         context.transition(InstallLifecycle.FAILED)
+        try:
+            write_failure_summary(FAILURE_SUMMARY_FILE, context=context, message=message)
+        except Exception as summary_exc:
+            log(f"Warning: could not write failure summary: {summary_exc}")
         _push({"type": "error", "message": message}, context)
     finally:
         # Guard against orphaned mounts when Phase 1 fails before the inner
         # try/finally (which holds the normal umount) is ever entered.
         clear_secrets_and_orphan_mount(state, alongside_mount, run=run_command)
+        cleanup_registered_mounts(context, run=run_command)
 
 def _run_install(context: InstallerContext) -> None:
     context.events.clear()
