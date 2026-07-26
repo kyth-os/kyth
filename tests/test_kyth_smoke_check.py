@@ -9,7 +9,8 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
-from kyth_shared.smoke_check import SmokeCheck
+from kyth_shared.health import HealthReport, HealthResult, from_smoke_results
+from kyth_shared.smoke_check import Result, SmokeCheck
 
 
 class SmokeCheckTests(unittest.TestCase):
@@ -52,6 +53,44 @@ class SmokeCheckTests(unittest.TestCase):
         ):
             checker.check_command("optional", "Optional", optional=True)
         self.assertEqual(checker.results[0].level, "WARN")
+
+    def test_health_report_has_stable_json_schema(self) -> None:
+        report = from_smoke_results(
+            [
+                Result("PASS", "Booted image", "testing", "Updates"),
+                Result("WARN", "Firmware service", "inactive", "Updates"),
+                Result("FAIL", "Vulkan", "probe failed", "Hardware"),
+            ]
+        )
+        payload = report.to_dict()
+
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(payload["overall"], "error")
+        self.assertEqual(payload["summary"]["healthy"], 1)
+        self.assertEqual(payload["summary"]["warning"], 1)
+        self.assertEqual(payload["summary"]["error"], 1)
+        self.assertIn("System Hub", payload["results"][1]["remediation"])
+
+    def test_health_text_groups_components_by_section(self) -> None:
+        report = HealthReport(
+            "2026-07-26T00:00:00+00:00",
+            (
+                HealthResult("bootc", "healthy", "ready", section="System"),
+                HealthResult(
+                    "Vulkan",
+                    "warning",
+                    "fallback",
+                    "Review graphics",
+                    "Hardware",
+                ),
+            ),
+        )
+
+        text = report.to_text()
+
+        self.assertIn("KythOS health: warning", text)
+        self.assertIn("== Hardware ==", text)
+        self.assertIn("Fix: Review graphics", text)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .commands import run
+from .health import from_smoke_results
 
 
 @dataclass(frozen=True)
@@ -28,18 +29,21 @@ class Result:
 class SmokeCheck:
     """Collect and render diagnostics while keeping probes independently testable."""
 
-    def __init__(self, *, verbose: bool = False) -> None:
+    def __init__(self, *, verbose: bool = False, quiet: bool = False) -> None:
         self.verbose = verbose
+        self.quiet = quiet
         self.results: list[Result] = []
         self.current_section = ""
 
     def section(self, name: str) -> None:
         self.current_section = name
-        print(f"\n== {name} ==")
+        if not self.quiet:
+            print(f"\n== {name} ==")
 
     def record(self, level: str, name: str, detail: str) -> None:
         self.results.append(Result(level, name, detail, self.current_section))
-        print(f"{level:<5} {name:<34} {detail}")
+        if not self.quiet:
+            print(f"{level:<5} {name:<34} {detail}")
 
     def passed(self, name: str, detail: str) -> None:
         self.record("PASS", name, detail)
@@ -336,10 +340,11 @@ class SmokeCheck:
             print()
 
     def execute(self) -> None:
-        print("KythOS Smoke Check")
-        print(f"Generated: {datetime.now().astimezone().isoformat()}")
-        print(f"Host: {socket.gethostname() or 'unknown'}")
-        print(f"Kernel: {platform.release() or 'unknown'}")
+        if not self.quiet:
+            print("KythOS Smoke Check")
+            print(f"Generated: {datetime.now().astimezone().isoformat()}")
+            print(f"Host: {socket.gethostname() or 'unknown'}")
+            print(f"Kernel: {platform.release() or 'unknown'}")
         self.identity_and_updates()
         self.desktop()
         self.services_and_hardware()
@@ -351,15 +356,19 @@ class SmokeCheck:
         failures = sum(result.level == "FAIL" for result in self.results)
         warnings = sum(result.level == "WARN" for result in self.results)
         passes = sum(result.level == "PASS" for result in self.results)
-        print("\n== Summary ==")
-        print(f"PASS: {passes}\nWARN: {warnings}\nFAIL: {failures}")
+        if not self.quiet:
+            print("\n== Summary ==")
+            print(f"PASS: {passes}\nWARN: {warnings}\nFAIL: {failures}")
         if failures:
-            print("Result: not daily-driver ready yet. Fix failed checks first.")
+            if not self.quiet:
+                print("Result: not daily-driver ready yet. Fix failed checks first.")
             return 2
         if warnings:
-            print("Result: usable, with warnings to review.")
+            if not self.quiet:
+                print("Result: usable, with warnings to review.")
             return 1 if strict else 0
-        print("Result: daily-driver smoke check is clean.")
+        if not self.quiet:
+            print("Result: daily-driver smoke check is clean.")
         return 0
 
 
@@ -370,11 +379,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--strict", action="store_true", help="return 1 when warnings are present")
     parser.add_argument("-v", "--verbose", action="store_true", help="include raw diagnostic context")
+    parser.add_argument("--json", action="store_true", help="emit a support-safe JSON health report")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    checker = SmokeCheck(verbose=args.verbose)
+    checker = SmokeCheck(verbose=args.verbose, quiet=args.json)
     checker.execute()
+    if args.json:
+        print(from_smoke_results(checker.results).to_json(), end="")
     return checker.exit_code(strict=args.strict)

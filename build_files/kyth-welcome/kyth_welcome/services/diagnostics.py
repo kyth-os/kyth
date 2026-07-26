@@ -155,7 +155,7 @@ def _diagnostics_report(probes: list[HardwareProbe]) -> str:
 def _health_command_report() -> str:
     import time
     checks: list[tuple[str, list[str], int]] = [
-        ("Daily-driver smoke check", ["/usr/bin/kyth-smoke-check", "--verbose"], 90),
+        ("Daily-driver health model", ["/usr/bin/kyth-smoke-check", "--json"], 90),
         ("Post-update confidence", ["/usr/bin/kyth-post-update-check", "--force", "--no-notify"], 45),
         ("NVIDIA status", ["/usr/bin/kyth-nvidia-status"], 30),
         ("Controller readiness", ["/usr/bin/kyth-controller-check"], 30),
