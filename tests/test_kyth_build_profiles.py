@@ -45,10 +45,10 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_smb_client_stack_remains_a_required_base_capability(self):
         windows_tools = _read("build_files/scripts/packages/21-windows-management-tools.sh")
-        smoke = _read("build_files/kyth-smoke-check")
+        smoke = _read("build_files/kyth_shared/kyth_shared/smoke_check.py")
         self.assertIn("dnf5 install -y cifs-utils libsmbclient samba-client", windows_tools)
-        self.assertIn('check_command smbclient "SMB client"', smoke)
-        self.assertNotIn('check_optional_command smbclient', smoke)
+        self.assertIn('("smbclient", "SMB client")', smoke)
+        self.assertIn('optional=command in {"fprintd", "pcscd"}', smoke)
 
     def test_third_party_downloads_use_exact_resolved_tags(self):
         resolver = _read("build_files/scripts/resolve-versions.py")

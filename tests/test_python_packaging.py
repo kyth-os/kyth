@@ -25,9 +25,18 @@ class PythonPackagingTests(unittest.TestCase):
                 self.assertEqual(metadata["project"]["name"], project_name)
 
     def test_app_packages_publish_console_entry_points(self):
+        shared = self._metadata("build_files/kyth_shared")
         installer = self._metadata("build_files/kyth-installer")
         welcome = self._metadata("build_files/kyth-welcome")
 
+        self.assertEqual(
+            shared["project"]["scripts"]["kyth-ai-dev"],
+            "kyth_shared.ai_dev:main",
+        )
+        self.assertEqual(
+            shared["project"]["scripts"]["kyth-smoke-check"],
+            "kyth_shared.smoke_check:main",
+        )
         self.assertEqual(
             installer["project"]["scripts"]["kyth-installer"],
             "kyth_installer.app:main",

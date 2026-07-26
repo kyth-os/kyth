@@ -6,9 +6,7 @@
 set -euo pipefail
 
 # Install optional helpers when provided by build context.
-if [[ -f /ctx/kyth-ai-dev ]]; then
-	install -Dm0755 /ctx/kyth-ai-dev /usr/bin/kyth-ai-dev
-fi
+# kyth-ai-dev and kyth-smoke-check are installed as kyth-shared entry points.
 
 if [[ -f /ctx/kyth-game-boost ]]; then
 	install -Dm0755 /ctx/kyth-game-boost /usr/bin/kyth-game-boost

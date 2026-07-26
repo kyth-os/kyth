@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # ── Read-only diagnostic/health-check scripts ──────────────────────────────────
-install -m 0755 /ctx/kyth-smoke-check /usr/bin/kyth-smoke-check
+# kyth-smoke-check is installed as a kyth-shared console entry point.
 install -m 0755 /ctx/kyth-post-update-check /usr/bin/kyth-post-update-check
 install -m 0755 /ctx/kyth-firstboot-app-status /usr/bin/kyth-firstboot-app-status
 install -m 0755 /ctx/kyth-controller-check /usr/bin/kyth-controller-check
