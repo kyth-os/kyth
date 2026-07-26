@@ -8,6 +8,9 @@ cd "${repo_root}"
 echo "==> GitHub Validation parity"
 ./build_files/scripts/validate.sh
 
+echo "==> GitHub quality parity"
+./build_files/scripts/run-quality.sh
+
 if [[ "${KYTH_SKIP_CODACY_PREFLIGHT:-0}" == "1" ]]; then
 	echo "==> Codacy preflight skipped with KYTH_SKIP_CODACY_PREFLIGHT=1"
 	exit 0

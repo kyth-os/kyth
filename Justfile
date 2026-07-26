@@ -41,22 +41,7 @@ test:
 # Run Python unit tests with a statement coverage report.
 [group('Quality')]
 test-coverage:
-    #!/usr/bin/env bash
-    set -eou pipefail
-    quality_python="python3"
-    if [[ -x .venv-quality/bin/python ]]; then
-        quality_python=".venv-quality/bin/python"
-    fi
-    if ! "${quality_python}" -m coverage --version &> /dev/null; then
-        echo "coverage.py could not be found. Run: just setup-quality"
-        exit 1
-    fi
-    "${quality_python}" -m coverage run -m unittest discover -s tests
-    "${quality_python}" -m coverage report -m
-    "${quality_python}" -m coverage json
-    "${quality_python}" build_files/scripts/check-critical-coverage.py
-    "${quality_python}" -m coverage xml
-    "${quality_python}" -m coverage html
+    ./build_files/scripts/run-quality.sh
     echo ""
     echo "HTML report: coverage-html/index.html"
 
@@ -148,7 +133,7 @@ install-git-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
     git config core.hooksPath .githooks
-    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/update-readme-snapshot.sh build_files/scripts/install-validation-tools.sh build_files/scripts/validate.sh build_files/scripts/ci-preflight.sh
+    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/update-readme-snapshot.sh build_files/scripts/install-validation-tools.sh build_files/scripts/validate.sh build_files/scripts/run-quality.sh build_files/scripts/ci-preflight.sh
     echo "Git hooks installed via core.hooksPath=.githooks"
 
 # Remove old output ISOs — keeps only the current live ISO and current BIB ISO.

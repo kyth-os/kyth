@@ -23,6 +23,8 @@ env:
   ACTIONLINT_VERSION: 1.7.7
   HADOLINT_VERSION: 2.14.0
   JUST_VERSION: 1.52.0
+  SHELLCHECK_VERSION: 0.10.0
+  SHELLCHECK_SHA256: 6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
   ZIZMOR_VERSION: 1.25.2
   ZIZMOR_SHA256: aa1facd105f0d83fe5c55b1adcd9d7417de5d83aa27471f91dc0b66cf3803577
 
@@ -42,7 +44,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/kyth-ci-tools
-          key: validation-tools-${{ runner.os }}-${{ env.ACTIONLINT_VERSION }}-${{ env.HADOLINT_VERSION }}-${{ env.JUST_VERSION }}-${{ env.ZIZMOR_VERSION }}
+          key: validation-tools-${{ runner.os }}-${{ env.ACTIONLINT_VERSION }}-${{ env.HADOLINT_VERSION }}-${{ env.JUST_VERSION }}-${{ env.SHELLCHECK_VERSION }}-${{ env.ZIZMOR_VERSION }}
 
       - name: Install pinned validators
         run: ./build_files/scripts/install-validation-tools.sh
@@ -67,11 +69,8 @@ jobs:
       - name: Install pinned quality tools
         run: python3 -m pip install --disable-pip-version-check -r requirements-quality.txt
 
-      - name: Check Python correctness
-        run: ruff check build_files tests .github/scripts
-
-      - name: Run coverage quality gates
-        run: just test-coverage
+      - name: Run Python quality gates
+        run: ./build_files/scripts/run-quality.sh
 
       - name: Upload coverage report
         if: always()
