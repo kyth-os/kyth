@@ -23,11 +23,16 @@ class UpdateCheckWorker(TrackedThread):
     """Compare local booted digest to remote manifest via skopeo inspect."""
     result = Signal(str, str, str)
 
+    def __init__(self, *, use_cached_snapshot: bool = True):
+        super().__init__()
+        self._use_cached_snapshot = use_cached_snapshot
+
     def run(self):
-        snapshot = read_update_snapshot(max_age=300)
-        if snapshot is not None and snapshot.system_state != "unknown":
-            self.result.emit(snapshot.system_state, "", "")
-            return
+        if self._use_cached_snapshot:
+            snapshot = read_update_snapshot(max_age=300)
+            if snapshot is not None and snapshot.system_state != "unknown":
+                self.result.emit(snapshot.system_state, "", "")
+                return
         result = check_registry_update(
             status_data=_bootc_status_data() or {},
             branch=_current_branch() or "latest",

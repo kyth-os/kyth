@@ -59,7 +59,7 @@ class _UpdateAvailabilityMixin:
         self._check_btn = QPushButton("Check Now")
         self._check_btn.setEnabled(False)
         self._check_btn.setMinimumWidth(120)
-        self._check_btn.clicked.connect(self._check_for_update)
+        self._check_btn.clicked.connect(lambda: self._check_for_update(force_refresh=True))
         avail_btn_col.addWidget(self._check_btn)
         avail_hero.addLayout(avail_btn_col)
 
@@ -67,7 +67,7 @@ class _UpdateAvailabilityMixin:
         self._avail_card = avail_card
         self._add(self._avail_card)
 
-    def _check_for_update(self):
+    def _check_for_update(self, *, force_refresh: bool = False):
         if (self._check_worker and self._check_worker.isRunning()) or (self._flatpak_check_worker and self._flatpak_check_worker.isRunning()):
             return
         self._check_state = "checking"
@@ -87,7 +87,7 @@ class _UpdateAvailabilityMixin:
         self._remote_manifest = ""
 
         # Start system update check
-        self._check_worker = UpdateCheckWorker()
+        self._check_worker = UpdateCheckWorker(use_cached_snapshot=not force_refresh)
         self._check_worker.result.connect(self._on_system_check_result)
         _release_worker_when_finished(self, "_check_worker", self._check_worker)
         self._check_worker.start()

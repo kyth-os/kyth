@@ -403,7 +403,7 @@ class _UpdateOpsMixin:
             self._status_lbl.setText("Update cancelled. The running operation was stopped.")
             self._status_lbl.setObjectName("status-warn")
             self._log.append("\nCancelled. You can start the update again when ready.")
-            self._check_for_update()
+            self._check_for_update(force_refresh=True)
         elif code == 0:
             if self._mode == "firmware":
                 self._status_lbl.setText("Firmware updates queued — reboot to flash.")
@@ -420,29 +420,29 @@ class _UpdateOpsMixin:
                 self._status_lbl.setObjectName("status-warn")
                 self._log.append("\nDone. Restart to switch to the previous deployment.")
                 self._reboot_btn.show()
-                self._check_for_update()
+                self._check_for_update(force_refresh=True)
             elif self._mode == "switch":
                 self._status_lbl.setText("Branch staged — restart to apply the new channel.")
                 self._status_lbl.setObjectName("status-ok")
                 self._log.append("\nDone. Restart to boot into the new branch.")
                 self._reboot_btn.show()
-                self._check_for_update()
+                self._check_for_update(force_refresh=True)
             elif _has_staged_update():
                 self._status_lbl.setText("Update staged — restart when you're ready to apply it.")
                 self._status_lbl.setObjectName("status-ok")
                 self._log.append("\nDone. Your next system image is staged and waiting for restart.")
                 self._reboot_btn.show()
-                self._check_for_update()
+                self._check_for_update(force_refresh=True)
             elif self._mode == "full-update":
                 self._status_lbl.setText("Update complete — everything is up to date.")
                 self._status_lbl.setObjectName("status-ok")
                 self._log.append("\nDone. All managed tools and apps are up to date.")
-                self._check_for_update()
+                self._check_for_update(force_refresh=True)
             else:
                 self._status_lbl.setText("Already on the latest deployment — no image update was staged.")
                 self._status_lbl.setObjectName("status-ok")
                 self._log.append("\nNo OS image update was staged. System is current.")
-                self._check_for_update()
+                self._check_for_update(force_refresh=True)
         else:
             label = failed_operation_label(self._mode)
             self._status_lbl.setText(f"{label} failed (exit code {code}).")
