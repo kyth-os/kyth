@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER_ROOT = ROOT / "build_files/kyth-installer"
@@ -8,9 +9,47 @@ if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
 from kyth_installer import plan, server  # noqa: E402
+from kyth_installer.storage_snapshot import StorageSnapshot  # noqa: E402
 
 
 class InstallerRefactorTests(unittest.TestCase):
+    def test_plan_validation_accepts_precomputed_storage_snapshot(self):
+        disk = "/dev/nvme0n1"
+        target = f"{disk}p2"
+        snapshot = StorageSnapshot(
+            disks=({"name": disk, "size_bytes": 128 * 1024**3},),
+            partitions=({
+                "name": target,
+                "size_bytes": 64 * 1024**3,
+                "efi": False,
+                "current": False,
+                "in_use": False,
+            },),
+            free_regions=(),
+            efi_partition=f"{disk}p1",
+            is_gpt=False,
+        )
+
+        with patch.object(plan, "_parent_disk", return_value=disk), \
+             patch.object(plan, "list_disks", side_effect=AssertionError("live probe")), \
+             patch.object(plan, "list_partitions", side_effect=AssertionError("live probe")):
+            result = plan._validate_install_target(
+                {"install_mode": "alongside", "disk": disk, "target_partition": target},
+                snapshot=snapshot,
+            )
+
+        self.assertEqual(result, (disk, target))
+
+    def test_snapshot_free_region_matching_is_pure(self):
+        snapshot = StorageSnapshot(
+            disks=(), partitions=(),
+            free_regions=({"start_bytes": 1024, "end_bytes": 4096},),
+            efi_partition=None, is_gpt=True,
+        )
+
+        self.assertTrue(snapshot.contains_free_region(1024, 4096))
+        self.assertFalse(snapshot.contains_free_region(1024, 8192))
+
     def test_normalized_install_mode_defaults_to_wipe(self):
         self.assertEqual(plan._normalized_install_mode({}), "wipe")
         self.assertEqual(plan._normalized_install_mode({"install_mode": "  FREE_SPACE "}), "free_space")

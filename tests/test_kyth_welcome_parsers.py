@@ -77,6 +77,42 @@ class CoreParserTests(unittest.TestCase):
         self.assertEqual(core_base._parse_size_bytes("1.5 GB"), int(1.5 * 1024**3))
         self.assertEqual(core_base._parse_size_bytes("not a size"), 0)
 
+
+class UpdateOperationControllerTests(unittest.TestCase):
+    def test_operation_controller_tracks_phase_and_irreversible_cancel_boundary(self):
+        controller = updates.UpdateOperationController()
+        controller.start("update", now=100.0)
+
+        phase = controller.receive_line("Deploying image", now=105.0)
+
+        self.assertTrue(phase)
+        self.assertEqual(controller.last_output_at, 105.0)
+        self.assertTrue(controller.cancellation_blocked)
+        self.assertTrue(controller.cancel_block_reason)
+
+    def test_operation_controller_finishes_quiet_download(self):
+        controller = updates.UpdateOperationController()
+        controller.start("update", now=100.0)
+        for _ in range(9):
+            self.assertEqual(
+                controller.update_download(500, 1000, 0, 0, proxy_running=False),
+                "active",
+            )
+
+        self.assertEqual(
+            controller.update_download(500, 1000, 0, 0, proxy_running=False),
+            "complete",
+        )
+        self.assertEqual(controller.final_download_bytes, 500)
+
+    def test_operation_controller_advances_silent_download_phase(self):
+        controller = updates.UpdateOperationController()
+        controller.start("update", now=100.0)
+        controller.set_phase("Downloading image layers…")
+        controller.last_output_at = 100.0
+
+        self.assertEqual(controller.heartbeat_phase(now=111.0), "Processing image layers…")
+
     def test_parse_steam_acf_text(self):
         acf = gaming._parse_steam_acf_text(
             '"appid" "620"\n"name" "Portal 2"\n"installdir" "Portal 2"\n'

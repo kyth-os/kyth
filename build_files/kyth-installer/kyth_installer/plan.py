@@ -61,6 +61,7 @@ from .disk import (
 from .partition_ops import get_journal
 from .system import _as_root, _settle, unmount_target_disk
 from .runner import run_command
+from .storage_snapshot import StorageSnapshot
 
 _logger = logging.getLogger(__name__)
 
@@ -92,12 +93,37 @@ def _apply_install_plan(state: dict, plan: InstallPlan) -> None:
         state["target_partition"] = plan.target_partition
 
 
-def _validate_partition_target(disk: str, target: str, label: str) -> dict:
+def _probe_storage(
+    disk: str,
+    *,
+    include_partitions: bool = True,
+    include_free_space: bool = False,
+) -> StorageSnapshot:
+    """Capture all live discovery needed for one planning decision."""
+    return StorageSnapshot(
+        disks=tuple(list_disks()),
+        partitions=tuple(list_partitions(disk)) if include_partitions else (),
+        free_regions=tuple(list_free_space(disk)) if include_free_space else (),
+        efi_partition=find_efi_partition(disk) if include_partitions else None,
+        is_gpt=_is_gpt_disk(disk) if include_partitions else False,
+    )
+
+
+def _validate_partition_target(
+    disk: str,
+    target: str,
+    label: str,
+    snapshot: StorageSnapshot | None = None,
+) -> dict:
     """Validate `target` is a real, unmounted, adequately-sized, non-EFI
     partition on `disk`, using `list_partitions()`'s post-scan state.
     `label` (e.g. "target partition", "root partition") is substituted into
     the error messages. Returns the matching partition dict on success."""
-    partitions = {p["name"]: p for p in list_partitions(disk)}
+    partitions = (
+        snapshot.partitions_by_name
+        if snapshot is not None
+        else {p["name"]: p for p in list_partitions(disk)}
+    )
     part = partitions.get(target)
     if not part:
         raise RuntimeError(f"The selected {label} was not found during the final disk scan.")
@@ -110,13 +136,18 @@ def _validate_partition_target(disk: str, target: str, label: str) -> dict:
     return part
 
 
-def _validate_install_target(config: dict, context=None) -> tuple[str, str | None]:
+def _validate_install_target(
+    config: dict,
+    context=None,
+    snapshot: StorageSnapshot | None = None,
+) -> tuple[str, str | None]:
     mode = str(config.get("install_mode") or "wipe").strip().lower()
     disk = _normal_device_path(config.get("disk"))
     if not disk:
         raise RuntimeError("No target disk was selected.")
 
-    safe_disks = {d["name"]: d for d in list_disks()}
+    snapshot = snapshot or _probe_storage(disk, include_partitions=mode != "wipe")
+    safe_disks = snapshot.disks_by_name
     if disk not in safe_disks:
         raise RuntimeError("The selected disk is not a safe install target. Re-scan disks and choose a non-live, non-mounted disk.")
 
@@ -132,13 +163,13 @@ def _validate_install_target(config: dict, context=None) -> tuple[str, str | Non
             raise RuntimeError("No target partition was selected for alongside installation.")
         if _parent_disk(target) != disk:
             raise RuntimeError("The selected partition does not belong to the selected disk.")
-        _validate_partition_target(disk, target, "target partition")
-        if _is_gpt_disk(disk) and not _has_bios_boot_partition(disk):
+        _validate_partition_target(disk, target, "target partition", snapshot)
+        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID):
             raise RuntimeError(
                 "This GPT disk has no BIOS boot partition required by the KythOS bootloader. "
                 "Choose unallocated space, shrink Windows, or erase the disk so the installer can create one."
             )
-        if not find_efi_partition(disk):
+        if not snapshot.efi_partition:
             raise RuntimeError("Alongside installation requires an EFI system partition on the system.")
         return disk, target
 
@@ -159,8 +190,8 @@ def _validate_install_target(config: dict, context=None) -> tuple[str, str | Non
         # partition a create/format op in the journal actually touched, so it
         # could point at a pre-existing, still-mounted/in-use partition on the
         # same disk — never trust it without re-checking here.
-        _validate_partition_target(disk, target, "root partition")
-        if not find_efi_partition(disk):
+        _validate_partition_target(disk, target, "root partition", snapshot)
+        if not snapshot.efi_partition:
             raise RuntimeError("Manual installation requires an EFI system partition on the system. Create one in the partition editor.")
         return disk, target
 
@@ -231,7 +262,10 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     return bios_end + sector
 
 
-def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
+def _validate_resize_ntfs_target(
+    config: dict,
+    snapshot: StorageSnapshot | None = None,
+) -> tuple[str, str, int]:
     disk = _normal_device_path(config.get("disk"))
     partition = _normal_device_path(config.get("resize_partition") or config.get("target_partition"))
     shrink_gib = _safe_int(config.get("resize_gib") or config.get("shrink_gib") or 0)
@@ -243,12 +277,13 @@ def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
     if shrink_gib < MIN_KYTHOS_GIB:
         raise RuntimeError(f"NTFS shrink install requires at least {MIN_KYTHOS_GIB} GiB for KythOS.")
 
-    safe_disks = {d["name"]: d for d in list_disks()}
+    snapshot = snapshot or _probe_storage(disk)
+    safe_disks = snapshot.disks_by_name
     if disk not in safe_disks:
         raise RuntimeError("The selected disk is not a safe install target.")
     if _parent_disk(partition) != disk:
         raise RuntimeError("The selected NTFS partition does not belong to the selected disk.")
-    parts = {p["name"]: p for p in list_partitions(disk)}
+    parts = snapshot.partitions_by_name
     part = parts.get(partition)
     if not part:
         raise RuntimeError("The selected NTFS partition was not found during the final disk scan.")
@@ -256,11 +291,16 @@ def _validate_resize_ntfs_target(config: dict) -> tuple[str, str, int]:
         raise RuntimeError("The selected partition is currently mounted or reserved and cannot be resized.")
     if (part.get("fstype") or "").lower() not in ("ntfs", "ntfs3"):
         raise RuntimeError("Only NTFS partitions can be resized by this installer path.")
-    if not find_efi_partition(disk):
+    if not snapshot.efi_partition:
         raise RuntimeError("NTFS resize installation requires an EFI system partition on the system.")
 
     shrink_bytes = shrink_gib * 1024**3
-    if shrink_bytes < _required_guided_space(disk):
+    required_space = (
+        MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
+        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+        else MIN_KYTHOS_BYTES
+    )
+    if shrink_bytes < required_space:
         raise RuntimeError(
             f"This layout needs at least {MIN_KYTHOS_GIB + 1} GiB of shrink space "
             "to create KythOS and its boot partition."
@@ -354,7 +394,10 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     return disk, created
 
 
-def _validate_free_space_target(config: dict) -> tuple[str, int, int]:
+def _validate_free_space_target(
+    config: dict,
+    snapshot: StorageSnapshot | None = None,
+) -> tuple[str, int, int]:
     disk = _normal_device_path(config.get("disk"))
     start = _safe_int(config.get("free_region_start"), -1)
     end = _safe_int(config.get("free_region_end"), -1)
@@ -366,21 +409,26 @@ def _validate_free_space_target(config: dict) -> tuple[str, int, int]:
     if end - start < MIN_KYTHOS_BYTES:
         raise RuntimeError(f"Free space install requires at least {MIN_KYTHOS_GIB} GiB for KythOS.")
 
-    safe_disks = {d["name"]: d for d in list_disks()}
+    snapshot = snapshot or _probe_storage(disk, include_free_space=True)
+    safe_disks = snapshot.disks_by_name
     if disk not in safe_disks:
         raise RuntimeError("The selected disk is not a safe install target.")
-    if end - start < _required_guided_space(disk):
+    required_space = (
+        MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
+        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+        else MIN_KYTHOS_BYTES
+    )
+    if end - start < required_space:
         raise RuntimeError(
             f"This layout needs at least {MIN_KYTHOS_GIB + 1} GiB of free space "
             "to create KythOS and its boot partition."
         )
-    if not find_efi_partition(disk):
+    if not snapshot.efi_partition:
         raise RuntimeError("Free space installation requires an EFI system partition on the system.")
 
     # Re-scan right before committing so a stale UI selection can't partition
     # space that's no longer actually free.
-    current_regions = list_free_space(disk)
-    if not any(r["start_bytes"] == start and r["end_bytes"] == end for r in current_regions):
+    if not snapshot.contains_free_region(start, end):
         raise RuntimeError("The selected free space is no longer available. Re-scan the disk and try again.")
 
     return disk, start, end

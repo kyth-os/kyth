@@ -2,9 +2,9 @@ import time
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
-    _active_bootc_operation, _bootc_cancel_block_reason, _bootc_image_timestamp,
+    _active_bootc_operation, _bootc_image_timestamp,
     _bootc_proxy_running, _branch_display_name, _format_dl_progress_line, _format_elapsed,
-    _get_disk_write_bytes, _has_rollback_deployment, _has_staged_update, _human_bytes, _parse_update_phase,
+    _get_disk_write_bytes, _has_rollback_deployment, _has_staged_update, _human_bytes,
     _restyle, _run_worker, _set_session_inhibit, _start_or_extend_dl_monitor, _stop_download_monitor,
     _with_idle_inhibit,
 )
@@ -12,7 +12,8 @@ from .services.launch import reboot
 from .services.runtime import Worker, _finish_worker
 from .services.privileged import bootc_action
 from .services.updates import (
-    failed_operation_label, full_update_operation, image_update_operation, rollback_operation,
+    UpdateOperationController, failed_operation_label, full_update_operation,
+    image_update_operation, rollback_operation,
 )
 from .core_base import _current_branch
 from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
@@ -87,6 +88,7 @@ class _UpdateOpsMixin:
         self._add(action_card)
 
     def _build_progress_section(self):
+        self._operation = UpdateOperationController()
         self._status_lbl = QLabel()
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.hide()
@@ -151,6 +153,7 @@ class _UpdateOpsMixin:
         _set_log_panel(self._log_toggle, self._log, expanded)
 
     def _set_phase(self, phase: str):
+        self._operation.set_phase(phase)
         self._current_phase = phase
         self._status_lbl.setText(phase)
         _restyle(self._status_lbl)
@@ -165,8 +168,9 @@ class _UpdateOpsMixin:
         self._dl_low_speed_ticks = 0
         self._staging_write_start = 0
         self._mode = mode
-        self._last_output_ts = time.monotonic()
-        self._op_start_ts = time.monotonic()
+        self._operation.start(mode)
+        self._last_output_ts = self._operation.last_output_at
+        self._op_start_ts = self._operation.started_at
         self._current_phase = ""
         self._cancel_blocked = False
         self._cancel_block_reason = ""
@@ -208,7 +212,8 @@ class _UpdateOpsMixin:
         )
 
     def _phase_blocks_cancel(self, phase: str) -> str:
-        return _bootc_cancel_block_reason(self._mode, phase)
+        self._operation.set_phase(phase)
+        return self._operation.cancel_block_reason
 
     def _update_cancel_state(self):
         if self._worker is None:
@@ -267,8 +272,8 @@ class _UpdateOpsMixin:
         )
 
     def _on_line(self, text: str):
-        self._last_output_ts = time.monotonic()
-        phase = _parse_update_phase(text.strip(), self._mode)
+        phase = self._operation.receive_line(text)
+        self._last_output_ts = self._operation.last_output_at
         if phase:
             self._set_phase(phase)
             self._update_cancel_state()
@@ -305,6 +310,15 @@ class _UpdateOpsMixin:
             self._update_activity()
             self._stop_dl_monitor()
 
+        download_state = self._operation.update_download(
+            downloaded,
+            total,
+            speed_bps,
+            eta_sec,
+            proxy_running=_bootc_proxy_running(),
+        )
+        self._dl_low_speed_ticks = self._operation.low_speed_ticks
+
         # Track consecutive near-zero-speed ticks.
         # Only declare the download done when speed has been near-zero for at
         # least 10 seconds AND the skopeo image-proxy process has exited —
@@ -313,12 +327,7 @@ class _UpdateOpsMixin:
         # network byte counter says.  The byte-count 99.5% heuristic is removed
         # entirely: /proc/net/dev counts all interface traffic (not just bootc)
         # and the total is an estimate, making it too unreliable to use alone.
-        if speed_bps <= 100_000:
-            self._dl_low_speed_ticks += 1
-        else:
-            self._dl_low_speed_ticks = 0
-
-        if self._dl_low_speed_ticks >= 10 and downloaded > 0 and not _bootc_proxy_running():
+        if download_state == "complete":
             _finish_download("Download complete — processing image layers…")
             return
 
@@ -336,7 +345,7 @@ class _UpdateOpsMixin:
         # Don't clobber live download stats the dl monitor just wrote
         if self._dl_monitor is not None and self._dl_speed > 100_000:
             return
-        elapsed = int(time.monotonic() - self._op_start_ts) if self._op_start_ts else 0
+        elapsed = self._operation.elapsed()
         parts: list[str] = []
         if self._dl_final_bytes > 0:
             parts.append(f"{_human_bytes(self._dl_final_bytes)} downloaded")
@@ -352,11 +361,12 @@ class _UpdateOpsMixin:
         # Fallback: if output has been silent for 10+ seconds and we're still
         # showing the download phase, the download finished without triggering
         # the dl monitor's low-speed transition (e.g. no "layers needed:" line).
-        if (self._current_phase == "Downloading image layers…"
+        previous_phase = self._operation.phase
+        current_phase = self._operation.heartbeat_phase()
+        if (previous_phase != current_phase
                 and self._dl_monitor is None
-                and self._last_output_ts
-                and time.monotonic() - self._last_output_ts > 10):
-            self._set_phase("Processing image layers…")
+                and current_phase == "Processing image layers…"):
+            self._set_phase(current_phase)
         # During the post-download staging phase, bootc/ostree commit layers to
         # disk without emitting any output. Inject a heartbeat line every tick so
         # the log doesn't look frozen while ostree is writing gigabytes to disk.
@@ -368,7 +378,7 @@ class _UpdateOpsMixin:
             if self._staging_write_start == 0:
                 self._staging_write_start = _get_disk_write_bytes()
             written = max(0, _get_disk_write_bytes() - self._staging_write_start)
-            elapsed = int(time.monotonic() - self._op_start_ts) if self._op_start_ts else 0
+            elapsed = self._operation.elapsed()
             elapsed_str = _format_elapsed(elapsed)
             if written >= 1024 * 1024:
                 msg = f"  [staging] writing image to disk… {_human_bytes(written)} written · {elapsed_str} elapsed"
