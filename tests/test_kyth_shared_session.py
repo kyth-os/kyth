@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import runpy
 import sys
 import unittest
 from unittest import mock
@@ -22,6 +23,18 @@ from kyth_shared.session import (
 
 
 class SessionTests(unittest.TestCase):
+    def test_vscode_wallet_launcher_runs_main(self) -> None:
+        launcher = ROOT / "build_files" / "kyth-vscode-wallet"
+        with (
+            mock.patch(
+                "kyth_shared.session.disable_vscode_brave_wallet_prompts"
+            ) as disable_prompts,
+            mock.patch("builtins.print"),
+        ):
+            runpy.run_path(str(launcher), run_name="__main__")
+
+        disable_prompts.assert_called_once_with(pathlib.Path.home())
+
     @mock.patch("pathlib.Path.home")
     def test_marker_path(self, mock_home) -> None:
         mock_home.return_value = pathlib.Path("/dummy/home")

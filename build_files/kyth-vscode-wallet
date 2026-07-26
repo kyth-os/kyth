@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import getpass
-
-
+from pathlib import Path
 
 from kyth_shared.session import disable_vscode_brave_wallet_prompts  # noqa: E402
 
