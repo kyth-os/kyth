@@ -52,3 +52,35 @@ jobs:
 
       - name: Run repository validation suite
         run: ./build_files/scripts/validate.sh
+
+  quality:
+    name: coverage and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned quality tools
+        run: python3 -m pip install --disable-pip-version-check -r requirements-quality.txt
+
+      - name: Check Python correctness
+        run: ruff check build_files tests .github/scripts
+
+      - name: Run coverage quality gates
+        run: just test-coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-coverage
+          path: |
+            coverage.xml
+            coverage.json
+            coverage-html
+          if-no-files-found: warn
+          retention-days: 14

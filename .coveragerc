@@ -1,0 +1,16 @@
+[run]
+branch = True
+source =
+    build_files/kyth-installer/kyth_installer
+    build_files/kyth-welcome/kyth_welcome
+    build_files/kyth_shared/kyth_shared
+
+[report]
+show_missing = True
+skip_covered = True
+
+[html]
+directory = coverage-html
+
+[xml]
+output = coverage.xml

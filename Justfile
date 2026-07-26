@@ -43,15 +43,30 @@ test:
 test-coverage:
     #!/usr/bin/env bash
     set -eou pipefail
-    if ! python3 -m coverage --version &> /dev/null; then
-        echo "coverage.py could not be found. Install it with: pip install --user coverage"
+    quality_python="python3"
+    if [[ -x .venv-quality/bin/python ]]; then
+        quality_python=".venv-quality/bin/python"
+    fi
+    if ! "${quality_python}" -m coverage --version &> /dev/null; then
+        echo "coverage.py could not be found. Run: just setup-quality"
         exit 1
     fi
-    python3 -m coverage run --source=build_files -m unittest discover -s tests
-    python3 -m coverage report -m
-    python3 -m coverage html -d /tmp/kyth-coverage-html
+    "${quality_python}" -m coverage run -m unittest discover -s tests
+    "${quality_python}" -m coverage report -m
+    "${quality_python}" -m coverage json
+    "${quality_python}" build_files/scripts/check-critical-coverage.py
+    "${quality_python}" -m coverage xml
+    "${quality_python}" -m coverage html
     echo ""
-    echo "HTML report: /tmp/kyth-coverage-html/index.html"
+    echo "HTML report: coverage-html/index.html"
+
+# Create/update the local pinned quality-tool environment.
+[group('Quality')]
+setup-quality:
+    python3 -m venv .venv-quality
+    .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-quality.txt
+    .venv-quality/bin/coverage --version
+    .venv-quality/bin/ruff --version
 
 # Run the complete validation suite used by GitHub Actions and pre-push.
 [group('Quality')]
