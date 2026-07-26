@@ -47,5 +47,8 @@ jobs:
       - name: Install pinned validators
         run: ./build_files/scripts/install-validation-tools.sh
 
+      - name: Check Dockerfile build rules
+        run: just check-dockerfile
+
       - name: Run repository validation suite
         run: ./build_files/scripts/validate.sh
