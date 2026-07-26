@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -16,8 +14,10 @@ from kyth_shared.system.updater import (  # noqa: E402
     download_file,
     extract_archive,
     fetch_github_latest_release,
+    validate_version,
     verify_checksum_file,
 )
+from kyth_shared.commands import run_text
 
 
 def main() -> None:
@@ -37,7 +37,9 @@ def main() -> None:
         sys.exit(1)
 
     # Validate the version tag looks like a semver (vX.Y.Z)
-    if not re.match(r"^v[0-9]+\.[0-9]+\.[0-9]+$", rclone_ver):
+    try:
+        validate_version(rclone_ver, r"v[0-9]+\.[0-9]+\.[0-9]+", "rclone")
+    except ValueError:
         print(f"ERROR: Unexpected rclone version format: {rclone_ver}", file=sys.stderr)
         sys.exit(1)
 
@@ -46,12 +48,9 @@ def main() -> None:
 
     if rclone_bin.is_file():
         try:
-            res = subprocess.run(
-                [str(rclone_bin), "--version"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            res = run_text([str(rclone_bin), "--version"])
+            if res is None:
+                raise OSError("rclone could not be executed")
             first_line = res.stdout.splitlines()[0]
             parts = first_line.split()
             if len(parts) >= 2 and parts[0] == "rclone" and parts[1].startswith("v"):
@@ -109,12 +108,9 @@ def main() -> None:
 
     # Print version of installed binary
     try:
-        res = subprocess.run(
-            [str(rclone_bin), "--version"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        res = run_text([str(rclone_bin), "--version"])
+        if res is None:
+            raise OSError("rclone could not be executed")
         version_output = res.stdout.splitlines()[0]
         print(f"rclone installed: {version_output}")
     except Exception as e:

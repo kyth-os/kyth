@@ -8,7 +8,63 @@ import shutil
 import tarfile
 import urllib.request
 import zipfile
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class ReleaseAsset:
+    """A normalized downloadable asset from a release document."""
+
+    name: str
+    url: str
+
+
+def release_assets(release: dict) -> tuple[ReleaseAsset, ...]:
+    """Return only well-formed assets, insulating providers from JSON details."""
+    assets = []
+    for item in release.get("assets", []):
+        name = item.get("name")
+        url = item.get("browser_download_url")
+        if isinstance(name, str) and name and isinstance(url, str) and url:
+            assets.append(ReleaseAsset(name, url))
+    return tuple(assets)
+
+
+def find_release_asset(
+    assets: Iterable[ReleaseAsset],
+    predicate: Callable[[str], bool],
+) -> ReleaseAsset | None:
+    """Find the first release asset whose name matches *predicate*."""
+    return next((asset for asset in assets if predicate(asset.name)), None)
+
+
+def validate_version(version: str, pattern: str, component: str) -> str:
+    """Validate an externally supplied version before using it in paths/URLs."""
+    import re
+
+    if not re.fullmatch(pattern, version):
+        raise ValueError(f"Unexpected {component} version format: {version}")
+    return version
+
+
+def prune_installations(
+    install_dir: Path,
+    pattern: str,
+    *,
+    keep: int = 2,
+) -> tuple[Path, ...]:
+    """Remove older version directories, retaining newest *keep* entries."""
+    entries = sorted(
+        (path for path in install_dir.glob(pattern) if path.is_dir()),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    removed = tuple(entries[max(0, keep):])
+    for path in removed:
+        shutil.rmtree(path)
+    return removed
 
 
 def get_github_headers() -> dict[str, str]:

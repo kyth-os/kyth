@@ -25,7 +25,9 @@ from .services.welcome import (
     _first_week_days,
     _kdeconnect_configured,
     _printer_configured,
+    home_categories,
     home_hero_view,
+    visible_category_indexes,
 )
 from .qt import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt, Signal, single_shot,
@@ -232,48 +234,7 @@ class WelcomePage(Page):
         self._add(self._make_section_header("Explore Tasks", "Choose a card below to configure launchers, tune displays, or run diagnostics."))
 
         # ── Category Grid (Action Cards) ──────────────────────────────────────
-        categories = [
-            (
-                ("applications-games", "input-gaming"), "◉", "Games",
-                [
-                    ("Set up game launchers", "Gaming"),
-                    ("Tune performance", "Performance"),
-                    ("Check if your games work", "Compatibility"),
-                    ("Connect a controller", "Controllers"),
-                ],
-            ),
-            (
-                ("plasmadiscover", "applications-all"), "⬡", "Apps",
-                [
-                    ("Browse and install apps", "App Store"),
-                    ("Move files and saves", "Move Files"),
-                ],
-            ),
-            (
-                ("computer", "computer-laptop"), "◈", "System & Security",
-                [
-                    ("Check for updates", "Update"),
-                    ("View hardware and devices", "Hardware"),
-                    ("Run a health report", "Diagnostics"),
-                    ("Fix problems", "Repair"),
-                ],
-            ),
-            (
-                ("folder-network", "network-workgroup"), "◫", "Network & Internet",
-                [
-                    ("Connect to a VPN", "VPN"),
-                    ("Map network shares", "Network Shares"),
-                    ("Set up cloud storage", "Cloud Storage"),
-                ],
-            ),
-        ]
-
-        advanced_tasks = []
-        if _detect_nvidia():
-            advanced_tasks.append(("Manage NVIDIA drivers", "NVIDIA"))
-        advanced_tasks.append(("Choose a kernel", "Kernel"))
-        advanced_tasks.append(("Pick an update channel", "Channels"))
-        categories.append((("cpu", "applications-system"), "◌", "Advanced", advanced_tasks))
+        categories = home_categories(has_nvidia=_detect_nvidia())
 
         self._category_grid = QGridLayout()
         self._category_grid.setSpacing(12)
@@ -471,11 +432,13 @@ class WelcomePage(Page):
         _restyle(self._preset_status)
 
     def _relayout_categories(self, profile: str):
-        show_games = profile == "gaming"
         visible = []
-        for card, is_games in self._category_cards:
+        visible_indexes = set(visible_category_indexes(
+            profile, [is_games for _card, is_games in self._category_cards]
+        ))
+        for index, (card, _is_games) in enumerate(self._category_cards):
             self._category_grid.removeWidget(card)
-            wanted = show_games or not is_games
+            wanted = index in visible_indexes
             card.setVisible(wanted)
             if wanted:
                 visible.append(card)

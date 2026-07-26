@@ -19,11 +19,42 @@ from kyth_shared.system.updater import (
     extract_archive,
     fetch_github_latest_release,
     get_github_headers,
+    find_release_asset,
+    prune_installations,
+    release_assets,
+    validate_version,
     verify_checksum_file,
 )
 
 
 class UpdaterTests(unittest.TestCase):
+    def test_release_assets_normalizes_and_filters_metadata(self) -> None:
+        assets = release_assets({"assets": [
+            {"name": "tool.tar.xz", "browser_download_url": "https://example/tool"},
+            {"name": "missing-url"},
+        ]})
+        self.assertEqual(len(assets), 1)
+        self.assertEqual(find_release_asset(assets, lambda name: name.endswith(".xz")).name, "tool.tar.xz")
+
+    def test_validate_version_rejects_untrusted_value(self) -> None:
+        self.assertEqual(validate_version("v1.2.3", r"v[0-9]+\.[0-9]+\.[0-9]+", "tool"), "v1.2.3")
+        with self.assertRaisesRegex(ValueError, "Unexpected tool"):
+            validate_version("../../tmp", r"v[0-9.]+", "tool")
+
+    def test_prune_installations_keeps_two_newest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            paths = [root / f"tool-{n}" for n in range(3)]
+            for index, path in enumerate(paths):
+                path.mkdir()
+                path.touch()
+                path.chmod(0o755)
+                import os
+                os.utime(path, (index, index))
+            removed = prune_installations(root, "tool-*", keep=2)
+            self.assertEqual(removed, (paths[0],))
+            self.assertFalse(paths[0].exists())
+
     @mock.patch("pathlib.Path.is_file")
     @mock.patch("pathlib.Path.read_text")
     def test_get_github_headers_with_secret(self, mock_read, mock_is_file) -> None:

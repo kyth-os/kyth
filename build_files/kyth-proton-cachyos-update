@@ -2,7 +2,6 @@
 """kyth-proton-cachyos-update — Download and manage Proton-CachyOS releases."""
 from __future__ import annotations
 
-import re
 import sys
 import tempfile
 from pathlib import Path
@@ -13,6 +12,10 @@ from kyth_shared.system.updater import (  # noqa: E402
     download_file,
     extract_archive,
     fetch_github_latest_release,
+    find_release_asset,
+    prune_installations,
+    release_assets,
+    validate_version,
     verify_checksum_file,
 )
 
@@ -41,25 +44,22 @@ def main() -> None:
         print("Failed to parse Proton-CachyOS version tag from release JSON", file=sys.stderr)
         sys.exit(1)
 
-    if not re.match(r"^cachyos-[0-9]+\.[0-9]+-[0-9]{8}-slr$", ver):
+    try:
+        validate_version(ver, r"cachyos-[0-9]+\.[0-9]+-[0-9]{8}-slr", "Proton-CachyOS")
+    except ValueError:
         print(f"Unexpected Proton-CachyOS version format: {ver}", file=sys.stderr)
         sys.exit(1)
 
-    tarball_url = None
-    sha512_url = None
-    for asset in release.get("assets", []):
-        name = asset.get("name", "")
-        if name.endswith("x86_64.tar.xz"):
-            tarball_url = asset.get("browser_download_url")
-        elif name.endswith("x86_64.sha512sum"):
-            sha512_url = asset.get("browser_download_url")
+    assets = release_assets(release)
+    tarball = find_release_asset(assets, lambda name: name.endswith("x86_64.tar.xz"))
+    checksum = find_release_asset(assets, lambda name: name.endswith("x86_64.sha512sum"))
 
-    if not tarball_url or not sha512_url:
+    if not tarball or not checksum:
         print("Failed to locate Proton-CachyOS release assets", file=sys.stderr)
         sys.exit(1)
 
-    tarball_name = Path(tarball_url).name
-    sha512_name = Path(sha512_url).name
+    tarball_url, tarball_name = tarball.url, tarball.name
+    sha512_url, sha512_name = checksum.url, checksum.name
 
     # Derive target install path from tarball filename
     folder_name = tarball_name
@@ -106,13 +106,9 @@ def main() -> None:
     print(f"Proton-CachyOS {ver} installed to {install_dir}/")
 
     # Prune old versions (keep only current + one rollback)
-    import shutil
     try:
-        dirs = [d for d in install_dir.glob("proton-cachyos-*") if d.is_dir()]
-        dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
-        for old in dirs[2:]:
+        for old in prune_installations(install_dir, "proton-cachyos-*", keep=2):
             print(f"Removing old version: {old.name}")
-            shutil.rmtree(old)
     except Exception as e:
         print(f"Failed to prune old versions: {e}", file=sys.stderr)
 

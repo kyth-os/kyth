@@ -68,7 +68,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
 from kyth_welcome import core_base, page_vpn  # noqa: E402
-from kyth_welcome.services import appstream, first_run, gaming, hardware, network, software, welcome  # noqa: E402
+from kyth_welcome.services import appstream, first_run, gaming, hardware, network, repair, software, updates, welcome  # noqa: E402
 
 
 class CoreParserTests(unittest.TestCase):
@@ -159,6 +159,13 @@ class VpnParserTests(unittest.TestCase):
 
 
 class HomeHeroViewTests(unittest.TestCase):
+    def test_home_categories_and_profile_filtering(self):
+        categories = welcome.home_categories(has_nvidia=True)
+        self.assertEqual(categories[0][2], "Games")
+        self.assertIn(("Manage NVIDIA drivers", "NVIDIA"), categories[-1][3])
+        self.assertEqual(welcome.visible_category_indexes("everyday", [True, False, False]), [1, 2])
+        self.assertEqual(welcome.visible_category_indexes("gaming", [True, False]), [0, 1])
+
     def test_staged_update_takes_priority(self):
         view = welcome.home_hero_view(staged=True, rollback=True, windows_found=True)
         self.assertEqual(view.pill_text, "RESTART REQUIRED")
@@ -183,6 +190,20 @@ class HomeHeroViewTests(unittest.TestCase):
         self.assertEqual(view.rec_target, "Gaming")
         self.assertEqual(view.rec_btn_label, "Configure Games")
         self.assertEqual(view.pill_text, "SYSTEM UP-TO-DATE")
+
+
+class PageServiceModelTests(unittest.TestCase):
+    def test_update_operations_are_provider_independent(self):
+        full = updates.full_update_operation()
+        image = updates.image_update_operation(lambda: ["pkexec", "bootc", "upgrade"])
+        self.assertEqual(full.mode, "full-update")
+        self.assertEqual(image.command, ("pkexec", "bootc", "upgrade"))
+        self.assertEqual(updates.failed_operation_label("rollback"), "bootc rollback")
+
+    def test_repair_quick_fixes_are_declarative(self):
+        fixes = repair.quick_fixes()
+        self.assertEqual(fixes[0].label, "Refresh App Menu")
+        self.assertTrue(all(fix.command for fix in fixes))
 
 
 class FamiliarAppMatchTests(unittest.TestCase):

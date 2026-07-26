@@ -6,10 +6,31 @@ from __future__ import annotations
 
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
+from .desktop import REFRESH_DESKTOP_DATABASE_SH
 from .process import _command_stdout, _with_idle_inhibit
 from .privileged import bootc_action, helper_action, systemctl_action
+
+
+@dataclass(frozen=True)
+class QuickFix:
+    label: str
+    tooltip: str
+    command: tuple[str, ...]
+
+
+def quick_fixes() -> tuple[QuickFix, ...]:
+    """Declarative bounded repair actions used by the Qt page."""
+    return (
+        QuickFix("Refresh App Menu", "Rebuild the application menu database. Fixes missing app icons and entries after installs.", ("bash", "-c", REFRESH_DESKTOP_DATABASE_SH)),
+        QuickFix("Apply User Polish", "Re-apply KythOS default theme, fonts, and KDE settings to your user profile.", ("/usr/bin/kyth-user-polish",)),
+        QuickFix("Retry Game Apps", "Restart the Flatpak install service to retry installing Steam, Lutris, and other game apps.", tuple(systemctl_action("restart", "kyth-default-flatpaks.service").command())),
+        QuickFix("Fix Flatpak Apps", "Repair the Flatpak user installation. Fixes corrupted or missing app runtimes.", ("flatpak", "repair", "--user")),
+        QuickFix("Restart Audio", "Restart PipeWire, PipeWire-Pulse, and WirePlumber. Fixes audio that has stopped working.", ("systemctl", "--user", "restart", "pipewire", "pipewire-pulse", "wireplumber")),
+        QuickFix("Restart Bluetooth", "Restart the Bluetooth service. Fixes controllers and headsets that won't pair or connect.", tuple(systemctl_action("restart", "bluetooth.service").command())),
+    )
 
 
 def read_sys_text(path: str) -> str:

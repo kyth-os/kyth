@@ -11,6 +11,9 @@ from .core_base import (
 from .services.launch import reboot
 from .services.runtime import Worker, _finish_worker
 from .services.privileged import bootc_action
+from .services.updates import (
+    failed_operation_label, full_update_operation, image_update_operation, rollback_operation,
+)
 from .core_base import _current_branch
 from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
 from .widgets import _make_card, _set_log_panel
@@ -196,6 +199,14 @@ class _UpdateOpsMixin:
         if mode != "rollback":
             self._heartbeat.start()
 
+    def _start_operation_spec(self, operation):
+        self._start_operation(
+            operation.mode,
+            operation.label,
+            list(operation.command),
+            operation.inhibit_reason,
+        )
+
     def _phase_blocks_cancel(self, phase: str) -> str:
         return _bootc_cancel_block_reason(self._mode, phase)
 
@@ -243,27 +254,16 @@ class _UpdateOpsMixin:
         self._worker.cancel()
 
     def _run_full_update(self):
-        self._start_operation(
-            "full-update",
-            "Running KythOS full system update…",
-            ["/usr/bin/kyth-full-update"],
-            "KythOS is running a full system update",
-        )
+        self._start_operation_spec(full_update_operation())
 
     def _run_bootc_upgrade(self):
-        self._start_operation(
-            "update",
-            "Downloading the next KythOS OS image…",
-            bootc_action("upgrade").command(),
-            "KythOS is downloading a system update",
+        self._start_operation_spec(
+            image_update_operation(lambda: bootc_action("upgrade").command())
         )
 
     def _run_rollback(self):
-        self._start_operation(
-            "rollback",
-            "Staging the previous deployment for next boot…",
-            bootc_action("rollback").command(),
-            "KythOS is staging a system rollback",
+        self._start_operation_spec(
+            rollback_operation(lambda: bootc_action("rollback").command())
         )
 
     def _on_line(self, text: str):
@@ -434,11 +434,7 @@ class _UpdateOpsMixin:
                 self._log.append("\nNo OS image update was staged. System is current.")
                 self._check_for_update()
         else:
-            label = {
-                "full-update": "full update", "update": "bootc upgrade",
-                "rollback": "bootc rollback", "switch": "bootc switch",
-                "firmware": "fwupdmgr upgrade",
-            }.get(self._mode, "operation")
+            label = failed_operation_label(self._mode)
             self._status_lbl.setText(f"{label} failed (exit code {code}).")
             self._status_lbl.setObjectName("status-err")
 

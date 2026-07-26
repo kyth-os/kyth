@@ -108,6 +108,35 @@ def home_hero_view(staged: bool, rollback: bool, windows_found: bool) -> HomeHer
     return HomeHeroView(pill_text, pill_object_name, rec_text, rec_btn_label, rec_target)
 
 
+def home_categories(*, has_nvidia: bool):
+    """Return home navigation content independently of Qt construction."""
+    categories = [
+        (("applications-games", "input-gaming"), "◉", "Games", [
+            ("Set up game launchers", "Gaming"), ("Tune performance", "Performance"),
+            ("Check if your games work", "Compatibility"), ("Connect a controller", "Controllers"),
+        ]),
+        (("plasmadiscover", "applications-all"), "⬡", "Apps", [
+            ("Browse and install apps", "App Store"), ("Move files and saves", "Move Files"),
+        ]),
+        (("computer", "computer-laptop"), "◈", "System & Security", [
+            ("Check for updates", "Update"), ("View hardware and devices", "Hardware"),
+            ("Run a health report", "Diagnostics"), ("Fix problems", "Repair"),
+        ]),
+        (("folder-network", "network-workgroup"), "◫", "Network & Internet", [
+            ("Connect to a VPN", "VPN"), ("Map network shares", "Network Shares"),
+            ("Set up cloud storage", "Cloud Storage"),
+        ]),
+    ]
+    advanced = [("Manage NVIDIA drivers", "NVIDIA")] if has_nvidia else []
+    advanced.extend((("Choose a kernel", "Kernel"), ("Pick an update channel", "Channels")))
+    categories.append((("cpu", "applications-system"), "◌", "Advanced", advanced))
+    return categories
+
+
+def visible_category_indexes(profile: str, games_flags: list[bool]) -> list[int]:
+    return [i for i, games in enumerate(games_flags) if profile == "gaming" or not games]
+
+
 # Underscore aliases
 _path_exists = path_exists
 _controller_seen = controller_seen

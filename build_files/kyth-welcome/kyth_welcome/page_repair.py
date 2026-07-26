@@ -7,7 +7,7 @@ from .page_repair_components import repair_overview_cards, rollback_card
 from .services.launch import kcmshell, popen_privileged
 from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
 from .services.hardware import _detect_nvidia
-from .services.repair import _read_sys_text, sleep_mode_label
+from .services.repair import _read_sys_text, quick_fixes, sleep_mode_label
 from .services.flatpak import _is_flatpak_installed
 from .services.privileged import systemctl_action
 from .page_repair_assist import _AssistMixin
@@ -86,23 +86,12 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             "/usr/bin/kyth-session-snapshot"
         ]))
         quick_btns.addWidget(panic_btn)
-        for label, tip, cmd in (
-            ("Refresh App Menu",  "Rebuild the application menu database. Fixes missing app icons and entries after installs.",
-             ["bash", "-c", REFRESH_DESKTOP_DATABASE_SH]),
-            ("Apply User Polish", "Re-apply KythOS default theme, fonts, and KDE settings to your user profile.",
-             ["/usr/bin/kyth-user-polish"]),
-            ("Retry Game Apps",   "Restart the Flatpak install service to retry installing Steam, Lutris, and other game apps.",
-             systemctl_action("restart", "kyth-default-flatpaks.service").command()),
-            ("Fix Flatpak Apps",  "Repair the Flatpak user installation. Fixes corrupted or missing app runtimes.",
-             ["flatpak", "repair", "--user"]),
-            ("Restart Audio",     "Restart PipeWire, PipeWire-Pulse, and WirePlumber. Fixes audio that has stopped working.",
-             ["systemctl", "--user", "restart", "pipewire", "pipewire-pulse", "wireplumber"]),
-            ("Restart Bluetooth", "Restart the Bluetooth service. Fixes controllers and headsets that won't pair or connect.",
-             systemctl_action("restart", "bluetooth.service").command()),
-        ):
-            btn = QPushButton(label)
-            btn.setToolTip(tip)
-            btn.clicked.connect(lambda _=False, c=cmd, l=label: self._run_quick_fix(l, c))
+        for fix in quick_fixes():
+            btn = QPushButton(fix.label)
+            btn.setToolTip(fix.tooltip)
+            btn.clicked.connect(
+                lambda _=False, f=fix: self._run_quick_fix(f.label, list(f.command))
+            )
             quick_btns.addWidget(btn)
         if _detect_nvidia():
             nvidia_status_btn = QPushButton("NVIDIA Status")
