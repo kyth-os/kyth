@@ -3,83 +3,20 @@
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
-
-
 from kyth_shared.diagnostics import DiagnosticReporter  # noqa: E402
+from kyth_shared.runtime_diagnostics import (  # noqa: E402
+    check_deployment_rollback,
+    check_gpu_modules,
+    check_services,
+    check_vulkan,
+    deployment_id,
+    is_live_image,
+)
 from kyth_shared.session import already_run, mark_run  # noqa: E402
-from kyth_shared.system.gpu import loaded_kernel_modules, lspci_gpu_lines  # noqa: E402
-
-
-def is_live_image() -> bool:
-    try:
-        with open("/proc/cmdline", "r", encoding="utf-8") as f:
-            cmdline = f.read()
-            if "kyth.live" in cmdline.split():
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def get_deployment_id(reporter: DiagnosticReporter) -> str:
-    if reporter.have("ostree"):
-        try:
-            res = subprocess.run(["ostree", "admin", "status"], capture_output=True, text=True, check=False)
-            for line in res.stdout.splitlines():
-                if line.strip().startswith("*"):
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        return f"{parts[1]}.{parts[2]}"
-        except Exception:
-            pass
-    if reporter.have("bootc"):
-        try:
-            res = subprocess.run(["bootc", "status", "--format", "json"], capture_output=True, text=True, check=False)
-            if res.returncode == 0:
-                data = json.loads(res.stdout)
-                digest = data.get("status", {}).get("booted", {}).get("image", {}).get("imageDigest", "")
-                if digest:
-                    return digest
-        except Exception:
-            pass
-    return subprocess.run(["uname", "-r"], capture_output=True, text=True, check=False).stdout.strip()
-
-
-def check_gpu_modules(reporter: DiagnosticReporter) -> None:
-    if reporter.have("lspci"):
-        gpus = lspci_gpu_lines()
-        if gpus:
-            gpu_line = gpus[0].lower()
-            loaded_mods = loaded_kernel_modules()
-
-            if "nvidia" in gpu_line:
-                if "nvidia" not in loaded_mods:
-                    reporter.warn_check("GPU drivers", "NVIDIA hardware detected but proprietary module is not loaded.")
-                else:
-                    reporter.pass_check("GPU drivers", "NVIDIA module loaded")
-            elif any(k in gpu_line for k in ("amd", "ati")):
-                if "amdgpu" not in loaded_mods:
-                    reporter.warn_check("GPU drivers", "AMD GPU detected but amdgpu is not loaded.")
-                else:
-                    reporter.pass_check("GPU drivers", "amdgpu loaded")
-            elif "intel" in gpu_line:
-                if not any(m in loaded_mods for m in ("i915", "xe")):
-                    reporter.warn_check("GPU drivers", "Intel GPU detected but i915/xe is not loaded.")
-                else:
-                    reporter.pass_check("GPU drivers", "Intel driver loaded")
-            else:
-                reporter.pass_check("GPU drivers", "Generic display controller active")
-        else:
-            reporter.warn_check("GPU drivers", "No GPU was detected by lspci.")
-    else:
-        reporter.warn_check("GPU drivers", "lspci is missing, so GPU drivers were not checked.")
 
 
 def main() -> None:
@@ -99,7 +36,7 @@ def main() -> None:
     reporter = DiagnosticReporter("Post-Update Check")
 
     # Resolve deployment ID & stamp
-    dep = get_deployment_id(reporter)
+    dep = deployment_id(reporter)
     sanitized_dep = re.sub(r"[^A-Za-z0-9_.-]", "_", dep)
     stamp_name = f"post-update-check-{sanitized_dep}"
 
@@ -110,48 +47,29 @@ def main() -> None:
     warnings: list[str] = []
 
     # 1. Deployment tool check
-    if reporter.have("ostree"):
-        try:
-            res = subprocess.run(["ostree", "admin", "status"], capture_output=True, text=True, check=False)
-            deployments_count = sum(1 for line in res.stdout.splitlines() if re.match(r"^\*?\s+[A-Za-z0-9_-]+\s", line))
-            if deployments_count < 2:
-                warnings.append("Rollback deployment not visible yet.")
-        except Exception:
-            warnings.append("Failed to query ostree admin status.")
-    elif reporter.have("bootc"):
-        # bootc status needs root, but we run read-only check here. We check if bootc status succeeds or fails
-        res = subprocess.run(["bootc", "status"], capture_output=True, check=False)
-        if res.returncode != 0:
-            warnings.append("bootc status needs root; rollback was not checked here.")
-    else:
-        failures.append("No deployment tool found.")
+    deployment_failures, deployment_warnings = check_deployment_rollback(reporter)
+    failures.extend(deployment_failures)
+    warnings.extend(deployment_warnings)
 
     # 2. GPU modules
     check_gpu_modules(reporter)
 
     # 3. Vulkan
-    if reporter.have("vulkaninfo"):
-        try:
-            res = subprocess.run(["vulkaninfo", "--summary"], capture_output=True, timeout=10, check=False)
-            if res.returncode != 0:
-                warnings.append("Vulkan check failed after update.")
-        except subprocess.TimeoutExpired:
-            warnings.append("Vulkan check timed out after 10s.")
-    else:
-        warnings.append("vulkaninfo is missing, so Vulkan was not checked.")
+    before_warnings = reporter.warnings
+    check_vulkan(reporter, warning="failed after update")
+    if reporter.warnings > before_warnings:
+        warnings.append("Vulkan check failed after update.")
 
     # 4. Flatpak
     if not reporter.have("flatpak"):
         failures.append("Flatpak is missing.")
 
     # 5. PipeWire & WirePlumber
-    if reporter.have("systemctl"):
-        pw_res = subprocess.run(["systemctl", "--user", "is-active", "pipewire.service"], capture_output=True, check=False)
-        if pw_res.returncode != 0:
-            warnings.append("PipeWire is not active in this login session.")
-        wp_res = subprocess.run(["systemctl", "--user", "is-active", "wireplumber.service"], capture_output=True, check=False)
-        if wp_res.returncode != 0:
-            warnings.append("WirePlumber is not active in this login session.")
+    service_results_before = len(reporter.results)
+    check_services(reporter, (("pipewire.service", True), ("wireplumber.service", True)))
+    for level, name, _message in reporter.results[service_results_before:]:
+        if level == "WARN":
+            warnings.append(f"{name} is not active in this login session.")
 
     # Format output/notify based on failures and warnings
     app_name = "KythOS Post-Update Check"

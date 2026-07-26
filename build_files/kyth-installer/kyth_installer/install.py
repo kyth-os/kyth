@@ -6,6 +6,7 @@ import traceback
 from pathlib import Path
 
 from .config import LOG_FILE, SKIP_FETCH_CHECK
+from .cleanup import clear_secrets_and_orphan_mount, unmount_configuration
 from .context import InstallLifecycle, InstallerContext
 from .disk import get_root_partition
 from .imagesrc import _friendly_network_error, _install_images, _network_preflight
@@ -392,14 +393,8 @@ def _configure_installed_system(
         else:
             log("Warning: deploy/etc not found — skipping post-install configuration")
     finally:
-        run_command(_as_root(["sync"]), check=False)
         progress(99)
-        if alongside_mount:
-            target_home = Path(alongside_mount) / "ostree/deploy/default/var/home"
-            run_command(_as_root(["umount", "-Rl", str(target_home)]), check=False, capture_output=True)
-            run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
-        else:
-            run_command(_as_root(["umount", config_root]), check=False)
+        unmount_configuration(config_root, alongside_mount, run=run_command)
 
 def _run_install_worker(
     log, progress, alongside_mount, context: InstallerContext,
@@ -457,12 +452,9 @@ def _run_install_worker(
         context.transition(InstallLifecycle.FAILED)
         _push({"type": "error", "message": message}, context)
     finally:
-        state["password_hash"] = ""  # nosec B105 # nosemgrep -- clearing, not a hardcoded secret
-        state["mok_password"] = ""  # nosec B105 # nosemgrep -- clearing, not a hardcoded secret
         # Guard against orphaned mounts when Phase 1 fails before the inner
         # try/finally (which holds the normal umount) is ever entered.
-        if alongside_mount:
-            run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
+        clear_secrets_and_orphan_mount(state, alongside_mount, run=run_command)
 
 def _run_install(context: InstallerContext) -> None:
     context.events.clear()

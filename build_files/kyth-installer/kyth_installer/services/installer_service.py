@@ -158,121 +158,15 @@ class InstallerService:
             return {"ok": False, "message": str(exc)}
 
     def start_install(self, body: dict) -> dict:
-        import re
-        import threading
-        from kyth_installer.config import _IS_LIVE_SESSION
-        from kyth_installer.context import InstallLifecycle, InstallationState
-        from kyth_installer.disk import (
-            find_efi_partition,
-            list_disks,
-            list_free_space,
-            list_partitions,
-            _safe_int,
-        )
-        from kyth_installer.partition_ops import get_journal
-        from kyth_installer.plan import _validate_storage_intent
-        from kyth_installer.system import _hash_password, list_timezones
         from kyth_installer import install
-
-        disk = body.get("disk", "")
-        disks = {item["name"]: item for item in list_disks()}
-        if disk not in disks:
-            return {"started": False, "message": "Invalid disk."}
-
-        install_mode = body.get("install_mode", "wipe")
-        if install_mode not in ("wipe", "alongside", "resize_ntfs", "free_space", "manual"):
-            install_mode = "wipe"
-        target_partition = resize_partition = efi_partition = ""
-        resize_gib = free_region_start = free_region_end = 0
-
-        if install_mode == "alongside":
-            target_partition = body.get("target_partition", "")
-            if target_partition not in {part.get("name") for part in list_partitions(disk)}:
-                return {"started": False, "message": "Invalid target partition."}
-            efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
-        elif install_mode == "resize_ntfs":
-            resize_partition = body.get("resize_partition") or body.get("target_partition", "")
-            resize_gib = _safe_int(body.get("resize_gib") or body.get("shrink_gib") or 0)
-            if resize_partition not in {part.get("name") for part in list_partitions(disk)} or resize_gib < 32:
-                return {"started": False, "message": "Invalid NTFS resize target."}
-            efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
-        elif install_mode == "free_space":
-            free_region_start = _safe_int(body.get("free_region_start"), -1)
-            free_region_end = _safe_int(body.get("free_region_end"), -1)
-            valid_region = any(
-                region["start_bytes"] <= free_region_start
-                and region["end_bytes"] >= free_region_end
-                for region in list_free_space(disk)
-            )
-            if free_region_start < 0 or free_region_end <= free_region_start or not valid_region:
-                return {"started": False, "message": "Invalid free space region."}
-            efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
-        elif install_mode == "manual":
-            journal = get_journal(self.context)
-            if not journal or not journal.committed:
-                return {"started": False, "message": "Partition changes must be committed before starting the install."}
-            target_partition = journal.root_partition or ""
-            if not target_partition:
-                return {"started": False, "message": "No root partition (/) configured in the manual partition layout."}
-            efi_partition = body.get("efi_partition", "") or find_efi_partition(disk)
-        elif disks[disk].get("current") and not _IS_LIVE_SESSION:
-            return {
-                "started": False,
-                "message": "This is the disk running the current KythOS session.\n\nThe running root filesystem cannot be unmounted, so reinstalling to this disk is only supported from the live ISO.",
-            }
-
-        state = {
-            "disk": disk, "install_mode": install_mode,
-            "target_partition": target_partition, "resize_partition": resize_partition,
-            "resize_gib": resize_gib, "free_region_start": free_region_start,
-            "free_region_end": free_region_end,
-        }
+        from kyth_installer.execution import start_installation
+        from kyth_installer.validation import InstallRequestError, validate_install_request
         try:
-            _validate_storage_intent(state, self.context)
-        except RuntimeError as exc:
+            state = validate_install_request(body, self.context)
+        except InstallRequestError as exc:
             return {"started": False, "message": str(exc)}
-
-        current_ok = install_mode == "alongside" or not disks[disk].get("current") or bool(body.get("confirm_current"))
-        if not (body.get("confirm_backup") and body.get("confirm_erase") and current_ok):
-            return {"started": False, "message": "Please confirm the on-screen acknowledgements before starting the install."}
-        try:
-            password_hash = _hash_password(body.get("password", ""))
-        except Exception as exc:
-            return {"started": False, "message": f"Could not hash password: {exc}"}
-
-        timezone = body.get("timezone", "UTC") or "UTC"
-        if timezone not in set(list_timezones()):
-            timezone = "UTC"
-        username = body.get("username", "")
-        if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,30}", username):
-            return {"started": False, "message": "Invalid username."}
-        hostname = body.get("hostname", "kyth")
-        if not re.fullmatch(r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?", hostname):
-            return {"started": False, "message": "Invalid hostname."}
-
-        if not self.context.install_lock.acquire(blocking=False):
+        if not start_installation(self.context, state, install._run_install):
             return {"started": False, "message": "An installation is already running."}
-        next_state: InstallationState = {
-            **state,
-            "efi_partition": efi_partition,
-            "hostname": hostname,
-            "timezone": timezone,
-            "username": username,
-            "password_hash": password_hash,
-            "kernel": body.get("kernel", "fedora") or "fedora",
-            "mok_password": body.get("mok_password", "") or "",
-        }
-        self.context.replace_state(next_state)
-        self.context.transition(InstallLifecycle.VALIDATED)
-
-        def worker() -> None:
-            try:
-                self.context.transition(InstallLifecycle.INSTALLING)
-                install._run_install(self.context)
-            finally:
-                self.context.install_lock.release()
-
-        threading.Thread(target=worker, daemon=True).start()
         return {"started": True}
 
     def reboot(self, _body: dict) -> dict:

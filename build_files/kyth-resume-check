@@ -2,33 +2,21 @@
 """Read-only suspend/resume confidence check."""
 from __future__ import annotations
 
-import os
-import re
-import subprocess
 from pathlib import Path
 
-
-
 from kyth_shared.diagnostics import DiagnosticReporter  # noqa: E402
-from kyth_shared.system.gpu import lspci_gpu_lines  # noqa: E402
-
-
-def check_loginctl(reporter: DiagnosticReporter) -> None:
-    if reporter.have("loginctl"):
-        session_id = os.environ.get("XDG_SESSION_ID", "self")
-        res = subprocess.run(["loginctl", "show-session", session_id], capture_output=True, check=False)
-        if res.returncode == 0:
-            reporter.pass_check("Login session", "logind can see this session")
-        else:
-            reporter.warn_check("Login session", "session not visible through loginctl")
-    else:
-        reporter.warn_check("Login session", "loginctl command not found")
+from kyth_shared.commands import DEFAULT_RUNNER  # noqa: E402
+from kyth_shared.runtime_diagnostics import (  # noqa: E402
+    check_gpu_detected,
+    check_loginctl,
+    check_services as check_systemd_services,
+    check_vulkan,
+)
 
 
 def check_network(reporter: DiagnosticReporter) -> None:
     if reporter.have("nmcli"):
-        res = subprocess.run(["nmcli", "-t", "-f", "STATE", "general"], capture_output=True, text=True, check=False)
-        state = res.stdout.strip()
+        state = DEFAULT_RUNNER.stdout(["nmcli", "-t", "-f", "STATE", "general"])
         if state.startswith("connected"):
             reporter.pass_check("Network", state)
         else:
@@ -38,24 +26,14 @@ def check_network(reporter: DiagnosticReporter) -> None:
 
 
 def check_services(reporter: DiagnosticReporter) -> None:
-    if reporter.have("systemctl"):
-        pw_res = subprocess.run(["systemctl", "--user", "is-active", "pipewire.service"], capture_output=True, check=False)
-        if pw_res.returncode == 0:
-            reporter.pass_check("PipeWire", "active")
-        else:
-            reporter.warn_check("PipeWire", "not active")
-
-        wp_res = subprocess.run(["systemctl", "--user", "is-active", "wireplumber.service"], capture_output=True, check=False)
-        if wp_res.returncode == 0:
-            reporter.pass_check("WirePlumber", "active")
-        else:
-            reporter.warn_check("WirePlumber", "not active")
-
-        bt_res = subprocess.run(["systemctl", "is-active", "bluetooth.service"], capture_output=True, check=False)
-        if bt_res.returncode == 0:
-            reporter.pass_check("Bluetooth service", "active")
-        else:
-            reporter.warn_check("Bluetooth service", "not active")
+    check_systemd_services(
+        reporter,
+        (
+            ("pipewire.service", True),
+            ("wireplumber.service", True),
+            ("bluetooth.service", False),
+        ),
+    )
 
 
 def check_bluetooth_adapter(reporter: DiagnosticReporter) -> None:
@@ -66,36 +44,11 @@ def check_bluetooth_adapter(reporter: DiagnosticReporter) -> None:
         reporter.warn_check("Bluetooth adapter", "no hci controller visible")
 
 
-def check_gpu(reporter: DiagnosticReporter) -> None:
-    if reporter.have("lspci"):
-        gpus = lspci_gpu_lines()
-        if gpus:
-            reporter.pass_check("GPU detected", gpus[0].strip())
-        else:
-            reporter.warn_check("GPU detected", "no GPU found via lspci")
-    else:
-        reporter.warn_check("GPU detected", "lspci command not found")
-
-
-def check_vulkan(reporter: DiagnosticReporter) -> None:
-    if reporter.have("vulkaninfo"):
-        try:
-            res = subprocess.run(["vulkaninfo", "--summary"], capture_output=True, timeout=10, check=False)
-            if res.returncode == 0:
-                reporter.pass_check("Vulkan", "responding")
-            else:
-                reporter.warn_check("Vulkan", "failed after resume")
-        except subprocess.TimeoutExpired:
-            reporter.warn_check("Vulkan", "failed after resume (timeout)")
-    else:
-        reporter.warn_check("Vulkan", "vulkaninfo unavailable")
-
-
 def check_displays(reporter: DiagnosticReporter) -> None:
     if reporter.have("kscreen-doctor"):
-        res = subprocess.run(["kscreen-doctor", "-o"], capture_output=True, text=True, check=False)
+        output = DEFAULT_RUNNER.stdout(["kscreen-doctor", "-o"])
         # Count lines containing ' connected'
-        connected_count = sum(1 for line in res.stdout.splitlines() if " connected" in line)
+        connected_count = sum(1 for line in output.splitlines() if " connected" in line)
         if connected_count > 0:
             reporter.pass_check("Displays", f"{connected_count} connected output(s)")
         else:
@@ -106,13 +59,10 @@ def check_displays(reporter: DiagnosticReporter) -> None:
 
 def check_journal_errors(reporter: DiagnosticReporter) -> None:
     if reporter.have("journalctl"):
-        res = subprocess.run(
+        res = DEFAULT_RUNNER.text(
             ["journalctl", "-b", "--since", "-10 minutes", "-p", "err", "--no-pager"],
-            capture_output=True,
-            text=True,
-            check=False,
         )
-        if res.returncode == 0:
+        if res is not None and res.returncode == 0:
             keywords = ("amdgpu", "nvidia", "i915", "xe", "bluetooth", "networkmanager", "pipewire", "wireplumber", "kwin")
             err_lines = [
                 line for line in res.stdout.splitlines()
@@ -136,8 +86,8 @@ def main() -> None:
     check_network(reporter)
     check_services(reporter)
     check_bluetooth_adapter(reporter)
-    check_gpu(reporter)
-    check_vulkan(reporter)
+    check_gpu_detected(reporter)
+    check_vulkan(reporter, warning="failed after resume")
     check_displays(reporter)
     check_journal_errors(reporter)
 
