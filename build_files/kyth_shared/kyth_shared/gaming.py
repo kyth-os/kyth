@@ -5,8 +5,9 @@ Used by kyth-sched and kyth-update-watcher to avoid duplicate busctl/proc scanni
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
+
+from kyth_shared.commands import run_text
 
 # Process names that indicate a game is active
 GAMING_PROCS = frozenset(
@@ -23,24 +24,21 @@ GAMING_PROCS = frozenset(
 
 def _active_uids() -> list[int]:
     """Return UIDs with active systemd user sessions."""
-    try:
-        r = subprocess.run(
-            ["loginctl", "list-sessions", "--no-legend", "--no-pager"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        uids: list[int] = []
-        for line in r.stdout.splitlines():
-            parts = line.split()
-            if len(parts) >= 3:
-                try:
-                    uids.append(int(parts[2]))
-                except ValueError:
-                    pass
-        return list(set(uids))
-    except Exception:
+    result = run_text(
+        ["loginctl", "list-sessions", "--no-legend", "--no-pager"],
+        timeout=5,
+    )
+    if result is None:
         return []
+    uids: list[int] = []
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 3:
+            try:
+                uids.append(int(parts[2]))
+            except ValueError:
+                pass
+    return list(set(uids))
 
 
 def gamescope_session_active(uid: int) -> bool:
@@ -50,36 +48,33 @@ def gamescope_session_active(uid: int) -> bool:
 
 def gamemode_active(uid: int) -> bool:
     """Query GameMode status over D-Bus for a user."""
-    try:
-        env = {
-            **os.environ,
-            "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus",
-        }
-        r = subprocess.run(
-            [
-                "busctl",
-                "--user",
-                "--address",
-                f"unix:path=/run/user/{uid}/bus",
-                "call",
-                "com.feralinteractive.GameMode",
-                "/com/feralinteractive/GameMode",
-                "com.feralinteractive.GameMode",
-                "QueryStatus",
-                "i",
-                "0",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            env=env,
-            check=False,
-        )
-        if r.returncode == 0 and r.stdout.strip():
-            val = r.stdout.strip().split()[-1]
+    env = {
+        **os.environ,
+        "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus",
+    }
+    result = run_text(
+        [
+            "busctl",
+            "--user",
+            "--address",
+            f"unix:path=/run/user/{uid}/bus",
+            "call",
+            "com.feralinteractive.GameMode",
+            "/com/feralinteractive/GameMode",
+            "com.feralinteractive.GameMode",
+            "QueryStatus",
+            "i",
+            "0",
+        ],
+        timeout=3,
+        env=env,
+    )
+    if result is not None and result.returncode == 0 and result.stdout.strip():
+        try:
+            val = result.stdout.strip().split()[-1]
             return int(val) > 0
-    except Exception:
-        pass
+        except (IndexError, ValueError):
+            return False
     return False
 
 

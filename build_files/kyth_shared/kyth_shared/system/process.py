@@ -12,6 +12,8 @@ import threading
 import time
 from typing import Callable, TypeVar
 
+from kyth_shared.commands import command_stdout, run_text
+
 T = TypeVar("T")
 
 _logger = logging.getLogger(__name__)
@@ -43,17 +45,11 @@ _DISK_BACKED_KEYS = frozenset({
 
 
 def _run_command(cmd: list[str], timeout: int = 5) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-    except Exception:
-        return None
+    return run_text(cmd, timeout=timeout)
 
 
 def _command_stdout(cmd: list[str], timeout: int = 5) -> str:
-    result = _run_command(cmd, timeout=timeout)
-    if result is None:
-        return ""
-    return result.stdout.strip()
+    return command_stdout(cmd, timeout=timeout)
 
 
 def _strip_ansi(text: str) -> str:

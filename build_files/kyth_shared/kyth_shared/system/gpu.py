@@ -1,14 +1,13 @@
 """Shared GPU detection helpers: lspci parsing, loaded kernel modules, installed RPM packages."""
 from __future__ import annotations
 
-import subprocess
+from kyth_shared.commands import run_optional, run_text
 
 
 def run_lspci_nn() -> list[str]:
     """Return the stdout lines of ``lspci -nn``, or an empty list if it fails."""
-    try:
-        res = subprocess.run(["lspci", "-nn"], capture_output=True, text=True, check=False)
-    except Exception:
+    res = run_text(["lspci", "-nn"])
+    if res is None:
         return []
     return res.stdout.splitlines()
 
@@ -42,8 +41,5 @@ def is_kernel_module_loaded(name: str) -> bool:
 
 def rpm_package_installed(name: str) -> bool:
     """Check whether an RPM package is installed."""
-    try:
-        res = subprocess.run(["rpm", "-q", name], capture_output=True, check=False)
-    except Exception:
-        return False
-    return res.returncode == 0
+    res = run_optional(["rpm", "-q", name], capture_output=True)
+    return res is not None and res.returncode == 0
