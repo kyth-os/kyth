@@ -1,5 +1,3 @@
-import subprocess  # nosec B404 # nosemgrep
-
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
     _IS_LIVE, _load_profile, _restyle,
@@ -15,6 +13,7 @@ from .qt import (
 from .widgets import (
     _divider, _theme_icon,
 )
+from .services.launch import popen
 
 # ── Sidebar nav button ─────────────────────────────────────────────────────────
 def _nav_section_label(text: str) -> QLabel:
@@ -87,7 +86,7 @@ class MainWindow(QMainWindow):
             install_btn.setObjectName("primary")
             install_btn.setFixedWidth(148)
             install_btn.clicked.connect(
-                lambda: subprocess.Popen(["/usr/bin/kyth-launch-installer"])
+                lambda: popen(["/usr/bin/kyth-launch-installer"])
             )
             banner_layout.addWidget(install_btn)
             central_layout.addWidget(banner)

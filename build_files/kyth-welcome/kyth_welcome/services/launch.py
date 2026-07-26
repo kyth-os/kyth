@@ -10,6 +10,8 @@ import shutil
 import subprocess
 from typing import Sequence
 
+from kyth_shared.commands import APPLICATION_RUNNER
+
 from .privileged import PrivilegedAction, PrivilegedGateway
 
 PRIVILEGED_GATEWAY = PrivilegedGateway()
@@ -26,7 +28,7 @@ def popen(cmd: Sequence[str], *, env: dict[str, str] | None = None) -> subproces
         if shutil.which(binary) is None:
             return None
     try:
-        return subprocess.Popen(
+        return APPLICATION_RUNNER.spawn(
             list(cmd),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

@@ -1,4 +1,5 @@
 import unittest
+import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +38,28 @@ class QualityContractsTests(unittest.TestCase):
         gate = (ROOT / "build_files/scripts/check-critical-coverage.py").read_text()
         for module in ("recovery.py", "privileged.py", "updates.py", "user_polish.py"):
             self.assertIn(module, gate)
+
+    def test_primary_ui_shells_do_not_bypass_command_gateway(self):
+        ui_paths = (
+            ROOT / "build_files/kyth-welcome/kyth_welcome/windows.py",
+            ROOT / "build_files/kyth-welcome/kyth_welcome/wizard/window.py",
+            ROOT / "build_files/kyth-welcome/kyth_welcome/wizard/steps_finish.py",
+        )
+        violations = []
+        for path in ui_paths:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    violations.extend(
+                        f"{path.relative_to(ROOT)} imports subprocess"
+                        for alias in node.names
+                        if alias.name == "subprocess"
+                    )
+                elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+                    violations.append(
+                        f"{path.relative_to(ROOT)} imports from subprocess"
+                    )
+        self.assertEqual(violations, [])
 
 
 if __name__ == "__main__":

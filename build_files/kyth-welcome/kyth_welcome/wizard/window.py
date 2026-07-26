@@ -9,7 +9,6 @@ Home page instead of silently marking everything done.
 """
 from __future__ import annotations
 
-import subprocess
 from typing import ClassVar
 
 from ..core_base import _load_profile, _restyle, _running_threads, _save_profile
@@ -18,6 +17,7 @@ from ..qt import (
     QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
 )
 from ..services.setup_state import STEP_KEYS, mark_step, mark_wizard_closed
+from ..services.launch import popen
 from .steps_apps import _AppsStepMixin, _default_checked_ids
 from .steps_finish import _FinishStepMixin
 from .steps_gaming import _GamingStepMixin
@@ -250,10 +250,7 @@ class WizardWindow(
         for key, card in self._profile_cards.items():
             card.set_checked(key == profile)
         _save_profile(profile)
-        try:
-            subprocess.Popen(["/usr/bin/kyth-apply-role-preset", profile], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # nosec B603 # nosemgrep
-        except OSError:
-            pass
+        popen(["/usr/bin/kyth-apply-role-preset", profile])
         # Re-seed the Get Apps defaults to match the chosen profile. Only
         # enabled boxes are touched — already-installed apps stay locked.
         wanted = _default_checked_ids(profile)
