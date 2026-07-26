@@ -6,9 +6,12 @@ is cheap to test and usable by non-UI callers.
 """
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any, Callable, Mapping
 
 
 class PrivilegedActionError(ValueError):
@@ -24,9 +27,69 @@ class AuthFrontend(StrEnum):
 class PrivilegedAction:
     name: str
     argv: tuple[str, ...]
+    timeout: float = 300
+    sensitive_options: tuple[str, ...] = ()
 
     def command(self) -> list[str]:
         return list(self.argv)
+
+    def display_command(self) -> list[str]:
+        command = self.command()
+        for index, value in enumerate(command[:-1]):
+            if value in self.sensitive_options:
+                command[index + 1] = "<redacted>"
+        return command
+
+
+_SAFE_ENV_KEYS = frozenset({
+    "DBUS_SESSION_BUS_ADDRESS",
+    "DESKTOP_STARTUP_ID",
+    "DISPLAY",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "SUDO_ASKPASS",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_RUNTIME_DIR",
+})
+
+
+def sanitized_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Keep desktop/auth context while dropping loader and interpreter injection."""
+    environment = source if source is not None else os.environ
+    return {key: value for key, value in environment.items() if key in _SAFE_ENV_KEYS}
+
+
+class PrivilegedGateway:
+    """The sole execution boundary for validated privileged actions."""
+
+    def __init__(
+        self,
+        *,
+        run: Callable[..., Any] = subprocess.run,
+        popen: Callable[..., subprocess.Popen] = subprocess.Popen,
+        audit: Callable[[str], None] | None = None,
+    ) -> None:
+        self._run = run
+        self._popen = popen
+        self._audit = audit or (lambda _message: None)
+
+    def run(self, action: PrivilegedAction, **kwargs: Any):
+        kwargs.setdefault("check", False)
+        kwargs.setdefault("timeout", action.timeout)
+        kwargs.setdefault("env", sanitized_environment())
+        kwargs["shell"] = False
+        self._audit(f"privileged action {action.name}: {' '.join(action.display_command())}")
+        return self._run(action.command(), **kwargs)
+
+    def spawn(self, action: PrivilegedAction, **kwargs: Any) -> subprocess.Popen:
+        kwargs.setdefault("env", sanitized_environment())
+        kwargs["shell"] = False
+        self._audit(f"privileged action {action.name}: {' '.join(action.display_command())}")
+        return self._popen(action.command(), **kwargs)
 
 
 _SAFE_IMAGE_REF_RE = re.compile(r"^[A-Za-z0-9._/@:+-]+$")
@@ -165,7 +228,11 @@ def openconnect_action(
     if username:
         args += ["--user", username]
     args.append(gateway)
-    return PrivilegedAction(name="openconnect", argv=tuple(args))
+    return PrivilegedAction(
+        name="openconnect",
+        argv=tuple(args),
+        sensitive_options=("--cookie",),
+    )
 
 
 def scheduler_action(name: str) -> PrivilegedAction:

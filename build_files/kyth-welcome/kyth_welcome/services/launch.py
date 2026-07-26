@@ -10,7 +10,9 @@ import shutil
 import subprocess
 from typing import Sequence
 
-from .privileged import PrivilegedAction
+from .privileged import PrivilegedAction, PrivilegedGateway
+
+PRIVILEGED_GATEWAY = PrivilegedGateway()
 
 
 def popen(cmd: Sequence[str], *, env: dict[str, str] | None = None) -> subprocess.Popen | None:
@@ -37,10 +39,9 @@ def popen(cmd: Sequence[str], *, env: dict[str, str] | None = None) -> subproces
 
 def popen_privileged(action: PrivilegedAction) -> subprocess.Popen | None:
     """Launch a command that has passed the centralized privilege policy."""
-    cmd = action.command()
     try:
-        return subprocess.Popen(
-            cmd,
+        return PRIVILEGED_GATEWAY.spawn(
+            action,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
