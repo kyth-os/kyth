@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "build_files" / "kyth-installer" / "kyth_installer"
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
-from kyth_installer import install, post_routes, runner as command_runner  # noqa: E402
+from kyth_installer import install, post_routes  # noqa: E402
 from kyth_installer.context import InstallLifecycle, InstallerContext  # noqa: E402
 from kyth_installer.partition_ops import get_journal, init_journal, reset_journal  # noqa: E402
 from kyth_installer.plan import InstallPlan  # noqa: E402
@@ -440,12 +440,8 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             monitor_interval=0.01,
         )
         with mock.patch(
-            "kyth_installer.runner._ALLOWED_EXECUTABLES",
-            new={
-                *command_runner._ALLOWED_EXECUTABLES,
-                Path(sys.executable).name,
-                Path(sys.executable).resolve().name,
-            },
+            "kyth_installer.runner._validate_executable",
+            side_effect=lambda executable: executable,
         ):
             runner.run(
                 cmd, 5, 90, logs.append, progress_values.append,

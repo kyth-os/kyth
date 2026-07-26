@@ -81,10 +81,15 @@ class ShortcutTests(unittest.TestCase):
             "Categories=Game;\n"
         )
 
-        with mock.patch("builtins.open", mock.mock_open(read_data=desktop_content)):
-            exported, skipped = export_steam_games()
-            self.assertEqual(exported, 1)
-            self.assertEqual(skipped, 0)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_home = pathlib.Path(tmpdir) / "data"
+            with (
+                mock.patch.dict(os.environ, {"HOME": tmpdir, "XDG_DATA_HOME": str(data_home)}),
+                mock.patch("builtins.open", mock.mock_open(read_data=desktop_content)),
+            ):
+                exported, skipped = export_steam_games()
+                self.assertEqual(exported, 1)
+                self.assertEqual(skipped, 0)
 
     @mock.patch("subprocess.run")
     @mock.patch("shutil.which")

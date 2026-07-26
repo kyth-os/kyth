@@ -4,6 +4,7 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -30,7 +31,9 @@ class WorkServiceTests(unittest.TestCase):
             self.assertEqual(work.create_m365_shortcuts(), 0)
 
     def test_convert_pst_missing_tool(self):
-        with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             mock.patch.object(work, "PST_IMPORT_DIR", tmpdir), \
+             mock.patch.object(work, "run_sync", side_effect=FileNotFoundError):
             ok, msg = work.convert_pst("/tmp/mail.pst")  # noqa: S108 — fixture string, not a real path opened on disk
         self.assertFalse(ok)
         self.assertIn("readpst", msg)

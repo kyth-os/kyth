@@ -53,6 +53,14 @@ echo "==> Committed-secret patterns"
 python3 build_files/scripts/check-committed-secrets.py
 
 echo "==> Python unit tests"
+test_home="$(mktemp -d)"
+trap 'rm -rf -- "${test_home}"' EXIT
+export HOME="${test_home}/home"
+export XDG_CACHE_HOME="${test_home}/cache"
+export XDG_CONFIG_HOME="${test_home}/config"
+export XDG_DATA_HOME="${test_home}/data"
+export XDG_STATE_HOME="${test_home}/state"
+mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}"
 python3 -m unittest discover -s tests
 
 echo "==> Structured configuration"

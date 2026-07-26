@@ -18,7 +18,6 @@ from kyth_installer import (  # noqa: E402
     install,
     partition_ops,
     plan,
-    runner as command_runner,
     server,
     system,
 )
@@ -107,12 +106,8 @@ class InstallerCommandTests(unittest.TestCase):
         with patch.object(install, "_as_root", side_effect=lambda cmd: cmd), \
              patch.object(install, "_get_rx_bytes", return_value=0), \
              patch(
-                 "kyth_installer.runner._ALLOWED_EXECUTABLES",
-                 new={
-                     *command_runner._ALLOWED_EXECUTABLES,
-                     Path(sys.executable).name,
-                     Path(sys.executable).resolve().name,
-                 },
+                 "kyth_installer.runner._validate_executable",
+                 side_effect=lambda executable: executable,
              ):
             install._run_cmd(
                 command, 5, 90, logs.append, progress.append,
