@@ -8,11 +8,14 @@ import shlex
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
 VERSION = "v13"
+PLACES_VERSION = "v1"
+AUTOSTART_VERSION = "v1"
 USER_FOLDERS = (
     "Desktop", "Documents", "Downloads", "Games", "Music", "Pictures",
     "Public", "Screenshots", "Templates", "Videos",
@@ -62,7 +65,7 @@ class OperationResult:
 def _run_operation(name: str, operation: Callable[[], OperationResult]) -> OperationResult:
     try:
         return operation()
-    except OSError as exc:
+    except (OSError, ValueError, ET.ParseError) as exc:
         return OperationResult(name, OperationStatus.FAILED, str(exc))
 
 
@@ -153,28 +156,100 @@ def apply_foundation(
     return [_run_operation(name, operation) for name, operation in operations]
 
 
-def ensure_place(places_file: str, href: str, title: str, icon: str) -> None:
-    try:
-        with open(places_file, "r", encoding="utf-8") as f:
-            content = f.read()
-    except OSError:
-        return
-    
-    if f'href="{href}"' in content:
-        return
-    
-    bookmark = (
-        f' <bookmark href="{href}">\n'
-        f'  <title>{title}</title>\n'
-        f'  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="{icon}" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-        f' </bookmark>\n'
+BOOKMARK_NS = "http://www.freedesktop.org/standards/desktop-bookmarks"
+ET.register_namespace("bookmark", BOOKMARK_NS)
+
+
+def _place_definitions(home: str) -> tuple[tuple[str, str, str], ...]:
+    folders = (
+        ("", "Home", "user-home"),
+        ("Desktop", "Desktop", "user-desktop"),
+        ("Documents", "Documents", "folder-documents"),
+        ("Downloads", "Downloads", "folder-download"),
+        ("Games", "Games", "applications-games"),
+        ("Music", "Music", "folder-music"),
+        ("Pictures", "Pictures", "folder-pictures"),
+        ("Screenshots", "Screenshots", "folder-pictures"),
+        ("Public", "Public", "folder-publicshare"),
+        ("Templates", "Templates", "folder-templates"),
+        ("Videos", "Videos", "folder-videos"),
     )
-    
-    parts = content.rsplit("</xbel>", 1)
-    if len(parts) == 2:
-        new_content = parts[0] + bookmark + "</xbel>" + parts[1]
-        with open(places_file, "w", encoding="utf-8") as f:
-            f.write(new_content)
+    return tuple(
+        (f"file://{home}{f'/{folder}' if folder else ''}", title, icon)
+        for folder, title, icon in folders
+    ) + (
+        ("trash:/", "Trash", "user-trash"),
+        ("network:/", "Network", "network-workgroup"),
+    )
+
+
+def _bookmark(href: str, title: str, icon: str) -> ET.Element:
+    node = ET.Element("bookmark", {"href": href})
+    ET.SubElement(node, "title").text = title
+    info = ET.SubElement(node, "info")
+    metadata = ET.SubElement(
+        info, "metadata", {"owner": "http://freedesktop.org"}
+    )
+    ET.SubElement(metadata, f"{{{BOOKMARK_NS}}}icon", {"name": icon})
+    return node
+
+
+def apply_places(home: str) -> OperationResult:
+    """Create or extend Dolphin places without duplicate string insertion."""
+    path = os.path.join(home, ".local", "share", "user-places.xbel")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.isfile(path):
+        tree = ET.parse(path)
+        root = tree.getroot()
+        if root.tag != "xbel":
+            raise ValueError(f"unexpected root element: {root.tag}")
+    else:
+        root = ET.Element("xbel", {"version": "1.0"})
+        tree = ET.ElementTree(root)
+
+    existing = {node.get("href") for node in root.findall("bookmark")}
+    changed = False
+    for href, title, icon in _place_definitions(home):
+        if href not in existing:
+            root.append(_bookmark(href, title, icon))
+            changed = True
+    if changed or not os.path.isfile(path):
+        ET.indent(tree, space=" ")
+        tree.write(path, encoding="utf-8", xml_declaration=True)
+    return OperationResult(
+        f"places-{PLACES_VERSION}",
+        OperationStatus.APPLIED if changed else OperationStatus.SKIPPED,
+    )
+
+
+def cleanup_autostart(home: str) -> OperationResult:
+    """Remove obsolete and completed user-polish launchers idempotently."""
+    autostart = os.path.join(home, ".config", "autostart")
+    removed = False
+    for filename in (
+        "kyth-windows-friendly-defaults.desktop",
+        "kyth-user-polish.desktop",
+    ):
+        path = os.path.join(autostart, filename)
+        if os.path.isfile(path):
+            os.remove(path)
+            removed = True
+    return OperationResult(
+        f"autostart-{AUTOSTART_VERSION}",
+        OperationStatus.APPLIED if removed else OperationStatus.SKIPPED,
+    )
+
+
+def finish_polish(stamp_name: str, home: str) -> list[OperationResult]:
+    """Persist completion only after all requested operations have run."""
+    mark_run(stamp_name)
+    return [
+        OperationResult("stamp", OperationStatus.APPLIED),
+        _run_operation(
+            f"autostart-{AUTOSTART_VERSION}",
+            lambda: cleanup_autostart(home),
+        ),
+    ]
 
 
 def main() -> None:
@@ -184,22 +259,16 @@ def main() -> None:
 
     stamp_dir = os.path.expanduser("~/.local/share/kyth")
     stamp_name = f"user-polish-{VERSION}"
-    old_autostart = os.path.expanduser("~/.config/autostart/kyth-windows-friendly-defaults.desktop")
-    new_autostart = os.path.expanduser("~/.config/autostart/kyth-user-polish.desktop")
-
     had_polish_stamp = 0
     if os.path.isdir(stamp_dir):
         if glob.glob(os.path.join(stamp_dir, "user-polish-*")):
             had_polish_stamp = 1
 
     if already_run(stamp_name) and not args.force:
-        try:
-            if os.path.isfile(old_autostart):
-                os.remove(old_autostart)
-            if os.path.isfile(new_autostart):
-                os.remove(new_autostart)
-        except OSError:
-            pass
+        _run_operation(
+            f"autostart-{AUTOSTART_VERSION}",
+            lambda: cleanup_autostart(os.path.expanduser("~")),
+        )
         return
 
     os.makedirs(stamp_dir, exist_ok=True)
@@ -212,87 +281,15 @@ def main() -> None:
         if result.status is OperationStatus.FAILED:
             print(f"kyth-user-polish: {result.name}: {result.detail}", file=sys.stderr)
 
-    places_file = os.path.expanduser("~/.local/share/user-places.xbel")
-    if not os.path.isfile(places_file):
-        os.makedirs(os.path.dirname(places_file), exist_ok=True)
-        default_places = (
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<!DOCTYPE xbel>\n'
-            '<xbel version="1.0">\n'
-            f' <bookmark href="file://{os.path.expanduser("~")}">\n'
-            '  <title>Home</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="user-home" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Desktop")}">\n'
-            '  <title>Desktop</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="user-desktop" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Documents")}">\n'
-            '  <title>Documents</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="folder-documents" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Downloads")}">\n'
-            '  <title>Downloads</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="folder-download" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Games")}">\n'
-            '  <title>Games</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="applications-games" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Music")}">\n'
-            '  <title>Music</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="folder-music" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Pictures")}">\n'
-            '  <title>Pictures</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="folder-pictures" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Screenshots")}">\n'
-            '  <title>Screenshots</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="folder-pictures" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Public")}">\n'
-            '  <title>Public</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="folder-publicshare" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Templates")}">\n'
-            '  <title>Templates</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="folder-templates" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            f' <bookmark href="file://{os.path.expanduser("~/Videos")}">\n'
-            '  <title>Videos</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="folder-videos" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            ' <bookmark href="trash:/">\n'
-            '  <title>Trash</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="user-trash" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            ' <bookmark href="network:/">\n'
-            '  <title>Network</title>\n'
-            '  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="network-workgroup" xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"/></metadata></info>\n'
-            ' </bookmark>\n'
-            '</xbel>\n'
-        )
-        try:
-            with open(places_file, "w", encoding="utf-8") as f:
-                f.write(default_places)
-        except OSError:
-            pass
-
     home_dir = os.path.expanduser("~")
-    ensure_place(places_file, f"file://{home_dir}", "Home", "user-home")
-    ensure_place(places_file, f"file://{home_dir}/Desktop", "Desktop", "user-desktop")
-    ensure_place(places_file, f"file://{home_dir}/Documents", "Documents", "folder-documents")
-    ensure_place(places_file, f"file://{home_dir}/Downloads", "Downloads", "folder-download")
-    ensure_place(places_file, f"file://{home_dir}/Games", "Games", "applications-games")
-    ensure_place(places_file, f"file://{home_dir}/Music", "Music", "folder-music")
-    ensure_place(places_file, f"file://{home_dir}/Pictures", "Pictures", "folder-pictures")
-    ensure_place(places_file, f"file://{home_dir}/Screenshots", "Screenshots", "folder-pictures")
-    ensure_place(places_file, f"file://{home_dir}/Public", "Public", "folder-publicshare")
-    ensure_place(places_file, f"file://{home_dir}/Templates", "Templates", "folder-templates")
-    ensure_place(places_file, f"file://{home_dir}/Videos", "Videos", "folder-videos")
-    ensure_place(places_file, "trash:/", "Trash", "user-trash")
-    ensure_place(places_file, "network:/", "Network", "network-workgroup")
+    places_result = _run_operation(
+        f"places-{PLACES_VERSION}", lambda: apply_places(home_dir)
+    )
+    if places_result.status is OperationStatus.FAILED:
+        print(
+            f"kyth-user-polish: {places_result.name}: {places_result.detail}",
+            file=sys.stderr,
+        )
 
     if shutil.which("kwriteconfig6"):
         kwriteconfig("ksplashrc", "KSplash", "Engine", "KSplashQML")
@@ -513,11 +510,4 @@ def main() -> None:
             except OSError:
                 pass
 
-    mark_run(stamp_name)
-    try:
-        if os.path.isfile(old_autostart):
-            os.remove(old_autostart)
-        if os.path.isfile(new_autostart):
-            os.remove(new_autostart)
-    except OSError:
-        pass
+    finish_polish(stamp_name, home_dir)

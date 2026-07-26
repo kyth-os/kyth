@@ -7,7 +7,13 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
-from kyth_shared.user_polish import OperationStatus, apply_foundation
+from kyth_shared.user_polish import (
+    OperationStatus,
+    _run_operation,
+    apply_foundation,
+    apply_places,
+    cleanup_autostart,
+)
 
 
 class UserPolishTests(unittest.TestCase):
@@ -35,6 +41,55 @@ class UserPolishTests(unittest.TestCase):
         self.assertEqual(results[0].status, OperationStatus.FAILED)
         self.assertEqual(results[1].status, OperationStatus.UNAVAILABLE)
         self.assertEqual(results[2].status, OperationStatus.UNAVAILABLE)
+
+    def test_places_are_xml_aware_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            places = Path(tmp) / ".local/share/user-places.xbel"
+            places.parent.mkdir(parents=True)
+            places.write_text(
+                '<?xml version="1.0"?><xbel version="1.0">'
+                '<bookmark href="smb://server/share"><title>Work</title></bookmark>'
+                "</xbel>",
+                encoding="utf-8",
+            )
+
+            first = apply_places(tmp)
+            second = apply_places(tmp)
+            content = places.read_text(encoding="utf-8")
+
+        self.assertEqual(first.status, OperationStatus.APPLIED)
+        self.assertEqual(second.status, OperationStatus.SKIPPED)
+        self.assertEqual(content.count('href="smb://server/share"'), 1)
+        self.assertEqual(content.count(f'href="file://{tmp}/Downloads"'), 1)
+        self.assertEqual(content.count('href="trash:/"'), 1)
+
+    def test_malformed_places_is_a_structured_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            places = Path(tmp) / ".local/share/user-places.xbel"
+            places.parent.mkdir(parents=True)
+            places.write_text("<xbel>", encoding="utf-8")
+
+            result = _run_operation("places-v1", lambda: apply_places(tmp))
+
+        self.assertEqual(result.status, OperationStatus.FAILED)
+        self.assertIn("no element found", result.detail)
+
+    def test_autostart_cleanup_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            autostart = Path(tmp) / ".config/autostart"
+            autostart.mkdir(parents=True)
+            obsolete = autostart / "kyth-windows-friendly-defaults.desktop"
+            current = autostart / "kyth-user-polish.desktop"
+            unrelated = autostart / "keep.desktop"
+            for path in (obsolete, current, unrelated):
+                path.touch()
+
+            first = cleanup_autostart(tmp)
+            second = cleanup_autostart(tmp)
+
+            self.assertEqual(first.status, OperationStatus.APPLIED)
+            self.assertEqual(second.status, OperationStatus.SKIPPED)
+            self.assertTrue(unrelated.exists())
 
 
 if __name__ == "__main__":
