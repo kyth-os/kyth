@@ -15,6 +15,11 @@ from kyth_welcome.services.updates import (  # noqa: E402
     check_registry_update,
     firmware_check_commands,
 )
+from kyth_welcome.services.registry import (  # noqa: E402
+    amd64_manifest_entry,
+    image_annotations,
+    image_revision,
+)
 
 
 class UpdateServiceTests(unittest.TestCase):
@@ -111,6 +116,51 @@ class UpdateServiceTests(unittest.TestCase):
             firmware_check_commands(refresh=True),
             [["fwupdmgr", "refresh"], ["fwupdmgr", "get-updates"]],
         )
+
+
+class ManifestAnnotationHelperTests(unittest.TestCase):
+    _REV = "org.opencontainers.image.revision"
+
+    def test_amd64_manifest_entry_selects_matching_platform(self):
+        index = {
+            "manifests": [
+                {"digest": "sha256:arm", "platform": {"architecture": "arm64", "os": "linux"}},
+                {"digest": "sha256:amd", "platform": {"architecture": "amd64", "os": "linux"}},
+            ]
+        }
+        entry = amd64_manifest_entry(index)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["digest"], "sha256:amd")
+
+    def test_amd64_manifest_entry_returns_none_without_index(self):
+        self.assertIsNone(amd64_manifest_entry({"config": {}, "layers": []}))
+        self.assertIsNone(amd64_manifest_entry({"manifests": []}))
+
+    def test_image_annotations_prefers_top_level_revision(self):
+        manifest = {
+            "annotations": {self._REV: "toplevel"},
+            "manifests": [
+                {"annotations": {self._REV: "entry"},
+                 "platform": {"architecture": "amd64", "os": "linux"}},
+            ],
+        }
+        self.assertEqual(image_annotations(manifest).get(self._REV), "toplevel")
+
+    def test_image_annotations_falls_back_to_amd64_entry(self):
+        manifest = {
+            "manifests": [
+                {"annotations": {self._REV: "entry"},
+                 "platform": {"architecture": "amd64", "os": "linux"}},
+            ],
+        }
+        self.assertEqual(image_annotations(manifest).get(self._REV), "entry")
+
+    def test_image_annotations_returns_empty_when_nothing_matches(self):
+        self.assertEqual(image_annotations({}), {})
+
+    def test_image_revision_truncates_to_twelve_chars(self):
+        self.assertEqual(image_revision({self._REV: "0123456789abcdef"}), "0123456789ab")
+        self.assertEqual(image_revision({}), "")
 
 
 if __name__ == "__main__":

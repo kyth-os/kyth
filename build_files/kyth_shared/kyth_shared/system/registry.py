@@ -17,6 +17,8 @@ from kyth_shared.system.bootc_query import image_digest_from_status, nested_get
 
 InspectRunner = Callable[[str], subprocess.CompletedProcess[bytes]]
 
+_REVISION_KEY = "org.opencontainers.image.revision"
+
 
 @dataclass(frozen=True)
 class UpdateCheckResult:
@@ -27,6 +29,42 @@ class UpdateCheckResult:
 
 def booted_image_digest(status_data: dict[str, Any]) -> str | None:
     return image_digest_from_status(status_data, "booted")
+
+
+def amd64_manifest_entry(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the ``amd64``/``linux`` entry from an OCI image index, or None.
+
+    None is returned both when the manifest is not a multi-arch index and when
+    the index carries no matching entry; callers that need to distinguish those
+    cases should guard on ``manifest.get("manifests")`` themselves.
+    """
+    manifests = manifest.get("manifests")
+    if not isinstance(manifests, list):
+        return None
+    for entry in manifests:
+        plat = entry.get("platform", {})
+        if plat.get("architecture") == "amd64" and plat.get("os") == "linux":
+            return entry
+    return None
+
+
+def image_annotations(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Annotations for the amd64 image.
+
+    Prefers the index's top-level annotations and falls back to the platform
+    entry's annotations only when the top level carries no image revision.
+    """
+    annotations = manifest.get("annotations") or {}
+    if not annotations.get(_REVISION_KEY):
+        entry = amd64_manifest_entry(manifest)
+        if entry is not None:
+            annotations = entry.get("annotations") or annotations
+    return annotations
+
+
+def image_revision(annotations: dict[str, Any]) -> str:
+    """Short (12-char) image revision from an annotations dict."""
+    return annotations.get(_REVISION_KEY, "")[:12]
 
 
 def default_inspect_runner(ref: str) -> subprocess.CompletedProcess[bytes]:
@@ -55,22 +93,13 @@ def remote_digest_and_timestamp(raw: bytes) -> tuple[str | None, str]:
 
     if manifest.get("mediaType", "").endswith("manifest.v1+json"):
         remote_digest = "sha256:" + hashlib.sha256(raw).hexdigest()
-    else:
-        manifests = manifest.get("manifests")
-        if isinstance(manifests, list):
-            for entry in manifests:
-                plat = entry.get("platform", {})
-                digest = entry.get("digest")
-                if (
-                    plat.get("architecture") == "amd64"
-                    and plat.get("os") == "linux"
-                    and isinstance(digest, str)
-                    and digest.startswith("sha256:")
-                ):
-                    remote_digest = digest
-                    break
-        elif manifest.get("config") and manifest.get("layers"):
-            remote_digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+    elif isinstance(manifest.get("manifests"), list):
+        entry = amd64_manifest_entry(manifest)
+        digest = entry.get("digest") if entry is not None else None
+        if isinstance(digest, str) and digest.startswith("sha256:"):
+            remote_digest = digest
+    elif manifest.get("config") and manifest.get("layers"):
+        remote_digest = "sha256:" + hashlib.sha256(raw).hexdigest()
 
     return remote_digest, remote_ts
 
@@ -140,9 +169,12 @@ def check_registry_update(
 __all__ = [
     "InspectRunner",
     "UpdateCheckResult",
+    "amd64_manifest_entry",
     "booted_image_digest",
     "check_registry_update",
     "default_inspect_runner",
+    "image_annotations",
+    "image_revision",
     "nested_get",
     "remote_digest_and_timestamp",
     "remote_digest_for_ref",

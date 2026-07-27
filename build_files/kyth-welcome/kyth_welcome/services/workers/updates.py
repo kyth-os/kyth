@@ -11,7 +11,7 @@ from kyth_shared.runtime_output import count_fwupd_updates
 from ...qt import Signal
 from ..bootc import REGISTRY, _bootc_image_digest, _bootc_status_data, _current_branch
 from ..process import _run_command
-from ..registry import check_registry_update
+from ..registry import check_registry_update, image_annotations, image_revision
 from ..runtime import TrackedThread
 from ..updates import firmware_check_commands
 from ..updates import UpdateProbeResult
@@ -111,14 +111,7 @@ class ChangelogWorker(TrackedThread):
             )
             if r.returncode != 0:
                 return {}
-            manifest = json.loads(r.stdout)
-            annotations = manifest.get("annotations") or {}
-            if not annotations.get("org.opencontainers.image.revision"):
-                for entry in manifest.get("manifests", []):
-                    plat = entry.get("platform", {})
-                    if plat.get("architecture") == "amd64" and plat.get("os") == "linux":
-                        annotations = entry.get("annotations") or annotations
-                        break
+            annotations = image_annotations(json.loads(r.stdout))
             if "@sha256:" in ref:
                 _BOOTED_ANNOTATIONS_CACHE[ref] = annotations
             return annotations
@@ -131,26 +124,19 @@ class ChangelogWorker(TrackedThread):
         booted_rev = ""
         if booted_digest:
             ann = self._fetch_annotations(f"{REGISTRY}@{booted_digest[1]}")
-            booted_rev = ann.get("org.opencontainers.image.revision", "")[:12]
+            booted_rev = image_revision(ann)
 
         remote_ann = {}
         if self._remote_manifest:
             try:
-                manifest = json.loads(self._remote_manifest)
-                remote_ann = manifest.get("annotations") or {}
-                if not remote_ann.get("org.opencontainers.image.revision"):
-                    for entry in manifest.get("manifests", []):
-                        plat = entry.get("platform", {})
-                        if plat.get("architecture") == "amd64" and plat.get("os") == "linux":
-                            remote_ann = entry.get("annotations") or remote_ann
-                            break
+                remote_ann = image_annotations(json.loads(self._remote_manifest))
             except Exception:
                 _logger.debug("ChangelogWorker.run: parsing the cached remote manifest failed", exc_info=True)
 
         if not remote_ann:
             remote_ann = self._fetch_annotations(f"{REGISTRY}:{tag}")
 
-        remote_rev = remote_ann.get("org.opencontainers.image.revision", "")[:12]
+        remote_rev = image_revision(remote_ann)
         self.result.emit(booted_rev, remote_rev)
 
 
