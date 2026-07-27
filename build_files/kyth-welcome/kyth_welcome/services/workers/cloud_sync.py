@@ -6,46 +6,29 @@ import subprocess
 
 from ...qt import Signal
 from ..cloud_sync import extract_rclone_token, rclone_sync_command, rsync_copy_command
-from ..runtime import TrackedThread
+from ..runtime import StreamingProcessWorker, TrackedThread
 
 
-class SteamCopyWorker(TrackedThread):
+class SteamCopyWorker(StreamingProcessWorker):
     """Copies a steamapps directory using rsync, streaming output line-by-line."""
-    BLOCKS_CLOSE = True
-    line = Signal(str)
-    done = Signal(int)
 
     def __init__(self, src: str, dst: str):
         super().__init__()
         self._src = src
         self._dst = dst
-        self._proc = None
 
-    def stop(self):
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+    def command(self) -> list[str]:
+        return rsync_copy_command(self._src, self._dst)
 
-    def run(self):
+    def prepare(self, cmd: list[str]) -> bool:
         try:
             os.makedirs(self._dst, exist_ok=True)
         except OSError as exc:
             self.line.emit(f"Error creating destination: {exc}")
             self.done.emit(1)
-            return
-        cmd = rsync_copy_command(self._src, self._dst)
+            return False
         self.line.emit(f"→ {' '.join(cmd)}\n")
-        try:
-            self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
-            )
-            for ln in self._proc.stdout:
-                self.line.emit(ln.rstrip())
-            self._proc.wait()
-            self.done.emit(self._proc.returncode)
-        except Exception as exc:
-            self.line.emit(f"Error: {exc}")
-            self.done.emit(1)
+        return True
 
 
 class RcloneAuthorizeWorker(TrackedThread):
@@ -96,36 +79,13 @@ class RcloneAuthorizeWorker(TrackedThread):
             self._proc.terminate()
 
 
-class RcloneSyncWorker(TrackedThread):
+class RcloneSyncWorker(StreamingProcessWorker):
     """Runs `rclone sync remote: folder --progress` and streams output lines."""
-    BLOCKS_CLOSE = True
-    line = Signal(str)
-    done = Signal(int)
 
     def __init__(self, remote: str, folder: str):
         super().__init__()
         self._remote = remote
         self._folder = folder
-        self._proc: subprocess.Popen[str] | None = None
 
-    def stop(self) -> None:
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
-
-    def run(self):
-        try:
-            self._proc = subprocess.Popen(
-                rclone_sync_command(self._remote, self._folder),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            assert self._proc.stdout
-            for ln in self._proc.stdout:
-                self.line.emit(ln.rstrip())
-            self._proc.wait()
-            self.done.emit(self._proc.returncode)
-        except Exception as exc:
-            self.line.emit(f"Error: {exc}")
-            self.done.emit(1)
+    def command(self) -> list[str]:
+        return rclone_sync_command(self._remote, self._folder)

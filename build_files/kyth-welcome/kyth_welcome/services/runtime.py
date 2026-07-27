@@ -162,6 +162,62 @@ class Worker(TrackedThread):
                 _logger.debug("Worker.run: targeted disk-cache invalidation failed", exc_info=True)
 
 
+class StreamingProcessWorker(TrackedThread):
+    """Runs one subprocess, streaming combined stdout/stderr line-by-line.
+
+    Emits each output line via ``line`` and the process exit code via ``done``;
+    any launch/stream exception is reported as an ``Error: …`` line followed by
+    ``done(1)``. ``stop()`` terminates a running process.
+
+    Subclasses supply the command via ``command()`` and may override
+    ``prepare(cmd)`` for setup (e.g. creating a destination directory or
+    echoing the command) — returning ``False`` aborts the launch after the
+    subclass has emitted its own ``done``.
+    """
+
+    BLOCKS_CLOSE = True
+    line = Signal(str)
+    done = Signal(int)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._proc: subprocess.Popen[str] | None = None
+
+    def command(self) -> list[str]:
+        raise NotImplementedError
+
+    def prepare(self, cmd: list[str]) -> bool:
+        """Hook run after ``command()`` and before launch. Return False to abort."""
+        return True
+
+    def stop(self) -> None:
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+
+    def run(self):
+        try:
+            cmd = self.command()
+        except Exception as exc:
+            self.line.emit(f"Error: {exc}")
+            self.done.emit(1)
+            return
+        if not self.prepare(cmd):
+            return
+        try:
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+            assert self._proc.stdout
+            for ln in self._proc.stdout:
+                self.line.emit(ln.rstrip())
+            self._proc.wait()
+            self.done.emit(self._proc.returncode)
+        except Exception as exc:
+            self.line.emit(f"Error: {exc}")
+            self.done.emit(1)
+
+
 class DownloadMonitor(TrackedThread):
     """Polls /proc/net/dev every second to track download speed and progress."""
     # downloaded, total, speed_bps, eta_sec  (object keeps Python int — avoids 32-bit overflow)
