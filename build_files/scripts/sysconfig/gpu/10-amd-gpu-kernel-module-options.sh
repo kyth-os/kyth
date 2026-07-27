@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── AMD GPU kernel module options ────────────────────────────────────────────
 # ppfeaturemask=0xffffffff: enables all PowerPlay features including fine-grained
 # GPU/memory clock and voltage control. Required for gamemode's amd_performance_level
@@ -13,7 +15,7 @@ set -euo pipefail
 # the GPU can claim most of system RAM as GTT under sustained gaming load, starving
 # CPU-side processes. Capping at 4096 MB leaves ≥10 GB reliably available for the
 # CPU without starving games that need GPU memory bandwidth.
-cat >/etc/modprobe.d/amdgpu-kyth.conf <<'AMDGPUEOF'
+write_config /etc/modprobe.d/amdgpu-kyth.conf <<'AMDGPUEOF'
 options amdgpu ppfeaturemask=0xffffffff
 options amdgpu gttsize=4096
 # noretry=0: allow the GPU to retry faulting memory accesses instead of
