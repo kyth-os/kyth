@@ -100,8 +100,7 @@ disk-usage:
     docker system df
     echo ""
     echo "── Output ISOs ───────────────────────────────────────────────────────────"
-    find output -name "*.iso" -o -name "*.qcow2" -o -name "*.raw" 2>/dev/null \
-        | sort | xargs -r du -sh 2>/dev/null || echo "(none)"
+    just _list-output-images
     echo ""
     echo "── /var/tmp kyth-live build dirs ─────────────────────────────────────────"
     find /var/tmp -maxdepth 1 \( -name "kyth-live.*" -o -name "kyth-titanoboa.*" \) -exec du -sh {} \; 2>/dev/null || echo "(none)"
@@ -142,23 +141,17 @@ clean-output:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Cleaning stale output artefacts..."
-    sudo rm -rf output/previous-built-iso output/archive 2>/dev/null || true
-    sudo rm -f  output/manifest-iso.json.bak 2>/dev/null || true
-    sudo chown -R "$(id -u):$(id -g)" output/ 2>/dev/null || true
+    just _clean-output-artefacts
     echo "Remaining output files:"
-    find output -name "*.iso" -o -name "*.qcow2" -o -name "*.raw" 2>/dev/null \
-        | sort | xargs -r du -sh 2>/dev/null || echo "(none)"
+    just _list-output-images
 
 # Prune Docker build cache and dangling (unreferenced) image layers.
 [group('Utility')]
 clean-docker:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Pruning Docker build cache..."
-    docker builder prune -f
-    echo ""
-    echo "Pruning dangling image layers..."
-    docker image prune -f
+    echo "Pruning Docker build cache and dangling image layers..."
+    just _prune-docker-cache
     echo ""
     docker system df
 
@@ -185,7 +178,7 @@ prune-live-dev:
     find /tmp -maxdepth 1 -type f -name 'kyth-live-test.qcow2' -delete || true
     find /var/tmp -maxdepth 2 -type f -name 'kyth-live-test.qcow2' -delete || true
     find /tmp -maxdepth 1 -type d -name 'kyth-vm-share-*' -exec rm -rf {} + || true
-    sudo find /var/tmp -maxdepth 1 -type d \( -name 'kyth-live.*' -o -name 'kyth-titanoboa.*' \) -exec rm -rf {} + || true
+    just _clean-vartmp-builddirs
 
     echo ""
     echo "── Post-cleanup summary ───────────────────────────────────────────────────"
@@ -214,26 +207,17 @@ purge:
 
     echo ""
     echo "── /var/tmp kyth-live.* / kyth-titanoboa.* build dirs ───────────────────"
-    if sudo find /var/tmp -maxdepth 1 \( -name "kyth-live.*" -o -name "kyth-titanoboa.*" \) -print -exec rm -rf {} + 2>/dev/null | grep -q .; then
-        echo "  Done"
-    else
-        echo "  (none)"
-    fi
-
-    echo ""
-    echo "── Old output artefacts (previous-built-iso, archive, manifest backups) ──"
-    sudo rm -rf output/previous-built-iso output/archive 2>/dev/null || true
-    sudo rm -f  output/manifest-iso.json.bak 2>/dev/null || true
-    sudo chown -R "$(id -u):$(id -g)" output/ 2>/dev/null || true
+    just _clean-vartmp-builddirs
     echo "  Done"
 
     echo ""
-    echo "── Docker build cache ────────────────────────────────────────────────────"
-    docker builder prune -f
+    echo "── Old output artefacts (previous-built-iso, archive, manifest backups) ──"
+    just _clean-output-artefacts
+    echo "  Done"
 
     echo ""
-    echo "── Docker dangling image layers ──────────────────────────────────────────"
-    docker image prune -f
+    echo "── Docker build cache and dangling image layers ──────────────────────────"
+    just _prune-docker-cache
 
     echo ""
     echo "── Podman dangling image layers ──────────────────────────────────────────"
