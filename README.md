@@ -354,12 +354,12 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-25 20:37:28 UTC
+- Last refreshed (UTC): 2026-07-27 02:26:01 UTC
 - Current branch: testing
-- HEAD commit: 079014a
-- Last commit title: Use tarfile data filter for safe extraction
-- Last commit date: 2026-07-25T16:23:00-04:00
+- HEAD commit: 047124c
+- Last commit title: Unify system health reporting
+- Last commit date: 2026-07-26T19:38:26-04:00
 - CI workflow files: 8
-- Build script files: 20
+- Build script files: 21
 
 <!-- AUTO-README-END -->

@@ -1,7 +1,7 @@
 import json
 
 # __KYTH_GENERATED_IMPORTS__
-from ..services.runtime import Worker, _finish_worker
+from ..services.runtime import Worker, finish_worker
 
 
 class _SearchMixin:
@@ -28,7 +28,7 @@ class _SearchMixin:
 
     def _on_fp_search_done(self, code: int):
         self._fp_progress.hide()
-        _finish_worker(self, attr="_fp_search_worker")
+        finish_worker(self, attr="_fp_search_worker")
         self._fp_search_btn.setEnabled(True)
         self._clear_fp_results()
         output = "\n".join(self._fp_search_lines).strip()

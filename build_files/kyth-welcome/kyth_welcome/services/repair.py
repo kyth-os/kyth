@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .desktop import REFRESH_DESKTOP_DATABASE_SH
-from .process import _command_stdout, _with_idle_inhibit
+from .process import command_stdout, with_idle_inhibit
 from .privileged import bootc_action, helper_action, systemctl_action
 
 
@@ -90,9 +90,9 @@ def force_deep_sleep_command() -> list[str]:
 
 def force_deep_sleep() -> tuple[bool, str]:
     """Apply deep sleep for this session. Returns (ok, error_text)."""
-    from .process import _run_command
+    from .process import run_command
 
-    result = _run_command(force_deep_sleep_command(), timeout=8)
+    result = run_command(force_deep_sleep_command(), timeout=8)
     if result is None:
         return False, "command failed to start"
     if result.returncode != 0:
@@ -101,36 +101,36 @@ def force_deep_sleep() -> tuple[bool, str]:
 
 
 def set_exe_mime_defaults(bottles_desktop: str = "com.usebottles.bottles.desktop") -> None:
-    from .process import _run_command
+    from .process import run_command
 
     for mime in (
         "application/x-ms-dos-executable",
         "application/x-msdos-program",
         "application/x-msi",
     ):
-        _run_command(["xdg-mime", "default", bottles_desktop, mime], timeout=5)
+        run_command(["xdg-mime", "default", bottles_desktop, mime], timeout=5)
 
 
 def enable_clipboard_history(*, max_items: int = 25) -> None:
     from .plasma import kwriteconfig_command
-    from .process import _run_command
+    from .process import run_command
 
-    _run_command(
+    run_command(
         kwriteconfig_command("klipperrc", ("General",), "KeepClipboardContents", "true"),
         timeout=5,
     )
-    _run_command(
+    run_command(
         kwriteconfig_command("klipperrc", ("General",), "MaxClipItems", str(max_items)),
         timeout=5,
     )
-    _run_command(
+    run_command(
         ["systemctl", "--user", "restart", "plasma-klipper.service"],
         timeout=5,
     )
 
 
 def wakeup_sources_text(timeout: int = 5) -> str:
-    return _command_stdout(
+    return command_stdout(
         [
             "bash",
             "-c",
@@ -144,14 +144,14 @@ def wakeup_sources_text(timeout: int = 5) -> str:
 
 
 def rollback_command() -> list[str]:
-    return _with_idle_inhibit(
+    return with_idle_inhibit(
         bootc_action("rollback").command(),
         "KythOS is staging a rollback",
     )
 
 
 def reset_command() -> list[str]:
-    return _with_idle_inhibit(
+    return with_idle_inhibit(
         bootc_action("reset").command(),
         "KythOS is resetting the system",
     )

@@ -3,13 +3,8 @@
 from __future__ import annotations
 
 import os
-from ..core_base import (
-    _human_bytes,
-    _release_worker_when_finished,
-)
-from ..services.runtime import (
-    DataWorker,
-)
+from .services.process import human_bytes
+from .services.runtime import DataWorker, release_worker_when_finished
 from ..actions import _install_flatpak_inline
 from ..services.windows_migration import (
     _scan_windows_bookmarks,
@@ -108,7 +103,7 @@ class _BookmarksExtrasMixin:
         worker = DataWorker("bookmarks", lambda: _scan_windows_bookmarks(profiles))
         worker.result.connect(self._on_bookmarks_found)
         self._bm_worker = worker
-        _release_worker_when_finished(self, "_bm_worker", worker)
+        release_worker_when_finished(self, "_bm_worker", worker)
         worker.start()
 
 
@@ -178,7 +173,7 @@ class _BookmarksExtrasMixin:
             lambda _key, message: self._wp_status.setText(
                 f"Could not read the PC drive: {message}"))
         self._extras_worker = worker
-        _release_worker_when_finished(self, "_extras_worker", worker)
+        release_worker_when_finished(self, "_extras_worker", worker)
         worker.start()
 
 
@@ -205,7 +200,7 @@ class _BookmarksExtrasMixin:
         if fonts.get("count"):
             self._fonts_btn.show()
             self._fonts_status.setText(
-                f"Found {fonts['count']} font files ({_human_bytes(fonts['bytes'])}) "
+                f"Found {fonts['count']} font files ({human_bytes(fonts['bytes'])}) "
                 "in the system font folders."
             )
         else:

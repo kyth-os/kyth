@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.vpn import (
     VPN_OS_OPTIONS as _VPN_OS_OPTIONS,
     VPN_PROTOCOLS as _VPN_PROTOCOLS,
@@ -333,4 +333,4 @@ class VpnPage(Page):
         view = vpn_status_view(state)
         self._vpn_status.setText(view.text)
         self._vpn_status.setObjectName(view.style)
-        _restyle(self._vpn_status)
+        restyle(self._vpn_status)

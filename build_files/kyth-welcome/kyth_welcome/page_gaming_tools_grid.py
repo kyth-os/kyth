@@ -1,7 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _cancel_worker, _restyle
+from .core_base import cancel_worker, restyle
 from .services.launch import popen
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit,
 )
@@ -118,7 +118,7 @@ class _ToolsGridMixin:
         status_lbl.setText(f"Installing {tool['name']}…")
         status_lbl.setObjectName("subheading")
         status_lbl.show()
-        _restyle(status_lbl)
+        restyle(status_lbl)
         active_refs["cancel"].setEnabled(True)
         active_refs["cancel"].show()
         self._tool_worker = Worker([
@@ -139,7 +139,7 @@ class _ToolsGridMixin:
         active_refs = self._active_tool_refs
         active_refs["progress"].hide()
         active_refs["cancel"].hide()
-        _finish_worker(self, attr="_tool_worker")
+        finish_worker(self, attr="_tool_worker")
         if code == Worker.CANCELLED:
             active_refs["status"].setText(f"{name} installation cancelled.")
             active_refs["status"].setObjectName("status-warn")
@@ -151,7 +151,7 @@ class _ToolsGridMixin:
         else:
             active_refs["status"].setText(f"Installation failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
-        _restyle(active_refs["status"])
+        restyle(active_refs["status"])
         for refs in self._tool_refs:
             refs["install"].setEnabled(True)
             refs["uninstall"].setEnabled(True)
@@ -169,7 +169,7 @@ class _ToolsGridMixin:
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        _cancel_worker(
+        cancel_worker(
             self,
             attr="_tool_worker",
             status_lbl=refs["status"],
@@ -205,7 +205,7 @@ class _ToolsGridMixin:
         status_lbl.setText(f"Uninstalling {tool['name']}…")
         status_lbl.setObjectName("subheading")
         status_lbl.show()
-        _restyle(status_lbl)
+        restyle(status_lbl)
         active_refs["cancel"].setEnabled(True)
         active_refs["cancel"].show()
         self._tool_worker = Worker(
@@ -224,7 +224,7 @@ class _ToolsGridMixin:
         active_refs = self._active_tool_refs
         active_refs["progress"].hide()
         active_refs["cancel"].hide()
-        _finish_worker(self, attr="_tool_worker")
+        finish_worker(self, attr="_tool_worker")
         if code == Worker.CANCELLED:
             active_refs["status"].setText(f"{name} uninstall cancelled.")
             active_refs["status"].setObjectName("status-warn")
@@ -236,7 +236,7 @@ class _ToolsGridMixin:
         else:
             active_refs["status"].setText(f"Uninstall failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
-        _restyle(active_refs["status"])
+        restyle(active_refs["status"])
         for refs in self._tool_refs:
             refs["install"].setEnabled(True)
             refs["uninstall"].setEnabled(True)

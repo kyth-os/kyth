@@ -14,9 +14,9 @@ from .tools import (
     _ntsync_state,
     _vulkan_state,
 )
-from ..bootc import _has_staged_update
+from ..bootc import has_staged_update
 from ..hardware import _detect_controllers, _find_ntfs_drives
-from ..process import _run_command
+from ..process import run_command
 from ..flatpak import is_installed
 
 
@@ -112,7 +112,7 @@ def _gaming_health_items(*, controllers: dict | None = None,
         ("ok" if controller_count else "dim", "Controllers", f"{controller_count} controller input(s) detected." if controller_count else "Connect one and press Refresh."),
         ("ok" if heroic_ok or lutris_ok else "dim", "Non-Steam launchers", "Heroic or Lutris installed." if heroic_ok or lutris_ok else "Install Heroic or Lutris for Epic, GOG, Battle.net, EA, and Ubisoft."),
         ("warn" if windows_drives else "ok", "PC game drives", windows_drive_summary if windows_drives else "No PC game drives detected."),
-        ("warn" if _has_staged_update() else "ok", "OS update", "Update staged; reboot before benchmarking." if _has_staged_update() else "No staged OS update."),
+        ("warn" if has_staged_update() else "ok", "OS update", "Update staged; reboot before benchmarking." if has_staged_update() else "No staged OS update."),
     ]
  # _gaming_health_items
 
@@ -194,7 +194,7 @@ def _streaming_health_items() -> list[tuple[str, str, str]]:
             "/usr/lib/obs-plugins/libobs_vkcapture.so",
         )
     )
-    v4l2_probe = _run_command(["modprobe", "-n", "v4l2loopback"], timeout=4)
+    v4l2_probe = run_command(["modprobe", "-n", "v4l2loopback"], timeout=4)
     v4l2_ok = v4l2_probe is not None and v4l2_probe.returncode == 0
     mic_hint = "PipeWire ready; test mic in Discord/OBS." if pipewire_ok else "PipeWire tools not found."
     obs_ok = is_installed("com.obsproject.Studio")

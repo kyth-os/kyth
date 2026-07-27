@@ -7,7 +7,7 @@ import re
 import subprocess
 
 from .types import HardwareProbe
-from ..process import _run_command
+from ..process import run_command
 
 
 def _vaapi_failure_summary(output: str) -> tuple[str, str]:
@@ -42,7 +42,7 @@ def _vaapi_failure_summary(output: str) -> tuple[str, str]:
  # _vaapi_failure_summary
 
 def _mesa_vaapi_failure_context() -> tuple[str, str]:
-    rpm = _run_command([
+    rpm = run_command([
         "rpm",
         "-q",
         "--queryformat",
@@ -165,7 +165,7 @@ def _codec_probe() -> HardwareProbe:
             f"Delete {skel_file} and log out/in to restore hardware rendering.",
         )
 
-    vainfo = _run_command(["vainfo"], timeout=10)
+    vainfo = run_command(["vainfo"], timeout=10)
     if vainfo is None:
         return HardwareProbe(
             "Video Decode", "dim",
@@ -178,7 +178,7 @@ def _codec_probe() -> HardwareProbe:
     if successful is None:
         render_nodes = sorted(glob.glob("/dev/dri/renderD*"))
         for node in render_nodes:
-            drm_vainfo = _run_command(["vainfo", "--display", "drm", "--device", node], timeout=10)
+            drm_vainfo = run_command(["vainfo", "--display", "drm", "--device", node], timeout=10)
             if drm_vainfo is not None:
                 direct_probe_details.append(
                     f"$ vainfo --display drm --device {node}\n"

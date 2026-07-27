@@ -6,7 +6,7 @@ from kyth_welcome.services.command import run_sync
 from dataclasses import dataclass
 
 from .types import HardwareProbe
-from ..process import _probe_cached
+from ..process import probe_cached
 
 
 def _detect_nvidia() -> bool:
@@ -16,7 +16,7 @@ def _detect_nvidia() -> bool:
             return "nvidia" in r.stdout.lower()
         except Exception:
             return False
-    return _probe_cached("nvidia-detect", 10.0, fetch)
+    return probe_cached("nvidia-detect", 10.0, fetch)
  # _detect_nvidia
 
 def _nvidia_module_loaded() -> bool:

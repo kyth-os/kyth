@@ -1,7 +1,7 @@
 import os
 import re
 import shutil
-from .core_base import _restyle
+from .core_base import restyle
 from .qt import (
     QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QUrl,
     QVBoxLayout, QWidget, Qt,
@@ -130,33 +130,33 @@ class _AppImageTabMixin:
         if not AppImageDropCard._is_icon_path(src) or not os.path.isfile(src):
             self._ai_icon_status.setText("That file does not look like a usable app icon.")
             self._ai_icon_status.setObjectName("status-warn")
-            _restyle(self._ai_icon_status)
+            restyle(self._ai_icon_status)
             return
         self._ai_icon_path = src
         self._ai_icon_status.setText(f"Icon ready: {os.path.basename(src)}")
         self._ai_icon_status.setObjectName("status-ok")
         self._ai_icon_clear_btn.show()
-        _restyle(self._ai_icon_status)
+        restyle(self._ai_icon_status)
 
     def _clear_appimage_icon(self):
         self._ai_icon_path = ""
         self._ai_icon_status.setText("No custom icon selected.")
         self._ai_icon_status.setObjectName("status-dim")
         self._ai_icon_clear_btn.hide()
-        _restyle(self._ai_icon_status)
+        restyle(self._ai_icon_status)
 
     def _import_appimage_path(self, src: str):
         if not re.search(r"\.[Aa]pp[Ii]mage$", src):
             self._ai_status.setText("That file does not look like an AppImage.")
             self._ai_status.setObjectName("status-warn")
             self._ai_status.show()
-            _restyle(self._ai_status)
+            restyle(self._ai_status)
             return
         if not os.path.isfile(src):
             self._ai_status.setText("Dropped AppImage file was not found.")
             self._ai_status.setObjectName("status-err")
             self._ai_status.show()
-            _restyle(self._ai_status)
+            restyle(self._ai_status)
             return
         apps_dir = os.path.expanduser("~/Applications")
         try:
@@ -165,7 +165,7 @@ class _AppImageTabMixin:
             self._ai_status.setText(f"Cannot create ~/Applications: {exc}")
             self._ai_status.setObjectName("status-err")
             self._ai_status.show()
-            _restyle(self._ai_status)
+            restyle(self._ai_status)
             return
 
         basename = os.path.basename(src)
@@ -177,7 +177,7 @@ class _AppImageTabMixin:
                 self._ai_status.setText(f"Copy failed: {exc}")
                 self._ai_status.setObjectName("status-err")
                 self._ai_status.show()
-                _restyle(self._ai_status)
+                restyle(self._ai_status)
                 return
         try:
             os.chmod(dest, 0o700)  # nosemgrep
@@ -198,7 +198,7 @@ class _AppImageTabMixin:
         self._ai_status.setText(f"{name} imported to ~/Applications.")
         self._ai_status.setObjectName("status-ok")
         self._ai_status.show()
-        _restyle(self._ai_status)
+        restyle(self._ai_status)
         self._clear_appimage_icon()
 
     def _create_appimage_launcher(self, name: str, appimage_path: str, icon_path: str = ""):

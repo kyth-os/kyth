@@ -1,7 +1,7 @@
 import os
 
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _release_worker_when_finished
+from .services.runtime import release_worker_when_finished
 from ..services.gaming import DataWorker
 from ..services.work import _convert_pst, _scan_for_pst_files
 from ..qt import QFileDialog, QHBoxLayout, QLabel, QPushButton
@@ -59,7 +59,7 @@ class _PstMixin:
         worker = DataWorker("pst-scan", _scan_for_pst_files)
         worker.result.connect(self._on_pst_found)
         self._pst_worker = worker
-        _release_worker_when_finished(self, "_pst_worker", worker)
+        release_worker_when_finished(self, "_pst_worker", worker)
         worker.start()
 
     def _on_pst_found(self, _key: str, paths: list):
@@ -98,7 +98,7 @@ class _PstMixin:
         worker = DataWorker("pst-convert", lambda: _convert_pst(path))
         worker.result.connect(self._on_pst_converted)
         self._pst_worker = worker
-        _release_worker_when_finished(self, "_pst_worker", worker)
+        release_worker_when_finished(self, "_pst_worker", worker)
         worker.start()
 
     def _on_pst_converted(self, _key: str, result: tuple):

@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _restyle
+from ..core_base import restyle
 from ..qt import QLabel
 
 
@@ -22,7 +22,7 @@ class _WinLibMixin:
 
         if any_dirty:
             self._win_lib_card.setObjectName("card-accent-err")
-            _restyle(self._win_lib_card)
+            restyle(self._win_lib_card)
             warn = QLabel(
                 "\u26a0  Your system partition is in a hibernated or dirty state \u2014 "
                 "this means other system used Fast Startup or wasn't shut down cleanly.\n\n"
@@ -40,7 +40,7 @@ class _WinLibMixin:
 
         if any_clean:
             self._win_lib_card.setObjectName("card-accent-ok")
-            _restyle(self._win_lib_card)
+            restyle(self._win_lib_card)
             found_any_steam = any(p["steam_paths"] for p in partitions if not p["is_dirty"])
             if found_any_steam:
                 msg = QLabel(

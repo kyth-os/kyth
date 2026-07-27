@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from ..core_base import (
-    _release_worker_when_finished,
-    _restyle,
-)
+from .core_base import restyle
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.runtime import _finish_worker
+from .services.runtime import finish_worker, release_worker_when_finished
 from ..services.windows_migration import (
     WindowsLibraryWorker,
     _unlock_bitlocker_drive,
@@ -117,7 +114,7 @@ class _DrivesMixin:
         self._drive_progress.show()
         self._drive_status.setText("Scanning NTFS partitions…")
         self._drive_status.setObjectName("subheading")
-        _restyle(self._drive_status)
+        restyle(self._drive_status)
         self._worker = WindowsLibraryWorker()
         self._worker.result.connect(self._on_windows_drives)
         self._worker.start()
@@ -125,19 +122,19 @@ class _DrivesMixin:
 
     def _on_windows_drives(self, partitions: list):
         self._drive_progress.hide()
-        _finish_worker(self)
+        finish_worker(self)
         if not partitions:
             self._drive_status.setText("No Windows/NTFS partitions found.")
             self._drive_status.setObjectName("status-warn")
             self._migration_score_lbl.setText("Switch readiness: 2/5. Install your launchers and Ludusavi, then connect your PC drive or cloud backup when ready.")
-            _restyle(self._drive_status)
+            restyle(self._drive_status)
             self._populate_files_card([])
             self._start_bookmark_scan([])
             self._start_extras_scan([])
             return
         self._drive_status.setText(f"Found {len(partitions)} Windows-style partition{'s' if len(partitions) != 1 else ''}.")
         self._drive_status.setObjectName("status-ok")
-        _restyle(self._drive_status)
+        restyle(self._drive_status)
         locked = sum(1 for p in partitions if p.get("is_bitlocker"))
         clean = sum(1 for p in partitions if not p.get("is_dirty") and not p.get("is_hibernated") and not p.get("is_bitlocker"))
         steam = sum(len(p.get("steam_paths") or []) for p in partitions)
@@ -252,11 +249,11 @@ class _DrivesMixin:
         btn.setText("Unlocking…")
         self._drive_status.setText(f"Unlocking {dev}…")
         self._drive_status.setObjectName("subheading")
-        _restyle(self._drive_status)
+        restyle(self._drive_status)
         worker = DataWorker("bitlocker", lambda: _unlock_bitlocker_drive(dev, key))
         worker.result.connect(self._on_bitlocker_unlock)
         self._bitlocker_worker = worker
-        _release_worker_when_finished(self, "_bitlocker_worker", worker)
+        release_worker_when_finished(self, "_bitlocker_worker", worker)
         worker.start()
 
 
@@ -269,7 +266,7 @@ class _DrivesMixin:
         else:
             self._drive_status.setText(f"BitLocker unlock failed: {message}")
             self._drive_status.setObjectName("status-warn")
-            _restyle(self._drive_status)
+            restyle(self._drive_status)
             self._clear_drive_rows()
             self._on_windows_drives_requery()
 
@@ -281,5 +278,5 @@ class _DrivesMixin:
             self._drive_rows.addWidget(self._make_drive_row(p)) for p in parts
         ])
         self._requery_worker = worker
-        _release_worker_when_finished(self, "_requery_worker", worker)
+        release_worker_when_finished(self, "_requery_worker", worker)
         worker.start()

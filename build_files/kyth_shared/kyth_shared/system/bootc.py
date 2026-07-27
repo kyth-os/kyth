@@ -1,13 +1,16 @@
-"""Compatibility façade for bootc query, policy, and operation helpers.
+"""bootc status, image reference, branch, and deployment helpers.
 
-New code should import pure decisions from ``bootc_policy`` and system-facing
-queries from ``bootc_query``.  Existing private names remain available while
-callers migrate.
+Pure stdlib — safe to import from CLI tools (update-watcher) without Qt.
+
+Thin, cache-aware wrappers around ``bootc_query``/``bootc_policy``. Pure
+pass-throughs of an already-public policy/query function (no added logic)
+aren't re-defined here — import them from ``bootc_policy``/``bootc_query``
+(also re-exported below) directly.
 """
 from __future__ import annotations
 
 from ..commands import run as run_command
-from kyth_shared.system.process import _BOOTC_CACHE_TTL, _command_stdout, _probe_cached
+from kyth_shared.system.process import BOOTC_CACHE_TTL, command_stdout, probe_cached
 from kyth_shared.system import bootc_query as query
 from kyth_shared.system.bootc_policy import (
     BranchCardView,
@@ -19,50 +22,44 @@ from kyth_shared.system.bootc_policy import (
     branches_view,
     cancel_block_reason,
     default_phase,
-    image_tag_for_channel,
-    image_tag_for_kernel,
+    image_tag_for_channel as _raw_image_tag_for_channel,
+    image_tag_for_kernel as _raw_image_tag_for_kernel,
     parse_update_phase,
     update_availability_view,
 )
 
 nested_get = query.nested_get
-_nested_get = nested_get
 walk_strings = query.walk_strings
-_walk_strings = walk_strings
 image_reference_from_status = query.image_reference_from_status
 image_digest_from_status = query.image_digest_from_status
 
 
-def _fetch_bootc_status_text() -> str:
+def fetch_bootc_status_text() -> str:
     return query.fetch_status_text()
 
 
-def _bootc_status_text() -> str:
+def bootc_status_text() -> str:
     # Keep patchable compatibility boundaries used by probes and tests.
-    return _probe_cached("bootc-status-text", _BOOTC_CACHE_TTL, _fetch_bootc_status_text)
+    return probe_cached("bootc-status-text", BOOTC_CACHE_TTL, fetch_bootc_status_text)
 
 
-def _fetch_bootc_status_data() -> dict | None:
+def fetch_bootc_status_data() -> dict | None:
     return query.fetch_status_data()
 
 
-def _bootc_status_data() -> dict | None:
-    return _probe_cached("bootc-status-data", _BOOTC_CACHE_TTL, _fetch_bootc_status_data)
+def bootc_status_data() -> dict | None:
+    return probe_cached("bootc-status-data", BOOTC_CACHE_TTL, fetch_bootc_status_data)
 
 
 def fetch_bootc_status_data_uncached() -> dict | None:
-    return _fetch_bootc_status_data()
+    return fetch_bootc_status_data()
 
 
-def _active_bootc_operation() -> str | None:
+def active_bootc_operation() -> str | None:
     return query.active_operation()
 
 
-def _default_phase(mode: str) -> str:
-    return default_phase(mode)
-
-
-def _bootc_proxy_running() -> bool:
+def bootc_proxy_running() -> bool:
     try:
         result = run_command(
             ["pgrep", "-f", "skopeo.*image-proxy"],
@@ -73,20 +70,16 @@ def _bootc_proxy_running() -> bool:
         return False
 
 
-def _parse_update_phase(line: str, mode: str) -> str | None:
-    return parse_update_phase(line, mode)
-
-
-def _bootc_cancel_block_reason(mode: str, phase: str) -> str:
+def bootc_cancel_block_reason(mode: str, phase: str) -> str:
     return cancel_block_reason(mode, phase)
 
 
-def _bootc_image_reference() -> str | None:
-    data = _bootc_status_data() or {}
+def bootc_image_reference() -> str | None:
+    data = bootc_status_data() or {}
     ref = query.image_reference_from_status(data)
     if ref:
         return ref
-    ref = query.image_reference_from_status(data, status_output=_bootc_status_text())
+    ref = query.image_reference_from_status(data, status_output=bootc_status_text())
     if ref:
         return ref
     # Preserve the compatibility module's patchable status seams while
@@ -94,22 +87,14 @@ def _bootc_image_reference() -> str | None:
     return query.image_reference()
 
 
-def _branch_from_ref(ref: str | None) -> str | None:
-    return branch_from_ref(ref)
-
-
-def _branch_display_name(tag: str | None) -> str:
-    return branch_display_name(tag)
-
-
-def _current_branch() -> str | None:
-    return _probe_cached(
-        "bootc-branch", _BOOTC_CACHE_TTL,
-        lambda: branch_from_ref(_bootc_image_reference()),
+def current_branch() -> str | None:
+    return probe_cached(
+        "bootc-branch", BOOTC_CACHE_TTL,
+        lambda: branch_from_ref(bootc_image_reference()),
     )
 
 
-def _current_kernel_flavor() -> str:
+def current_kernel_flavor() -> str:
     def fetch() -> str:
         try:
             with open("/usr/share/kyth/kernel-flavor") as fh:
@@ -118,31 +103,31 @@ def _current_kernel_flavor() -> str:
                     return flavor
         except OSError:
             pass
-        return "cachy" if "cachy" in _command_stdout(["uname", "-r"]).lower() else "fedora"
+        return "cachy" if "cachy" in command_stdout(["uname", "-r"]).lower() else "fedora"
 
-    return _probe_cached("kernel-flavor", 60.0, fetch)
-
-
-def _image_tag_for_channel(channel: str, flavor: str | None = None) -> str:
-    return image_tag_for_channel(channel, flavor or _current_kernel_flavor())
+    return probe_cached("kernel-flavor", 60.0, fetch)
 
 
-def _image_tag_for_kernel(flavor: str) -> str:
-    return image_tag_for_kernel(flavor, _current_branch())
+def image_tag_for_channel(channel: str, flavor: str | None = None) -> str:
+    return _raw_image_tag_for_channel(channel, flavor or current_kernel_flavor())
 
 
-def _has_staged_update() -> bool:
-    return nested_get(_bootc_status_data() or {}, ("status", "staged")) is not None
+def image_tag_for_kernel(flavor: str) -> str:
+    return _raw_image_tag_for_kernel(flavor, current_branch())
 
 
-def _has_rollback_deployment() -> bool:
-    return nested_get(_bootc_status_data() or {}, ("status", "rollback")) is not None
+def has_staged_update() -> bool:
+    return nested_get(bootc_status_data() or {}, ("status", "staged")) is not None
 
 
-def _bootc_image_timestamp(section: str) -> str | None:
+def has_rollback_deployment() -> bool:
+    return nested_get(bootc_status_data() or {}, ("status", "rollback")) is not None
+
+
+def bootc_image_timestamp(section: str) -> str | None:
     # Query through the compatibility status function so existing cache/test
     # injection remains effective.
-    data = _bootc_status_data() or {}
+    data = bootc_status_data() or {}
     deployment = nested_get(data, ("status", section)) or {}
     from datetime import datetime
 
@@ -157,6 +142,6 @@ def _bootc_image_timestamp(section: str) -> str | None:
     return None
 
 
-def _bootc_image_digest(section: str) -> tuple[str, str] | None:
-    value = image_digest_from_status(_bootc_status_data(), section)
+def bootc_image_digest(section: str) -> tuple[str, str] | None:
+    value = image_digest_from_status(bootc_status_data(), section)
     return None if value is None else (value[7:19], value[7:])

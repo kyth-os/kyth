@@ -8,7 +8,7 @@ steps were; everything above it is wizard-native.
 """
 from __future__ import annotations
 
-from ..core_base import _IS_LIVE
+from ..core_base import IS_LIVE
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives
 from ..qt import QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget
 from ..widgets import _divider, _make_card
@@ -73,7 +73,7 @@ class _GamingStepMixin:
         ps_layout.setContentsMargins(52, 6, 52, 0)
         ps_layout.setSpacing(10)
 
-        windows_drives = [] if _IS_LIVE else [
+        windows_drives = [] if IS_LIVE else [
             d for d in _find_ntfs_drives() if not d.get("is_bitlocker")
         ]
         if windows_drives:

@@ -67,15 +67,15 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
-from kyth_welcome import core_base, page_vpn  # noqa: E402
-from kyth_welcome.services import appstream, first_run, gaming, hardware, network, repair, software, updates, welcome  # noqa: E402
+from kyth_welcome import page_vpn  # noqa: E402
+from kyth_welcome.services import appstream, first_run, gaming, hardware, network, process, repair, software, updates, welcome  # noqa: E402
 
 
 class CoreParserTests(unittest.TestCase):
     def test_parse_size_bytes(self):
-        self.assertEqual(core_base._parse_size_bytes("1 KB"), 1024)
-        self.assertEqual(core_base._parse_size_bytes("1.5 GB"), int(1.5 * 1024**3))
-        self.assertEqual(core_base._parse_size_bytes("not a size"), 0)
+        self.assertEqual(process.parse_size_bytes("1 KB"), 1024)
+        self.assertEqual(process.parse_size_bytes("1.5 GB"), int(1.5 * 1024**3))
+        self.assertEqual(process.parse_size_bytes("not a size"), 0)
 
 
 class UpdateOperationControllerTests(unittest.TestCase):

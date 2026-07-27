@@ -22,15 +22,15 @@ from .system import (
     _thermal_probe,
 )
 from .codec import _codec_probe
-from ..process import _command_stdout, _probe_cached
+from ..process import command_stdout, probe_cached
 
 
 def _collect_hardware_probes() -> list[HardwareProbe]:
     def fetch() -> list[HardwareProbe]:
         from ..diagnostics import _system_hub_probe
-        pci_text  = _command_stdout(["lspci"],  timeout=5)
-        usb_text  = _command_stdout(["lsusb"],  timeout=5)
-        lsmod_text = _command_stdout(["lsmod"], timeout=5)
+        pci_text  = command_stdout(["lspci"],  timeout=5)
+        usb_text  = command_stdout(["lsusb"],  timeout=5)
+        lsmod_text = command_stdout(["lsmod"], timeout=5)
         return [
             # Gaming-critical first
             _gpu_probe(pci_text, lsmod_text),
@@ -51,7 +51,7 @@ def _collect_hardware_probes() -> list[HardwareProbe]:
             _platform_probe(),
             _system_hub_probe(),
         ]
-    return _probe_cached("hardware-probes", 5.0, fetch)
+    return probe_cached("hardware-probes", 5.0, fetch)
 
 
 @dataclass(frozen=True)

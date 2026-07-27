@@ -1,9 +1,9 @@
 import os
 import shutil
 
-from ..core_base import _restyle, _run_worker
+from ..core_base import restyle, run_worker
 from ..services.launch import flatpak_run, popen
-from ..services.runtime import _finish_worker
+from ..services.runtime import finish_worker
 from ..qt import QHBoxLayout, QLabel, QPushButton
 from ..widgets import _make_card
 
@@ -54,8 +54,8 @@ class _DropboxMixin:
         self._op_status.setText("Installing Dropbox…")
         self._op_status.setObjectName("subheading")
         self._op_status.show()
-        _restyle(self._op_status)
-        _run_worker(
+        restyle(self._op_status)
+        run_worker(
             self,
             ["flatpak", "install", "-y", "--user", "flathub", "com.dropbox.Client"],
             on_line=self._on_line,
@@ -64,7 +64,7 @@ class _DropboxMixin:
 
     def _on_dropbox_install_done(self, code: int):
         self._progress.hide()
-        _finish_worker(self)
+        finish_worker(self)
         if code == 0:
             self._op_status.setText("Dropbox installed. Launch it to sign in.")
             self._op_status.setObjectName("status-ok")
@@ -72,7 +72,7 @@ class _DropboxMixin:
         else:
             self._op_status.setText(f"Installation failed (exit code {code}).")
             self._op_status.setObjectName("status-err")
-        _restyle(self._op_status)
+        restyle(self._op_status)
         self._refresh_status()
 
     def _launch_dropbox(self):

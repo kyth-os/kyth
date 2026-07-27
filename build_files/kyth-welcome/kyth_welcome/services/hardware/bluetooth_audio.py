@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import time
 
-from ..process import _command_stdout, _run_command
+from ..process import command_stdout, run_command
 
 
 def bt_audio_device_summary() -> str:
-    paired = _command_stdout(["bluetoothctl", "devices", "Paired"], timeout=5)
-    connected = _command_stdout(["bluetoothctl", "devices", "Connected"], timeout=5)
+    paired = command_stdout(["bluetoothctl", "devices", "Paired"], timeout=5)
+    connected = command_stdout(["bluetoothctl", "devices", "Connected"], timeout=5)
     connected_addrs = {
         line.split()[1] for line in connected.splitlines()
         if len(line.split()) >= 2
     }
-    sinks_raw = _command_stdout(
+    sinks_raw = command_stdout(
         ["bash", "-c", "wpctl status 2>/dev/null | grep -E 'bluez_output' | head -8"],
         timeout=5,
     )
@@ -33,7 +33,7 @@ def bt_audio_device_summary() -> str:
 
 
 def switch_to_bt_audio_output() -> str:
-    result = _run_command(
+    result = run_command(
         [
             "bash", "-c",
             "wpctl status 2>/dev/null | grep -E '\\bbluez_output' | head -1"
@@ -43,7 +43,7 @@ def switch_to_bt_audio_output() -> str:
     )
     sink_id = (result.stdout.strip() if result else "")
     if sink_id:
-        _run_command(["wpctl", "set-default", sink_id], timeout=5)
+        run_command(["wpctl", "set-default", sink_id], timeout=5)
         return (
             f"Audio output switched to Bluetooth device (WirePlumber ID: {sink_id}). "
             "If the change doesn't take effect, log out and back in."
@@ -52,15 +52,15 @@ def switch_to_bt_audio_output() -> str:
 
 
 def force_ldac_reconnect() -> str:
-    connected = _command_stdout(["bluetoothctl", "devices", "Connected"], timeout=5)
+    connected = command_stdout(["bluetoothctl", "devices", "Connected"], timeout=5)
     for line in connected.splitlines():
         parts = line.split(" ", 2)
         if len(parts) < 2:
             continue
         addr = parts[1]
-        _run_command(["bluetoothctl", "disconnect", addr], timeout=6)
+        run_command(["bluetoothctl", "disconnect", addr], timeout=6)
         time.sleep(1.5)
-        _run_command(["bluetoothctl", "connect", addr], timeout=12)
+        run_command(["bluetoothctl", "connect", addr], timeout=12)
         return (
             f"Reconnected {addr}. LDAC should now be active if your device supports it. "
             "Refresh Devices to confirm the WirePlumber sink is present."

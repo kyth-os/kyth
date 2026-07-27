@@ -1,5 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _command_stdout, _restyle
+from .core_base import restyle
+from .services.process import command_stdout
 from .services.gaming import DataWorker
 from .services.hardware import (
     HardwareProbe,
@@ -11,7 +12,7 @@ from .services.hardware import (
     switch_to_bt_audio_output,
 )
 from .services.launch import kcmshell, popen
-from .services.runtime import _finish_worker
+from .services.runtime import finish_worker
 from .qt import (
     QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QUrl, QVBoxLayout, QWidget, Signal, single_shot,
 )
@@ -108,7 +109,7 @@ class HardwarePage(Page):
             return
         self._display_worker = DataWorker(
             "display",
-            lambda: _command_stdout(["kscreen-doctor", "-o"], timeout=6),
+            lambda: command_stdout(["kscreen-doctor", "-o"], timeout=6),
         )
         self._display_worker.result.connect(self._on_display_status_ready)
         self._display_worker.failed.connect(self._on_display_status_failed)
@@ -246,7 +247,7 @@ class HardwarePage(Page):
         self._refresh_btn.setEnabled(False)
         self._status_lbl.setText("Running hardware probes…")
         self._status_lbl.setObjectName("subheading")
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
         self._progress.show()
 
         self._worker = HardwareProbeWorker()
@@ -268,7 +269,7 @@ class HardwarePage(Page):
     def _on_done(self, probes: list[HardwareProbe]):
         self._progress.hide()
         self._refresh_btn.setEnabled(True)
-        _finish_worker(self)
+        finish_worker(self)
         self._replace_cards(probes)
         self._last_probes = probes
 
@@ -278,8 +279,8 @@ class HardwarePage(Page):
         self._summary_card.setObjectName(view.summary_card_style)
         self._summary_title.setText(view.summary_title)
         self._summary_body.setText(view.summary_body)
-        _restyle(self._status_lbl)
-        _restyle(self._summary_card)
+        restyle(self._status_lbl)
+        restyle(self._summary_card)
         self._summary_card.show()
 
         if self._wizard_mode:
@@ -309,7 +310,7 @@ class HardwarePage(Page):
     def _on_failed(self, message: str):
         self._progress.hide()
         self._refresh_btn.setEnabled(True)
-        _finish_worker(self)
+        finish_worker(self)
         self._status_lbl.setText(f"Probe failed: {message}")
         self._status_lbl.setObjectName("status-err")
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)

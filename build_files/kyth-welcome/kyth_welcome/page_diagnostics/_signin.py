@@ -1,7 +1,7 @@
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _release_worker_when_finished
+from .services.runtime import release_worker_when_finished
 from ..services.diagnostics import _collect_signin_status, fingerprint_enroll_shell_command
 from ..services.gaming import DataWorker
 from ..services.launch import open_first, open_settings_module, open_terminal_command
@@ -73,7 +73,7 @@ class _SigninMixin:
         worker = DataWorker("signin", _collect_signin_status)
         worker.result.connect(self._on_signin_status)
         self._signin_worker = worker
-        _release_worker_when_finished(self, "_signin_worker", worker)
+        release_worker_when_finished(self, "_signin_worker", worker)
         worker.start()
 
     def _on_signin_status(self, _key: str, rows: list):

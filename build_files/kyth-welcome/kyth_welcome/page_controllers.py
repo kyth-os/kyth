@@ -1,10 +1,9 @@
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _release_worker_when_finished
 from .services.workers import ControllerProbeWorker
 from .services.hardware import controller_status_view
-from .services.runtime import Worker
+from .services.runtime import Worker, release_worker_when_finished
 from .services.privileged import AuthFrontend, helper_action
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QPushButton,
@@ -206,7 +205,7 @@ class ControllerPage(Page):
         worker = ControllerProbeWorker()
         self._probe_worker = worker
         worker.result.connect(self._on_probe_result)
-        _release_worker_when_finished(self, "_probe_worker", worker)
+        release_worker_when_finished(self, "_probe_worker", worker)
         worker.start()
 
     def _on_probe_result(self, info: dict) -> None:

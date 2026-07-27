@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _restyle
+from ..core_base import restyle
 from ..services.flatpak import _is_flatpak_installed
 from ..qt import (
     QDesktopServices, QDialog, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QTextEdit, QUrl, QVBoxLayout,
@@ -171,7 +171,7 @@ class _DetailsMixin:
             open_btn.setObjectName("primary" if installed else "")
             if installed:
                 open_btn.clicked.connect(lambda _=False, aid=app_id: self._open_fp_app(aid))
-            _restyle(open_btn)
+            restyle(open_btn)
 
         if installed:
             action_btn.setText("Uninstall")
@@ -186,7 +186,7 @@ class _DetailsMixin:
                 lambda _=False, aid=app_id, n=name, b=action_btn, ob=open_btn: self._fp_install(aid, n, b, ob)
             )
         action_btn.setEnabled(True)
-        _restyle(action_btn)
+        restyle(action_btn)
 
     def _set_fp_task_state(self, message: str, state: str) -> None:
         styles = {
@@ -199,4 +199,4 @@ class _DetailsMixin:
         self._fp_status.setText(message)
         self._fp_status.setObjectName(styles.get(state, "task-status-idle"))
         self._fp_status.show()
-        _restyle(self._fp_status)
+        restyle(self._fp_status)

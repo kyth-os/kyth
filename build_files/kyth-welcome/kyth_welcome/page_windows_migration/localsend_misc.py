@@ -3,12 +3,7 @@
 from __future__ import annotations
 
 import os
-from ..core_base import (
-    _release_worker_when_finished,
-)
-from ..services.runtime import (
-    DataWorker,
-)
+from .services.runtime import DataWorker, release_worker_when_finished
 from ..actions import _install_flatpak_inline
 from ..services.flatpak import _is_flatpak_installed
 from ..services.launch import flatpak_run, popen, systemsettings, kcmshell
@@ -231,7 +226,7 @@ class _LocalSendMiscMixin:
         worker = DataWorker("hw-sanity", _collect_hw_sanity)
         worker.result.connect(self._on_hw_sanity)
         self._hw_worker = worker
-        _release_worker_when_finished(self, "_hw_worker", worker)
+        release_worker_when_finished(self, "_hw_worker", worker)
         worker.start()
 
 

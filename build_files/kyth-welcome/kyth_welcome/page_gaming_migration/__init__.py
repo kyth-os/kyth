@@ -4,7 +4,7 @@ from ._saves import _SavesMixin
 from ._mods import _ModsMixin
 from ._scan import _ScanMixin
 from ._win_lib import _WinLibMixin
-from ..core_base import _release_worker_when_finished
+from .services.runtime import release_worker_when_finished
 from ..services.workers.windows_migration import WindowsLibraryWorker
 from ..qt import single_shot
 
@@ -20,5 +20,5 @@ class _MigrationMixin(_LibraryMixin, _SavesMixin, _ModsMixin, _ScanMixin, _WinLi
             worker = WindowsLibraryWorker()
             self._win_lib_worker = worker
             worker.result.connect(self._on_win_lib_result)
-            _release_worker_when_finished(self, "_win_lib_worker", worker)
+            release_worker_when_finished(self, "_win_lib_worker", worker)
             worker.start()

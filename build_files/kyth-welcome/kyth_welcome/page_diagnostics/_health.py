@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _restyle
+from ..core_base import restyle
 from ..services.diagnostics import (
     _diagnostics_report,
     _health_command_report,
@@ -12,7 +12,7 @@ from ..services.diagnostics import (
 from ..services.gaming import DataWorker
 from ..services.hardware import HardwareProbeWorker
 from ..services.launch import popen
-from ..services.runtime import _finish_worker
+from ..services.runtime import finish_worker
 from ..qt import QApplication, QFileDialog
 from ..widgets import HardwareCard
 
@@ -47,7 +47,7 @@ class _HealthMixin:
             self._banner_card.setObjectName("card-accent-ok")
             self._banner_title.setText(f"All {len(oks)} checks passed")
             self._banner_body.setText("Your hardware and system stack look healthy.")
-        _restyle(self._banner_card)
+        restyle(self._banner_card)
         self._banner_card.show()
 
     def _clear_cards(self):
@@ -81,7 +81,7 @@ class _HealthMixin:
     def _on_done(self, probes: list):
         self._progress.hide()
         self._refresh_btn.setEnabled(True)
-        _finish_worker(self)
+        finish_worker(self)
         self._last_probes = probes
         self._base_report = _diagnostics_report(probes)
 
@@ -110,7 +110,7 @@ class _HealthMixin:
         self._health_worker.start()
 
     def _on_health_done(self, _key: str, report: str):
-        _finish_worker(self, "_health_worker")
+        finish_worker(self, "_health_worker")
         self._health_report = str(report)
         recs = _health_recommendations(self._base_report + self._health_report)
         self._report.setPlainText(self._base_report + recs + self._health_report)
@@ -138,7 +138,7 @@ class _HealthMixin:
             self._set_status("ok", "All checks completed successfully.")
 
     def _on_health_failed(self, _key: str, message: str):
-        _finish_worker(self, "_health_worker")
+        finish_worker(self, "_health_worker")
         self._health_report = f"\nKythOS Health Command Output\n==========================\n\nfailed: {message}\n"
         self._report.setPlainText(self._base_report + self._health_report)
         self._copy_btn.setEnabled(True)
@@ -150,7 +150,7 @@ class _HealthMixin:
     def _on_failed(self, message: str):
         self._progress.hide()
         self._refresh_btn.setEnabled(True)
-        _finish_worker(self)
+        finish_worker(self)
         self._set_status("err", f"Failed: {message}")
 
     def _toggle_raw(self, checked: bool):

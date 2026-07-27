@@ -1,14 +1,12 @@
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.launch import reboot
-from .core_base import (
-    _bootc_cancel_block_reason, _branch_display_name, _current_kernel_flavor, _image_tag_for_kernel,
-    _parse_update_phase, _restyle, _run_worker, _set_session_inhibit, _with_idle_inhibit,
-)
-from .services.diagnostics import _command_stdout
-from .services.runtime import Worker, _finish_worker
+from .core_base import restyle, run_worker, set_session_inhibit
+from .services.process import with_idle_inhibit
+from .services.bootc import REGISTRY, bootc_cancel_block_reason, branch_display_name, current_branch, current_kernel_flavor, image_tag_for_kernel, parse_update_phase
+from .services.diagnostics import command_stdout
+from .services.runtime import Worker, finish_worker
 from .services.privileged import bootc_action
-from .core_base import REGISTRY, _current_branch
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, single_shot,
 )
@@ -139,9 +137,9 @@ class KernelPage(Page):
         single_shot(self, 0, self._refresh)
 
     def _refresh(self):
-        flavor = _current_kernel_flavor()
-        kernel = _command_stdout(["uname", "-r"]) or "unknown"
-        channel = _branch_display_name(_current_branch())
+        flavor = current_kernel_flavor()
+        kernel = command_stdout(["uname", "-r"]) or "unknown"
+        channel = branch_display_name(current_branch())
         names = {"fedora": "Fedora", "cachy": "CachyOS"}
         self._current_lbl.setText(f"{names.get(flavor, flavor)} kernel  ·  {kernel}  ·  {channel}")
         idle = self._worker is None
@@ -157,10 +155,10 @@ class KernelPage(Page):
                     "cachy": "Switch to CachyOS",
                 }[key])
                 btn.setEnabled(idle)
-            _restyle(btn)
+            restyle(btn)
 
     def _switch_kernel(self, flavor: str):
-        tag = _image_tag_for_kernel(flavor)
+        tag = image_tag_for_kernel(flavor)
         ref = f"{REGISTRY}:{tag}"
         self._current_phase = ""
         self._cancel_blocked = False
@@ -173,7 +171,7 @@ class KernelPage(Page):
         self._status_lbl.setText("Switching kernel image…")
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.show()
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
         self._reboot_btn.hide()
         self._cancel_btn.setText("Cancel Kernel Switch")
         self._cancel_btn.setEnabled(True)
@@ -183,9 +181,9 @@ class KernelPage(Page):
         for btn in self._kernel_buttons.values():
             btn.setEnabled(False)
 
-        _run_worker(
+        run_worker(
             self,
-            _with_idle_inhibit(
+            with_idle_inhibit(
                 bootc_action("switch", ref).command(),
                 "KythOS is switching kernel image",
             ),
@@ -195,7 +193,7 @@ class KernelPage(Page):
         )
 
     def _on_line(self, text: str):
-        phase = _parse_update_phase(text.strip(), "switch")
+        phase = parse_update_phase(text.strip(), "switch")
         if phase:
             self._current_phase = phase
             self._status_lbl.setText(phase)
@@ -204,7 +202,7 @@ class KernelPage(Page):
         self._log.ensureCursorVisible()
 
     def _update_cancel_state(self):
-        reason = _bootc_cancel_block_reason("switch", self._current_phase)
+        reason = bootc_cancel_block_reason("switch", self._current_phase)
         if reason:
             self._cancel_blocked = True
             self._cancel_block_reason = reason
@@ -243,8 +241,8 @@ class KernelPage(Page):
         self._progress.hide()
         self._cancel_btn.hide()
         self._cancel_note.hide()
-        _finish_worker(self)
-        _set_session_inhibit(self, None)
+        finish_worker(self)
+        set_session_inhibit(self, None)
         if code == Worker.CANCELLED:
             self._status_lbl.setText("Kernel switch cancelled.")
             self._status_lbl.setObjectName("status-warn")
@@ -257,5 +255,5 @@ class KernelPage(Page):
         else:
             self._status_lbl.setText(f"Kernel switch failed (exit code {code}).")
             self._status_lbl.setObjectName("status-err")
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
         self._refresh()

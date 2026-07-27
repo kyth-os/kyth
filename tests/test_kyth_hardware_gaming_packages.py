@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 try:
     from kyth_welcome.services import gaming, hardware
     from kyth_welcome.services.gaming.steam import _parse_steam_acf_text
-    from kyth_welcome.services.hardware.display import _format_display_mode, _strip_ansi
+    from kyth_welcome.services.hardware.display import _format_display_mode, strip_ansi
     from kyth_welcome.services.hardware.types import HardwareProbe
 except ImportError:
     raise unittest.SkipTest("PyQt6/PySide6 required by kyth_welcome.core_base → qt imports") from None
@@ -23,7 +23,7 @@ class HardwarePackageTests(unittest.TestCase):
         self.assertIs(hardware.HardwareProbe, HardwareProbe)
 
     def test_display_helpers(self):
-        self.assertEqual(_strip_ansi("\x1b[32mOK\x1b[0m"), "OK")
+        self.assertEqual(strip_ansi("\x1b[32mOK\x1b[0m"), "OK")
         self.assertEqual(_format_display_mode("2560x1440@165.00"), "2560×1440 @ 165Hz")  # noqa: RUF001 — multiplication sign, matches display.py's output
 
     def test_hardware_probe_dataclass(self):

@@ -1,7 +1,7 @@
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .lazy_page import compose_on_first_init
 from .services.runtime import Worker
 from .qt import QHBoxLayout, QPushButton, QWidget
@@ -389,7 +389,7 @@ class SoftwarePage(Page):
         for i, btn in enumerate(self._tab_btns):
             active = i == idx
             btn.setObjectName("sw-tab-active" if active else "sw-tab")
-            _restyle(btn)
+            restyle(btn)
             widget = self._tab_widgets[i]
             if widget is not None:
                 widget.setVisible(active)

@@ -1,7 +1,7 @@
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _apply_install_badge, _restyle
+from .core_base import apply_install_badge, restyle
 from .services.launch import popen
 from .services.security import (
     build_kali_create_command,
@@ -12,7 +12,7 @@ from .services.security import (
 from .services.security_container import (
     is_socket_capable_kali_box as _is_socket_capable_kali_box,
 )
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import (
     QButtonGroup, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QRadioButton,
     QTextEdit, Qt,
@@ -129,7 +129,7 @@ class _KaliContainerMixin:
         if not hasattr(self, "_sec_badge"):
             return
         installed = _is_socket_capable_kali_box(self._SEC_BOX_NAME)
-        _apply_install_badge(self._sec_badge, installed,
+        apply_install_badge(self._sec_badge, installed,
                              ok_text="Installed", warn_text="Not Installed")
         self._sec_create_btn.setVisible(not installed)
         for rb in (self._sec_radio_headless, self._sec_radio_default, self._sec_radio_everything):
@@ -183,7 +183,7 @@ class _KaliContainerMixin:
         self._sec_status_lbl.setText("Pulling Kali container image…")
         self._sec_status_lbl.setObjectName("subheading")
         self._sec_status_lbl.show()
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
         self._sec_progress_tracker = KaliInstallProgressTracker()
 
         cmd = build_kali_create_command(self._SEC_BOX_NAME, self._SEC_BOX_IMAGE, meta, has_gui)
@@ -199,14 +199,14 @@ class _KaliContainerMixin:
         msg, prog = self._sec_progress_tracker.parse_line(ln)
         if msg is not None:
             self._sec_status_lbl.setText(msg)
-            _restyle(self._sec_status_lbl)
+            restyle(self._sec_status_lbl)
         if prog is not None:
             self._sec_progress.setValue(prog)
 
     def _sec_on_create_done(self, code: int):
         self._sec_progress.setValue(100)
         self._sec_progress.hide()
-        _finish_worker(self, attr="_sec_worker")
+        finish_worker(self, attr="_sec_worker")
         self._sec_create_btn.setEnabled(True)
         for rb in (self._sec_radio_headless, self._sec_radio_default, self._sec_radio_everything):
             rb.setEnabled(True)
@@ -223,7 +223,7 @@ class _KaliContainerMixin:
         else:
             self._sec_status_lbl.setText(f"Setup failed (exit {code}). Check the details below.")
             self._sec_status_lbl.setObjectName("status-err")
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
         self._refresh_sec_kali_status()
 
     def _sec_enter_box(self):
@@ -261,7 +261,7 @@ class _KaliContainerMixin:
         self._sec_status_lbl.setText("Scanning for GUI apps…")
         self._sec_status_lbl.setObjectName("subheading")
         self._sec_status_lbl.show()
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
 
         cmd = build_kali_export_command(self._SEC_BOX_NAME)
         self._sec_worker = Worker(cmd)
@@ -281,7 +281,7 @@ class _KaliContainerMixin:
 
     def _sec_on_export_done(self, code: int):
         self._sec_progress.hide()
-        _finish_worker(self, attr="_sec_worker")
+        finish_worker(self, attr="_sec_worker")
         self._sec_export_btn.setEnabled(True)
         self._sec_enter_btn.setEnabled(True)
         self._sec_remove_btn.setEnabled(True)
@@ -317,7 +317,7 @@ class _KaliContainerMixin:
         else:
             self._sec_status_lbl.setText(f"Export failed (exit {code}). Check the details below.")
             self._sec_status_lbl.setObjectName("status-err")
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
 
     def _sec_remove_box(self):
         if self._sec_worker and self._sec_worker.isRunning():
@@ -343,7 +343,7 @@ class _KaliContainerMixin:
         self._sec_status_lbl.setText("Stopping and removing Kali box…")
         self._sec_status_lbl.setObjectName("subheading")
         self._sec_status_lbl.show()
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
 
         self._sec_worker = Worker(build_kali_remove_command(self._SEC_BOX_NAME))
         self._sec_worker.line.connect(lambda ln: (
@@ -355,7 +355,7 @@ class _KaliContainerMixin:
 
     def _sec_on_remove_done(self, code: int):
         self._sec_progress.hide()
-        _finish_worker(self, attr="_sec_worker")
+        finish_worker(self, attr="_sec_worker")
         self._sec_enter_btn.setEnabled(True)
         self._sec_remove_btn.setEnabled(True)
         if code == 0:
@@ -365,5 +365,5 @@ class _KaliContainerMixin:
         else:
             self._sec_status_lbl.setText(f"Removal failed (exit {code}).")
             self._sec_status_lbl.setObjectName("status-err")
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
         self._refresh_sec_kali_status()

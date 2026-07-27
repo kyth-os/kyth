@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _release_worker_when_finished
+from .services.runtime import release_worker_when_finished
 from .services.workers.updates import FirmwareCheckWorker
 from .services.updates import UpdateProbeResult
 from .qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout
@@ -50,7 +50,7 @@ class _FirmwareUpdateMixin:
         self._fw_btn.hide()
         self._fw_check_worker = FirmwareCheckWorker()
         self._fw_check_worker.result.connect(self._on_firmware_check_result)
-        _release_worker_when_finished(self, "_fw_check_worker", self._fw_check_worker)
+        release_worker_when_finished(self, "_fw_check_worker", self._fw_check_worker)
         self._fw_check_worker.start()
 
     def _on_firmware_check_result(self, result: UpdateProbeResult) -> None:

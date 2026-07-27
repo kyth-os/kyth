@@ -26,10 +26,8 @@ def _acquire_lock() -> bool:
         return True  # can't lock → allow launch
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import (
-    _IS_LIVE, _is_first_run, _prefer_xwayland_if_wayland_plugin_missing, _remove_autostart, _shutdown_threads,
-    _wait_for_display_setup,
-)
+from .core_base import IS_LIVE, is_first_run, prefer_xwayland_if_wayland_plugin_missing, remove_autostart, wait_for_display_setup
+from .services.runtime import shutdown_threads
 from .qt import (
     QApplication, QIcon,
 )
@@ -52,8 +50,8 @@ def main():
         if a == "--page" and i + 1 < len(raw_args):
             start_page = raw_args[i + 1]
 
-    _wait_for_display_setup()
-    _prefer_xwayland_if_wayland_plugin_missing()
+    wait_for_display_setup()
+    prefer_xwayland_if_wayland_plugin_missing()
 
     # PyQt6 calls qFatal() (abort + core dump) on any uncaught Python exception
     # in a slot unless an excepthook is installed. Log and keep the app alive.
@@ -64,15 +62,15 @@ def main():
     app = QApplication(sys.argv)
     # Join background probe threads before Qt tears down: destroying a running
     # QThread aborts the process, turning a normal quit into a crash.
-    app.aboutToQuit.connect(_shutdown_threads)
+    app.aboutToQuit.connect(shutdown_threads)
     app.setApplicationName("kyth-welcome")
     app.setDesktopFileName("kyth-welcome")
     app.setWindowIcon(QIcon.fromTheme("kyth"))
     app.setStyleSheet(QSS)
 
-    if _IS_LIVE:
+    if IS_LIVE:
         win = MainWindow()
-    elif _is_first_run():
+    elif is_first_run():
         win = WizardWindow()
     else:
         win = MainWindow()
@@ -80,5 +78,5 @@ def main():
     win.showMaximized()
     if start_page and isinstance(win, MainWindow):
         win._navigate_to(start_page)
-    _remove_autostart()
+    remove_autostart()
     sys.exit(app.exec())

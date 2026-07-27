@@ -2,13 +2,13 @@
 # __KYTH_GENERATED_IMPORTS__
 from .services.launch import reboot
 from .core_base import (
-    _restyle, _run_worker, _set_session_inhibit,
+    restyle, run_worker, set_session_inhibit,
 )
 from .services.hardware import (
     _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
     _nvidia_module_loaded, nvidia_status_view,
 )
-from .services.runtime import _finish_worker
+from .services.runtime import finish_worker
 from .services.privileged import helper_action
 from .qt import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer,
@@ -116,8 +116,8 @@ class NvidiaPage(Page):
 
         self._reboot_btn.setVisible(view.reboot_visible)
 
-        _restyle(self._sub)
-        _restyle(self._status_lbl)
+        restyle(self._sub)
+        restyle(self._status_lbl)
 
     def _run_install(self):
         self._build_module()
@@ -131,7 +131,7 @@ class NvidiaPage(Page):
         self._progress.show()
         self._install_btn.setEnabled(False)
 
-        _run_worker(
+        run_worker(
             self,
             cmd,
             session_inhibit_reason="KythOS is building NVIDIA kernel module",
@@ -146,8 +146,8 @@ class NvidiaPage(Page):
     def _on_done(self, code: int):
         self._progress.hide()
         self._install_btn.setEnabled(True)
-        _finish_worker(self)
-        _set_session_inhibit(self, None)
+        finish_worker(self)
+        set_session_inhibit(self, None)
 
         if code == 0:
             self._log.append("\nDone. Reboot to activate NVIDIA drivers.")

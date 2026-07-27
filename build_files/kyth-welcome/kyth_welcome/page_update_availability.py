@@ -1,10 +1,9 @@
 from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import (
-    _bootc_image_timestamp, _has_staged_update, _release_worker_when_finished, _restyle,
-    update_availability_view,
-)
+from .core_base import restyle
+from .services.bootc import bootc_image_timestamp, has_staged_update, update_availability_view
+from .services.runtime import release_worker_when_finished
 from .services.launch import reboot
 from .services.updates import AvailabilityCheckResult, UpdateProbeResult
 from .services.workers.updates import FlatpakCheckWorker, UpdateCheckWorker
@@ -74,7 +73,7 @@ class _UpdateAvailabilityMixin:
         self._check_state = "checking"
         self._check_btn.setEnabled(False)
         self._avail_card.setObjectName("card")
-        _restyle(self._avail_card)
+        restyle(self._avail_card)
         self._avail_icon.setText("○")
         self._avail_icon.setStyleSheet("font-size: 28px; color: #555555;")
         self._avail_title.setText("Checking for updates…")
@@ -89,13 +88,13 @@ class _UpdateAvailabilityMixin:
         # Start system update check
         self._check_worker = UpdateCheckWorker(use_cached_snapshot=not force_refresh)
         self._check_worker.result.connect(self._on_system_check_result)
-        _release_worker_when_finished(self, "_check_worker", self._check_worker)
+        release_worker_when_finished(self, "_check_worker", self._check_worker)
         self._check_worker.start()
 
         # Start flatpak update check
         self._flatpak_check_worker = FlatpakCheckWorker()
         self._flatpak_check_worker.result.connect(self._on_flatpak_check_result)
-        _release_worker_when_finished(self, "_flatpak_check_worker", self._flatpak_check_worker)
+        release_worker_when_finished(self, "_flatpak_check_worker", self._flatpak_check_worker)
         self._flatpak_check_worker.start()
 
     def _on_system_check_result(self, result: UpdateProbeResult):
@@ -118,7 +117,7 @@ class _UpdateAvailabilityMixin:
         self._flatpak_count = completed.flatpak_count
         self._check_btn.setEnabled(True)
         flatpak_count = self._flatpak_count
-        staged = _has_staged_update()
+        staged = has_staged_update()
 
         # Update the automatic updates status card locally with the fresh counts
         self._au_last_lbl.setText(self._check_ts)
@@ -136,10 +135,10 @@ class _UpdateAvailabilityMixin:
             flatpak_count=flatpak_count,
             check_ts=self._check_ts,
             check_ts_details=self._check_ts_details,
-            staged_ts=_bootc_image_timestamp("staged") if staged else None,
+            staged_ts=bootc_image_timestamp("staged") if staged else None,
         )
         self._avail_card.setObjectName(view.card_style)
-        _restyle(self._avail_card)
+        restyle(self._avail_card)
         self._avail_icon.setText(view.icon_text)
         self._avail_icon.setStyleSheet(f"font-size: 28px; color: {view.icon_color};")
         self._avail_title.setText(view.title)

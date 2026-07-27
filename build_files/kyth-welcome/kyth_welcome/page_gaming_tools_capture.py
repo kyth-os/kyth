@@ -2,11 +2,11 @@ import shutil
 from pathlib import Path
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.gaming import opticscaler_deploy_command
 from .services.launch import popen
 from .actions import _install_flatpak_inline
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import (
     QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, Qt, single_shot,
 )
@@ -202,7 +202,7 @@ class _CaptureToolsMixin:
         self._opti_status_lbl.setText("Deploying OptiScaler…")
         self._opti_status_lbl.setObjectName("subheading")
         self._opti_status_lbl.show()
-        _restyle(self._opti_status_lbl)
+        restyle(self._opti_status_lbl)
         cmd = opticscaler_deploy_command(game_dir)
         self._opticscaler_worker = Worker(cmd)
         self._opticscaler_worker.line.connect(lambda ln: (
@@ -214,7 +214,7 @@ class _CaptureToolsMixin:
 
     def _on_opticscaler_done(self, code: int, btn: QPushButton):
         btn.setEnabled(True)
-        _finish_worker(self, attr="_opticscaler_worker")
+        finish_worker(self, attr="_opticscaler_worker")
         if code == 0:
             self._opti_status_lbl.setText(
                 "Deployed. Set Steam launch option: WINEDLLOVERRIDES=\"nvngx=n,b\" %command%"
@@ -223,4 +223,4 @@ class _CaptureToolsMixin:
         else:
             self._opti_status_lbl.setText(f"Deploy failed (exit {code}). See output above.")
             self._opti_status_lbl.setObjectName("status-err")
-        _restyle(self._opti_status_lbl)
+        restyle(self._opti_status_lbl)

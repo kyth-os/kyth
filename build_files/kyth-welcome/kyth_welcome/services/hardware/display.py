@@ -6,7 +6,7 @@ import os
 import re
 
 from .types import HardwareProbe
-from ..process import _command_stdout, _strip_ansi
+from ..process import command_stdout, strip_ansi
 
 
 def _format_display_mode(mode: str) -> str:
@@ -21,7 +21,7 @@ def _format_display_mode(mode: str) -> str:
  # _format_display_mode
 
 def _display_probe() -> HardwareProbe:
-    kscreen_raw = _command_stdout(["kscreen-doctor", "-o"], timeout=8)
+    kscreen_raw = command_stdout(["kscreen-doctor", "-o"], timeout=8)
 
     if kscreen_raw:
         return _parse_kscreen_output(kscreen_raw)
@@ -57,7 +57,7 @@ def _display_probe() -> HardwareProbe:
  # _display_probe
 
 def _parse_kscreen_output(raw: str) -> HardwareProbe:
-    text = _strip_ansi(raw)
+    text = strip_ansi(raw)
 
     outputs: list[dict] = []
     cur: dict | None = None

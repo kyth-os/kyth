@@ -3,11 +3,10 @@ from __future__ import annotations
 
 from .services.launch import reboot
 
-from .core_base import (
-    _has_rollback_deployment, _restyle, _run_worker, _set_session_inhibit,
-)
+from .core_base import restyle, run_worker, set_session_inhibit
+from .services.bootc import has_rollback_deployment
 from .services.repair import rollback_command, reset_command
-from .services.runtime import _finish_worker
+from .services.runtime import finish_worker
 from .qt import single_shot
 from .widgets import _set_log_panel
 
@@ -30,9 +29,9 @@ class _ResetMixin:
         self._status_lbl.setText("Staging previous system image…")
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.show()
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
 
-        _run_worker(
+        run_worker(
             self,
             rollback_command(),
             session_inhibit_reason="KythOS is staging a rollback",
@@ -42,8 +41,8 @@ class _ResetMixin:
 
     def _on_rollback_done(self, code: int):
         self._progress.hide()
-        _finish_worker(self)
-        _set_session_inhibit(self, None)
+        finish_worker(self)
+        set_session_inhibit(self, None)
         self._confirm_edit.setEnabled(True)
         self._on_confirm_text(self._confirm_edit.text())
         if code == 0:
@@ -54,8 +53,8 @@ class _ResetMixin:
         else:
             self._status_lbl.setText(f"Rollback failed (exit code {code}).")
             self._status_lbl.setObjectName("status-err")
-            self._rollback_repair_btn.setEnabled(_has_rollback_deployment())
-        _restyle(self._status_lbl)
+            self._rollback_repair_btn.setEnabled(has_rollback_deployment())
+        restyle(self._status_lbl)
 
     def _run_reset(self):
         self._confirm_edit.setEnabled(False)
@@ -68,9 +67,9 @@ class _ResetMixin:
         self._status_lbl.setText("Resetting system…")
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.show()
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
 
-        _run_worker(
+        run_worker(
             self,
             reset_command(),
             session_inhibit_reason="KythOS is resetting the system image",
@@ -84,19 +83,19 @@ class _ResetMixin:
 
     def _on_done(self, code: int):
         self._progress.hide()
-        _finish_worker(self)
-        _set_session_inhibit(self, None)
+        finish_worker(self)
+        set_session_inhibit(self, None)
 
         if code == 0:
             self._status_lbl.setText("Reset staged — rebooting…")
             self._status_lbl.setObjectName("status-ok")
             self._log.append("\nDone. Rebooting now.")
-            _restyle(self._status_lbl)
+            restyle(self._status_lbl)
             single_shot(self, 2000, reboot)
         else:
             self._status_lbl.setText(f"Reset failed (exit code {code}).")
             self._status_lbl.setObjectName("status-err")
-            _restyle(self._status_lbl)
+            restyle(self._status_lbl)
             self._confirm_edit.setEnabled(True)
             self._confirm_edit.clear()
 

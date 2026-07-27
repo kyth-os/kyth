@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import os
 import shutil
-from ..core_base import (
-    _release_worker_when_finished,
-)
-from ..services.process import _run_command
+from ..services.process import run_command
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.runtime import Worker
+from .services.runtime import Worker, release_worker_when_finished
 from ..services.launch import popen
 from ..services.windows_migration import (
     _copy_game_saves,
@@ -257,7 +254,7 @@ class _TransferExtrasMixin:
         home = os.path.expanduser("~")
         shown = dest.replace(home, "~", 1)
         if shutil.which("plasma-apply-wallpaperimage"):
-            result = _run_command(["plasma-apply-wallpaperimage", dest], timeout=30)
+            result = run_command(["plasma-apply-wallpaperimage", dest], timeout=30)
             if result is not None and result.returncode == 0:
                 self._wp_status.setText(f"✓ Wallpaper applied — saved to {shown}.")
                 return
@@ -292,7 +289,7 @@ class _TransferExtrasMixin:
                 self._fonts_status.setText(f"Could not copy fonts: {message}"),
             ))
         self._fonts_copy_worker = worker
-        _release_worker_when_finished(self, "_fonts_copy_worker", worker)
+        release_worker_when_finished(self, "_fonts_copy_worker", worker)
         worker.start()
 
 
@@ -322,7 +319,7 @@ class _TransferExtrasMixin:
                 self._saves_status.setText(f"Could not copy saves: {message}"),
             ))
         self._saves_copy_worker = worker
-        _release_worker_when_finished(self, "_saves_copy_worker", worker)
+        release_worker_when_finished(self, "_saves_copy_worker", worker)
         worker.start()
 
 
@@ -391,7 +388,7 @@ class _TransferExtrasMixin:
                 )
         worker.done.connect(_done)
         self._wsl_worker = worker
-        _release_worker_when_finished(self, "_wsl_worker", worker)
+        release_worker_when_finished(self, "_wsl_worker", worker)
         worker.start()
 
 

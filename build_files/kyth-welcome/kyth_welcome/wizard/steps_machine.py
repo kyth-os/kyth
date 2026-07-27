@@ -8,10 +8,9 @@ button to System Hub for anyone who wants the full page.
 """
 from __future__ import annotations
 
-from ..core_base import (
-    _IS_LIVE, _command_stdout, _current_branch, _has_rollback_deployment,
-    _has_staged_update,
-)
+from .core_base import IS_LIVE
+from .services.process import command_stdout
+from .services.bootc import current_branch, has_rollback_deployment, has_staged_update
 from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives, _proton_cachyos_version
 from ..services.hardware import _detect_nvidia
@@ -37,7 +36,7 @@ class _MachineStepMixin:
                 "Known hard blockers: "
                 f"{blocked_summary}. These are publisher anti-cheat decisions, not Proton settings."
             )
-        if not _IS_LIVE and _find_ntfs_drives():
+        if not IS_LIVE and _find_ntfs_drives():
             rows.append(
                 "PC game drive detected. Copy Steam libraries to a Linux-formatted disk before using Proton."
             )
@@ -45,7 +44,7 @@ class _MachineStepMixin:
             rows.append(
                 "NVIDIA GPU detected. Open Hardware to verify the proprietary module and reboot state."
             )
-        if _has_rollback_deployment():
+        if has_rollback_deployment():
             rows.append(
                 "Rollback is available. If an update makes things worse, return to the previous image first."
             )
@@ -64,8 +63,8 @@ class _MachineStepMixin:
         return card
 
     def _make_update_card(self) -> QFrame:
-        staged = _has_staged_update()
-        branch = _current_branch() or ""
+        staged = has_staged_update()
+        branch = current_branch() or ""
         if branch.startswith("testing"):
             channel = "Testing"
         elif branch.startswith("latest"):
@@ -105,7 +104,7 @@ class _MachineStepMixin:
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
 
-        kernel = _command_stdout(["uname", "-r"]) or "unknown"
+        kernel = command_stdout(["uname", "-r"]) or "unknown"
         pc_ver = _proton_cachyos_version() or "included"
         scx_sched = "Fedora"
         try:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import shlex
 
-from .core_base import _restyle, _run_worker
+from .core_base import restyle, run_worker
 from .services.launch import flatpak_run, kcmshell, popen, popen_privileged, systemsettings
 from .services.repair import (
     enable_clipboard_history,
@@ -14,7 +14,7 @@ from .services.repair import (
 )
 from .actions import _install_flatpak_inline
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import _finish_worker
+from .services.runtime import finish_worker
 from .services.privileged import systemctl_action
 from .qt import QDesktopServices, QMessageBox, QUrl
 from .widgets import _set_log_panel
@@ -35,7 +35,7 @@ class _QuickFixMixin:
                 f"Could not set sleep mode (may not be supported on this platform): {err}"
             )
             self._sleep_fix_status.setObjectName("status-err")
-        _restyle(self._sleep_fix_status)
+        restyle(self._sleep_fix_status)
 
     def _show_wakeup_sources(self):
         result = wakeup_sources_text(timeout=5)
@@ -44,7 +44,7 @@ class _QuickFixMixin:
         else:
             self._sleep_fix_status.setText("No wake sources found (or /sys/bus path unavailable).")
         self._sleep_fix_status.setObjectName("card-copy")
-        _restyle(self._sleep_fix_status)
+        restyle(self._sleep_fix_status)
 
     def _on_file_history(self):
         if _is_flatpak_installed("org.gnome.World.PikaBackup"):
@@ -125,8 +125,8 @@ class _QuickFixMixin:
         self._status_lbl.setText(f"{label}…")
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.show()
-        _restyle(self._status_lbl)
-        _run_worker(
+        restyle(self._status_lbl)
+        run_worker(
             self,
             cmd,
             on_line=self._on_line,
@@ -135,7 +135,7 @@ class _QuickFixMixin:
 
     def _on_quick_fix_done(self, code: int, label: str):
         self._progress.hide()
-        _finish_worker(self)
+        finish_worker(self)
         self._confirm_edit.setEnabled(True)
         self._on_confirm_text(self._confirm_edit.text())
         view = quick_fix_completion(label, code)
@@ -145,4 +145,4 @@ class _QuickFixMixin:
             self._log.append("\nDone.")
         if view.expand_log:
             _set_log_panel(self._log_toggle, self._log, True)
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)

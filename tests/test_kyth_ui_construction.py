@@ -16,7 +16,7 @@ import inspect
 from unittest.mock import patch
 
 from kyth_welcome.qt import QApplication, QPushButton
-from kyth_welcome.services.runtime import _shutdown_threads
+from kyth_welcome.services.runtime import shutdown_threads
 from kyth_welcome.windows import MainWindow
 from kyth_welcome.wizard import WizardWindow
 from kyth_welcome.vpn_app import VpnWindow
@@ -78,7 +78,7 @@ vpn_window = VpnWindow()
 assert isinstance(vpn_window.centralWidget(), VpnPage)
 assert vpn_window.windowTitle() == "VPN Connect"
 vpn_window.close()
-_shutdown_threads()
+shutdown_threads()
 """
 
 

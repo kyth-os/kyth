@@ -5,7 +5,7 @@ import glob
 import os
 import shutil
 
-from ..process import _run_command
+from ..process import run_command
 
 
 def _mangohud_installed() -> bool:
@@ -62,7 +62,7 @@ def _compat_tool_version(prefix: str) -> str | None:
 def _ntsync_state() -> tuple[str, str]:
     if os.path.exists("/dev/ntsync"):
         return "ok", "/dev/ntsync is present."
-    module_probe = _run_command(["modprobe", "-n", "ntsync"], timeout=5)
+    module_probe = run_command(["modprobe", "-n", "ntsync"], timeout=5)
     if module_probe is not None and module_probe.returncode == 0:
         return "warn", "ntsync module exists but /dev/ntsync is not present yet."
     return "warn", "ntsync device not detected; Proton will fall back to fsync/esync."
@@ -70,7 +70,7 @@ def _ntsync_state() -> tuple[str, str]:
 
 def _vulkan_state() -> tuple[str, str]:
     if shutil.which("vulkaninfo"):
-        result = _run_command(["vulkaninfo", "--summary"], timeout=12)
+        result = run_command(["vulkaninfo", "--summary"], timeout=12)
         if result is not None and result.returncode == 0:
             gpus = [
                 line.split("=", 1)[1].strip()

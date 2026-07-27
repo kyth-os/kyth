@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .core_base import _bootc_image_timestamp
+from .services.bootc import bootc_image_timestamp
 from .qt import QHBoxLayout, QLabel, QPushButton
 from .widgets import _make_card, _make_flow_step
 
@@ -70,7 +70,7 @@ def rollback_card(
     title = QLabel("Undo last update")
     title.setObjectName("card-title")
     layout.addWidget(title)
-    timestamp = _bootc_image_timestamp("rollback")
+    timestamp = bootc_image_timestamp("rollback")
     body = QLabel(
         (
             "A previous system image is available. Rollback restores that image on the next boot; "

@@ -11,7 +11,7 @@ import time
 from collections import deque
 
 
-def _parse_size_bytes(size_str: str) -> int:
+def parse_size_bytes(size_str: str) -> int:
     """Parse ``'8.3 GB'``, ``'500 MB'``, or ``'2 GiB'`` to bytes.
 
     Returns 0 on failure so callers can treat 0 as "unknown/unparseable".
@@ -28,7 +28,7 @@ def _parse_size_bytes(size_str: str) -> int:
         return 0
 
 
-def _get_rx_bytes() -> int:
+def get_rx_bytes() -> int:
     """Return total received bytes across all non-loopback interfaces.
 
     Reads ``/proc/net/dev`` and sums the receive byte counter (column 2)
@@ -49,7 +49,7 @@ def _get_rx_bytes() -> int:
         return 0
 
 
-def _human_bytes(n: int | float) -> str:
+def human_bytes(n: int | float) -> str:
     """Format a byte count as a human-readable string (e.g. ``'1.5 GB'``).
 
     Shows whole numbers for raw bytes, one decimal place for KB and above.
@@ -63,7 +63,7 @@ def _human_bytes(n: int | float) -> str:
     return f"{n:.1f} TB"
 
 
-def _human_bytes_pair(downloaded: int, total: int) -> tuple[str, str]:
+def human_bytes_pair(downloaded: int, total: int) -> tuple[str, str]:
     """Format a downloaded/total pair, e.g. ``('1.4', '1.5 GB')``.
 
     The unit appears only on the total element so callers can show
@@ -75,7 +75,7 @@ def _human_bytes_pair(downloaded: int, total: int) -> tuple[str, str]:
     return str(downloaded), f"{total} B"
 
 
-class _NetStatsTracker:
+class NetStatsTracker:
     """Pure-Python rolling-window network throughput tracker.
 
     Polled by both the Qt ``DownloadMonitor`` (welcome) and the stdlib

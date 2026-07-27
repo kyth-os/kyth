@@ -4,14 +4,9 @@ from __future__ import annotations
 
 import os
 import shutil
-from ..core_base import (
-    _human_bytes,
-    _release_worker_when_finished,
-    _restyle,
-)
-from ..services.runtime import (
-    DataWorker,
-)
+from .core_base import restyle
+from .services.process import human_bytes
+from .services.runtime import DataWorker, release_worker_when_finished
 from ..services.windows_migration import (
     UserFilesCopyWorker,
     _folder_sizes_calc,
@@ -78,7 +73,7 @@ class _FilesCopyMixin:
     def _set_files_status(self, text: str, obj: str = "card-copy"):
         self._files_status.setText(text)
         self._files_status.setObjectName(obj)
-        _restyle(self._files_status)
+        restyle(self._files_status)
 
 
     def _populate_files_card(self, partitions: list):
@@ -133,7 +128,7 @@ class _FilesCopyMixin:
             self._files_checks.append((cb, folder, src, dst))
             self._files_rows.addWidget(cb)
         free = shutil.disk_usage(home).free
-        self._files_space_lbl.setText(f"Free space in your home folder: {_human_bytes(free)}.")
+        self._files_space_lbl.setText(f"Free space in your home folder: {human_bytes(free)}.")
         key = prof["path"]
         self._files_sizes_key = key
         cached = self._folder_sizes_cache.get(key)
@@ -160,7 +155,7 @@ class _FilesCopyMixin:
         home = os.path.expanduser("~")
         for cb, folder, _src, dst in self._files_checks:
             size = sizes.get(folder, -1)
-            size_txt = _human_bytes(size) if size >= 0 else "size unknown"
+            size_txt = human_bytes(size) if size >= 0 else "size unknown"
             cb.setText(f"{folder} — {size_txt} → {dst.replace(home, '~', 1)}")
 
 
@@ -176,8 +171,8 @@ class _FilesCopyMixin:
         free = shutil.disk_usage(os.path.expanduser("~")).free
         if needed > free:
             self._set_files_status(
-                f"Not enough free space: the selected folders hold {_human_bytes(needed)} "
-                f"but only {_human_bytes(free)} is free in your home folder.", "status-err")
+                f"Not enough free space: the selected folders hold {human_bytes(needed)} "
+                f"but only {human_bytes(free)} is free in your home folder.", "status-err")
             return
         for cb, *_ in self._files_checks:
             cb.setEnabled(False)
@@ -192,7 +187,7 @@ class _FilesCopyMixin:
         worker.overall.connect(self._files_progress.setValue)
         worker.done.connect(self._on_files_copy_done)
         self._files_copy_worker = worker
-        _release_worker_when_finished(self, "_files_copy_worker", worker)
+        release_worker_when_finished(self, "_files_copy_worker", worker)
         worker.start()
 
 

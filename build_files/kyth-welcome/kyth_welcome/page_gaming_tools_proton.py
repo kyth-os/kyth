@@ -1,9 +1,9 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.launch import flatpak_run
 from .actions import _install_flatpak_inline
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import QDesktopServices, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QUrl, Qt
 from .widgets import _copy_text, _launch_opt_label, _launch_opt_value, _make_card, _set_log_panel
 
@@ -187,7 +187,7 @@ class _ProtonToolsMixin:
         self._pc_op_status.setText("Checking for Proton-CachyOS update…")
         self._pc_op_status.setObjectName("subheading")
         self._pc_op_status.show()
-        _restyle(self._pc_op_status)
+        restyle(self._pc_op_status)
         self._pc_worker = Worker(["/usr/bin/kyth-proton-cachyos-update"])
         self._pc_worker.line.connect(lambda ln: (
             self._pc_log.append(ln),
@@ -198,7 +198,7 @@ class _ProtonToolsMixin:
 
     def _on_pc_update_done(self, code: int):
         self._pc_progress.hide()
-        _finish_worker(self, attr="_pc_worker")
+        finish_worker(self, attr="_pc_worker")
         self._pc_update_btn.setEnabled(True)
         if code == 0:
             self._pc_op_status.setText("Proton-CachyOS is up to date.")
@@ -207,5 +207,5 @@ class _ProtonToolsMixin:
         else:
             self._pc_op_status.setText(f"Update failed (exit {code}).")
             self._pc_op_status.setObjectName("status-err")
-        _restyle(self._pc_op_status)
+        restyle(self._pc_op_status)
         self._refresh_status()

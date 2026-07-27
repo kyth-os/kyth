@@ -1,7 +1,7 @@
 import os
 
 # __KYTH_GENERATED_IMPORTS__
-from .services.process import _run_command
+from .services.process import run_command
 from .services.gaming import (
     _streaming_health_items, command_details, discord_screenshare_fix_command, obs_pipewire_fix_command
 )
@@ -101,7 +101,7 @@ class _FixesMixin:
         cmd = discord_screenshare_fix_command()
         self._discord_fix_status.hide()
         self._discord_fix_result.set_running("Applying Discord screen share repair…", command_details(cmd))
-        result = _run_command(cmd, timeout=10)
+        result = run_command(cmd, timeout=10)
         if result is not None and result.returncode == 0:
             self._discord_fix_result.set_result(
                 "ok",
@@ -128,7 +128,7 @@ class _FixesMixin:
         cmd = obs_pipewire_fix_command()
         self._obs_fix_status.hide()
         self._obs_fix_result.set_running("Applying OBS capture repair…", command_details(cmd))
-        result = _run_command(cmd, timeout=10)
+        result = run_command(cmd, timeout=10)
         if result is not None and result.returncode == 0:
             self._obs_fix_result.set_result(
                 "ok",

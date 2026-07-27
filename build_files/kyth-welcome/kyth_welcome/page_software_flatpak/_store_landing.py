@@ -46,8 +46,8 @@ class _StoreLandingMixin:
         )
         self._fp_status.setObjectName("status-dim")
         self._fp_status.show()
-        from ..core_base import _restyle
-        _restyle(self._fp_status)
+        from ..core_base import restyle
+        restyle(self._fp_status)
 
         trending_label = QLabel("Trending on Kyth")
         trending_label.setObjectName("section-heading")

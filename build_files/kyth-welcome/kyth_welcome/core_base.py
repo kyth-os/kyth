@@ -1,103 +1,35 @@
-"""System Hub shared entry surface.
+"""Shared UI/session helpers for System Hub pages.
 
-Domain logic lives under ``services/``:
-  process  — subprocess helpers + probe cache
-  bootc    — bootc status / branch / deployment
-  registry — skopeo/registry digest checks
-  runtime  — Qt worker threads
-
-This module re-exports those APIs under the historical underscore names and
-keeps UI/session helpers that pages still import from here.
+Domain logic lives under ``services/`` (process, bootc, registry, runtime) —
+pages import those directly. This module only holds the Qt/session-facing
+helpers that don't have a more specific home: window-close/worker-cancel
+plumbing, the usage-profile file, and small widget utilities.
 """
-# pylint: disable=unused-import
-# Most imports below are deliberate re-exports under the historical
-# underscore names described above, not used directly in this file.
-
 from __future__ import annotations
 
 import os
 import re
-from kyth_welcome.services.command import run_sync
 import time
 
-# __KYTH_GENERATED_IMPORTS__
+from kyth_welcome.services.command import run_sync
+from kyth_welcome.services.process import is_live_session, run_command
+from kyth_welcome.services.runtime import Worker
+
 from .qt import (
     QLabel, QPushButton, QTextEdit, QWidget,
 )
 
-# ── Re-exports: process ───────────────────────────────────────────────────────
-from .services.process import (  # noqa: F401
-    _BOOTC_CACHE_TTL,
-    _FLATPAK_CACHE_TTL,
-    _command_stdout,
-    _format_dl_progress_line,
-    _format_elapsed,
-    _format_eta,
-    _get_disk_write_bytes,
-    _get_rx_bytes,
-    _human_bytes,
-    _human_bytes_pair,
-    _invalidate_probe_caches,
-    _is_live_session,
-    _parse_size_bytes,
-    _probe_cached,
-    _run_command,
-    _with_idle_inhibit,
-)
-
-# ── Re-exports: bootc ─────────────────────────────────────────────────────────
-from .services.bootc import (  # noqa: F401
-    REGISTRY,
-    _active_bootc_operation,
-    _bootc_cancel_block_reason,
-    _bootc_image_digest,
-    _bootc_image_reference,
-    _bootc_image_timestamp,
-    _bootc_proxy_running,
-    _bootc_status_data,
-    _bootc_status_text,
-    _branch_display_name,
-    _branch_from_ref,
-    _current_branch,
-    _current_kernel_flavor,
-    _default_phase,
-    _fetch_bootc_status_data,
-    _fetch_bootc_status_text,
-    _has_rollback_deployment,
-    _has_staged_update,
-    _image_tag_for_channel,
-    _image_tag_for_kernel,
-    _nested_get,
-    _parse_update_phase,
-    _walk_strings,
-    update_availability_view,
-)
-
-# ── Re-exports: runtime (Qt workers) ──────────────────────────────────────────
-from .services.runtime import (  # noqa: F401
-    DataWorker,
-    DownloadMonitor,
-    TrackedThread,
-    Worker,
-    _finish_worker,
-    _release_worker_when_finished,
-    _running_threads,
-    _shutdown_threads,
-    _start_or_extend_dl_monitor,
-    _stop_download_monitor,
-)
-
 # ── Constants still used by pages ─────────────────────────────────────────────
-_CLOUD_SYNC_CONFIG = os.path.expanduser("~/.config/kyth-cloud-sync.json")
-_SYNC_INTERVAL_MS = 5 * 60 * 1000  # 5 minutes
-_SMB_CONFIG = os.path.expanduser("~/.config/kyth-smb-shares.json")
-_SMB_CREDS_DIR = "/etc/kyth-smb-creds"
+CLOUD_SYNC_CONFIG = os.path.expanduser("~/.config/kyth-cloud-sync.json")
+SYNC_INTERVAL_MS = 5 * 60 * 1000  # 5 minutes
+SMB_CONFIG = os.path.expanduser("~/.config/kyth-smb-shares.json")
+SMB_CREDS_DIR = "/etc/kyth-smb-creds"
 
 
-_IS_LIVE = _is_live_session()
+IS_LIVE = is_live_session()
 
 
-def _prefer_xwayland_if_wayland_plugin_missing() -> None:
+def prefer_xwayland_if_wayland_plugin_missing() -> None:
     # KDE Wayland sessions usually expose both WAYLAND_DISPLAY and DISPLAY.
     # If qt6-qtwayland is missing in the image, Qt aborts before showing any
     # window; falling back to xcb lets the helper still open via XWayland.
@@ -108,13 +40,13 @@ def _prefer_xwayland_if_wayland_plugin_missing() -> None:
 
     # Use filesystem scan so this runs safely before QApplication is created
     # (QLibraryInfo.path() can initialize Qt internals that produce ghost windows).
-    _QT6_PLATFORM_DIRS = [
+    QT6_PLATFORM_DIRS = [
         "/usr/lib64/qt6/plugins/platforms",
         "/usr/lib/qt6/plugins/platforms",
         "/usr/lib/x86_64-linux-gnu/qt6/plugins/platforms",
         "/usr/lib/aarch64-linux-gnu/qt6/plugins/platforms",
     ]
-    for platform_dir in _QT6_PLATFORM_DIRS:
+    for platform_dir in QT6_PLATFORM_DIRS:
         if not os.path.isdir(platform_dir):
             continue
         if any(
@@ -127,7 +59,7 @@ def _prefer_xwayland_if_wayland_plugin_missing() -> None:
     os.environ["QT_QPA_PLATFORM"] = "xcb"
 
 
-def _apply_install_badge(lbl: QLabel, ok: bool, ok_text: str = "Installed",
+def apply_install_badge(lbl: QLabel, ok: bool, ok_text: str = "Installed",
                          warn_text: str = "Not Installed") -> None:
     if ok:
         bg = "#121e2d"
@@ -148,7 +80,7 @@ def _apply_install_badge(lbl: QLabel, ok: bool, ok_text: str = "Installed",
     )
 
 
-def _cancel_worker(
+def cancel_worker(
     owner: object,
     attr: str = "_worker",
     status_lbl: QLabel | None = None,
@@ -165,7 +97,7 @@ def _cancel_worker(
         status_lbl.setText(message)
         status_lbl.setObjectName("status-warn")
         status_lbl.show()
-        _restyle(status_lbl)
+        restyle(status_lbl)
     if log is not None:
         log.append("\nCancel requested. Waiting for the running command to stop...")
         log.ensureCursorVisible()
@@ -173,7 +105,7 @@ def _cancel_worker(
     return True
 
 
-def _set_session_inhibit(owner: object, reason: str | None = None) -> None:
+def set_session_inhibit(owner: object, reason: str | None = None) -> None:
     current = getattr(owner, "_screen_inhibit_cookie", None)
     if reason is None:
         if current is None:
@@ -214,7 +146,7 @@ def _set_session_inhibit(owner: object, reason: str | None = None) -> None:
         owner._screen_inhibit_cookie = int(match.group(1))
 
 
-def _run_worker(
+def run_worker(
     owner: object,
     cmd: list[str],
     *,
@@ -234,14 +166,14 @@ def _run_worker(
     worker = Worker(cmd, input_text=input_text)
     setattr(owner, attr, worker)
     if session_inhibit_reason is not None:
-        _set_session_inhibit(owner, session_inhibit_reason)
+        set_session_inhibit(owner, session_inhibit_reason)
     worker.line.connect(on_line)
     worker.done.connect(on_done)
     worker.start()
     return worker
 
 
-def _remove_autostart():
+def remove_autostart():
     path = os.path.expanduser("~/.config/autostart/kyth-welcome.desktop")
     try:
         os.remove(path)
@@ -249,49 +181,49 @@ def _remove_autostart():
         pass
 
 
-def _is_first_run() -> bool:
-    from .services.setup_state import is_first_run
-    return is_first_run()
+def is_first_run() -> bool:
+    from .services.setup_state import is_first_run as _is_first_run_impl
+    return _is_first_run_impl()
 
 
 # ── Usage profile (everyday / gaming) ─────────────────────────────────────────
 # Chosen on the first-run wizard's welcome step; drives which app defaults the
 # wizard pre-selects and which System Hub sections get the most prominence.
 # Older installs used work/both; both are treated as the Everyday preset.
-_PROFILE_PATH = os.path.expanduser("~/.local/share/kyth/profile")
-_VALID_PROFILES = ("everyday", "gaming")
-_PROFILE_ALIASES = {"work": "everyday", "both": "everyday"}
+PROFILE_PATH = os.path.expanduser("~/.local/share/kyth/profile")
+VALID_PROFILES = ("everyday", "gaming")
+PROFILE_ALIASES = {"work": "everyday", "both": "everyday"}
 
 
-def _normalize_profile(profile: str) -> str:
+def normalize_profile(profile: str) -> str:
     value = profile.strip().lower()
-    value = _PROFILE_ALIASES.get(value, value)
-    return value if value in _VALID_PROFILES else "everyday"
+    value = PROFILE_ALIASES.get(value, value)
+    return value if value in VALID_PROFILES else "everyday"
 
 
-def _load_profile() -> str:
+def load_profile() -> str:
     try:
-        with open(_PROFILE_PATH, encoding="utf-8") as fh:
-            return _normalize_profile(fh.read())
+        with open(PROFILE_PATH, encoding="utf-8") as fh:
+            return normalize_profile(fh.read())
     except OSError:
         return "everyday"
 
 
-def _save_profile(profile: str) -> None:
-    profile = _normalize_profile(profile)
+def save_profile(profile: str) -> None:
+    profile = normalize_profile(profile)
     try:
-        os.makedirs(os.path.dirname(_PROFILE_PATH), exist_ok=True)
-        with open(_PROFILE_PATH, "w", encoding="utf-8") as fh:
+        os.makedirs(os.path.dirname(PROFILE_PATH), exist_ok=True)
+        with open(PROFILE_PATH, "w", encoding="utf-8") as fh:
             fh.write(profile + "\n")
     except OSError:
         pass
 
 
-def _wait_for_display_setup(timeout: float = 8.0, interval: float = 0.25):
+def wait_for_display_setup(timeout: float = 8.0, interval: float = 0.25):
     autostart = os.path.expanduser("~/.config/autostart/kyth-set-resolution.desktop")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        result = _run_command(["pgrep", "-af", "kyth-set-resolution"], timeout=2)
+        result = run_command(["pgrep", "-af", "kyth-set-resolution"], timeout=2)
         running = bool(result is not None and result.returncode == 0 and result.stdout.strip())
         pending = os.path.exists(autostart)
         if not running and not pending:
@@ -301,6 +233,6 @@ def _wait_for_display_setup(timeout: float = 8.0, interval: float = 0.25):
 
 # ── UI utilities ───────────────────────────────────────────────────────────────
 
-def _restyle(widget: QWidget):
+def restyle(widget: QWidget):
     widget.style().unpolish(widget)
     widget.style().polish(widget)

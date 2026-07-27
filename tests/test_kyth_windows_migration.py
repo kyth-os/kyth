@@ -19,7 +19,7 @@ from kyth_welcome.services.windows_migration.extras import (  # noqa: E402
     parse_rdp_file,
 )
 from kyth_welcome.services.windows_migration.hardware_sanity import (  # noqa: E402
-    _strip_ansi,
+    strip_ansi,
     hw_display_row,
 )
 from kyth_welcome.services.phone_link import (  # noqa: E402
@@ -121,17 +121,17 @@ class ExtrasTests(unittest.TestCase):
 
 class HardwareSanityTests(unittest.TestCase):
     def test_strip_ansi(self):
-        self.assertEqual(_strip_ansi("\x1b[32mOK\x1b[0m"), "OK")
+        self.assertEqual(strip_ansi("\x1b[32mOK\x1b[0m"), "OK")
 
     def test_strip_ansi_non_color_csi_sequences(self):
         # Cursor-movement/erase CSI codes end in letters other than 'm'
         # (e.g. 'H', 'K'); a color-only regex would leave these behind.
-        self.assertEqual(_strip_ansi("\x1b[2K\x1b[1GHDR: enabled"), "HDR: enabled")
+        self.assertEqual(strip_ansi("\x1b[2K\x1b[1GHDR: enabled"), "HDR: enabled")
 
     def test_hw_display_row_hdr_vrr(self):
         sample = "Output: HDMI-1\nHDR: enabled\nVRR: automatic\n"
         with patch(
-            "kyth_welcome.services.windows_migration.hardware_sanity._command_stdout",
+            "kyth_welcome.services.windows_migration.hardware_sanity.command_stdout",
             return_value=sample,
         ):
             row = hw_display_row()

@@ -5,7 +5,7 @@ import os
 import time
 from dataclasses import dataclass
 
-from .process import _run_command
+from .process import run_command
 
 _FIRST_WEEK_DISMISS = os.path.expanduser("~/.config/kyth-first-week-done")
 _FIRST_BOOT_MARKERS = (
@@ -34,7 +34,7 @@ def controller_seen() -> bool:
 def kdeconnect_configured() -> bool:
     if path_exists("~/.config/kdeconnect"):
         return True
-    result = _run_command(["kdeconnect-cli", "--list-devices"], timeout=6)
+    result = run_command(["kdeconnect-cli", "--list-devices"], timeout=6)
     return bool(result and result.returncode == 0 and result.stdout.strip())
 
 
@@ -43,12 +43,12 @@ def cloud_storage_configured() -> bool:
 
 
 def printer_configured() -> bool:
-    result = _run_command(["lpstat", "-v"], timeout=5)
+    result = run_command(["lpstat", "-v"], timeout=5)
     return bool(result and result.returncode == 0 and result.stdout.strip())
 
 
 def browser_integration_native_ready() -> bool:
-    result = _run_command(["rpm", "-q", "plasma-browser-integration"], timeout=5)
+    result = run_command(["rpm", "-q", "plasma-browser-integration"], timeout=5)
     if result and result.returncode == 0:
         return True
     return path_exists("/usr/bin/plasma-browser-integration-host")

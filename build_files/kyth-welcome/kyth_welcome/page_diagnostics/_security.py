@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _release_worker_when_finished
+from .services.runtime import release_worker_when_finished
 from ..services.diagnostics import _collect_security_status
 from ..services.gaming import DataWorker
 from ..qt import QFrame, QHBoxLayout, QLabel, QVBoxLayout
@@ -26,7 +26,7 @@ class _SecurityMixin:
         worker = DataWorker("security", _collect_security_status)
         worker.result.connect(self._on_security_status)
         self._security_worker = worker
-        _release_worker_when_finished(self, "_security_worker", worker)
+        release_worker_when_finished(self, "_security_worker", worker)
         worker.start()
         return card
 

@@ -14,7 +14,7 @@ from .plan import _get_manual_mounts, _prepare_install_plan, _validate_install_t
 from .runner import run_command
 from .recovery import cleanup_registered_mounts, write_failure_summary
 from .streaming import StreamingCommandRunner
-from kyth_shared import _get_rx_bytes
+from kyth_shared import get_rx_bytes
 from kyth_shared.accounts import create_installer_user as _shared_create_installer_user
 
 from .system import (
@@ -96,7 +96,7 @@ def _run_cmd(
         )
 
     StreamingCommandRunner(
-        rx_bytes=_get_rx_bytes,
+        rx_bytes=get_rx_bytes,
         publish=publish or (lambda _event: None),
     ).run(
         full_cmd,

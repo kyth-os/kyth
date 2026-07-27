@@ -15,7 +15,7 @@ from .services.repair import (
 )
 from .actions import _install_flatpak_inline
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import QFileDialog, QMessageBox
 
 
@@ -70,7 +70,7 @@ class _AssistMixin:
         worker.start()
 
     def _on_assist_snapshot_done(self, code: int):
-        _finish_worker(self, attr="_assist_worker")
+        finish_worker(self, attr="_assist_worker")
         if code != 0:
             self._assist_status.setText(f"Support snapshot failed (exit {code}).")
 
@@ -116,8 +116,8 @@ class _AssistMixin:
         if not os.path.exists(helper):
             self._setup_status.setText("Setup transfer is available after the next KythOS update and restart.")
             return
-        from .services.process import _run_command
-        result = _run_command(setup_summary_command(archive), timeout=15)
+        from .services.process import run_command
+        result = run_command(setup_summary_command(archive), timeout=15)
         if result is None:
             QMessageBox.warning(self, "Could not inspect archive", "command failed to start")
             return
@@ -144,7 +144,7 @@ class _AssistMixin:
 
     def _on_setup_transfer_done(self, code: int):
         operation = self._setup_operation
-        _finish_worker(self, attr="_setup_worker")
+        finish_worker(self, attr="_setup_worker")
         self._set_setup_busy(False)
         if code == 0 and operation == "restore":
             self._setup_status.setText(
@@ -165,7 +165,7 @@ class _AssistMixin:
         self._snapshot_worker.start()
 
     def _on_snapshot_done(self, code: int):
-        _finish_worker(self, attr="_snapshot_worker")
+        finish_worker(self, attr="_snapshot_worker")
         self._snapshot_btn.setEnabled(True)
         if code != 0:
             self._snapshot_status.setText(f"Snapshot failed (exit {code}).")

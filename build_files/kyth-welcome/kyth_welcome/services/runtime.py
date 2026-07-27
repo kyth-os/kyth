@@ -13,8 +13,8 @@ import threading
 import time
 
 from ..qt import QThread, Signal
-from kyth_shared import _NetStatsTracker, _get_rx_bytes
-from .process import _invalidate_probe_caches, _parse_size_bytes
+from kyth_shared import NetStatsTracker, get_rx_bytes
+from .process import invalidate_probe_caches, parse_size_bytes
 
 _logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class TrackedThread(QThread):
 
     Subclasses that run user tasks (installs, copies, updates) set BLOCKS_CLOSE
     so the main window refuses to close mid-task; probes leave it False and are
-    joined at quit by _shutdown_threads.
+    joined at quit by shutdown_threads.
     """
 
     BLOCKS_CLOSE = False
@@ -42,11 +42,11 @@ class TrackedThread(QThread):
         self.finished.connect(lambda: _ACTIVE_THREADS.discard(self))
 
 
-def _running_threads() -> list[TrackedThread]:
+def running_threads() -> list[TrackedThread]:
     return [t for t in _ACTIVE_THREADS if t.isRunning()]
 
 
-def _shutdown_threads(timeout_ms: int = 15000) -> None:
+def shutdown_threads(timeout_ms: int = 15000) -> None:
     """Cancel and join every tracked thread. Connected to aboutToQuit so the
     interpreter never tears down a still-running QThread."""
     for t in list(_ACTIVE_THREADS):
@@ -55,9 +55,9 @@ def _shutdown_threads(timeout_ms: int = 15000) -> None:
             try:
                 stop()
             except Exception:
-                _logger.debug("_shutdown_threads: stop() on %r failed", t, exc_info=True)
+                _logger.debug("shutdown_threads: stop() on %r failed", t, exc_info=True)
     deadline = time.monotonic() + timeout_ms / 1000
-    while running := _running_threads():
+    while running := running_threads():
         remaining_ms = int((deadline - time.monotonic()) * 1000)
         if remaining_ms <= 0:
             break
@@ -73,7 +73,7 @@ def _shutdown_threads(timeout_ms: int = 15000) -> None:
 # aboutToQuit only fires when an event loop exits, so also join at interpreter
 # exit — atexit runs before module teardown destroys the QThread wrappers.
 # Covers embedders (tests, screenshot driver) that never call app.exec().
-atexit.register(_shutdown_threads)
+atexit.register(shutdown_threads)
 
 
 class Worker(TrackedThread):
@@ -146,7 +146,7 @@ class Worker(TrackedThread):
         finally:
             self._proc = None
             # The command may have installed apps or staged a deployment.
-            _invalidate_probe_caches()
+            invalidate_probe_caches()
             # Targeted disk-section drops for common mutation commands.
             try:
                 cmd0 = " ".join(self._cmd[:4])
@@ -225,7 +225,7 @@ class DownloadMonitor(TrackedThread):
 
     def __init__(self, total_bytes: int, rx_start: int):
         super().__init__()
-        self._tracker = _NetStatsTracker(total_bytes, rx_start)
+        self._tracker = NetStatsTracker(total_bytes, rx_start)
         # threading.Event rather than a bool flag: stop() wakes the loop
         # immediately instead of leaving callers' unbounded .wait() blocking
         # the GUI thread for up to the full 1s poll interval.
@@ -242,11 +242,11 @@ class DownloadMonitor(TrackedThread):
         while not self._stop_event.is_set():
             if self._stop_event.wait(1):
                 break
-            stats = self._tracker.tick(_get_rx_bytes())
+            stats = self._tracker.tick(get_rx_bytes())
             self.stats.emit(stats["downloaded"], stats["total"], stats["speed"], stats["eta_sec"])
 
 
-def _stop_download_monitor(monitor: DownloadMonitor | None) -> None:
+def stop_download_monitor(monitor: DownloadMonitor | None) -> None:
     """Stop and dispose of a running DownloadMonitor thread, if any."""
     if monitor is not None:
         monitor.stop()
@@ -254,7 +254,7 @@ def _stop_download_monitor(monitor: DownloadMonitor | None) -> None:
         monitor.deleteLater()
 
 
-def _start_or_extend_dl_monitor(
+def start_or_extend_dl_monitor(
     text: str, monitor: DownloadMonitor | None, total: int,
 ) -> tuple[DownloadMonitor | None, int, bool, bool]:
     """Parse a bootc "layers needed: ... (SIZE)" line and start a new
@@ -273,14 +273,14 @@ def _start_or_extend_dl_monitor(
     try:
         after = text.split("layers needed:")[1]
         size_str = after.split("(")[1].rstrip(")") if "(" in after else ""
-        new_total = _parse_size_bytes(size_str)
+        new_total = parse_size_bytes(size_str)
     except Exception:
-        _logger.debug("_start_or_extend_dl_monitor: failed to parse download size from %r", text, exc_info=True)
+        _logger.debug("start_or_extend_dl_monitor: failed to parse download size from %r", text, exc_info=True)
         return monitor, total, False, False
     if new_total <= 0:
         return monitor, total, False, False
     if monitor is None:
-        return DownloadMonitor(new_total, _get_rx_bytes()), new_total, True, True
+        return DownloadMonitor(new_total, get_rx_bytes()), new_total, True, True
     if new_total > total:
         monitor.update_total(new_total)
         return monitor, new_total, False, True
@@ -303,7 +303,7 @@ class DataWorker(TrackedThread):
             self.failed.emit(self._key, str(exc))
 
 
-def _finish_worker(owner: object, attr: str = "_worker") -> None:
+def finish_worker(owner: object, attr: str = "_worker") -> None:
     worker = getattr(owner, attr, None)
     if worker is None:
         return
@@ -312,7 +312,7 @@ def _finish_worker(owner: object, attr: str = "_worker") -> None:
     setattr(owner, attr, None)
 
 
-def _release_worker_when_finished(owner: object, attr: str, worker: QThread) -> None:
+def release_worker_when_finished(owner: object, attr: str, worker: QThread) -> None:
     def _release() -> None:
         if getattr(owner, attr, None) is worker:
             setattr(owner, attr, None)

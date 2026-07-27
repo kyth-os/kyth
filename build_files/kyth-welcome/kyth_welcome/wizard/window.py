@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from ..core_base import _load_profile, _restyle, _running_threads, _save_profile
+from .core_base import load_profile, restyle, save_profile
+from .services.runtime import running_threads
 from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QMainWindow, QMessageBox, QPushButton,
     QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
@@ -64,7 +65,7 @@ class WizardWindow(
         self.setMinimumSize(900, 620)
         self.resize(1040, 720)
 
-        self._profile = _load_profile()
+        self._profile = load_profile()
         self._handoff_win: QMainWindow | None = None
         # Lazy import avoids a circular import cycle with the hub package.
         from ..page_gaming import GamingPage
@@ -249,7 +250,7 @@ class WizardWindow(
         self._profile = profile
         for key, card in self._profile_cards.items():
             card.set_checked(key == profile)
-        _save_profile(profile)
+        save_profile(profile)
         popen(["/usr/bin/kyth-apply-role-preset", profile])
         # Re-seed the Get Apps defaults to match the chosen profile. Only
         # enabled boxes are touched — already-installed apps stay locked.
@@ -277,7 +278,7 @@ class WizardWindow(
     # ── Navigation ────────────────────────────────────────────────────────────
 
     def _has_running_operation(self) -> bool:
-        return any(t.BLOCKS_CLOSE for t in _running_threads())
+        return any(t.BLOCKS_CLOSE for t in running_threads())
 
     def _update_nav(self):
         specs = self._active_specs()
@@ -302,12 +303,12 @@ class WizardWindow(
                 num.setText(str(i + 1))
                 num.setObjectName("wiz-step-num-upcoming")
                 text.setObjectName("wiz-step-label-upcoming")
-            _restyle(num)
-            _restyle(text)
+            restyle(num)
+            restyle(text)
 
         for i, rule in enumerate(self._rail_rules):
             rule.setObjectName("wiz-rail-rule-done" if i < idx else "wiz-rail-rule-upcoming")
-            _restyle(rule)
+            restyle(rule)
 
         self._back_btn.setVisible(idx > 0)
         self._skip_btn.setVisible(self._current_key in STEP_KEYS)

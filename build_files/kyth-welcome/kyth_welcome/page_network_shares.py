@@ -3,7 +3,7 @@ import os
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import (
-    _apply_install_badge, _restyle, _run_worker,
+    apply_install_badge, restyle, run_worker,
 )
 from .services.network import (
     _is_cifs_available, _is_mounted, _load_smb_config,
@@ -207,7 +207,7 @@ class NetworkSharesPage(Page):
         unit_name = _systemd_escape_mount_path(share["mount_point"])
         unit_exists = os.path.exists(f"/etc/systemd/system/{unit_name}")
         badge = QLabel()
-        _apply_install_badge(
+        apply_install_badge(
             badge, mounted, "Mounted", "Not Mounted" if unit_exists else "Reconnect Needed"
         )
         hdr.addWidget(badge)
@@ -271,7 +271,7 @@ class NetworkSharesPage(Page):
         )
         self._op_status.setObjectName("status-warn")
         self._op_status.show()
-        _restyle(self._op_status)
+        restyle(self._op_status)
         self._f_pass.setFocus()
 
     # ── Form validation ───────────────────────────────────────────────────────
@@ -310,7 +310,7 @@ class NetworkSharesPage(Page):
             "gid": os.getgid(),
         }
         self._begin_op(f"Adding share {share['name']}…")
-        _run_worker(
+        run_worker(
             self,
             helper_action("network-share", "add").command(),
             input_text=json.dumps(payload),
@@ -338,7 +338,7 @@ class NetworkSharesPage(Page):
         else:
             self._op_status.setText(f"Add failed (exit {code}). Check the log below.")
             self._op_status.setObjectName("status-err")
-        _restyle(self._op_status)
+        restyle(self._op_status)
         self._rebuild_shares_list()
 
     def _mount_share(self, share: dict):
@@ -376,7 +376,7 @@ class NetworkSharesPage(Page):
         if self._worker and self._worker.isRunning():
             return
         self._begin_op(f"Removing {share['name']}…")
-        _run_worker(
+        run_worker(
             self,
             helper_action("network-share", "remove").command(),
             input_text=json.dumps({
@@ -397,12 +397,12 @@ class NetworkSharesPage(Page):
         else:
             self._op_status.setText(f"Remove failed (exit {code}). Check the log below.")
             self._op_status.setObjectName("status-err")
-        _restyle(self._op_status)
+        restyle(self._op_status)
         self._rebuild_shares_list()
 
     def _run_systemctl(self, action: str, unit: str, status_msg: str):
         self._begin_op(status_msg)
-        _run_worker(
+        run_worker(
             self,
             systemctl_action(action, unit).command(),
             on_line=self._op_log.append,
@@ -417,7 +417,7 @@ class NetworkSharesPage(Page):
         else:
             self._op_status.setText(f"Operation failed (exit {code}).")
             self._op_status.setObjectName("status-err")
-        _restyle(self._op_status)
+        restyle(self._op_status)
         self._rebuild_shares_list()
 
     def _begin_op(self, msg: str):
@@ -425,6 +425,6 @@ class NetworkSharesPage(Page):
         self._op_log.show()
         self._op_status.setText(msg)
         self._op_status.setObjectName("status-dim")
-        _restyle(self._op_status)
+        restyle(self._op_status)
         self._op_status.show()
         self._op_progress.show()

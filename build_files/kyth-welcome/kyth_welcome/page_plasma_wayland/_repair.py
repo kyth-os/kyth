@@ -1,6 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from ..services.launch import open_settings_module
-from ..services.process import _run_command
+from ..services.process import run_command
 
 
 class _RepairMixin:
@@ -26,7 +26,7 @@ class _RepairMixin:
 
     def _run_repair_command(self, label: str, success: str, cmd: list[str]):
         self._repair_result.set_running(label, self._command_details(cmd))
-        result = _run_command(cmd, timeout=20)
+        result = run_command(cmd, timeout=20)
         if result is None:
             self._repair_result.set_result("err", f"{label} failed: command failed to start", self._command_details(cmd))
             return

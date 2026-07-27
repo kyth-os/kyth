@@ -8,21 +8,21 @@ import shutil
 from kyth_welcome.services.command import run_sync
 from kyth_shared.runtime_output import parse_flatpak_apps
 
-from .process import _FLATPAK_CACHE_TTL, _probe_cached, _run_command
+from .process import FLATPAK_CACHE_TTL, probe_cached, run_command
 
 
 def installed_app_ids() -> frozenset[str] | None:
     """Return one cached Flatpak application-ID snapshot."""
 
     def fetch() -> list[str] | None:
-        result = _run_command(
+        result = run_command(
             ["flatpak", "list", "--app", "--columns=application"], timeout=10
         )
         if result is None or result.returncode != 0:
             return None
         return sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
 
-    raw = _probe_cached("flatpak-apps", _FLATPAK_CACHE_TTL, fetch)
+    raw = probe_cached("flatpak-apps", FLATPAK_CACHE_TTL, fetch)
     if raw is None:
         return None
     if isinstance(raw, frozenset):
@@ -61,14 +61,14 @@ def pending_update_count() -> int | None:
 
         return _count_flatpak_updates()
 
-    return _probe_cached("flatpak-updates", _FLATPAK_CACHE_TTL, fetch)
+    return probe_cached("flatpak-updates", FLATPAK_CACHE_TTL, fetch)
 
 
 def is_installed(app_id: str) -> bool:
     ids = installed_app_ids()
     if ids is not None:
         return app_id in ids
-    result = _run_command(["flatpak", "info", app_id], timeout=8)
+    result = run_command(["flatpak", "info", app_id], timeout=8)
     return result is not None and result.returncode == 0
 
 

@@ -1,7 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.gaming import scx_scheduler_command
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, Qt
 from .widgets import _copy_text, _launch_opt_label, _launch_opt_value, _make_card, _set_log_panel
 
@@ -205,7 +205,7 @@ class _PerfTuningMixin:
         self._scx_progress.show()
         self._scx_status_lbl.setText(f"Setting scheduler: {scheduler}…")
         self._scx_status_lbl.setObjectName("subheading")
-        _restyle(self._scx_status_lbl)
+        restyle(self._scx_status_lbl)
 
         self._scx_worker = Worker(cmd)
         self._scx_worker.line.connect(lambda ln: (
@@ -217,7 +217,7 @@ class _PerfTuningMixin:
 
     def _on_scx_done(self, code: int):
         self._scx_progress.hide()
-        _finish_worker(self, attr="_scx_worker")
+        finish_worker(self, attr="_scx_worker")
         if code == 0:
             self._scx_status_lbl.setText("sched-ext updated.")
             self._scx_status_lbl.setObjectName("status-ok")
@@ -225,5 +225,5 @@ class _PerfTuningMixin:
         else:
             self._scx_status_lbl.setText(f"sched-ext update failed (exit {code}).")
             self._scx_status_lbl.setObjectName("status-err")
-        _restyle(self._scx_status_lbl)
+        restyle(self._scx_status_lbl)
         self._refresh_status()

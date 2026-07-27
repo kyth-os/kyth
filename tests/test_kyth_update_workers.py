@@ -66,8 +66,8 @@ class UpdateCheckWorkerTests(unittest.TestCase):
 
         with (
             patch.object(updates, "read_update_snapshot") as read_snapshot,
-            patch.object(updates, "_bootc_status_data", return_value={"status": {}}),
-            patch.object(updates, "_current_branch", return_value="testing"),
+            patch.object(updates, "bootc_status_data", return_value={"status": {}}),
+            patch.object(updates, "current_branch", return_value="testing"),
             patch.object(updates, "check_registry_update", return_value=result) as registry_check,
         ):
             worker.run()
@@ -87,8 +87,8 @@ class UpdateCheckWorkerTests(unittest.TestCase):
 
         with (
             patch.object(updates, "read_update_snapshot", return_value=snapshot),
-            patch.object(updates, "_bootc_status_data", return_value={}),
-            patch.object(updates, "_current_branch", return_value=None),
+            patch.object(updates, "bootc_status_data", return_value={}),
+            patch.object(updates, "current_branch", return_value=None),
             patch.object(updates, "check_registry_update", return_value=result),
         ):
             worker.run()
@@ -101,7 +101,7 @@ class UpdateCheckWorkerTests(unittest.TestCase):
 
     def test_unexpected_failure_still_emits_completion_result(self):
         worker = self._worker(use_cached_snapshot=False)
-        with patch.object(updates, "_bootc_status_data", side_effect=RuntimeError("broken probe")):
+        with patch.object(updates, "bootc_status_data", side_effect=RuntimeError("broken probe")):
             worker.run()
 
         emitted = worker.result.emit.call_args.args[0]

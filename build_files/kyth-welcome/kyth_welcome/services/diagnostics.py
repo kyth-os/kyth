@@ -8,13 +8,13 @@ from kyth_welcome.services.command import run_sync
 from datetime import datetime
 
 from .bootc import (
-    _branch_display_name,
-    _current_branch,
-    _has_rollback_deployment,
-    _has_staged_update,
+    branch_display_name,
+    current_branch,
+    has_rollback_deployment,
+    has_staged_update,
 )
 from .hardware import HardwareProbe
-from .process import _command_stdout, _run_command
+from .process import command_stdout, run_command
 
 def _tail_file(path: str, max_lines: int = 80) -> str:
     try:
@@ -109,12 +109,12 @@ def _system_hub_probe() -> HardwareProbe:
 
 def _diagnostics_report(probes: list[HardwareProbe]) -> str:
     timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    kernel = _command_stdout(["uname", "-r"], timeout=5) or "unknown"
-    hostname = _command_stdout(["hostnamectl", "--static"], timeout=5) or _command_stdout(["hostname"], timeout=5) or "unknown"
-    branch = _branch_display_name(_current_branch())
-    staged = "yes" if _has_staged_update() else "no"
-    rollback = "yes" if _has_rollback_deployment() else "no"
-    fwupd = _run_command(["fwupdmgr", "get-updates"], timeout=20)
+    kernel = command_stdout(["uname", "-r"], timeout=5) or "unknown"
+    hostname = command_stdout(["hostnamectl", "--static"], timeout=5) or command_stdout(["hostname"], timeout=5) or "unknown"
+    branch = branch_display_name(current_branch())
+    staged = "yes" if has_staged_update() else "no"
+    rollback = "yes" if has_rollback_deployment() else "no"
+    fwupd = run_command(["fwupdmgr", "get-updates"], timeout=20)
     if fwupd is None:
         fwupd_status = "fwupd unavailable"
     elif fwupd.returncode == 0:
@@ -271,7 +271,7 @@ def _health_recommendations(report: str) -> str:
 
 
 def storage_sense_enabled() -> bool:
-    result = _run_command(
+    result = run_command(
         ["systemctl", "--user", "is-enabled", "kyth-storage-sense.timer"],
         timeout=5,
     )
@@ -283,7 +283,7 @@ _storage_sense_enabled = storage_sense_enabled
 
 def storage_sense_set(enable: bool) -> tuple[bool, str]:
     action = "enable" if enable else "disable"
-    result = _run_command(
+    result = run_command(
         ["systemctl", "--user", action, "--now", "kyth-storage-sense.timer"],
         timeout=15,
     )
@@ -340,7 +340,7 @@ def collect_security_status() -> list[tuple[str, str, str]]:
         "Store apps run as Flatpaks in sandboxes — permissions are reviewable in Flatseal.",
     ))
 
-    staged = _has_staged_update()
+    staged = has_staged_update()
     rows.append((
         "ok", "Updates",
         "An update is downloaded and staged — it applies on the next restart."
@@ -348,9 +348,9 @@ def collect_security_status() -> list[tuple[str, str, str]]:
     ))
 
     rows.append((
-        "ok" if _has_rollback_deployment() else "dim", "Recovery",
+        "ok" if has_rollback_deployment() else "dim", "Recovery",
         "The previous OS version is kept — one-click rollback from Repair."
-        if _has_rollback_deployment() else "A rollback point appears automatically after your first update.",
+        if has_rollback_deployment() else "A rollback point appears automatically after your first update.",
     ))
 
     rows.append((

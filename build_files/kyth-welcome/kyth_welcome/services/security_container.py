@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .process import _run_command
+from .process import run_command
 
 DEFAULT_KALI_BOX = "kali"
 DEFAULT_KALI_IMAGE = "docker.io/kalilinux/kali-rolling"
@@ -35,7 +35,7 @@ def parse_kali_inspect_output(output: str) -> KaliContainerInfo:
 
 
 def inspect_kali_box(name: str = DEFAULT_KALI_BOX) -> KaliContainerInfo | None:
-    result = _run_command(
+    result = run_command(
         [
             "sudo", "-n", "podman", "inspect", name,
             "--format",

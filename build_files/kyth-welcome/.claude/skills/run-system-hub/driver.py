@@ -7,7 +7,7 @@ Usage:
 
 Bypasses kyth_welcome.app:main() entirely so it never touches the
 single-instance lock file at ~/.cache/kyth/kyth-welcome.lock, and never
-calls _wait_for_display_setup()/_prefer_xwayland_if_wayland_plugin_missing()
+calls wait_for_display_setup()/prefer_xwayland_if_wayland_plugin_missing()
 (both no-ops under the offscreen platform anyway).
 """
 import argparse

@@ -8,8 +8,8 @@ from .services.appimages import (
 )
 from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
 from .services.launch import popen
-from .core_base import _restyle
-from .services.runtime import Worker, _finish_worker
+from .core_base import restyle
+from .services.runtime import Worker, finish_worker
 from .qt import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
@@ -74,14 +74,14 @@ class _InstalledTabMixin:
         if not apps:
             self._uninstall_status.setText(status_text or "No removable Flatpak apps or AppImages found.")
             self._uninstall_status.setObjectName(status_object)
-            _restyle(self._uninstall_status)
+            restyle(self._uninstall_status)
             return
         flatpak_count = sum(1 for app in apps if app["kind"] == "flatpak")
         appimage_count = sum(1 for app in apps if app["kind"] == "appimage")
         if not shutil.which("flatpak") and appimage_count == 0:
             self._uninstall_status.setText("Flatpak is not available and no AppImages were found.")
             self._uninstall_status.setObjectName("status-warn")
-            _restyle(self._uninstall_status)
+            restyle(self._uninstall_status)
             return
         self._uninstall_status.setText(
             status_text or (
@@ -90,7 +90,7 @@ class _InstalledTabMixin:
             )
         )
         self._uninstall_status.setObjectName(status_object)
-        _restyle(self._uninstall_status)
+        restyle(self._uninstall_status)
         for app in apps:
             self._uninstall_list.addWidget(self._make_uninstall_app_row(app))
 
@@ -157,7 +157,7 @@ class _InstalledTabMixin:
         self._uninstall_progress.show()
         self._uninstall_status.setText(f"Uninstalling {app['name']}…")
         self._uninstall_status.setObjectName("subheading")
-        _restyle(self._uninstall_status)
+        restyle(self._uninstall_status)
         self._uninstall_worker = Worker(cmd)
         self._uninstall_worker.line.connect(self._on_uninstall_line)
         self._uninstall_worker.done.connect(
@@ -209,7 +209,7 @@ class _InstalledTabMixin:
         self._uninstall_progress.show()
         self._uninstall_status.setText(f"Uninstalling {app['name']}…")
         self._uninstall_status.setObjectName("subheading")
-        _restyle(self._uninstall_status)
+        restyle(self._uninstall_status)
         self._uninstall_worker = Worker(cmd)
         self._uninstall_worker.line.connect(self._on_uninstall_line)
         self._uninstall_worker.done.connect(
@@ -223,7 +223,7 @@ class _InstalledTabMixin:
 
     def _on_uninstall_done(self, code: int, name: str):
         self._uninstall_progress.hide()
-        _finish_worker(self, attr="_uninstall_worker")
+        finish_worker(self, attr="_uninstall_worker")
         self._set_uninstall_controls_enabled(True)
         if code == 0:
             self._uninstall_log.append("\nDone.")
@@ -232,7 +232,7 @@ class _InstalledTabMixin:
             self._uninstall_status.setText(f"Uninstall failed (exit {code}).")
             self._uninstall_status.setObjectName("status-err")
             _set_log_panel(self._uninstall_log_toggle, self._uninstall_log, True)
-            _restyle(self._uninstall_status)
+            restyle(self._uninstall_status)
 
     # ── Shared helpers ────────────────────────────────────────────────────────
 

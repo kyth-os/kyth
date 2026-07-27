@@ -2,10 +2,10 @@ import os
 import time
 from datetime import datetime
 
-from ..core_base import _restyle
+from ..core_base import restyle
 from ..services.cloud_sync import RcloneSyncWorker
 from ..services.network import _save_sync_config
-from ..services.runtime import _finish_worker
+from ..services.runtime import finish_worker
 from ..qt import QComboBox, QHBoxLayout, QLabel, QPushButton, QTextEdit, QTimer
 from ..widgets import _make_card
 
@@ -143,7 +143,7 @@ class _GoogleDriveMixin:
                 else:
                     self._gd_sync_status.setText(f"Sync failed at {ts}")
                     self._gd_sync_status.setObjectName("status-err")
-                _restyle(self._gd_sync_status)
+                restyle(self._gd_sync_status)
                 return
         if mins == 0:
             self._gd_sync_status.setText("Auto-sync disabled — click Sync Now to sync manually")
@@ -152,7 +152,7 @@ class _GoogleDriveMixin:
                 f"Not synced yet — click Sync Now or wait for auto-sync ({interval_str})"
             )
         self._gd_sync_status.setObjectName("card-copy")
-        _restyle(self._gd_sync_status)
+        restyle(self._gd_sync_status)
 
     def _start_gd_sync(self, remote: str | None = None, folder: str | None = None):
         if self._gd_sync_worker and self._gd_sync_worker.isRunning():
@@ -169,7 +169,7 @@ class _GoogleDriveMixin:
 
         self._gd_sync_status.setText(f"Syncing {remote}…")
         self._gd_sync_status.setObjectName("status-warn")
-        _restyle(self._gd_sync_status)
+        restyle(self._gd_sync_status)
         self._gd_sync_status.show()
         self._gd_sync_btn.show()
         self._gd_sync_btn.setEnabled(False)
@@ -194,7 +194,7 @@ class _GoogleDriveMixin:
                 self._gd_sync_log.append(line)
 
     def _on_gd_sync_done(self, remote: str, code: int):
-        _finish_worker(self, attr="_gd_sync_worker")
+        finish_worker(self, attr="_gd_sync_worker")
         now = time.time()
         ok = code == 0
         if remote in self._sync_config:

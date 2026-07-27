@@ -11,10 +11,10 @@ from typing import Any
 from kyth_shared.runtime_output import parse_json_object
 
 from kyth_shared.system.process import (
-    _BOOTC_CACHE_TTL,
-    _command_stdout,
-    _probe_cached,
-    _run_command,
+    BOOTC_CACHE_TTL,
+    command_stdout,
+    probe_cached,
+    run_command,
 )
 
 REGISTRY = "ghcr.io/mrtrick37/kyth"
@@ -42,14 +42,14 @@ def walk_strings(data: object):
 
 def fetch_status_text() -> str:
     for cmd in (["sudo", "-n", "bootc", "status"], ["bootc", "status"]):
-        result = _run_command(cmd, timeout=10)
+        result = run_command(cmd, timeout=10)
         if result is not None and result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     return ""
 
 
 def status_text() -> str:
-    return _probe_cached("bootc-status-text", _BOOTC_CACHE_TTL, fetch_status_text)
+    return probe_cached("bootc-status-text", BOOTC_CACHE_TTL, fetch_status_text)
 
 
 def fetch_status_data() -> dict | None:
@@ -57,7 +57,7 @@ def fetch_status_data() -> dict | None:
         ["sudo", "-n", "bootc", "status", "--json"],
         ["bootc", "status", "--json"],
     ):
-        result = _run_command(cmd, timeout=10)
+        result = run_command(cmd, timeout=10)
         if result is None or result.returncode != 0 or not result.stdout.strip():
             continue
         parsed = parse_json_object(result.stdout)
@@ -67,11 +67,11 @@ def fetch_status_data() -> dict | None:
 
 
 def status_data() -> dict | None:
-    return _probe_cached("bootc-status-data", _BOOTC_CACHE_TTL, fetch_status_data)
+    return probe_cached("bootc-status-data", BOOTC_CACHE_TTL, fetch_status_data)
 
 
 def active_operation() -> str | None:
-    result = _run_command(["ps", "-eo", "pid=,args="], timeout=5)
+    result = run_command(["ps", "-eo", "pid=,args="], timeout=5)
     if result is None or result.returncode != 0 or not result.stdout.strip():
         return None
     for line in result.stdout.splitlines():
@@ -124,7 +124,7 @@ def image_reference() -> str | None:
     ref = image_reference_from_status(data, status_output=status_text())
     if ref:
         return ref
-    result = _run_command(["rpm-ostree", "status"], timeout=10)
+    result = run_command(["rpm-ostree", "status"], timeout=10)
     if result and result.returncode == 0:
         return image_reference_from_status({}, status_output=result.stdout)
     return None
@@ -139,9 +139,9 @@ def kernel_flavor() -> str:
                     return flavor
         except OSError:
             pass
-        return "cachy" if "cachy" in _command_stdout(["uname", "-r"]).lower() else "fedora"
+        return "cachy" if "cachy" in command_stdout(["uname", "-r"]).lower() else "fedora"
 
-    return _probe_cached("kernel-flavor", 60.0, fetch)
+    return probe_cached("kernel-flavor", 60.0, fetch)
 
 
 def has_deployment(section: str) -> bool:

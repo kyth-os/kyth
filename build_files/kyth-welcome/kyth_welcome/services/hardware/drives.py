@@ -7,7 +7,7 @@ import re
 import shutil
 from kyth_welcome.services.command import run_sync
 
-from ..process import _command_stdout, _probe_cached
+from ..process import command_stdout, probe_cached
 
 
 def _find_ntfs_drives() -> list[dict]:
@@ -50,8 +50,8 @@ def _find_ntfs_drives() -> list[dict]:
 def _detect_controllers() -> dict:
     """Snapshot of all connected controllers and driver state. Thread-safe."""
     def fetch() -> dict:
-        usb_text = _command_stdout(["lsusb"], timeout=6)
-        lsmod_text = _command_stdout(["lsmod"], timeout=4)
+        usb_text = command_stdout(["lsusb"], timeout=6)
+        lsmod_text = command_stdout(["lsmod"], timeout=4)
 
         _GAMING_VIDS: dict[str, str] = {
             "045e": "Xbox", "054c": "PlayStation", "057e": "Nintendo",
@@ -103,7 +103,7 @@ def _detect_controllers() -> dict:
 
         dualsensectl_out = ""
         if dualsense_found and shutil.which("dualsensectl"):
-            dualsensectl_out = _command_stdout(["dualsensectl", "status", "0"], timeout=3)
+            dualsensectl_out = command_stdout(["dualsensectl", "status", "0"], timeout=3)
 
         # Secure Boot state
         secure_boot = False
@@ -131,5 +131,5 @@ def _detect_controllers() -> dict:
             "secure_boot":      secure_boot,
             "jstest_available": bool(shutil.which("jstest-gtk")),
         }
-    return _probe_cached("controllers-detect", 5.0, fetch)
+    return probe_cached("controllers-detect", 5.0, fetch)
  # _detect_controllers

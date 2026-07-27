@@ -1,7 +1,7 @@
 from urllib.parse import urlencode
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _release_worker_when_finished
+from .services.runtime import release_worker_when_finished
 from .services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _detect_installed_games, _load_protondb_cache,
     _save_protondb_cache, find_compat_game, game_row_status_view, library_summary_text,
@@ -203,7 +203,7 @@ class _LibraryMixin:
         if uncached and (self._protondb_worker is None or not self._protondb_worker.isRunning()):
             self._protondb_worker = _ProtonDbBatchWorker(uncached, cache)
             self._protondb_worker.finished_all.connect(self._on_protondb_done)
-            _release_worker_when_finished(self, "_protondb_worker", self._protondb_worker)
+            release_worker_when_finished(self, "_protondb_worker", self._protondb_worker)
             self._protondb_worker.start()
 
     def _on_protondb_done(self, full_cache: dict):

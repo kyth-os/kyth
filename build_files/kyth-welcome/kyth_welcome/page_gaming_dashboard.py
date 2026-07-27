@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.gaming import (
     _find_ntfs_drives, _gamescope_installed, _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed,
 )
@@ -154,7 +154,7 @@ class _DashboardMixin:
         else:
             self._hero_status_pill.setText("GAMING STACK READY")
             self._hero_status_pill.setObjectName("glowing-pill-ok")
-        _restyle(self._hero_status_pill)
+        restyle(self._hero_status_pill)
 
         # 1. Launchers
         steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")

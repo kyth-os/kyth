@@ -13,7 +13,7 @@ PACKAGE = ROOT / "build_files" / "kyth-welcome" / "kyth_welcome"
 class RefactorRuntimeImportTests(unittest.TestCase):
     def test_deferred_callback_dependencies_are_imported(self):
         required = {
-            "page_hardware.py": {"_command_stdout"},
+            "page_hardware.py": {"command_stdout"},
             "page_repair_quick.py": {"shlex"},
             "page_welcome.py": {"time"},
         }

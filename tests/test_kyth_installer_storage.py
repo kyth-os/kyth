@@ -104,7 +104,7 @@ class InstallerCommandTests(unittest.TestCase):
         ]
 
         with patch.object(install, "_as_root", side_effect=lambda cmd: cmd), \
-             patch.object(install, "_get_rx_bytes", return_value=0), \
+             patch.object(install, "get_rx_bytes", return_value=0), \
              patch(
                  "kyth_installer.runner._validate_executable",
                  side_effect=lambda executable: executable,

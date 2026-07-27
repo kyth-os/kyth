@@ -6,11 +6,8 @@ import os
 import sys
 import traceback
 
-from .core_base import (
-    _prefer_xwayland_if_wayland_plugin_missing,
-    _shutdown_threads,
-    _wait_for_display_setup,
-)
+from .core_base import prefer_xwayland_if_wayland_plugin_missing, wait_for_display_setup
+from .services.runtime import shutdown_threads
 from .page_vpn import VpnPage
 from .qt import QApplication, QIcon, QLocalServer, QLocalSocket, QMainWindow
 from .theme import QSS
@@ -35,15 +32,15 @@ class VpnWindow(QMainWindow):
 
 
 def main() -> None:
-    _wait_for_display_setup()
-    _prefer_xwayland_if_wayland_plugin_missing()
+    wait_for_display_setup()
+    prefer_xwayland_if_wayland_plugin_missing()
 
     def log_uncaught(exc_type, exc_value, exc_tb):
         traceback.print_exception(exc_type, exc_value, exc_tb, file=sys.stderr)
 
     sys.excepthook = log_uncaught
     app = QApplication(sys.argv)
-    app.aboutToQuit.connect(_shutdown_threads)
+    app.aboutToQuit.connect(shutdown_threads)
     app.setApplicationName("kyth-vpn-connect")
     app.setDesktopFileName("kyth-vpn-connect")
     app.setWindowIcon(QIcon.fromTheme("network-vpn"))

@@ -1,21 +1,16 @@
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import (
-    _active_bootc_operation, _bootc_image_timestamp,
-    _bootc_proxy_running, _branch_display_name, _format_dl_progress_line, _format_elapsed,
-    _get_disk_write_bytes, _has_rollback_deployment, _has_staged_update, _human_bytes,
-    _restyle, _run_worker, _set_session_inhibit, _start_or_extend_dl_monitor, _stop_download_monitor,
-    _with_idle_inhibit,
-)
+from .core_base import restyle, run_worker, set_session_inhibit
+from .services.process import format_dl_progress_line, format_elapsed, get_disk_write_bytes, human_bytes, with_idle_inhibit
+from .services.bootc import active_bootc_operation, bootc_image_timestamp, bootc_proxy_running, branch_display_name, current_branch, has_rollback_deployment, has_staged_update
 from .services.launch import reboot
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker, start_or_extend_dl_monitor, stop_download_monitor
 from .services.privileged import bootc_action
 from .services.updates import (
     UpdateOperationController, full_update_operation,
     image_update_operation, rollback_operation,
 )
-from .core_base import _current_branch
 from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
 from .widgets import _make_card, _set_log_panel
 
@@ -146,7 +141,7 @@ class _UpdateOpsMixin:
         self._full_update_btn.setEnabled(enabled)
         self._os_btn.setEnabled(enabled)
         self._fw_btn.setEnabled(enabled)
-        rollback_ok = enabled and _has_rollback_deployment()
+        rollback_ok = enabled and has_rollback_deployment()
         self._rollback_btn.setEnabled(rollback_ok)
 
     def _set_log_expanded(self, expanded: bool):
@@ -156,7 +151,7 @@ class _UpdateOpsMixin:
         self._operation.set_phase(phase)
         self._current_phase = phase
         self._status_lbl.setText(phase)
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
 
     def _start_operation(self, mode: str, label: str, cmd: list[str], inhibit_reason: str):
         self._stop_dl_monitor()
@@ -182,7 +177,7 @@ class _UpdateOpsMixin:
         self._status_lbl.setText(label)
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.show()
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
         self._reboot_btn.hide()
         self._cancel_btn.setText("Cancel Update")
         self._cancel_btn.setEnabled(True)
@@ -191,9 +186,9 @@ class _UpdateOpsMixin:
         self._cancel_note.show()
         self._set_buttons_enabled(False)
 
-        _run_worker(
+        run_worker(
             self,
-            _with_idle_inhibit(cmd, inhibit_reason),
+            with_idle_inhibit(cmd, inhibit_reason),
             session_inhibit_reason=inhibit_reason,
             on_line=self._on_line,
             on_done=self._on_done,
@@ -280,7 +275,7 @@ class _UpdateOpsMixin:
             if phase != "Downloading image layers…" and self._dl_downloaded >= self._dl_total > 0:
                 self._progress.setRange(0, 0)
         # Start or update network monitor when bootc tells us how much to download
-        self._dl_monitor, self._dl_total, started, progress_ready = _start_or_extend_dl_monitor(
+        self._dl_monitor, self._dl_total, started, progress_ready = start_or_extend_dl_monitor(
             text, self._dl_monitor, self._dl_total,
         )
         if progress_ready:
@@ -292,7 +287,7 @@ class _UpdateOpsMixin:
         self._log.ensureCursorVisible()
 
     def _stop_dl_monitor(self):
-        _stop_download_monitor(self._dl_monitor)
+        stop_download_monitor(self._dl_monitor)
         self._dl_monitor = None
 
     def _on_dl_stats(self, downloaded: int, total: int, speed_bps: int, eta_sec: int):
@@ -315,7 +310,7 @@ class _UpdateOpsMixin:
             total,
             speed_bps,
             eta_sec,
-            proxy_running=_bootc_proxy_running(),
+            proxy_running=bootc_proxy_running(),
         )
         self._dl_low_speed_ticks = self._operation.low_speed_ticks
 
@@ -335,11 +330,11 @@ class _UpdateOpsMixin:
         if speed_bps > 100_000 and downloaded < total:
             self._set_phase("Downloading image layers…")
         if speed_bps > 100_000:
-            self._activity_lbl.setText(_format_dl_progress_line(downloaded, total, speed_bps, eta_sec))
+            self._activity_lbl.setText(format_dl_progress_line(downloaded, total, speed_bps, eta_sec))
             self._activity_lbl.show()
 
     def _update_activity(self):
-        if not _active_bootc_operation() and self._worker is None:
+        if not active_bootc_operation() and self._worker is None:
             self._activity_lbl.hide()
             return
         # Don't clobber live download stats the dl monitor just wrote
@@ -348,8 +343,8 @@ class _UpdateOpsMixin:
         elapsed = self._operation.elapsed()
         parts: list[str] = []
         if self._dl_final_bytes > 0:
-            parts.append(f"{_human_bytes(self._dl_final_bytes)} downloaded")
-        parts.append(f"{_format_elapsed(elapsed)} elapsed")
+            parts.append(f"{human_bytes(self._dl_final_bytes)} downloaded")
+        parts.append(f"{format_elapsed(elapsed)} elapsed")
         self._activity_lbl.setText("  ·  ".join(parts))
         self._activity_lbl.show()
 
@@ -376,12 +371,12 @@ class _UpdateOpsMixin:
                 and silent_secs >= 5
                 and self._worker is not None):
             if self._staging_write_start == 0:
-                self._staging_write_start = _get_disk_write_bytes()
-            written = max(0, _get_disk_write_bytes() - self._staging_write_start)
+                self._staging_write_start = get_disk_write_bytes()
+            written = max(0, get_disk_write_bytes() - self._staging_write_start)
             elapsed = self._operation.elapsed()
-            elapsed_str = _format_elapsed(elapsed)
+            elapsed_str = format_elapsed(elapsed)
             if written >= 1024 * 1024:
-                msg = f"  [staging] writing image to disk… {_human_bytes(written)} written · {elapsed_str} elapsed"
+                msg = f"  [staging] writing image to disk… {human_bytes(written)} written · {elapsed_str} elapsed"
             else:
                 msg = f"  [staging] committing image to repository… {elapsed_str} elapsed"
             self._log.append(msg)
@@ -394,13 +389,13 @@ class _UpdateOpsMixin:
         self._progress.hide()
         self._cancel_btn.hide()
         self._cancel_note.hide()
-        _finish_worker(self)
-        _set_session_inhibit(self, None)
+        finish_worker(self)
+        set_session_inhibit(self, None)
         self._update_activity()
         self._set_buttons_enabled(True)
         completion = self._operation.completion(
             code,
-            staged=code == 0 and _has_staged_update(),
+            staged=code == 0 and has_staged_update(),
         )
 
         if code == Worker.CANCELLED:
@@ -431,7 +426,7 @@ class _UpdateOpsMixin:
                 self._log.append("\nDone. Restart to boot into the new branch.")
                 self._reboot_btn.show()
                 self._check_for_update(force_refresh=True)
-            elif _has_staged_update():
+            elif has_staged_update():
                 self._status_lbl.setText("Update staged — restart when you're ready to apply it.")
                 self._status_lbl.setObjectName("status-ok")
                 self._log.append("\nDone. Your next system image is staged and waiting for restart.")
@@ -451,13 +446,13 @@ class _UpdateOpsMixin:
             self._status_lbl.setText(completion.message)
             self._status_lbl.setObjectName(completion.style)
 
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
         self._refresh_summary()
 
     def _refresh_summary(self):
-        tag = _current_branch()
-        branch = _branch_display_name(tag)
-        booted_ts = _bootc_image_timestamp("booted")
+        tag = current_branch()
+        branch = branch_display_name(tag)
+        booted_ts = bootc_image_timestamp("booted")
 
         # Running row
         running_text = branch
@@ -474,10 +469,10 @@ class _UpdateOpsMixin:
             self._reboot_btn.hide()
             return
 
-        staged = _has_staged_update()
-        rollback = _has_rollback_deployment()
-        staged_ts = _bootc_image_timestamp("staged") if staged else None
-        rollback_ts = _bootc_image_timestamp("rollback") if rollback else None
+        staged = has_staged_update()
+        rollback = has_rollback_deployment()
+        staged_ts = bootc_image_timestamp("staged") if staged else None
+        rollback_ts = bootc_image_timestamp("rollback") if rollback else None
 
         # Staged row
         if staged:

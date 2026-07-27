@@ -1,9 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import (
-    _IS_LIVE, _load_profile, _restyle,
-    _running_threads,
-)
-from .core_base import _current_branch
+from .core_base import IS_LIVE, load_profile, restyle
+from .services.bootc import current_branch
+from .services.runtime import running_threads
 from .page_registry import (
     PROBLEM_ROUTES, SEARCH_ALIASES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups,
 )
@@ -44,7 +42,7 @@ class NavButton(QPushButton):
 
     def set_active(self, active: bool):
         self.setObjectName("nav-item-active" if active else "nav-item")
-        _restyle(self)
+        restyle(self)
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
@@ -63,7 +61,7 @@ class MainWindow(QMainWindow):
         central_layout.setSpacing(0)
         self.setCentralWidget(central)
 
-        if _IS_LIVE:
+        if IS_LIVE:
             banner = QWidget()
             banner.setObjectName("live-banner")
             banner_layout = QHBoxLayout(banner)
@@ -248,7 +246,7 @@ class MainWindow(QMainWindow):
         welcome_idx = self._page_index_by_key["Welcome"]
         welcome_page = self._ensure_page(welcome_idx)
         welcome_page.profile_changed.connect(self._apply_profile_visibility)
-        self._apply_profile_visibility(_load_profile())
+        self._apply_profile_visibility(load_profile())
 
         self._history: list[int] = []
         self._history_pos: int = -1
@@ -405,7 +403,7 @@ class MainWindow(QMainWindow):
     # ── Navigation ────────────────────────────────────────────────────────────
 
     def _refresh_sidebar_channel(self):
-        branch = _current_branch()
+        branch = current_branch()
         text = {"latest": "Stable Channel", "testing": "Testing Channel"}.get(branch or "", "System Hub")
         self._sidebar_ver_lbl.setText(text)
 
@@ -467,7 +465,7 @@ class MainWindow(QMainWindow):
         # Registry catches workers regardless of which attribute a page keeps
         # them in; the findChildren scan keeps covering page-local QThreads
         # that follow the `_worker` convention without subclassing Worker.
-        busy = any(t.BLOCKS_CLOSE for t in _running_threads()) or any(
+        busy = any(t.BLOCKS_CLOSE for t in running_threads()) or any(
             (w := getattr(child, "_worker", None)) is not None and w.isRunning()
             for child in self.findChildren(QWidget)
         )

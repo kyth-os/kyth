@@ -2,7 +2,7 @@ import os
 import re
 from typing import ClassVar
 
-from ..core_base import _restyle
+from ..core_base import restyle
 from ..services.cloud_sync import (
     RcloneAuthorizeWorker,
     rclone_create_remote,
@@ -407,7 +407,7 @@ class RcloneSetupWizard(QDialog):
             "Browser opened — please sign in and grant access, then return here."
         )
         self._auth_status_lbl.setObjectName("subheading")
-        _restyle(self._auth_status_lbl)
+        restyle(self._auth_status_lbl)
 
         self._auth_worker = RcloneAuthorizeWorker(self._selected_service)
         self._auth_worker.token_ready.connect(self._on_auth_success)
@@ -425,7 +425,7 @@ class RcloneSetupWizard(QDialog):
         self._auth_progress.hide()
         self._auth_status_lbl.setText("Ready — click the button below to begin.")
         self._auth_status_lbl.setObjectName("")
-        _restyle(self._auth_status_lbl)
+        restyle(self._auth_status_lbl)
 
     def _on_auth_success(self, token: str):
         self._token = token
@@ -436,7 +436,7 @@ class RcloneSetupWizard(QDialog):
             "Authorization successful!  Click Next → to save and test the connection."
         )
         self._auth_status_lbl.setObjectName("status-ok")
-        _restyle(self._auth_status_lbl)
+        restyle(self._auth_status_lbl)
         self._update_nav()  # reveals Next button
 
     def _on_auth_failed(self, error: str):
@@ -445,7 +445,7 @@ class RcloneSetupWizard(QDialog):
         self._auth_progress.hide()
         self._auth_status_lbl.setText(f"Authorization failed — {error[:200]}")
         self._auth_status_lbl.setObjectName("status-err")
-        _restyle(self._auth_status_lbl)
+        restyle(self._auth_status_lbl)
 
     # ── Config creation + done page ─────────────────────────────────────────
 

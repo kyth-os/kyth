@@ -1,9 +1,9 @@
 import shlex
-from .core_base import _restyle
+from .core_base import restyle
 from .actions import _install_flatpak_inline, _open_chromium_webapp
 from .services.flatpak import _is_flatpak_installed
 from .services.software import find_familiar_app_match
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import (
     QCheckBox, QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QProgressBar,
     QPushButton, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
@@ -411,7 +411,7 @@ class _StarterPackTabMixin:
             self._starter_status.setText(f"No apps selected for {name}.")
             self._starter_status.setObjectName("status-dim")
             self._starter_status.show()
-            _restyle(self._starter_status)
+            restyle(self._starter_status)
             return
         app_ids = [app_id for app_id, _, _ in selected]
         missing = [app_id for app_id in app_ids if not _is_flatpak_installed(app_id)]
@@ -419,7 +419,7 @@ class _StarterPackTabMixin:
             self._starter_status.setText(f"Selected {name} apps are already installed.")
             self._starter_status.setObjectName("status-ok")
             self._starter_status.show()
-            _restyle(self._starter_status)
+            restyle(self._starter_status)
             return
         cmd = [
             "bash", "-c",
@@ -436,7 +436,7 @@ class _StarterPackTabMixin:
         self._starter_status.setText(f"Installing {name} starter pack…")
         self._starter_status.setObjectName("subheading")
         self._starter_status.show()
-        _restyle(self._starter_status)
+        restyle(self._starter_status)
         self._set_starter_pack_controls_enabled(False)
         self._starter_worker = Worker(cmd)
         self._starter_worker.line.connect(self._on_starter_line)
@@ -451,7 +451,7 @@ class _StarterPackTabMixin:
 
     def _on_starter_done(self, code: int, name: str, installed_ids: list[str]):
         self._starter_progress.hide()
-        _finish_worker(self, attr="_starter_worker")
+        finish_worker(self, attr="_starter_worker")
         self._set_starter_pack_controls_enabled(True)
         if code == 0:
             self._starter_status.setText(f"Selected {name} apps installed.")
@@ -467,4 +467,4 @@ class _StarterPackTabMixin:
             self._starter_status.setText(f"{name} app install failed (exit {code}).")
             self._starter_status.setObjectName("status-err")
             _set_log_panel(self._starter_log_toggle, self._starter_log, True)
-        _restyle(self._starter_status)
+        restyle(self._starter_status)

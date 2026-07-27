@@ -11,7 +11,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Sequence
 
-from kyth_shared import _NetStatsTracker, _parse_size_bytes
+from kyth_shared import NetStatsTracker, parse_size_bytes
 from .runner import spawn_command
 
 
@@ -66,7 +66,7 @@ class StreamingCommandRunner:
         monitor_stop = threading.Event()
         recent_output: deque[str] = deque(maxlen=30)
         output_state = {"total": 0, "rx_start": 0}
-        tracker: _NetStatsTracker | None = None
+        tracker: NetStatsTracker | None = None
 
         def net_monitor() -> None:
             nonlocal tracker
@@ -76,7 +76,7 @@ class StreamingCommandRunner:
                     tracker = None
                     continue
                 if tracker is None:
-                    tracker = _NetStatsTracker(total, output_state["rx_start"])
+                    tracker = NetStatsTracker(total, output_state["rx_start"])
                 stats = tracker.tick(self._rx_bytes())
                 frac = min(0.95, stats["downloaded"] / total)
                 progress(int(pct_start + frac * (pct_end - pct_start)))
@@ -105,7 +105,7 @@ class StreamingCommandRunner:
             try:
                 details = stripped.split("layers needed:", 1)[1]
                 size_str = details.split("(", 1)[1].rstrip(")") if "(" in details else ""
-                output_state["total"] = _parse_size_bytes(size_str)
+                output_state["total"] = parse_size_bytes(size_str)
                 output_state["rx_start"] = self._rx_bytes()
             except (IndexError, TypeError, ValueError):
                 # bootc output is advisory; malformed progress must not abort

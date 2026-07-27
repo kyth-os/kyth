@@ -9,8 +9,8 @@ import time
 
 from kyth_shared.system.bootc_policy import cancel_block_reason, parse_update_phase
 
-_bootc_cancel_block_reason = cancel_block_reason
-_parse_update_phase = parse_update_phase
+bootc_cancel_block_reason = cancel_block_reason
+parse_update_phase = parse_update_phase
 
 # pylint: disable=unused-import
 from .registry import (  # noqa: F401 — re-export pure API for existing imports
@@ -176,14 +176,14 @@ class UpdateOperationController:
 
     def receive_line(self, text: str, now: float | None = None) -> str:
         self.last_output_at = time.monotonic() if now is None else now
-        phase = _parse_update_phase(text.strip(), self.mode)
+        phase = parse_update_phase(text.strip(), self.mode)
         if phase:
             self.set_phase(phase)
         return phase
 
     def set_phase(self, phase: str) -> None:
         self.phase = phase
-        reason = _bootc_cancel_block_reason(self.mode, phase)
+        reason = bootc_cancel_block_reason(self.mode, phase)
         if reason:
             self.cancel_block_reason = reason
 

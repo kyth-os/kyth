@@ -1,8 +1,9 @@
 import re
 
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _release_worker_when_finished, _restyle
-from ..services.process import _run_command
+from .core_base import restyle
+from .services.runtime import release_worker_when_finished
+from ..services.process import run_command
 from ..services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _find_ntfs_drives, _find_steam_libraries,
     _load_protondb_cache, _save_protondb_cache, _scan_steamapps_manifests, blocked_compat_lookup,
@@ -41,16 +42,16 @@ class _ScanMixin:
             self._migrate_status.setText(f"Mounting {drive['dev']}\u2026")
             self._migrate_status.setObjectName("subheading")
             self._migrate_status.show()
-            _restyle(self._migrate_status)
+            restyle(self._migrate_status)
             QApplication.processEvents()
             try:
-                r = _run_command(
+                r = run_command(
                     ["udisksctl", "mount", "-b", drive["dev"], "-t", "ntfs3",
                      "--options", "ro", "--no-user-interaction"],
                     timeout=15,
                 )
                 if r is None or r.returncode != 0:
-                    r = _run_command(
+                    r = run_command(
                         ["udisksctl", "mount", "-b", drive["dev"],
                          "--options", "ro", "--no-user-interaction"],
                         timeout=15,
@@ -65,26 +66,26 @@ class _ScanMixin:
                     else:
                         self._migrate_status.setText(f"Mount failed: {err}")
                     self._migrate_status.setObjectName("status-err")
-                    _restyle(self._migrate_status)
+                    restyle(self._migrate_status)
                     return
                 m = re.search(r" at (.+?)\.$", r.stdout.strip())
                 mount = m.group(1) if m else None
                 if not mount:
                     self._migrate_status.setText("Could not determine mount point from udisksctl output.")
                     self._migrate_status.setObjectName("status-err")
-                    _restyle(self._migrate_status)
+                    restyle(self._migrate_status)
                     return
             except Exception as exc:
                 self._migrate_status.setText(f"Mount error: {exc}")
                 self._migrate_status.setObjectName("status-err")
-                _restyle(self._migrate_status)
+                restyle(self._migrate_status)
                 return
 
         self._scanned_mount = mount
         self._migrate_status.setText(f"Scanning {mount} for Steam libraries\u2026")
         self._migrate_status.setObjectName("subheading")
         self._migrate_status.show()
-        _restyle(self._migrate_status)
+        restyle(self._migrate_status)
         QApplication.processEvents()
 
         libs = _find_steam_libraries(mount)
@@ -98,7 +99,7 @@ class _ScanMixin:
             self._copy_btn.setEnabled(False)
             self._migrate_status.setText("No Steam libraries found on this drive.")
             self._migrate_status.setObjectName("status-err")
-            _restyle(self._migrate_status)
+            restyle(self._migrate_status)
             return
 
         for lib in libs:
@@ -112,7 +113,7 @@ class _ScanMixin:
             "report, or Copy Library to start migrating."
         )
         self._migrate_status.setObjectName("status-ok")
-        _restyle(self._migrate_status)
+        restyle(self._migrate_status)
 
     def _check_windows_library_compat(self):
         steamapps = self._lib_combo.currentText().strip()
@@ -135,7 +136,7 @@ class _ScanMixin:
             worker = _ProtonDbBatchWorker(uncached, cache)
             worker.finished_all.connect(self._on_winlib_protondb_done)
             self._winlib_protondb_worker = worker
-            _release_worker_when_finished(self, "_winlib_protondb_worker", worker)
+            release_worker_when_finished(self, "_winlib_protondb_worker", worker)
             worker.start()
 
     def _on_winlib_protondb_done(self, full_cache: dict):
@@ -223,7 +224,7 @@ class _ScanMixin:
         self._migrate_status.setText(f"Copying {src} \u2192 {dst}\u2026")
         self._migrate_status.setObjectName("subheading")
         self._migrate_status.show()
-        _restyle(self._migrate_status)
+        restyle(self._migrate_status)
         self._copy_btn.setEnabled(False)
         self._copy_cancel_btn.show()
         self._migrate_worker = SteamCopyWorker(src, dst)
@@ -252,5 +253,5 @@ class _ScanMixin:
         else:
             self._migrate_status.setText(f"Copy failed (exit {code}). See details.")
             self._migrate_status.setObjectName("status-err")
-        _restyle(self._migrate_status)
+        restyle(self._migrate_status)
         _set_log_panel(self._migrate_log_toggle, self._migrate_log, True)

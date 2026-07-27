@@ -2,7 +2,7 @@ import shlex
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.launch import flatpak_run
-from ..services.runtime import Worker, _finish_worker
+from ..services.runtime import Worker, finish_worker
 from ..qt import QMessageBox, QPushButton
 from ..widgets import _set_log_panel
 
@@ -41,7 +41,7 @@ class _LifecycleMixin:
 
     def _on_fp_install_done(self, code: int, app_id: str, name: str, btn: QPushButton, open_btn: QPushButton | None = None):
         self._fp_progress.hide()
-        _finish_worker(self, attr="_fp_install_worker")
+        finish_worker(self, attr="_fp_install_worker")
         self._fp_installing = None
         if code == 0:
             self._set_fp_task_state(f"{name or app_id} installed.", "success")
@@ -85,7 +85,7 @@ class _LifecycleMixin:
 
     def _on_fp_store_uninstall_done(self, code: int, app_id: str, name: str, btn: QPushButton, open_btn: QPushButton | None = None):
         self._fp_progress.hide()
-        _finish_worker(self, attr="_fp_uninstall_worker")
+        finish_worker(self, attr="_fp_uninstall_worker")
         if code == 0:
             self._set_fp_task_state(f"{name or app_id} uninstalled.", "success")
             self._fp_install_log.append("\nDone.")

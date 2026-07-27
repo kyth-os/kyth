@@ -11,7 +11,7 @@ from .security_container import (
     DEFAULT_KALI_IMAGE,
     is_socket_capable_kali_box,
 )
-from .process import _run_command
+from .process import run_command
 
 SEC_HOST_TOOLS = [
     {
@@ -31,7 +31,7 @@ SEC_HOST_TOOLS = [
 
 def _is_socket_capable_kali_box(name: str = DEFAULT_KALI_BOX) -> bool:
     """Legacy patchable seam; new code should use ``security_container``."""
-    result = _run_command(
+    result = run_command(
         [
             "sudo", "-n", "podman", "inspect", name, "--format",
             "{{.ImageName}}\n{{.HostConfig.Privileged}}\n"

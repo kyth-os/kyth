@@ -2,18 +2,15 @@ import os
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import (
-    _IS_LIVE, _branch_display_name, _has_rollback_deployment, _has_staged_update, _load_profile, _restyle,
-    _save_profile,
-)
+from .core_base import IS_LIVE, load_profile, restyle, save_profile
+from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
 from .services.gaming import (
     DataWorker, _find_ntfs_drives, _steam_libraries_on_ntfs,
 )
 from .services.hardware import _detect_nvidia
 from .services.launch import reboot
-from .services.process import _command_stdout, _run_command
+from .services.process import command_stdout, run_command
 from .services.flatpak import _is_flatpak_installed as _flatpak_installed
-from .core_base import _current_branch
 from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (
     FIRST_WEEK_MAX_DAYS as _FIRST_WEEK_MAX_DAYS,
@@ -43,7 +40,7 @@ class WelcomePage(Page):
     def __init__(self, navigate=None):
         super().__init__()
         self._navigate = navigate or (lambda _: None)
-        self._profile = _load_profile()
+        self._profile = load_profile()
 
         # Simplify standard header to let the new Gen Z Hero Banner shine
         self._page_header(
@@ -52,9 +49,9 @@ class WelcomePage(Page):
             ""
         )
 
-        branch = _branch_display_name(_current_branch())
-        staged = _has_staged_update()
-        rollback = _has_rollback_deployment()
+        branch = branch_display_name(current_branch())
+        staged = has_staged_update()
+        rollback = has_rollback_deployment()
         uname = os.uname()
         kernel = uname.release or "unknown"
         hostname = uname.nodename or "This PC"
@@ -88,7 +85,7 @@ class WelcomePage(Page):
         self._add(hero_card)
 
         # ── 1b. Finish setup (resumable first-boot wizard steps) ──────────────
-        incomplete = [] if _IS_LIVE else incomplete_steps(self._profile)
+        incomplete = [] if IS_LIVE else incomplete_steps(self._profile)
         if incomplete:
             self._add(self._make_setup_resume_card(incomplete))
 
@@ -162,8 +159,8 @@ class WelcomePage(Page):
         title2.setObjectName("hud-title")
         layout2.addWidget(title2)
         session = os.environ.get("XDG_SESSION_TYPE", "unknown").capitalize()
-        portal = _command_stdout(["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"], timeout=3) or "unknown"
-        pipewire = _command_stdout(["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"], timeout=3) or "unknown"
+        portal = command_stdout(["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"], timeout=3) or "unknown"
+        pipewire = command_stdout(["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"], timeout=3) or "unknown"
         desc2 = QLabel(f"<b>Session Type:</b> {session}<br>"
                        f"<b>Audio Engine:</b> PipeWire ({pipewire.strip()})<br>"
                        f"<b>Desktop Portal:</b> {portal.strip()}")
@@ -223,11 +220,11 @@ class WelcomePage(Page):
         # ── NTFS Steam library warning ────────────────────────────────────────
         self._ntfs_library_insert_index = self._layout.count()
         self._ntfs_library_worker = None
-        if not _IS_LIVE:
+        if not IS_LIVE:
             single_shot(self, 0, self._refresh_ntfs_library_warning)
 
         # ── First-week tips ───────────────────────────────────────────────────
-        days = None if _IS_LIVE else _first_week_days()
+        days = None if IS_LIVE else _first_week_days()
         if days is not None and _FIRST_WEEK_MIN_DAYS <= days <= _FIRST_WEEK_MAX_DAYS:
             self._add(self._make_first_week_card(days))
 
@@ -293,7 +290,7 @@ class WelcomePage(Page):
             return
         card = self._make_ntfs_library_card(list(libs))
         self._layout.insertWidget(self._ntfs_library_insert_index, card)
-        _restyle(card)
+        restyle(card)
 
     def _make_setup_resume_card(self, incomplete: list[tuple[str, str]]) -> QFrame:
         card, layout = _make_card("card-accent-warn")
@@ -350,7 +347,7 @@ class WelcomePage(Page):
             (_kdeconnect_configured(), "KDE Connect", "Phone pairing and notifications set up.", "Move Files"),
             (_cloud_storage_configured(), "Cloud Sync", "rclone/cloud sync initialized.", "Cloud Storage"),
             (_printer_configured(), "Printers", "Local or network printers configured.", "Hardware"),
-            (_has_rollback_deployment(), "Rollback Safety", "Previous builds cached for rollback.", "Update"),
+            (has_rollback_deployment(), "Rollback Safety", "Previous builds cached for rollback.", "Update"),
         ]
 
         for done, label, text, page_key in checklist:
@@ -414,12 +411,12 @@ class WelcomePage(Page):
         self._profile = profile
         for key, btn in self._focus_buttons.items():
             btn.setChecked(key == profile)
-        _save_profile(profile)
+        save_profile(profile)
         self._relayout_categories(profile)
         self.profile_changed.emit(profile)
 
     def _apply_role_preset(self):
-        result = _run_command(["/usr/bin/kyth-apply-role-preset", self._profile], timeout=20)
+        result = run_command(["/usr/bin/kyth-apply-role-preset", self._profile], timeout=20)
         if result is not None and result.returncode == 0:
             self._preset_status.setObjectName("status-ok")
             self._preset_status.setText(f"{self._profile.title()} preset applied.")
@@ -429,7 +426,7 @@ class WelcomePage(Page):
                 detail = (result.stderr or result.stdout or "").strip()
             self._preset_status.setObjectName("status-warn")
             self._preset_status.setText(f"Preset error: {detail or 'unknown error'}")
-        _restyle(self._preset_status)
+        restyle(self._preset_status)
 
     def _relayout_categories(self, profile: str):
         visible = []

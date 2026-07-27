@@ -47,4 +47,4 @@ from ._lookup import (  # noqa: F401
     get_root_partition,
 )
 
-from kyth_shared import _human_bytes as _human_size  # noqa: F401
+from kyth_shared import human_bytes as _human_size  # noqa: F401

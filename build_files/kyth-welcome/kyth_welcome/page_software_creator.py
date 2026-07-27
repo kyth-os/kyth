@@ -1,9 +1,9 @@
 import os
 import shutil
 from .services.launch import flatpak_run, popen
-from .core_base import _apply_install_badge, _restyle
+from .core_base import apply_install_badge, restyle
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .services.creator import (
     davinci_download_dir, davinci_flatpak_app_id, davinci_zip_candidates,
 )
@@ -197,7 +197,7 @@ class _CreatorTabMixin:
 
         if hasattr(self, "_dv_badge"):
             dv_installed = davinci_flatpak_app_id() is not None
-            _apply_install_badge(self._dv_badge, dv_installed)
+            apply_install_badge(self._dv_badge, dv_installed)
             self._dv_install_btn.setVisible(not dv_installed)
             self._dv_launch_btn.setVisible(dv_installed)
             self._refresh_davinci_zip_hint()
@@ -223,7 +223,7 @@ class _CreatorTabMixin:
         status_lbl.setText(f"Installing {tool['name']}…")
         status_lbl.setObjectName("subheading")
         status_lbl.show()
-        _restyle(status_lbl)
+        restyle(status_lbl)
         self._cr_tool_worker = Worker([
             "bash", "-c",
             f"flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
@@ -241,7 +241,7 @@ class _CreatorTabMixin:
     def _on_cr_tool_install_done(self, code: int, name: str):
         active_refs = self._cr_active_tool_refs
         active_refs["progress"].hide()
-        _finish_worker(self, attr="_cr_tool_worker")
+        finish_worker(self, attr="_cr_tool_worker")
         for refs in self._cr_tool_refs:
             refs["install"].setEnabled(True)
             refs["uninstall"].setEnabled(True)
@@ -253,7 +253,7 @@ class _CreatorTabMixin:
         else:
             active_refs["status"].setText(f"Installation failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
-        _restyle(active_refs["status"])
+        restyle(active_refs["status"])
         self._refresh_cr_status()
 
     def _uninstall_cr_tool(self, tool: dict):
@@ -284,7 +284,7 @@ class _CreatorTabMixin:
         status_lbl.setText(f"Uninstalling {tool['name']}…")
         status_lbl.setObjectName("subheading")
         status_lbl.show()
-        _restyle(status_lbl)
+        restyle(status_lbl)
         self._cr_tool_worker = Worker(
             ["flatpak", "uninstall", "-y", tool["flatpak"]]
         )
@@ -300,7 +300,7 @@ class _CreatorTabMixin:
     def _on_cr_tool_uninstall_done(self, code: int, name: str):
         active_refs = self._cr_active_tool_refs
         active_refs["progress"].hide()
-        _finish_worker(self, attr="_cr_tool_worker")
+        finish_worker(self, attr="_cr_tool_worker")
         if code == 0:
             active_refs["status"].setText(f"{name} uninstalled.")
             active_refs["status"].setObjectName("status-ok")
@@ -308,7 +308,7 @@ class _CreatorTabMixin:
         else:
             active_refs["status"].setText(f"Uninstall failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
-        _restyle(active_refs["status"])
+        restyle(active_refs["status"])
         for refs in self._cr_tool_refs:
             refs["install"].setEnabled(True)
             refs["uninstall"].setEnabled(True)
@@ -335,7 +335,7 @@ class _CreatorTabMixin:
         if selected and os.path.isfile(selected):
             self._dv_zip_hint.setText(f"Selected ZIP: {selected}")
             self._dv_zip_hint.setObjectName("status-ok")
-            _restyle(self._dv_zip_hint)
+            restyle(self._dv_zip_hint)
             return
 
         self._dv_selected_zip = None
@@ -348,7 +348,7 @@ class _CreatorTabMixin:
                 f"No DaVinci ZIP found yet. Download it to {davinci_download_dir()} or click Choose ZIP…"
             )
             self._dv_zip_hint.setObjectName("status-warn")
-        _restyle(self._dv_zip_hint)
+        restyle(self._dv_zip_hint)
 
     def _launch_davinci(self):
         app_id = davinci_flatpak_app_id()
@@ -372,7 +372,7 @@ class _CreatorTabMixin:
             )
             self._dv_op_status.setObjectName("status-warn")
             self._dv_op_status.show()
-            _restyle(self._dv_op_status)
+            restyle(self._dv_op_status)
             return
 
         zip_path = self._dv_selected_zip if self._dv_selected_zip and os.path.isfile(self._dv_selected_zip) else ""
@@ -390,7 +390,7 @@ class _CreatorTabMixin:
             self._dv_op_status.setText("Download the Linux ZIP first, or choose it manually.")
             self._dv_op_status.setObjectName("status-warn")
             self._dv_op_status.show()
-            _restyle(self._dv_op_status)
+            restyle(self._dv_op_status)
             QMessageBox.warning(
                 self,
                 "DaVinci Resolve",
@@ -416,7 +416,7 @@ class _CreatorTabMixin:
         self._dv_op_status.setText("Building and installing DaVinci Resolve…")
         self._dv_op_status.setObjectName("subheading")
         self._dv_op_status.show()
-        _restyle(self._dv_op_status)
+        restyle(self._dv_op_status)
         self._dv_worker = Worker(["/usr/bin/kyth-davinci-install", zip_path])
         self._dv_worker.line.connect(lambda ln: (
             self._dv_log.append(ln),
@@ -427,7 +427,7 @@ class _CreatorTabMixin:
 
     def _on_davinci_install_done(self, code: int):
         self._dv_progress.hide()
-        _finish_worker(self, attr="_dv_worker")
+        finish_worker(self, attr="_dv_worker")
         for refs in self._cr_tool_refs:
             refs["install"].setEnabled(True)
         self._dv_install_btn.setEnabled(True)
@@ -442,5 +442,5 @@ class _CreatorTabMixin:
                 f"Installation failed (exit {code}). Check the details below — a fresh ZIP or system update may be needed."
             )
             self._dv_op_status.setObjectName("status-err")
-        _restyle(self._dv_op_status)
+        restyle(self._dv_op_status)
         self._refresh_cr_status()

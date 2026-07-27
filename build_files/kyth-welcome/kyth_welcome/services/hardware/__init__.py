@@ -23,7 +23,7 @@ from .display import (
     _display_probe,
     _format_display_mode,
     _parse_kscreen_output,
-    _strip_ansi,
+    strip_ansi,
     hdr_vrr_status_text,
 )
 from .system import (
@@ -95,7 +95,7 @@ __all__ = [
     "_platform_probe",
     "_status_palette",
     "_storage_probe",
-    "_strip_ansi",
+    "strip_ansi",
     "_successful_vaapi_probe",
     "_thermal_probe",
     "_vaapi_failure_summary",

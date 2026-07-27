@@ -1,8 +1,8 @@
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _apply_install_badge, _restyle
-from .services.diagnostics import _command_stdout
+from .core_base import apply_install_badge, restyle
+from .services.diagnostics import command_stdout
 from .services.gaming import (
     DataWorker, GameNightManager, _ProtonDbBatchWorker, _collect_gaming_dashboard, _compat_tool_version,
     _gamescope_installed, _gaming_health_items, _gaming_migration_checklist_items,
@@ -103,7 +103,7 @@ class GamingPage(Page):
             selected = key == active
             btn.setChecked(selected)
             btn.setObjectName("genz-mode-btn")
-            _restyle(btn)
+            restyle(btn)
 
         dashboard_visible = (active == "all")
         for widget in self._dashboard_widgets:
@@ -355,15 +355,15 @@ class GamingPage(Page):
 
     def _refresh_status(self):
         if hasattr(self, "_mh_badge"):
-            _apply_install_badge(self._mh_badge, _mangohud_installed())
+            apply_install_badge(self._mh_badge, _mangohud_installed())
         if hasattr(self, "_gs_badge"):
-            _apply_install_badge(self._gs_badge, _gamescope_installed())
+            apply_install_badge(self._gs_badge, _gamescope_installed())
         if hasattr(self, "_vk_badge"):
-            _apply_install_badge(self._vk_badge, _vkbasalt_installed())
+            apply_install_badge(self._vk_badge, _vkbasalt_installed())
         if hasattr(self, "_scx_badge"):
-            scx_status = _command_stdout(["kyth-scx", "status"], timeout=5)
+            scx_status = command_stdout(["kyth-scx", "status"], timeout=5)
             scx_active = "Service: active" in scx_status
-            _apply_install_badge(self._scx_badge, scx_active, ok_text="Active", warn_text="Inactive")
+            apply_install_badge(self._scx_badge, scx_active, ok_text="Active", warn_text="Inactive")
             if scx_status:
                 configured = "unknown"
                 for line in scx_status.splitlines():
@@ -376,7 +376,7 @@ class GamingPage(Page):
 
         if hasattr(self, "_pc_badge"):
             pc_ver = _proton_cachyos_version()
-            _apply_install_badge(self._pc_badge, bool(pc_ver), ok_text=pc_ver or "Installed")
+            apply_install_badge(self._pc_badge, bool(pc_ver), ok_text=pc_ver or "Installed")
             self._pc_version_lbl.setText(
                 f"Installed: {pc_ver}" if pc_ver
                 else "Proton-CachyOS not found in compatibilitytools.d"
@@ -384,7 +384,7 @@ class GamingPage(Page):
 
         if hasattr(self, "_ge_badge"):
             ge_ver = _compat_tool_version("GE-Proton")
-            _apply_install_badge(self._ge_badge, bool(ge_ver), ok_text=ge_ver or "Installed", warn_text="Optional")
+            apply_install_badge(self._ge_badge, bool(ge_ver), ok_text=ge_ver or "Installed", warn_text="Optional")
             self._ge_version_lbl.setText(
                 f"Installed: {ge_ver}" if ge_ver
                 else "Not installed. Optional fallback runner; Proton-CachyOS remains the recommended default."

@@ -2,7 +2,7 @@ import os
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _has_rollback_deployment
+from .services.bootc import has_rollback_deployment
 from .page_repair_components import repair_overview_cards, rollback_card
 from .services.launch import kcmshell, popen_privileged
 from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
@@ -28,7 +28,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._snapshot_worker = None
         self._assist_worker = None
         self._setup_worker = None
-        self._has_rollback = _has_rollback_deployment()
+        self._has_rollback = has_rollback_deployment()
         self._setup_operation = ""
         self._navigate = navigate or (lambda _key: None)
 

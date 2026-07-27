@@ -183,12 +183,12 @@ def invalidate_disk_sections(keys: Iterable[str] | None = None) -> None:
 
 
 def _count_flatpak_updates() -> int | None:
-    from kyth_shared.system.process import _run_command
+    from kyth_shared.system.process import run_command
 
     total = 0
     saw_ok = False
     for scope in ("--system", "--user"):
-        result = _run_command(
+        result = run_command(
             ["flatpak", "remote-ls", "--updates", scope, "--columns=application"],
             timeout=30,
         )
@@ -203,29 +203,29 @@ def _count_flatpak_updates() -> int | None:
 
 def collect_snapshot() -> dict[str, Any]:
     from kyth_shared.system.bootc import (
-        _branch_from_ref,
-        _current_kernel_flavor,
-        _fetch_bootc_status_data,
-        _fetch_bootc_status_text,
+        branch_from_ref,
+        current_kernel_flavor,
+        fetch_bootc_status_data,
+        fetch_bootc_status_text,
         image_reference_from_status,
     )
-    from kyth_shared.system.process import _run_command
+    from kyth_shared.system.process import run_command
 
     sections: dict[str, Any] = {}
 
-    data = _fetch_bootc_status_data()
+    data = fetch_bootc_status_data()
     sections["bootc-status-data"] = data
-    text = _fetch_bootc_status_text()
+    text = fetch_bootc_status_text()
     sections["bootc-status-text"] = text
 
     ref = image_reference_from_status(data or {}, status_text=text)
-    sections["bootc-branch"] = _branch_from_ref(ref)
+    sections["bootc-branch"] = branch_from_ref(ref)
     try:
-        sections["kernel-flavor"] = _current_kernel_flavor()
+        sections["kernel-flavor"] = current_kernel_flavor()
     except Exception:
         sections["kernel-flavor"] = "fedora"
 
-    result = _run_command(["flatpak", "list", "--app", "--columns=application"], timeout=15)
+    result = run_command(["flatpak", "list", "--app", "--columns=application"], timeout=15)
     if result is not None and result.returncode == 0:
         apps = sorted({ln.strip() for ln in result.stdout.splitlines() if ln.strip()})
         sections["flatpak-apps"] = apps
@@ -235,7 +235,7 @@ def collect_snapshot() -> dict[str, Any]:
     sections["flatpak-updates"] = _count_flatpak_updates()
 
     try:
-        r = _run_command(["lspci"], timeout=5)
+        r = run_command(["lspci"], timeout=5)
         sections["nvidia-detect"] = bool(r and "nvidia" in (r.stdout or "").lower())
     except Exception:
         sections["nvidia-detect"] = False

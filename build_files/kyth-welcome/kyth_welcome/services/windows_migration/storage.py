@@ -10,7 +10,7 @@ import subprocess
 
 from kyth_welcome.services.command import run_sync
 
-from ..process import _command_stdout
+from ..process import command_stdout
 
 # The source system stores profile folders under their English names on disk
 # regardless of display language, so these source names are locale-safe.
@@ -66,7 +66,7 @@ def windows_folder_dest(folder: str) -> str:
         return os.path.join(windows_folder_dest("Documents"), "Saved Games")
     key = _XDG_FOLDER_KEYS.get(folder)
     if key:
-        path = _command_stdout(["xdg-user-dir", key], timeout=5)
+        path = command_stdout(["xdg-user-dir", key], timeout=5)
         # xdg-user-dir answers $HOME itself for unset entries; don't copy there.
         if path and os.path.abspath(path) != home:
             return path

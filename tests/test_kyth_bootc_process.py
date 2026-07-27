@@ -13,24 +13,24 @@ from kyth_shared.system.bootc import (  # noqa: E402
     REGISTRY,
     image_digest_from_status,
     image_reference_from_status,
-    _bootc_cancel_block_reason,
-    _branch_from_ref,
-    _branch_display_name,
+    bootc_cancel_block_reason,
+    branch_from_ref,
+    branch_display_name,
     branches_view,
-    _current_kernel_flavor,
-    _default_phase,
-    _image_tag_for_channel,
-    _image_tag_for_kernel,
-    _parse_update_phase,
+    current_kernel_flavor,
+    default_phase,
+    image_tag_for_channel,
+    image_tag_for_kernel,
+    parse_update_phase,
     update_availability_view,
 )
 from kyth_shared.system.process import (  # noqa: E402
-    _format_dl_progress_line,
-    _format_elapsed,
-    _format_eta,
-    _human_bytes,
-    _human_bytes_pair,
-    _parse_size_bytes,
+    format_dl_progress_line,
+    format_elapsed,
+    format_eta,
+    human_bytes,
+    human_bytes_pair,
+    parse_size_bytes,
 )
 from kyth_shared.system.registry import (  # noqa: E402
     check_registry_update,
@@ -40,32 +40,32 @@ from kyth_shared.system import bootc_policy, bootc_query  # noqa: E402
 
 class ProcessHelpersTests(unittest.TestCase):
     def test_human_bytes(self):
-        self.assertEqual(_human_bytes(500), "500 B")
-        self.assertEqual(_human_bytes(2048), "2.0 KB")
-        self.assertEqual(_human_bytes(5 * 1024**2), "5.0 MB")
+        self.assertEqual(human_bytes(500), "500 B")
+        self.assertEqual(human_bytes(2048), "2.0 KB")
+        self.assertEqual(human_bytes(5 * 1024**2), "5.0 MB")
 
     def test_human_bytes_pair_shares_unit(self):
-        down, total = _human_bytes_pair(512 * 1024, 2 * 1024**2)
+        down, total = human_bytes_pair(512 * 1024, 2 * 1024**2)
         self.assertTrue(total.endswith("MB"))
         self.assertIn(".", down)
 
     def test_parse_size_bytes(self):
-        self.assertEqual(_parse_size_bytes("8.0 GB"), 8 * 1024**3)
-        self.assertEqual(_parse_size_bytes("bad"), 0)
+        self.assertEqual(parse_size_bytes("8.0 GB"), 8 * 1024**3)
+        self.assertEqual(parse_size_bytes("bad"), 0)
 
     def test_format_elapsed(self):
-        self.assertEqual(_format_elapsed(45), "45s")
-        self.assertEqual(_format_elapsed(65), "1m 05s")
+        self.assertEqual(format_elapsed(45), "45s")
+        self.assertEqual(format_elapsed(65), "1m 05s")
 
     def test_format_eta(self):
-        self.assertEqual(_format_eta(0), "")
-        self.assertEqual(_format_eta(45), "~45s remaining")
-        self.assertEqual(_format_eta(125), "~2m 05s remaining")
+        self.assertEqual(format_eta(0), "")
+        self.assertEqual(format_eta(45), "~45s remaining")
+        self.assertEqual(format_eta(125), "~2m 05s remaining")
 
     def test_format_dl_progress_line(self):
-        line = _format_dl_progress_line(512 * 1024, 2 * 1024**2, 300_000, 30)
+        line = format_dl_progress_line(512 * 1024, 2 * 1024**2, 300_000, 30)
         self.assertIn("/", line)
-        self.assertIn(f"{_human_bytes(300_000)}/s", line)
+        self.assertIn(f"{human_bytes(300_000)}/s", line)
         self.assertIn("~30s remaining", line)
 
 
@@ -114,14 +114,14 @@ class BootcHelpersTests(unittest.TestCase):
         self.assertIsNone(image_digest_from_status(status, "staged"))
 
     def test_branch_helpers(self):
-        self.assertEqual(_branch_from_ref(f"{REGISTRY}:testing-cachy"), "testing-cachy")
-        self.assertEqual(_branch_display_name("latest"), "Stable (latest)")
-        self.assertEqual(_branch_display_name("testing"), "Testing")
+        self.assertEqual(branch_from_ref(f"{REGISTRY}:testing-cachy"), "testing-cachy")
+        self.assertEqual(branch_display_name("latest"), "Stable (latest)")
+        self.assertEqual(branch_display_name("testing"), "Testing")
 
 
 class KernelFlavorTests(unittest.TestCase):
     """page_kernel.py's current-kernel label and switch-target image tag both
-    come from these functions. _probe_cached is bypassed (call fetch directly)
+    come from these functions. probe_cached is bypassed (call fetch directly)
     so tests exercise the fetch logic itself rather than a shared, ordering-
     sensitive in-memory cache."""
 
@@ -131,10 +131,10 @@ class KernelFlavorTests(unittest.TestCase):
             if file_error
             else patch("builtins.open", mock_open(read_data=file_content))
         )
-        with patch("kyth_shared.system.bootc._probe_cached", side_effect=lambda key, ttl, fetch: fetch()), \
+        with patch("kyth_shared.system.bootc.probe_cached", side_effect=lambda key, ttl, fetch: fetch()), \
              open_patch, \
-             patch("kyth_shared.system.bootc._command_stdout", return_value=uname):
-            return _current_kernel_flavor()
+             patch("kyth_shared.system.bootc.command_stdout", return_value=uname):
+            return current_kernel_flavor()
 
     def test_flavor_from_marker_file(self):
         self.assertEqual(self._fetch_flavor(file_content="cachy\n"), "cachy")
@@ -154,22 +154,22 @@ class KernelFlavorTests(unittest.TestCase):
         )
 
     def test_image_tag_for_channel(self):
-        self.assertEqual(_image_tag_for_channel("latest", flavor="fedora"), "latest")
-        self.assertEqual(_image_tag_for_channel("latest", flavor="cachy"), "latest-cachy")
-        self.assertEqual(_image_tag_for_channel("testing", flavor="fedora"), "testing")
-        self.assertEqual(_image_tag_for_channel("testing", flavor="cachy"), "testing-cachy")
+        self.assertEqual(image_tag_for_channel("latest", flavor="fedora"), "latest")
+        self.assertEqual(image_tag_for_channel("latest", flavor="cachy"), "latest-cachy")
+        self.assertEqual(image_tag_for_channel("testing", flavor="fedora"), "testing")
+        self.assertEqual(image_tag_for_channel("testing", flavor="cachy"), "testing-cachy")
         # Anything other than the literal "testing" channel name is treated as stable.
-        self.assertEqual(_image_tag_for_channel("unknown", flavor="fedora"), "latest")
+        self.assertEqual(image_tag_for_channel("unknown", flavor="fedora"), "latest")
 
     def test_image_tag_for_kernel(self):
-        with patch("kyth_shared.system.bootc._current_branch", return_value="latest"):
-            self.assertEqual(_image_tag_for_kernel("fedora"), "latest")
-            self.assertEqual(_image_tag_for_kernel("cachy"), "latest-cachy")
-        with patch("kyth_shared.system.bootc._current_branch", return_value="testing-cachy"):
-            self.assertEqual(_image_tag_for_kernel("fedora"), "testing")
-            self.assertEqual(_image_tag_for_kernel("cachy"), "testing-cachy")
-        with patch("kyth_shared.system.bootc._current_branch", return_value=None):
-            self.assertEqual(_image_tag_for_kernel("fedora"), "latest")
+        with patch("kyth_shared.system.bootc.current_branch", return_value="latest"):
+            self.assertEqual(image_tag_for_kernel("fedora"), "latest")
+            self.assertEqual(image_tag_for_kernel("cachy"), "latest-cachy")
+        with patch("kyth_shared.system.bootc.current_branch", return_value="testing-cachy"):
+            self.assertEqual(image_tag_for_kernel("fedora"), "testing")
+            self.assertEqual(image_tag_for_kernel("cachy"), "testing-cachy")
+        with patch("kyth_shared.system.bootc.current_branch", return_value=None):
+            self.assertEqual(image_tag_for_kernel("fedora"), "latest")
 
 
 class UpdatePhaseParsingTests(unittest.TestCase):
@@ -179,10 +179,10 @@ class UpdatePhaseParsingTests(unittest.TestCase):
     (once bootc has started writing/staging the new image)."""
 
     def test_default_phase_per_mode(self):
-        self.assertEqual(_default_phase("update"), "Pulling OS image from container registry…")
-        self.assertEqual(_default_phase("full-update"), "Running full system update…")
-        self.assertEqual(_default_phase("rollback"), "Staging rollback deployment…")
-        self.assertEqual(_default_phase("unknown-mode"), "Operation in progress…")
+        self.assertEqual(default_phase("update"), "Pulling OS image from container registry…")
+        self.assertEqual(default_phase("full-update"), "Running full system update…")
+        self.assertEqual(default_phase("rollback"), "Staging rollback deployment…")
+        self.assertEqual(default_phase("unknown-mode"), "Operation in progress…")
 
     def test_parse_update_phase_recognizes_known_lines(self):
         cases = [
@@ -198,19 +198,19 @@ class UpdatePhaseParsingTests(unittest.TestCase):
             ("No update available.", "Already on the latest image — nothing to download."),
         ]
         for line, expected in cases:
-            self.assertEqual(_parse_update_phase(line, "update"), expected, msg=line)
+            self.assertEqual(parse_update_phase(line, "update"), expected, msg=line)
 
     def test_parse_update_phase_returns_none_for_unrecognized_line(self):
-        self.assertIsNone(_parse_update_phase("some unrelated log noise", "update"))
+        self.assertIsNone(parse_update_phase("some unrelated log noise", "update"))
 
     def test_parse_update_phase_full_update_section_header(self):
         line = "―― 12:34:01 - Flatpaks ――"
         self.assertEqual(
-            _parse_update_phase(line, "full-update"),
+            parse_update_phase(line, "full-update"),
             "Updating Flatpaks…",
         )
         # The same section-header format is only meaningful in full-update mode.
-        self.assertIsNone(_parse_update_phase(line, "update"))
+        self.assertIsNone(parse_update_phase(line, "update"))
 
     def test_cancel_blocked_once_writing_or_staging(self):
         for phase in (
@@ -218,16 +218,16 @@ class UpdatePhaseParsingTests(unittest.TestCase):
             "Writing new OS image to disk…",
             "Staging new image for next reboot…",
         ):
-            self.assertNotEqual(_bootc_cancel_block_reason("update", phase), "")
+            self.assertNotEqual(bootc_cancel_block_reason("update", phase), "")
 
     def test_cancel_allowed_while_still_downloading(self):
-        self.assertEqual(_bootc_cancel_block_reason("update", "Downloading image layers…"), "")
-        self.assertEqual(_bootc_cancel_block_reason("update", "Resolving OS image version…"), "")
+        self.assertEqual(bootc_cancel_block_reason("update", "Downloading image layers…"), "")
+        self.assertEqual(bootc_cancel_block_reason("update", "Resolving OS image version…"), "")
 
     def test_rollback_never_cancellable(self):
         # Rollback has no safe early phase to cancel from at all.
-        self.assertNotEqual(_bootc_cancel_block_reason("rollback", "Staging rollback deployment…"), "")
-        self.assertNotEqual(_bootc_cancel_block_reason("rollback", ""), "")
+        self.assertNotEqual(bootc_cancel_block_reason("rollback", "Staging rollback deployment…"), "")
+        self.assertNotEqual(bootc_cancel_block_reason("rollback", ""), "")
 
 
 class BranchesViewTests(unittest.TestCase):

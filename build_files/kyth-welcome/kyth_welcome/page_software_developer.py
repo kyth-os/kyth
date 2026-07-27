@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.launch import popen
 from .services.runtime import Worker
 from .qt import (
@@ -142,7 +142,7 @@ class _DeveloperTabMixin:
             self._ai_status_lbl.setText(labels.get(action, "Finished."))
         else:
             self._ai_status_lbl.setText(f"{action.capitalize()} failed (exit code {code}).")
-        _restyle(self._ai_status_lbl)
+        restyle(self._ai_status_lbl)
 
     def _ai_enter_box(self):
         try:

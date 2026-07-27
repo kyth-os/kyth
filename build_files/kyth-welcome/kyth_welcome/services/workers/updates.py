@@ -9,8 +9,8 @@ from kyth_shared.update_status import read_update_snapshot
 from kyth_shared.runtime_output import count_fwupd_updates
 
 from ...qt import Signal
-from ..bootc import REGISTRY, _bootc_image_digest, _bootc_status_data, _current_branch
-from ..process import _run_command
+from ..bootc import REGISTRY, bootc_image_digest, bootc_status_data, current_branch
+from ..process import run_command
 from ..registry import check_registry_update, image_annotations, image_revision
 from ..runtime import TrackedThread
 from ..updates import firmware_check_commands
@@ -37,8 +37,8 @@ class UpdateCheckWorker(TrackedThread):
                     self.result.emit(UpdateProbeResult.success("system", snapshot.system_state))
                     return
             result = check_registry_update(
-                status_data=_bootc_status_data() or {},
-                branch=_current_branch() or "latest",
+                status_data=bootc_status_data() or {},
+                branch=current_branch() or "latest",
                 registry=REGISTRY,
             )
             manifest_raw = result.manifest_raw.decode("utf-8", errors="ignore")
@@ -62,8 +62,8 @@ class FirmwareCheckWorker(TrackedThread):
     def run(self):
         try:
             refresh_cmd, updates_cmd = firmware_check_commands(refresh=True)
-            _run_command(refresh_cmd, timeout=30)
-            updates = _run_command(updates_cmd, timeout=20)
+            run_command(refresh_cmd, timeout=30)
+            updates = run_command(updates_cmd, timeout=20)
             if updates is None:
                 self.result.emit(UpdateProbeResult.error("firmware", "fwupd not available."))
                 return
@@ -119,8 +119,8 @@ class ChangelogWorker(TrackedThread):
             return {}
 
     def run(self):
-        tag = _current_branch() or "latest"
-        booted_digest = _bootc_image_digest("booted")
+        tag = current_branch() or "latest"
+        booted_digest = bootc_image_digest("booted")
         booted_rev = ""
         if booted_digest:
             ann = self._fetch_annotations(f"{REGISTRY}@{booted_digest[1]}")

@@ -3,7 +3,7 @@ import os
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.appstream import load_appstream_catalog
-from ..services.runtime import Worker, _finish_worker
+from ..services.runtime import Worker, finish_worker
 
 
 class _CatalogMixin:
@@ -29,7 +29,7 @@ class _CatalogMixin:
 
     def _on_fp_catalog_done(self, code: int):
         self._fp_progress.hide()
-        _finish_worker(self, attr="_fp_catalog_worker")
+        finish_worker(self, attr="_fp_catalog_worker")
         self._fp_catalog_btn.setEnabled(True)
         output = "\n".join(self._fp_catalog_lines).strip()
         entries = []
@@ -109,7 +109,7 @@ class _CatalogMixin:
 
     def _on_fp_refresh_done(self, code: int):
         self._fp_progress.hide()
-        _finish_worker(self, attr="_fp_refresh_worker")
+        finish_worker(self, attr="_fp_refresh_worker")
         self._fp_refresh_btn.setEnabled(True)
         self._fp_appstream_cache = None
         self._fp_catalog_entries = []

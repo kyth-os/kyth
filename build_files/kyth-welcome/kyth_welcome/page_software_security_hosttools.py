@@ -1,8 +1,8 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.launch import popen
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QWidget
 from .widgets import _make_card, _set_log_panel
 
@@ -132,7 +132,7 @@ class _HostSecurityToolsMixin:
         status_lbl.setText(f"Installing {tool['name']}…")
         status_lbl.setObjectName("subheading")
         status_lbl.show()
-        _restyle(status_lbl)
+        restyle(status_lbl)
         self._sec_host_tool_worker = Worker([
             "bash", "-c",
             f"flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
@@ -149,7 +149,7 @@ class _HostSecurityToolsMixin:
     def _sec_on_host_tool_install_done(self, code: int, name: str):
         active_refs = self._sec_active_host_refs
         active_refs["progress"].hide()
-        _finish_worker(self, attr="_sec_host_tool_worker")
+        finish_worker(self, attr="_sec_host_tool_worker")
         for refs in self._sec_host_tool_refs:
             refs["install"].setEnabled(True)
             refs["uninstall"].setEnabled(True)
@@ -160,7 +160,7 @@ class _HostSecurityToolsMixin:
         else:
             active_refs["status"].setText(f"Installation failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
-        _restyle(active_refs["status"])
+        restyle(active_refs["status"])
         self._refresh_sec_host_tools_status()
 
     def _sec_uninstall_host_tool(self, tool: dict):
@@ -190,7 +190,7 @@ class _HostSecurityToolsMixin:
         status_lbl.setText(f"Uninstalling {tool['name']}…")
         status_lbl.setObjectName("subheading")
         status_lbl.show()
-        _restyle(status_lbl)
+        restyle(status_lbl)
         self._sec_host_tool_worker = Worker(["flatpak", "uninstall", "-y", tool["flatpak"]])
         self._sec_host_tool_worker.line.connect(lambda ln: (
             log.append(ln), log.ensureCursorVisible(),
@@ -203,7 +203,7 @@ class _HostSecurityToolsMixin:
     def _sec_on_host_tool_uninstall_done(self, code: int, name: str):
         active_refs = self._sec_active_host_refs
         active_refs["progress"].hide()
-        _finish_worker(self, attr="_sec_host_tool_worker")
+        finish_worker(self, attr="_sec_host_tool_worker")
         for refs in self._sec_host_tool_refs:
             refs["install"].setEnabled(True)
             refs["uninstall"].setEnabled(True)
@@ -214,5 +214,5 @@ class _HostSecurityToolsMixin:
         else:
             active_refs["status"].setText(f"Uninstall failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
-        _restyle(active_refs["status"])
+        restyle(active_refs["status"])
         self._refresh_sec_host_tools_status()

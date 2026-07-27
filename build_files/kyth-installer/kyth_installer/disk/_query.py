@@ -7,7 +7,7 @@ import sys
 import kyth_installer.disk as _disk
 
 from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES
-from kyth_shared import _human_bytes as _human_size
+from kyth_shared import human_bytes as _human_size
 
 def _partition_mountpoints(child: dict) -> list[str]:
     mounts = child.get("mountpoints")

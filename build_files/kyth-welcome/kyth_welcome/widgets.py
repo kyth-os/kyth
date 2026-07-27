@@ -2,7 +2,7 @@ import re
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.hardware import HardwareProbe
 from .qt import (
     QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, single_shot,
@@ -78,7 +78,7 @@ class StatusBadge(QLabel):
     def set_state(self, state: str, text: str) -> None:
         self.setText(text)
         self.setObjectName(self._STATE_NAMES.get(state, "task-status-idle"))
-        _restyle(self)
+        restyle(self)
 
 
 def status_color(state: str) -> str:
@@ -266,7 +266,7 @@ class AppImageDropCard(QFrame):
         kind, _ = self._dropped_path(event)
         if kind:
             self.setObjectName("drop-card-active")
-            _restyle(self)
+            restyle(self)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -280,12 +280,12 @@ class AppImageDropCard(QFrame):
 
     def dragLeaveEvent(self, event):  # noqa: N802
         self.setObjectName("drop-card")
-        _restyle(self)
+        restyle(self)
         event.accept()
 
     def dropEvent(self, event):  # noqa: N802
         self.setObjectName("drop-card")
-        _restyle(self)
+        restyle(self)
         kind, path = self._dropped_path(event)
         if not kind or not path:
             event.ignore()
@@ -401,7 +401,7 @@ class HardwareCard(QFrame):
 
         card_name = self._CARD_NAME.get(probe.status, "hw-card-dim")
         self.setObjectName(card_name)
-        _restyle(self)
+        restyle(self)
 
         if probe.action:
             self._action.setText(probe.action)
@@ -445,7 +445,7 @@ class StatTile(QFrame):
     def set_value(self, value: str, style: str = "stat-value"):
         self._value.setText(value)
         self._value.setObjectName(style)
-        _restyle(self._value)
+        restyle(self._value)
 
 
 # ── Page base ─────────────────────────────────────────────────────────────────
