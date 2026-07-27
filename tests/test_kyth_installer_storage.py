@@ -546,8 +546,8 @@ class InstallerPlanTests(unittest.TestCase):
         start = 40 * 1024**3
         end = start + 32 * 1024**3
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
-             patch.object(self.plan, "_has_bios_boot_partition", return_value=False):
+             patch.object(self.plan, "list_partitions", return_value=[]), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True):
             with self.assertRaisesRegex(RuntimeError, "33 GiB"):
                 self.plan._validate_free_space_target({
                     "disk": "/dev/nvme0n1",
