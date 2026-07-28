@@ -39,7 +39,9 @@ whatever protections/flags apply to "alongside" (see above) apply to them too.
 import logging
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
@@ -58,7 +60,9 @@ from .disk import (
     list_free_space,
     list_partitions,
 )
+from .fsresize import shrink_filesystem
 from .partition_ops import get_journal
+from .services.disk_service import DiskService
 from .system import _as_root, _settle, unmount_target_disk
 from .runner import run_command
 from .storage_snapshot import StorageSnapshot
@@ -289,7 +293,15 @@ def _validate_resize_ntfs_target(
         raise RuntimeError("The selected NTFS partition was not found during the final disk scan.")
     if part.get("efi") or part.get("current") or part.get("in_use"):
         raise RuntimeError("The selected partition is currently mounted or reserved and cannot be resized.")
-    if (part.get("fstype") or "").lower() not in ("ntfs", "ntfs3"):
+    part_fstype = (part.get("fstype") or "").lower()
+    if part_fstype == "bitlocker":
+        raise RuntimeError(
+            "This partition is BitLocker-encrypted and cannot be resized while "
+            "locked. In Windows, suspend or disable BitLocker protection "
+            "(Control Panel > BitLocker Drive Encryption, or 'manage-bde -off "
+            "C:'), wait for decryption to finish, then try again."
+        )
+    if part_fstype not in ("ntfs", "ntfs3"):
         raise RuntimeError("Only NTFS partitions can be resized by this installer path.")
     if not snapshot.efi_partition:
         raise RuntimeError("NTFS resize installation requires an EFI system partition on the system.")
@@ -314,7 +326,7 @@ def _validate_resize_ntfs_target(
 
 def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     disk, partition, shrink_bytes = _validate_resize_ntfs_target(config)
-    missing = [cmd for cmd in ("ntfsresize", "parted", "partprobe", "udevadm", "mkfs.btrfs") if shutil.which(cmd) is None]
+    missing = [cmd for cmd in ("ntfsresize", "parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk") if shutil.which(cmd) is None]
     if missing:
         raise RuntimeError(f"Required NTFS resize tools are missing from the live environment: {', '.join(missing)}")
     unmount_target_disk(disk, log)
@@ -328,69 +340,57 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     new_end = partition_start + new_ntfs_size - sector
 
     log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
-    log("Checking NTFS resize safety...")
-    check = run_command(
-        _as_root(["ntfsresize", "--check", partition]),
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=240,
-    )
-    if check.returncode != 0:
-        raise RuntimeError("Windows left this NTFS volume in an unsafe state. Disable Fast Startup and hibernation, run chkdsk in Windows, then try again.")
-    info = run_command(_as_root(["ntfsresize", "--info", partition]), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
-    if info.returncode != 0:
-        raise RuntimeError("NTFS partition is not clean enough to resize. Boot Windows, disable Fast Startup/hibernation, run chkdsk, and try again.")
+    shrink_filesystem(partition, "ntfs", new_ntfs_size, log)
 
-    size_arg = str(new_ntfs_size)
-    dry = run_command(
-        _as_root(["ntfsresize", "--no-action", "--size", size_arg, partition]),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=240,
-    )
-    if dry.returncode != 0:
-        out = (dry.stdout or "").lower()
-        if "too small" in out or "not enough space" in out:
-            raise RuntimeError("NTFS shrink failed: Not enough free space on the NTFS partition to shrink it by the requested amount.")
-        elif "immovable" in out:
-            raise RuntimeError("NTFS shrink failed: Immovable files prevent shrinking this partition further. Boot Windows, defragment the drive, and try again.")
-        else:
-            raise RuntimeError(f"NTFS resize dry-run failed. Output:\n{dry.stdout}\nBoot Windows, shrink the volume there, then return to the installer.")
+    disk_service = DiskService()
+    with tempfile.TemporaryDirectory(prefix="kyth-partition-") as backup_dir:
+        backup_path = str(Path(backup_dir) / "partition-table.backup")
+        log("Backing up the partition table before changing it...")
+        disk_service.backup_table(disk, backup_path)
+        try:
+            log("Shrinking partition boundary...")
+            # parted >= 3.3 refuses to shrink a partition in script mode (-s):
+            # it asks "Shrinking a partition can cause data loss, are you
+            # sure?" and exits 1 when it cannot prompt. ---pretend-input-tty
+            # with "Yes" piped on stdin is the documented way to answer that
+            # prompt non-interactively.
+            run_command(
+                _as_root(["parted", "---pretend-input-tty", disk, "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
+                input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True, timeout=120,
+            )
+            _settle()
 
-    log("Shrinking NTFS filesystem...")
-    shrink = run_command(
-        _as_root(["ntfsresize", "--size", size_arg, partition]),
-        input="y\n",
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=1800,
-    )
-    if shrink.returncode != 0:
-        raise RuntimeError(f"NTFS filesystem resize failed before the partition boundary was changed. Output:\n{shrink.stdout}")
+            btrfs_start = _ensure_bios_boot_partition(disk, new_end + sector, log)
+            before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
-    log("Shrinking partition boundary...")
-    # parted >= 3.3 refuses to shrink a partition in script mode (-s): it asks
-    # "Shrinking a partition can cause data loss, are you sure?" and exits 1
-    # when it cannot prompt. ---pretend-input-tty with "Yes" piped on stdin is
-    # the documented way to answer that prompt non-interactively.
-    run_command(
-        _as_root(["parted", "---pretend-input-tty", disk, "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
-        input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True, timeout=120,
-    )
-    _settle()
+            log("Creating KythOS Btrfs partition in freed space...")
+            run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{old_end}B"]), check=True, timeout=120)
+            _settle()
 
-    btrfs_start = _ensure_bios_boot_partition(disk, new_end + sector, log)
-    before = {p["name"] for p in list_partitions(disk) if p.get("name")}
-
-    log("Creating KythOS Btrfs partition in freed space...")
-    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{old_end}B"]), check=True, timeout=120)
-    _settle()
-
-    created = _latest_partition_on_disk(disk, before)
-    if not created:
-        raise RuntimeError("The installer could not find the new KythOS partition after resizing.")
-    run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
-    log(f"Created target partition {created}")
+            created = _latest_partition_on_disk(disk, before)
+            if not created:
+                raise RuntimeError("The installer could not find the new KythOS partition after resizing.")
+            run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
+            log(f"Created target partition {created}")
+        except Exception:
+            # The NTFS filesystem was already shrunk above (that step cannot
+            # be undone by a table restore, and doesn't need to be — a
+            # partition table describing more space than the filesystem
+            # inside it uses is a benign, expected intermediate state, not
+            # corruption). Restoring the table just undoes the boundary
+            # move / new-partition creation that failed here.
+            log("A step after the NTFS shrink failed — restoring the original partition table...")
+            try:
+                disk_service.restore_table(disk, backup_path)
+                log(
+                    "Partition table restored. The NTFS filesystem itself was "
+                    "already shrunk and remains intact and usable — Windows may "
+                    "offer to grow it back to fill the partition, or you can "
+                    "leave it as-is and try the install again."
+                )
+            except Exception as restore_exc:
+                log(f"Warning: automatic partition table restore failed: {restore_exc}")
+            raise
     return disk, created
 
 
@@ -436,25 +436,39 @@ def _validate_free_space_target(
 
 def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     disk, start, end = _validate_free_space_target(config)
-    missing = [cmd for cmd in ("parted", "partprobe", "udevadm", "mkfs.btrfs") if shutil.which(cmd) is None]
+    missing = [cmd for cmd in ("parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk") if shutil.which(cmd) is None]
     if missing:
         raise RuntimeError(f"Required partitioning tools are missing from the live environment: {', '.join(missing)}")
     unmount_target_disk(disk, log)
     disk, start, end = _validate_free_space_target(config)
 
-    start = _ensure_bios_boot_partition(disk, start, log)
-    before = {p["name"] for p in list_partitions(disk) if p.get("name")}
+    disk_service = DiskService()
+    with tempfile.TemporaryDirectory(prefix="kyth-partition-") as backup_dir:
+        backup_path = str(Path(backup_dir) / "partition-table.backup")
+        log("Backing up the partition table before changing it...")
+        disk_service.backup_table(disk, backup_path)
+        try:
+            start = _ensure_bios_boot_partition(disk, start, log)
+            before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
-    log(f"Creating KythOS Btrfs partition in {_human_size(end - start)} of free space...")
-    sector = _block_size_bytes(disk)
-    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{start}B", f"{end - sector}B"]), check=True, timeout=120)
-    _settle()
+            log(f"Creating KythOS Btrfs partition in {_human_size(end - start)} of free space...")
+            sector = _block_size_bytes(disk)
+            run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{start}B", f"{end - sector}B"]), check=True, timeout=120)
+            _settle()
 
-    created = _latest_partition_on_disk(disk, before)
-    if not created:
-        raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
-    run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
-    log(f"Created target partition {created}")
+            created = _latest_partition_on_disk(disk, before)
+            if not created:
+                raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
+            run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
+            log(f"Created target partition {created}")
+        except Exception:
+            log("A step failed — restoring the original partition table...")
+            try:
+                disk_service.restore_table(disk, backup_path)
+                log("Partition table restored to its state before this attempt.")
+            except Exception as restore_exc:
+                log(f"Warning: automatic partition table restore failed: {restore_exc}")
+            raise
     return disk, created
 
 

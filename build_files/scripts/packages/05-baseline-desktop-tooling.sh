@@ -26,6 +26,7 @@ dnf5 install -y --skip-unavailable \
 	cabextract \
 	ntfs-3g \
 	ntfsprogs \
+	os-prober \
 	libpst \
 	rsync \
 	fuse \

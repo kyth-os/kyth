@@ -429,6 +429,26 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertEqual(target, "/dev/nvme0n1p3")
         self.assertEqual(shrink, 64 * 1024**3)
 
+    def test_validate_resize_ntfs_rejects_bitlocker_with_targeted_message(self):
+        partition = {
+            "name": "/dev/nvme0n1p3",
+            "fstype": "BitLocker",
+            "efi": False,
+            "current": False,
+            "size_bytes": 256 * 1024**3,
+        }
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=False), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+            with self.assertRaisesRegex(RuntimeError, "BitLocker"):
+                self.plan._validate_resize_ntfs_target({
+                    "disk": "/dev/nvme0n1",
+                    "resize_partition": "/dev/nvme0n1p3",
+                    "resize_gib": 64,
+                })
+
     def test_prepare_ntfs_resize_creates_btrfs_target_after_dry_run(self):
         partition = "/dev/nvme0n1p3"
         commands = []
@@ -457,6 +477,8 @@ class InstallerPlanTests(unittest.TestCase):
 
         with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
              patch.object(self.plan, "unmount_target_disk") as mock_unmount, \
+             patch.object(self.plan, "shrink_filesystem") as mock_shrink, \
+             patch.object(self.plan, "DiskService"), \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
              patch.object(self.plan, "_partition_size_bytes", return_value=256 * 1024**3), \
              patch.object(self.plan, "_partition_number", return_value=3), \
@@ -474,8 +496,12 @@ class InstallerPlanTests(unittest.TestCase):
 
         mock_unmount.assert_called_once_with("/dev/nvme0n1", unittest.mock.ANY)
         self.assertEqual(created, ("/dev/nvme0n1", "/dev/nvme0n1p4"))
+        # The NTFS-safe shrink sequence (ntfsresize --check/--info/dry-run/
+        # real shrink) now lives in fsresize.shrink_filesystem, with its own
+        # tests — this test only verifies it's invoked before the partition
+        # boundary moves, and with the right target size.
+        mock_shrink.assert_called_once_with(partition, "ntfs", 192 * 1024**3, unittest.mock.ANY)
         flattened = [" ".join(cmd) for cmd in commands]
-        self.assertTrue(any("ntfsresize --no-action" in cmd for cmd in flattened))
         # parted >= 3.3 exits 1 on a script-mode (-s) shrink because it cannot
         # ask its "can cause data loss" question; the shrink must run with
         # ---pretend-input-tty and "Yes" on stdin instead.
@@ -489,13 +515,83 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertIn("parted ---pretend-input-tty /dev/nvme0n1 unit B resizepart 3", shrink_cmd)
         self.assertNotIn(" -s ", shrink_cmd)
         self.assertEqual(shrink_kwargs.get("input"), "Yes\n")
-        ntfs_shrink = next(
-            kwargs for cmd, kwargs in zip(flattened, run_kwargs, strict=True)
-            if "ntfsresize --size" in cmd and "--no-action" not in cmd
-        )
-        self.assertEqual(ntfs_shrink.get("input"), "y\n")
         self.assertTrue(any("mkpart KythOS btrfs" in cmd and "100%" not in cmd for cmd in flattened))
         self.assertTrue(any("mkfs.btrfs -f -L KythOS /dev/nvme0n1p4" in cmd for cmd in flattened))
+
+    def test_prepare_ntfs_resize_restores_partition_table_on_later_failure(self):
+        # The NTFS filesystem shrink itself is mocked out (its own safety is
+        # fsresize.py's job) — this test is specifically about the partition-
+        # table backup/restore safety net around the parted/mkfs steps that
+        # run *after* a real, successful filesystem shrink.
+        partition = "/dev/nvme0n1p3"
+
+        def fake_run(cmd, **kwargs):
+            if "mkfs.btrfs" in " ".join(cmd):
+                raise RuntimeError("mkfs.btrfs exploded")
+            return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
+
+        existing = [
+            {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
+            {"name": partition},
+        ]
+        list_partitions_mock = MagicMock(side_effect=[
+            existing, existing, existing + [{"name": "/dev/nvme0n1p4"}],
+        ])
+        mock_disk_service_cls = MagicMock()
+        mock_disk_service = mock_disk_service_cls.return_value
+
+        with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
+             patch.object(self.plan, "unmount_target_disk"), \
+             patch.object(self.plan, "shrink_filesystem"), \
+             patch.object(self.plan, "DiskService", mock_disk_service_cls), \
+             patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
+             patch.object(self.plan, "_partition_size_bytes", return_value=256 * 1024**3), \
+             patch.object(self.plan, "_partition_number", return_value=3), \
+             patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
+             patch.object(self.plan, "_block_size_bytes", return_value=512), \
+             patch.object(self.plan, "list_partitions", list_partitions_mock), \
+             patch.object(disk, "list_partitions", list_partitions_mock), \
+             patch.object(self.plan, "_settle"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
+             patch.object(self.plan, "run_command", side_effect=fake_run):
+            with self.assertRaisesRegex(RuntimeError, "mkfs.btrfs exploded"):
+                self.plan._prepare_ntfs_resize_target(
+                    {"disk": "/dev/nvme0n1", "resize_partition": partition, "resize_gib": 64},
+                    lambda _msg: None,
+                )
+
+        mock_disk_service.backup_table.assert_called_once()
+        mock_disk_service.restore_table.assert_called_once()
+
+    def test_prepare_free_space_target_restores_partition_table_on_later_failure(self):
+        def fake_run(cmd, **kwargs):
+            if "mkfs.btrfs" in " ".join(cmd):
+                raise RuntimeError("mkfs.btrfs exploded")
+            return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
+
+        mock_disk_service_cls = MagicMock()
+        mock_disk_service = mock_disk_service_cls.return_value
+
+        with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
+             patch.object(self.plan, "unmount_target_disk"), \
+             patch.object(self.plan, "DiskService", mock_disk_service_cls), \
+             patch.object(self.plan, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)), \
+             patch.object(self.plan, "list_partitions", return_value=[
+                 {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
+             ]), \
+             patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/nvme0n1p2"), \
+             patch.object(self.plan, "_block_size_bytes", return_value=512), \
+             patch.object(self.plan, "_settle"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
+             patch.object(self.plan, "run_command", side_effect=fake_run):
+            with self.assertRaisesRegex(RuntimeError, "mkfs.btrfs exploded"):
+                self.plan._prepare_free_space_target(
+                    {"disk": "/dev/nvme0n1", "free_region_start": 40 * 1024**3, "free_region_end": 80 * 1024**3},
+                    lambda _msg: None,
+                )
+
+        mock_disk_service.backup_table.assert_called_once()
+        mock_disk_service.restore_table.assert_called_once()
 
     def test_ensure_bios_boot_partition_creates_and_flags_when_missing(self):
         # The OS image ships a bootupd BIOS component and bootc installs every
@@ -612,6 +708,7 @@ class InstallerPlanTests(unittest.TestCase):
 
         with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
              patch.object(self.plan, "unmount_target_disk") as mock_unmount, \
+             patch.object(self.plan, "DiskService"), \
              patch.object(self.plan, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)), \
              patch.object(self.plan, "list_partitions", return_value=[
                  {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
@@ -650,6 +747,16 @@ class JournalValidateTests(unittest.TestCase):
     """Journal.validate() gates real partitioning safety properties (no
     overlaps, exactly one Btrfs root, never touch a mounted/in-use partition)
     but previously had no direct test coverage of its own."""
+
+    def setUp(self):
+        # validate() looks up the disk's current partition_table to gate the
+        # MBR 4-primary-partition limit; default to "no such disk" (empty
+        # table_type, same as the GPT/non-msdos path) so every test not
+        # specifically about msdos doesn't need to mock this itself and
+        # never makes a real lsblk call.
+        patcher = patch.object(partition_ops, "list_disks", return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _journal(self, current_parts=()):
         with patch.object(partition_ops, "list_partitions", return_value=list(current_parts)):
@@ -714,6 +821,51 @@ class JournalValidateTests(unittest.TestCase):
         # about a missing root rather than silently accepting the stale one.
         self.assertTrue(any("No root partition" in e for e in errors))
 
+    def test_msdos_table_rejects_a_5th_primary_partition(self):
+        journal = self._journal()
+        journal.add_op("new_table", {"table_type": "msdos"})
+        for i in range(4):
+            journal.add_op("create", {
+                "start_bytes": i * 10 * 1024**3 + 1024**2, "size_bytes": 9 * 1024**3,
+                "fs_type": "btrfs" if i == 0 else "ext4", "mountpoint": "/" if i == 0 else "",
+            })
+        journal.add_op("create", {
+            "start_bytes": 41 * 1024**3, "size_bytes": 9 * 1024**3, "fs_type": "ext4", "mountpoint": "",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("at most 4 primary partitions" in e for e in errors))
+
+    def test_msdos_table_allows_up_to_4_primary_partitions(self):
+        journal = self._journal()
+        journal.add_op("new_table", {"table_type": "msdos"})
+        for i in range(4):
+            journal.add_op("create", {
+                "start_bytes": i * 10 * 1024**3 + 1024**2, "size_bytes": 9 * 1024**3,
+                "fs_type": "btrfs" if i == 0 else "ext4", "mountpoint": "/" if i == 0 else "",
+            })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertEqual(errors, [])
+
+    def test_msdos_limit_counts_preexisting_partitions_without_a_new_table_op(self):
+        journal = self._journal()
+        # No new_table op — this journal partitions onto the disk's existing
+        # (already-msdos) table, so the 3 pre-existing partitions count too.
+        journal.add_op("create", {
+            "start_bytes": 31 * 1024**3, "size_bytes": 9 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        journal.add_op("create", {
+            "start_bytes": 41 * 1024**3, "size_bytes": 9 * 1024**3, "fs_type": "ext4", "mountpoint": "",
+        })
+        with patch.object(partition_ops, "list_disks", return_value=[
+            {"name": "/dev/nvme0n1", "partition_table": "msdos"},
+        ]), patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1"}, {"name": "/dev/nvme0n1p2"}, {"name": "/dev/nvme0n1p3"},
+        ]):
+            errors = journal.validate()
+        self.assertTrue(any("at most 4 primary partitions" in e for e in errors))
+
     def test_format_of_mounted_partition_is_rejected(self):
         journal = self._journal()
         journal.add_op("create", {
@@ -734,6 +886,74 @@ class JournalValidateTests(unittest.TestCase):
         ]):
             errors = journal.validate()
         self.assertTrue(any("Cannot set /dev/nvme0n1p3 as the root partition" in e for e in errors))
+
+
+class JournalCommitResizeTests(unittest.TestCase):
+    """Journal._commit_resize must shrink the filesystem before ever moving
+    the partition boundary — parted's resizepart only moves the table entry
+    and never touches filesystem metadata, so skipping the shrink corrupts
+    whatever filesystem already lives on the partition."""
+
+    def _journal(self):
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            return partition_ops.Journal("/dev/nvme0n1")
+
+    def test_shrinks_filesystem_before_moving_partition_boundary(self):
+        journal = self._journal()
+        journal._disk_service = MagicMock(dry_run=False)
+        call_order = []
+        mock_shrink = MagicMock(side_effect=lambda *a, **k: call_order.append("shrink"))
+        journal._disk_service.resize_partition = MagicMock(
+            side_effect=lambda *a, **k: call_order.append("resize_partition")
+        )
+
+        with patch.object(partition_ops, "shrink_filesystem", mock_shrink), \
+             patch.object(partition_ops, "list_partitions", return_value=[
+                 {"name": "/dev/nvme0n1p2", "fstype": "ntfs"},
+             ]), \
+             patch.object(partition_ops, "_partition_number", return_value=2), \
+             patch.object(partition_ops, "_partition_start_bytes", return_value=1024**2):
+            journal._commit_resize(
+                {"partition": "/dev/nvme0n1p2", "new_size_bytes": 20 * 1024**3}, lambda _m: None
+            )
+
+        self.assertEqual(call_order, ["shrink", "resize_partition"])
+        mock_shrink.assert_called_once_with("/dev/nvme0n1p2", "ntfs", 20 * 1024**3, unittest.mock.ANY)
+
+    def test_rejects_a_partition_missing_from_the_current_disk_scan(self):
+        journal = self._journal()
+        journal._disk_service = MagicMock(dry_run=False)
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "was not found"):
+                journal._commit_resize(
+                    {"partition": "/dev/nvme0n1p2", "new_size_bytes": 20 * 1024**3}, lambda _m: None
+                )
+
+    def test_dry_run_skips_the_filesystem_shrink_entirely(self):
+        journal = self._journal()
+        journal._disk_service = MagicMock(dry_run=True)
+        with patch.object(partition_ops, "shrink_filesystem") as mock_shrink, \
+             patch.object(partition_ops, "_partition_number", return_value=99), \
+             patch.object(partition_ops, "_partition_start_bytes", return_value=1024**2):
+            journal._commit_resize(
+                {"partition": "/dev/nvme0n1p2", "new_size_bytes": 20 * 1024**3}, lambda _m: None
+            )
+        mock_shrink.assert_not_called()
+        journal._disk_service.resize_partition.assert_called_once()
+
+    def test_unsupported_filesystem_propagates_and_never_touches_partition_table(self):
+        journal = self._journal()
+        journal._disk_service = MagicMock(dry_run=False)
+        with patch.object(partition_ops, "list_partitions", return_value=[
+                 {"name": "/dev/nvme0n1p2", "fstype": "xfs"},
+             ]), \
+             patch.object(partition_ops, "_partition_number", return_value=2), \
+             patch.object(partition_ops, "_partition_start_bytes", return_value=1024**2):
+            with self.assertRaisesRegex(RuntimeError, "not supported"):
+                journal._commit_resize(
+                    {"partition": "/dev/nvme0n1p2", "new_size_bytes": 20 * 1024**3}, lambda _m: None
+                )
+        journal._disk_service.resize_partition.assert_not_called()
 
 
 class InstallerServerConfirmationTests(unittest.TestCase):

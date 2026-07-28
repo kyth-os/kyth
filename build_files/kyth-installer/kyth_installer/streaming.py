@@ -52,16 +52,25 @@ class StreamingCommandRunner:
         stall_timeout: int = 600,
         absolute_timeout: int | None = 3600,
         error_factory: Callable[[int, list[str], Sequence[str]], Exception] | None = None,
+        input: str | None = None,
     ) -> None:
         argv = list(command)
         log(f"$ {' '.join(argv)}")
         proc = spawn_command(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0,
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE if input is not None else None, bufsize=0,
         )
         if proc.stdout is None:
             proc.kill()
             proc.wait()
             raise RuntimeError("Could not capture installer command output.")
+
+        if input is not None:
+            # Short, fixed-size confirmation answers only (e.g. "y\n") — small
+            # enough to never block on pipe buffer capacity, so writing before
+            # the read loop starts below cannot deadlock.
+            proc.stdin.write(input.encode())
+            proc.stdin.close()
 
         monitor_stop = threading.Event()
         recent_output: deque[str] = deque(maxlen=30)

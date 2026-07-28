@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-28 23:04:26 UTC
+- Last refreshed (UTC): 2026-07-28 23:52:42 UTC
 - Current branch: testing
-- HEAD commit: 882e55e
-- Last commit title: Split install.py's _prepare_install_storage into per-mode helpers
-- Last commit date: 2026-07-28T18:56:12-04:00
+- HEAD commit: 5fb9fc4
+- Last commit title: Raise system.py test coverage from 30% to 91% and gate it
+- Last commit date: 2026-07-28T19:04:26-04:00
 - CI workflow files: 8
 - Build script files: 21
 

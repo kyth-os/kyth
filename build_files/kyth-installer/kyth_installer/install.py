@@ -1,6 +1,8 @@
 """Install orchestration for an explicit installer runtime context."""
 
 import os
+import re
+import shutil
 import subprocess
 import traceback
 from pathlib import Path
@@ -219,6 +221,57 @@ def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerC
         log(f"EFI mounted from {efi_part}")
 
 
+def _snapshot_efi_boot_entries(log) -> str:
+    """Best-effort capture of 'efibootmgr -v' output for later comparison.
+
+    Returns "" (never raises) when efibootmgr is unavailable — legacy BIOS
+    boot, a container test environment, or a live session with no UEFI
+    firmware access — since this is a diagnostic safety net, not a
+    requirement the install should ever fail on.
+    """
+    if shutil.which("efibootmgr") is None:
+        return ""
+    try:
+        result = run_command(_as_root(["efibootmgr", "-v"]), capture_output=True, text=True, timeout=10)
+        return result.stdout if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+_EFI_BOOT_ENTRY_RE = re.compile(r"^Boot[0-9A-Fa-f]{4}\*?\s+(.+)$")
+
+
+def _warn_if_efi_boot_entries_disappeared(before: str, after: str, log) -> None:
+    """Warn (never raise) if a named EFI boot entry present before the
+    install — e.g. "Windows Boot Manager" — is gone from NVRAM afterward.
+
+    bootc's bootupd step registers KythOS's own boot entry and can rewrite
+    BootOrder; this is the safety net for it silently dropping another OS's
+    entry rather than just reordering it. The other OS's files/bootloader on
+    disk are untouched either way — only the firmware's menu entry is at risk.
+    """
+    if not before or not after:
+        return
+
+    def entry_labels(text: str) -> set[str]:
+        labels = set()
+        for line in text.splitlines():
+            match = _EFI_BOOT_ENTRY_RE.match(line)
+            if match:
+                labels.add(match.group(1).strip())
+        return labels
+
+    lost = entry_labels(before) - entry_labels(after)
+    if lost:
+        log(
+            "Warning: these EFI boot entries were present before the install "
+            f"but are missing from firmware NVRAM afterward: {', '.join(sorted(lost))}. "
+            "The other OS on disk is unaffected — only its boot menu entry may "
+            "be gone. Use your firmware's boot menu (often F12/Esc at power-on) "
+            "or 'efibootmgr' to recreate the entry if needed."
+        )
+
+
 def _prepare_partition_target_storage(
     target_part, efi_part, alongside_mount, src_ref, tgt_ref, log, progress,
     context: InstallerContext,
@@ -256,12 +309,14 @@ def _prepare_partition_target_storage(
         # docstring for the "alongside" mode.
         extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@", "--skip-fetch-check"],
     )
+    efi_before = _snapshot_efi_boot_entries(log)
     context.enter_phase(InstallPhase.IMAGE)
     _run_cmd(
         install_cmd, 12, 90, log, progress,
         stall_timeout=3600, absolute_timeout=None,
         publish=lambda event: _push(event, context),
     )
+    _warn_if_efi_boot_entries_disappeared(efi_before, _snapshot_efi_boot_entries(log), log)
 
     return target_part, target_part, alongside_mount
 

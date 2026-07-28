@@ -13,9 +13,10 @@ from typing import Optional
 # pylint: disable-next=unused-import
 from .config import FILESYSTEM_OPTIONS, _FILESYSTEM  # noqa: F401 — re-exported for server.py
 from .disk import (
-    _normal_device_path, list_partitions, _safe_int, _partition_number,
+    _normal_device_path, list_disks, list_partitions, _safe_int, _partition_number,
     _partition_start_bytes, _human_size, _latest_partition_on_disk,
 )
+from .fsresize import shrink_filesystem
 from .services.disk_service import DiskService
 
 def _require_sgdisk(log=None):
@@ -143,6 +144,19 @@ class Journal:
         has_root = False
         allocated: list[tuple[int, int, str]] = []
 
+        # MBR (msdos) tables support at most 4 primary partitions, and this
+        # installer does not create extended/logical partitions to work
+        # around that limit — fail closed here with a clear message instead
+        # of letting a 5th mkpart hit parted's own cryptic error later.
+        # Table type starts from whatever the disk currently has unless a
+        # new_table op in this journal replaces it.
+        disks_by_name = {d["name"]: d for d in list_disks()}
+        table_type = (disks_by_name.get(self.disk, {}).get("partition_table") or "").lower()
+        primary_count = (
+            len([pt for pt in list_partitions(self.disk) if pt.get("name")])
+            if table_type == "msdos" else 0
+        )
+
         for op in self.ops:
             kind = op["kind"]
             p = op["params"]
@@ -150,6 +164,8 @@ class Journal:
             if kind == "new_table":
                 allocated.clear()
                 has_root = False
+                table_type = (p.get("table_type") or "gpt").lower()
+                primary_count = 0
 
             elif kind == "create":
                 start = _safe_int(p.get("start_bytes"), -1)
@@ -167,10 +183,23 @@ class Journal:
                         errors.append(f"New partition overlaps with existing region ({n}).")
                 allocated.append((start, end, fs))
 
+                if table_type == "msdos":
+                    primary_count += 1
+                    if primary_count > 4:
+                        errors.append(
+                            "MBR (msdos) partition tables support at most 4 primary "
+                            "partitions, and this installer does not create extended/"
+                            "logical partitions. Use a GPT table instead, or remove a "
+                            "partition from this layout."
+                        )
+
                 if mount == "/":
                     if fs != "btrfs":
                         errors.append("Root partition (/) must use the Btrfs filesystem.")
                     has_root = True
+
+            elif kind == "delete" and table_type == "msdos":
+                primary_count = max(0, primary_count - 1)
 
         if not has_root:
             errors.append("No root partition (/) configured. Mount at least one partition as '/' with Btrfs.")
@@ -248,6 +277,21 @@ class Journal:
         new_size = _safe_int(p.get("new_size_bytes"), 0)
         if not part_name or new_size <= 0:
             raise RuntimeError(f"Resize: invalid partition {part_name} or size {new_size}.")
+        if not self._disk_service.dry_run:
+            # parted only moves the partition table boundary — it never
+            # touches the filesystem inside. Re-read the current fstype
+            # right before shrinking (not whatever it was when this op was
+            # staged) and shrink the filesystem itself first, or refuse for
+            # any type without a safe shrink path. Skipping this would
+            # silently corrupt whatever filesystem already lives here.
+            current = {pt["name"]: pt for pt in list_partitions(self.disk)}
+            part_info = current.get(part_name)
+            if not part_info:
+                raise RuntimeError(f"Resize: {part_name} was not found on {self.disk}.")
+            fstype = (part_info.get("fstype") or "").lower()
+            log(f"Shrinking the {fstype or 'unknown'} filesystem on {part_name} "
+                "before moving the partition boundary...")
+            shrink_filesystem(part_name, fstype, new_size, log)
         part_num = _partition_number(part_name) if not self._disk_service.dry_run else 99
         start = _partition_start_bytes(part_name) if not self._disk_service.dry_run else 1024**2
         log(f"Resizing {part_name} to {_human_size(new_size)}...")

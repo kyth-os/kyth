@@ -467,5 +467,60 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         self.assertIn("root", errors[0].get("message", "").lower())
 
 
+class EfiBootEntrySnapshotTests(unittest.TestCase):
+    """bootc's bootupd step can rewrite EFI NVRAM boot entries when writing
+    the OS image — this is the safety net that warns if a named entry (e.g.
+    "Windows Boot Manager") present beforehand goes missing afterward."""
+
+    def test_snapshot_returns_empty_when_efibootmgr_is_unavailable(self):
+        with mock.patch.object(install.shutil, "which", return_value=None):
+            self.assertEqual(install._snapshot_efi_boot_entries(lambda _m: None), "")
+
+    def test_snapshot_returns_empty_on_nonzero_exit(self):
+        with mock.patch.object(install.shutil, "which", return_value="/usr/sbin/efibootmgr"), \
+             mock.patch.object(install, "run_command", return_value=mock.MagicMock(returncode=1, stdout="")):
+            self.assertEqual(install._snapshot_efi_boot_entries(lambda _m: None), "")
+
+    def test_snapshot_returns_empty_when_efibootmgr_raises(self):
+        with mock.patch.object(install.shutil, "which", return_value="/usr/sbin/efibootmgr"), \
+             mock.patch.object(install, "run_command", side_effect=RuntimeError("not UEFI")):
+            self.assertEqual(install._snapshot_efi_boot_entries(lambda _m: None), "")
+
+    def test_warns_when_a_named_entry_disappears(self):
+        before = (
+            "BootCurrent: 0001\n"
+            "BootOrder: 0000,0001\n"
+            "Boot0000* KythOS\tHD(1,GPT,...)\n"
+            "Boot0001* Windows Boot Manager\tHD(1,GPT,...)\n"
+        )
+        after = (
+            "BootCurrent: 0000\n"
+            "BootOrder: 0000\n"
+            "Boot0000* KythOS\tHD(1,GPT,...)\n"
+        )
+        logs = []
+        install._warn_if_efi_boot_entries_disappeared(before, after, logs.append)
+        self.assertTrue(any("Windows Boot Manager" in m for m in logs))
+
+    def test_no_warning_when_entries_are_unchanged(self):
+        snapshot = "Boot0000* KythOS\tHD(1,GPT,...)\nBoot0001* Windows Boot Manager\tHD(1,GPT,...)\n"
+        logs = []
+        install._warn_if_efi_boot_entries_disappeared(snapshot, snapshot, logs.append)
+        self.assertEqual(logs, [])
+
+    def test_no_warning_when_reordered_but_not_removed(self):
+        before = "Boot0000* KythOS\tHD(1,GPT,...)\nBoot0001* Windows Boot Manager\tHD(1,GPT,...)\n"
+        after = "Boot0001* Windows Boot Manager\tHD(1,GPT,...)\nBoot0000* KythOS\tHD(1,GPT,...)\n"
+        logs = []
+        install._warn_if_efi_boot_entries_disappeared(before, after, logs.append)
+        self.assertEqual(logs, [])
+
+    def test_no_warning_when_either_snapshot_is_empty(self):
+        logs = []
+        install._warn_if_efi_boot_entries_disappeared("", "Boot0000* KythOS\n", logs.append)
+        install._warn_if_efi_boot_entries_disappeared("Boot0000* KythOS\n", "", logs.append)
+        self.assertEqual(logs, [])
+
+
 if __name__ == "__main__":
     unittest.main()
