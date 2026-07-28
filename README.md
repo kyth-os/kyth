@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-28 22:56:12 UTC
+- Last refreshed (UTC): 2026-07-28 23:04:26 UTC
 - Current branch: testing
-- HEAD commit: 9c2a80c
-- Last commit title: Extract _safe_umount helper for the installer's disk-partitioning path
-- Last commit date: 2026-07-28T18:54:10-04:00
+- HEAD commit: 882e55e
+- Last commit title: Split install.py's _prepare_install_storage into per-mode helpers
+- Last commit date: 2026-07-28T18:56:12-04:00
 - CI workflow files: 8
 - Build script files: 21
 

@@ -5,7 +5,7 @@ import sys
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER_ROOT = ROOT / "build_files/kyth-installer"
@@ -892,6 +892,12 @@ class InstallerSystemTests(unittest.TestCase):
             self.assertTrue(any("tee" in s and "passwd" in s for s in flat), flat)
             self.assertTrue(any("chmod" in s and "644" in s for s in flat), flat)
 
+    @patch.object(system._accounts, "_write_lines")
+    def test_write_lines_wraps_non_os_error_as_runtime_error(self, mock_write):
+        mock_write.side_effect = ValueError("boom")
+        with self.assertRaisesRegex(RuntimeError, r"Could not write .*shadow"):
+            system._write_lines(Path("/target/etc/shadow"), ["root:!:::::::"], 0o000)
+
     def test_require_root_rejects_non_root(self):
         with patch.object(system.os, "geteuid", return_value=1000):
             with self.assertRaisesRegex(RuntimeError, "must run as root"):
@@ -935,6 +941,269 @@ class InstallerSystemTests(unittest.TestCase):
             os.makedirs(real)
             system._require_no_symlink(real)  # does not raise
             system._require_no_symlink(os.path.join(tmpdir, "does-not-exist"))  # does not raise
+
+    def test_safe_umount_defaults_to_check_false_and_captures_output(self):
+        mock_run = MagicMock(return_value=MagicMock(returncode=1))
+        result = system._safe_umount(mock_run, "/mnt/target")
+        argv = mock_run.call_args.args[0]
+        self.assertIn("umount", argv)
+        self.assertIn("-l", argv)
+        self.assertIn("/mnt/target", argv)
+        self.assertEqual(mock_run.call_args.kwargs.get("check"), False)
+        self.assertEqual(mock_run.call_args.kwargs.get("capture_output"), True)
+        self.assertIs(result, mock_run.return_value)
+
+    def test_safe_umount_check_true_propagates_to_run(self):
+        mock_run = MagicMock()
+        system._safe_umount(mock_run, "/mnt/target", check=True)
+        self.assertEqual(mock_run.call_args.kwargs.get("check"), True)
+
+    @patch.object(system, "run_command")
+    def test_settle_runs_partprobe_then_udevadm_settle(self, mock_run):
+        system._settle()
+        self.assertEqual(mock_run.call_count, 2)
+        self.assertIn("partprobe", mock_run.call_args_list[0].args[0])
+        self.assertEqual(mock_run.call_args_list[1].args[0], ["udevadm", "settle"])
+
+    @patch.object(system, "run_command")
+    def test_list_timezones_uses_timedatectl_when_available(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="America/New_York\nUTC\n")
+        zones = system.list_timezones()
+        self.assertEqual(zones, ["America/New_York", "UTC"])
+
+    @patch.object(system, "run_command")
+    def test_list_timezones_falls_back_to_zone_tab_when_timedatectl_fails(self, mock_run):
+        mock_run.side_effect = RuntimeError("timedatectl not found")
+        tab_data = "# comment\nUS\t+404251-0740023\tAmerica/New_York\tEastern\n"
+        with patch("builtins.open", mock_open(read_data=tab_data)):
+            zones = system.list_timezones()
+        self.assertIn("America/New_York", zones)
+        self.assertIn("UTC", zones)
+
+    @patch.object(system, "run_command")
+    def test_list_timezones_falls_back_to_utc_when_everything_fails(self, mock_run):
+        mock_run.side_effect = RuntimeError("timedatectl not found")
+        with patch("builtins.open", side_effect=OSError("no such file")):
+            zones = system.list_timezones()
+        self.assertEqual(zones, ["UTC"])
+
+    def test_find_deploy_etc_returns_latest_sorted_candidate(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir) / "ostree/deploy/default/deploy"
+            (base / "abc123.0" / "etc").mkdir(parents=True)
+            (base / "def456.1" / "etc").mkdir(parents=True)
+            result = system.find_deploy_etc(tmpdir)
+            self.assertEqual(result, str(base / "def456.1" / "etc"))
+
+    def test_find_deploy_etc_returns_none_when_missing(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertIsNone(system.find_deploy_etc(tmpdir))
+
+    @patch.object(system._accounts, "_read_lines")
+    def test_read_lines_wraps_os_error_with_path_context(self, mock_read):
+        mock_read.side_effect = OSError(13, "Permission denied")
+        with self.assertRaisesRegex(OSError, "path=/target/etc/passwd"):
+            system._read_lines(Path("/target/etc/passwd"))
+
+    @patch.object(system._accounts, "_chmod_path")
+    def test_chmod_path_wraps_os_error_with_path_context(self, mock_chmod):
+        mock_chmod.side_effect = OSError(13, "Permission denied")
+        with self.assertRaisesRegex(OSError, "path=/target/etc/shadow"):
+            system._chmod_path(Path("/target/etc/shadow"), 0o600)
+
+    @patch.object(system._accounts, "_path_exists", return_value=True)
+    def test_path_exists_delegates_to_accounts_module(self, mock_exists):
+        self.assertTrue(system._path_exists(Path("/target/etc/passwd")))
+        mock_exists.assert_called_once()
+
+    @patch.object(system._accounts, "ensure_system_accounts")
+    def test_ensure_system_accounts_wraps_os_error_with_path_context(self, mock_ensure):
+        mock_ensure.side_effect = OSError(13, "Permission denied")
+        with self.assertRaisesRegex(OSError, "path=/mnt/target"):
+            system.ensure_system_accounts("/mnt/target", lambda _m: None)
+
+    @patch.object(system._accounts, "ensure_system_accounts")
+    def test_ensure_system_accounts_wraps_generic_exception_as_runtime_error(self, mock_ensure):
+        mock_ensure.side_effect = ValueError("boom")
+        with self.assertRaisesRegex(RuntimeError, "Could not repair system accounts under /mnt/target"):
+            system.ensure_system_accounts("/mnt/target", lambda _m: None)
+
+    @patch.object(system, "run_command")
+    def test_lsblk_target_mounts_walks_children_and_sorts_deepest_first(self, mock_run):
+        payload = {
+            "blockdevices": [
+                {
+                    "name": "/dev/sda",
+                    "mountpoints": [None],
+                    "children": [
+                        {"name": "/dev/sda1", "mountpoints": ["/boot/efi"]},
+                        {"name": "/dev/sda2", "mountpoints": ["/mnt/target/home", "/mnt/target"]},
+                    ],
+                }
+            ]
+        }
+        mock_run.return_value = MagicMock(stdout=json.dumps(payload))
+        mounts = system._lsblk_target_mounts("/dev/sda")
+        self.assertEqual(
+            mounts,
+            [
+                ("/dev/sda2", "/mnt/target/home"),
+                ("/dev/sda1", "/boot/efi"),
+                ("/dev/sda2", "/mnt/target"),
+            ],
+        )
+
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_succeeds_with_no_mounts(self, mock_run, mock_lsblk):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_lsblk.side_effect = [[], []]
+        logs = []
+        system.unmount_target_disk("/dev/sda", logs.append)
+        self.assertTrue(any("Unmounting any existing mounts" in m for m in logs))
+
+    @patch.object(system, "_safe_umount")
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_skips_lazy_umount_for_critical_mount(self, mock_run, mock_lsblk, mock_safe_umount):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="target is busy")
+        mock_lsblk.side_effect = [[("/dev/sda2", "/boot")], []]
+        logs = []
+        system.unmount_target_disk("/dev/sda", logs.append)
+        mock_safe_umount.assert_not_called()
+        self.assertTrue(any("Skipping lazy unmount" in m for m in logs))
+
+    @patch.object(system, "_safe_umount")
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_lazy_umounts_non_critical_mount(self, mock_run, mock_lsblk, mock_safe_umount):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="target is busy")
+        mock_lsblk.side_effect = [[("/dev/sda3", "/mnt/target/home")], []]
+        logs = []
+        system.unmount_target_disk("/dev/sda", logs.append)
+        mock_safe_umount.assert_called_once_with(mock_run, "/mnt/target/home")
+
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_logs_warning_when_initial_scan_fails(self, mock_run, mock_lsblk):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_lsblk.side_effect = [RuntimeError("lsblk not found"), []]
+        logs = []
+        system.unmount_target_disk("/dev/sda", logs.append)
+        self.assertTrue(any("could not inspect target mounts" in m for m in logs))
+
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_treats_failed_final_scan_as_no_remaining_mounts(self, mock_run, mock_lsblk):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_lsblk.side_effect = [[], RuntimeError("lsblk not found")]
+        system.unmount_target_disk("/dev/sda", lambda _m: None)  # does not raise
+
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_raises_when_mounts_remain(self, mock_run, mock_lsblk):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_lsblk.side_effect = [[], [("/dev/sda2", "/mnt/target")]]
+        with self.assertRaisesRegex(RuntimeError, "still has mounted partitions"):
+            system.unmount_target_disk("/dev/sda", lambda _m: None)
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    def test_mok_enrollment_skipped_for_non_cachy_kernel(self):
+        logs = []
+        result = system._try_stage_mok_enrollment(logs.append, kernel="fedora")
+        self.assertEqual(result, "skipped")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "Path")
+    def test_mok_enrollment_skipped_when_cert_missing(self, mock_path_cls):
+        mock_path_cls.return_value.exists.return_value = False
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "skipped")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_skipped_when_mokutil_missing(self, mock_path_cls, mock_shutil):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = None
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "skipped")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_skipped_when_secure_boot_disabled(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.return_value = MagicMock(stdout="SecureBoot disabled\n")
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "skipped")
+        mock_run.assert_called_once()
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_reports_already_enrolled(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.side_effect = [
+            MagicMock(stdout="SecureBoot enabled\n"),
+            MagicMock(stdout="KythOS Secure Boot\n"),
+        ]
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "enrolled")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_reports_already_pending(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.side_effect = [
+            MagicMock(stdout="SecureBoot enabled\n"),
+            MagicMock(stdout="no keys enrolled\n"),
+            MagicMock(stdout="KythOS Secure Boot\n"),
+        ]
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "pending")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_stages_successfully(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.side_effect = [
+            MagicMock(stdout="SecureBoot enabled\n"),
+            MagicMock(stdout="no keys enrolled\n"),
+            MagicMock(stdout="no keys pending\n"),
+            MagicMock(returncode=0),
+        ]
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy", mok_password="hunter2")
+        self.assertEqual(result, "staged")
+        self.assertEqual(mock_run.call_args_list[-1].kwargs.get("input"), "hunter2\n")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_reports_failed_import(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.side_effect = [
+            MagicMock(stdout="SecureBoot enabled\n"),
+            MagicMock(stdout="no keys enrolled\n"),
+            MagicMock(stdout="no keys pending\n"),
+            MagicMock(returncode=1, stderr="import error"),
+        ]
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "failed")
 
 
 class InstallerGptDiskTests(unittest.TestCase):

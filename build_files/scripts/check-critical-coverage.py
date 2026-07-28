@@ -8,6 +8,7 @@ from pathlib import Path
 
 THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/recovery.py": 85.0,
+    "build_files/kyth-installer/kyth_installer/system.py": 85.0,
     "build_files/kyth-welcome/kyth_welcome/services/privileged.py": 80.0,
     "build_files/kyth-welcome/kyth_welcome/services/updates.py": 75.0,
     "build_files/kyth_shared/kyth_shared/user_polish.py": 15.0,
