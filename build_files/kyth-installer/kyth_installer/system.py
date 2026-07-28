@@ -40,6 +40,20 @@ def _require_no_symlink(path: str) -> None:
         )
 
 
+def _safe_umount(run, path: str, *, check: bool = False) -> subprocess.CompletedProcess:
+    """Lazily detach `path` via the caller's own run(), swallowing "not
+    mounted" / "target busy" failures by default.
+
+    Install-path unmounts previously duplicated `umount -l` with a slightly
+    different check=/capture_output= combination at each call site (some
+    captured output, one didn't, one used check=True) — centralize on one
+    behavior instead. `run` is passed in rather than imported here so each
+    caller's own run_command reference is what actually executes, keeping
+    existing `run_command` mocks/patches on the caller's module effective.
+    """
+    return run(_as_root(["umount", "-l", path]), check=check, capture_output=True)
+
+
 def _settle():
     run_command(_as_root(["partprobe"]), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
     run_command(["udevadm", "settle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
@@ -243,7 +257,7 @@ def unmount_target_disk(disk: str, log) -> None:
             if mount in _CRITICAL_MOUNTS:
                 log(f"Skipping lazy unmount of running system mount: {mount}")
             else:
-                run_command(_as_root(["umount", "-l", mount]), check=False)
+                _safe_umount(run_command, mount)
 
     try:
         remaining = _lsblk_target_mounts(disk)

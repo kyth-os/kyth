@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-28 22:47:27 UTC
+- Last refreshed (UTC): 2026-07-28 22:54:10 UTC
 - Current branch: testing
-- HEAD commit: eae725d
-- Last commit title: Fix environment-leaking mock in the BIOS-boot-partition free-space test
-- Last commit date: 2026-07-26T22:34:14-04:00
+- HEAD commit: 6cfa8ea
+- Last commit title: Roll out config-helpers.sh write_config/write_line across build fragments
+- Last commit date: 2026-07-28T18:47:27-04:00
 - CI workflow files: 8
 - Build script files: 21
 

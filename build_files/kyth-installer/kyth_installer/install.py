@@ -20,6 +20,7 @@ from kyth_shared.accounts import create_installer_user as _shared_create_install
 from .system import (
     _as_root,
     _require_no_symlink,
+    _safe_umount,
     _try_stage_mok_enrollment,
     ensure_system_accounts,
     find_deploy_etc,
@@ -155,7 +156,7 @@ def _prepare_install_storage(
         log(f"Target partition : {target_part}")
         log(f"EFI partition    : {efi_part or '(none detected)'}")
 
-        run_command(_as_root(["umount", "-l", target_part]), check=False, capture_output=True)
+        _safe_umount(run_command, target_part)
         run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
 
         log(f"Formatting {target_part} as btrfs ...")
@@ -168,7 +169,7 @@ def _prepare_install_storage(
         # Create btrfs subvolumes @ and @home
         log("Creating Btrfs subvolumes @ and @home ...")
         btrfs_temp_root = "/var/tmp/kyth-btrfs-root"  # noqa: S108 — _require_no_symlink guards this below
-        run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=False, capture_output=True)
+        _safe_umount(run_command, btrfs_temp_root)
         _require_no_symlink(btrfs_temp_root)
         run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
         context.register_mount(btrfs_temp_root)
@@ -179,7 +180,7 @@ def _prepare_install_storage(
             log("Setting Btrfs default subvolume to @ ...")
             run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
         finally:
-            run_command(_as_root(["umount", "-l", btrfs_temp_root]), check=True)
+            _safe_umount(run_command, btrfs_temp_root, check=True)
             context.release_mount(btrfs_temp_root)
 
         _require_no_symlink(alongside_mount)
@@ -253,7 +254,7 @@ def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
     deploy root and wire it into the target system's fstab."""
     target_home = Path(config_root) / "ostree/deploy/default/var/home"
     run_command(_as_root(["mkdir", "-p", str(target_home)]), check=True)
-    run_command(_as_root(["umount", "-l", str(target_home)]), check=False, capture_output=True)
+    _safe_umount(run_command, str(target_home))
     run_command(_as_root(["mount", "-o", "subvol=@home", target_part, str(target_home)]), check=True)
 
     try:
@@ -309,10 +310,7 @@ def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -
                     check=False,
                 )
                 # Unmount any existing mount at this path (e.g. @home subvolume)
-                run_command(
-                    _as_root(["umount", "-l", str(target_path)]),
-                    check=False, capture_output=True,
-                )
+                _safe_umount(run_command, str(target_path))
             run_command(
                 _as_root(["/usr/bin/tee", "-a", str(Path(etc, "fstab"))]),
                 input=fstab_line, text=True,
@@ -434,7 +432,7 @@ def _run_install_worker(
             _require_no_symlink(config_root)
             run_command(_as_root(["mkdir", "-p", config_root]), check=True)
             # Detach any stale mount left by a previously crashed install attempt.
-            run_command(_as_root(["umount", "-l", config_root]), check=False, capture_output=True)
+            _safe_umount(run_command, config_root)
             context.register_mount(config_root)
             run_command(_as_root(["mount", root_part, config_root]), check=True)
 
