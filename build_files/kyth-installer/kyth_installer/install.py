@@ -146,108 +146,142 @@ def _prepare_install_storage(
 ):
     context.enter_phase(InstallPhase.STORAGE)
     state = context.state
-    target_part = ""
-    root_part = ""
     if install_mode in ("alongside", "manual"):
         target_part = state.get("target_partition", "")
-        efi_part    = state.get("efi_partition", "")
+        efi_part = state.get("efi_partition", "")
         alongside_mount = "/var/tmp/kyth-alongside-target"  # noqa: S108 — _require_no_symlink guards this below
-
-        log(f"Target partition : {target_part}")
-        log(f"EFI partition    : {efi_part or '(none detected)'}")
-
-        _safe_umount(run_command, target_part)
-        run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
-
-        log(f"Formatting {target_part} as btrfs ...")
-        _run_cmd(
-            ["mkfs.btrfs", "-f", "-L", "KythOS", target_part],
-            5, 10, log, progress,
-            publish=lambda event: _push(event, context),
+        return _prepare_partition_target_storage(
+            target_part, efi_part, alongside_mount, src_ref, tgt_ref, log, progress, context
         )
+    return _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_mount, context)
 
-        # Create btrfs subvolumes @ and @home
-        log("Creating Btrfs subvolumes @ and @home ...")
-        btrfs_temp_root = "/var/tmp/kyth-btrfs-root"  # noqa: S108 — _require_no_symlink guards this below
-        _safe_umount(run_command, btrfs_temp_root)
-        _require_no_symlink(btrfs_temp_root)
-        run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
-        context.register_mount(btrfs_temp_root)
-        run_command(_as_root(["mount", target_part, btrfs_temp_root]), check=True)
-        try:
-            run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
-            run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@home"]), check=True)
-            log("Setting Btrfs default subvolume to @ ...")
-            run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
-        finally:
-            _safe_umount(run_command, btrfs_temp_root, check=True)
-            context.release_mount(btrfs_temp_root)
 
-        _require_no_symlink(alongside_mount)
-        run_command(_as_root(["mkdir", "-p", alongside_mount]), check=True)
-        context.register_mount(alongside_mount)
-        run_command(_as_root(["mount", "-o", "subvol=@", target_part, alongside_mount]), check=True)
-        progress(11)
+def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerContext) -> None:
+    """Format `target_part` as btrfs and lay out the @ / @home subvolumes.
 
-        if efi_part:
-            efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
-            run_command(_as_root(["mkdir", "-p", str(efi_mountpoint)]), check=True)
-            context.register_mount(str(efi_mountpoint))
-            try:
-                result = run_command(
-                    ["findmnt", "-n", "-o", "MOUNTPOINT", efi_part],
-                    capture_output=True, text=True, check=True, timeout=5,
-                )
-                current_efi_mnt = result.stdout.strip()
-            except Exception:
-                current_efi_mnt = ""
-            if current_efi_mnt:
-                run_command(
-                    _as_root(["mount", "--bind", current_efi_mnt, str(efi_mountpoint)]),
-                    check=True,
-                )
-                log(f"EFI bind-mounted from {current_efi_mnt}")
-            else:
-                run_command(
-                    _as_root(["mount", efi_part, str(efi_mountpoint)]),
-                    check=True,
-                )
-                log(f"EFI mounted from {efi_part}")
+    Mounts target_part at a private temp root just long enough to create the
+    subvolumes and set @ as default; the temp mount must not outlive this
+    function regardless of success or failure, hence the finally.
+    """
+    log(f"Formatting {target_part} as btrfs ...")
+    _run_cmd(
+        ["mkfs.btrfs", "-f", "-L", "KythOS", target_part],
+        5, 10, log, progress,
+        publish=lambda event: _push(event, context),
+    )
 
-        install_cmd = _build_bootc_install_cmd(
-            "to-filesystem", src_ref, tgt_ref, alongside_mount,
-            # --skip-fetch-check unconditionally here (not gated behind the
-            # SKIP_FETCH_CHECK env toggle, which controls the unrelated
-            # network-preflight check below): this target mountpoint already
-            # has other partitions (e.g. a bind-mounted /boot/efi) mounted
-            # under it, which is exactly the case the partition CLI exercises.
-            # See plan.py's install_mode
-            # docstring for the "alongside" mode.
-            extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@", "--skip-fetch-check"],
+    log("Creating Btrfs subvolumes @ and @home ...")
+    btrfs_temp_root = "/var/tmp/kyth-btrfs-root"  # noqa: S108 — _require_no_symlink guards this below
+    _safe_umount(run_command, btrfs_temp_root)
+    _require_no_symlink(btrfs_temp_root)
+    run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
+    context.register_mount(btrfs_temp_root)
+    run_command(_as_root(["mount", target_part, btrfs_temp_root]), check=True)
+    try:
+        run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
+        run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@home"]), check=True)
+        log("Setting Btrfs default subvolume to @ ...")
+        run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
+    finally:
+        _safe_umount(run_command, btrfs_temp_root, check=True)
+        context.release_mount(btrfs_temp_root)
+
+
+def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerContext) -> None:
+    """Mount efi_part under alongside_mount/boot/efi.
+
+    Bind-mounts from efi_part's current mountpoint when the live session
+    already has it mounted (e.g. /boot/efi), rather than mounting the device
+    a second time.
+    """
+    efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
+    run_command(_as_root(["mkdir", "-p", str(efi_mountpoint)]), check=True)
+    context.register_mount(str(efi_mountpoint))
+    try:
+        result = run_command(
+            ["findmnt", "-n", "-o", "MOUNTPOINT", efi_part],
+            capture_output=True, text=True, check=True, timeout=5,
         )
-        context.enter_phase(InstallPhase.IMAGE)
-        _run_cmd(
-            install_cmd, 12, 90, log, progress,
-            stall_timeout=3600, absolute_timeout=None,
-            publish=lambda event: _push(event, context),
+        current_efi_mnt = result.stdout.strip()
+    except Exception:
+        current_efi_mnt = ""
+    if current_efi_mnt:
+        run_command(
+            _as_root(["mount", "--bind", current_efi_mnt, str(efi_mountpoint)]),
+            check=True,
         )
-
-        root_part = target_part
-
+        log(f"EFI bind-mounted from {current_efi_mnt}")
     else:
-        unmount_target_disk(disk, log)
-        install_cmd = _build_bootc_install_cmd(
-            "to-disk", src_ref, tgt_ref, disk,
-            extra_flags=["--filesystem", "btrfs", "--wipe"],
+        run_command(
+            _as_root(["mount", efi_part, str(efi_mountpoint)]),
+            check=True,
         )
-        context.enter_phase(InstallPhase.IMAGE)
-        _run_cmd(
-            install_cmd, 5, 90, log, progress,
-            stall_timeout=3600, absolute_timeout=None,
-            publish=lambda event: _push(event, context),
-        )
-        root_part = get_root_partition(disk)
-    return target_part, root_part, alongside_mount
+        log(f"EFI mounted from {efi_part}")
+
+
+def _prepare_partition_target_storage(
+    target_part, efi_part, alongside_mount, src_ref, tgt_ref, log, progress,
+    context: InstallerContext,
+):
+    """Storage prep for the alongside/manual install modes: format the
+    user-selected target partition as btrfs, lay out @ / @home subvolumes,
+    mount it (plus EFI if present) under alongside_mount, then write the OS
+    image into that mountpoint via `bootc install to-filesystem`.
+    """
+    log(f"Target partition : {target_part}")
+    log(f"EFI partition    : {efi_part or '(none detected)'}")
+
+    _safe_umount(run_command, target_part)
+    run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
+
+    _create_btrfs_subvolumes(target_part, log, progress, context)
+
+    _require_no_symlink(alongside_mount)
+    run_command(_as_root(["mkdir", "-p", alongside_mount]), check=True)
+    context.register_mount(alongside_mount)
+    run_command(_as_root(["mount", "-o", "subvol=@", target_part, alongside_mount]), check=True)
+    progress(11)
+
+    if efi_part:
+        _mount_efi_for_alongside(alongside_mount, efi_part, log, context)
+
+    install_cmd = _build_bootc_install_cmd(
+        "to-filesystem", src_ref, tgt_ref, alongside_mount,
+        # --skip-fetch-check unconditionally here (not gated behind the
+        # SKIP_FETCH_CHECK env toggle, which controls the unrelated
+        # network-preflight check below): this target mountpoint already
+        # has other partitions (e.g. a bind-mounted /boot/efi) mounted
+        # under it, which is exactly the case the partition CLI exercises.
+        # See plan.py's install_mode
+        # docstring for the "alongside" mode.
+        extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@", "--skip-fetch-check"],
+    )
+    context.enter_phase(InstallPhase.IMAGE)
+    _run_cmd(
+        install_cmd, 12, 90, log, progress,
+        stall_timeout=3600, absolute_timeout=None,
+        publish=lambda event: _push(event, context),
+    )
+
+    return target_part, target_part, alongside_mount
+
+
+def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_mount, context: InstallerContext):
+    """Storage prep for the wipe install mode: unmount anything blocking the
+    disk, then write the OS image via `bootc install to-disk`.
+    """
+    unmount_target_disk(disk, log)
+    install_cmd = _build_bootc_install_cmd(
+        "to-disk", src_ref, tgt_ref, disk,
+        extra_flags=["--filesystem", "btrfs", "--wipe"],
+    )
+    context.enter_phase(InstallPhase.IMAGE)
+    _run_cmd(
+        install_cmd, 5, 90, log, progress,
+        stall_timeout=3600, absolute_timeout=None,
+        publish=lambda event: _push(event, context),
+    )
+    return "", get_root_partition(disk), alongside_mount
 
 def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
     """Mount the alongside-install target's @home subvolume under the ostree
