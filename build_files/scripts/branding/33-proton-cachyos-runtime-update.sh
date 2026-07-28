@@ -14,6 +14,5 @@
 # for the first time.
 mkdir -p /var/lib/kyth/proton-cachyos
 chmod 1777 /var/lib/kyth/proton-cachyos
-mkdir -p /usr/lib/tmpfiles.d
-echo 'd /var/lib/kyth/proton-cachyos 1777 root root - -' >/usr/lib/tmpfiles.d/kyth-proton-cachyos.conf
-echo 'STEAM_EXTRA_COMPAT_TOOLS_PATHS=/var/lib/kyth/proton-cachyos' >/etc/environment.d/proton-cachyos.conf
+write_line 'd /var/lib/kyth/proton-cachyos 1777 root root - -' /usr/lib/tmpfiles.d/kyth-proton-cachyos.conf
+write_line 'STEAM_EXTRA_COMPAT_TOOLS_PATHS=/var/lib/kyth/proton-cachyos' /etc/environment.d/proton-cachyos.conf

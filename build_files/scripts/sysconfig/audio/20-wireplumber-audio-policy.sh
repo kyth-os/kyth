@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── WirePlumber audio policy ───────────────────────────────────────────────────
 # Two concerns addressed here:
 #   1. Bluetooth codec quality: pipewire-libs-extra ships LDAC and aptX, but
@@ -11,8 +13,7 @@ set -euo pipefail
 #   2. Device priority: USB audio and Bluetooth get higher session priority than
 #      built-in speakers, so plugging in a headset makes it the active output
 #      without a manual switch in the volume mixer.
-mkdir -p /etc/wireplumber/wireplumber.conf.d
-cat >/etc/wireplumber/wireplumber.conf.d/99-kyth-audio.conf <<'WPEOF'
+write_config /etc/wireplumber/wireplumber.conf.d/99-kyth-audio.conf <<'WPEOF'
 # Automatically switch to headset Bluetooth profile (A2DP → HFP) when a call
 # application opens a mic/output pair.  Without this, Bluetooth headsets stay
 # in A2DP (stereo playback) and mic input fails silently in Discord/Teams.
@@ -62,7 +63,6 @@ WPEOF
 # default. Global capture hooks are convenient for streamers, but they can become
 # another compatibility variable for games and GPU apps. `ujust install-obs`
 # enables OBS_VKCAPTURE for the OBS Flatpak specifically.
-mkdir -p /etc/environment.d
-cat >/etc/environment.d/obs-vkcapture.conf <<'OBSVKCAPTUREEOF'
+write_config /etc/environment.d/obs-vkcapture.conf <<'OBSVKCAPTUREEOF'
 # OBS_VKCAPTURE intentionally left unset globally.
 OBSVKCAPTUREEOF

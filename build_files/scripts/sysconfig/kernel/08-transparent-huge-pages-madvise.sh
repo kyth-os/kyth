@@ -2,11 +2,12 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── Transparent Huge Pages → madvise ─────────────────────────────────────────
 # 'always' (kernel default) forces THP on all allocations and causes stutter.
 # 'madvise' lets apps that benefit (e.g. JVMs, some game engines) opt in.
-mkdir -p /etc/tmpfiles.d
-cat >/etc/tmpfiles.d/kyth-thp.conf <<'THPEOF'
+write_config /etc/tmpfiles.d/kyth-thp.conf <<'THPEOF'
 w! /sys/kernel/mm/transparent_hugepage/enabled - - - - madvise
 w! /sys/kernel/mm/transparent_hugepage/defrag  - - - - defer+madvise
 THPEOF
@@ -16,7 +17,7 @@ THPEOF
 # in the bootc base only creates /var/lib/dbus, and /run is empty at every boot.
 # Without this, dbus.socket fails, which then takes down logind, polkit,
 # NetworkManager, and the SDDM greeter.
-cat >/etc/tmpfiles.d/kyth-dbus.conf <<'DBUSTMPFILEEOF'
+write_config /etc/tmpfiles.d/kyth-dbus.conf <<'DBUSTMPFILEEOF'
 d /run/dbus 0755 root root -
 DBUSTMPFILEEOF
 
@@ -24,7 +25,7 @@ DBUSTMPFILEEOF
 # /var content on the initial install — systems that gained plocate via an
 # upgrade never get the directory and plocate-updatedb.service fails daily
 # with "/var/lib/plocate/: No such file or directory".
-cat >/etc/tmpfiles.d/kyth-plocate.conf <<'PLOCATETMPFILEEOF'
+write_config /etc/tmpfiles.d/kyth-plocate.conf <<'PLOCATETMPFILEEOF'
 d /var/lib/plocate 0755 root root -
 PLOCATETMPFILEEOF
 
@@ -33,7 +34,7 @@ PLOCATETMPFILEEOF
 # '"/home" already exists and is not a directory' (and the same for /srv and
 # /root) at error level. Replace those entries with symlink-creating ones
 # that match the ostree layout; L is a no-op when the symlink already exists.
-cat >/usr/lib/tmpfiles.d/home.conf <<'HOMETMPFILEEOF'
+write_config /usr/lib/tmpfiles.d/home.conf <<'HOMETMPFILEEOF'
 # KythOS override — /home and /srv are ostree symlinks into /var.
 L /home - - - - var/home
 L /srv - - - - var/srv

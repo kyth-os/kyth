@@ -31,8 +31,7 @@ install -m 0644 /ctx/auto-update.toml /etc/kyth/auto-update.toml
 install -m 0644 /ctx/kyth-asus-supergfxd.rules /usr/lib/udev/rules.d/98-kyth-asus-supergfxd.rules
 
 # Autostart on first login — removes itself after running once (like kyth-set-resolution).
-mkdir -p /etc/skel/.config/autostart
-cat >/etc/skel/.config/autostart/kyth-welcome.desktop <<'WELCOMEEOF'
+write_config /etc/skel/.config/autostart/kyth-welcome.desktop <<'WELCOMEEOF'
 [Desktop Entry]
 Type=Application
 Name=KythOS Helper

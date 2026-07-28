@@ -8,4 +8,5 @@ set -euo pipefail
 # filename order and do not share state, so the split is purely organizational.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${HERE}/lib/fragment-runner.sh"
+source "${HERE}/lib/config-helpers.sh"
 run_fragments "branding" "source"

@@ -12,14 +12,14 @@ if [[ -f /etc/dracut.conf.d/99-kyth.conf ]]; then
 	grep -q 'add_dracutmodules+=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.conf ||
 		printf '\nadd_dracutmodules+=" kyth-plymouth "\n' >>/etc/dracut.conf.d/99-kyth.conf
 else
-	cat >/etc/dracut.conf.d/99-kyth.conf <<'DRACUTEOF'
+	write_config /etc/dracut.conf.d/99-kyth.conf <<'DRACUTEOF'
 add_dracutmodules+=" ostree drm plymouth kyth-plymouth "
 DRACUTEOF
 fi
 grep -q 'force_add_dracutmodules+=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.conf ||
 	printf 'force_add_dracutmodules+=" kyth-plymouth "\n' >>/etc/dracut.conf.d/99-kyth.conf
 
-cat >/usr/lib/systemd/system/kyth-boot-splash-kargs.service <<'SPLASHKARGSEOF'
+write_config /usr/lib/systemd/system/kyth-boot-splash-kargs.service <<'SPLASHKARGSEOF'
 [Unit]
 Description=KythOS boot splash kernel argument migration
 ConditionPathExists=!/var/lib/kyth/boot-splash-kargs-v2
@@ -37,7 +37,7 @@ systemctl enable kyth-boot-splash-kargs.service 2>/dev/null || true
 install -d -m 0755 /usr/libexec
 install -m 0755 /ctx/kyth-boot-branding-guard /usr/libexec/kyth-boot-branding-guard
 
-cat >/usr/lib/systemd/system/kyth-boot-branding.service <<'BOOTBRANDINGSERVICEEOF'
+write_config /usr/lib/systemd/system/kyth-boot-branding.service <<'BOOTBRANDINGSERVICEEOF'
 [Unit]
 Description=Refresh KythOS bootloader branding
 After=local-fs.target
@@ -51,7 +51,7 @@ WantedBy=multi-user.target
 BOOTBRANDINGSERVICEEOF
 systemctl enable kyth-boot-branding.service 2>/dev/null || true
 
-cat >/usr/lib/systemd/system/kyth-boot-branding.path <<'BOOTBRANDINGPATHEOF'
+write_config /usr/lib/systemd/system/kyth-boot-branding.path <<'BOOTBRANDINGPATHEOF'
 [Unit]
 Description=Watch bootloader entries for KythOS branding repairs
 
@@ -67,7 +67,7 @@ systemctl enable kyth-boot-branding.path 2>/dev/null || true
 
 install -m 0755 /ctx/kyth-refresh-boot-splash-initramfs /usr/libexec/kyth-refresh-boot-splash-initramfs
 
-cat >/usr/lib/systemd/system/kyth-boot-splash-initramfs.service <<'SPLASHINITRDEOF'
+write_config /usr/lib/systemd/system/kyth-boot-splash-initramfs.service <<'SPLASHINITRDEOF'
 [Unit]
 Description=Refresh KythOS boot splash initramfs
 After=local-fs.target ostree-remount.service
@@ -82,7 +82,7 @@ WantedBy=multi-user.target
 SPLASHINITRDEOF
 systemctl enable kyth-boot-splash-initramfs.service 2>/dev/null || true
 
-cat >/usr/lib/systemd/system/kyth-firstboot-notice.service <<'FBOOTEOF'
+write_config /usr/lib/systemd/system/kyth-firstboot-notice.service <<'FBOOTEOF'
 [Unit]
 Description=KythOS first-boot Plymouth notice
 After=plymouth-start.service local-fs.target ostree-remount.service

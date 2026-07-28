@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── KWin VRR policy — Automatic (fullscreen / direct scanout) ────────────────
 # KDE Plasma ships with VRR disabled (VrrPolicy=0 / Never). Gaming users expect
 # their 144 Hz / VRR monitor to actually use variable refresh in games.
@@ -9,8 +11,7 @@ set -euo pipefail
 # display (fullscreen / direct scanout) — i.e., during games — and reverts to
 # fixed rate on the desktop. "Always" (2) would enable VRR even on composited
 # desktop, which causes flicker artifacts on some panels and wastes panel power.
-mkdir -p /etc/xdg
-cat >/etc/xdg/kwinrc <<'KWINRCEOF'
+write_config /etc/xdg/kwinrc <<'KWINRCEOF'
 [Effect-blur]
 BlurStrength=7
 NoiseStrength=0

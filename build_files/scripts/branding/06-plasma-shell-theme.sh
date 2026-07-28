@@ -5,9 +5,7 @@
 # SVG uses fill-opacity=0.82 so KWin's blur effect shines through, producing
 # a frosted glass look. A thin teal top-edge accent line ties the panel to
 # the KythDark color accent and System Hub visual language.
-mkdir -p /usr/share/plasma/desktoptheme/kyth-dark/widgets
-
-cat >/usr/share/plasma/desktoptheme/kyth-dark/metadata.json <<'KYTHMETAEOF'
+write_config /usr/share/plasma/desktoptheme/kyth-dark/metadata.json <<'KYTHMETAEOF'
 {
     "KPlugin": {
         "Authors": [{"Name": "KythOS"}],
@@ -27,7 +25,7 @@ KYTHMETAEOF
 # The hint-* elements encode margin widths for the Plasma SVG renderer;
 # they are invisible (fill:none) and exist only to carry the numeric hint.
 # A 1px teal accent line runs along the top edge of the panel.
-cat >/usr/share/plasma/desktoptheme/kyth-dark/widgets/panel-background.svg <<'KYTHPANELSVGEOF'
+write_config /usr/share/plasma/desktoptheme/kyth-dark/widgets/panel-background.svg <<'KYTHPANELSVGEOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
   <!-- Margin hints (invisible, encode border widths for the 9-patch renderer) -->

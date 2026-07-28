@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-27 02:34:14 UTC
+- Last refreshed (UTC): 2026-07-28 22:47:27 UTC
 - Current branch: testing
-- HEAD commit: 4892060
-- Last commit title: Retire core_base.py's re-export shim and the underscore-as-public-API convention
-- Last commit date: 2026-07-26T22:27:59-04:00
+- HEAD commit: eae725d
+- Last commit title: Fix environment-leaking mock in the BIOS-boot-partition free-space test
+- Last commit date: 2026-07-26T22:34:14-04:00
 - CI workflow files: 8
 - Build script files: 21
 

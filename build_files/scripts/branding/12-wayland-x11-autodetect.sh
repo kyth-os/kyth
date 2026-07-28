@@ -7,8 +7,7 @@
 # The script runs as SDDM's ExecStartPre — fast, idempotent, no flag file.
 install -m 0755 /ctx/kyth-configure-session /usr/bin/kyth-configure-session
 
-mkdir -p /usr/lib/systemd/system/sddm.service.d
-cat >/usr/lib/systemd/system/sddm.service.d/10-kyth-detect-session.conf <<'SDDMDROPINEOF'
+write_config /usr/lib/systemd/system/sddm.service.d/10-kyth-detect-session.conf <<'SDDMDROPINEOF'
 [Service]
 ExecStartPre=/usr/bin/kyth-configure-session
 SDDMDROPINEOF

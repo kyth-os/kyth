@@ -2,11 +2,12 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── NVMe Read-Ahead Tuning ───────────────────────────────────────────────────
 # Increases block device read-ahead to 2048 KB for NVMe drives,
 # improving sequential disk read throughput and game loading times.
-mkdir -p /etc/udev/rules.d
-cat >/etc/udev/rules.d/60-nvme-readahead.rules <<'EOF'
+write_config /etc/udev/rules.d/60-nvme-readahead.rules <<'EOF'
 # ENV{DEVTYPE}=="disk" restricts this to whole-disk nodes (nvme0n1), not
 # partitions (nvme0n1p1) — partitions have no queue/read_ahead_kb attribute
 # of their own, so without this the rule fired on every partition too and

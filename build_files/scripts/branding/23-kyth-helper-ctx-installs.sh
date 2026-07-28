@@ -17,7 +17,7 @@ unset welcome_package_dir
 install -m 0755 /ctx/kyth-welcome/kyth-welcome-launch /usr/bin/kyth-welcome-launch
 install -m 0644 /ctx/kyth-welcome/kyth-welcome.desktop \
 	/usr/share/applications/kyth-welcome.desktop
-cat >/usr/share/applications/kyth-app-store.desktop <<'APPSTOREEOF'
+write_config /usr/share/applications/kyth-app-store.desktop <<'APPSTOREEOF'
 [Desktop Entry]
 Type=Application
 Name=KythOS App Store
@@ -44,8 +44,7 @@ install -m 0755 /ctx/kyth-welcome/kyth-welcome.desktop \
 # Recycle Bin on the desktop keeps deletion recovery visible. Type=Link entries
 # open in Dolphin and need no executable/trust bit. Kept in /usr/share/kyth so
 # the user-polish pass can seed existing accounts too.
-mkdir -p /usr/share/kyth
-cat >/usr/share/kyth/kyth-recycle-bin.desktop <<'TRASHEOF'
+write_config /usr/share/kyth/kyth-recycle-bin.desktop <<'TRASHEOF'
 [Desktop Entry]
 Type=Link
 URL=trash:/

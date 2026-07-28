@@ -3,8 +3,7 @@
 # First-login autostart: run kscreen-doctor to set all outputs to their
 # preferred (auto) mode.  Works for both hardware and VMs.  Removes itself
 # so it only fires once per user.
-mkdir -p /etc/skel/.config/autostart
-cat >/etc/skel/.config/autostart/kyth-set-resolution.desktop <<'RESEOF'
+write_config /etc/skel/.config/autostart/kyth-set-resolution.desktop <<'RESEOF'
 [Desktop Entry]
 Type=Application
 Name=KythOS: Set display resolution
@@ -18,8 +17,7 @@ install -m 0755 /ctx/kyth-set-resolution /usr/bin/kyth-set-resolution
 
 write_kyth_os_release() {
 	local target=$1
-	mkdir -p "$(dirname "${target}")"
-	cat >"${target}" <<'EOF'
+	write_config "${target}" <<'EOF'
 NAME="KythOS"
 PRETTY_NAME="KythOS 44"
 ID=kythos

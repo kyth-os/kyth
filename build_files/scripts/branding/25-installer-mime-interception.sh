@@ -27,7 +27,7 @@ for _hidden_desktop in \
 	org.kde.kdebugsettings.desktop \
 	org.kde.kjournaldbrowser.desktop \
 	remote-viewer.desktop; do
-	cat >"/usr/local/share/applications/${_hidden_desktop}" <<'HIDDENDESKTOPEOF'
+	write_config "/usr/local/share/applications/${_hidden_desktop}" <<'HIDDENDESKTOPEOF'
 [Desktop Entry]
 Type=Application
 Name=Hidden expert tool
@@ -86,7 +86,7 @@ install -m 0644 /ctx/kyth-nearby-share.desktop \
 
 # Surface a plain "Open Terminal Here" action in Dolphin. This is a small
 # everyday comfort affordance for support notes, development, and modding.
-cat >/usr/share/kio/servicemenus/kyth-open-terminal-here.desktop <<'TERMHEREDESKTOPEOF'
+write_config /usr/share/kio/servicemenus/kyth-open-terminal-here.desktop <<'TERMHEREDESKTOPEOF'
 [Desktop Entry]
 Type=Service
 MimeType=inode/directory;

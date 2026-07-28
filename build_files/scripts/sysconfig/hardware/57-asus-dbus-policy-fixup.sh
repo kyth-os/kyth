@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── ASUS D-Bus policy fixup ───────────────────────────────────────────────────
 # asusctl/supergfxctl are opt-in (ujust install-asus-tools), layered at runtime
 # rather than baked into the base image, so their D-Bus policy files don't
@@ -13,8 +15,7 @@ set -euo pipefail
 # Ship a boot-time oneshot that rewrites the policy files if/when they show up
 # after a layered install + reboot, mirroring kyth-system-accounts.service's
 # "repair after layering" pattern. A no-op on systems without ASUS hardware.
-install -d -m 0755 /usr/libexec
-cat >/usr/libexec/kyth-fix-asus-dbus-policy <<'ASUSDBUSFIXEOF'
+write_config /usr/libexec/kyth-fix-asus-dbus-policy 0755 <<'ASUSDBUSFIXEOF'
 #!/usr/bin/bash
 set -euo pipefail
 for dbus_policy in \
@@ -23,9 +24,8 @@ for dbus_policy in \
 	[[ -f "${dbus_policy}" ]] && sed -i 's/group="sudo"/group="wheel"/' "${dbus_policy}"
 done
 ASUSDBUSFIXEOF
-chmod 0755 /usr/libexec/kyth-fix-asus-dbus-policy
 
-cat >/usr/lib/systemd/system/kyth-asus-dbus-policy-fixup.service <<'ASUSDBUSUNITEOF'
+write_config /usr/lib/systemd/system/kyth-asus-dbus-policy-fixup.service <<'ASUSDBUSUNITEOF'
 [Unit]
 Description=Rewrite asusd/supergfxd D-Bus policy group for Fedora
 DefaultDependencies=no

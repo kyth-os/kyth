@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── Sleep reliability ─────────────────────────────────────────────────────────
 # Hybrid sleep and suspend-then-hibernate are common causes of black screen on
 # wake for gaming PCs: the NVRAM hibernation image doesn't survive a full power
@@ -12,8 +14,7 @@ set -euo pipefail
 # S3 (hardware-level suspend-to-RAM) rather than s2idle (CPU halt + PCIe active),
 # which drains more power and is more prone to wake-on-USB spurious events.
 # s2idle is still used as a fallback on systems that don't advertise S3 support.
-mkdir -p /etc/systemd/sleep.conf.d
-cat >/etc/systemd/sleep.conf.d/kyth-sleep.conf <<'SLEEPEOF'
+write_config /etc/systemd/sleep.conf.d/kyth-sleep.conf <<'SLEEPEOF'
 [Sleep]
 AllowSuspend=yes
 AllowHibernation=no

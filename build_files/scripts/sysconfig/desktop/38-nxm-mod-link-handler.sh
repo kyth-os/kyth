@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── NXM mod link handler ──────────────────────────────────────────────────────
 # Nexus Mods uses nxm:// URIs to hand off mod downloads to a local manager
 # (Vortex, Mod Organizer 2).  Register a system-wide handler so Firefox and
@@ -9,7 +11,7 @@ set -euo pipefail
 # user's installed mod manager (Vortex in Bottles preferred, then MO2).
 install -m 0755 /ctx/sysconfig/kyth-nxm-handler /usr/bin/kyth-nxm-handler
 
-cat >/usr/share/applications/kyth-nxm-handler.desktop <<'NXMDESKEOF'
+write_config /usr/share/applications/kyth-nxm-handler.desktop <<'NXMDESKEOF'
 [Desktop Entry]
 Type=Application
 Name=KythOS NXM Handler

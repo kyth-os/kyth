@@ -2,18 +2,18 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── WiFi — disable power management ──────────────────────────────────────────
 # Linux WiFi power-save throttles the radio when idle, reducing signal
 # sensitivity and causing apparent "weak signal" even close to the AP.
 # NetworkManager powersave=2 disables it at the connection level (all adapters).
-mkdir -p /etc/NetworkManager/conf.d
-cat >/etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'NMEOF'
+write_config /etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'NMEOF'
 [connection]
 wifi.powersave = 2
 NMEOF
 
-mkdir -p /etc/NetworkManager/dispatcher.d
-cat >/etc/NetworkManager/dispatcher.d/90-kyth-prefer-last-wifi <<'NMDISPEOF'
+write_config /etc/NetworkManager/dispatcher.d/90-kyth-prefer-last-wifi 0755 <<'NMDISPEOF'
 #!/usr/bin/env bash
 set -u
 
@@ -50,13 +50,11 @@ while IFS=: read -r other_uuid other_type; do
     nmcli connection modify "${other_uuid}" connection.autoconnect no >/dev/null 2>&1 || true
 done < <(nmcli -t -f UUID,TYPE connection show 2>/dev/null || true)
 NMDISPEOF
-chmod 0755 /etc/NetworkManager/dispatcher.d/90-kyth-prefer-last-wifi
 
 install -d -m 0755 /usr/libexec
 install -m 0755 /ctx/sysconfig/kyth-network-fallback /usr/libexec/kyth-network-fallback
 
-mkdir -p /etc/xdg/autostart
-cat >/etc/xdg/autostart/kyth-network-fallback.desktop <<'NETFALLBACKDESKTOPEOF'
+write_config /etc/xdg/autostart/kyth-network-fallback.desktop <<'NETFALLBACKDESKTOPEOF'
 [Desktop Entry]
 Type=Application
 Name=Kyth Network Fallback
@@ -68,7 +66,7 @@ X-KDE-autostart-after=panel
 NoDisplay=true
 NETFALLBACKDESKTOPEOF
 
-cat >/etc/NetworkManager/dispatcher.d/80-kyth-wired-or-wireless <<'NMWIREDEOF'
+write_config /etc/NetworkManager/dispatcher.d/80-kyth-wired-or-wireless 0755 <<'NMWIREDEOF'
 #!/usr/bin/env bash
 set -u
 
@@ -113,4 +111,3 @@ esac
 
 exit 0
 NMWIREDEOF
-chmod 0755 /etc/NetworkManager/dispatcher.d/80-kyth-wired-or-wireless

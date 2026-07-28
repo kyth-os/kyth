@@ -5,8 +5,7 @@
 # "Security" alone is not a recognized XDG main category, so apps without a main
 # category fall through to KDE's catch-all bucket.  X-KythSecurity is our custom
 # main category; the .menu merge file teaches KDE what group it belongs to.
-mkdir -p /usr/share/desktop-directories
-cat >/usr/share/desktop-directories/kyth-security.directory <<'SECDIREF'
+write_config /usr/share/desktop-directories/kyth-security.directory <<'SECDIREF'
 [Desktop Entry]
 Version=1.0
 Type=Directory
@@ -18,8 +17,7 @@ SECDIREF
 install -m 0644 /ctx/kyth-web-apps.directory \
 	/usr/share/desktop-directories/kyth-web-apps.directory
 
-mkdir -p /etc/xdg/menus/applications-merged
-cat >/etc/xdg/menus/applications-merged/kyth-security.menu <<'SECMENUEOF'
+write_config /etc/xdg/menus/applications-merged/kyth-security.menu <<'SECMENUEOF'
 <!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN"
   "http://www.freedesktop.org/standards/menu-spec/menu-1.0.dtd">
 <Menu>

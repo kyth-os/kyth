@@ -2,9 +2,10 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── Proton/Wine environment defaults ──────────────────────────────────────────
-mkdir -p /etc/environment.d
-cat >/etc/environment.d/proton-radv.conf <<'PROTONEOF'
+write_config /etc/environment.d/proton-radv.conf <<'PROTONEOF'
 PROTON_FORCE_LARGE_ADDRESS_AWARE=1
 WINE_LARGE_ADDRESS_AWARE=1
 PROTON_USE_NTSYNC=1

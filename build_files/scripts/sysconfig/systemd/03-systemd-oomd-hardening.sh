@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+
 # ── systemd-oomd hardening ────────────────────────────────────────────────────
 # By default systemd-oomd runs but monitors nothing — cgroups must explicitly
 # opt in with ManagedOOMSwap/ManagedOOMMemoryPressure. Without these, oomd sits
@@ -18,8 +20,7 @@ set -euo pipefail
 #   still catching genuine runaway processes well before the kernel OOM killer.
 # - SwapUsedLimit raised to 85%: zram compresses at ~3:1, so 85% of 14 GB of
 #   zram logical capacity still leaves physical RAM available for decompression.
-mkdir -p /etc/systemd/oomd.conf.d
-cat >/etc/systemd/oomd.conf.d/99-kyth.conf <<'OOMDEOF'
+write_config /etc/systemd/oomd.conf.d/99-kyth.conf <<'OOMDEOF'
 [OOM]
 SwapUsedLimit=85%
 DefaultMemoryPressureLimit=65%
@@ -29,8 +30,7 @@ OOMDEOF
 # Opt the user session slice into oomd monitoring. oomd will select and kill
 # the highest-OOM-score process inside user.slice when thresholds are breached,
 # sparing session-critical processes like dbus-broker and plasmashell.
-mkdir -p /etc/systemd/system/user.slice.d
-cat >/etc/systemd/system/user.slice.d/10-oomd-user.conf <<'OOMDSLICEEOF'
+write_config /etc/systemd/system/user.slice.d/10-oomd-user.conf <<'OOMDSLICEEOF'
 [Slice]
 ManagedOOMSwap=kill
 ManagedOOMMemoryPressure=kill
