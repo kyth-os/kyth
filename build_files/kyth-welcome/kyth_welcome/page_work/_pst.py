@@ -1,7 +1,7 @@
 import os
 
 # __KYTH_GENERATED_IMPORTS__
-from .services.runtime import release_worker_when_finished
+from ..services.runtime import release_worker_when_finished
 from ..services.gaming import DataWorker
 from ..services.work import _convert_pst, _scan_for_pst_files
 from ..qt import QFileDialog, QHBoxLayout, QLabel, QPushButton

@@ -8,9 +8,9 @@ button to System Hub for anyone who wants the full page.
 """
 from __future__ import annotations
 
-from .core_base import IS_LIVE
-from .services.process import command_stdout
-from .services.bootc import current_branch, has_rollback_deployment, has_staged_update
+from ..core_base import IS_LIVE
+from ..services.process import command_stdout
+from ..services.bootc import current_branch, has_rollback_deployment, has_staged_update
 from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives, _proton_cachyos_version
 from ..services.hardware import _detect_nvidia

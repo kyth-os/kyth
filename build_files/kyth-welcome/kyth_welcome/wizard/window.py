@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from .core_base import load_profile, restyle, save_profile
-from .services.runtime import running_threads
+from ..core_base import load_profile, restyle, save_profile
+from ..services.runtime import running_threads
 from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QMainWindow, QMessageBox, QPushButton,
     QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,

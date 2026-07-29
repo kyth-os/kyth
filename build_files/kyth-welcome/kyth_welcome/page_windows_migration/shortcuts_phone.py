@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .core_base import restyle
+from ..core_base import restyle
 from ..services.phone_link import (
     _configure_dynamic_lock_service,
     _kdeconnect_devices,
@@ -12,7 +12,7 @@ from ..services.phone_link import (
     _save_dynamic_lock_config,
     _send_kdeconnect_sms,
 )
-from .services.runtime import DataWorker, release_worker_when_finished
+from ..services.runtime import DataWorker, release_worker_when_finished
 from ..services.launch import popen, systemsettings, kcmshell
 from ..qt import (
     QCheckBox, QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QUrl, single_shot,

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-from .services.process import human_bytes
-from .services.runtime import DataWorker, release_worker_when_finished
+from ..services.process import human_bytes
+from ..services.runtime import DataWorker, release_worker_when_finished
 from ..actions import _install_flatpak_inline
 from ..services.windows_migration import (
     _scan_windows_bookmarks,

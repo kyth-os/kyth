@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from .services.runtime import release_worker_when_finished
+from ..services.runtime import release_worker_when_finished
 from ..services.diagnostics import _collect_security_status
 from ..services.gaming import DataWorker
 from ..qt import QFrame, QHBoxLayout, QLabel, QVBoxLayout

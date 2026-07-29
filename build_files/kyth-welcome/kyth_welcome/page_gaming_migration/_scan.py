@@ -1,8 +1,8 @@
 import re
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import restyle
-from .services.runtime import release_worker_when_finished
+from ..core_base import restyle
+from ..services.runtime import release_worker_when_finished
 from ..services.process import run_command
 from ..services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _find_ntfs_drives, _find_steam_libraries,

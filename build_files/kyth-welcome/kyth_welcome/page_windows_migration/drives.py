@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from .core_base import restyle
+from ..core_base import restyle
 from ..services.runtime import (
     DataWorker,
 )
-from .services.runtime import finish_worker, release_worker_when_finished
+from ..services.runtime import finish_worker, release_worker_when_finished
 from ..services.windows_migration import (
     WindowsLibraryWorker,
     _unlock_bitlocker_drive,

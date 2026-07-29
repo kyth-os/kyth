@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import shutil
-from .core_base import restyle
-from .services.process import human_bytes
-from .services.runtime import DataWorker, release_worker_when_finished
+from ..core_base import restyle
+from ..services.process import human_bytes
+from ..services.runtime import DataWorker, release_worker_when_finished
 from ..services.windows_migration import (
     UserFilesCopyWorker,
     _folder_sizes_calc,

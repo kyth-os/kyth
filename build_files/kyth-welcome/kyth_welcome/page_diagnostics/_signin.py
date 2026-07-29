@@ -1,7 +1,7 @@
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .services.runtime import release_worker_when_finished
+from ..services.runtime import release_worker_when_finished
 from ..services.diagnostics import _collect_signin_status, fingerprint_enroll_shell_command
 from ..services.gaming import DataWorker
 from ..services.launch import open_first, open_settings_module, open_terminal_command

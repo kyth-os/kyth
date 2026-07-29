@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from .services.runtime import DataWorker, release_worker_when_finished
+from ..services.runtime import DataWorker, release_worker_when_finished
 from ..actions import _install_flatpak_inline
 from ..services.flatpak import _is_flatpak_installed
 from ..services.launch import flatpak_run, popen, systemsettings, kcmshell

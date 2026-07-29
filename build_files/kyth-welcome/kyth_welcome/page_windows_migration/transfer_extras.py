@@ -8,7 +8,7 @@ from ..services.process import run_command
 from ..services.runtime import (
     DataWorker,
 )
-from .services.runtime import Worker, release_worker_when_finished
+from ..services.runtime import Worker, release_worker_when_finished
 from ..services.launch import popen
 from ..services.windows_migration import (
     _copy_game_saves,

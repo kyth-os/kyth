@@ -4,7 +4,7 @@ from ._saves import _SavesMixin
 from ._mods import _ModsMixin
 from ._scan import _ScanMixin
 from ._win_lib import _WinLibMixin
-from .services.runtime import release_worker_when_finished
+from ..services.runtime import release_worker_when_finished
 from ..services.workers.windows_migration import WindowsLibraryWorker
 from ..qt import single_shot
 
