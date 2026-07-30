@@ -1,30 +1,39 @@
 # shellcheck shell=bash
 
-# Build an initramfs defensively. dracut's `hardlink` post-processing pass
-# (deduplicating identical files in the initramfs) uses util-linux hardlink's
-# AF_ALG kernel-crypto-API file comparison, which reliably SIGSEGVs on these
-# GitHub Actions build containers — a known upstream issue (util-linux is
-# removing AF_ALG from hardlink entirely: util-linux/util-linux#4334).
-# --nohardlink skips that pass; the resulting initramfs is a few KB larger,
-# never smaller/functionally different. The retry-with-lsinitrd-verification
-# loop below is kept as defense-in-depth against any other transient dracut
-# failure, not as the fix for this specific one.
+# Build an initramfs defensively.
+#
+# kinoite-main ships /root as a symlink to var/roothome, but /var/roothome
+# doesn't exist in the container image. dracut's core skeleton setup
+# unconditionally calls `inst_symlink /root` for every build (see
+# /usr/bin/dracut's `for d in dev proc sys sysroot root run` loop), which
+# fails with "dracut-install: ERROR: installing '/root'" against the
+# dangling symlink. Creating the target first makes that install succeed.
+# --nohardlink additionally skips dracut's post-build hardlink dedup pass,
+# whose util-linux AF_ALG file-comparison path is a known SIGSEGV risk on
+# some containerized builders (util-linux/util-linux#4334) — unrelated to
+# the /root issue above, kept as a separate precaution.
 kyth_build_initramfs() {
 	local output=$1
 	shift
 	local attempt status=1
+	local stderr_log
+	stderr_log=$(mktemp)
+
+	install -d -m 0700 /var/roothome
 
 	for attempt in 1 2; do
 		rm -f "${output}"
-		if TMPDIR=/var/tmp dracut "$@" --nohardlink --force "${output}" \
-			2> >(grep -Ev 'xattr|fail to copy' >&2); then
+		if TMPDIR=/var/tmp dracut "$@" --nohardlink --force "${output}" 2>"${stderr_log}"; then
+			grep -Ev 'xattr|fail to copy' "${stderr_log}" >&2
 			if lsinitrd "${output}" >/dev/null; then
+				rm -f "${stderr_log}"
 				return 0
 			fi
 			status=1
 			echo "WARNING: dracut produced an unreadable initramfs (attempt ${attempt}/2)" >&2
 		else
 			status=$?
+			grep -Ev 'xattr|fail to copy' "${stderr_log}" >&2
 			echo "WARNING: dracut failed with status ${status} (attempt ${attempt}/2)" >&2
 		fi
 
@@ -33,6 +42,6 @@ kyth_build_initramfs() {
 		fi
 	done
 
-	rm -f "${output}"
+	rm -f "${output}" "${stderr_log}"
 	return "${status}"
 }

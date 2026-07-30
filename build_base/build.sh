@@ -258,13 +258,19 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 	install -m 0644 /usr/share/kyth/branding/transparent-watermark.png \
 		"${_kyth_plymouth_include_root}/usr/share/pixmaps/system-logo-white.png"
 	_kyth_initramfs="/usr/lib/modules/${KVER}/initramfs"
-	# --nohardlink: dracut's hardlink-dedup pass uses util-linux hardlink's
-	# AF_ALG kernel-crypto-API file comparison, which reliably SIGSEGVs on
-	# these GitHub Actions build containers (a known upstream issue —
-	# util-linux is removing AF_ALG from hardlink entirely:
-	# util-linux/util-linux#4334). Skipping it costs a few KB of initramfs
-	# size, nothing functional. The retry loop below stays as defense-in-depth
-	# against any other transient dracut failure, not as the fix for this one.
+	# kinoite-main ships /root as a symlink to var/roothome, but
+	# /var/roothome doesn't exist in the container image. dracut's core
+	# skeleton setup unconditionally calls `inst_symlink /root` for every
+	# build (see /usr/bin/dracut's `for d in dev proc sys sysroot root run`
+	# loop), which fails with "dracut-install: ERROR: installing '/root'"
+	# against the dangling symlink. Creating the target first makes that
+	# install succeed. --nohardlink additionally skips dracut's post-build
+	# hardlink dedup pass, whose util-linux AF_ALG file-comparison path is a
+	# known SIGSEGV risk on some containerized builders
+	# (util-linux/util-linux#4334) — unrelated to the /root issue above,
+	# kept as a separate precaution.
+	install -d -m 0700 /var/roothome
+	_kyth_dracut_stderr="$(mktemp)"
 	_kyth_dracut_status=1
 	for _kyth_dracut_attempt in 1 2; do
 		rm -f "${_kyth_initramfs}"
@@ -277,7 +283,8 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 			--add kyth-plymouth \
 			--include "${_kyth_plymouth_include_root}" / \
 			"${_kyth_initramfs}" \
-			2> >(grep -Ev 'xattr|fail to copy' >&2); then
+			2>"${_kyth_dracut_stderr}"; then
+			grep -Ev 'xattr|fail to copy' "${_kyth_dracut_stderr}" >&2
 			if lsinitrd "${_kyth_initramfs}" >/dev/null; then
 				_kyth_dracut_status=0
 				break
@@ -286,12 +293,15 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 			echo "WARNING: dracut produced an unreadable initramfs (attempt ${_kyth_dracut_attempt}/2)" >&2
 		else
 			_kyth_dracut_status=$?
+			grep -Ev 'xattr|fail to copy' "${_kyth_dracut_stderr}" >&2
 			echo "WARNING: dracut failed with status ${_kyth_dracut_status} (attempt ${_kyth_dracut_attempt}/2)" >&2
 		fi
 		if ((_kyth_dracut_attempt < 2)); then
 			echo "Retrying initramfs generation from a clean output..." >&2
 		fi
 	done
+	rm -f "${_kyth_dracut_stderr}"
+	unset _kyth_dracut_stderr
 	if ((_kyth_dracut_status != 0)); then
 		rm -f "${_kyth_initramfs}"
 		exit "${_kyth_dracut_status}"
