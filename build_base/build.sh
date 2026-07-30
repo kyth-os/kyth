@@ -253,15 +253,38 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 		"${_kyth_plymouth_include_root}/usr/share/plymouth/plymouthd.defaults"
 	install -m 0644 /usr/share/kyth/branding/transparent-watermark.png \
 		"${_kyth_plymouth_include_root}/usr/share/pixmaps/system-logo-white.png"
-	TMPDIR=/var/tmp dracut \
-		--no-hostonly \
-		--compress "zstd -1" \
-		--kver "${KVER}" \
-		--force \
-		--add kyth-plymouth \
-		--include "${_kyth_plymouth_include_root}" / \
-		"/usr/lib/modules/${KVER}/initramfs" \
-		2> >(grep -Ev 'xattr|fail to copy' >&2)
+	_kyth_initramfs="/usr/lib/modules/${KVER}/initramfs"
+	_kyth_dracut_status=1
+	for _kyth_dracut_attempt in 1 2; do
+		rm -f "${_kyth_initramfs}"
+		if TMPDIR=/var/tmp dracut \
+			--no-hostonly \
+			--compress "zstd -1" \
+			--kver "${KVER}" \
+			--force \
+			--add kyth-plymouth \
+			--include "${_kyth_plymouth_include_root}" / \
+			"${_kyth_initramfs}" \
+			2> >(grep -Ev 'xattr|fail to copy' >&2); then
+			if lsinitrd "${_kyth_initramfs}" >/dev/null; then
+				_kyth_dracut_status=0
+				break
+			fi
+			_kyth_dracut_status=1
+			echo "WARNING: dracut produced an unreadable initramfs (attempt ${_kyth_dracut_attempt}/2)" >&2
+		else
+			_kyth_dracut_status=$?
+			echo "WARNING: dracut failed with status ${_kyth_dracut_status} (attempt ${_kyth_dracut_attempt}/2)" >&2
+		fi
+		if ((_kyth_dracut_attempt < 2)); then
+			echo "Retrying initramfs generation from a clean output..." >&2
+		fi
+	done
+	if ((_kyth_dracut_status != 0)); then
+		rm -f "${_kyth_initramfs}"
+		exit "${_kyth_dracut_status}"
+	fi
+	unset _kyth_dracut_attempt _kyth_dracut_status _kyth_initramfs
 	rm -rf "${_kyth_plymouth_include_root}"
 	if command -v lsinitrd >/dev/null 2>&1; then
 		_initrd_listing="$(mktemp)"

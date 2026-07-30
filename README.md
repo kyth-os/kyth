@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-30 03:01:43 UTC
+- Last refreshed (UTC): 2026-07-30 03:10:02 UTC
 - Current branch: testing
-- HEAD commit: 8fb753c
-- Last commit title: Harden installer NTFS coexistence paths
-- Last commit date: 2026-07-29T22:46:07-04:00
+- HEAD commit: a6c54d0
+- Last commit title: Raise installer feature parity baseline
+- Last commit date: 2026-07-29T23:01:43-04:00
 - CI workflow files: 8
 - Build script files: 21
 

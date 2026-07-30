@@ -130,6 +130,7 @@ ARG BUILD_DATE=unset
 RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-git.sh \
     --mount=type=bind,source=build_files/scripts/kernel-repair.sh,target=/ctx/kernel-repair.sh \
     --mount=type=bind,source=build_files/scripts/lib/find-kver.sh,target=/ctx/lib/find-kver.sh \
+    --mount=type=bind,source=build_files/scripts/lib/dracut-retry.sh,target=/ctx/lib/dracut-retry.sh \
     --mount=type=bind,source=build_files/scripts/lib/check-multilib.sh,target=/ctx/lib/check-multilib.sh \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=tmpfs,dst=/tmp \

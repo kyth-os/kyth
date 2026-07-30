@@ -10,6 +10,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/find-kver.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-initrd-checks.sh"
 # shellcheck source=lib/plymouth-config.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-config.sh"
+# shellcheck source=lib/dracut-retry.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/dracut-retry.sh"
 
 /usr/libexec/kyth-plymouth-branding-guard /ctx/branding/transparent-watermark.svg
 
@@ -24,14 +26,11 @@ mkdir -p /etc/plymouth /usr/share/plymouth
 printf '%s\n' "${KYTH_PLYMOUTHD_CONF}" >/etc/plymouth/plymouthd.conf
 install -m 0644 /etc/plymouth/plymouthd.conf /usr/share/plymouth/plymouthd.defaults
 
-TMPDIR=/var/tmp dracut \
+kyth_build_initramfs "/usr/lib/modules/${KVER}/initramfs" \
 	--no-hostonly \
 	--compress "zstd -3" \
 	--kver "${KVER}" \
-	--force \
-	--add kyth-plymouth \
-	"/usr/lib/modules/${KVER}/initramfs" \
-	2> >(grep -Ev 'xattr|fail to copy' >&2)
+	--add kyth-plymouth
 
 echo "=== POST-DRACUT: plymouthd.defaults from initramfs ===" >&2
 (lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" 2>/dev/null || echo "MISSING") >&2
