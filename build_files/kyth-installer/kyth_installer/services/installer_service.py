@@ -39,6 +39,8 @@ class InstallerService:
         partition = disk._normal_device_path(body.get("partition", ""))
         if error or not partition:
             return None, None, None, error or {"ok": False, "message": "Disk and partition are required."}
+        if disk._parent_disk(partition) != disk_path:
+            return None, None, None, {"ok": False, "message": "Partition does not belong to the active disk."}
         return disk_path, journal, partition, None
 
     def new_table(self, body: dict) -> dict:
@@ -121,7 +123,7 @@ class InstallerService:
         if error:
             return error
         mountpoint = body.get("mountpoint", "").strip()
-        if mountpoint and not mountpoint.startswith("/"):
+        if mountpoint and mountpoint != "swap" and not mountpoint.startswith("/"):
             return {"ok": False, "message": "Mount point must be an absolute path (e.g. /, /home)."}
         journal.add_op("set_mountpoint", {"partition": partition, "mountpoint": mountpoint})
         return {"ok": True, "pending": len(journal.ops)}

@@ -142,6 +142,28 @@ def list_timezones() -> list[str]:
     return ["UTC"]
 
 
+def _list_localectl_values(kind: str, fallback: list[str]) -> list[str]:
+    try:
+        result = run_command(
+            ["localectl", f"list-{kind}", "--no-pager"],
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+        values = sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
+        if values:
+            return values
+    except Exception:
+        _logger.debug("localectl list-%s failed", kind, exc_info=True)
+    return fallback
+
+
+def list_locales() -> list[str]:
+    return _list_localectl_values("locales", ["en_US.UTF-8"])
+
+
+def list_keymaps() -> list[str]:
+    return _list_localectl_values("keymaps", ["us"])
+
+
 def find_deploy_etc(root_mount: str) -> Optional[str]:
     candidates = glob.glob(f"{root_mount}/ostree/deploy/default/deploy/*/etc")
     if not candidates:

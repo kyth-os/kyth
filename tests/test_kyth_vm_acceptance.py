@@ -34,6 +34,15 @@ class VmAcceptanceTests(unittest.TestCase):
         self.assertIn("oci:/usr/share/kyth/image:latest", text)
         self.assertIn("virtio-KYTH_ACCEPT", text)
 
+    def test_live_build_bundles_the_installer_image(self):
+        build = (ROOT / "installer" / "build.sh").read_text(encoding="utf-8")
+        containerfile = (ROOT / "installer" / "Containerfile").read_text(encoding="utf-8")
+
+        self.assertIn('"oci:/usr/share/kyth/image:latest"', build)
+        self.assertIn("skopeo copy --retry-times 3", build)
+        self.assertIn("KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest", build)
+        self.assertIn("INSTALL_SOURCE_IMAGE", containerfile)
+
     def test_update_reference_policy(self):
         self.assertTrue(vm_acceptance.valid_update_ref("ghcr.io/example/kyth:testing"))
         self.assertTrue(vm_acceptance.valid_update_ref(""))

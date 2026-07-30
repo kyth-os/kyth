@@ -1,4 +1,7 @@
 import sys
+import json
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -10,7 +13,7 @@ if str(INSTALLER_ROOT) not in sys.path:
 
 from kyth_installer.context import InstallerContext
 from kyth_installer.services.installer_service import InstallerService
-from kyth_installer.app import run_headless
+from kyth_installer.app import _load_answer_file, run_headless
 
 
 class TestInstallerService(unittest.TestCase):
@@ -22,7 +25,7 @@ class TestInstallerService(unittest.TestCase):
     def test_new_table(self, mock_list_disks):
         mock_list_disks.return_value = [{"name": "/dev/sda"}]
         body = {"disk": "/dev/sda", "table_type": "gpt"}
-        
+
         # Test valid disk and table type
         res = self.service.new_table(body)
         self.assertTrue(res.get("ok"))
@@ -51,17 +54,63 @@ class TestInstallerService(unittest.TestCase):
         }
         res = self.service.start_install(body)
         self.assertFalse(res.get("started"))
-        
+
         # Invalid hostname
         body["username"] = "validuser"
         body["hostname"] = "invalid_hostname_!!!"
         res = self.service.start_install(body)
         self.assertFalse(res.get("started"))
 
+
+class AnswerFileTests(unittest.TestCase):
+    def test_secure_answer_file_loads_supported_fields(self):
+        fd, path = tempfile.mkstemp()
+        try:
+            os.write(fd, json.dumps({"disk": "/dev/sda", "password": "secret"}).encode())
+            os.close(fd)
+            os.chmod(path, 0o600)
+            self.assertEqual(_load_answer_file(path)["disk"], "/dev/sda")
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            os.unlink(path)
+
+    def test_answer_file_rejects_permissions_that_expose_passwords(self):
+        fd, path = tempfile.mkstemp()
+        try:
+            os.write(fd, b'{"password":"secret"}')
+            os.close(fd)
+            os.chmod(path, 0o644)
+            with self.assertRaisesRegex(ValueError, "chmod 600"):
+                _load_answer_file(path)
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            os.unlink(path)
+
+    def test_answer_file_rejects_unknown_fields(self):
+        fd, path = tempfile.mkstemp()
+        try:
+            os.write(fd, b'{"run_arbitrary_command":"bad"}')
+            os.close(fd)
+            os.chmod(path, 0o600)
+            with self.assertRaisesRegex(ValueError, "Unknown installer answer-file fields"):
+                _load_answer_file(path)
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            os.unlink(path)
+
     @patch("sys.argv", ["/path/to/cmd", "--headless"])
     @patch("kyth_installer.services.installer_service.InstallerService")
     def test_headless_cli_entrypoint(self, mock_service_class):
-        
+
         mock_service = MagicMock()
         mock_service.start_install.return_value = {"started": False, "message": "Failed to start"}
         mock_service_class.return_value = mock_service

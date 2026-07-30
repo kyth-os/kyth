@@ -393,7 +393,8 @@ def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -
             if fs == "linux-swap":
                 fstab_line = f"UUID={uuid_out} none swap defaults 0 0\n"
             else:
-                fstab_line = f"UUID={uuid_out} {fstab_mp} {fs} defaults,compress=zstd:1 0 2\n"
+                mount_options = "defaults,compress=zstd:1" if fs == "btrfs" else "defaults"
+                fstab_line = f"UUID={uuid_out} {fstab_mp} {fs} {mount_options} 0 2\n"
                 run_command(
                     _as_root(["mkdir", "-p", str(target_path)]),
                     check=False,
@@ -438,6 +439,21 @@ def _configure_hostname_timezone(etc, state, log) -> None:
     except OSError as exc:
         raise OSError(format_os_error(exc, path=localtime_path)) from exc
     log(f"Timezone : {state['timezone']}")
+
+    locale_path = str(Path(etc, "locale.conf"))
+    run_command(
+        _as_root(["/usr/bin/tee", locale_path]),
+        input=f"LANG={state.get('locale', 'en_US.UTF-8')}\n", text=True,
+        stdout=subprocess.DEVNULL, check=True,
+    )
+    vconsole_path = str(Path(etc, "vconsole.conf"))
+    run_command(
+        _as_root(["/usr/bin/tee", vconsole_path]),
+        input=f"KEYMAP={state.get('keymap', 'us')}\n", text=True,
+        stdout=subprocess.DEVNULL, check=True,
+    )
+    log(f"Locale   : {state.get('locale', 'en_US.UTF-8')}")
+    log(f"Keyboard : {state.get('keymap', 'us')}")
 
 
 def _create_installer_user(config_root, deploy_root, username, password_hash, log, progress) -> None:

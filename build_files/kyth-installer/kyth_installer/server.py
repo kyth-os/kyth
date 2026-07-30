@@ -12,7 +12,7 @@ from .context import InstallerContext
 from .disk import list_disks, list_partitions, list_free_space
 from .partition_ops import FILESYSTEM_OPTIONS, get_journal
 from .post_routes import PostRouteService
-from .system import list_timezones
+from .system import list_keymaps, list_locales, list_timezones
 
 _WEBUI_DIR = Path(__file__).parent / "webui"
 
@@ -34,6 +34,8 @@ ROUTES = {
     "stream": RouteSpec("GET", "/api/stream"),
     "log": RouteSpec("GET", "/api/log"),
     "timezones": RouteSpec("GET", "/api/timezones"),
+    "locales": RouteSpec("GET", "/api/locales"),
+    "keymaps": RouteSpec("GET", "/api/keymaps"),
     "start": RouteSpec("POST", "/api/start", requires_same_origin=True),
     "reboot": RouteSpec("POST", "/api/reboot", requires_same_origin=True),
     # Manual partition management
@@ -181,6 +183,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(list_disks())
         elif route == ROUTES["timezones"]:
             self._json(list_timezones())
+        elif route == ROUTES["locales"]:
+            self._json(list_locales())
+        elif route == ROUTES["keymaps"]:
+            self._json(list_keymaps())
         elif route == ROUTES["partitions"]:
             disk = (qs.get("disk") or [""])[0]
             self._json(list_partitions(disk) if disk else [])

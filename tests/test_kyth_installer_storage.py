@@ -25,6 +25,15 @@ from kyth_installer.context import InstallerContext  # noqa: E402
 
 
 class InstallerWebuiTests(unittest.TestCase):
+    def test_accessibility_and_region_controls_are_exposed(self):
+        html = (WEBUI_DIR / "index.html").read_text()
+
+        self.assertIn('class="skip-link"', html)
+        self.assertIn('id="toggle-high-contrast"', html)
+        self.assertIn('role="progressbar"', html)
+        self.assertIn('id="sel-locale"', html)
+        self.assertIn('id="sel-keymap"', html)
+
     def test_ntfs_resize_ui_uses_backend_safety_flag(self):
         js = (WEBUI_DIR / "app.js").read_text()
 
@@ -96,6 +105,25 @@ class InstallerWebuiTests(unittest.TestCase):
 
 
 class InstallerCommandTests(unittest.TestCase):
+    def test_installed_region_writes_locale_and_keyboard_configuration(self):
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append((command, kwargs))
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        state = {
+            "hostname": "kyth", "timezone": "Europe/Berlin",
+            "locale": "de_DE.UTF-8", "keymap": "de",
+        }
+        with patch.object(install, "run_command", side_effect=fake_run), \
+             patch.object(install, "_as_root", side_effect=lambda command: command):
+            install._configure_hostname_timezone("/target/etc", state, lambda _message: None)
+
+        inputs = [kwargs.get("input", "") for _command, kwargs in calls]
+        self.assertIn("LANG=de_DE.UTF-8\n", inputs)
+        self.assertIn("KEYMAP=de\n", inputs)
+
     def test_streaming_command_handles_carriage_return_progress(self):
         logs = []
         progress = []
@@ -858,6 +886,77 @@ class JournalValidateTests(unittest.TestCase):
             errors = journal.validate()
         self.assertTrue(any("overlaps with existing region" in e for e in errors))
 
+    def test_create_overlapping_existing_partition_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 5 * 1024**3, "size_bytes": 10 * 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[{
+            "name": "/dev/nvme0n1p1", "start_bytes": 1024**2,
+            "size_bytes": 10 * 1024**3, "fstype": "ntfs",
+        }]):
+            errors = journal.validate()
+        self.assertTrue(any("overlaps with existing region" in error for error in errors))
+
+    def test_cross_disk_partition_operation_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sdb1", "mountpoint": "/"})
+        with patch.object(partition_ops, "list_partitions", return_value=[]), \
+             patch.object(partition_ops, "_parent_disk", return_value="/dev/sdb"):
+            errors = journal.validate()
+        self.assertTrue(any("does not belong" in error for error in errors))
+
+    def test_multiple_root_assignments_are_rejected(self):
+        journal = self._journal()
+        for index in range(2):
+            journal.add_op("create", {
+                "start_bytes": (index * 50 + 1) * 1024**3,
+                "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+            })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("Exactly one root" in error for error in errors))
+
+    def test_created_efi_partition_must_be_fat32(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 1024**3,
+            "fs_type": "ext4", "mountpoint": "/boot/efi",
+        })
+        journal.add_op("create", {
+            "start_bytes": 2 * 1024**3, "size_bytes": 40 * 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("must use FAT32" in error for error in errors))
+
+    def test_existing_root_partition_must_be_btrfs_after_staged_format(self):
+        journal = self._journal()
+        journal.add_op("format", {"partition": "/dev/nvme0n1p2", "fs_type": "ext4"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p2", "mountpoint": "/"})
+        with patch.object(partition_ops, "list_partitions", return_value=[{
+            "name": "/dev/nvme0n1p2", "fstype": "btrfs",
+        }]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
+            errors = journal.validate()
+        self.assertTrue(any("must use the Btrfs filesystem" in error for error in errors))
+
+    def test_existing_efi_partition_must_be_fat32(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {
+            "partition": "/dev/nvme0n1p1", "mountpoint": "/boot/efi",
+        })
+        journal.add_op("set_mountpoint", {
+            "partition": "/dev/nvme0n1p2", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1", "fstype": "ext4"},
+            {"name": "/dev/nvme0n1p2", "fstype": "btrfs"},
+        ]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
+            errors = journal.validate()
+        self.assertTrue(any("must use FAT32" in error for error in errors))
+
     def test_valid_single_root_partition_has_no_errors(self):
         journal = self._journal()
         journal.add_op("create", {
@@ -1103,6 +1202,15 @@ class InstallerServerConfirmationTests(unittest.TestCase):
 
 
 class InstallerSystemTests(unittest.TestCase):
+    @patch.object(system, "run_command")
+    def test_locales_and_keymaps_are_discovered_with_localectl(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(stdout="de_DE.UTF-8\nen_US.UTF-8\n"),
+            MagicMock(stdout="de\nus\n"),
+        ]
+        self.assertEqual(system.list_locales(), ["de_DE.UTF-8", "en_US.UTF-8"])
+        self.assertEqual(system.list_keymaps(), ["de", "us"])
+
     @patch("kyth_installer.system.subprocess.run")
     def test_hash_password_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="$6$hashedpassword\n")
@@ -1541,6 +1649,12 @@ class InstallerDiskServiceTests(unittest.TestCase):
         self.assertIn("resizepart 2", " ".join(svc.journal[3]))
         self.assertIn("mkfs.ext4", " ".join(svc.journal[4]))
 
+    def test_disk_service_can_mark_an_efi_partition(self):
+        from kyth_installer.services.disk_service import DiskService
+        svc = DiskService(dry_run=True)
+        svc.set_partition_flag("/dev/sda", 1, "esp")
+        self.assertEqual(svc.journal[-1][-7:], ["parted", "-s", "/dev/sda", "set", "1", "esp", "on"])
+
     def test_journal_with_dry_run_disk_service_executes_safely(self):
         from kyth_installer.services.disk_service import DiskService
         svc = DiskService(dry_run=True)
@@ -1549,7 +1663,7 @@ class InstallerDiskServiceTests(unittest.TestCase):
             journal = partition_ops.Journal("/dev/sda", disk_service=svc)
             journal.add_op("new_table", {"table_type": "gpt"})
             journal.add_op("create", {
-                "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+                "start_bytes": 2 * 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
             })
             # Verify we can validate and commit without throwing any command execution errors
             errors = journal.validate()

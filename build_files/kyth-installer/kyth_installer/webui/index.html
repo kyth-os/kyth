@@ -9,6 +9,8 @@
 </head>
 <body>
 
+<button class="skip-link" type="button" onclick="document.getElementById('main').focus()">Skip to installer content</button>
+
 <nav id="sidebar">
   <div class="logo">
     <div class="logo-mark">K</div>
@@ -28,13 +30,18 @@
   <div class="sidebar-footer">kyth installer</div>
 </nav>
 
-<div id="main">
+<div id="main" tabindex="-1">
 
   <!-- Welcome -->
   <div class="page active" id="page-welcome">
     <div class="card">
       <div class="card-title">Welcome to KythOS</div>
       <div class="card-sub">Immutable gaming &amp; development desktop — KythOS</div>
+      <div class="accessibility-tools" aria-label="Accessibility controls">
+        <button type="button" id="toggle-large-text" aria-pressed="false" onclick="toggleAccessibility('large-text')">Large text</button>
+        <button type="button" id="toggle-high-contrast" aria-pressed="false" onclick="toggleAccessibility('high-contrast')">High contrast</button>
+        <button type="button" id="toggle-reduced-motion" aria-pressed="false" onclick="toggleAccessibility('reduced-motion')">Reduce motion</button>
+      </div>
       <hr class="divider">
       <p style="color:var(--muted);line-height:1.8">
         This installer will guide you through installing KythOS on your computer.<br><br>
@@ -213,17 +220,21 @@
       <div class="card-title">System Configuration</div>
       <div class="card-sub">Set hostname, timezone, and your user account</div>
       <hr class="divider">
-      <div class="field-label">Hostname</div>
+      <label class="field-label" for="inp-hostname">Hostname</label>
       <input type="text" id="inp-hostname" value="kyth" maxlength="63" spellcheck="false">
-      <div class="field-label">Timezone</div>
+      <label class="field-label" for="sel-tz">Timezone</label>
       <select id="sel-tz"></select>
-      <div class="field-label" style="margin-top:20px">Username</div>
+      <label class="field-label" for="sel-locale">System language and locale</label>
+      <select id="sel-locale"></select>
+      <label class="field-label" for="sel-keymap">Keyboard layout</label>
+      <select id="sel-keymap"></select>
+      <label class="field-label" for="inp-username" style="margin-top:20px">Username</label>
       <input type="text" id="inp-username" maxlength="32" spellcheck="false" autocomplete="off" placeholder="e.g. alice">
-      <div class="field-label">Password</div>
+      <label class="field-label" for="inp-password">Password</label>
       <input type="password" id="inp-password" autocomplete="new-password">
-      <div class="field-label">Confirm Password</div>
+      <label class="field-label" for="inp-password2">Confirm Password</label>
       <input type="password" id="inp-password2" autocomplete="new-password">
-      <div id="user-error" style="color:var(--red);font-size:13px;margin-top:8px;min-height:1.2em"></div>
+      <div id="user-error" role="alert" aria-live="assertive" style="color:var(--red);font-size:13px;margin-top:8px;min-height:1.2em"></div>
       <div class="btn-row">
         <button onclick="goto('kernel')">← Back</button>
         <button class="primary" onclick="saveConfig()">Continue →</button>
@@ -288,7 +299,7 @@
         <div class="phase-pill">Apply Region</div>
         <div class="phase-pill">Final Checks</div>
       </div>
-      <div class="progress-bar"><div class="progress-fill pulsing" id="progress-fill" style="width:0%"></div></div>
+      <div class="progress-bar" role="progressbar" aria-label="Installation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill pulsing" id="progress-fill" style="width:0%"></div></div>
         <div class="stats-row" id="stats-row"></div>
       </div>
       <button class="log-toggle" id="log-toggle" type="button"

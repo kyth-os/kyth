@@ -20,6 +20,12 @@ class InstallerImageSourceTests(unittest.TestCase):
         run_command.assert_not_called()
         create_connection.assert_not_called()
 
+    def test_oci_layout_is_preserved_as_an_offline_source(self):
+        source = "oci:/usr/share/kyth/image:latest"
+
+        self.assertEqual(imagesrc._source_imgref(source), source)
+        self.assertIsNone(imagesrc._network_preflight(source))
+
     def test_network_preflight_reports_missing_default_route(self):
         with mock.patch.object(imagesrc.socket, "getaddrinfo", return_value=[]), \
              mock.patch.object(imagesrc.socket, "create_connection", side_effect=OSError("network unreachable")):

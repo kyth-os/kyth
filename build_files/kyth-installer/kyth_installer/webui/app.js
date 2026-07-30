@@ -665,7 +665,9 @@ function showNewTableDialog() {
         if (S.freeRegions) {
           // After new table, the whole disk is free space
           const diskSize = S.disk.size_bytes;
-          const reserve = 1024 * 1024;
+          // Leave 1 MiB for alignment plus 1 MiB for the automatic GPT
+          // BIOS-boot partition created by the backend.
+          const reserve = 2 * 1024 * 1024;
           S.freeRegions = [{
             start_bytes: reserve,
             end_bytes: diskSize - reserve,
@@ -1051,6 +1053,23 @@ function initConfig() {
       sel.appendChild(opt);
     });
   }
+  const populate = (id, endpoint, fallback, preferred) => {
+    const target = document.getElementById(id);
+    if (target.options.length) return;
+    apiFetch(endpoint).then(r => r.json()).then(values => {
+      (values.length ? values : [fallback]).forEach(value => {
+        const opt = document.createElement('option');
+        opt.value = value; opt.textContent = value; opt.selected = value === preferred;
+        target.appendChild(opt);
+      });
+    }).catch(() => {
+      const opt = document.createElement('option');
+      opt.value = fallback; opt.textContent = fallback; opt.selected = true;
+      target.appendChild(opt);
+    });
+  };
+  populate('sel-locale', '/api/locales', 'en_US.UTF-8', S.locale);
+  populate('sel-keymap', '/api/keymaps', 'us', S.keymap);
 }
 // Called from index.html's inline onclick/oninput handlers, not referenced within this file.
 // eslint-disable-next-line no-unused-vars
@@ -1074,6 +1093,8 @@ function saveConfig() {
 
   S.hostname = hostname;
   S.timezone = document.getElementById('sel-tz').value;
+  S.locale = document.getElementById('sel-locale').value;
+  S.keymap = document.getElementById('sel-keymap').value;
   S.username = username;
   S.password = pw1;
   goto('review');
@@ -1114,6 +1135,8 @@ function buildReview() {
   rows.push(
     ['Hostname', S.hostname],
     ['Timezone', S.timezone],
+    ['Locale', S.locale],
+    ['Keyboard', S.keymap],
     ['Username', S.username],
     ['Password', '••••••••'],
     ['Kernel',   kernelLabels[S.kernel] || S.kernel],
@@ -1186,6 +1209,7 @@ function startInstall() {
   postRequest('/api/start', {
     disk: S.disk.name, hostname: S.hostname,
     timezone: S.timezone, username: S.username, password: S.password,
+    locale: S.locale, keymap: S.keymap,
     kernel: S.kernel,
     install_mode:      S.install_mode,
     target_partition:  S.target_partition || '',
@@ -1241,11 +1265,18 @@ function setProgress(pct) {
   document.getElementById('progress-fill').style.width = pct + '%';
   document.getElementById('install-pct').textContent   = pct + '%';
   const fill = document.getElementById('progress-fill');
+  fill.parentElement.setAttribute('aria-valuenow', String(pct));
   if (pct >= 100) fill.classList.remove('pulsing');
   const phases = {5:'Pulling OS image…',90:'Configuring…',95:'Creating user…',99:'Finalizing…'};
   for (const [p, label] of Object.entries(phases).reverse()) {
     if (pct >= parseInt(p)) { document.getElementById('install-phase').textContent = label; break; }
   }
+}
+
+function toggleAccessibility(feature) {
+  document.body.classList.toggle(feature);
+  const button = document.getElementById('toggle-' + feature);
+  button.setAttribute('aria-pressed', document.body.classList.contains(feature) ? 'true' : 'false');
 }
 
 function showStats(s) {

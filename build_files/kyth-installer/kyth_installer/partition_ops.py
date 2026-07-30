@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Optional
 
 # pylint: disable-next=unused-import
-from .config import FILESYSTEM_OPTIONS, _FILESYSTEM  # noqa: F401 — re-exported for server.py
+from .config import BIOS_BOOT_BYTES, FILESYSTEM_OPTIONS, _FILESYSTEM  # noqa: F401 — re-exported for server.py
 from .disk import (
     _normal_device_path, list_disks, list_partitions, _safe_int, _partition_number,
-    _partition_start_bytes, _human_size, _latest_partition_on_disk,
+    _partition_start_bytes, _human_size, _latest_partition_on_disk, _parent_disk,
 )
 from .fsresize import shrink_filesystem
 from .services.disk_service import DiskService
@@ -180,8 +180,20 @@ class Journal:
             errors.append("No partition operations have been added.")
             return errors
 
-        has_root = False
-        allocated: list[tuple[int, int, str]] = []
+        root_count = 0
+        mountpoints: set[str] = set()
+        current_parts = list_partitions(self.disk)
+        allocated: dict[str, tuple[int, int, str]] = {}
+        for part in current_parts:
+            name = part.get("name")
+            start = _safe_int(part.get("start_bytes"), -1)
+            size = _safe_int(part.get("size_bytes"), -1)
+            if name:
+                allocated[name] = (
+                    start,
+                    start + size if start >= 0 and size > 0 else -1,
+                    part.get("fstype") or "",
+                )
         table_type, primary_count = self._initial_table_state()
 
         for op in self.ops:
@@ -190,9 +202,16 @@ class Journal:
 
             if kind == "new_table":
                 allocated.clear()
-                has_root = False
+                root_count = 0
+                mountpoints.clear()
                 table_type = (p.get("table_type") or "gpt").lower()
                 primary_count = 0
+                if table_type == "gpt":
+                    allocated["automatic BIOS boot partition"] = (
+                        1024**2,
+                        1024**2 + BIOS_BOOT_BYTES,
+                        "bios_grub",
+                    )
 
             elif kind == "create":
                 start = _safe_int(p.get("start_bytes"), -1)
@@ -205,10 +224,10 @@ class Journal:
                     continue
 
                 end = start + size
-                for s, e, n in allocated:
-                    if start < e and end > s:
+                for s, e, n in allocated.values():
+                    if s >= 0 and e > s and start < e and end > s:
                         errors.append(f"New partition overlaps with existing region ({n}).")
-                allocated.append((start, end, fs))
+                allocated[f"new:{op['index']}"] = (start, end, fs)
 
                 if table_type == "msdos":
                     primary_count += 1
@@ -223,15 +242,58 @@ class Journal:
                 if mount == "/":
                     if fs != "btrfs":
                         errors.append("Root partition (/) must use the Btrfs filesystem.")
-                    has_root = True
+                    root_count += 1
+                if mount == "/boot/efi" and fs != "fat32":
+                    errors.append("EFI System Partition (/boot/efi) must use FAT32.")
+                if mount:
+                    if mount in mountpoints:
+                        errors.append(f"Mount point {mount} is assigned more than once.")
+                    mountpoints.add(mount)
 
-            elif kind == "delete" and table_type == "msdos":
-                primary_count = max(0, primary_count - 1)
+            elif kind in ("delete", "format", "resize", "set_mountpoint"):
+                partition = _normal_device_path(p.get("partition"))
+                if not partition or _parent_disk(partition) != self.disk:
+                    errors.append(f"{kind.replace('_', ' ').title()}: partition does not belong to {self.disk}.")
+                    continue
+                if partition not in allocated:
+                    errors.append(f"{kind.replace('_', ' ').title()}: {partition} is not present on {self.disk}.")
+                    continue
+                if kind == "delete":
+                    allocated.pop(partition, None)
+                    if table_type == "msdos":
+                        primary_count = max(0, primary_count - 1)
+                elif kind == "resize":
+                    start, _end, fs = allocated[partition]
+                    new_size = _safe_int(p.get("new_size_bytes"), -1)
+                    if new_size <= 0:
+                        errors.append("Resize partition: invalid new size.")
+                    else:
+                        allocated[partition] = (start, start + new_size, fs)
+                elif kind == "format":
+                    start, end, _fs = allocated[partition]
+                    allocated[partition] = (
+                        start, end, (p.get("fs_type") or "").lower()
+                    )
+                elif kind == "set_mountpoint":
+                    mount = str(p.get("mountpoint") or "").strip()
+                    fs = allocated[partition][2].lower()
+                    if mount == "/":
+                        if fs != "btrfs":
+                            errors.append("Root partition (/) must use the Btrfs filesystem.")
+                        root_count += 1
+                    if mount == "/boot/efi" and fs not in ("fat", "fat32", "vfat"):
+                        errors.append("EFI System Partition (/boot/efi) must use FAT32.")
+                    if mount:
+                        if mount in mountpoints:
+                            errors.append(f"Mount point {mount} is assigned more than once.")
+                        mountpoints.add(mount)
 
-        if not has_root:
+        if root_count == 0:
             errors.append("No root partition (/) configured. Mount at least one partition as '/' with Btrfs.")
+        elif root_count > 1:
+            errors.append("Exactly one root partition (/) must be configured.")
 
-        errors.extend(self._validate_not_in_use(list_partitions(self.disk)))
+        errors.extend(self._validate_not_in_use(current_parts))
 
         return errors
 
@@ -239,6 +301,22 @@ class Journal:
         table_type = p.get("table_type", "gpt")
         log(f"Creating new {table_type.upper()} partition table on {self.disk}...")
         self._disk_service.create_label(self.disk, table_type)
+        if table_type == "gpt":
+            before = set()
+            if not self._disk_service.dry_run:
+                before = {part["name"] for part in list_partitions(self.disk) if part.get("name")}
+            log("Creating BIOS boot partition required by the KythOS boot image...")
+            self._disk_service.create_unformatted_partition(
+                self.disk, 1024**2, BIOS_BOOT_BYTES, "biosboot"
+            )
+            if self._disk_service.dry_run:
+                part_num = 99
+            else:
+                created = _latest_partition_on_disk(self.disk, before)
+                if not created:
+                    raise RuntimeError("Could not find the automatic BIOS boot partition.")
+                part_num = _partition_number(created)
+            self._disk_service.set_partition_flag(self.disk, part_num, "bios_grub")
 
     def _commit_create(self, p: dict, log) -> None:
         start = _safe_int(p.get("start_bytes"), 0)
@@ -271,6 +349,11 @@ class Journal:
         if fs != "linux-swap":
             log(f"Formatting {created} as {fs}...")
             self._disk_service.format_filesystem(created, fs, label)
+
+        if p.get("mountpoint") == "/boot/efi":
+            part_num = _partition_number(created) if not self._disk_service.dry_run else 99
+            log(f"Marking {created} as an EFI System Partition...")
+            self._disk_service.set_partition_flag(self.disk, part_num, "esp")
 
         log(f"Created {created}")
 

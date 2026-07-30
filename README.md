@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-30 02:46:07 UTC
+- Last refreshed (UTC): 2026-07-30 03:01:43 UTC
 - Current branch: testing
-- HEAD commit: 59ac719
-- Last commit title: Copy lib/plymouth-config.sh alongside plymouth-setup.sh's standalone layer
-- Last commit date: 2026-07-29T22:29:27-04:00
+- HEAD commit: 8fb753c
+- Last commit title: Harden installer NTFS coexistence paths
+- Last commit date: 2026-07-29T22:46:07-04:00
 - CI workflow files: 8
 - Build script files: 21
 

@@ -46,6 +46,13 @@ body {
   display: flex;
 }
 
+.skip-link { position:fixed; left:12px; top:-80px; z-index:10000; padding:10px 14px; background:#fff; color:#000; }
+.skip-link:focus { top:12px; }
+.accessibility-tools { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; }
+body.large-text { font-size:18px; }
+body.high-contrast { --bg:#000; --surface:#000; --surface2:#111; --text:#fff; --muted:#eee; --muted2:#ddd; --border:#fff; --accent:#00ffff; --amber:#ffff00; --red:#ff7070; }
+body.reduced-motion *, body.reduced-motion *::before, body.reduced-motion *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+
 button, input, select {
   font: inherit;
 }

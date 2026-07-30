@@ -15,7 +15,7 @@ def _source_imgref(image: str) -> str:
     image = (image or "").strip()
     if not image:
         return SOURCE_IMAGE
-    if image.startswith(("docker://", "containers-storage:", "ostree:")):
+    if image.startswith(("docker://", "containers-storage:", "oci:", "ostree:")):
         return image
     return f"docker://{image}"
 

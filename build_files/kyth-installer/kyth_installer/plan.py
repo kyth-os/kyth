@@ -535,11 +535,11 @@ def _get_manual_mounts(context) -> list[dict]:
         return []
     mounts: list[dict] = []
     for op in journal.ops:
-        if op["kind"] == "set_mountpoint":
+        if op["kind"] in ("create", "set_mountpoint"):
             mountpoint = op["params"].get("mountpoint", "").strip()
             partition = op["params"].get("partition", "")
-            if mountpoint and mountpoint != "/" and partition:
-                fs_type = ""
+            if mountpoint and mountpoint not in ("/", "/boot/efi") and partition:
+                fs_type = op["params"].get("fs_type", "") if op["kind"] == "create" else ""
                 for fmt_op in journal.ops:
                     if (fmt_op["kind"] == "format" and
                         fmt_op["params"].get("partition") == partition):

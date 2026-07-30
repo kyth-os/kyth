@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 INSTALL_MODES = frozenset({"wipe", "alongside", "resize_ntfs", "free_space", "manual"})
 USERNAME_PATTERN = re.compile(r"[a-z_][a-z0-9_-]{0,30}")
 HOSTNAME_PATTERN = re.compile(r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?")
+LOCALE_PATTERN = re.compile(r"[A-Za-z0-9_.@-]{1,64}")
+KEYMAP_PATTERN = re.compile(r"[A-Za-z0-9_.+@/-]{1,64}")
 
 
 class InstallRequestError(ValueError):
@@ -129,6 +131,12 @@ def validate_install_request(body: dict, context: InstallerContext) -> Installat
     timezone = body.get("timezone", "UTC") or "UTC"
     if timezone not in set(system.list_timezones()):
         timezone = "UTC"
+    locale = str(body.get("locale") or "en_US.UTF-8")
+    if not LOCALE_PATTERN.fullmatch(locale) or locale not in set(system.list_locales()):
+        locale = "en_US.UTF-8"
+    keymap = str(body.get("keymap") or "us")
+    if not KEYMAP_PATTERN.fullmatch(keymap) or keymap not in set(system.list_keymaps()):
+        keymap = "us"
     username = body.get("username", "")
     _require_valid_username(username)
     hostname = body.get("hostname", "kyth")
@@ -138,6 +146,8 @@ def validate_install_request(body: dict, context: InstallerContext) -> Installat
         **state,
         "hostname": hostname,
         "timezone": timezone,
+        "locale": locale,
+        "keymap": keymap,
         "username": username,
         "password_hash": password_hash,
         "kernel": body.get("kernel", "fedora") or "fedora",
@@ -210,6 +220,8 @@ def validate_partition_install_request(
         **state,
         "hostname": hostname,
         "timezone": timezone,
+        "locale": "en_US.UTF-8",
+        "keymap": "us",
         "username": username,
         "password_hash": password_hash,
         "kernel": "fedora",

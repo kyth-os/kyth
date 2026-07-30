@@ -68,11 +68,33 @@ class DiskService:
         )
         self.settle()
 
+    def create_unformatted_partition(self, disk: str, start: int, size: int, label: str) -> None:
+        if not self.dry_run and not shutil.which("parted"):
+            raise RuntimeError("parted is required for partition operations.")
+        from ..disk import _block_size_bytes
+        sector = 512 if self.dry_run else _block_size_bytes(disk)
+        end_byte = start + size - sector
+        self.execute(
+            _as_root(["parted", "-s", disk, "unit", "B", "mkpart", label,
+                      f"{start}B", f"{end_byte}B"]),
+            check=True, timeout=120,
+        )
+        self.settle()
+
     def delete_partition(self, disk: str, part_num: int) -> None:
         if not self.dry_run and not shutil.which("parted"):
             raise RuntimeError("parted is required for partition operations.")
         self.execute(
             _as_root(["parted", "-s", disk, "rm", str(part_num)]),
+            check=True, timeout=60,
+        )
+        self.settle()
+
+    def set_partition_flag(self, disk: str, part_num: int, flag: str, enabled: bool = True) -> None:
+        if not self.dry_run and not shutil.which("parted"):
+            raise RuntimeError("parted is required for partition operations.")
+        self.execute(
+            _as_root(["parted", "-s", disk, "set", str(part_num), flag, "on" if enabled else "off"]),
             check=True, timeout=60,
         )
         self.settle()

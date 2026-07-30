@@ -17,6 +17,8 @@ else
 fi
 
 SOURCE_TAG=${SOURCE_TAG:?}
+BASE_IMAGE=${BASE_IMAGE:?}
+INSTALL_SOURCE_IMAGE=${INSTALL_SOURCE_IMAGE:-${BASE_IMAGE}}
 
 # bwrap tries to write /proc/sys/user/max_user_namespaces which is mounted as ro
 mount -o remount,rw /proc/sys
@@ -53,8 +55,16 @@ Type=Application
 Categories=System;
 EOF
 
-printf 'KYTH_SOURCE_IMAGE=ghcr.io/mrtrick37/kyth:%s\nKYTH_TARGET_IMAGE=ghcr.io/mrtrick37/kyth:%s\n' \
-	"${SOURCE_TAG}" "${SOURCE_TAG}" >/etc/kyth-installer.env
+# Bundle the exact image used for this live payload. The default Fedora install
+# can then complete without a network connection while retaining the public
+# registry reference for future bootc updates. Optional kernel variants remain
+# registry-backed because they are separate images.
+mkdir -p /usr/share/kyth/image
+skopeo copy --retry-times 3 \
+	"docker://${INSTALL_SOURCE_IMAGE#docker://}" \
+	"oci:/usr/share/kyth/image:latest"
+printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=ghcr.io/mrtrick37/kyth:%s\n' \
+	"${SOURCE_TAG}" >/etc/kyth-installer.env
 
 # Install live-only packages in one transaction so dependency solving and
 # repository metadata work happen once. Browsers from the installed image are

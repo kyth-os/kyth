@@ -23,6 +23,8 @@ class InstallationState(TypedDict, total=False):
     efi_partition: str
     hostname: str
     timezone: str
+    locale: str
+    keymap: str
     username: str
     password_hash: str
     kernel: str
@@ -55,6 +57,8 @@ def default_installation_state() -> InstallationState:
         efi_partition="",
         hostname="kyth",
         timezone="UTC",
+        locale="en_US.UTF-8",
+        keymap="us",
         username="",
         password_hash="",
         kernel="fedora",
