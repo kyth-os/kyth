@@ -22,7 +22,7 @@ from .system import _as_root
 _runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
 
 
-def _stream(argv, log, *, input=None, timeout=1800, error_factory=None):
+def _stream(argv, log, *, stdin_data=None, timeout=1800, error_factory=None):
     """Run argv as root with output streamed live to log().
 
     ntfsresize/resize2fs/btrfs print live percentage progress as they work;
@@ -32,7 +32,7 @@ def _stream(argv, log, *, input=None, timeout=1800, error_factory=None):
     _runner.run(
         _as_root(argv), 0, 0, log, lambda _pct: None,
         stall_timeout=timeout, absolute_timeout=timeout,
-        error_factory=error_factory, input=input,
+        error_factory=error_factory, stdin_data=stdin_data,
     )
 
 
@@ -90,7 +90,7 @@ def _shrink_ntfs(partition: str, new_size_bytes: int, log) -> None:
     log("Shrinking NTFS filesystem...")
     _stream(
         ["ntfsresize", "--size", size_arg, partition], log,
-        input="y\n", timeout=1800,
+        stdin_data="y\n", timeout=1800,
         error_factory=lambda _rc, recent_output, _argv: RuntimeError(
             "NTFS filesystem resize failed before the partition boundary was "
             "changed. Output:\n" + "\n".join(recent_output)

@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import re
 
-from .security_container import (
+# pylint: disable=unused-import
+from .security_container import (  # noqa: F401 — DEFAULT_KALI_IMAGE re-exported; see page_software_security.py
     DEFAULT_KALI_BOX,
     DEFAULT_KALI_IMAGE,
-    is_socket_capable_kali_box,
 )
 from .process import run_command
 

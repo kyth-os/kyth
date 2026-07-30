@@ -5,7 +5,6 @@ Ported from bash helpers (kyth-apply-desktop-layout, kyth-refresh-taskbar-pins, 
 from __future__ import annotations
 
 import shutil
-import subprocess
 
 from ..commands import run as run_command
 from pathlib import Path

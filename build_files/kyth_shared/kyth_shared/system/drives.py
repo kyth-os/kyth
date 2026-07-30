@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 
 from ..commands import run as run_command
 from ..runtime_output import parse_ntfs_devices

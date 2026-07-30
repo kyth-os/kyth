@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-30 01:09:54 UTC
+- Last refreshed (UTC): 2026-07-30 01:48:56 UTC
 - Current branch: testing
-- HEAD commit: a5ca6ea
-- Last commit title: fix: installer refactoring
-- Last commit date: 2026-07-29T20:40:58-04:00
+- HEAD commit: 5400d5f
+- Last commit title: Reduce duplication across installer HTTP/partitioning code and Plymouth scripts
+- Last commit date: 2026-07-29T21:09:54-04:00
 - CI workflow files: 8
 - Build script files: 21
 

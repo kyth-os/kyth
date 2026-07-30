@@ -135,7 +135,7 @@ class ShrinkNtfsTests(unittest.TestCase):
              patch.object(fsresize, "_stream", side_effect=fake_stream):
             fsresize._shrink_ntfs("/dev/sda1", 100 * 1024**3, lambda _m: None)
 
-        self.assertEqual(captured.get("input"), "y\n")
+        self.assertEqual(captured.get("stdin_data"), "y\n")
 
 
 class ShrinkExtTests(unittest.TestCase):
@@ -199,7 +199,7 @@ class StreamTests(unittest.TestCase):
     def test_stream_pipes_input_to_the_process(self):
         logs = []
         with patch.object(fsresize, "_as_root", side_effect=lambda cmd: cmd):
-            fsresize._stream(["cat"], logs.append, input="confirmed\n", timeout=5)
+            fsresize._stream(["cat"], logs.append, stdin_data="confirmed\n", timeout=5)
         self.assertIn("confirmed", logs)
 
     def test_stream_failure_raises_via_error_factory(self):

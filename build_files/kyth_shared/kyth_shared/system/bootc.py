@@ -12,7 +12,8 @@ from __future__ import annotations
 from ..commands import run as run_command
 from kyth_shared.system.process import BOOTC_CACHE_TTL, command_stdout, probe_cached
 from kyth_shared.system import bootc_query as query
-from kyth_shared.system.bootc_policy import (
+# pylint: disable=unused-import
+from kyth_shared.system.bootc_policy import (  # noqa: F401 — re-export pure API for existing imports
     BranchCardView,
     BranchesView,
     REGISTRY,

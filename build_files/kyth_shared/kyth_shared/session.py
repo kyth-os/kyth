@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 
 from .commands import run as run_command
 import time

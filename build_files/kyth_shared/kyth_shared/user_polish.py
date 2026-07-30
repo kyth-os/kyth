@@ -4,7 +4,6 @@ import argparse
 import glob
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -194,12 +193,28 @@ def _bookmark(href: str, title: str, icon: str) -> ET.Element:
     return node
 
 
+def _parse_xbel_without_doctype(path: str) -> ET.ElementTree:
+    """Parse a Dolphin xbel bookmarks file, rejecting any DOCTYPE declaration
+    up front so a maliciously crafted file can't trigger XML entity expansion
+    (XXE) through ElementTree's underlying expat parser. This tool only ever
+    writes plain `<xbel version="1.0">` root elements with no DOCTYPE, so a
+    real one here always means the file didn't come from this tool."""
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    if "<!DOCTYPE" in text:
+        raise ValueError(f"{path}: DOCTYPE declarations are not allowed")
+    # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
+    # defusedxml isn't packaged in the base image; the DOCTYPE rejection above
+    # closes the XXE vector (external/internal entity expansion) without it.
+    return ET.ElementTree(ET.fromstring(text))
+
+
 def apply_places(home: str) -> OperationResult:
     """Create or extend Dolphin places without duplicate string insertion."""
     path = os.path.join(home, ".local", "share", "user-places.xbel")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.isfile(path):
-        tree = ET.parse(path)
+        tree = _parse_xbel_without_doctype(path)
         root = tree.getroot()
         if root.tag != "xbel":
             raise ValueError(f"unexpected root element: {root.tag}")
@@ -497,6 +512,14 @@ def main() -> None:
         if os.path.isfile(welcome_desktop):
             try:
                 shutil.copy(welcome_desktop, os.path.expanduser("~/Desktop/kyth-welcome.desktop"))
+                # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+                # The executable bit is required for KDE Plasma 6 to treat this
+                # launcher as trusted without prompting (see the same rule in
+                # branding/23-kyth-helper-ctx-installs.sh, which uses 0o755 for
+                # the shared /etc/skel template). This copy lands in the live
+                # user's own home directory, so owner-only 0o700 is tighter
+                # than the skel default, not a downgrade — no other user needs
+                # access to this desktop.
                 os.chmod(os.path.expanduser("~/Desktop/kyth-welcome.desktop"), 0o700)
             except OSError:
                 pass
