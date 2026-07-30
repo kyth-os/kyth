@@ -101,7 +101,7 @@ ShowDelay=0
 DeviceTimeout=8
 UseFirmwareBackground=false
 PLYMOUTHCONF
-    install -m 0644 "${initdir}/etc/plymouth/plymouthd.conf" \
+    command install -m 0644 "${initdir}/etc/plymouth/plymouthd.conf" \
         "${initdir}/usr/share/plymouth/plymouthd.defaults"
     # Keep in sync with KYTH_STOCK_PLYMOUTH_THEMES in
     # build_files/scripts/lib/plymouth-stock-themes.sh — this heredoc is

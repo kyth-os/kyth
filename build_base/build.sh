@@ -181,7 +181,7 @@ ShowDelay=0
 DeviceTimeout=8
 UseFirmwareBackground=false
 PLYMOUTHCONF
-    install -m 0644 "${initdir}/etc/plymouth/plymouthd.conf" \
+    command install -m 0644 "${initdir}/etc/plymouth/plymouthd.conf" \
         "${initdir}/usr/share/plymouth/plymouthd.defaults"
     rm -rf \
         "${initdir}/usr/share/plymouth/themes/default.plymouth" \
