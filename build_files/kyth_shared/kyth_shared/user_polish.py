@@ -512,7 +512,6 @@ def main() -> None:
         if os.path.isfile(welcome_desktop):
             try:
                 shutil.copy(welcome_desktop, os.path.expanduser("~/Desktop/kyth-welcome.desktop"))
-                # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
                 # The executable bit is required for KDE Plasma 6 to treat this
                 # launcher as trusted without prompting (see the same rule in
                 # branding/23-kyth-helper-ctx-installs.sh, which uses 0o755 for
@@ -520,7 +519,7 @@ def main() -> None:
                 # user's own home directory, so owner-only 0o700 is tighter
                 # than the skel default, not a downgrade — no other user needs
                 # access to this desktop.
-                os.chmod(os.path.expanduser("~/Desktop/kyth-welcome.desktop"), 0o700)
+                os.chmod(os.path.expanduser("~/Desktop/kyth-welcome.desktop"), 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
             except OSError:
                 pass
 
