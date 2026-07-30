@@ -376,10 +376,11 @@ jobs:
           docker buildx prune -f
           docker system prune -f
 
-      # Only ever added to the fedora leg (7e31fbd); preserved as fedora-only
-      # here rather than guessing it should also apply to cachy.
+      # Default graphroot (on /) and runroot (tmpfs under /run) are both too
+      # small for the rechunk mount; cachy hit the same ENOSPC-driven
+      # `crun: unknown version specified` failure fedora was moved off of
+      # in 7e31fbd, so this now runs for every kernel flavor.
       - name: Relocate containers storage for rechunk
-        if: matrix.kernel_flavor == 'fedora'
         run: |
           sudo mkdir -p /mnt/containers-storage /mnt/containers-runroot
           sudo tee /etc/containers/storage.conf >/dev/null <<'EOF'
