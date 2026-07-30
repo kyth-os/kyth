@@ -133,11 +133,42 @@ def _validate_partition_target(
         raise RuntimeError(f"The selected {label} was not found during the final disk scan.")
     if part.get("efi"):
         raise RuntimeError(f"The EFI system partition cannot be used as the KythOS {label}.")
-    if part.get("current") or part.get("in_use"):
-        raise RuntimeError(f"The selected {label} is mounted or has active encrypted/LVM mappings.")
+    if part.get("current") or part.get("in_use") or part.get("read_only"):
+        raise RuntimeError(f"The selected {label} is mounted, read-only, or has active encrypted/LVM mappings.")
     if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
         raise RuntimeError(f"The {label} is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
     return part
+
+
+def _validate_efi_target(config: dict, target: str, discovered: str | None) -> str:
+    """Revalidate the exact ESP that the install will mount.
+
+    Discovery may legitimately select an ESP on another internal disk, so the
+    selected-disk snapshot alone is insufficient. Re-scan the ESP's own parent
+    disk and fail closed if the request names a stale, read-only, non-ESP, or
+    root-target partition.
+    """
+    requested = _normal_device_path(config.get("efi_partition"))
+    efi = requested or _normal_device_path(discovered)
+    if not efi:
+        raise RuntimeError("Alongside installation requires an EFI system partition on the system.")
+    if efi == target:
+        raise RuntimeError("The EFI system partition and KythOS target partition must be different.")
+    # A discovery-produced value came from find_efi_partition() during this
+    # same snapshot and has already been checked as an ESP. An explicitly
+    # supplied/state-carried value crosses a request or phase boundary and
+    # must be re-read from the live device graph below.
+    if not requested:
+        return efi
+    efi_disk = _parent_disk(efi)
+    if not efi_disk:
+        raise RuntimeError("Could not determine which disk contains the EFI system partition.")
+    efi_info = next((part for part in list_partitions(efi_disk) if part.get("name") == efi), None)
+    if not efi_info or not efi_info.get("efi"):
+        raise RuntimeError("The selected EFI partition is no longer a valid EFI System Partition.")
+    if efi_info.get("read_only"):
+        raise RuntimeError("The selected EFI System Partition is read-only and cannot receive the KythOS bootloader.")
+    return efi
 
 
 def _validate_install_target(
@@ -173,8 +204,7 @@ def _validate_install_target(
                 "This GPT disk has no BIOS boot partition required by the KythOS bootloader. "
                 "Choose unallocated space, shrink Windows, or erase the disk so the installer can create one."
             )
-        if not snapshot.efi_partition:
-            raise RuntimeError("Alongside installation requires an EFI system partition on the system.")
+        _validate_efi_target(config, target, snapshot.efi_partition)
         return disk, target
 
     if mode == "manual":
@@ -195,8 +225,7 @@ def _validate_install_target(
         # could point at a pre-existing, still-mounted/in-use partition on the
         # same disk — never trust it without re-checking here.
         _validate_partition_target(disk, target, "root partition", snapshot)
-        if not snapshot.efi_partition:
-            raise RuntimeError("Manual installation requires an EFI system partition on the system. Create one in the partition editor.")
+        _validate_efi_target(config, target, snapshot.efi_partition)
         return disk, target
 
     raise RuntimeError(f"Unsupported install mode: {mode}")
@@ -341,8 +370,8 @@ def _validate_resize_ntfs_target(
     part = parts.get(partition)
     if not part:
         raise RuntimeError("The selected NTFS partition was not found during the final disk scan.")
-    if part.get("efi") or part.get("current") or part.get("in_use"):
-        raise RuntimeError("The selected partition is currently mounted or reserved and cannot be resized.")
+    if part.get("efi") or part.get("current") or part.get("in_use") or part.get("read_only"):
+        raise RuntimeError("The selected partition is mounted, read-only, or reserved and cannot be resized.")
     part_fstype = (part.get("fstype") or "").lower()
     if part_fstype == "bitlocker":
         raise RuntimeError(
@@ -404,6 +433,12 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
             input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True, timeout=120,
         )
         _settle()
+        actual_size = _partition_size_bytes(partition)
+        if abs(actual_size - new_ntfs_size) > sector:
+            raise RuntimeError(
+                "The partition tool did not produce the requested NTFS boundary. "
+                "No KythOS partition was created; the original partition table will be restored."
+            )
 
     # The NTFS filesystem was already shrunk above (that step cannot be
     # undone by a table restore, and doesn't need to be — a partition table

@@ -143,10 +143,10 @@ function selectMode(id) {
   
   // Auto-select defaults
   if (id === 'resize_ntfs') {
-    const defaultNtfs = S.partitions.find(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= 96 * 1024**3);
+    const defaultNtfs = S.partitions.find(p => p.ntfs_resize_candidate && p.size_bytes >= (64 + S.minGuidedGiB) * 1024**3);
     if (defaultNtfs) selectResizePartitionByName(defaultNtfs.name);
   } else if (id === 'alongside') {
-    const defaultReplace = S.partitions.find(p => !p.efi && !p.current && p.size_bytes >= 32 * 1024**3);
+    const defaultReplace = S.partitions.find(p => p.alongside_candidate);
     if (defaultReplace) selectPartitionByName(defaultReplace.name);
   } else if (id === 'free_space') {
     const defaultFree = S.freeRegions.find(r => r.size_bytes >= 32 * 1024**3);
@@ -183,9 +183,9 @@ function loadPartitions() {
     }
     
     // Enable/Disable mode cards based on candidates
-    const hasNtfsCandidate = parts.some(p => ['ntfs', 'ntfs3'].includes(p.fstype) && p.size_bytes >= (64 + S.minGuidedGiB) * 1024**3);
+    const hasNtfsCandidate = parts.some(p => p.ntfs_resize_candidate && p.size_bytes >= (64 + S.minGuidedGiB) * 1024**3);
     const hasFreeCandidate = regions.some(r => r.size_bytes >= S.minGuidedGiB * 1024**3);
-    const hasReplaceCandidate = S.replaceAllowed && parts.some(p => !p.efi && !p.current && !p.in_use && p.size_bytes >= 32 * 1024**3);
+    const hasReplaceCandidate = S.replaceAllowed && parts.some(p => p.alongside_candidate);
     
     const mResize = document.getElementById('mcard-resize_ntfs');
     mResize.style.opacity = hasNtfsCandidate ? '1' : '0.4';
@@ -293,11 +293,11 @@ function blockToNode(block, isProposed = false) {
   
   let onclick = null;
   if (!isProposed) {
-    if (S.install_mode === 'alongside' && S.replaceAllowed && block.type === 'part' && !block.efi && !block.current && !block.ref.in_use && block.size_bytes >= 32 * 1024**3) {
+    if (S.install_mode === 'alongside' && S.replaceAllowed && block.type === 'part' && block.ref.alongside_candidate) {
       klass += ' clickable';
       if (S.target_partition === block.name) klass += ' selected-target';
       onclick = () => selectPartitionByName(block.name);
-    } else if (S.install_mode === 'resize_ntfs' && block.type === 'part' && ['ntfs', 'ntfs3'].includes(block.fstype) && block.size_bytes >= 96 * 1024**3) {
+    } else if (S.install_mode === 'resize_ntfs' && block.type === 'part' && block.ref.ntfs_resize_candidate && block.size_bytes >= (64 + S.minGuidedGiB) * 1024**3) {
       klass += ' clickable';
       if (S.resize_partition === block.name) klass += ' selected-target';
       onclick = () => selectResizePartitionByName(block.name);
@@ -488,7 +488,7 @@ function selectFreeRegionByStart(start) {
 function populateReplacementList() {
   const container = document.getElementById('replace-list');
   const replaceable = S.replaceAllowed
-    ? S.partitions.filter(p => !p.efi && !p.current && !p.in_use && p.size_bytes >= 32 * 1024**3)
+    ? S.partitions.filter(p => p.alongside_candidate)
     : [];
   if (!replaceable.length) {
     container.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">No partitions available to replace.</div>';

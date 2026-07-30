@@ -75,7 +75,7 @@ def list_partitions(disk: str, *, strict: bool = False):
     parts = []
     try:
         devices = _disk._lsblk_blockdevices(
-            ["--paths", "--output", "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS,START", disk]
+            ["--paths", "--output", "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO", disk]
         )
 
         def walk(items):
@@ -89,9 +89,15 @@ def list_partitions(disk: str, *, strict: bool = False):
                     is_efi = parttype == EFI_PART_GUID or (fstype == "vfat" and "/boot/efi" in mounts)
                     current = _disk._is_active_mount(mounts)
                     in_use = bool(child.get("children"))
+                    read_only = bool(child.get("ro"))
                     alongside_candidate = bool(
                         name and size >= MIN_KYTHOS_BYTES and not is_efi
-                        and not current and not in_use
+                        and not current and not in_use and not read_only
+                    )
+                    ntfs_resize_candidate = bool(
+                        alongside_candidate
+                        and fstype in ("ntfs", "ntfs3")
+                        and size >= (64 * 1024**3) + MIN_KYTHOS_BYTES
                     )
                     start_val = _disk._safe_int(child.get("start"))
                     start_bytes = start_val * 512
@@ -107,7 +113,9 @@ def list_partitions(disk: str, *, strict: bool = False):
                         "efi": is_efi,
                         "current": current,
                         "in_use": in_use,
+                        "read_only": read_only,
                         "alongside_candidate": alongside_candidate,
+                        "ntfs_resize_candidate": ntfs_resize_candidate,
                     })
                 walk(child.get("children"))
 
@@ -255,6 +263,5 @@ def list_filesystems() -> list[dict]:
         {"id": "fat32", "name": "FAT32", "root_ok": False, "efi_ok": True},
         {"id": "linux-swap", "name": "Swap", "root_ok": False, "efi_ok": False},
     ]
-
 
 

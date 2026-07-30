@@ -9,10 +9,10 @@ source /src/build_files/scripts/lib/plymouth-initrd-checks.sh
 
 # Tools required by the live installer's NTFS shrink-and-install path.
 if command -v dnf5 >/dev/null 2>&1; then
-	dnf5 install -y ntfs-3g parted btrfs-progs
+	dnf5 install -y ntfs-3g parted btrfs-progs gdisk
 	dnf5 clean all
 else
-	dnf install -y ntfs-3g parted btrfs-progs
+	dnf install -y ntfs-3g parted btrfs-progs gdisk
 	dnf clean all
 fi
 

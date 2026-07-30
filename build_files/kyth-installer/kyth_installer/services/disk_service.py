@@ -38,7 +38,7 @@ class DiskService:
             raise RuntimeError("sgdisk (gptfdisk) is required for partition table operations.")
         self.execute(
             _as_root(["sgdisk", "--load-backup", backup_path, disk]),
-            check=False, timeout=60,
+            check=True, timeout=60,
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
         self.settle()

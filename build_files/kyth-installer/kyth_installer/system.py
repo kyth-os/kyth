@@ -242,8 +242,10 @@ def unmount_target_disk(disk: str, log) -> None:
     try:
         mounts = _lsblk_target_mounts(disk)
     except Exception as exc:
-        log(f"Warning: could not inspect target mounts with lsblk: {exc}")
-        mounts = []
+        raise RuntimeError(
+            f"Could not inspect mounts on target disk {disk}; no storage changes were made. "
+            f"Retry after checking lsblk/udev. Detail: {exc}"
+        ) from exc
 
     for dev, mount in mounts:
         log(f"Unmounting {dev} from {mount}")
@@ -261,8 +263,11 @@ def unmount_target_disk(disk: str, log) -> None:
 
     try:
         remaining = _lsblk_target_mounts(disk)
-    except Exception:
-        remaining = []
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not verify that target disk {disk} is fully unmounted; "
+            f"refusing to continue. Detail: {exc}"
+        ) from exc
     if remaining:
         details = ", ".join(f"{dev} at {mount}" for dev, mount in remaining)
         raise RuntimeError(

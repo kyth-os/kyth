@@ -25,6 +25,12 @@ from kyth_installer.context import InstallerContext  # noqa: E402
 
 
 class InstallerWebuiTests(unittest.TestCase):
+    def test_ntfs_resize_ui_uses_backend_safety_flag(self):
+        js = (WEBUI_DIR / "app.js").read_text()
+
+        self.assertIn("p.ntfs_resize_candidate", js)
+        self.assertIn("block.ref.ntfs_resize_candidate", js)
+
     def test_install_log_is_collapsed_until_toggle_opens_it(self):
         html = (WEBUI_DIR / "index.html").read_text()
         css = (WEBUI_DIR / "style.css").read_text()
@@ -226,6 +232,23 @@ class InstallerStorageTests(unittest.TestCase):
         self.assertFalse(parts["/dev/nvme0n1p5"]["alongside_candidate"])
         self.assertTrue(parts["/dev/nvme0n1p5"]["in_use"])
 
+    def test_list_partitions_never_offers_read_only_ntfs_for_resize(self):
+        payload = {"blockdevices": [{
+            "name": "/dev/sda", "type": "disk", "children": [{
+                "name": "/dev/sda3", "size": 256 * 1024**3, "type": "part",
+                "fstype": "ntfs", "parttype": "", "label": "Windows",
+                "mountpoints": [], "ro": True,
+            }],
+        }]}
+        with patch.object(self.disk, "run_command", return_value=SimpleNamespace(
+            stdout=json.dumps(payload), returncode=0,
+        )):
+            part = self.disk.list_partitions("/dev/sda")[0]
+
+        self.assertTrue(part["read_only"])
+        self.assertFalse(part["alongside_candidate"])
+        self.assertFalse(part["ntfs_resize_candidate"])
+
     def test_find_efi_partition_reads_efi_key_without_keyerror(self):
         partitions = [
             {"name": "/dev/nvme0n1p1", "efi": False},
@@ -365,6 +388,41 @@ class InstallerPlanTests(unittest.TestCase):
                     "target_partition": "/dev/nvme0n1p2",
                 })
 
+    def test_validate_alongside_rechecks_explicit_efi_partition(self):
+        target = {
+            "name": "/dev/nvme0n1p3", "fstype": "ext4", "efi": False,
+            "current": False, "size_bytes": 128 * 1024**3,
+        }
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[target]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=False), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+            with self.assertRaisesRegex(RuntimeError, "no longer a valid EFI"):
+                self.plan._validate_install_target({
+                    "install_mode": "alongside", "disk": "/dev/nvme0n1",
+                    "target_partition": "/dev/nvme0n1p3",
+                    "efi_partition": "/dev/nvme0n1p2",
+                })
+
+    def test_validate_alongside_rejects_read_only_efi_partition(self):
+        target = {
+            "name": "/dev/nvme0n1p3", "fstype": "ext4", "efi": False,
+            "current": False, "size_bytes": 128 * 1024**3,
+        }
+        esp = {"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True, "read_only": True}
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[esp, target]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=False), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+            with self.assertRaisesRegex(RuntimeError, "read-only"):
+                self.plan._validate_install_target({
+                    "install_mode": "alongside", "disk": "/dev/nvme0n1",
+                    "target_partition": "/dev/nvme0n1p3",
+                    "efi_partition": "/dev/nvme0n1p1",
+                })
+
     def test_validate_wipe_rejects_disk_missing_from_safe_scan(self):
         with patch.object(self.plan, "list_disks", return_value=[]):
             with self.assertRaisesRegex(RuntimeError, "not a safe install target"):
@@ -480,7 +538,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "shrink_filesystem") as mock_shrink, \
              patch.object(self.plan, "DiskService"), \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
-             patch.object(self.plan, "_partition_size_bytes", return_value=256 * 1024**3), \
+             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 192 * 1024**3]), \
              patch.object(self.plan, "_partition_number", return_value=3), \
              patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
              patch.object(self.plan, "_block_size_bytes", return_value=512), \
@@ -545,7 +603,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "shrink_filesystem"), \
              patch.object(self.plan, "DiskService", mock_disk_service_cls), \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
-             patch.object(self.plan, "_partition_size_bytes", return_value=256 * 1024**3), \
+             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 192 * 1024**3]), \
              patch.object(self.plan, "_partition_number", return_value=3), \
              patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
              patch.object(self.plan, "_block_size_bytes", return_value=512), \
@@ -1307,19 +1365,19 @@ class InstallerSystemTests(unittest.TestCase):
 
     @patch.object(system, "_lsblk_target_mounts")
     @patch.object(system, "run_command")
-    def test_unmount_target_disk_logs_warning_when_initial_scan_fails(self, mock_run, mock_lsblk):
+    def test_unmount_target_disk_refuses_when_initial_scan_fails(self, mock_run, mock_lsblk):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         mock_lsblk.side_effect = [RuntimeError("lsblk not found"), []]
-        logs = []
-        system.unmount_target_disk("/dev/sda", logs.append)
-        self.assertTrue(any("could not inspect target mounts" in m for m in logs))
+        with self.assertRaisesRegex(RuntimeError, "Could not inspect mounts"):
+            system.unmount_target_disk("/dev/sda", lambda _m: None)
 
     @patch.object(system, "_lsblk_target_mounts")
     @patch.object(system, "run_command")
-    def test_unmount_target_disk_treats_failed_final_scan_as_no_remaining_mounts(self, mock_run, mock_lsblk):
+    def test_unmount_target_disk_refuses_when_final_scan_fails(self, mock_run, mock_lsblk):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         mock_lsblk.side_effect = [[], RuntimeError("lsblk not found")]
-        system.unmount_target_disk("/dev/sda", lambda _m: None)  # does not raise
+        with self.assertRaisesRegex(RuntimeError, "Could not verify"):
+            system.unmount_target_disk("/dev/sda", lambda _m: None)
 
     @patch.object(system, "_lsblk_target_mounts")
     @patch.object(system, "run_command")
@@ -1452,6 +1510,20 @@ class InstallerGptDiskTests(unittest.TestCase):
 
 
 class InstallerDiskServiceTests(unittest.TestCase):
+    def test_partition_table_restore_is_checked(self):
+        from kyth_installer.services.disk_service import DiskService
+        svc = DiskService()
+        with patch.object(svc, "execute") as execute, \
+             patch("kyth_installer.services.disk_service.shutil.which", return_value="/usr/bin/sgdisk"), \
+             patch.object(svc, "settle"):
+            svc.restore_table("/dev/sda", "/tmp/table.backup")
+
+        self.assertTrue(execute.call_args.kwargs["check"])
+
+    def test_live_image_installs_partition_backup_tool(self):
+        build_script = (ROOT / "installer/build.sh").read_text()
+        self.assertRegex(build_script, r"dnf5? install -y[^\n]*\bgdisk\b")
+
     def test_disk_service_dry_run_collects_journal(self):
         from kyth_installer.services.disk_service import DiskService
         svc = DiskService(dry_run=True)
