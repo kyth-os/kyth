@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-30 02:22:09 UTC
+- Last refreshed (UTC): 2026-07-30 02:29:27 UTC
 - Current branch: testing
-- HEAD commit: 9e8681d
-- Last commit title: Reduce duplication across installer HTTP/partitioning code and Plymouth scripts
-- Last commit date: 2026-07-29T22:20:30-04:00
+- HEAD commit: 26830e4
+- Last commit title: Untangle installer service imports, split Journal.validate(), and raise server.py/app.py test coverage
+- Last commit date: 2026-07-29T22:22:09-04:00
 - CI workflow files: 8
 - Build script files: 21
 
