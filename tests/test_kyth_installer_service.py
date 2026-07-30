@@ -82,7 +82,9 @@ class AnswerFileTests(unittest.TestCase):
         try:
             os.write(fd, b'{"password":"secret"}')
             os.close(fd)
-            os.chmod(path, 0o644)
+            # Intentionally insecure: this fixture verifies answer files that
+            # expose passwords are rejected before their contents are used.
+            os.chmod(path, 0o644)  # lgtm[py/overly-permissive-file]
             with self.assertRaisesRegex(ValueError, "chmod 600"):
                 _load_answer_file(path)
         finally:

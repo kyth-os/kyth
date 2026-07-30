@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-30 03:14:52 UTC
+- Last refreshed (UTC): 2026-07-30 03:18:44 UTC
 - Current branch: testing
-- HEAD commit: 811f438
-- Last commit title: Retry transient dracut container build failures
-- Last commit date: 2026-07-29T23:10:02-04:00
+- HEAD commit: 43689e2
+- Last commit title: Mark installer accessibility handler as used
+- Last commit date: 2026-07-29T23:14:52-04:00
 - CI workflow files: 8
 - Build script files: 21
 
