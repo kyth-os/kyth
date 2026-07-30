@@ -134,6 +134,45 @@ class Journal:
                         return name
         return None
 
+    def _initial_table_state(self) -> tuple[str, int]:
+        """Return (table_type, primary_count) as the disk stands before this
+        journal's ops are applied — the starting point validate() walks ops
+        forward from, since a new_table op can replace either mid-journal.
+
+        MBR (msdos) tables support at most 4 primary partitions, and this
+        installer does not create extended/logical partitions to work around
+        that limit — validate() fails closed on a 5th instead of letting it
+        hit parted's own cryptic error later."""
+        disks_by_name = {d["name"]: d for d in list_disks()}
+        table_type = (disks_by_name.get(self.disk, {}).get("partition_table") or "").lower()
+        primary_count = (
+            len([pt for pt in list_partitions(self.disk) if pt.get("name")])
+            if table_type == "msdos" else 0
+        )
+        return table_type, primary_count
+
+    def _validate_not_in_use(self, current_parts: list[dict]) -> list[str]:
+        """Reject any op touching a partition the live disk scan shows as
+        currently mounted or carrying active LVM/LUKS mappings. A
+        set_mountpoint("/", name) op is checked too since it schedules an
+        eventual reformat at install time even without an explicit
+        format/delete/resize op staged for it here."""
+        errors = []
+        for part in current_parts:
+            name = part.get("name")
+            if not (part.get("current") or part.get("in_use")):
+                continue
+            for op in self.ops:
+                kind = op["kind"]
+                params = op["params"]
+                if kind in ("delete", "format", "resize") and params.get("partition") == name:
+                    errors.append(f"Cannot modify {name} — it is currently mounted or in use.")
+                    break
+                if kind == "set_mountpoint" and params.get("partition") == name and params.get("mountpoint") == "/":
+                    errors.append(f"Cannot set {name} as the root partition — it is currently mounted or in use.")
+                    break
+        return errors
+
     def validate(self) -> list[str]:
         errors = []
 
@@ -143,19 +182,7 @@ class Journal:
 
         has_root = False
         allocated: list[tuple[int, int, str]] = []
-
-        # MBR (msdos) tables support at most 4 primary partitions, and this
-        # installer does not create extended/logical partitions to work
-        # around that limit — fail closed here with a clear message instead
-        # of letting a 5th mkpart hit parted's own cryptic error later.
-        # Table type starts from whatever the disk currently has unless a
-        # new_table op in this journal replaces it.
-        disks_by_name = {d["name"]: d for d in list_disks()}
-        table_type = (disks_by_name.get(self.disk, {}).get("partition_table") or "").lower()
-        primary_count = (
-            len([pt for pt in list_partitions(self.disk) if pt.get("name")])
-            if table_type == "msdos" else 0
-        )
+        table_type, primary_count = self._initial_table_state()
 
         for op in self.ops:
             kind = op["kind"]
@@ -204,24 +231,7 @@ class Journal:
         if not has_root:
             errors.append("No root partition (/) configured. Mount at least one partition as '/' with Btrfs.")
 
-        current_parts = list_partitions(self.disk)
-        for part in current_parts:
-            name = part.get("name")
-            if part.get("current") or part.get("in_use"):
-                for op in self.ops:
-                    kind = op["kind"]
-                    params = op["params"]
-                    if kind in ("delete", "format", "resize") and params.get("partition") == name:
-                        errors.append(f"Cannot modify {name} — it is currently mounted or in use.")
-                        break
-                    # A set_mountpoint("/", name) op makes this the install's
-                    # root partition, which gets reformatted at install time
-                    # even though no "format" op was staged for it here — that
-                    # eventual mkfs must be rejected too, not just an explicit
-                    # format/delete/resize op.
-                    if kind == "set_mountpoint" and params.get("partition") == name and params.get("mountpoint") == "/":
-                        errors.append(f"Cannot set {name} as the root partition — it is currently mounted or in use.")
-                        break
+        errors.extend(self._validate_not_in_use(list_partitions(self.disk)))
 
         return errors
 

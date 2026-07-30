@@ -499,6 +499,33 @@ def _configure_installed_system(
         else:
             context.release_mount(config_root)
 
+def _handle_install_failure(exc: Exception, log, context: InstallerContext) -> None:
+    """Log, record, and publish an install failure. Runs inside
+    _run_install_worker's except block, so a failure in any step here must
+    not prevent the error event from reaching the UI — hence the nested
+    try/excepts around the log write and failure-summary write."""
+    message = format_install_error(exc)
+    try:
+        with LOG_FILE.open("a") as f:
+            f.write(traceback.format_exc())
+            f.write(f"\n# install error: {message}\n")
+    except OSError as log_exc:
+        message = (
+            f"{message} "
+            f"(also failed writing installer log {LOG_FILE}: "
+            f"{format_os_error(log_exc, path=LOG_FILE)})"
+        )
+    except Exception as log_exc:
+        message = f"{message} (also failed writing installer log {LOG_FILE}: {log_exc})"
+    log(f"ERROR: {message}")
+    context.transition(InstallLifecycle.FAILED)
+    try:
+        write_failure_summary(FAILURE_SUMMARY_FILE, context=context, message=message)
+    except Exception as summary_exc:
+        log(f"Warning: could not write failure summary: {summary_exc}")
+    _push({"type": "error", "message": message}, context)
+
+
 def _run_install_worker(
     log, progress, alongside_mount, context: InstallerContext,
 ):
@@ -541,26 +568,7 @@ def _run_install_worker(
         _push({"type": "done", "mok_state": mok_state}, context)
 
     except Exception as exc:
-        message = format_install_error(exc)
-        try:
-            with LOG_FILE.open("a") as f:
-                f.write(traceback.format_exc())
-                f.write(f"\n# install error: {message}\n")
-        except OSError as log_exc:
-            message = (
-                f"{message} "
-                f"(also failed writing installer log {LOG_FILE}: "
-                f"{format_os_error(log_exc, path=LOG_FILE)})"
-            )
-        except Exception as log_exc:
-            message = f"{message} (also failed writing installer log {LOG_FILE}: {log_exc})"
-        log(f"ERROR: {message}")
-        context.transition(InstallLifecycle.FAILED)
-        try:
-            write_failure_summary(FAILURE_SUMMARY_FILE, context=context, message=message)
-        except Exception as summary_exc:
-            log(f"Warning: could not write failure summary: {summary_exc}")
-        _push({"type": "error", "message": message}, context)
+        _handle_install_failure(exc, log, context)
     finally:
         # Guard against orphaned mounts when Phase 1 fails before the inner
         # try/finally (which holds the normal umount) is ever entered.

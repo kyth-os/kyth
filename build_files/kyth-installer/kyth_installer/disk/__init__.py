@@ -1,4 +1,17 @@
-"""disk inspection package"""
+"""disk inspection package
+
+Every submodule here (_util, _probe, _query, _lookup) imports this package
+itself (`import kyth_installer.disk as _disk`) and calls even its own
+sibling/self-defined functions through that reference (`_disk.some_func(...)`)
+rather than importing them directly. This is deliberate, not an oversight:
+it gives tests a single patchable seam — `patch.object(disk, "some_func", ...)`
+intercepts every call to `some_func` throughout the whole subpackage,
+regardless of which submodule defines or calls it (see the tests around
+`_latest_partition_on_disk` in tests/test_kyth_installer_storage.py for a
+call site that depends on exactly this). Switching any of these to direct
+`from ._sibling import name` imports would silently stop such patches from
+working for calls made inside that file.
+"""
 
 from __future__ import annotations
 

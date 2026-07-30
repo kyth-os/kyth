@@ -86,5 +86,67 @@ class TestInstallerService(unittest.TestCase):
             self.assertEqual(cm.exception.code, 1)
 
 
+class RunHeadlessEventLoopTests(unittest.TestCase):
+    """run_headless()'s polling loop after a successful start_install() —
+    covers the log/progress/error/done event types and the lifecycle-only
+    fallback (no event) checked after the inner loop."""
+
+    def _run_with_fake_service(self, populate):
+        """`populate(context)` runs synchronously inside the mocked
+        start_install(), before it returns {"started": True} — so the
+        events/lifecycle it sets are already visible when run_headless()'s
+        wait_for() predicate is first evaluated, and the loop never actually
+        blocks on the 1s timeout."""
+        def fake_service_ctor(context):
+            service = MagicMock()
+
+            def fake_start_install(_body):
+                populate(context)
+                return {"started": True}
+
+            service.start_install.side_effect = fake_start_install
+            return service
+
+        argv = [
+            "/path/to/cmd", "--headless", "--disk", "/dev/sda",
+            "--username", "user", "--password", "pass",
+        ]
+        with patch("sys.argv", argv), \
+             patch("kyth_installer.app.InstallerService", side_effect=fake_service_ctor):
+            with self.assertRaises(SystemExit) as cm:
+                run_headless()
+        return cm.exception.code
+
+    def test_prints_log_and_progress_then_exits_zero_on_done(self):
+        def populate(context):
+            context.events.publish({"type": "log", "text": "step 1"})
+            context.events.publish({"type": "progress", "value": 42})
+            context.events.publish({"type": "done", "mok_state": "enrolled"})
+
+        self.assertEqual(self._run_with_fake_service(populate), 0)
+
+    def test_error_event_exits_one(self):
+        def populate(context):
+            context.events.publish({"type": "error", "message": "disk write failed"})
+
+        self.assertEqual(self._run_with_fake_service(populate), 1)
+
+    def test_lifecycle_done_without_an_event_still_exits_zero(self):
+        from kyth_installer.context import InstallLifecycle as _InstallLifecycle
+
+        def populate(context):
+            context.transition(_InstallLifecycle.DONE)
+
+        self.assertEqual(self._run_with_fake_service(populate), 0)
+
+    def test_lifecycle_failed_without_an_event_still_exits_one(self):
+        from kyth_installer.context import InstallLifecycle as _InstallLifecycle
+
+        def populate(context):
+            context.transition(_InstallLifecycle.FAILED)
+
+        self.assertEqual(self._run_with_fake_service(populate), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

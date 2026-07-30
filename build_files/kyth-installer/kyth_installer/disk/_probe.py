@@ -7,7 +7,6 @@ import os
 from typing import Optional
 
 import kyth_installer.disk as _disk
-subprocess = _disk.subprocess
 
 from ..config import _IS_LIVE_SESSION
 

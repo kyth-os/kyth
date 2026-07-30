@@ -5,6 +5,7 @@ from functools import partial
 from typing import Callable
 
 from .context import InstallerContext
+from .services import InstallerService
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,6 @@ class PostRouteService:
 
     def __init__(self, context: InstallerContext):
         self.context = context
-        from .services import InstallerService
         self.installer_service = InstallerService(self.context)
         self.handlers: dict[str, Callable[[dict], ApiResponse]] = {
             name: partial(self._simple, name) for name in self._SIMPLE_ROUTES

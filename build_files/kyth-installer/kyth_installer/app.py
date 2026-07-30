@@ -3,24 +3,23 @@ server in a background thread, and launches Chromium in app/kiosk mode
 pointed at it.
 """
 
+import argparse
 import os
 import secrets
 import shutil
+import sys
 import threading
 import time
 
 from . import config
 from .config import PORT
+from .context import InstallerContext, InstallLifecycle
 from .runner import spawn_command
 from .server import Handler, _Server
+from .services.installer_service import InstallerService
 
 
 def run_headless() -> None:
-    import argparse
-    import sys
-    from kyth_installer.context import InstallerContext, InstallLifecycle
-    from kyth_installer.services import InstallerService
-
     parser = argparse.ArgumentParser(description="KythOS Installer Headless CLI")
     parser.add_argument("--headless", action="store_true", required=True)
     parser.add_argument("--disk", required=True, help="Target disk path (e.g. /dev/sda)")
@@ -90,7 +89,6 @@ def run_headless() -> None:
 
 
 def main() -> None:
-    import sys
     if "--headless" in sys.argv:
         run_headless()
         return

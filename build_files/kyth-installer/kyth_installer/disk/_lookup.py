@@ -6,7 +6,6 @@ import json
 import logging
 
 import kyth_installer.disk as _disk
-subprocess = _disk.subprocess
 
 _logger = logging.getLogger(__name__)
 

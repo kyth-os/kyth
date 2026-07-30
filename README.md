@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-30 01:52:47 UTC
+- Last refreshed (UTC): 2026-07-30 02:22:09 UTC
 - Current branch: testing
-- HEAD commit: f7948e5
-- Last commit title: Fix pre-existing Codacy/pylint findings blocking the testing-branch pre-push gate
-- Last commit date: 2026-07-29T21:48:56-04:00
+- HEAD commit: 9e8681d
+- Last commit title: Reduce duplication across installer HTTP/partitioning code and Plymouth scripts
+- Last commit date: 2026-07-29T22:20:30-04:00
 - CI workflow files: 8
 - Build script files: 21
 

@@ -7,7 +7,7 @@ import os
 import re
 
 import kyth_installer.disk as _disk
-subprocess = _disk.subprocess
+
 _SAFE_DEVICE_PATH_RE = re.compile(r"^/dev/[A-Za-z0-9._/+:-]+$")
 
 def _safe_int(value, default: int = 0) -> int:

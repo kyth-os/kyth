@@ -60,8 +60,8 @@ from .disk import (
     list_free_space,
     list_partitions,
 )
+from . import partition_ops
 from .fsresize import shrink_filesystem
-from .partition_ops import get_journal
 from .services.disk_service import DiskService
 from .system import _as_root, _settle, unmount_target_disk
 from .runner import run_command
@@ -180,7 +180,7 @@ def _validate_install_target(
     if mode == "manual":
         if context is None:
             raise RuntimeError("Manual installation requires an installer session context.")
-        journal = get_journal(context)
+        journal = partition_ops.get_journal(context)
         if not journal or not journal.committed:
             raise RuntimeError("Partition changes have not been committed. Return to the disk step and apply your partition layout.")
         target = _normal_device_path(journal.root_partition or config.get("target_partition"))
@@ -495,7 +495,7 @@ def _prepare_install_plan(state: dict, log, context=None) -> InstallPlan:
 
 def _get_manual_mounts(context) -> list[dict]:
     """Return non-root partition mount assignments from the committed journal."""
-    journal = get_journal(context)
+    journal = partition_ops.get_journal(context)
     if not journal or not journal.committed:
         return []
     mounts: list[dict] = []
