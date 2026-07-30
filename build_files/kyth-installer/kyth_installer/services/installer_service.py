@@ -7,6 +7,13 @@ if TYPE_CHECKING:
     from kyth_installer.context import InstallerContext
 
 
+def _validate_fs_type(fs_type: str) -> dict | None:
+    from kyth_installer.partition_ops import FILESYSTEM_OPTIONS
+    if not any(item["id"] == fs_type for item in FILESYSTEM_OPTIONS):
+        return {"ok": False, "message": f"Unsupported filesystem: {fs_type}"}
+    return None
+
+
 class InstallerService:
     """Encapsulates all installation and disk partitioning business logic."""
 
@@ -52,7 +59,6 @@ class InstallerService:
 
     def create_partition(self, body: dict) -> dict:
         from kyth_installer.disk import _safe_int
-        from kyth_installer.partition_ops import FILESYSTEM_OPTIONS
         _disk, journal, error = self._journal_for(body)
         if error:
             return error
@@ -61,8 +67,9 @@ class InstallerService:
         if start < 0 or size < 1:
             return {"ok": False, "message": "Invalid start offset or size."}
         fs_type = body.get("fs_type", "btrfs")
-        if not any(item["id"] == fs_type for item in FILESYSTEM_OPTIONS):
-            return {"ok": False, "message": f"Unsupported filesystem: {fs_type}"}
+        fs_error = _validate_fs_type(fs_type)
+        if fs_error:
+            return fs_error
         journal.add_op("create", {
             "start_bytes": start,
             "size_bytes": size,
@@ -103,13 +110,13 @@ class InstallerService:
         return {"ok": True, "pending": len(journal.ops)}
 
     def format_partition(self, body: dict) -> dict:
-        from kyth_installer.partition_ops import FILESYSTEM_OPTIONS
         _disk, journal, partition, error = self._partition_for(body)
         if error:
             return error
         fs_type = body.get("fs_type", "btrfs")
-        if not any(item["id"] == fs_type for item in FILESYSTEM_OPTIONS):
-            return {"ok": False, "message": f"Unsupported filesystem: {fs_type}"}
+        fs_error = _validate_fs_type(fs_type)
+        if fs_error:
+            return fs_error
         journal.add_op("format", {
             "partition": partition, "fs_type": fs_type, "label": body.get("label", ""),
         })

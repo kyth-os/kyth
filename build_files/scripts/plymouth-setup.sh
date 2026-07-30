@@ -6,6 +6,9 @@
 
 set -euo pipefail
 
+# shellcheck source=lib/plymouth-config.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-config.sh"
+
 PLYMOUTH_THEME_DIR=/usr/share/plymouth/themes/kyth
 mkdir -p "${PLYMOUTH_THEME_DIR}"
 
@@ -25,13 +28,7 @@ install -Dm0755 /tmp/plymouth-branding-guard.sh \
 # The guard owns the late 99kyth-plymouth dracut module. Keep setup focused on
 # the theme files and host defaults so there is one generated module body.
 mkdir -p /etc/plymouth /usr/share/plymouth
-cat >/etc/plymouth/plymouthd.conf <<'PLYMOUTHCONF'
-[Daemon]
-Theme=kyth
-ShowDelay=0
-DeviceTimeout=8
-UseFirmwareBackground=false
-PLYMOUTHCONF
+printf '%s\n' "${KYTH_PLYMOUTHD_CONF}" >/etc/plymouth/plymouthd.conf
 install -m 0644 /etc/plymouth/plymouthd.conf /usr/share/plymouth/plymouthd.defaults
 
 mkdir -p /etc/dracut.conf.d

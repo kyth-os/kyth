@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Callable
 
 from .context import InstallerContext
@@ -26,22 +27,30 @@ class PostRouteService:
         "rollback_partitions",
     }
 
+    # Routes whose handler is just "call the same-named InstallerService
+    # method and map ok/not-ok to 200/400" -- see _simple().
+    _SIMPLE_ROUTES = (
+        "new_table",
+        "create_partition",
+        "delete_partition",
+        "resize_partition",
+        "format_partition",
+        "set_mountpoint",
+    )
+
     def __init__(self, context: InstallerContext):
         self.context = context
         from .services import InstallerService
         self.installer_service = InstallerService(self.context)
         self.handlers: dict[str, Callable[[dict], ApiResponse]] = {
-            "new_table": self.new_table,
-            "create_partition": self.create_partition,
-            "delete_partition": self.delete_partition,
-            "resize_partition": self.resize_partition,
-            "format_partition": self.format_partition,
-            "set_mountpoint": self.set_mountpoint,
+            name: partial(self._simple, name) for name in self._SIMPLE_ROUTES
+        }
+        self.handlers.update({
             "commit_partitions": self.commit_partitions,
             "rollback_partitions": self.rollback_partitions,
             "start": self.start,
             "reboot": self.reboot,
-        }
+        })
 
     def dispatch(self, route_name: str, body: dict) -> ApiResponse:
         handler = self.handlers.get(route_name)
@@ -55,33 +64,8 @@ class PostRouteService:
                 )
             return handler(body)
 
-    def new_table(self, body: dict) -> ApiResponse:
-        res = self.installer_service.new_table(body)
-        status = 200 if res.get("ok") else 400
-        return ApiResponse(res, status)
-
-    def create_partition(self, body: dict) -> ApiResponse:
-        res = self.installer_service.create_partition(body)
-        status = 200 if res.get("ok") else 400
-        return ApiResponse(res, status)
-
-    def delete_partition(self, body: dict) -> ApiResponse:
-        res = self.installer_service.delete_partition(body)
-        status = 200 if res.get("ok") else 400
-        return ApiResponse(res, status)
-
-    def resize_partition(self, body: dict) -> ApiResponse:
-        res = self.installer_service.resize_partition(body)
-        status = 200 if res.get("ok") else 400
-        return ApiResponse(res, status)
-
-    def format_partition(self, body: dict) -> ApiResponse:
-        res = self.installer_service.format_partition(body)
-        status = 200 if res.get("ok") else 400
-        return ApiResponse(res, status)
-
-    def set_mountpoint(self, body: dict) -> ApiResponse:
-        res = self.installer_service.set_mountpoint(body)
+    def _simple(self, service_method_name: str, body: dict) -> ApiResponse:
+        res = getattr(self.installer_service, service_method_name)(body)
         status = 200 if res.get("ok") else 400
         return ApiResponse(res, status)
 

@@ -181,13 +181,8 @@ ShowDelay=0
 DeviceTimeout=8
 UseFirmwareBackground=false
 PLYMOUTHCONF
-    cat > "${initdir}/usr/share/plymouth/plymouthd.defaults" <<'PLYMOUTHDEFAULTS'
-[Daemon]
-Theme=kyth
-ShowDelay=0
-DeviceTimeout=8
-UseFirmwareBackground=false
-PLYMOUTHDEFAULTS
+    install -m 0644 "${initdir}/etc/plymouth/plymouthd.conf" \
+        "${initdir}/usr/share/plymouth/plymouthd.defaults"
     rm -rf \
         "${initdir}/usr/share/plymouth/themes/default.plymouth" \
         "${initdir}/usr/share/plymouth/themes/bgrt-fedora" \
@@ -228,7 +223,10 @@ add_drivers+=" virtio_blk virtio_scsi virtio_pci nvme ahci virtio_gpu qxl bochs 
 DRACUTEOF
 
 # Write Plymouth defaults unconditionally so both Fedora and CachyOS images ship
-# a host config that agrees with the late kyth-plymouth dracut module.
+# a host config that agrees with the late kyth-plymouth dracut module. This
+# build runs in the separate build_base/ Docker context, so it can't source
+# build_files/scripts/lib/plymouth-config.sh — keep this in sync with
+# KYTH_PLYMOUTHD_CONF there by hand.
 mkdir -p /etc/plymouth /usr/share/plymouth
 cat >/etc/plymouth/plymouthd.conf <<'PLYMOUTHCONF'
 [Daemon]

@@ -21,6 +21,32 @@ class InstallRequestError(ValueError):
     """A user-correctable error in an installation request."""
 
 
+def _hash_password_for_request(password: str, *, allow_blank: bool = False) -> str:
+    """Hash `password`, wrapping hashing failures as InstallRequestError.
+
+    If allow_blank, a blank password hashes to "" instead of being passed
+    through to system._hash_password (which rejects empty input) — used by
+    the CLI path, where a blank password means "don't create an admin user"."""
+    if allow_blank and not password:
+        return ""
+    try:
+        return system._hash_password(password)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        raise InstallRequestError(f"Could not hash password: {exc}") from exc
+
+
+def _require_valid_hostname(hostname: str) -> None:
+    if not HOSTNAME_PATTERN.fullmatch(hostname):
+        raise InstallRequestError("Invalid hostname.")
+
+
+def _require_valid_username(username: str, *, required: bool = True) -> None:
+    if not required and not username:
+        return
+    if not USERNAME_PATTERN.fullmatch(username):
+        raise InstallRequestError("Invalid username.")
+
+
 def _storage_state(body: dict, context: InstallerContext) -> tuple[dict, dict]:
     target_disk = body.get("disk", "")
     disks = {item["name"]: item for item in disk.list_disks()}
@@ -98,20 +124,15 @@ def validate_install_request(body: dict, context: InstallerContext) -> Installat
     if not (body.get("confirm_backup") and body.get("confirm_erase") and current_ok):
         raise InstallRequestError("Please confirm the on-screen acknowledgements before starting the install.")
 
-    try:
-        password_hash = system._hash_password(body.get("password", ""))
-    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
-        raise InstallRequestError(f"Could not hash password: {exc}") from exc
+    password_hash = _hash_password_for_request(body.get("password", ""))
 
     timezone = body.get("timezone", "UTC") or "UTC"
     if timezone not in set(system.list_timezones()):
         timezone = "UTC"
     username = body.get("username", "")
-    if not USERNAME_PATTERN.fullmatch(username):
-        raise InstallRequestError("Invalid username.")
+    _require_valid_username(username)
     hostname = body.get("hostname", "kyth")
-    if not HOSTNAME_PATTERN.fullmatch(hostname):
-        raise InstallRequestError("Invalid hostname.")
+    _require_valid_hostname(hostname)
 
     return {
         **state,
@@ -175,20 +196,15 @@ def validate_partition_install_request(
         },
         context,
     )
-    if not HOSTNAME_PATTERN.fullmatch(hostname):
-        raise InstallRequestError("Invalid hostname.")
+    _require_valid_hostname(hostname)
     if timezone not in set(system.list_timezones()):
         raise InstallRequestError(f"Invalid timezone: {timezone}")
-    if username and not USERNAME_PATTERN.fullmatch(username):
-        raise InstallRequestError("Invalid username.")
+    _require_valid_username(username, required=False)
     if bool(username) != bool(password):
         raise InstallRequestError(
             "An admin username and password must either both be supplied or both be blank."
         )
-    try:
-        password_hash = system._hash_password(password) if password else ""
-    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
-        raise InstallRequestError(f"Could not hash password: {exc}") from exc
+    password_hash = _hash_password_for_request(password, allow_blank=True)
 
     return {
         **state,

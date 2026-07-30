@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from . import config
 from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, _IS_LIVE_SESSION
@@ -47,6 +47,14 @@ ROUTES = {
     "set_mountpoint": RouteSpec("POST", "/api/disk/set-mountpoint", requires_same_origin=True),
     "commit_partitions": RouteSpec("POST", "/api/disk/commit", requires_same_origin=True),
     "rollback_partitions": RouteSpec("POST", "/api/disk/rollback", requires_same_origin=True),
+}
+
+
+# path -> (webui filename, content-type, whether to inject the session token)
+_STATIC_TEXT_ASSETS: dict[str, tuple[str, str, bool]] = {
+    "/style.css": ("style.css", "text/css; charset=utf-8", False),
+    "/app.js": ("app.js", "application/javascript; charset=utf-8", True),
+    "/state.js": ("state.js", "application/javascript; charset=utf-8", True),
 }
 
 
@@ -119,64 +127,54 @@ class Handler(BaseHTTPRequestHandler):
         if (route is None or route.requires_same_origin) and not self._require_same_origin_context():
             return
 
-        query = urlparse(self.path).query
-        from urllib.parse import parse_qs
-        qs = parse_qs(query)
-
-        cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
-
-        is_authenticated = False
-
-        if cookies.get("bootstrap_auth") == SESSION_TOKEN:
-            is_authenticated = True
-        elif qs.get("bootstrap_token") and config._bootstrap_token is not None:
-            with config._bootstrap_lock:
-                if config._bootstrap_token is not None and qs.get("bootstrap_token") == [config._bootstrap_token]:
-                    is_authenticated = True
-                    config._bootstrap_token = None
+        qs = parse_qs(urlparse(self.path).query)
 
         if path == "/":
-            if not is_authenticated:
-                self.send_error(403, "Forbidden")
-                return
-
-            injected_html = _read_webui("index.html")
-            body = injected_html.encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.send_header("Set-Cookie", f"bootstrap_auth={SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Strict")
-            self.end_headers()
-            self.wfile.write(body)
+            self._serve_index(qs)
             return
 
-        if path == "/style.css":
-            if not self._require_auth():
-                return
-            body = _read_webui("style.css").encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/css; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+        if path in _STATIC_TEXT_ASSETS:
+            self._serve_static_asset(path)
             return
 
-        if path in ("/app.js", "/state.js"):
-            if not self._require_auth():
-                return
-            asset_name = path.removeprefix("/")
-            body = _read_webui(asset_name).replace("SESSION_TOKEN_PLACEHOLDER", SESSION_TOKEN).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/javascript; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-
-        # Authenticate all other API endpoints
         if not self._require_auth():
             return
 
+        self._dispatch_api_get(route, qs)
+
+    def _bootstrap_authenticated(self, qs: dict[str, list[str]]) -> bool:
+        cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
+        if cookies.get("bootstrap_auth") == SESSION_TOKEN:
+            return True
+        if qs.get("bootstrap_token") and config._bootstrap_token is not None:
+            with config._bootstrap_lock:
+                if config._bootstrap_token is not None and qs.get("bootstrap_token") == [config._bootstrap_token]:
+                    config._bootstrap_token = None
+                    return True
+        return False
+
+    def _serve_index(self, qs: dict[str, list[str]]) -> None:
+        if not self._bootstrap_authenticated(qs):
+            self.send_error(403, "Forbidden")
+            return
+        body = _read_webui("index.html").encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", len(body))
+        self.send_header("Set-Cookie", f"bootstrap_auth={SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Strict")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_static_asset(self, path: str) -> None:
+        if not self._require_auth():
+            return
+        filename, content_type, inject_token = _STATIC_TEXT_ASSETS[path]
+        text = _read_webui(filename)
+        if inject_token:
+            text = text.replace("SESSION_TOKEN_PLACEHOLDER", SESSION_TOKEN)
+        self._send_text(text, content_type)
+
+    def _dispatch_api_get(self, route: RouteSpec | None, qs: dict[str, list[str]]) -> None:
         if route == ROUTES["config"]:
             self._json({"source_image": SOURCE_IMAGE, "is_live": _IS_LIVE_SESSION})
         elif route == ROUTES["disks"]:
@@ -197,18 +195,24 @@ class Handler(BaseHTTPRequestHandler):
         elif route == ROUTES["stream"]:
             self._sse()
         elif route == ROUTES["log"]:
-            try:
-                text = LOG_FILE.read_text(errors="replace")
-            except Exception as exc:
-                text = f"Could not read installer log: {exc}\n"
-            body = text.encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+            self._serve_log()
         else:
             self.send_error(404)
+
+    def _serve_log(self) -> None:
+        try:
+            text = LOG_FILE.read_text(errors="replace")
+        except Exception as exc:
+            text = f"Could not read installer log: {exc}\n"
+        self._send_text(text, "text/plain; charset=utf-8")
+
+    def _send_text(self, text: str, content_type: str) -> None:
+        body = text.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", len(body))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         path = urlparse(self.path).path

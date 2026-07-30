@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-28 23:52:42 UTC
+- Last refreshed (UTC): 2026-07-30 01:09:54 UTC
 - Current branch: testing
-- HEAD commit: 5fb9fc4
-- Last commit title: Raise system.py test coverage from 30% to 91% and gate it
-- Last commit date: 2026-07-28T19:04:26-04:00
+- HEAD commit: a5ca6ea
+- Last commit title: fix: installer refactoring
+- Last commit date: 2026-07-29T20:40:58-04:00
 - CI workflow files: 8
 - Build script files: 21
 

@@ -42,7 +42,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
 from .disk import (
@@ -266,6 +266,56 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     return bios_end + sector
 
 
+def _commit_new_kythos_partition(
+    disk: str,
+    gap_start: int,
+    gap_end: int,
+    log,
+    *,
+    before_partition: Callable[[], None] | None = None,
+    failure_message: str = "A step failed — restoring the original partition table...",
+    restored_message: str = "Partition table restored to its state before this attempt.",
+) -> str:
+    """Back up `disk`'s partition table, then create a new KythOS Btrfs
+    partition spanning [gap_start, gap_end), restoring the backup if
+    anything in this scope raises. `before_partition`, if given, runs first
+    inside the same backed-up/restored scope (e.g. the NTFS boundary-shrink
+    resizepart call) so its failures are covered by the same safety net.
+    Returns the new partition's device path."""
+    disk_service = DiskService()
+    with tempfile.TemporaryDirectory(prefix="kyth-partition-") as backup_dir:
+        backup_path = str(Path(backup_dir) / "partition-table.backup")
+        log("Backing up the partition table before changing it...")
+        disk_service.backup_table(disk, backup_path)
+        try:
+            if before_partition is not None:
+                before_partition()
+
+            btrfs_start = _ensure_bios_boot_partition(disk, gap_start, log)
+            sector = _block_size_bytes(disk)
+            partition_end = gap_end - sector
+            before = {p["name"] for p in list_partitions(disk) if p.get("name")}
+
+            log(f"Creating KythOS Btrfs partition in {_human_size(gap_end - btrfs_start)} of free space...")
+            run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{partition_end}B"]), check=True, timeout=120)
+            _settle()
+
+            created = _latest_partition_on_disk(disk, before)
+            if not created:
+                raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
+            run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
+            log(f"Created target partition {created}")
+        except Exception:
+            log(failure_message)
+            try:
+                disk_service.restore_table(disk, backup_path)
+                log(restored_message)
+            except Exception as restore_exc:
+                log(f"Warning: automatic partition table restore failed: {restore_exc}")
+            raise
+    return created
+
+
 def _validate_resize_ntfs_target(
     config: dict,
     snapshot: StorageSnapshot | None = None,
@@ -342,55 +392,35 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
     shrink_filesystem(partition, "ntfs", new_ntfs_size, log)
 
-    disk_service = DiskService()
-    with tempfile.TemporaryDirectory(prefix="kyth-partition-") as backup_dir:
-        backup_path = str(Path(backup_dir) / "partition-table.backup")
-        log("Backing up the partition table before changing it...")
-        disk_service.backup_table(disk, backup_path)
-        try:
-            log("Shrinking partition boundary...")
-            # parted >= 3.3 refuses to shrink a partition in script mode (-s):
-            # it asks "Shrinking a partition can cause data loss, are you
-            # sure?" and exits 1 when it cannot prompt. ---pretend-input-tty
-            # with "Yes" piped on stdin is the documented way to answer that
-            # prompt non-interactively.
-            run_command(
-                _as_root(["parted", "---pretend-input-tty", disk, "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
-                input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True, timeout=120,
-            )
-            _settle()
+    def _shrink_partition_boundary() -> None:
+        log("Shrinking partition boundary...")
+        # parted >= 3.3 refuses to shrink a partition in script mode (-s):
+        # it asks "Shrinking a partition can cause data loss, are you
+        # sure?" and exits 1 when it cannot prompt. ---pretend-input-tty
+        # with "Yes" piped on stdin is the documented way to answer that
+        # prompt non-interactively.
+        run_command(
+            _as_root(["parted", "---pretend-input-tty", disk, "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
+            input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True, timeout=120,
+        )
+        _settle()
 
-            btrfs_start = _ensure_bios_boot_partition(disk, new_end + sector, log)
-            before = {p["name"] for p in list_partitions(disk) if p.get("name")}
-
-            log("Creating KythOS Btrfs partition in freed space...")
-            run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{old_end}B"]), check=True, timeout=120)
-            _settle()
-
-            created = _latest_partition_on_disk(disk, before)
-            if not created:
-                raise RuntimeError("The installer could not find the new KythOS partition after resizing.")
-            run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
-            log(f"Created target partition {created}")
-        except Exception:
-            # The NTFS filesystem was already shrunk above (that step cannot
-            # be undone by a table restore, and doesn't need to be — a
-            # partition table describing more space than the filesystem
-            # inside it uses is a benign, expected intermediate state, not
-            # corruption). Restoring the table just undoes the boundary
-            # move / new-partition creation that failed here.
-            log("A step after the NTFS shrink failed — restoring the original partition table...")
-            try:
-                disk_service.restore_table(disk, backup_path)
-                log(
-                    "Partition table restored. The NTFS filesystem itself was "
-                    "already shrunk and remains intact and usable — Windows may "
-                    "offer to grow it back to fill the partition, or you can "
-                    "leave it as-is and try the install again."
-                )
-            except Exception as restore_exc:
-                log(f"Warning: automatic partition table restore failed: {restore_exc}")
-            raise
+    # The NTFS filesystem was already shrunk above (that step cannot be
+    # undone by a table restore, and doesn't need to be — a partition table
+    # describing more space than the filesystem inside it uses is a benign,
+    # expected intermediate state, not corruption). Restoring the table just
+    # undoes the boundary move / new-partition creation that failed here.
+    created = _commit_new_kythos_partition(
+        disk, new_end + sector, old_end + sector, log,
+        before_partition=_shrink_partition_boundary,
+        failure_message="A step after the NTFS shrink failed — restoring the original partition table...",
+        restored_message=(
+            "Partition table restored. The NTFS filesystem itself was "
+            "already shrunk and remains intact and usable — Windows may "
+            "offer to grow it back to fill the partition, or you can "
+            "leave it as-is and try the install again."
+        ),
+    )
     return disk, created
 
 
@@ -442,33 +472,7 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     unmount_target_disk(disk, log)
     disk, start, end = _validate_free_space_target(config)
 
-    disk_service = DiskService()
-    with tempfile.TemporaryDirectory(prefix="kyth-partition-") as backup_dir:
-        backup_path = str(Path(backup_dir) / "partition-table.backup")
-        log("Backing up the partition table before changing it...")
-        disk_service.backup_table(disk, backup_path)
-        try:
-            start = _ensure_bios_boot_partition(disk, start, log)
-            before = {p["name"] for p in list_partitions(disk) if p.get("name")}
-
-            log(f"Creating KythOS Btrfs partition in {_human_size(end - start)} of free space...")
-            sector = _block_size_bytes(disk)
-            run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{start}B", f"{end - sector}B"]), check=True, timeout=120)
-            _settle()
-
-            created = _latest_partition_on_disk(disk, before)
-            if not created:
-                raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
-            run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
-            log(f"Created target partition {created}")
-        except Exception:
-            log("A step failed — restoring the original partition table...")
-            try:
-                disk_service.restore_table(disk, backup_path)
-                log("Partition table restored to its state before this attempt.")
-            except Exception as restore_exc:
-                log(f"Warning: automatic partition table restore failed: {restore_exc}")
-            raise
+    created = _commit_new_kythos_partition(disk, start, end, log)
     return disk, created
 
 

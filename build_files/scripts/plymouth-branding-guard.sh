@@ -15,6 +15,8 @@ asset_dir=/usr/share/kyth/branding
 transparent_svg="${asset_dir}/transparent-watermark.svg"
 transparent_png="${asset_dir}/transparent-watermark.png"
 pixmaps_dir=/usr/share/pixmaps
+# Keep in sync with KYTH_PLYMOUTHD_CONF in lib/plymouth-config.sh (this
+# script can't source it — see the no-sibling-lib/ note above).
 plymouth_conf='[Daemon]
 Theme=kyth
 ShowDelay=0
@@ -99,13 +101,8 @@ ShowDelay=0
 DeviceTimeout=8
 UseFirmwareBackground=false
 PLYMOUTHCONF
-    cat > "${initdir}/usr/share/plymouth/plymouthd.defaults" <<'PLYMOUTHDEFAULTS'
-[Daemon]
-Theme=kyth
-ShowDelay=0
-DeviceTimeout=8
-UseFirmwareBackground=false
-PLYMOUTHDEFAULTS
+    install -m 0644 "${initdir}/etc/plymouth/plymouthd.conf" \
+        "${initdir}/usr/share/plymouth/plymouthd.defaults"
     # Keep in sync with KYTH_STOCK_PLYMOUTH_THEMES in
     # build_files/scripts/lib/plymouth-stock-themes.sh — this heredoc is
     # quoted so ${initdir} stays literal for dracut, and can't source it.
