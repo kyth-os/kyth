@@ -1388,7 +1388,7 @@ void [
   onSliderMove, showNewTableDialog, showCreateDialog, showDeleteDialog,
   showResizeDialog, showFormatDialog, showMountDialog, commitPartitions,
   rollbackPartitions, saveConfig, startInstall, copyFullLog, toggleLog,
-  backFromError, reboot,
+  toggleAccessibility, backFromError, reboot,
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────

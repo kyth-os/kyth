@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-30 03:10:02 UTC
+- Last refreshed (UTC): 2026-07-30 03:14:52 UTC
 - Current branch: testing
-- HEAD commit: a6c54d0
-- Last commit title: Raise installer feature parity baseline
-- Last commit date: 2026-07-29T23:01:43-04:00
+- HEAD commit: 811f438
+- Last commit title: Retry transient dracut container build failures
+- Last commit date: 2026-07-29T23:10:02-04:00
 - CI workflow files: 8
 - Build script files: 21
 
