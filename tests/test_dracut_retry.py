@@ -73,6 +73,20 @@ class DracutRetryTests(unittest.TestCase):
         self.assertEqual(attempts, 2)
         self.assertFalse(output_exists)
 
+    def test_always_passes_nohardlink(self) -> None:
+        # util-linux hardlink's AF_ALG file-comparison path reliably SIGSEGVs
+        # dracut's post-build dedup pass in these containerized builders
+        # (util-linux/util-linux#4334) — --nohardlink is the actual fix, not
+        # the retry loop, so a regression here must fail loudly. The fake
+        # dracut echoes its argv to stdout (captured before the temp dir
+        # holding $output is cleaned up) instead of writing it to a file.
+        result, _attempts, _output_exists = self._run(
+            'printf "%s\\n" "$@"\nprintf "valid\\n" >"$output"',
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--nohardlink", result.stdout.splitlines())
+
 
 if __name__ == "__main__":
     unittest.main()

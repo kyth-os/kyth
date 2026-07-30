@@ -89,12 +89,16 @@ for image in "${images[@]}"; do
 		cp -a "${image}" "${backup}"
 	fi
 
+	# --nohardlink: dracut's hardlink-dedup pass can SIGSEGV inside
+	# containerized build environments due to a util-linux/kernel AF_ALG
+	# interaction (util-linux/util-linux#4334) — harmless to skip everywhere.
 	TMPDIR=/var/tmp dracut \
 		--tmpdir /var/tmp \
 		--no-hostonly \
 		--compress "zstd -1" \
 		--kver "${kernel}" \
 		--force \
+		--nohardlink \
 		--add "drm plymouth ostree kyth-plymouth" \
 		--include "${include_root}/etc/plymouth" /etc/plymouth \
 		--include "${include_root}/usr/share/plymouth" /usr/share/plymouth \

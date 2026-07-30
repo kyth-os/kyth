@@ -149,6 +149,11 @@ DRACUTEOF
 fi
 grep -q 'force_add_dracutmodules+=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.conf ||
 	printf 'force_add_dracutmodules+=" kyth-plymouth "\n' >>/etc/dracut.conf.d/99-kyth.conf
+# See build_base/build.sh for why: util-linux hardlink's AF_ALG crypto-API
+# file comparison reliably SIGSEGVs dracut's dedup pass in containerized
+# builders (util-linux/util-linux#4334).
+grep -q 'do_hardlink=' /etc/dracut.conf.d/99-kyth.conf ||
+	printf 'do_hardlink="no"\n' >>/etc/dracut.conf.d/99-kyth.conf
 
 # Remove both Fedora-branded and plain bgrt themes from the system filesystem.
 # The bgrt theme can render the firmware BGRT image, which may still be Fedora

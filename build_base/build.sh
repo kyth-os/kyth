@@ -214,12 +214,16 @@ chmod 0755 "${KYTH_PLYMOUTH_DRACUT_DIR}/module-setup.sh"
 unset KYTH_PLYMOUTH_DRACUT_DIR
 
 # Write dracut config — applies on next initramfs regeneration (bootc deploy,
-# or dracut run in the cachy path below).
+# or dracut run in the cachy path below). do_hardlink="no" sidesteps a
+# util-linux hardlink/kernel AF_ALG crypto-API interaction that reliably
+# SIGSEGVs dracut's post-build dedup pass in containerized builders
+# (util-linux/util-linux#4334); costs a few KB of initramfs size, nothing else.
 mkdir -p /etc/dracut.conf.d
 cat >/etc/dracut.conf.d/99-kyth.conf <<'DRACUTEOF'
 add_dracutmodules+=" ostree drm plymouth kyth-plymouth "
 force_add_dracutmodules+=" kyth-plymouth "
 add_drivers+=" virtio_blk virtio_scsi virtio_pci nvme ahci virtio_gpu qxl bochs overlay "
+do_hardlink="no"
 DRACUTEOF
 
 # Write Plymouth defaults unconditionally so both Fedora and CachyOS images ship
@@ -254,6 +258,13 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 	install -m 0644 /usr/share/kyth/branding/transparent-watermark.png \
 		"${_kyth_plymouth_include_root}/usr/share/pixmaps/system-logo-white.png"
 	_kyth_initramfs="/usr/lib/modules/${KVER}/initramfs"
+	# --nohardlink: dracut's hardlink-dedup pass uses util-linux hardlink's
+	# AF_ALG kernel-crypto-API file comparison, which reliably SIGSEGVs on
+	# these GitHub Actions build containers (a known upstream issue —
+	# util-linux is removing AF_ALG from hardlink entirely:
+	# util-linux/util-linux#4334). Skipping it costs a few KB of initramfs
+	# size, nothing functional. The retry loop below stays as defense-in-depth
+	# against any other transient dracut failure, not as the fix for this one.
 	_kyth_dracut_status=1
 	for _kyth_dracut_attempt in 1 2; do
 		rm -f "${_kyth_initramfs}"
@@ -262,6 +273,7 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 			--compress "zstd -1" \
 			--kver "${KVER}" \
 			--force \
+			--nohardlink \
 			--add kyth-plymouth \
 			--include "${_kyth_plymouth_include_root}" / \
 			"${_kyth_initramfs}" \

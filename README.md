@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-30 03:18:44 UTC
+- Last refreshed (UTC): 2026-07-30 10:25:52 UTC
 - Current branch: testing
-- HEAD commit: 43689e2
-- Last commit title: Mark installer accessibility handler as used
-- Last commit date: 2026-07-29T23:14:52-04:00
+- HEAD commit: 0dc66f3
+- Last commit title: Document insecure answer-file test fixture
+- Last commit date: 2026-07-29T23:18:44-04:00
 - CI workflow files: 8
 - Build script files: 21
 
