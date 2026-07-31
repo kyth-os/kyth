@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-30 10:25:52 UTC
+- Last refreshed (UTC): 2026-07-31 01:04:29 UTC
 - Current branch: testing
-- HEAD commit: 0dc66f3
-- Last commit title: Document insecure answer-file test fixture
-- Last commit date: 2026-07-29T23:18:44-04:00
+- HEAD commit: 4d9b3b0
+- Last commit title: Relocate rechunk podman storage to runner data disk for cachy leg too
+- Last commit date: 2026-07-30T09:38:12-04:00
 - CI workflow files: 8
 - Build script files: 21
 
