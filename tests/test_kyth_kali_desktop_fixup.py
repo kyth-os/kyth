@@ -40,8 +40,10 @@ def _run_fixup(home: pathlib.Path) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["HOME"] = str(home)
     env["PATH"] = f"{stub_bin}:{env['PATH']}"
+    shared_path = str(ROOT / "build_files" / "kyth_shared")
+    env["PYTHONPATH"] = f"{shared_path}:{env.get('PYTHONPATH', '')}"
     return subprocess.run(
-        ["bash", str(SCRIPT)],
+        [str(SCRIPT)],
         env=env,
         capture_output=True,
         text=True,
@@ -49,8 +51,8 @@ def _run_fixup(home: pathlib.Path) -> subprocess.CompletedProcess:
 
 
 class KaliDesktopFixupTests(unittest.TestCase):
-    def test_script_parses_as_bash(self):
-        subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
+    def test_script_parses_as_python(self):
+        subprocess.run(["python3", "-m", "py_compile", str(SCRIPT)], check=True)
 
     def test_patches_categories_and_strips_display_hints_on_kali_entries(self):
         with tempfile.TemporaryDirectory() as home_dir:

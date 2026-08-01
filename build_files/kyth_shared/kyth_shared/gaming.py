@@ -128,14 +128,14 @@ def check_gaming_reason(
 def find_controllers() -> list[str]:
     """Scan /dev/input using udevadm for connected gamepads and joysticks."""
     import re
-    import subprocess
+    from kyth_shared.commands import run as run_command
     controllers = []
     dev_input = Path("/dev/input")
     if not dev_input.is_dir():
         return controllers
 
     for path in sorted(dev_input.glob("event*")):
-        res = subprocess.run(
+        res = run_command(
             ["udevadm", "info", "--query=property", "--name", str(path)],
             capture_output=True,
             text=True,
@@ -160,4 +160,5 @@ def find_controllers() -> list[str]:
             controllers.append(f"{path} {name or 'controller'}")
 
     return controllers
+
 
