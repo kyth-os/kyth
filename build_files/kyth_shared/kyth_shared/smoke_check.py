@@ -224,7 +224,6 @@ class SmokeCheck:
             self.check_unit(unit, label, user=user)
         for unit, label in (
             ("kyth-bluetooth-enable.service", "Bluetooth auto-enable"),
-            ("cups-browsed.service", "Printer discovery"),
             ("irqbalance.service", "IRQ balancing"),
         ):
             self.check_unit(unit, label, enabled=True)

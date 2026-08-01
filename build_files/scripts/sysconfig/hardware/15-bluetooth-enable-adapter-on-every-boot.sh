@@ -41,5 +41,4 @@ BTENABLEUNITEOF
 
 systemctl enable bluetooth.service 2>/dev/null || true
 systemctl enable kyth-bluetooth-enable.service 2>/dev/null || true
-systemctl enable cups-browsed.service 2>/dev/null || true
 systemctl enable avahi-daemon.service 2>/dev/null || true

@@ -141,6 +141,26 @@ class BuildAssemblyContracts(unittest.TestCase):
                 self.assertIn("PYTHONPATH=\"/ctx/kyth_shared\"", dockerfile)
                 self.assertIn("source=build_files/kyth_shared,target=/ctx/kyth_shared", dockerfile)
 
+    def test_cups_browsed_is_purged_not_reinstalled_or_enabled(self):
+        # cups-browsed is the legacy LAN printer auto-discovery daemon (2024 CUPS
+        # RCE vector on UDP 631). It is deliberately dropped: the cleanup fragment
+        # is the single source of truth for the purge, and nothing may quietly
+        # re-add it to an install transaction or re-enable its service. Driverless
+        # printing still works via cups + Avahi/mDNS.
+        cleanup = BUILD_FILES / "scripts/packages/17-desktop-package-cleanup.sh"
+        self.assertIn("cups-browsed", cleanup.read_text(encoding="utf-8"))
+        for script in BUILD_FILES.rglob("*.sh"):
+            text = script.read_text(encoding="utf-8")
+            with self.subTest(script=script.relative_to(ROOT)):
+                self.assertNotIn(
+                    "enable cups-browsed", text,
+                    f"{script.relative_to(ROOT)} re-enables purged cups-browsed",
+                )
+                for line in text.splitlines():
+                    token = line.strip().rstrip("\\").strip()
+                    if token == "cups-browsed" and script.name != cleanup.name:
+                        self.fail(f"{script.relative_to(ROOT)} re-installs purged cups-browsed")
+
 
 if __name__ == "__main__":
     unittest.main()

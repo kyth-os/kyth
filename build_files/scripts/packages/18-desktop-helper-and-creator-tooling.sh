@@ -31,8 +31,7 @@ dnf5 install -y --skip-unavailable \
 	openconnect \
 	vpnc \
 	kde-connect \
-	plasma-browser-integration \
-	cups-browsed
+	plasma-browser-integration
 
 # Generic Distrobox wrapper — delegates to kyth-ai-dev container dynamically
 install -Dm 0755 /dev/stdin /usr/libexec/kyth-distrobox-wrapper <<'WRAPPEREOF'
@@ -160,7 +159,10 @@ install_available_optional_packages desktop "${optional_desktop_packages[@]}"
 # kde-connect: Phone Link equivalent for Android — pairs over LAN/Bluetooth.
 # plasma-browser-integration: native host for browser media controls, download
 #   progress, and desktop integration once the browser extension is enabled.
-# cups-browsed: auto-discovers printers on the LAN without manual config.
+# cups-browsed is intentionally NOT installed: it is the legacy LAN printer
+#   auto-discovery daemon (2024 CUPS RCE vector on UDP 631) and is purged in
+#   packages/17-desktop-package-cleanup.sh. Driverless printing still works via
+#   cups + Avahi/mDNS (IPP Everywhere), which remain installed and enabled.
 # liberation-fonts-all: metric-compatible substitutes for Arial/Times/Courier.
 #   mscore-fonts-all (RPM Fusion) was removed — its %post downloads from
 #   SourceForge at install time, which is unreliable in CI builds.
