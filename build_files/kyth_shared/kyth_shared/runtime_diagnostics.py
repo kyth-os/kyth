@@ -140,7 +140,18 @@ def check_services(
         if result is not None and result.returncode == 0:
             reporter.pass_check(label, "active")
         else:
-            reporter.warn_check(label, "not active")
+            # Check Result for oneshot / exit success services
+            show_cmd = ["systemctl"]
+            if user_service:
+                show_cmd.append("--user")
+            show_cmd.extend(["show", "-p", "Result", "--value", service])
+            show_res = runner.optional(show_cmd, capture_output=True)
+            res_val = show_res.stdout.strip() if show_res else ""
+            if res_val == "success":
+                reporter.pass_check(label, "completed successfully")
+            else:
+                reporter.warn_check(label, "not active")
+
 
 
 def check_deployment_rollback(

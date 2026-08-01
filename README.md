@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:12:55 UTC
+- Last refreshed (UTC): 2026-08-01 01:13:06 UTC
 - Current branch: testing
-- HEAD commit: c208e8e
-- Last commit title: refactor: consolidate repo definitions and GPU service status diagnostics
-- Last commit date: 2026-07-31T21:11:34-04:00
+- HEAD commit: 924621d
+- Last commit title: refactor: migrate Terra and COPR repo management to kyth_shared.repos
+- Last commit date: 2026-07-31T21:12:55-04:00
 - CI workflow files: 8
 - Build script files: 21
 
