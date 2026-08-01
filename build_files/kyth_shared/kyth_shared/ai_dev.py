@@ -31,13 +31,14 @@ packages=(
   nodejs npm rust cargo golang podman skopeo podman-compose
   vulkan-tools clinfo ollama llama.cpp helix zellij shellcheck shfmt
   ripgrep fd-find fzf code antigravity azure-cli gh
+  flatpak-builder rclone duperemove trivy
 )
 if command -v dnf5 >/dev/null 2>&1; then
   sudo dnf5 install -y --skip-unavailable "${packages[@]}"
-  sudo dnf5 install -y --skip-unavailable pipx uv || true
+  sudo dnf5 install -y --skip-unavailable pipx uv zizmor || true
 elif command -v dnf >/dev/null 2>&1; then
   sudo dnf install -y --skip-unavailable "${packages[@]}"
-  sudo dnf install -y --skip-unavailable pipx uv || true
+  sudo dnf install -y --skip-unavailable pipx uv zizmor || true
 else
   echo "ERROR: unsupported container package manager." >&2
   exit 1
@@ -51,7 +52,7 @@ fi
 echo "Exporting applications and CLI wrappers to host..."
 distrobox-export --app code || true
 distrobox-export --app antigravity || true
-for binary in code antigravity az node npm npx hx zellij shellcheck shfmt gh; do
+for binary in code antigravity az node npm npx hx zellij shellcheck shfmt gh flatpak-builder rclone duperemove trivy zizmor; do
   path="$(command -v "$binary" 2>/dev/null || true)"
   [[ -n "$path" ]] && distrobox-export --bin "$path" --export-path ~/.local/bin || true
 done
@@ -186,6 +187,9 @@ class AiDev:
             "node": "Node.js", "headroom": "Headroom CLI", "rtk": "RTK CLI",
             "hx": "Helix Editor",
             "zellij": "Zellij Multiplexer", "gh": "GitHub CLI",
+            "flatpak-builder": "Flatpak Builder", "rclone": "RClone Cloud Sync",
+            "duperemove": "Btrfs Deduplicator", "trivy": "Trivy Scanner",
+            "zizmor": "Zizmor Workflow Scanner",
             "claude": "Claude Code", "codex": "Codex CLI", "ollama": "Ollama",
         }
         for command, label in labels.items():
