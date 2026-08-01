@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:05:27 UTC
+- Last refreshed (UTC): 2026-08-01 01:10:39 UTC
 - Current branch: testing
-- HEAD commit: e5ef413
-- Last commit title: build: add static kyth-browser-wallet-defaults systemd unit file
-- Last commit date: 2026-07-31T20:58:19-04:00
+- HEAD commit: 4795194
+- Last commit title: fix: test harness compatibility for kyth-kali-desktop-fixup and gaming.py
+- Last commit date: 2026-07-31T21:05:27-04:00
 - CI workflow files: 8
 - Build script files: 21
 
