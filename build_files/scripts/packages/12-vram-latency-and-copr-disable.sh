@@ -25,27 +25,31 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/gaming-coprs.sh"
 # bootstrap needs --nogpgcheck (same pattern as Bazzite and the RPM Fusion
 # bootstrap above). The repo is disabled afterwards so it does not persist
 # as an active package source in the final image.
-# shellcheck disable=SC2016 # $releasever is a dnf repo variable, not a shell expansion
-if dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release; then
-	# --skip-unavailable and the enable guards below match every other
-	# optional-feature fragment in this directory: a transient Terra mirror
-	# desync on one of these three packages must not hard-fail the whole
-	# image build the way an unguarded `dnf5 install` under `set -e` would.
-	if dnf5 install -y --skip-unavailable \
-		dmemcg-booster \
-		plasma-foreground-booster-dmemcg \
-		vulkan-low-latency-layer; then
-		systemctl enable dmemcg-booster-system.service 2>/dev/null || true
-		systemctl --global enable dmemcg-booster-user.service 2>/dev/null || true
-	else
-		echo "WARNING: dmemcg-booster/vulkan-low-latency-layer install failed; skipping." >&2
-	fi
-	dnf5 config-manager setopt terra.enabled=0
+mkdir -p /etc/yum.repos.d
+python3 -c "
+from kyth_shared.repos import load_repo_specs
+for repo in load_repo_specs():
+    if repo.name == 'terra':
+        with open('/etc/yum.repos.d/terra.repo', 'w') as f:
+            f.write(repo.render_yum_repo())
+"
+
+if dnf5 install -y --skip-unavailable \
+	dmemcg-booster \
+	plasma-foreground-booster-dmemcg \
+	vulkan-low-latency-layer; then
+	systemctl enable dmemcg-booster-system.service 2>/dev/null || true
+	systemctl --global enable dmemcg-booster-user.service 2>/dev/null || true
 else
-	echo "WARNING: Terra repo bootstrap failed; skipping VRAM booster + low-latency layer." >&2
+	echo "WARNING: dmemcg-booster/vulkan-low-latency-layer install failed; skipping." >&2
 fi
+dnf5 config-manager setopt terra.enabled=0
 
 # Disable COPRs so they don't persist in the final image
-for copr in "${KYTH_GAMING_COPRS[@]}"; do
-	dnf5 copr disable -y "${copr}"
-done
+python3 -c "
+from kyth_shared.repos import GAMING_COPRS
+import subprocess
+for copr in GAMING_COPRS:
+    subprocess.run(['dnf5', 'copr', 'disable', '-y', copr], check=False)
+"
+

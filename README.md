@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:11:34 UTC
+- Last refreshed (UTC): 2026-08-01 01:12:55 UTC
 - Current branch: testing
-- HEAD commit: 2c497cf
-- Last commit title: refactor: modularize container shims and repository specs in kyth_shared
-- Last commit date: 2026-07-31T21:10:39-04:00
+- HEAD commit: c208e8e
+- Last commit title: refactor: consolidate repo definitions and GPU service status diagnostics
+- Last commit date: 2026-07-31T21:11:34-04:00
 - CI workflow files: 8
 - Build script files: 21
 
