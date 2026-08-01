@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply quiet VS Code and Brave wallet defaults
+ConditionPathExists=!%h/.local/state/kyth/browser-wallet-defaults-v1
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -c 'set -euo pipefail; /usr/bin/kyth-vscode-wallet; mkdir -p "${HOME}/.local/state/kyth"; touch "${HOME}/.local/state/kyth/browser-wallet-defaults-v1"'
+
+[Install]
+WantedBy=default.target

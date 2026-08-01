@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 00:57:54 UTC
+- Last refreshed (UTC): 2026-08-01 00:58:19 UTC
 - Current branch: testing
-- HEAD commit: 003856c
-- Last commit title: refactor: expand host wrapper shims and container provisions for CLI tooling
-- Last commit date: 2026-07-31T20:54:54-04:00
+- HEAD commit: 76740e2
+- Last commit title: refactor: containerize input, hardware sensor, and video diagnostic tooling
+- Last commit date: 2026-07-31T20:57:54-04:00
 - CI workflow files: 8
 - Build script files: 21
 
