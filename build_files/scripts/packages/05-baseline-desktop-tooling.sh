@@ -14,7 +14,6 @@ dnf5 install -y --skip-unavailable \
 	opensc \
 	krdc \
 	bubblewrap \
-	skopeo \
 	plasma-workspace-x11 \
 	xorg-x11-server-Xorg \
 	xorg-x11-xinit \
@@ -36,7 +35,6 @@ dnf5 install -y --skip-unavailable \
 	dosfstools \
 	sbsigntools \
 	util-linux-script \
-	tmux \
 	openssl \
-	fwupd \
-	hyperfine
+	fwupd
+
