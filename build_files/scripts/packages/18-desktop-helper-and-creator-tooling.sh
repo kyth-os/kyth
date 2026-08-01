@@ -47,6 +47,10 @@ declare -A descriptions=(
 	[gh]="GitHub CLI"
 	[hx]="Helix editor"
 	[zellij]="Zellij"
+	[bat]="bat syntax highlighter"
+	[eza]="eza ls replacement"
+	[fastfetch]="fastfetch system summary"
+	[zoxide]="zoxide directory navigator"
 )
 desc="${descriptions[$tool]:-$tool}"
 
@@ -66,7 +70,7 @@ exec distrobox enter "${box}" -- "${tool}" "$@"
 WRAPPEREOF
 
 # Create host symlinks to the generic distrobox wrapper
-for tool in shellcheck shfmt gh hx zellij; do
+for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide; do
 	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
 done
 
