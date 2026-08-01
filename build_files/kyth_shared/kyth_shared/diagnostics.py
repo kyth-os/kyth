@@ -201,14 +201,11 @@ def create_github_issue_draft(
     repo_url: str = "https://github.com/mrtrick37/kyth",
     open_browser: bool = True,
 ) -> tuple[str, str]:
-    """Generate local markdown draft and prefilled GitHub issue URL."""
     import os
-    import shutil
-    import subprocess
-    from datetime import datetime
     from urllib.parse import urlencode
 
     if body_file:
+
         if os.access(body_file, os.R_OK):
             with open(body_file, "r", encoding="utf-8") as fh:
                 body = fh.read()

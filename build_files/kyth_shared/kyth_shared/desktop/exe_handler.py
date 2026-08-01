@@ -7,9 +7,9 @@ import re
 import shlex
 import shutil
 import subprocess
-import sys
 
 from ..apps import suggest_app
+
 from ..commands import run as run_command
 from ..qt import (
 

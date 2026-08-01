@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 00:33:29 UTC
+- Last refreshed (UTC): 2026-08-01 00:36:03 UTC
 - Current branch: testing
-- HEAD commit: eccdb89
-- Last commit title: fix build iso
-- Last commit date: 2026-07-30T21:04:29-04:00
+- HEAD commit: 8c7a1e2
+- Last commit title: refactor: extract exe-handler and report-issue into kyth_shared
+- Last commit date: 2026-07-31T20:33:29-04:00
 - CI workflow files: 8
 - Build script files: 21
 
