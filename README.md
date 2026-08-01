@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:31:00 UTC
+- Last refreshed (UTC): 2026-08-01 01:33:40 UTC
 - Current branch: testing
-- HEAD commit: 86bf93a
-- Last commit title: refactor: containerize starship, direnv, git-delta, gum, and archive utilities
-- Last commit date: 2026-07-31T21:30:29-04:00
+- HEAD commit: 1bcd7be
+- Last commit title: refactor: enforce removal of legacy archive utilities from host package manifest
+- Last commit date: 2026-07-31T21:31:00-04:00
 - CI workflow files: 8
 - Build script files: 21
 

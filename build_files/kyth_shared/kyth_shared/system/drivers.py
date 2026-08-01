@@ -1,8 +1,7 @@
 """Hardware driver and module probing utilities."""
 from __future__ import annotations
 
-from pathlib import Path
-from kyth_shared.commands import run_text, run_optional
+from kyth_shared.commands import run_text
 
 
 def get_loaded_kernel_modules() -> set[str]:
