@@ -32,6 +32,7 @@ packages=(
   vulkan-tools clinfo ollama llama.cpp helix zellij shellcheck shfmt
   ripgrep fd-find fzf code antigravity azure-cli gh
   flatpak-builder rclone duperemove trivy bat eza fastfetch zoxide
+  evtest lm_sensors i2c-tools v4l-utils
 )
 if command -v dnf5 >/dev/null 2>&1; then
   sudo dnf5 install -y --skip-unavailable "${packages[@]}"
@@ -52,7 +53,7 @@ fi
 echo "Exporting applications and CLI wrappers to host..."
 distrobox-export --app code || true
 distrobox-export --app antigravity || true
-for binary in code antigravity az node npm npx hx zellij shellcheck shfmt gh flatpak-builder rclone duperemove trivy zizmor bat eza fastfetch zoxide; do
+for binary in code antigravity az node npm npx hx zellij shellcheck shfmt gh flatpak-builder rclone duperemove trivy zizmor bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq; do
   path="$(command -v "$binary" 2>/dev/null || true)"
   [[ -n "$path" ]] && distrobox-export --bin "$path" --export-path ~/.local/bin || true
 done

@@ -51,6 +51,14 @@ declare -A descriptions=(
 	[eza]="eza ls replacement"
 	[fastfetch]="fastfetch system summary"
 	[zoxide]="zoxide directory navigator"
+	[evtest]="evtest input event monitor"
+	[sensors]="lm_sensors hardware monitor"
+	[i2cget]="i2cget I2C utility"
+	[i2cset]="i2cset I2C utility"
+	[i2cdetect]="i2cdetect I2C utility"
+	[v4l2-ctl]="v4l2-ctl Video4Linux utility"
+	[jq]="jq JSON processor"
+	[yq]="yq YAML processor"
 )
 desc="${descriptions[$tool]:-$tool}"
 
@@ -70,7 +78,7 @@ exec distrobox enter "${box}" -- "${tool}" "$@"
 WRAPPEREOF
 
 # Create host symlinks to the generic distrobox wrapper
-for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide; do
+for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq; do
 	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
 done
 
