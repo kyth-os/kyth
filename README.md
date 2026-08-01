@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 14:02:39 UTC
+- Last refreshed (UTC): 2026-08-01 14:09:07 UTC
 - Current branch: testing
-- HEAD commit: 48069a4
-- Last commit title: refactor: fully drop cups-browsed, resolving the half-applied purge
-- Last commit date: 2026-08-01T02:15:23Z
+- HEAD commit: bce6193
+- Last commit title: refactor: modularize thirdparty software installers and performance tuning into kyth_shared
+- Last commit date: 2026-08-01T10:06:46-04:00
 - CI workflow files: 8
 - Build script files: 21
 

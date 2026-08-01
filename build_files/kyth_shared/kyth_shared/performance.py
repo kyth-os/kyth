@@ -184,3 +184,33 @@ def apply_game_boost() -> bool:
     switch_sched_ext_profile("gaming")
     return success
 
+
+def apply_nvme_tuning() -> bool:
+    """Apply low-latency I/O queue tuning for NVMe storage devices."""
+    tuned_count = 0
+    sys_block = Path("/sys/block")
+    if sys_block.is_dir():
+        for nvme_queue in sys_block.glob("nvme*/queue/scheduler"):
+            try:
+                nvme_queue.write_text("none\n", encoding="utf-8")
+                tuned_count += 1
+            except Exception:
+                pass
+    return tuned_count > 0
+
+
+def get_gamescope_cmd(target_command: list[str]) -> list[str]:
+    """Wrap a application command line with Gamescope launcher flags."""
+    if not shutil.which("gamescope"):
+        return target_command
+
+    gamescope_cmd = [
+        "gamescope",
+        "-f",
+        "-e",
+        "--rt",
+        "--",
+    ] + target_command
+    return gamescope_cmd
+
+

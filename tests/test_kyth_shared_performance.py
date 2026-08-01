@@ -116,6 +116,14 @@ class PerformanceTests(unittest.TestCase):
             check=False,
         )
 
+    @mock.patch("shutil.which")
+    def test_get_gamescope_cmd(self, mock_which) -> None:
+        from kyth_shared.performance import get_gamescope_cmd
+        mock_which.return_value = "/usr/bin/gamescope"
+        res = get_gamescope_cmd(["vkcube"])
+        self.assertEqual(res, ["gamescope", "-f", "-e", "--rt", "--", "vkcube"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
