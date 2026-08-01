@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:19:08 UTC
+- Last refreshed (UTC): 2026-08-01 01:24:59 UTC
 - Current branch: testing
-- HEAD commit: 55b8db5
-- Last commit title: refactor: add DNF cache and transient artifact purging in package cleanup
-- Last commit date: 2026-07-31T21:18:46-04:00
+- HEAD commit: 5d4d67b
+- Last commit title: fix: provide fallback result in test_runtime_diagnostics command runner mock
+- Last commit date: 2026-07-31T21:19:08-04:00
 - CI workflow files: 8
 - Build script files: 21
 

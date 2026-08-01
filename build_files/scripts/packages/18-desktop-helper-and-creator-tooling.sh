@@ -61,6 +61,8 @@ declare -A descriptions=(
 	[yq]="yq YAML processor"
 	[hyperfine]="hyperfine benchmarking tool"
 	[tmux]="tmux terminal multiplexer"
+	[rclone]="rclone cloud storage sync"
+	[flatpak-builder]="flatpak-builder package creator"
 )
 desc="${descriptions[$tool]:-$tool}"
 
@@ -80,7 +82,7 @@ exec distrobox enter "${box}" -- "${tool}" "$@"
 WRAPPEREOF
 
 # Create host symlinks to the generic distrobox wrapper
-for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux; do
+for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux rclone flatpak-builder; do
 	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
 done
 

@@ -25,6 +25,7 @@ cat >>/etc/dnf/dnf.conf <<'DNFCONFEOF'
 max_parallel_downloads=10
 excludepkgs=kernel,kernel-core*,kernel-modules*,kernel-modules-core*,kernel-modules-extra*,kernel-devel*,kernel-debug*
 countme=True
+nodocs=True
 DNFCONFEOF
 
 # KythOS is its own distribution identity. Replace the inherited Fedora artwork
