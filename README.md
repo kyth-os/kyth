@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 14:09:07 UTC
+- Last refreshed (UTC): 2026-08-01 14:16:23 UTC
 - Current branch: testing
-- HEAD commit: bce6193
+- HEAD commit: 02841b3
 - Last commit title: refactor: modularize thirdparty software installers and performance tuning into kyth_shared
-- Last commit date: 2026-08-01T10:06:46-04:00
+- Last commit date: 2026-08-01T10:09:07-04:00
 - CI workflow files: 8
 - Build script files: 21
 

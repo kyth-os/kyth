@@ -1,0 +1,12 @@
+[Unit]
+Description=KythOS User Comfort Polish Setup
+Documentation=https://github.com/mrtrick37/kyth
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/kyth-user-polish
+RemainAfterExit=yes
+
+[Install]
+WantedBy=graphical-session.target

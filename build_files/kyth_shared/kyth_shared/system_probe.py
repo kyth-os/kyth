@@ -93,3 +93,31 @@ class SystemProbe:
     def get_kwallet_enabled(cls) -> bool:
         wallet_enabled = (cls._kreadconfig("kwalletrc", "Wallet", "Enabled") or "true").lower()
         return wallet_enabled not in ("false", "0")
+
+    @classmethod
+    def get_probe_snapshot(cls) -> dict[str, str | bool]:
+        """Return a aggregated snapshot of system state."""
+        autolock, lock_resume = cls.get_screen_lock_status()
+        return {
+            "firewall": cls.get_firewall_status(),
+            "selinux": cls.get_selinux_status(),
+            "secure_boot": cls.get_secure_boot_status(),
+            "autologin_user": cls.get_autologin_user(),
+            "autolock": autolock,
+            "lock_on_resume": lock_resume,
+            "kwallet_enabled": cls.get_kwallet_enabled(),
+        }
+
+    @classmethod
+    def export_probe_cache(cls, path_str: str = "/run/kyth/hardware-probe.json") -> bool:
+        """Export hardware and system probe data to a runtime cache file."""
+        import json
+        from pathlib import Path
+        try:
+            p = Path(path_str)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(cls.get_probe_snapshot(), indent=2), encoding="utf-8")
+            return True
+        except OSError:
+            return False
+
