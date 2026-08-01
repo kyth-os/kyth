@@ -125,30 +125,16 @@ optional_desktop_packages=(
 	# Emoji rendering — without this, emoji in browsers and terminals render as
 	# empty boxes on systems that only have the liberation/inter font set.
 	google-noto-emoji-fonts
-	# Modern CLI tools loved by Linux veterans (all gracefully absent if unavailable).
-	bat
-	eza
+	# Modern CLI tools (heavy ones like fish, btop, ddcutil are provided via
+	# kyth-ai-dev container or Flatpaks to keep base OS lean).
 	fd-find
 	ripgrep
 	fzf
-	zoxide
-	jq
-	yq
 	# zsh enhancements — sourced automatically by the /etc/skel/.zshrc below.
 	zsh-autosuggestions
 	zsh-syntax-highlighting
-	# fish shell — out-of-box syntax highlighting and autosuggestions with no config.
-	# Good first shell for Windows migrants; veterans can chsh -s /usr/bin/fish.
-	fish
-	# btop — interactive resource/process monitor (better htop).
-	btop
-	# fastfetch — system info display (neofetch replacement, actively maintained).
-	fastfetch
 	# ydotool — Wayland-compatible xdotool; required for Wayland automation scripts.
 	ydotool
-	# ddcutil — DDC/CI monitor brightness/contrast control via I²C.
-	ddcutil
-	ddcutil-service
 	# iio-sensor-proxy — exposes orientation sensors (accelerometer) over D-Bus
 	# for auto-rotation on convertibles and handhelds.
 	iio-sensor-proxy

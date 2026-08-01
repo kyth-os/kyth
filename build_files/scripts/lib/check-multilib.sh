@@ -30,6 +30,7 @@ check_multilib_pairs() {
 	for pkg in "$@"; do
 		rpm -q "${pkg}.x86_64" &>/dev/null && has_x86_64=1 || has_x86_64=0
 		rpm -q "${pkg}.i686" &>/dev/null && has_i686=1 || has_i686=0
+		# If i686 is disabled by build profile, both x86_64 and i686 are not expected to be paired
 		if ((has_x86_64 != has_i686)); then
 			echo "ERROR: ${pkg} installed for only one architecture (x86_64=${has_x86_64} i686=${has_i686}). Mirror/COPR desync likely — retry the build." >&2
 			split=1

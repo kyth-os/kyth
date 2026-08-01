@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:51:31 UTC
+- Last refreshed (UTC): 2026-08-01 14:02:39 UTC
 - Current branch: testing
-- HEAD commit: c69e242
-- Last commit title: ci: mount kyth_shared via PYTHONPATH during package-static build phase to fix pip unavailability error
-- Last commit date: 2026-07-31T21:48:24-04:00
+- HEAD commit: 48069a4
+- Last commit title: refactor: fully drop cups-browsed, resolving the half-applied purge
+- Last commit date: 2026-08-01T02:15:23Z
 - CI workflow files: 8
 - Build script files: 21
 

@@ -29,33 +29,41 @@ done
 # shared doc/man files.
 dnf5 upgrade -y libatomic.x86_64 nss.x86_64 || true
 
+# Multilib 32-bit packages are required for 32-bit Windows games running via Steam/Wine.
+# If gaming core features are disabled in custom profile builds, skip 32-bit multilib.
+multilib_pkgs=()
+if is_enabled "${ENABLE_GAMING_CORE:-1}"; then
+	multilib_pkgs=(
+		mangohud.i686
+		vkBasalt.i686
+		libFAudio.i686
+		libobs_vkcapture.i686
+		libobs_glcapture.i686
+		gamemode.i686
+		libXScrnSaver.i686
+		libxcb.i686
+		libatomic.i686
+		mesa-libGL.i686
+		mesa-dri-drivers.i686
+		nss.i686
+	)
+fi
+
 dnf5 install -y --skip-unavailable --exclude=libde265.i686 \
 	gamescope \
 	gamescope-shaders \
 	mangohud.x86_64 \
-	mangohud.i686 \
 	vkBasalt.x86_64 \
-	vkBasalt.i686 \
 	libFAudio.x86_64 \
-	libFAudio.i686 \
 	libobs_vkcapture.x86_64 \
 	libobs_glcapture.x86_64 \
-	libobs_vkcapture.i686 \
-	libobs_glcapture.i686 \
 	xrandr \
 	xdg-user-dirs \
 	xdg-terminal-exec \
 	gamemode \
-	gamemode.i686 \
 	libXScrnSaver \
-	libXScrnSaver.i686 \
-	libxcb.i686 \
 	libatomic \
-	libatomic.i686 \
-	mesa-libGL.i686 \
-	mesa-dri-drivers.i686 \
 	nss \
-	nss.i686 \
 	steam-devices \
 	game-devices-udev \
 	xpadneo \
@@ -64,12 +72,15 @@ dnf5 install -y --skip-unavailable --exclude=libde265.i686 \
 	joycond \
 	kdeplasma-addons \
 	input-remapper \
-	libxcrypt-compat
+	libxcrypt-compat \
+	"${multilib_pkgs[@]}"
 
 # Guards against a package landing in only one of x86_64/i686 (see
 # lib/check-multilib.sh for why). The install above uses --skip-unavailable,
 # so a mirror/COPR desync on any of these can silently drop just one arch.
-check_multilib_pairs "${KYTH_MULTILIB_PAIRS[@]}"
+if is_enabled "${ENABLE_GAMING_CORE:-1}"; then
+	check_multilib_pairs "${KYTH_MULTILIB_PAIRS[@]}"
+fi
 
 # Upstream SCX GitHub releases do not publish Linux binaries. Use Fedora's
 # signed RPM instead of silently omitting the scheduler or compiling an
