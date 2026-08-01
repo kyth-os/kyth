@@ -1,15 +1,46 @@
-#!/bin/bash
-mkdir -p /etc/sddm.conf.d
-if systemd-detect-virt -q 2>/dev/null; then
-    cat >/etc/sddm.conf.d/11-kyth-session.conf <<'EOF'
-[General]
-DisplayServer=x11
-DefaultSession=plasmax11.desktop
-EOF
-else
-    cat >/etc/sddm.conf.d/11-kyth-session.conf <<'EOF'
-[General]
-DisplayServer=wayland
-DefaultSession=plasma.desktop
-EOF
-fi
+#!/usr/bin/env python3
+"""kyth-configure-session — configure SDDM session defaults based on virtualization state."""
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+from kyth_shared.commands import run as run_command
+
+
+def configure_session() -> int:
+    sddm_dir = Path("/etc/sddm.conf.d")
+    try:
+        sddm_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        print(f"Error creating {sddm_dir}: {exc}", file=sys.stderr)
+        return 1
+
+    is_virt = False
+    if shutil.which("systemd-detect-virt"):
+        res = run_command(["systemd-detect-virt", "-q"], check=False)
+        if res.returncode == 0:
+            is_virt = True
+
+    conf_file = sddm_dir / "11-kyth-session.conf"
+    if is_virt:
+        content = "[General]\nDisplayServer=x11\nDefaultSession=plasmax11.desktop\n"
+    else:
+        content = "[General]\nDisplayServer=wayland\nDefaultSession=plasma.desktop\n"
+
+    try:
+        conf_file.write_text(content, encoding="utf-8")
+        return 0
+    except Exception as exc:
+        print(f"Error writing {conf_file}: {exc}", file=sys.stderr)
+        return 1
+
+
+def main() -> None:
+    sys.exit(configure_session())
+
+
+if __name__ == "__main__":
+    main()

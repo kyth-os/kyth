@@ -17,8 +17,9 @@ install -m 0755 /ctx/kyth-session-snapshot /usr/bin/kyth-session-snapshot
 install -m 0755 /ctx/kyth-report-issue /usr/bin/kyth-report-issue
 install -m 0755 /ctx/kyth-proton-cachyos-update /usr/bin/kyth-proton-cachyos-update
 install -m 0755 /ctx/kyth-steam-game-export /usr/bin/kyth-steam-game-export
-install -m 0644 /ctx/kyth-proton-cachyos-update.service /usr/lib/systemd/user/kyth-proton-cachyos-update.service
-install -m 0644 /ctx/kyth-proton-cachyos-update.timer /usr/lib/systemd/user/kyth-proton-cachyos-update.timer
+install -m 0644 /ctx/kyth-proton-cachyos-update.service /usr/lib/systemd/system/kyth-proton-cachyos-update.service
+install -m 0644 /ctx/kyth-proton-cachyos-update.timer /usr/lib/systemd/system/kyth-proton-cachyos-update.timer
+
 install -m 0644 /ctx/kyth-flathub-setup.service /usr/lib/systemd/system/kyth-flathub-setup.service
 install -m 0644 /ctx/kyth-default-flatpaks.service /usr/lib/systemd/system/kyth-default-flatpaks.service
 install -m 0440 /ctx/kyth-bootc-sudo /etc/sudoers.d/kyth-bootc

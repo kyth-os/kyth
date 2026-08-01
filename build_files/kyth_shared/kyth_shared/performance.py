@@ -172,3 +172,15 @@ def switch_sched_ext_profile(profile: str) -> None:
             run_command(["sudo", "-n", "/usr/bin/kyth-scx", "set", profile], capture_output=True, check=False)
         except Exception:
             pass
+
+
+def apply_game_boost() -> bool:
+    """Apply system optimizations for gaming performance (EPP, THP, caches)."""
+    success = False
+    if set_epp("performance"):
+        success = True
+    set_transparent_hugepages("madvise")
+    flush_page_caches()
+    switch_sched_ext_profile("gaming")
+    return success
+

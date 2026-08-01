@@ -4,6 +4,7 @@ import shlex
 import shutil
 import subprocess
 
+from kyth_welcome.services.hardware.types import HardwareProbe
 from kyth_welcome.services.command import run_sync
 from datetime import datetime
 
@@ -13,8 +14,8 @@ from .bootc import (
     has_rollback_deployment,
     has_staged_update,
 )
-from .hardware import HardwareProbe
 from .process import command_stdout, run_command
+
 
 def _tail_file(path: str, max_lines: int = 80) -> str:
     try:
