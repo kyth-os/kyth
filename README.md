@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:10:39 UTC
+- Last refreshed (UTC): 2026-08-01 01:11:34 UTC
 - Current branch: testing
-- HEAD commit: 4795194
-- Last commit title: fix: test harness compatibility for kyth-kali-desktop-fixup and gaming.py
-- Last commit date: 2026-07-31T21:05:27-04:00
+- HEAD commit: 2c497cf
+- Last commit title: refactor: modularize container shims and repository specs in kyth_shared
+- Last commit date: 2026-07-31T21:10:39-04:00
 - CI workflow files: 8
 - Build script files: 21
 

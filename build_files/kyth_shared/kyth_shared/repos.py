@@ -34,9 +34,21 @@ class RepoSpec:
         return "\n".join(lines) + "\n"
 
 
+GAMING_COPRS = [
+    "ublue-os/bazzite",
+    "ublue-os/bazzite-multilib",
+    "ublue-os/staging",
+    "ublue-os/packages",
+    "ublue-os/obs-vkcapture",
+    "lukenukem/asus-linux",
+    "ycollet/audinux",
+]
+
+
 def load_repo_specs(config_file: Path = CONFIG_PATH) -> list[RepoSpec]:
     """Load third-party repository definitions from JSON config."""
     if not config_file.is_file():
         return []
     data = json.loads(config_file.read_text(encoding="utf-8"))
     return [RepoSpec(**item) for item in data]
+

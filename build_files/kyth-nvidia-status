@@ -56,22 +56,8 @@ def main() -> None:
 
     # Check hardware setup service
     if reporter.have("systemctl"):
-        state_res = subprocess.run(
-            ["systemctl", "is-active", "kyth-hw-setup.service"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        svc_state = state_res.stdout.strip()
-
-        show_res = subprocess.run(
-            ["systemctl", "show", "-p", "Result", "--value", "kyth-hw-setup.service"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        svc_result = show_res.stdout.strip()
-
+        from kyth_shared.system.gpu import get_hardware_setup_service_status
+        svc_state, svc_result = get_hardware_setup_service_status("kyth-hw-setup.service")
         combined = f"{svc_state}:{svc_result}"
         if svc_state in ("active", "activating"):
             reporter.warn_check("Hardware setup service", "building in background")
@@ -84,17 +70,10 @@ def main() -> None:
 
     # Check nvidia-smi
     if reporter.have("nvidia-smi"):
-        smi_res = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        smi = smi_res.stdout.strip()
+        from kyth_shared.system.gpu import query_nvidia_smi
+        smi = query_nvidia_smi()
         if smi:
-            # Get first line
-            first_line = smi.splitlines()[0].strip()
-            reporter.pass_check("nvidia-smi", first_line)
+            reporter.pass_check("nvidia-smi", smi)
         else:
             reporter.warn_check("nvidia-smi", "command failed or no GPU output")
     else:

@@ -43,3 +43,24 @@ def rpm_package_installed(name: str) -> bool:
     """Check whether an RPM package is installed."""
     res = run_optional(["rpm", "-q", name], capture_output=True)
     return res is not None and res.returncode == 0
+
+
+def get_hardware_setup_service_status(service_name: str = "kyth-hw-setup.service") -> tuple[str, str]:
+    """Return systemd (state, result) tuple for the specified hardware setup service."""
+    state_res = run_text(["systemctl", "is-active", service_name])
+    state = state_res.stdout.strip() if state_res else "unknown"
+
+    show_res = run_text(["systemctl", "show", "-p", "Result", "--value", service_name])
+    result = show_res.stdout.strip() if show_res else "unknown"
+
+    return state, result
+
+
+def query_nvidia_smi() -> str:
+    """Return the name and driver version from nvidia-smi, or empty string."""
+    res = run_text(["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"])
+    if res is not None and res.returncode == 0:
+        lines = res.stdout.strip().splitlines()
+        return lines[0].strip() if lines else ""
+    return ""
+
