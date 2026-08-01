@@ -25,11 +25,24 @@ LABEL org.kyth.profile.gaming-peripherals="${ENABLE_GAMING_PERIPHERALS}"
 LABEL org.kyth.profile.virtualization-host="${ENABLE_VIRTUALIZATION_HOST}"
 LABEL org.kyth.profile.ksm="${ENABLE_KSM}"
 
+# Install the shared Python distribution before any build-time helper imports
+# it. Runtime scripts can then use normal package imports without mutating
+# sys.path to support the repository layout.
+COPY build_files/kyth_shared /tmp/kyth-shared-package
+RUN python3 -m pip install \
+        --no-cache-dir \
+        --no-deps \
+        --no-build-isolation \
+        --prefix=/usr \
+        /tmp/kyth-shared-package && \
+    rm -rf /tmp/kyth-shared-package
+
 # Build cache boundary: all RPM package installs (~2-3 GB).
 # Stable — only re-run when packages-static.sh or packages/*.sh fragments
 # change or the base image is updated.
 # Published layer boundaries are defined later by legacy-rechunk metadata.
-RUN --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/packages-static.sh \
+RUN --mount=type=bind,source=build_files/config,target=/ctx/config \
+    --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/packages-static.sh \
     --mount=type=bind,source=build_files/scripts/packages,target=/ctx/packages \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-microsoft,target=/ctx/RPM-GPG-KEY-microsoft \
@@ -92,17 +105,6 @@ RUN bash /tmp/plymouth-setup.sh && \
 # sysconfig layers. COPY once so neither layer needs a redundant bind-mount.
 COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev build_files/kyth-game-boost build_files/kyth-ntfs-repair build_files/kyth-shader-preheat build_files/kyth-health-check /ctx/
 
-# Install the shared Python distribution before any build-time helper imports
-# it. Runtime scripts can then use normal package imports without mutating
-# sys.path to support the repository layout.
-COPY build_files/kyth_shared /tmp/kyth-shared-package
-RUN python3 -m pip install \
-        --no-cache-dir \
-        --no-deps \
-        --no-build-isolation \
-        --prefix=/usr \
-        /tmp/kyth-shared-package && \
-    rm -rf /tmp/kyth-shared-package
 
 # Static system configuration — sysctl, kernel modules, PipeWire, Proton env
 # vars, gamemode, MangoHud, vkBasalt, bluetooth, and kyth-* service units.

@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:33:40 UTC
+- Last refreshed (UTC): 2026-08-01 01:38:46 UTC
 - Current branch: testing
-- HEAD commit: 1bcd7be
-- Last commit title: refactor: enforce removal of legacy archive utilities from host package manifest
-- Last commit date: 2026-07-31T21:31:00-04:00
+- HEAD commit: f6a3f23
+- Last commit title: fix: remove unused imports in drivers.py to satisfy Codacy quality gate
+- Last commit date: 2026-07-31T21:33:40-04:00
 - CI workflow files: 8
 - Build script files: 21
 
