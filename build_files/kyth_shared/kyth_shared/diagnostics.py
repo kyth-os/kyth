@@ -192,3 +192,64 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     else:
         reporter.warn_check("Input & Gamepads", "/dev/input device node inaccessible")
 
+
+def create_github_issue_draft(
+    title: str = "KythOS issue report",
+    body: str = "",
+    body_file: str | None = None,
+    label: str = "bug",
+    repo_url: str = "https://github.com/mrtrick37/kyth",
+    open_browser: bool = True,
+) -> tuple[str, str]:
+    """Generate local markdown draft and prefilled GitHub issue URL."""
+    import os
+    import shutil
+    import subprocess
+    from datetime import datetime
+    from urllib.parse import urlencode
+
+    if body_file:
+        if os.access(body_file, os.R_OK):
+            with open(body_file, "r", encoding="utf-8") as fh:
+                body = fh.read()
+        else:
+            raise FileNotFoundError(f"Body file is not readable: {body_file}")
+
+    if not body:
+        body = "Describe what happened, what you expected, and what you were doing just before it happened."
+
+    state_home = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+    draft_dir = os.path.join(state_home, "kyth")
+    os.makedirs(draft_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    draft_path = os.path.join(draft_dir, f"github-issue-{timestamp}.md")
+
+    with open(draft_path, "w", encoding="utf-8") as fh:
+        fh.write(f"# {title}\n\n{body}\n")
+
+    max_body = 5500
+    encoded_body = body
+    if len(encoded_body) > max_body:
+        encoded_body = (
+            encoded_body[:max_body]
+            + "\n\n[Report body truncated for the browser URL. A full local draft was saved by kyth-report-issue.]"
+        )
+
+    params = {"title": title, "body": encoded_body}
+    if label:
+        params["labels"] = label
+
+    url = repo_url.rstrip("/") + "/issues/new?" + urlencode(params)
+
+    if open_browser:
+        if shutil.which("xdg-open"):
+            subprocess.Popen(
+                ["xdg-open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+    return draft_path, url
+
+

@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-07-31 01:04:29 UTC
+- Last refreshed (UTC): 2026-08-01 00:33:29 UTC
 - Current branch: testing
-- HEAD commit: 4d9b3b0
-- Last commit title: Relocate rechunk podman storage to runner data disk for cachy leg too
-- Last commit date: 2026-07-30T09:38:12-04:00
+- HEAD commit: eccdb89
+- Last commit title: fix build iso
+- Last commit date: 2026-07-30T21:04:29-04:00
 - CI workflow files: 8
 - Build script files: 21
 

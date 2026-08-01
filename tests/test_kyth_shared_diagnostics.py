@@ -111,6 +111,28 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(reporter.warnings, 4)
         self.assertEqual(reporter.failures, 0)
 
+    @mock.patch("subprocess.Popen")
+    @mock.patch("shutil.which")
+    def test_create_github_issue_draft(self, mock_which, mock_popen) -> None:
+        import os
+        import tempfile
+        from kyth_shared.diagnostics import create_github_issue_draft
+
+        mock_which.return_value = "/usr/bin/xdg-open"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.dict(os.environ, {"XDG_STATE_HOME": tmpdir}):
+                draft_path, url = create_github_issue_draft(
+                    title="Test Bug",
+                    body="Something broke",
+                    label="bug",
+                    open_browser=True,
+                )
+                self.assertTrue(os.path.isfile(draft_path))
+                self.assertIn("https://github.com/mrtrick37/kyth/issues/new?", url)
+                self.assertIn("labels=bug", url)
+                mock_popen.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+

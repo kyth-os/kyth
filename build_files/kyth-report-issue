@@ -1,104 +1,65 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""kyth-report-issue — generate prefilled GitHub issue URL & local Markdown draft."""
 
-repo_url="${KYTH_ISSUE_REPO_URL:-https://github.com/mrtrick37/kyth}"
-title="KythOS issue report"
-body=""
-body_file=""
-label="${KYTH_ISSUE_LABEL:-bug}"
-open_browser=1
+from __future__ import annotations
 
-usage() {
-    cat <<'EOF'
-Usage: kyth-report-issue [--title TITLE] [--body TEXT] [--body-file PATH] [--label LABEL] [--no-open]
-
-Creates a prefilled GitHub issue URL for KythOS, writes a local draft copy,
-and opens the browser unless --no-open is passed.
-EOF
-}
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --title)
-            title="${2:-}"
-            shift 2
-            ;;
-        --body)
-            body="${2:-}"
-            shift 2
-            ;;
-        --body-file)
-            body_file="${2:-}"
-            shift 2
-            ;;
-        --label)
-            label="${2:-}"
-            shift 2
-            ;;
-        --no-open)
-            open_browser=0
-            shift
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "kyth-report-issue: unknown argument: $1" >&2
-            usage >&2
-            exit 2
-            ;;
-    esac
-done
-
-if [[ -n "${body_file}" ]]; then
-    if [[ -r "${body_file}" ]]; then
-        body="$(cat "${body_file}")"
-    else
-        echo "kyth-report-issue: body file is not readable: ${body_file}" >&2
-        exit 1
-    fi
-fi
-
-if [[ -z "${body}" ]]; then
-    body="Describe what happened, what you expected, and what you were doing just before it happened."
-fi
-
-draft_dir="${XDG_STATE_HOME:-${HOME}/.local/state}/kyth"
-mkdir -p "${draft_dir}"
-draft="${draft_dir}/github-issue-$(date +%Y%m%d-%H%M%S).md"
-{
-    printf '# %s\n\n' "${title}"
-    printf '%s\n' "${body}"
-} > "${draft}"
-
-url="$(
-    python3 - "${repo_url}" "${title}" "${body}" "${label}" <<'PY'
+import argparse
+import os
 import sys
-from urllib.parse import urlencode
 
-repo_url, title, body, label = sys.argv[1:5]
-max_body = 5500
-if len(body) > max_body:
-    body = (
-        body[:max_body]
-        + "\n\n[Report body truncated for the browser URL. A full local draft was saved by kyth-report-issue.]"
+from kyth_shared.diagnostics import create_github_issue_draft
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Creates a prefilled GitHub issue URL for KythOS and writes a local draft."
     )
-params = {"title": title, "body": body}
-if label:
-    params["labels"] = label
-print(repo_url.rstrip("/") + "/issues/new?" + urlencode(params))
-PY
-)"
+    parser.add_argument(
+        "--title",
+        default="KythOS issue report",
+        help="Title for the GitHub issue",
+    )
+    parser.add_argument(
+        "--body",
+        default="",
+        help="Body text for the issue description",
+    )
+    parser.add_argument(
+        "--body-file",
+        default=None,
+        help="Path to file containing issue body text",
+    )
+    parser.add_argument(
+        "--label",
+        default=os.environ.get("KYTH_ISSUE_LABEL", "bug"),
+        help="Label to apply on GitHub",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Do not open the URL in the default browser",
+    )
 
-echo "Draft saved: ${draft}"
-echo "${url}"
+    args = parser.parse_args()
+    repo_url = os.environ.get(
+        "KYTH_ISSUE_REPO_URL", "https://github.com/mrtrick37/kyth"
+    )
 
-if [[ "${open_browser}" -eq 1 ]]; then
-    if command -v xdg-open >/dev/null 2>&1; then
-        nohup xdg-open "${url}" >/dev/null 2>&1 &
-    else
-        echo "Open this URL to file the issue:" >&2
-        echo "${url}" >&2
-    fi
-fi
+    try:
+        draft_path, url = create_github_issue_draft(
+            title=args.title,
+            body=args.body,
+            body_file=args.body_file,
+            label=args.label,
+            repo_url=repo_url,
+            open_browser=not args.no_open,
+        )
+        print(f"Draft saved: {draft_path}")
+        print(url)
+    except Exception as err:
+        print(f"kyth-report-issue error: {err}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
