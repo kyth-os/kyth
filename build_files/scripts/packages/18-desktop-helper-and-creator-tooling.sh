@@ -106,15 +106,9 @@ pip --version
 
 optional_desktop_packages=(
 	jetbrains-mono-fonts
-	cascadia-code-nf-fonts
 	liberation-fonts-all
 	inter-fonts
 	papirus-icon-theme
-	# Calibri/Cambria-compatible fonts: fix Office document rendering for Windows migrants.
-	# Arial/Times are covered by liberation-fonts; Calibri (default since Office 2007)
-	# needs Carlito, and Cambria needs Caladea, for correct line-break and pagination matching.
-	google-carlito-fonts
-	google-caladea-fonts
 	# Emoji rendering — without this, emoji in browsers and terminals render as
 	# empty boxes on systems that only have the liberation/inter font set.
 	google-noto-emoji-fonts
