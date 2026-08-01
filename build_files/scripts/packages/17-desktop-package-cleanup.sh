@@ -15,6 +15,7 @@ dnf5 remove -y --no-autoremove \
 	plasma-welcome-fedora \
 	plasma-discover-rpm-ostree \
 	kio-gdrive \
+	cups-browsed \
 	2>/dev/null || true
 
 # Remove Firefox — Brave Browser is installed as a Flatpak on first boot

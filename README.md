@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:26:49 UTC
+- Last refreshed (UTC): 2026-08-01 01:27:46 UTC
 - Current branch: testing
-- HEAD commit: c272e81
-- Last commit title: refactor: extract rclone & flatpak-builder to container, enable dnf nodocs
-- Last commit date: 2026-07-31T21:24:59-04:00
+- HEAD commit: 918988d
+- Last commit title: refactor: extract pipx/uv to container shims and introduce system.drivers probe module
+- Last commit date: 2026-07-31T21:26:49-04:00
 - CI workflow files: 8
 - Build script files: 21
 
