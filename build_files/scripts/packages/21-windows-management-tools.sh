@@ -6,24 +6,12 @@ set -euo pipefail
 # RDP, Active Directory, Kerberos, and SMB tooling in standard Fedora repos.
 # Azure CLI is provided via the kyth-ai-dev container to keep the core OS slim.
 
-install -Dm 0755 /dev/stdin /usr/bin/az <<'WRAPPEREOF'
-#!/usr/bin/env bash
-set -euo pipefail
+python3 -c "
+from pathlib import Path
+from kyth_shared.containers import write_distrobox_wrapper
+write_distrobox_wrapper(Path('/usr/bin/az'), 'az', 'Azure CLI')
+"
 
-if [[ -x "${HOME}/.local/bin/az" ]]; then
-	exec "${HOME}/.local/bin/az" "$@"
-fi
-
-box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
-if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
-	exec distrobox enter "${box}" -- az "$@"
-else
-	echo "Azure CLI is managed in the KythOS AI Developer container (${box})."
-	echo "Initializing ${box} environment..."
-	kyth-ai-dev setup
-	exec distrobox enter "${box}" -- az "$@"
-fi
-WRAPPEREOF
 
 # RDP and SMB tooling — standard Fedora repos. samba-client is a required base
 # capability alongside cifs-utils: it supplies smbclient/net/wbinfo for share

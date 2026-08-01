@@ -43,7 +43,6 @@ dnf5 install -y --skip-unavailable --exclude=libde265.i686 \
 	libobs_vkcapture.i686 \
 	libobs_glcapture.i686 \
 	xrandr \
-	evtest \
 	xdg-user-dirs \
 	xdg-terminal-exec \
 	gamemode \

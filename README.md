@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:16:13 UTC
+- Last refreshed (UTC): 2026-08-01 01:17:20 UTC
 - Current branch: testing
-- HEAD commit: d08efc3
-- Last commit title: refactor: consolidate service diagnostics and scheduler status helpers
-- Last commit date: 2026-07-31T21:13:06-04:00
+- HEAD commit: 3d7d58d
+- Last commit title: refactor: trim auxiliary font assets from base image package manifest
+- Last commit date: 2026-07-31T21:16:13-04:00
 - CI workflow files: 8
 - Build script files: 21
 
