@@ -237,3 +237,85 @@ def categorize_web_apps() -> bool:
         refresh_kde_sycoca()
 
     return changed
+
+
+def fixup_kali_desktop_launchers() -> bool:
+    """Fix up .desktop launchers exported from Kali distrobox container."""
+    app_dir = Path.home() / ".local" / "share" / "applications"
+    if not app_dir.is_dir():
+        return False
+
+    changed = False
+    for desktop_file in app_dir.glob("*.desktop"):
+        if not desktop_file.is_file():
+            continue
+        try:
+            content = desktop_file.read_text(encoding="utf-8", errors="replace")
+            if "--name kali" not in content and "-n kali" not in content:
+                continue
+
+            lines = content.splitlines()
+            new_lines = []
+            file_changed = False
+
+            for line in lines:
+                if line.startswith("Categories="):
+                    new_lines.append("Categories=X-KythSecurity;")
+                    file_changed = True
+                    continue
+                if re.match(r"^NoDisplay\s*=\s*true", line, re.IGNORECASE):
+                    file_changed = True
+                    continue
+                if line.startswith("OnlyShowIn=") or line.startswith("NotShowIn="):
+                    file_changed = True
+                    continue
+                if re.search(r"\b(pkexec|kdesu|gksu|gksudo)\b", line):
+                    line = re.sub(r"\b(pkexec|kdesu|gksu|gksudo)\s+", "sudo -E ", line)
+                    file_changed = True
+
+                new_lines.append(line)
+
+            if not any(l.startswith("Categories=") for l in new_lines):
+                new_lines.append("Categories=X-KythSecurity;")
+                file_changed = True
+
+            if file_changed:
+                desktop_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+                changed = True
+        except Exception:
+            pass
+
+    # Zenmap specific fixups
+    for desktop_file in app_dir.glob("*zenmap*.desktop"):
+        if not desktop_file.is_file():
+            continue
+        try:
+            content = desktop_file.read_text(encoding="utf-8", errors="replace")
+            if "--name kali" not in content and "-n kali" not in content:
+                continue
+
+            if re.search(r"^Exec=.*$", content, re.MULTILINE):
+                content = re.sub(
+                    r"^Exec=.*$",
+                    "Exec=kyth-distrobox-root-launch --root kali /usr/bin/zenmap",
+                    content,
+                    flags=re.MULTILINE,
+                )
+            if re.search(r"^TryExec=.*$", content, re.MULTILINE):
+                content = re.sub(
+                    r"^TryExec=.*$",
+                    "TryExec=kyth-distrobox-root-launch",
+                    content,
+                    flags=re.MULTILINE,
+                )
+            desktop_file.write_text(content, encoding="utf-8")
+            changed = True
+        except Exception:
+            pass
+
+    if changed:
+        refresh_desktop_database(app_dir)
+        refresh_kde_sycoca()
+
+    return changed
+

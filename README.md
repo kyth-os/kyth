@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 00:48:10 UTC
+- Last refreshed (UTC): 2026-08-01 00:51:53 UTC
 - Current branch: testing
-- HEAD commit: ba06ce7
-- Last commit title: refactor: complete 5 system optimization and refactoring passes
-- Last commit date: 2026-07-31T20:42:02-04:00
+- HEAD commit: 66192d5
+- Last commit title: refactor: extract base OS dev & build tools to container provisioning
+- Last commit date: 2026-07-31T20:48:10-04:00
 - CI workflow files: 8
 - Build script files: 21
 
