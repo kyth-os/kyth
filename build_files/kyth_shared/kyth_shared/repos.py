@@ -5,7 +5,22 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "repos.json"
+def _get_config_path() -> Path:
+    primary = Path(__file__).resolve().parents[2] / "config" / "repos.json"
+    if primary.is_file():
+        return primary
+    candidates = [
+        Path("/ctx/config/repos.json"),
+        Path("/usr/share/kyth/config/repos.json"),
+        Path("/etc/kyth/config/repos.json"),
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c
+    return primary
+
+
+CONFIG_PATH = _get_config_path()
 
 
 @dataclass

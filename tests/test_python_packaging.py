@@ -66,7 +66,7 @@ class PythonPackagingTests(unittest.TestCase):
         )
         build_time_import = dockerfile.index("bash /ctx/sysconfig-static.sh")
         self.assertLess(shared_install, build_time_import)
-        self.assertNotIn(
+        self.assertIn(
             "source=build_files/kyth_shared,target=/ctx/kyth_shared",
             dockerfile,
         )

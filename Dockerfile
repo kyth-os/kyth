@@ -25,23 +25,12 @@ LABEL org.kyth.profile.gaming-peripherals="${ENABLE_GAMING_PERIPHERALS}"
 LABEL org.kyth.profile.virtualization-host="${ENABLE_VIRTUALIZATION_HOST}"
 LABEL org.kyth.profile.ksm="${ENABLE_KSM}"
 
-# Install the shared Python distribution before any build-time helper imports
-# it. Runtime scripts can then use normal package imports without mutating
-# sys.path to support the repository layout.
-COPY build_files/kyth_shared /tmp/kyth-shared-package
-RUN python3 -m pip install \
-        --no-cache-dir \
-        --no-deps \
-        --no-build-isolation \
-        --prefix=/usr \
-        /tmp/kyth-shared-package && \
-    rm -rf /tmp/kyth-shared-package
-
 # Build cache boundary: all RPM package installs (~2-3 GB).
 # Stable — only re-run when packages-static.sh or packages/*.sh fragments
 # change or the base image is updated.
 # Published layer boundaries are defined later by legacy-rechunk metadata.
-RUN --mount=type=bind,source=build_files/config,target=/ctx/config \
+RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
+    --mount=type=bind,source=build_files/config,target=/ctx/config \
     --mount=type=bind,source=build_files/scripts/packages-static.sh,target=/ctx/packages-static.sh \
     --mount=type=bind,source=build_files/scripts/packages,target=/ctx/packages \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
@@ -50,6 +39,7 @@ RUN --mount=type=bind,source=build_files/config,target=/ctx/config \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
+    PYTHONPATH="/ctx/kyth_shared" \
     ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS}" \
     ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST}" \
     ENABLE_KSM="${ENABLE_KSM}" \
@@ -104,6 +94,16 @@ RUN bash /tmp/plymouth-setup.sh && \
 # kyth-vscode-wallet and kyth-ai-dev are needed by both sysconfig-static and
 # sysconfig layers. COPY once so neither layer needs a redundant bind-mount.
 COPY build_files/kyth-vscode-wallet build_files/kyth-ai-dev build_files/kyth-game-boost build_files/kyth-ntfs-repair build_files/kyth-shader-preheat build_files/kyth-health-check /ctx/
+
+# Install the shared Python distribution for runtime scripts.
+COPY build_files/kyth_shared /tmp/kyth-shared-package
+RUN python3 -m pip install \
+        --no-cache-dir \
+        --no-deps \
+        --no-build-isolation \
+        --prefix=/usr \
+        /tmp/kyth-shared-package && \
+    rm -rf /tmp/kyth-shared-package
 
 
 # Static system configuration — sysctl, kernel modules, PipeWire, Proton env
