@@ -123,3 +123,41 @@ def check_gaming_reason(
         return "gaming process detected (/proc scan)"
 
     return None
+
+
+def find_controllers() -> list[str]:
+    """Scan /dev/input using udevadm for connected gamepads and joysticks."""
+    import re
+    import subprocess
+    controllers = []
+    dev_input = Path("/dev/input")
+    if not dev_input.is_dir():
+        return controllers
+
+    for path in sorted(dev_input.glob("event*")):
+        res = subprocess.run(
+            ["udevadm", "info", "--query=property", "--name", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode != 0:
+            continue
+        props = res.stdout
+
+        name = None
+        for prop in ("ID_MODEL_FROM_DATABASE", "ID_MODEL", "NAME"):
+            m = re.search(rf"^{prop}=(.*)$", props, re.MULTILINE)
+            if m:
+                name = m.group(1).strip()
+                if name.startswith('"') and name.endswith('"'):
+                    name = name[1:-1]
+                break
+
+        check_str = f"{name or ''} {props}".lower()
+        keywords = ("joystick", "gamepad", "xbox", "dualsense", "dualshock", "playstation", "controller")
+        if any(kw in check_str for kw in keywords):
+            controllers.append(f"{path} {name or 'controller'}")
+
+    return controllers
+

@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 00:51:53 UTC
+- Last refreshed (UTC): 2026-08-01 00:53:49 UTC
 - Current branch: testing
-- HEAD commit: 66192d5
-- Last commit title: refactor: extract base OS dev & build tools to container provisioning
-- Last commit date: 2026-07-31T20:48:10-04:00
+- HEAD commit: f76c5fc
+- Last commit title: refactor: consolidate desktop launcher fixup into kyth_shared.desktop
+- Last commit date: 2026-07-31T20:51:53-04:00
 - CI workflow files: 8
 - Build script files: 21
 

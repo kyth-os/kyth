@@ -17,17 +17,7 @@ install -m 0755 /ctx/kyth-scx-loader /usr/bin/scx_loader
 install -m 0755 /ctx/kyth-vscode-wallet /usr/bin/kyth-vscode-wallet
 mkdir -p /usr/lib/systemd/user /usr/lib/systemd/user/default.target.wants
 install -m 0644 /ctx/kyth-dynamic-lock.service /usr/lib/systemd/user/kyth-dynamic-lock.service
-write_config /usr/lib/systemd/user/kyth-browser-wallet-defaults.service <<'WALLETDEFAULTSEOF'
-[Unit]
-Description=Apply quiet VS Code and Brave wallet defaults
-ConditionPathExists=!%h/.local/state/kyth/browser-wallet-defaults-v1
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/bash -c 'set -euo pipefail; /usr/bin/kyth-vscode-wallet; mkdir -p "${HOME}/.local/state/kyth"; touch "${HOME}/.local/state/kyth/browser-wallet-defaults-v1"'
-
-[Install]
-WantedBy=default.target
-WALLETDEFAULTSEOF
+install -m 0644 /ctx/kyth-browser-wallet-defaults.service /usr/lib/systemd/user/kyth-browser-wallet-defaults.service
 ln -sf ../kyth-browser-wallet-defaults.service \
 	/usr/lib/systemd/user/default.target.wants/kyth-browser-wallet-defaults.service
+
