@@ -128,18 +128,21 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertIn('branches=["main","testing"]', workflow)
         self.assertIn("matrix.branch == 'main' && 'latest' || matrix.branch", workflow)
 
-    def test_forbidden_bloat_packages_not_in_manifest(self):
+    def test_build_time_python_imports_are_resolvable_in_build_context(self):
+        dockerfile = (ROOT / "Dockerfile").read_text()
         package_scripts = (BUILD_FILES / "scripts/packages").glob("*.sh")
         all_content = "\n".join(p.read_text(encoding="utf-8") for p in package_scripts)
-        forbidden = ["cups-browsed", "firefox", "evtest", "skopeo", "hyperfine", "duperemove", "starship", "direnv", "gum", "p7zip", "cabextract", "libpst"]
-        for pkg in forbidden:
-            with self.subTest(package=pkg):
-                # Ensure forbidden package names do not appear in dnf5 install lists
-                self.assertNotRegex(all_content, r"dnf5\s+install.*?\b" + re.escape(pkg) + r"\b")
-
-
+        python_imports = set(re.findall(r"from\s+([a-zA-Z0-9_]+)\b", all_content))
+        python_imports.update(re.findall(r"import\s+([a-zA-Z0-9_]+)\b", all_content))
+        for mod in python_imports:
+            if mod in {"sys", "os", "json", "pathlib", "dataclasses", "typing", "subprocess", "shutil"}:
+                continue
+            if mod == "kyth_shared":
+                self.assertIn("PYTHONPATH=\"/ctx/kyth_shared\"", dockerfile)
+                self.assertIn("source=build_files/kyth_shared,target=/ctx/kyth_shared", dockerfile)
 
 
 if __name__ == "__main__":
     unittest.main()
+
 

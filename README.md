@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:48:24 UTC
+- Last refreshed (UTC): 2026-08-01 01:51:31 UTC
 - Current branch: testing
-- HEAD commit: a30a643
-- Last commit title: ci: fix Dockerfile layer ordering so kyth_shared is installed before package assembly
-- Last commit date: 2026-07-31T21:38:46-04:00
+- HEAD commit: c69e242
+- Last commit title: ci: mount kyth_shared via PYTHONPATH during package-static build phase to fix pip unavailability error
+- Last commit date: 2026-07-31T21:48:24-04:00
 - CI workflow files: 8
 - Build script files: 21
 
