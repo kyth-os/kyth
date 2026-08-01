@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:28:36 UTC
+- Last refreshed (UTC): 2026-08-01 01:29:34 UTC
 - Current branch: testing
-- HEAD commit: 4b45264
-- Last commit title: refactor: purge cups-browsed in package cleanup and refine peripheral manifests
-- Last commit date: 2026-07-31T21:27:46-04:00
+- HEAD commit: 2459527
+- Last commit title: refactor: add declarative configs, sysctl performance tuning, and forbidden bloat contract test
+- Last commit date: 2026-07-31T21:28:36-04:00
 - CI workflow files: 8
 - Build script files: 21
 
