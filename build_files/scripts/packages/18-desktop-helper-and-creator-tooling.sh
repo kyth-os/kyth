@@ -65,6 +65,14 @@ declare -A descriptions=(
 	[flatpak-builder]="flatpak-builder package creator"
 	[pipx]="pipx Python application runner"
 	[uv]="uv fast Python package installer"
+	[starship]="starship prompt engine"
+	[direnv]="direnv environment loader"
+	[delta]="git-delta diff pager"
+	[gum]="gum TUI menu builder"
+	[7z]="7z archive extractor"
+	[7za]="7za archive extractor"
+	[cabextract]="cabextract archive utility"
+	[readpst]="readpst PST converter"
 )
 desc="${descriptions[$tool]:-$tool}"
 
@@ -84,7 +92,7 @@ exec distrobox enter "${box}" -- "${tool}" "$@"
 WRAPPEREOF
 
 # Create host symlinks to the generic distrobox wrapper
-for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux rclone flatpak-builder pipx uv; do
+for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux rclone flatpak-builder pipx uv starship direnv delta gum 7z 7za cabextract readpst; do
 	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
 done
 
@@ -125,9 +133,6 @@ optional_desktop_packages=(
 	ripgrep
 	fzf
 	zoxide
-	git-delta
-	starship
-	direnv
 	jq
 	yq
 	# zsh enhancements — sourced automatically by the /etc/skel/.zshrc below.
@@ -140,8 +145,6 @@ optional_desktop_packages=(
 	btop
 	# fastfetch — system info display (neofetch replacement, actively maintained).
 	fastfetch
-	# gum — Charm CLI beautification library; used by ujust scripts for interactive menus.
-	gum
 	# ydotool — Wayland-compatible xdotool; required for Wayland automation scripts.
 	ydotool
 	# ddcutil — DDC/CI monitor brightness/contrast control via I²C.

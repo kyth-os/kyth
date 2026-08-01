@@ -131,11 +131,12 @@ class BuildAssemblyContracts(unittest.TestCase):
     def test_forbidden_bloat_packages_not_in_manifest(self):
         package_scripts = (BUILD_FILES / "scripts/packages").glob("*.sh")
         all_content = "\n".join(p.read_text(encoding="utf-8") for p in package_scripts)
-        forbidden = ["cups-browsed", "firefox", "evtest", "skopeo", "hyperfine", "duperemove"]
+        forbidden = ["cups-browsed", "firefox", "evtest", "skopeo", "hyperfine", "duperemove", "starship", "direnv", "gum"]
         for pkg in forbidden:
             with self.subTest(package=pkg):
                 # Ensure forbidden package names do not appear in dnf5 install lists
                 self.assertNotRegex(all_content, r"dnf5\s+install.*?\b" + re.escape(pkg) + r"\b")
+
 
 
 if __name__ == "__main__":
