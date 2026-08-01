@@ -21,3 +21,8 @@ dnf5 remove -y --no-autoremove \
 # via kyth-default-flatpaks.service (avoids baking external repo keys into
 # the build and eliminates DNS-dependent rpm --import calls in CI).
 dnf5 remove -y firefox || true
+
+# Purge DNF solver metadata, package caches, and transient logs to keep image layer lean
+dnf5 clean all 2>/dev/null || true
+rm -rf /var/cache/dnf /var/cache/libdnf5 /tmp/* /var/tmp/* 2>/dev/null || true
+

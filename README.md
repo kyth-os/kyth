@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:18:27 UTC
+- Last refreshed (UTC): 2026-08-01 01:18:46 UTC
 - Current branch: testing
-- HEAD commit: eb29620
-- Last commit title: refactor: modularize container wrapper creation and remove redundant evtest package
-- Last commit date: 2026-07-31T21:17:20-04:00
+- HEAD commit: bd565bc
+- Last commit title: refactor: extract skopeo, tmux, and hyperfine to container execution space
+- Last commit date: 2026-07-31T21:18:27-04:00
 - CI workflow files: 8
 - Build script files: 21
 
