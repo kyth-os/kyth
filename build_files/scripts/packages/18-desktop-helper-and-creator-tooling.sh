@@ -63,6 +63,8 @@ declare -A descriptions=(
 	[tmux]="tmux terminal multiplexer"
 	[rclone]="rclone cloud storage sync"
 	[flatpak-builder]="flatpak-builder package creator"
+	[pipx]="pipx Python application runner"
+	[uv]="uv fast Python package installer"
 )
 desc="${descriptions[$tool]:-$tool}"
 
@@ -82,7 +84,7 @@ exec distrobox enter "${box}" -- "${tool}" "$@"
 WRAPPEREOF
 
 # Create host symlinks to the generic distrobox wrapper
-for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux rclone flatpak-builder; do
+for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux rclone flatpak-builder pipx uv; do
 	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
 done
 

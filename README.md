@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:24:59 UTC
+- Last refreshed (UTC): 2026-08-01 01:26:49 UTC
 - Current branch: testing
-- HEAD commit: 5d4d67b
-- Last commit title: fix: provide fallback result in test_runtime_diagnostics command runner mock
-- Last commit date: 2026-07-31T21:19:08-04:00
+- HEAD commit: c272e81
+- Last commit title: refactor: extract rclone & flatpak-builder to container, enable dnf nodocs
+- Last commit date: 2026-07-31T21:24:59-04:00
 - CI workflow files: 8
 - Build script files: 21
 
