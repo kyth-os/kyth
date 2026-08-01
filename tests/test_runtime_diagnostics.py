@@ -30,7 +30,7 @@ class AvailableReporter(DiagnosticReporter):
 
 def runner_for(results):
     def execute(command, **_kwargs):
-        result = results[tuple(command)]
+        result = results.get(tuple(command), (1, "", "not mocked"))
         return subprocess.CompletedProcess(command, result[0], result[1], result[2])
 
     return CommandRunner(execute)

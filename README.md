@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:18:46 UTC
+- Last refreshed (UTC): 2026-08-01 01:19:08 UTC
 - Current branch: testing
-- HEAD commit: bd565bc
-- Last commit title: refactor: extract skopeo, tmux, and hyperfine to container execution space
-- Last commit date: 2026-07-31T21:18:27-04:00
+- HEAD commit: 55b8db5
+- Last commit title: refactor: add DNF cache and transient artifact purging in package cleanup
+- Last commit date: 2026-07-31T21:18:46-04:00
 - CI workflow files: 8
 - Build script files: 21
 
