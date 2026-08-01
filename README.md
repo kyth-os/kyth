@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 01:30:29 UTC
+- Last refreshed (UTC): 2026-08-01 01:31:00 UTC
 - Current branch: testing
-- HEAD commit: 28a8d96
-- Last commit title: refactor: vendor static fastfetch configuration template and complete optimization pass
-- Last commit date: 2026-07-31T21:29:34-04:00
+- HEAD commit: 86bf93a
+- Last commit title: refactor: containerize starship, direnv, git-delta, gum, and archive utilities
+- Last commit date: 2026-07-31T21:30:29-04:00
 - CI workflow files: 8
 - Build script files: 21
 

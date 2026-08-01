@@ -19,14 +19,10 @@ dnf5 install -y --skip-unavailable \
 	xorg-x11-xinit \
 	xorg-x11-drv-libinput \
 	irqbalance \
-	p7zip \
-	p7zip-plugins \
 	plocate \
-	cabextract \
 	ntfs-3g \
 	ntfsprogs \
 	os-prober \
-	libpst \
 	rsync \
 	fuse \
 	fuse-libs \
