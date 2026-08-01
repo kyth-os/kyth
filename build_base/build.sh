@@ -226,6 +226,22 @@ add_drivers+=" virtio_blk virtio_scsi virtio_pci nvme ahci virtio_gpu qxl bochs 
 do_hardlink="no"
 DRACUTEOF
 
+# Boot-leanness: drop initramfs modules for network/SAN root scenarios that a
+# gaming/desktop workstation never boots from. Root is local (btrfs on
+# SATA/NVMe/virtio), so none of these are on any boot path — omitting them
+# shrinks the initramfs and shaves a little udev settle time at boot. This is
+# purely about the *early-boot* dracut modules: post-boot NFS/SMB/iSCSI mounts
+# use their normal kernel modules + userspace and are unaffected.
+#
+# Kept in a dedicated file (not 99-kyth.conf) because the Plymouth setup,
+# branding-guard, and runtime repair paths rewrite 99-kyth.conf; a separate
+# file survives every one of those regenerations. Both the CachyOS build-time
+# initramfs rebuild and the Fedora bootc first-deploy regeneration read all of
+# /etc/dracut.conf.d, so the omission applies to both kernel flavors.
+cat >/etc/dracut.conf.d/90-kyth-lean.conf <<'DRACUTEOF'
+omit_dracutmodules+=" nfs cifs iscsi fcoe fcoe-uefi nbd multipath "
+DRACUTEOF
+
 # Write Plymouth defaults unconditionally so both Fedora and CachyOS images ship
 # a host config that agrees with the late kyth-plymouth dracut module. This
 # build runs in the separate build_base/ Docker context, so it can't source
