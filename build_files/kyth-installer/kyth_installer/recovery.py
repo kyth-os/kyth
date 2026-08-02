@@ -28,14 +28,15 @@ def write_failure_summary(
     message: str,
 ) -> None:
     """Atomically persist a support-friendly summary without request secrets."""
+    plan = context.plan
     payload = {
         "schema_version": 1,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "phase": context.phase.value,
         "lifecycle": context.lifecycle.value,
-        "install_mode": context.state.get("install_mode", ""),
-        "disk": context.state.get("disk", ""),
-        "target_partition": context.state.get("target_partition", ""),
+        "install_mode": plan.mode if plan is not None else context.state.get("install_mode", ""),
+        "disk": plan.disk if plan is not None else context.state.get("disk", ""),
+        "target_partition": plan.target_partition if plan is not None else context.state.get("target_partition", ""),
         "message": message,
     }
     path.parent.mkdir(parents=True, exist_ok=True)

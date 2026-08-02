@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
+from .context import InstallRequest
 from .disk import (
     _human_size,
     _latest_partition_on_disk,
@@ -75,6 +76,38 @@ class InstallPlan:
     mode: str
     disk: Optional[str] = None
     target_partition: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ResolvedInstallPlan:
+    """Complete immutable input consumed by destructive install phases."""
+
+    request: InstallRequest
+    storage: InstallPlan
+    source_ref: str
+    target_ref: str
+
+    @property
+    def mode(self) -> str:
+        return self.storage.mode
+
+    @property
+    def disk(self) -> str:
+        if not self.storage.disk:
+            raise RuntimeError("Resolved install plan has no target disk")
+        return self.storage.disk
+
+    @property
+    def target_partition(self) -> str:
+        return self.storage.target_partition or ""
+
+    @property
+    def efi_partition(self) -> str:
+        return self.request.efi_partition
+
+    @property
+    def kernel(self) -> str:
+        return self.request.kernel
 
 
 def _normalized_install_mode(state: dict) -> str:
@@ -511,7 +544,7 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     return disk, created
 
 
-def _prepare_install_plan(state: dict, log, context=None) -> InstallPlan:
+def _prepare_install_plan(state: dict | InstallRequest, log, context=None) -> InstallPlan:
     plan = _install_plan_from_state(state)
     if plan.mode == "resize_ntfs":
         _validate_resize_ntfs_target(state)
@@ -524,7 +557,6 @@ def _prepare_install_plan(state: dict, log, context=None) -> InstallPlan:
     else:
         disk, target_partition = _validate_install_target(state, context)
         plan = InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
-    _apply_install_plan(state, plan)
     return plan
 
 

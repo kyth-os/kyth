@@ -64,6 +64,16 @@ class InstallerRefactorTests(unittest.TestCase):
         self.assertEqual(state["disk"], "/dev/nvme0n1")
         self.assertEqual(state["target_partition"], "/dev/sda1")
 
+    def test_prepare_plan_does_not_rewrite_request_state(self):
+        state = {"install_mode": "wipe", "disk": "/dev/sda", "target_partition": ""}
+        original = state.copy()
+
+        with patch.object(plan, "_validate_install_target", return_value=("/dev/sda", None)):
+            result = plan._prepare_install_plan(state, lambda _message: None)
+
+        self.assertEqual(result, plan.InstallPlan("wipe", disk="/dev/sda", target_partition=None))
+        self.assertEqual(state, original)
+
     def test_cookie_parser_ignores_malformed_pairs(self):
         cookies = server._parse_cookie_header("a=1; no-value; b = two ")
 

@@ -186,6 +186,8 @@ class RunHeadlessEventLoopTests(unittest.TestCase):
         from kyth_installer.context import InstallLifecycle as _InstallLifecycle
 
         def populate(context):
+            context.transition(_InstallLifecycle.VALIDATED)
+            context.transition(_InstallLifecycle.INSTALLING)
             context.transition(_InstallLifecycle.DONE)
 
         self.assertEqual(self._run_with_fake_service(populate), 0)

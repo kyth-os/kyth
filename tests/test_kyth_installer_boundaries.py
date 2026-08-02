@@ -1,5 +1,6 @@
 import sys
 import unittest
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -9,7 +10,7 @@ if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
 from kyth_installer.cleanup import clear_secrets_and_orphan_mount, unmount_configuration
-from kyth_installer.context import InstallLifecycle, InstallerContext
+from kyth_installer.context import InstallLifecycle, InstallRequest, InstallerContext
 from kyth_installer.execution import start_installation
 from kyth_installer.validation import InstallRequestError, validate_install_request
 
@@ -50,6 +51,9 @@ class InstallerBoundaryTests(unittest.TestCase):
         self.assertEqual(state["install_mode"], "wipe")
         self.assertEqual(state["username"], "kyth")
         self.assertEqual(state["password_hash"], "hashed")
+        self.assertIsInstance(state, InstallRequest)
+        with self.assertRaises(FrozenInstanceError):
+            state.disk = "/dev/sdb"
         _validate_storage.assert_called_once()
 
     @patch("kyth_installer.validation.disk.list_disks")
@@ -78,6 +82,12 @@ class InstallerBoundaryTests(unittest.TestCase):
             self.assertFalse(start_installation(context, {}, MagicMock()))
         finally:
             context.install_lock.release()
+
+    def test_context_rejects_invalid_lifecycle_jump(self):
+        context = InstallerContext()
+
+        with self.assertRaisesRegex(RuntimeError, "idle -> done"):
+            context.transition(InstallLifecycle.DONE)
 
     def test_cleanup_clears_secrets_and_unmounts_orphan(self):
         state = {"password_hash": "hash", "mok_password": "mok"}

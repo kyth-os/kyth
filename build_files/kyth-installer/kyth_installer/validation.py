@@ -6,7 +6,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from . import config, disk, partition_ops, plan, system
-from .context import InstallationState
+from .context import InstallRequest
 
 if TYPE_CHECKING:
     from .context import InstallerContext
@@ -115,8 +115,8 @@ def _storage_state(body: dict, context: InstallerContext) -> tuple[dict, dict]:
     return state, disks[target_disk]
 
 
-def validate_install_request(body: dict, context: InstallerContext) -> InstallationState:
-    """Validate a start request and return the normalized installation state."""
+def validate_install_request(body: dict, context: InstallerContext) -> InstallRequest:
+    """Validate a start request and return an immutable normalized request."""
     state, disk_info = _storage_state(body, context)
     current_ok = (
         state["install_mode"] == "alongside"
@@ -142,7 +142,7 @@ def validate_install_request(body: dict, context: InstallerContext) -> Installat
     hostname = body.get("hostname", "kyth")
     _require_valid_hostname(hostname)
 
-    return {
+    return InstallRequest.from_state({
         **state,
         "hostname": hostname,
         "timezone": timezone,
@@ -152,7 +152,7 @@ def validate_install_request(body: dict, context: InstallerContext) -> Installat
         "password_hash": password_hash,
         "kernel": body.get("kernel", "fedora") or "fedora",
         "mok_password": body.get("mok_password", "") or "",
-    }
+    })
 
 
 def validate_partition_install_request(
@@ -164,7 +164,7 @@ def validate_partition_install_request(
     username: str,
     password: str,
     context: InstallerContext,
-) -> InstallationState:
+) -> InstallRequest:
     """Normalize the blank-partition CLI request through installer policy."""
     target = disk._normal_device_path(target_partition)
     if not target:
@@ -216,7 +216,7 @@ def validate_partition_install_request(
         )
     password_hash = _hash_password_for_request(password, allow_blank=True)
 
-    return {
+    return InstallRequest.from_state({
         **state,
         "hostname": hostname,
         "timezone": timezone,
@@ -226,4 +226,4 @@ def validate_partition_install_request(
         "password_hash": password_hash,
         "kernel": "fedora",
         "mok_password": "",
-    }
+    })

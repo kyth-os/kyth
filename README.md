@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-02 02:53:28 UTC
+- Last refreshed (UTC): 2026-08-02 14:19:02 UTC
 - Current branch: testing
-- HEAD commit: 438c8ae
-- Last commit title: refactor: convert user polish to systemd user unit and add system probe cache export
-- Last commit date: 2026-08-01T10:16:23-04:00
+- HEAD commit: 1a86790
+- Last commit title: standardize shell script source paths
+- Last commit date: 2026-08-01T22:53:28-04:00
 - CI workflow files: 8
 - Build script files: 21
 

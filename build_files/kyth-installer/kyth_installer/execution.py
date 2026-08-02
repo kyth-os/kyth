@@ -5,7 +5,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from .context import InstallLifecycle, InstallationState
+from .context import InstallLifecycle, InstallationState, InstallRequest
 
 if TYPE_CHECKING:
     from .context import InstallerContext
@@ -13,13 +13,14 @@ if TYPE_CHECKING:
 
 def start_installation(
     context: InstallerContext,
-    state: InstallationState,
+    state: InstallationState | InstallRequest,
     worker: Callable[[InstallerContext], None],
 ) -> bool:
     """Acquire the install slot, store validated state, and start its worker."""
     if not context.install_lock.acquire(blocking=False):
         return False
-    context.replace_state(state)
+    request = state if isinstance(state, InstallRequest) else InstallRequest.from_state(state)
+    context.replace_request(request)
     context.transition(InstallLifecycle.VALIDATED)
 
     def run() -> None:

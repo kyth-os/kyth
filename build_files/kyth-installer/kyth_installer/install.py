@@ -9,10 +9,16 @@ from pathlib import Path
 
 from .config import FAILURE_SUMMARY_FILE, LOG_FILE, SKIP_FETCH_CHECK
 from .cleanup import clear_secrets_and_orphan_mount, unmount_configuration
-from .context import InstallLifecycle, InstallerContext, InstallPhase
+from .context import InstallLifecycle, InstallRequest, InstallerContext, InstallPhase
 from .disk import get_root_partition
 from .imagesrc import _friendly_network_error, _install_images, _network_preflight
-from .plan import _get_manual_mounts, _prepare_install_plan, _validate_install_target, _validate_storage_intent
+from .plan import (
+    ResolvedInstallPlan,
+    _get_manual_mounts,
+    _prepare_install_plan,
+    _validate_install_target,
+    _validate_storage_intent,
+)
 from .runner import run_command
 from .recovery import cleanup_registered_mounts, write_failure_summary
 from .streaming import StreamingCommandRunner
@@ -112,45 +118,81 @@ def _run_cmd(
         error_factory=error_factory,
     )
 
-def _prepare_install_context(log, context: InstallerContext):
+def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallPlan:
     context.enter_phase(InstallPhase.PREPARE)
-    state = context.state
-    kernel = state.get("kernel", "fedora")
+    request = context.request or InstallRequest.from_state(context.state)
+    kernel = request.kernel
     src_ref, tgt_ref = _install_images(kernel)
-    _validate_storage_intent(state, context)
+    _validate_storage_intent(request, context)
     if not SKIP_FETCH_CHECK:
         log("Running network preflight check...")
         net_err = _network_preflight(src_ref)
         if net_err:
             raise RuntimeError(net_err)
-    install_plan = _prepare_install_plan(state, log, context)
-    disk, target_partition = _validate_install_target(state, context)
-    state["disk"] = disk
-    if target_partition:
-        state["target_partition"] = target_partition
-    else:
-        state.pop("target_partition", None)
-    disk = state["disk"]
-    install_mode = install_plan.mode
-    log(f"Mode         : {install_mode}")
+    storage_plan = _prepare_install_plan(request, log, context)
+
+    # Revalidate the effective target immediately before execution. Guided
+    # free-space/NTFS plans resolve to an alongside target without rewriting
+    # the original request object.
+    effective_state = request.as_state()
+    effective_state["install_mode"] = storage_plan.mode
+    if storage_plan.disk:
+        effective_state["disk"] = storage_plan.disk
+    if storage_plan.target_partition:
+        effective_state["target_partition"] = storage_plan.target_partition
+    disk, target_partition = _validate_install_target(effective_state, context)
+    storage_plan = type(storage_plan)(storage_plan.mode, disk=disk, target_partition=target_partition)
+    resolved = ResolvedInstallPlan(
+        request=request,
+        storage=storage_plan,
+        source_ref=src_ref,
+        target_ref=tgt_ref,
+    )
+    context.set_plan(resolved)
+
+    log(f"Mode         : {resolved.mode}")
     log(f"Kernel       : {kernel}")
     log(f"Source imgref: {src_ref}")
     log(f"Target image : {tgt_ref}")
-    log(f"Disk         : {disk}")
+    log(f"Disk         : {resolved.disk}")
     log("")
 
     log("── Phase 1: Writing OS image to disk ─────────────────────────────")
-    return disk, install_mode, kernel, src_ref, tgt_ref
+    return resolved
+
+
+def _prepare_storage_for_plan(
+    plan: ResolvedInstallPlan,
+    log,
+    progress,
+    alongside_mount: str,
+    context: InstallerContext,
+):
+    """Execute storage preparation from a resolved immutable plan."""
+    return _prepare_install_storage(
+        plan.disk,
+        plan.mode,
+        plan.source_ref,
+        plan.target_ref,
+        log,
+        progress,
+        alongside_mount,
+        context,
+        target_partition=plan.target_partition,
+        efi_partition=plan.efi_partition,
+    )
 
 def _prepare_install_storage(
     disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount,
     context: InstallerContext,
+    *,
+    target_partition: str | None = None,
+    efi_partition: str | None = None,
 ):
     context.enter_phase(InstallPhase.STORAGE)
-    state = context.state
     if install_mode in ("alongside", "manual"):
-        target_part = state.get("target_partition", "")
-        efi_part = state.get("efi_partition", "")
+        target_part = target_partition if target_partition is not None else context.state.get("target_partition", "")
+        efi_part = efi_partition if efi_partition is not None else context.state.get("efi_partition", "")
         alongside_mount = "/var/tmp/kyth-alongside-target"  # noqa: S108 — _require_no_symlink guards this below
         return _prepare_partition_target_storage(
             target_part, efi_part, alongside_mount, src_ref, tgt_ref, log, progress, context
@@ -479,10 +521,10 @@ def _create_installer_user(config_root, deploy_root, username, password_hash, lo
 
 def _configure_installed_system(
     root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress,
-    context: InstallerContext,
+    context: InstallerContext, request: InstallRequest | None = None,
 ):
     context.enter_phase(InstallPhase.CONFIGURE)
-    state = context.state
+    request = request or context.request or InstallRequest.from_state(context.state)
     try:
         etc = find_deploy_etc(config_root)
         if etc:
@@ -493,14 +535,14 @@ def _configure_installed_system(
             if install_mode == "manual":
                 _configure_manual_mounts(config_root, etc, log, context)
 
-            _configure_hostname_timezone(etc, state, log)
+            _configure_hostname_timezone(etc, request, log)
             progress(95)
 
             deploy_root = str(Path(etc).parent)
             ensure_system_accounts(deploy_root, log)
 
-            username = state.get("username", "").strip()
-            password_hash = state.get("password_hash", "")
+            username = request.username.strip()
+            password_hash = request.password_hash
             if username and password_hash:
                 _create_installer_user(config_root, deploy_root, username, password_hash, log, progress)
         else:
@@ -545,13 +587,19 @@ def _handle_install_failure(exc: Exception, log, context: InstallerContext) -> N
 def _run_install_worker(
     log, progress, alongside_mount, context: InstallerContext,
 ):
-    state = context.state
+    # The execution service owns these transitions in production. Keeping the
+    # worker independently invokable also supports the partition CLI and
+    # focused phase tests without weakening transition validation.
+    if context.lifecycle is InstallLifecycle.IDLE:
+        context.transition(InstallLifecycle.VALIDATED)
+        context.transition(InstallLifecycle.INSTALLING)
+    request = context.request or InstallRequest.from_state(context.state)
     try:
         require_root()
-        disk, install_mode, kernel, src_ref, tgt_ref = _prepare_install_context(log, context)
+        resolved = _prepare_install_context(log, context)
 
-        target_part, root_part, alongside_mount = _prepare_install_storage(
-            disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount, context
+        target_part, root_part, alongside_mount = _prepare_storage_for_plan(
+            resolved, log, progress, alongside_mount, context
         )
 
         log("── Phase 2: Configuring installed system ─────────────────────────")
@@ -571,12 +619,13 @@ def _run_install_worker(
         progress(93)
 
         _configure_installed_system(
-            root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress, context
+            root_part, target_part, resolved.disk, resolved.kernel, resolved.mode,
+            config_root, alongside_mount, log, progress, context, resolved.request,
         )
 
         log("── Phase 3: Staging Secure Boot enrollment ───────────────────────")
         context.enter_phase(InstallPhase.SECURE_BOOT)
-        mok_state = _try_stage_mok_enrollment(log, kernel, state["mok_password"])
+        mok_state = _try_stage_mok_enrollment(log, resolved.kernel, resolved.request.mok_password)
 
         progress(100)
         context.enter_phase(InstallPhase.COMPLETE)
@@ -588,7 +637,8 @@ def _run_install_worker(
     finally:
         # Guard against orphaned mounts when Phase 1 fails before the inner
         # try/finally (which holds the normal umount) is ever entered.
-        clear_secrets_and_orphan_mount(state, alongside_mount, run=run_command)
+        clear_secrets_and_orphan_mount(context.state, alongside_mount, run=run_command)
+        context.clear_secrets()
         cleanup_registered_mounts(context, run=run_command)
 
 def _run_install(context: InstallerContext) -> None:
