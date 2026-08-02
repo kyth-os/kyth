@@ -12,7 +12,6 @@ from ..apps import suggest_app
 
 from ..commands import run as run_command
 from ..qt import (
-
     QApplication,
     QCheckBox,
     QDesktopServices,
@@ -20,9 +19,22 @@ from ..qt import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
+    QProgressBar,
     QPushButton,
+    QThread,
     QUrl,
     QVBoxLayout,
+    Signal,
+    single_shot,
+)
+from .windows_installer import (
+    Compatibility,
+    InstallerRequest,
+    WindowsInstallerWorkflow,
+    WorkflowFailure,
+    assess_compatibility,
+    inspect_installer,
 )
 
 _BOTTLES_ID = "com.usebottles.bottles"
@@ -148,6 +160,42 @@ def launch_flatpak_install(flatpak_id: str) -> None:
         subprocess.Popen(cmd)
 
 
+class _InstallerWorker(QThread):
+    status = Signal(str)
+    completed = Signal(object)
+    failed = Signal(str, str)
+
+    def __init__(self, request: InstallerRequest, parent=None) -> None:
+        super().__init__(parent)
+        self._request = request
+
+    def run(self) -> None:
+        try:
+            result = WindowsInstallerWorkflow().execute(self._request, self.status.emit)
+        except WorkflowFailure as exc:
+            self.failed.emit(exc.kind.value, str(exc))
+        except Exception as exc:  # pragma: no cover - final GUI process boundary
+            self.failed.emit("unexpected", f"Unexpected installer error: {exc}")
+        else:
+            self.completed.emit(result)
+
+
+class _InstallerDialog(QDialog):
+    """Keep the workflow alive if the user closes the window mid-operation."""
+
+    busy = False
+
+    def reject(self) -> None:
+        if not self.busy:
+            super().reject()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt virtual method name
+        if self.busy:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+
 def run_exe_handler(argv: list[str]) -> int:
     """Main execution handler logic for CLI or Dolphin invocation."""
     os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
@@ -160,14 +208,16 @@ def run_exe_handler(argv: list[str]) -> int:
     filepath = args[0]
     is_rpm = is_rpm_installer(filepath)
 
-    if (
-        not is_rpm
-        and not force_dialog
-        and load_auto_bottles()
-        and is_flatpak_installed(_BOTTLES_ID)
-    ):
-        subprocess.Popen(["flatpak", "run", _BOTTLES_ID, filepath])
-        return 0
+    request = None
+    assessment = None
+    if not is_rpm:
+        try:
+            request = inspect_installer(filepath)
+            assessment = assess_compatibility(request)
+        except WorkflowFailure as exc:
+            app = QApplication(argv)
+            QMessageBox.warning(None, "KythOS — Cannot Open Installer", str(exc))
+            return 1
 
     if is_rpm:
         app_name = "RPM Package"
@@ -193,7 +243,7 @@ def run_exe_handler(argv: list[str]) -> int:
     app = QApplication(argv)
     app.setStyleSheet(_QSS)
 
-    dlg = QDialog()
+    dlg = _InstallerDialog()
     dlg.setWindowTitle(
         "KythOS — Installer Help" if is_rpm else "KythOS — Windows Application"
     )
@@ -228,6 +278,49 @@ def run_exe_handler(argv: list[str]) -> int:
 
     btn_row = QHBoxLayout()
     btn_row.setSpacing(8)
+
+    progress = QProgressBar()
+    progress.setRange(0, 0)
+    progress.setVisible(False)
+    status = QLabel("")
+    status.setWordWrap(True)
+    status.setVisible(False)
+
+    run_btn = None
+    if request is not None and assessment is not None:
+        level_labels = {
+            Compatibility.LIKELY: "LIKELY COMPATIBLE",
+            Compatibility.UNKNOWN: "UNKNOWN — TRY IT",
+            Compatibility.UNSUPPORTED: "KNOWN LIMITATION",
+        }
+        level_colors = {
+            Compatibility.LIKELY: "#73c991",
+            Compatibility.UNKNOWN: "#d7ba7d",
+            Compatibility.UNSUPPORTED: "#f48771",
+        }
+        compatibility = QLabel(
+            f"<b>{level_labels[assessment.level]}</b> — {assessment.summary}<br>"
+            f"<span style='color:#aaaaaa'>{assessment.detail}</span>"
+        )
+        compatibility.setWordWrap(True)
+        compatibility.setStyleSheet(f"color: {level_colors[assessment.level]};")
+        root.addWidget(compatibility)
+
+        expectations = QLabel(
+            "Kyth runs Windows software in an isolated compatibility environment. "
+            "Applications requiring Windows drivers, kernel anti-cheat, device services, "
+            "or Microsoft Store components generally will not work."
+        )
+        expectations.setWordWrap(True)
+        expectations.setStyleSheet("color:#aaaaaa; font-size:12px;")
+        root.addWidget(expectations)
+
+        fingerprint = QLabel(f"SHA-256: {request.sha256[:16]}…")
+        fingerprint.setStyleSheet("color:#777777; font-size:11px;")
+        root.addWidget(fingerprint)
+
+        root.addWidget(progress)
+        root.addWidget(status)
 
     if is_rpm:
         app_store_btn = QPushButton("Open App Store")
@@ -264,20 +357,14 @@ def run_exe_handler(argv: list[str]) -> int:
     )
     btn_row.addWidget(flathub_btn)
 
-    if not is_rpm:
-        bottles_installed = is_flatpak_installed(_BOTTLES_ID)
-        bottles_lbl = "Open with Bottles" if bottles_installed else "Try Bottles (Wine)"
-        bottles_btn = QPushButton(bottles_lbl)
-        bottles_btn.setToolTip("Run Windows apps in an isolated Wine environment")
-        bottles_btn.clicked.connect(
-            lambda: (
-                subprocess.Popen(["flatpak", "run", _BOTTLES_ID, filepath])
-                if bottles_installed
-                else launch_flatpak_install(_BOTTLES_ID),
-                dlg.accept(),
-            )
+    if request is not None and assessment is not None:
+        run_btn = QPushButton(
+            "Try Anyway" if assessment.level is Compatibility.UNSUPPORTED else "Run Windows Installer"
         )
-        btn_row.addWidget(bottles_btn)
+        if assessment.level is not Compatibility.UNSUPPORTED:
+            run_btn.setObjectName("primary")
+        run_btn.setToolTip("Prepare an isolated Bottles environment and open this installer")
+        btn_row.insertWidget(0, run_btn)
 
     btn_row.addStretch()
 
@@ -285,11 +372,12 @@ def run_exe_handler(argv: list[str]) -> int:
     cancel_btn.clicked.connect(dlg.reject)
     btn_row.addWidget(cancel_btn)
 
-    if not is_rpm:
-        auto_chk = QCheckBox("Always open Windows installers in Bottles")
+    auto_chk = None
+    if request is not None:
+        auto_chk = QCheckBox("Automatically prepare and run future Windows installers")
         auto_chk.setChecked(load_auto_bottles())
         auto_chk.setToolTip(
-            "Skip this dialog and hand .exe/.msi files straight to Bottles.\n"
+            "Future valid .exe/.msi files start this isolated workflow immediately.\n"
             f"Saved to {_CONF_PATH}.\n"
             "To see this dialog again, run: kyth-exe-handler --dialog <file>"
         )
@@ -297,5 +385,78 @@ def run_exe_handler(argv: list[str]) -> int:
         root.addWidget(auto_chk)
 
     root.addLayout(btn_row)
+
+    if request is not None and assessment is not None and run_btn is not None:
+        worker_holder: dict[str, _InstallerWorker] = {}
+        launch_succeeded = False
+
+        def set_busy(busy: bool) -> None:
+            dlg.busy = busy
+            progress.setVisible(busy)
+            status.setVisible(True)
+            for index in range(btn_row.count()):
+                widget = btn_row.itemAt(index).widget()
+                if widget is not None:
+                    widget.setEnabled(not busy)
+
+        def workflow_failed(kind: str, message: str) -> None:
+            set_busy(False)
+            recovery = {
+                "file-changed": "Reopen the downloaded file, then try again.",
+                "bottles-install": "Check your internet connection and try again.",
+                "bottle-create": "Open Bottles once, close it, then try again.",
+                "file-stage": "Check available disk space and try again.",
+                "launch": "Open Bottles to inspect the environment, or try again.",
+            }.get(kind, "Try again, or use a native Linux alternative when available.")
+            run_btn.setText("Retry")
+            status.setText(f"Could not open the installer: {message}\n{recovery}")
+            status.setStyleSheet("color:#f48771;")
+            QMessageBox.warning(
+                dlg,
+                "Windows Installer Could Not Start",
+                f"{message}\n\n{recovery}",
+            )
+
+        def workflow_completed(_result: object) -> None:
+            nonlocal launch_succeeded
+            launch_succeeded = True
+            status.setText("The Windows installer is opening in its isolated environment.")
+            status.setStyleSheet("color:#73c991;")
+
+        def worker_finished() -> None:
+            if launch_succeeded:
+                dlg.busy = False
+                dlg.accept()
+
+        def start_workflow() -> None:
+            if assessment.level is Compatibility.UNSUPPORTED:
+                answer = QMessageBox.question(
+                    dlg,
+                    "Try Unsupported Windows Installer?",
+                    assessment.detail + "\n\nYou can still try it, but it is unlikely to work.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+            set_busy(True)
+            status.setText("Checking Windows compatibility support…")
+            status.setStyleSheet("color:#d4d4d4;")
+            worker = _InstallerWorker(request, dlg)
+            worker_holder["worker"] = worker
+            worker.status.connect(status.setText)
+            worker.failed.connect(workflow_failed)
+            worker.completed.connect(workflow_completed)
+            worker.finished.connect(worker_finished)
+            worker.start()
+
+        run_btn.clicked.connect(start_workflow)
+        if (
+            not force_dialog
+            and load_auto_bottles()
+            and assessment.level is not Compatibility.UNSUPPORTED
+        ):
+            dlg.setWindowTitle("KythOS — Preparing Windows Application")
+            single_shot(dlg, 0, start_workflow)
 
     return dlg.exec()

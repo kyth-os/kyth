@@ -362,11 +362,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-02 15:49:19 UTC
+- Last refreshed (UTC): 2026-08-02 16:21:47 UTC
 - Current branch: testing
-- HEAD commit: a2099d2
-- Last commit title: feat: add declarative hardware policy
-- Last commit date: 2026-08-02T11:36:09-04:00
+- HEAD commit: a906f58
+- Last commit title: fix container fragment source resolution
+- Last commit date: 2026-08-02T11:49:19-04:00
 - CI workflow files: 8
 - Build script files: 21
 

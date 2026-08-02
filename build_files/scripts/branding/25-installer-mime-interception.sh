@@ -1,8 +1,8 @@
 # shellcheck shell=bash
 # ── Downloaded installer MIME interception ───────────────────────────────────
 # When a Windows user double-clicks a .exe/.msi or downloaded .rpm in Dolphin,
-# show a dialog that suggests the best KythOS path instead of failing silently
-# or teaching the wrong mutable-system model.
+# validate it, explain known limits, then prepare and launch it in Bottles. Keep
+# native KythOS paths visible instead of teaching the wrong mutable-system model.
 # The handler is registered as the system-wide default for these installer MIME
 # types; users can override per-app via Dolphin's "Open With" dialog.
 install -m 0755 /ctx/kyth-exe-handler /usr/bin/kyth-exe-handler

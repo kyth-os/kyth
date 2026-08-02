@@ -2,9 +2,9 @@
 """kyth-exe-handler — intercept Windows and RPM installers with KythOS guidance.
 
 Registered as the default MIME handler for common Windows executable,
-installer, and RPM package MIME types so that double-clicking a download in
-Dolphin shows a curated suggestion dialog instead of silently failing or
-teaching the wrong mutable-Fedora mental model.
+installer, and RPM package MIME types. Valid Windows installers can be prepared
+and opened in an isolated Bottles environment, while the dialog keeps native
+alternatives and known compatibility limitations visible.
 """
 
 import sys
