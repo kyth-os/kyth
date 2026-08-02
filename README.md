@@ -362,11 +362,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-02 15:36:09 UTC
+- Last refreshed (UTC): 2026-08-02 15:49:19 UTC
 - Current branch: testing
-- HEAD commit: 1f75088
-- Last commit title: feat: add health-aware update recovery
-- Last commit date: 2026-08-02T11:17:53-04:00
+- HEAD commit: a2099d2
+- Last commit title: feat: add declarative hardware policy
+- Last commit date: 2026-08-02T11:36:09-04:00
 - CI workflow files: 8
 - Build script files: 21
 

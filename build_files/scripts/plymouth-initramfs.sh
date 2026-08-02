@@ -4,14 +4,15 @@
 # it in. Run after scripts/branding.sh in the same image layer.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/find-kver.sh disable=SC1091
-source "lib/find-kver.sh"
+source "${SCRIPT_DIR}/lib/find-kver.sh"
 # shellcheck source=lib/plymouth-initrd-checks.sh disable=SC1091
-source "lib/plymouth-initrd-checks.sh"
+source "${SCRIPT_DIR}/lib/plymouth-initrd-checks.sh"
 # shellcheck source=lib/plymouth-config.sh disable=SC1091
-source "lib/plymouth-config.sh"
+source "${SCRIPT_DIR}/lib/plymouth-config.sh"
 # shellcheck source=lib/dracut-retry.sh disable=SC1091
-source "lib/dracut-retry.sh"
+source "${SCRIPT_DIR}/lib/dracut-retry.sh"
 
 /usr/libexec/kyth-plymouth-branding-guard /ctx/branding/transparent-watermark.svg
 

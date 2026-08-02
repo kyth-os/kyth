@@ -5,10 +5,11 @@
 # from /boot or /usr/lib/kernel, or rebuilding via dracut as a last resort.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/find-kver.sh disable=SC1091
-source "lib/find-kver.sh"
+source "${SCRIPT_DIR}/lib/find-kver.sh"
 # shellcheck source=lib/dracut-retry.sh disable=SC1091
-source "lib/dracut-retry.sh"
+source "${SCRIPT_DIR}/lib/dracut-retry.sh"
 
 KVER="$(find_active_kver)"
 if [ -z "${KVER}" ]; then

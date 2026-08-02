@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/curl-common.sh disable=SC1091
-source "lib/curl-common.sh"
+source "${SCRIPT_DIR}/lib/curl-common.sh"
 CURL_COMMON_ARGS+=(--max-time 3600)
 
 # ── Proton-CachyOS ───────────────────────────────────────────────────────────

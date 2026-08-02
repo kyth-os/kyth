@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import configparser
 import re
+import subprocess
+import tempfile
+import textwrap
 from pathlib import Path
 import unittest
 
@@ -79,6 +82,79 @@ class ShippedCommandContracts(unittest.TestCase):
 
 
 class BuildAssemblyContracts(unittest.TestCase):
+    def test_fragment_relative_source_targets_exist(self):
+        scripts = BUILD_FILES / "scripts"
+        for tree in (scripts / "packages", scripts / "sysconfig"):
+            for fragment in tree.rglob("*.sh"):
+                body = fragment.read_text(encoding="utf-8")
+                sources = re.findall(r'^\s*source\s+["\'](\.\.?/[^"\']+)["\']', body, re.M)
+                for source in sources:
+                    target = (fragment.parent / source).resolve()
+                    with self.subTest(fragment=fragment.relative_to(ROOT), source=source):
+                        self.assertTrue(target.is_file(), f"missing sourced helper: {target}")
+
+    def test_fragment_runner_resolves_sources_from_fragment_directory(self):
+        runner = BUILD_FILES / "scripts/lib/fragment-runner.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            fragments = scripts / "packages"
+            helper_dir = scripts / "lib"
+            unrelated_cwd = root / "unrelated"
+            fragments.mkdir(parents=True)
+            helper_dir.mkdir()
+            unrelated_cwd.mkdir()
+
+            (helper_dir / "helper.sh").write_text(
+                'helper_value="resolved"\n', encoding="utf-8"
+            )
+            (fragments / "01-source-helper.sh").write_text(
+                textwrap.dedent(
+                    """\
+                    #!/bin/bash
+                    set -euo pipefail
+                    source "../lib/helper.sh"
+                    [[ "${helper_value}" == "resolved" ]]
+                    """
+                ),
+                encoding="utf-8",
+            )
+            orchestrator = scripts / "run.sh"
+            orchestrator.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/bash
+                    set -euo pipefail
+                    source "{runner}"
+                    run_fragments "packages" "bash"
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                ["bash", str(orchestrator)],
+                cwd=unrelated_cwd,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_standalone_container_scripts_anchor_helper_sources(self):
+        scripts = BUILD_FILES / "scripts"
+        standalone = (
+            "kernel-repair.sh",
+            "plymouth-initramfs.sh",
+            "proton-cachyos.sh",
+            "repair-current-plymouth-initramfs.sh",
+        )
+        for name in standalone:
+            body = (scripts / name).read_text(encoding="utf-8")
+            with self.subTest(script=name):
+                self.assertIn('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"', body)
+                self.assertNotRegex(body, r'^\s*source\s+["\']lib/',)
+
     def test_packaged_installer_is_the_only_installation_entry_point(self):
         self.assertFalse((BUILD_FILES / "kyth-install.sh").exists())
         self.assertFalse((BUILD_FILES / "kyth-manual-install.sh").exists())
@@ -164,5 +240,3 @@ class BuildAssemblyContracts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
