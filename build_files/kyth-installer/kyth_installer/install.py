@@ -635,7 +635,6 @@ def _run_install_worker(
     if context.lifecycle is InstallLifecycle.IDLE:
         context.transition(InstallLifecycle.VALIDATED)
         context.transition(InstallLifecycle.INSTALLING)
-    request = context.request or InstallRequest.from_state(context.state)
     try:
         require_root()
         resolved = _prepare_install_context(log, context)
