@@ -391,7 +391,9 @@ def _atomic_write(path: Path, content: str, mode: int = 0o644) -> None:
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         temporary.write_text(content, encoding="utf-8")
-        os.chmod(temporary, mode)
+        # Callers write /etc config (modprobe.d, scx) and state/report files that
+        # must stay world-readable by convention; content carries no secrets.
+        os.chmod(temporary, mode)  # lgtm[py/overly-permissive-file]
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
