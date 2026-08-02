@@ -356,11 +356,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-02 14:51:42 UTC
+- Last refreshed (UTC): 2026-08-02 15:04:03 UTC
 - Current branch: testing
-- HEAD commit: e8da828
-- Last commit title: feat: harden offline installer assurance
-- Last commit date: 2026-08-02T10:48:15-04:00
+- HEAD commit: e7fd89f
+- Last commit title: fix: satisfy installer quality gate
+- Last commit date: 2026-08-02T10:51:42-04:00
 - CI workflow files: 8
 - Build script files: 21
 

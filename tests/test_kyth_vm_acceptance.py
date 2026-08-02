@@ -64,6 +64,8 @@ class VmAcceptanceTests(unittest.TestCase):
         self.assertIn("live-desktop.ppm", text)
         self.assertIn("installed-login.ppm", text)
         self.assertIn("KYTH_ACCEPTANCE:FAILED", text)
+        self.assertIn("qualification.json", text)
+        self.assertIn("qualification.md", text)
 
 
 if __name__ == "__main__":

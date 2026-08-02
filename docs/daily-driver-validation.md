@@ -23,6 +23,17 @@ Store notable output in the release notes or the matching hardware result. The
 check is read-only: it does not install apps, change drivers, run updates, or
 mount Windows drives.
 
+For a versioned, machine-readable qualification artifact, run:
+
+```bash
+kyth-qualify collect \
+  --output qualification.json \
+  --markdown qualification.md
+```
+
+Gaming telemetry stays local and is excluded by default. Testers may explicitly
+include game names and aggregate MangoHud metrics with `--include-gaming`.
+
 KythOS also ships smaller targeted checks:
 
 ```bash
@@ -66,6 +77,32 @@ just accept-live-iso output/live-iso/kyth-live-testing.iso
 To exercise update and rollback directly, invoke
 `build_files/scripts/vm-acceptance.sh` with `--update-ref` pointing at a second,
 different KythOS image.
+
+Every successful VM run writes `qualification.json` and `qualification.md` in
+the artifact directory alongside the serial log and screenshots. The JSON uses
+the same schema as physical-hardware reports, so automation can gate a release
+without scraping human-oriented logs.
+
+## Regression Gate
+
+Compare a candidate report with the last qualified report from the same
+hardware and workload:
+
+```bash
+kyth-qualify gate \
+  --candidate candidate.json \
+  --baseline baseline.json \
+  --budgets /usr/share/kyth/qualification-budgets.json \
+  --output gated.json \
+  --markdown gated.md
+```
+
+The command exits non-zero when a required check fails or a comparable metric
+exceeds its regression budget. Metrics only compare when name, workload, and
+unit all match; results from different games or hardware should never be mixed.
+The default budgets cap average-FPS regression at 5%, 1%-low regression at 8%,
+and stutter-rate regression at 10%. A release owner can tighten these values as
+the hardware lab accumulates stable baselines.
 
 ## Release Gates
 
@@ -173,3 +210,8 @@ Verdict:
 
 Use this alongside the gaming matrix. The gaming matrix proves games work; this
 document proves the computer around the games is calm enough to live in.
+
+For new results, attach the generated qualification JSON instead of copying this
+template by hand. It intentionally records CPU model, architecture, and kernel,
+but no hostname, account name, network address, device serial, or other stable
+machine identifier.

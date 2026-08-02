@@ -38,6 +38,10 @@ class PythonPackagingTests(unittest.TestCase):
             "kyth_shared.smoke_check:main",
         )
         self.assertEqual(
+            shared["project"]["scripts"]["kyth-qualify"],
+            "kyth_shared.qualification:main",
+        )
+        self.assertEqual(
             shared["project"]["scripts"]["kyth-setup-transfer"],
             "kyth_shared.setup_transfer:main",
         )

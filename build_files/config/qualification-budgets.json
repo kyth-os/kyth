@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "budgets": [
+    {
+      "metric": "gaming.avg_fps",
+      "max_regression_percent": 5.0
+    },
+    {
+      "metric": "gaming.p1_low_fps",
+      "max_regression_percent": 8.0
+    },
+    {
+      "metric": "gaming.stutters_per_minute",
+      "max_regression_percent": 10.0
+    }
+  ]
+}
