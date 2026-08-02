@@ -28,8 +28,11 @@ desktop defaults, and labels the image with source and release metadata.
 
 `installer/` builds a live payload that boots into a graphical installer. The
 installer writes a selected target disk using `bootc install to-disk`, creates
-the local user, and installs from a pinned source image when release workflows
-provide one.
+the local user, and installs the standard image offline from the live ISO. The
+embedded OCI manifest is checked against release metadata before destructive
+storage work. A durable, redacted transaction record tracks the source digest,
+phase, safety checks, and outcome; browser progress resumes by event ID after a
+temporary UI disconnect.
 
 ### System Hub
 

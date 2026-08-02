@@ -63,8 +63,23 @@ mkdir -p /usr/share/kyth/image
 skopeo copy --retry-times 3 \
 	"docker://${INSTALL_SOURCE_IMAGE#docker://}" \
 	"oci:/usr/share/kyth/image:latest"
-printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=ghcr.io/mrtrick37/kyth:%s\n' \
-	"${SOURCE_TAG}" >/etc/kyth-installer.env
+embedded_digest="$(skopeo inspect --format '{{.Digest}}' 'oci:/usr/share/kyth/image:latest')"
+case "${embedded_digest}" in
+	sha256:[0-9a-f][0-9a-f]*) ;;
+	*)
+		echo "ERROR: embedded installer image has no valid sha256 digest: ${embedded_digest}" >&2
+		exit 1
+		;;
+esac
+expected_digest="${INSTALL_SOURCE_IMAGE##*@}"
+release_digest="${embedded_digest}"
+[[ "${expected_digest}" == sha256:* ]] && release_digest="${expected_digest}"
+target_image="ghcr.io/mrtrick37/kyth:${SOURCE_TAG}"
+printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\n' \
+	"${target_image}" "${embedded_digest}" >/etc/kyth-installer.env
+printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"%s","source_image":"%s"}\n' \
+	"${embedded_digest}" "${release_digest}" "${target_image}" "${INSTALL_SOURCE_IMAGE}" \
+	>/usr/share/kyth/image-source.json
 
 # Install live-only packages in one transaction so dependency solving and
 # repository metadata work happen once. Browsers from the installed image are

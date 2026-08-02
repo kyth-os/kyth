@@ -7,11 +7,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import config
-from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, _IS_LIVE_SESSION
+from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, TRANSACTION_FILE, _IS_LIVE_SESSION
 from .context import InstallerContext
 from .disk import list_disks, list_partitions, list_free_space
 from .partition_ops import FILESYSTEM_OPTIONS, get_journal
 from .post_routes import PostRouteService
+from .imagesrc import source_status
+from .recovery import read_transaction_state
 from .system import list_keymaps, list_locales, list_timezones
 
 _WEBUI_DIR = Path(__file__).parent / "webui"
@@ -33,6 +35,7 @@ ROUTES = {
     "free_space": RouteSpec("GET", "/api/free-space"),
     "stream": RouteSpec("GET", "/api/stream"),
     "log": RouteSpec("GET", "/api/log"),
+    "report": RouteSpec("GET", "/api/report"),
     "timezones": RouteSpec("GET", "/api/timezones"),
     "locales": RouteSpec("GET", "/api/locales"),
     "keymaps": RouteSpec("GET", "/api/keymaps"),
@@ -178,7 +181,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch_api_get(self, route: RouteSpec | None, qs: dict[str, list[str]]) -> None:
         if route == ROUTES["config"]:
-            self._json({"source_image": SOURCE_IMAGE, "is_live": _IS_LIVE_SESSION})
+            self._json({
+                "source_image": SOURCE_IMAGE,
+                "is_live": _IS_LIVE_SESSION,
+                "source": source_status(),
+            })
         elif route == ROUTES["disks"]:
             self._json(list_disks())
         elif route == ROUTES["timezones"]:
@@ -202,6 +209,8 @@ class Handler(BaseHTTPRequestHandler):
             self._sse()
         elif route == ROUTES["log"]:
             self._serve_log()
+        elif route == ROUTES["report"]:
+            self._json(read_transaction_state(TRANSACTION_FILE))
         else:
             self.send_error(404)
 
@@ -253,7 +262,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
-        sent = 0
+        try:
+            sent = int(self.headers.get("Last-Event-ID", "-1")) + 1
+        except ValueError:
+            sent = 0
+        sent = max(0, sent)
         while True:
             with self.context.events.condition:
                 while sent >= len(self.context.events.events):
@@ -267,7 +280,9 @@ class Handler(BaseHTTPRequestHandler):
                 batch = self.context.events.events[sent:]
             for event in batch:
                 try:
-                    self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
+                    self.wfile.write(
+                        f"id: {sent}\ndata: {json.dumps(event)}\n\n".encode()
+                    )
                     self.wfile.flush()
                 except Exception:
                     return

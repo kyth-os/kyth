@@ -993,7 +993,7 @@ const KERNELS = [
     badge: 'Default' },
   { id: 'cachy',  icon: '⚡', name: 'KythOS Performance',
     desc: 'BORE scheduler · sched-ext · BBRv3 · NTSYNC · Optimized for gaming & low-latency workloads',
-    note: 'Secure Boot: the installer stages the KythOS signing key and you confirm enrollment on first boot' },
+    note: 'Requires network during installation; Secure Boot enrollment is staged for first boot' },
 ];
 
 function initKernel() {
@@ -1105,6 +1105,7 @@ function buildReview() {
   const kernelLabels = { fedora: 'KythOS Standard', cachy: 'KythOS Performance' };
   const modeLabels   = { wipe: 'Erase Full Disk', alongside: 'Install Alongside', resize_ntfs: 'Shrink NTFS & Install', free_space: 'Use Free Space', manual: 'Manual Partitioning' };
   const targetImage = (() => {
+    if (S.kernel === 'fedora' && S.source && S.source.target_ref) return S.source.target_ref;
     const base = S._sourceImage || '';
     if (!base || S.kernel === 'fedora') return base || '—';
     const colon = base.lastIndexOf(':');
@@ -1140,6 +1141,8 @@ function buildReview() {
     ['Username', S.username],
     ['Password', '••••••••'],
     ['Kernel',   kernelLabels[S.kernel] || S.kernel],
+    ['Source',   S.kernel === 'fedora' && S.source && S.source.kind === 'embedded' ? 'Verified offline image' : 'Network registry'],
+    ...(S.kernel === 'fedora' && S.source && S.source.digest ? [['Image Digest', S.source.digest]] : []),
     ['Image',    targetImage],
   );
   document.getElementById('review-table').replaceChildren(
@@ -1258,7 +1261,11 @@ function listenSSE() {
     else if (ev.type === 'done') { src.close(); onDone(ev.mok_state); }
     else if (ev.type === 'error'){ src.close(); showError(ev.message); }
   };
-  src.onerror = () => { src.close(); showError('Lost connection to installer backend.'); };
+  src.onerror = () => {
+    document.getElementById('install-phase').textContent = 'Reconnecting to installer…';
+    // EventSource reconnects automatically and sends Last-Event-ID, so the
+    // backend resumes at the next transaction event without duplicating logs.
+  };
 }
 
 function setProgress(pct) {
@@ -1267,7 +1274,9 @@ function setProgress(pct) {
   const fill = document.getElementById('progress-fill');
   fill.parentElement.setAttribute('aria-valuenow', String(pct));
   if (pct >= 100) fill.classList.remove('pulsing');
-  const phases = {5:'Pulling OS image…',90:'Configuring…',95:'Creating user…',99:'Finalizing…'};
+  const imagePhase = S.kernel === 'fedora' && S.source && S.source.kind === 'embedded'
+    ? 'Writing verified offline image…' : 'Downloading OS image…';
+  const phases = {5:imagePhase,90:'Configuring…',95:'Creating user…',99:'Running final checks…'};
   for (const [p, label] of Object.entries(phases).reverse()) {
     if (pct >= parseInt(p)) { document.getElementById('install-phase').textContent = label; break; }
   }
@@ -1333,6 +1342,15 @@ function copyFullLog() {
     .catch(() => copyVisibleLog());
 }
 
+// Called from completion and error page buttons.
+// eslint-disable-next-line no-unused-vars
+function copyInstallReport() {
+  apiFetch('/api/report')
+    .then(r => r.json())
+    .then(report => copyText(JSON.stringify(report, null, 2)))
+    .catch(() => copyText('{"status":"report unavailable"}'));
+}
+
 // Called from index.html's inline onclick/oninput handlers, not referenced within this file.
 // eslint-disable-next-line no-unused-vars
 function toggleLog() {
@@ -1388,12 +1406,30 @@ void [
   onSliderMove, showNewTableDialog, showCreateDialog, showDeleteDialog,
   showResizeDialog, showFormatDialog, showMountDialog, commitPartitions,
   rollbackPartitions, saveConfig, startInstall, copyFullLog, toggleLog,
-  toggleAccessibility, backFromError, reboot,
+  toggleAccessibility, backFromError, copyInstallReport, reboot,
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 apiFetch('/api/config').then(r=>r.json()).then(cfg => {
   S._sourceImage = cfg.source_image;
+  S.source = cfg.source || null;
   S.isLive = cfg.is_live !== false;
+  const welcome = document.getElementById('welcome-source');
+  const confidence = document.getElementById('source-confidence');
+  const confidenceText = document.getElementById('source-confidence-text');
+  if (S.source && S.source.available && S.source.kind === 'embedded') {
+    welcome.textContent = 'The standard KythOS image is verified and included on this ISO, so it installs offline.';
+    confidenceText.textContent = 'Embedded release digest verified before disk changes';
+  } else if (S.source && !S.source.available) {
+    welcome.textContent = 'The embedded installation image failed validation. Installation will remain blocked.';
+    welcome.style.color = 'var(--red)';
+    confidence.classList.remove('ok');
+    confidence.classList.add('warn');
+    confidenceText.textContent = S.source.message || 'Image validation failed';
+  } else {
+    welcome.textContent = 'This installation source requires a network connection.';
+    welcome.style.color = 'var(--amber)';
+    confidenceText.textContent = 'Registry reachability checked before disk changes';
+  }
 });
 goto('welcome');

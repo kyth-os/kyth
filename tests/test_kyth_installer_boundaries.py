@@ -83,6 +83,17 @@ class InstallerBoundaryTests(unittest.TestCase):
         finally:
             context.install_lock.release()
 
+    @patch("kyth_installer.execution.threading.Thread", ImmediateThread)
+    def test_failed_attempt_can_be_retried_with_a_new_transaction(self):
+        context = InstallerContext()
+        context.transition(InstallLifecycle.FAILED)
+        previous_id = context.transaction_id
+
+        self.assertTrue(start_installation(context, {}, MagicMock()))
+
+        self.assertEqual(context.lifecycle, InstallLifecycle.INSTALLING)
+        self.assertNotEqual(context.transaction_id, previous_id)
+
     def test_context_rejects_invalid_lifecycle_jump(self):
         context = InstallerContext()
 

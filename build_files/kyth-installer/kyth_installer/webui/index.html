@@ -45,14 +45,14 @@
       <hr class="divider">
       <p style="color:var(--muted);line-height:1.8">
         This installer will guide you through installing KythOS on your computer.<br><br>
-        <span style="color:var(--amber)">A network connection is required to install KythOS.</span><br>
-        Connect using the network icon in the bottom-right panel before clicking Start Install. Your disk, account, timezone, and kernel selections will remain if you need to reconnect.<br><br>
+        <span id="welcome-source" style="color:var(--green)">The standard KythOS image is included on this ISO, so it installs offline.</span><br>
+        A network connection is only required when selecting an optional image that is not included on the ISO.<br><br>
         <span style="color:var(--text)">What happens:</span><br>
         &nbsp; 1. Select a target disk<br>
         &nbsp; 2. Choose install mode — erase full disk or install alongside existing OS<br>
         &nbsp; 3. Choose your kernel<br>
         &nbsp; 4. Set hostname, timezone, and user account<br>
-        &nbsp; 5. Download and write KythOS to disk<br><br>
+        &nbsp; 5. Verify and write KythOS to disk<br><br>
         <span style="color:var(--amber)">⚠ The selected disk or partition will be erased.</span><br>
         Back up any data you need before continuing.
       </p>
@@ -249,7 +249,7 @@
       <div class="card-sub">Confirm settings — installation begins immediately after you click Install</div>
       <hr class="divider">
       <div class="confidence-grid">
-        <div class="confidence-chip ok"><strong>Image Source</strong><span>Reachability checked before install</span></div>
+        <div class="confidence-chip ok" id="source-confidence"><strong>Image Source</strong><span id="source-confidence-text">Checking embedded image…</span></div>
         <div class="confidence-chip ok"><strong>Boot Target</strong><span>EFI path verified when needed</span></div>
         <div class="confidence-chip ok"><strong>Disk Safety</strong><span>Unmounted targets are enforced</span></div>
         <div class="confidence-chip warn"><strong>Rollback</strong><span>bootc history remains available after first boot</span></div>
@@ -348,6 +348,7 @@
         </div>
       </div>
       <div class="btn-row" style="justify-content:center;margin-top:32px">
+        <button onclick="copyInstallReport()">Copy Install Report</button>
         <button class="primary" onclick="reboot()" style="padding:11px 32px;font-size:15px">Reboot Now</button>
       </div>
     </div>
@@ -363,6 +364,7 @@
       <div class="btn-row">
         <button class="primary" onclick="backFromError()">← Back to Installer</button>
         <button onclick="copyFullLog()">Copy Full Log</button>
+        <button onclick="copyInstallReport()">Copy Install Report</button>
       </div>
     </div>
   </div>

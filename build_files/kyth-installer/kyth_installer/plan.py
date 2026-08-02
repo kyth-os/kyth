@@ -86,6 +86,9 @@ class ResolvedInstallPlan:
     storage: InstallPlan
     source_ref: str
     target_ref: str
+    source_digest: str = ""
+    source_kind: str = "network"
+    source_verified: bool = False
 
     @property
     def mode(self) -> str:

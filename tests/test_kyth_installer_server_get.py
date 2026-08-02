@@ -142,6 +142,7 @@ class ServerApiDispatchTests(unittest.TestCase):
         payload = self._json_body(handler)
         self.assertEqual(payload["source_image"], config.SOURCE_IMAGE)
         self.assertIn("is_live", payload)
+        self.assertIn("source", payload)
 
     def test_disks_route_delegates_to_list_disks(self):
         handler = self._handler("/api/disks")
@@ -194,6 +195,12 @@ class ServerApiDispatchTests(unittest.TestCase):
             handler.do_GET()
         self.assertIn(b"Could not read installer log", handler.wfile.getvalue())
 
+    def test_report_route_returns_transaction_json(self):
+        handler = self._handler("/api/report")
+        with patch.object(server, "read_transaction_state", return_value={"status": "complete"}):
+            handler.do_GET()
+        self.assertEqual(self._json_body(handler), {"status": "complete"})
+
     def test_unknown_route_is_404(self):
         handler = self._handler("/api/does-not-exist")
         handler.do_GET()
@@ -215,8 +222,20 @@ class ServerSseTests(unittest.TestCase):
         handler.server.context.events.publish({"type": "done"})
         handler.do_GET()
         body = handler.wfile.getvalue().decode()
+        self.assertIn("id: 0", body)
         self.assertIn('"text": "hello"', body)
         self.assertIn('"type": "done"', body)
+
+    def test_stream_resumes_after_last_event_id(self):
+        handler = _make_handler("/api/stream", host=f"127.0.0.1:{config.PORT}")
+        handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+        handler.headers["Last-Event-ID"] = "0"
+        handler.server.context.events.publish({"type": "log", "text": "old"})
+        handler.server.context.events.publish({"type": "done"})
+        handler.do_GET()
+        body = handler.wfile.getvalue().decode()
+        self.assertNotIn("old", body)
+        self.assertIn("id: 1", body)
 
 
 class ServerConstructionTests(unittest.TestCase):

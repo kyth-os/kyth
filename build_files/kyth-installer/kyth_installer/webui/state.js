@@ -25,4 +25,5 @@ globalThis.KythInstallerState = {
   manualCommitted: false,
   startTime: 0,
   elapsedTimer: null,
+  source: null,
 };

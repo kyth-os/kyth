@@ -36,8 +36,9 @@ requirements from enterprise storage/provisioning features.
 | Locale, keyboard, timezone | Installed locale, console keymap and timezone selection; installer strings remain English | Yes | Yes | Partial; translated UI is Open P1 |
 | Accessibility | Keyboard-operable controls, labels/live regions, skip link, large text, high contrast and reduced motion | Yes | Varies | Met at web UI level; screen-reader hardware test required |
 | Unattended install | Headless CLI plus mode-0600 JSON answer files; all guided storage fields supported | Limited | Kickstart/AutoYaST | Met for fixed KythOS images, not general package provisioning |
-| Failure diagnostics | Live streamed log, copyable full log, redacted machine-readable failure summary, mount cleanup | Varies | Remote logging/rescue | Met locally |
-| Offline install | Exact pinned Fedora OCI image bundled in the ISO; optional CachyOS image requires network | Common | Common | Met for the default image |
+| Failure diagnostics | Resumable live event stream, copyable log, durable redacted transaction report, machine-readable failure summary, mount cleanup | Varies | Remote logging/rescue | Met locally |
+| Offline install | Exact pinned Fedora OCI image bundled in the ISO; manifest blob and release digest verified before storage mutation; optional CachyOS image requires network | Common | Common | Met for the default image |
+| Install completion assurance | Power preflight plus installed deployment, hostname, account and fstab validation before success | Varies | Varies | Met for implemented checks; real boot remains a release gate |
 | Full-disk encryption | Not exposed | LUKS/ZFS available | LUKS/LVM policies | **Open P0** |
 | LVM/MD RAID/multipath/iSCSI | Existing mappings are detected and protected, but creation is not supported | Optional | Supported | Open enterprise scope |
 | OEM/custom package selection | Fixed image with first-boot System Hub | Varies | Supported | Image-based alternative, not direct parity |

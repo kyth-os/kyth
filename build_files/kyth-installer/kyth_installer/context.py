@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -186,6 +187,8 @@ class InstallerContext:
     lifecycle: InstallLifecycle = InstallLifecycle.IDLE
     phase: InstallPhase = InstallPhase.PREPARE
     cleanup_mounts: list[str] = field(default_factory=list)
+    transaction_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    assurance_checks: list[dict[str, str]] = field(default_factory=list)
 
     def transition(self, lifecycle: InstallLifecycle) -> None:
         with self.state_lock:
@@ -203,6 +206,10 @@ class InstallerContext:
 
     def replace_request(self, request: InstallRequest) -> None:
         with self.state_lock:
+            if self.lifecycle in (InstallLifecycle.DONE, InstallLifecycle.FAILED):
+                self.lifecycle = InstallLifecycle.IDLE
+                self.transaction_id = uuid.uuid4().hex
+                self.assurance_checks.clear()
             self.request = request
             self.state = request.as_state()
             self.plan = None

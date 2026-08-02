@@ -55,21 +55,23 @@ Moving channel releases and immutable archived builds are published on GitHub:
 [stable releases](https://github.com/mrtrick37/kyth/releases/tag/iso-latest) and
 [testing releases](https://github.com/mrtrick37/kyth/releases/tag/iso-testing).
 
-Practical requirements are an x86-64 PC, a USB drive, an internet connection
-during installation, and at least 8 GB of RAM for the live environment. Back up
-important data before changing disk partitions.
+Practical requirements are an x86-64 PC, a USB drive, and at least 8 GB of RAM
+for the live environment. The standard image installs offline; optional image
+variants require a network connection. Back up important data before changing
+disk partitions.
 
 1. Download the ISO for the channel you want.
 2. Write it to a USB drive with Fedora Media Writer, Balena Etcher, Ventoy, or
    another raw-image tool.
 3. Boot the USB drive and open **Install KythOS**.
 4. Choose the target disk and installation layout, then create the local user.
-5. Let the installer pull and deploy the pinned KythOS image.
+5. Let the installer verify and deploy the pinned KythOS image embedded in the ISO.
 6. Reboot, open **KythOS System Hub**, and complete the first-run checklist.
 
 The installer uses `bootc install to-disk` under a local graphical frontend.
-The ISO build pins the source image digest so the installed deployment matches
-the image validated for that release.
+Before changing disk state, it verifies the embedded OCI manifest against the
+digest pinned by the ISO build, checks power safety, and writes a redacted
+transaction report. Final target checks must pass before the UI reports success.
 
 ### Verify an ISO
 
@@ -354,11 +356,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-02 14:34:32 UTC
+- Last refreshed (UTC): 2026-08-02 14:48:15 UTC
 - Current branch: testing
-- HEAD commit: b24396e
-- Last commit title: refactor: make installer transactions immutable
-- Last commit date: 2026-08-02T10:19:02-04:00
+- HEAD commit: 0020a45
+- Last commit title: refactor: unify runtime execution and boot configuration
+- Last commit date: 2026-08-02T10:34:32-04:00
 - CI workflow files: 8
 - Build script files: 21
 

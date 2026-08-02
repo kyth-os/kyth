@@ -233,6 +233,10 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             return_value=Path("/mnt/deploy/etc"),
         ), mock.patch.object(
             install,
+            "validate_installed_target",
+            return_value=[],
+        ), mock.patch.object(
+            install,
             "ensure_system_accounts",
         ), mock.patch.object(
             install,

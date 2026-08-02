@@ -7,11 +7,17 @@ import subprocess
 import traceback
 from pathlib import Path
 
-from .config import FAILURE_SUMMARY_FILE, LOG_FILE, SKIP_FETCH_CHECK
+from .assurance import run_preflight, validate_installed_target
+from .config import FAILURE_SUMMARY_FILE, LOG_FILE, SKIP_FETCH_CHECK, TRANSACTION_FILE
 from .cleanup import clear_secrets_and_orphan_mount, unmount_configuration
 from .context import InstallLifecycle, InstallRequest, InstallerContext, InstallPhase
 from .disk import get_root_partition
-from .imagesrc import _friendly_network_error, _install_images, _network_preflight
+from .imagesrc import (
+    _friendly_network_error,
+    _install_images,
+    _network_preflight,
+    resolve_source_refs,
+)
 from .plan import (
     ResolvedInstallPlan,
     _get_manual_mounts,
@@ -20,7 +26,7 @@ from .plan import (
     _validate_storage_intent,
 )
 from .runner import run_command
-from .recovery import cleanup_registered_mounts, write_failure_summary
+from .recovery import cleanup_registered_mounts, write_failure_summary, write_transaction_state
 from .streaming import StreamingCommandRunner
 from kyth_shared import get_rx_bytes
 from kyth_shared.accounts import create_installer_user as _shared_create_installer_user
@@ -40,6 +46,25 @@ from .system import (
 
 def _push(event: dict, context: InstallerContext) -> None:
     context.events.publish(event)
+
+
+def _record_transaction(
+    context: InstallerContext,
+    status: str,
+    *,
+    message: str = "",
+    log=None,
+) -> None:
+    try:
+        write_transaction_state(
+            TRANSACTION_FILE,
+            context=context,
+            status=status,
+            message=message,
+        )
+    except Exception as exc:
+        if log is not None:
+            log(f"Warning: could not update installer transaction report: {exc}")
 
 
 def _build_bootc_install_cmd(
@@ -123,12 +148,17 @@ def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallP
     request = context.request or InstallRequest.from_state(context.state)
     kernel = request.kernel
     src_ref, tgt_ref = _install_images(kernel)
+    source = resolve_source_refs(src_ref, tgt_ref)
     _validate_storage_intent(request, context)
     if not SKIP_FETCH_CHECK:
         log("Running network preflight check...")
         net_err = _network_preflight(src_ref)
         if net_err:
             raise RuntimeError(net_err)
+    checks = run_preflight(source)
+    context.assurance_checks = [check.as_dict() for check in checks]
+    for check in checks:
+        log(f"Preflight [{check.status}]: {check.name} — {check.detail}")
     storage_plan = _prepare_install_plan(request, log, context)
 
     # Revalidate the effective target immediately before execution. Guided
@@ -147,12 +177,19 @@ def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallP
         storage=storage_plan,
         source_ref=src_ref,
         target_ref=tgt_ref,
+        source_digest=source.digest,
+        source_kind=source.kind,
+        source_verified=source.verified,
     )
     context.set_plan(resolved)
+    _record_transaction(context, "prepared", log=log)
 
     log(f"Mode         : {resolved.mode}")
     log(f"Kernel       : {kernel}")
     log(f"Source imgref: {src_ref}")
+    if source.digest:
+        log(f"Source digest: {source.digest}")
+    log(f"Source type  : {source.kind}{' (verified)' if source.verified else ''}")
     log(f"Target image : {tgt_ref}")
     log(f"Disk         : {resolved.disk}")
     log("")
@@ -527,26 +564,30 @@ def _configure_installed_system(
     request = request or context.request or InstallRequest.from_state(context.state)
     try:
         etc = find_deploy_etc(config_root)
-        if etc:
-            if install_mode == "alongside":
-                _configure_alongside_fstab(config_root, target_part, etc, log)
+        if not etc:
+            raise RuntimeError("Installed deployment could not be located for final configuration.")
+        if install_mode == "alongside":
+            _configure_alongside_fstab(config_root, target_part, etc, log)
 
-            # Manual partition mode: mount additional partitions and update fstab
-            if install_mode == "manual":
-                _configure_manual_mounts(config_root, etc, log, context)
+        # Manual partition mode: mount additional partitions and update fstab
+        if install_mode == "manual":
+            _configure_manual_mounts(config_root, etc, log, context)
 
-            _configure_hostname_timezone(etc, request, log)
-            progress(95)
+        _configure_hostname_timezone(etc, request, log)
+        progress(95)
 
-            deploy_root = str(Path(etc).parent)
-            ensure_system_accounts(deploy_root, log)
+        deploy_root = str(Path(etc).parent)
+        ensure_system_accounts(deploy_root, log)
 
-            username = request.username.strip()
-            password_hash = request.password_hash
-            if username and password_hash:
-                _create_installer_user(config_root, deploy_root, username, password_hash, log, progress)
-        else:
-            log("Warning: deploy/etc not found — skipping post-install configuration")
+        username = request.username.strip()
+        password_hash = request.password_hash
+        if username and password_hash:
+            _create_installer_user(config_root, deploy_root, username, password_hash, log, progress)
+
+        checks = validate_installed_target(Path(etc), request)
+        context.assurance_checks.extend(check.as_dict() for check in checks)
+        for check in checks:
+            log(f"Final check [{check.status}]: {check.name} — {check.detail}")
     finally:
         progress(99)
         unmount_configuration(config_root, alongside_mount, run=run_command)
@@ -577,6 +618,7 @@ def _handle_install_failure(exc: Exception, log, context: InstallerContext) -> N
         message = f"{message} (also failed writing installer log {LOG_FILE}: {log_exc})"
     log(f"ERROR: {message}")
     context.transition(InstallLifecycle.FAILED)
+    _record_transaction(context, "failed", message=message, log=log)
     try:
         write_failure_summary(FAILURE_SUMMARY_FILE, context=context, message=message)
     except Exception as summary_exc:
@@ -601,6 +643,7 @@ def _run_install_worker(
         target_part, root_part, alongside_mount = _prepare_storage_for_plan(
             resolved, log, progress, alongside_mount, context
         )
+        _record_transaction(context, "image_installed", log=log)
 
         log("── Phase 2: Configuring installed system ─────────────────────────")
         progress(91)
@@ -630,6 +673,7 @@ def _run_install_worker(
         progress(100)
         context.enter_phase(InstallPhase.COMPLETE)
         context.transition(InstallLifecycle.DONE)
+        _record_transaction(context, "complete", log=log)
         _push({"type": "done", "mok_state": mok_state}, context)
 
     except Exception as exc:
@@ -674,6 +718,7 @@ def _run_install(context: InstallerContext) -> None:
         LOG_FILE.unlink(missing_ok=True)
         fd = os.open(str(LOG_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         os.close(fd)
+        _record_transaction(context, "started")
     except Exception as exc:
         message = format_install_error(exc)
         context.transition(InstallLifecycle.FAILED)

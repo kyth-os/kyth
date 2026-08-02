@@ -9,7 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
 from kyth_installer.context import InstallLifecycle, InstallerContext, InstallPhase
-from kyth_installer.recovery import cleanup_registered_mounts, write_failure_summary
+from kyth_installer.recovery import (
+    cleanup_registered_mounts,
+    read_transaction_state,
+    write_failure_summary,
+    write_transaction_state,
+)
 
 
 class InstallerRecoveryTests(unittest.TestCase):
@@ -45,6 +50,28 @@ class InstallerRecoveryTests(unittest.TestCase):
         self.assertEqual(payload["message"], "bootc failed")
         self.assertNotIn("password_hash", payload)
         self.assertNotIn("mok_password", payload)
+
+    def test_transaction_state_is_durable_and_support_safe(self):
+        context = InstallerContext()
+        context.state.update({
+            "disk": "/dev/sda",
+            "install_mode": "wipe",
+            "password_hash": "sensitive",
+            "mok_password": "sensitive",
+        })
+        context.assurance_checks.append({
+            "name": "image", "status": "pass", "detail": "verified",
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "transaction.json"
+            write_transaction_state(path, context=context, status="started")
+            payload = read_transaction_state(path)
+
+        self.assertEqual(payload["status"], "started")
+        self.assertEqual(payload["disk"], "/dev/sda")
+        self.assertEqual(payload["checks"][0]["name"], "image")
+        self.assertNotIn("password_hash", json.dumps(payload))
+        self.assertNotIn("sensitive", json.dumps(payload))
 
 
 if __name__ == "__main__":
