@@ -1,5 +1,0 @@
-#!/usr/bin/python3
-"""Compatibility launcher; the installed entry point is provided by kyth-shared."""
-from kyth_shared.ai_dev import main
-
-raise SystemExit(main())

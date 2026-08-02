@@ -12,7 +12,6 @@ PACKAGE_SCRIPT = (
     / "packages"
     / "18-desktop-helper-and-creator-tooling.sh"
 )
-AI_DEV_SCRIPT = ROOT / "build_files" / "kyth-ai-dev"
 AI_DEV_MODULE = (
     ROOT / "build_files" / "kyth_shared" / "kyth_shared" / "ai_dev.py"
 )
@@ -22,7 +21,6 @@ class NodeToolingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.package_script = PACKAGE_SCRIPT.read_text(encoding="utf-8")
-        cls.ai_dev_script = AI_DEV_SCRIPT.read_text(encoding="utf-8")
         cls.ai_dev_module = AI_DEV_MODULE.read_text(encoding="utf-8")
 
     def test_global_npm_prefix_is_user_writable(self):

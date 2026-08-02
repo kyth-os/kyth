@@ -63,3 +63,11 @@ systemctl enable input-remapper.service 2>/dev/null || true
 systemctl enable joycond.service 2>/dev/null || true
 systemctl enable bluetooth.service 2>/dev/null || true
 systemctl enable kyth-bluetooth-enable.service 2>/dev/null || true
+
+# Drop the build-context helper copies now that everything needed from /ctx
+# (here and in the earlier sysconfig-static layer) has been installed.
+# Left in place they'd ship as duplicate content outside any package/kyth
+# rechunk group, landing in the churny "unpackaged" catch-all on every build
+# that touches one of these small scripts.
+rm -f /ctx/kyth-vscode-wallet /ctx/kyth-game-boost /ctx/kyth-ntfs-repair \
+	/ctx/kyth-shader-preheat /ctx/kyth-health-check

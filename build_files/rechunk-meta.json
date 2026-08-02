@@ -334,6 +334,19 @@
         "gnome-tweaks"
       ]
     },
+    "gnome-session": {
+      "packages": [
+        "gsettings-desktop-schemas",
+        "gnome-settings-daemon",
+        "gnome-session",
+        "gnome-session-wayland-session",
+        "gnome-session-xsession",
+        "gnome-shell-extension-background-logo",
+        "gnome-system-monitor",
+        "gnome-disk-utility",
+        "gnome-backgrounds"
+      ]
+    },
     "gnome-shell": {
       "packages": [
         "gnome-control-center-filesystem",
@@ -351,19 +364,6 @@
       "packages": [
         "gtk3",
         "gtk-update-icon-cache"
-      ]
-    },
-    "gnome-session": {
-      "packages": [
-        "gsettings-desktop-schemas",
-        "gnome-settings-daemon",
-        "gnome-session",
-        "gnome-session-wayland-session",
-        "gnome-session-xsession",
-        "gnome-shell-extension-background-logo",
-        "gnome-system-monitor",
-        "gnome-disk-utility",
-        "gnome-backgrounds"
       ]
     },
     "gutenprint": {
@@ -442,6 +442,13 @@
       ],
       "dedicated": false
     },
+    "mingw-libjpeg": {
+      "packages": [
+        "mingw*-libjpeg-turbo",
+        "libjpeg-turbo"
+      ],
+      "dedicated": false
+    },
     "mingw-libgcc": {
       "packages": [
         "mingw*-lib*"
@@ -456,13 +463,6 @@
     "mingw-vkd3d": {
       "packages": [
         "mingw*-vkd3d*"
-      ],
-      "dedicated": false
-    },
-    "mingw-libjpeg": {
-      "packages": [
-        "mingw*-libjpeg-turbo",
-        "libjpeg-turbo"
       ],
       "dedicated": false
     },
