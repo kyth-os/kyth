@@ -5,6 +5,7 @@ import shutil
 import subprocess
 
 from kyth_shared.commands import APPLICATION_RUNNER, command_spec
+from kyth_shared.boot_health import read_state as read_boot_health_state
 
 from kyth_welcome.services.hardware.types import HardwareProbe
 from kyth_welcome.services.command import run_sync
@@ -117,6 +118,7 @@ def _diagnostics_report(probes: list[HardwareProbe]) -> str:
     branch = branch_display_name(current_branch())
     staged = "yes" if has_staged_update() else "no"
     rollback = "yes" if has_rollback_deployment() else "no"
+    boot_health = read_boot_health_state()
     fwupd = run_command(["fwupdmgr", "get-updates"], timeout=20)
     if fwupd is None:
         fwupd_status = "fwupd unavailable"
@@ -137,6 +139,10 @@ def _diagnostics_report(probes: list[HardwareProbe]) -> str:
         f"  Branch:            {branch}",
         f"  Update staged:     {staged}",
         f"  Rollback available:{rollback}",
+        f"  Boot health:       {boot_health.status}",
+        f"  Failed boots:      {boot_health.failures}",
+        f"  Quarantined builds:{len(boot_health.quarantined)}",
+        f"  Last recovery:     {boot_health.last_recovered_digest or 'none'}",
         f"  Firmware state:    {fwupd_status}",
         "",
         "Checks",

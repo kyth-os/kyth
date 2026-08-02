@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Record the exact digest greenboot declared healthy.
+set -euo pipefail
+
+exec /usr/bin/kyth-boot-health mark-healthy

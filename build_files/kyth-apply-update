@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# kyth-apply-update — zero-dependency update trigger for KythOS.
+# kyth-apply-update — System Hub-independent update trigger for KythOS.
 #
 # Opened by the "Apply KythOS Update" app-menu entry. Designed to work even
-# when KythOS Hub (Python/Qt) is broken. Requires only bootc, sudo, and bash.
-# bootc upgrade is NOPASSWD for wheel users via /etc/sudoers.d/kyth-bootc-sudo.
+# when the graphical KythOS Hub is broken. The immutable guarded update helper
+# applies the same ring and quarantine policy as every other update surface.
+# The guarded updater is NOPASSWD for wheel users via the KythOS sudo policy.
 
 set -euo pipefail
 
@@ -21,7 +22,7 @@ echo "Downloading and staging the latest KythOS image…"
 echo "(This can take several minutes on a slow connection.)"
 echo ""
 
-if sudo -n bootc upgrade; then
+if sudo -n kyth-safe-upgrade; then
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  Update complete."

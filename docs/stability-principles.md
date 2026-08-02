@@ -26,6 +26,8 @@ Engineering rules:
 - A cutting-edge default should have an obvious disable, retry, or rollback path.
 - Release validation should always include update, rollback, suspend/resume,
   network reconnect, audio, Vulkan, and System Hub navigation.
+- A repeatedly unhealthy image digest must be quarantined so a mutable channel
+  tag cannot immediately reinstall the deployment greenboot rolled back.
 
 ## Stability
 

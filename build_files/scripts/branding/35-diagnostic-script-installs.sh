@@ -11,3 +11,9 @@ install -m 0644 /ctx/config/qualification-budgets.json /usr/share/kyth/qualifica
 install -m 0755 /ctx/kyth-vm-acceptance-guest /usr/libexec/kyth-vm-acceptance-guest
 install -m 0644 /ctx/kyth-vm-acceptance.service /usr/lib/systemd/system/kyth-vm-acceptance.service
 systemctl enable kyth-vm-acceptance.service
+
+# greenboot owns boot counting and rollback. These hooks add KythOS-specific
+# required checks plus digest-aware success/failure and quarantine records.
+install -Dm0755 /ctx/kyth-greenboot-required /etc/greenboot/check/required.d/40_kyth_core_health.sh
+install -Dm0755 /ctx/kyth-greenboot-success /etc/greenboot/green.d/40_kyth_record_success.sh
+install -Dm0755 /ctx/kyth-greenboot-failure /etc/greenboot/red.d/40_kyth_record_failure.sh

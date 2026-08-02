@@ -52,6 +52,12 @@ class PrivilegedActionTests(unittest.TestCase):
         with self.assertRaises(PrivilegedActionError):
             systemctl_action("start", "bad;unit.mount")
 
+    def test_manual_upgrade_uses_quarantine_guard(self):
+        self.assertEqual(
+            bootc_action("upgrade").command(),
+            ["sudo", "-A", "kyth-safe-upgrade"],
+        )
+
     def test_fixed_helpers_validate_arguments(self):
         self.assertEqual(helper_action("sleep-mode", "deep").command()[-2:], [
             "/usr/libexec/kyth-set-sleep-mode", "deep",

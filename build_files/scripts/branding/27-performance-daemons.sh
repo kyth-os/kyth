@@ -20,7 +20,7 @@ mkdir -p /var/cache/kyth
 # Ensure unit names match WantedBy installs (user units ship as kyth-probe.*)
 # (files above already use kyth-probe.service / .timer under user/)
 
-# Zero-Python update escape hatch — works even when KythOS Hub is broken.
+# Graphical-Hub-independent update escape hatch.
 install -m 0755 /ctx/kyth-apply-update /usr/bin/kyth-apply-update
 install -m 0644 /ctx/kyth-apply-update.desktop /usr/share/applications/kyth-apply-update.desktop
 

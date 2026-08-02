@@ -99,6 +99,8 @@ def bootc_action(action: str, image_ref: str | None = None) -> PrivilegedAction:
     if action not in {"upgrade", "rollback", "reset", "switch"}:
         raise PrivilegedActionError(f"Unsupported bootc action: {action}")
     args = ["bootc", action]
+    if action == "upgrade":
+        args = ["kyth-safe-upgrade"]
     if action == "switch":
         if not image_ref or not _SAFE_IMAGE_REF_RE.fullmatch(image_ref):
             raise PrivilegedActionError("bootc switch requires a safe image reference")

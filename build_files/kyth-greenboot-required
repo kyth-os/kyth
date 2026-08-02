@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# KythOS-specific required checks. Failure is handled by greenboot's retry and
+# bootc rollback machinery.
+set -euo pipefail
+
+exec /usr/bin/kyth-boot-health check

@@ -3,15 +3,16 @@
 set -euo pipefail
 
 # ── Sudoers: passwordless safe upgrade/firmware operations ────────────────────
-# bootc upgrade/switch stages a new image but does not modify the running system —
-# a reboot is always required to activate it. fwupdmgr operations are similarly
-# safe (refresh = metadata fetch; get-updates/update = firmware staging).
+# kyth-safe-upgrade applies quarantine/ring policy before bootc stages an image;
+# bootc switch remains restricted to KythOS image refs. A reboot is always
+# required to activate either operation. fwupdmgr operations are similarly safe
+# (refresh = metadata fetch; get-updates/update = firmware staging).
 # Allowing these without a password lets KythOS update flows run without a
 # mid-stream sudo prompt that breaks the terminal flow.
 # The 0440 mode (owner+group read, no write) is required by sudo's NOPASSWD check.
 install -m 0440 /dev/stdin /etc/sudoers.d/kyth-upgrade <<'SUDOEOF'
 # KythOS: wheel group may run safe update/firmware commands without a password.
-%wheel ALL=(root) NOPASSWD: /usr/bin/bootc upgrade
+%wheel ALL=(root) NOPASSWD: /usr/bin/kyth-safe-upgrade
 %wheel ALL=(root) NOPASSWD: /usr/bin/bootc switch ghcr.io/mrtrick37/kyth\:*
 %wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr refresh
 %wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr update

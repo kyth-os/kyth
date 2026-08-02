@@ -227,7 +227,8 @@ Fedora Kinoite / Universal Blue base
 
 See [Architecture](docs/architecture.md) and the
 [security model](docs/security-model.md) for the detailed component and trust
-boundaries.
+boundaries. The [health-aware update lifecycle](docs/update-safety.md) explains
+boot validation, automatic rollback, rollout rings, and digest quarantine.
 
 ## Security and release integrity
 
@@ -356,11 +357,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-02 15:04:03 UTC
+- Last refreshed (UTC): 2026-08-02 15:17:53 UTC
 - Current branch: testing
-- HEAD commit: e7fd89f
-- Last commit title: fix: satisfy installer quality gate
-- Last commit date: 2026-08-02T10:51:42-04:00
+- HEAD commit: e8a4b49
+- Last commit title: feat: add release qualification framework
+- Last commit date: 2026-08-02T11:04:03-04:00
 - CI workflow files: 8
 - Build script files: 21
 

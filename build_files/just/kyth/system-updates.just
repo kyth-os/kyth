@@ -45,7 +45,7 @@ kyth-upgrade:
           print(s.get('status',{}).get('booted',{}).get('image',{}) \
                  .get('imageDigest','unknown'))" 2>/dev/null || echo "unknown")
 
-    sudo bootc upgrade
+    sudo kyth-safe-upgrade
 
     staged_digest=$(bootc status --format json 2>/dev/null \
         | python3 -c "import sys,json; s=json.load(sys.stdin); \
@@ -85,6 +85,22 @@ status:
     #!/usr/bin/env bash
     set -euo pipefail
     bootc status
+
+# Show the digest-aware boot health and quarantined update records.
+[group('KythOS')]
+update-health:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kyth-boot-health status
+
+# Explicitly allow a previously quarantined digest to be tried again.
+# Usage: ujust retry-quarantined-update sha256:...
+[group('KythOS')]
+retry-quarantined-update digest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sudo kyth-boot-health clear-quarantine --digest "{{ digest }}"
+    echo "Cleared quarantine for {{ digest }}. The update watcher may stage it again."
 
 # Rebase to a different KythOS image.
 # Usage:

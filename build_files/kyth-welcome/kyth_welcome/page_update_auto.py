@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 
+from kyth_shared.boot_health import read_state as read_boot_health_state
 from kyth_shared.update_status import read_update_snapshot
 
 # __KYTH_GENERATED_IMPORTS__
@@ -43,8 +44,9 @@ class _AutoUpdateMixin:
         last_row, self._au_last_lbl      = _au_row("Last check:")
         result_row, self._au_result_lbl  = _au_row("Result:")
         reason_row, self._au_reason_lbl  = _au_row("Reason:")
+        health_row, self._au_health_lbl = _au_row("Boot health:")
         flatpak_row, self._au_flatpak_lbl = _au_row("Flatpak:")
-        for row in (last_row, result_row, reason_row, flatpak_row):
+        for row in (last_row, result_row, reason_row, health_row, flatpak_row):
             auto_state_col.addLayout(row)
         auto_status_row.addLayout(auto_state_col, 1)
 
@@ -83,10 +85,28 @@ class _AutoUpdateMixin:
         self._au_last_lbl.setText(ts_str)
 
         result = status.get("result", "")
-        _colors = {"upgraded": "#4caf50", "no_change": "#b0bccf", "skipped": "#ffa726", "error": "#ef5350"}
+        _colors = {
+            "upgraded": "#4caf50", "no_change": "#b0bccf",
+            "skipped": "#ffa726", "quarantined": "#ef5350", "error": "#ef5350",
+        }
         self._au_result_lbl.setText(result.replace("_", " ").title() if result else "—")
         self._au_result_lbl.setStyleSheet(f"color: {_colors.get(result, '#b0bccf')};")
         self._au_reason_lbl.setText(status.get("reason") or "—")
+
+        health = read_boot_health_state()
+        health_text = health.status.replace("_", " ").title()
+        if health.failures:
+            health_text += f" · {health.failures} failed boot(s)"
+        if health.quarantined:
+            health_text += f" · {len(health.quarantined)} quarantined"
+        if health.last_recovered_digest:
+            health_text += f" · recovered from {health.last_recovered_digest[:19]}…"
+        self._au_health_lbl.setText(health_text)
+        health_color = {
+            "healthy": "#4caf50", "recovered": "#4caf50", "unhealthy": "#ffa726",
+            "quarantined": "#ef5350",
+        }.get(health.status, "#b0bccf")
+        self._au_health_lbl.setStyleSheet(f"color: {health_color};")
 
         flatpak_count = status.get("flatpak_updates", 0)
         if flatpak_count > 0:

@@ -42,6 +42,14 @@ class PythonPackagingTests(unittest.TestCase):
             "kyth_shared.qualification:main",
         )
         self.assertEqual(
+            shared["project"]["scripts"]["kyth-boot-health"],
+            "kyth_shared.boot_health:main",
+        )
+        self.assertEqual(
+            shared["project"]["scripts"]["kyth-safe-upgrade"],
+            "kyth_shared.safe_upgrade:main",
+        )
+        self.assertEqual(
             shared["project"]["scripts"]["kyth-setup-transfer"],
             "kyth_shared.setup_transfer:main",
         )
