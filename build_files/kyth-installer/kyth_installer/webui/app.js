@@ -1,4 +1,5 @@
-/* global document, fetch, Headers, setTimeout, setInterval, clearInterval, Intl, EventSource, navigator */
+/* global document, setTimeout, setInterval, Intl, EventSource,
+   S, el, apiFetch, postRequest, postJSON, appendLog, fmtBytes, onDone, setProgress, showError, showStats */
 const STEPS = ['welcome','disk','kernel','config','review','install'];
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -436,7 +437,7 @@ function selectFreeRegionByStart(start) {
     S.free_region_start = r.start_bytes;
     S.free_region_end = r.end_bytes;
     const cards = document.querySelectorAll('#free-space-list .part-selector-card');
-    cards.forEach(c => { c.classList.toggle('selected', parseInt(c.dataset.start) === start); });
+    cards.forEach(c => { c.classList.toggle('selected', parseInt(c.dataset.start, 10) === start); });
   }
   renderDiskLayouts();
   updateDiskNext();
@@ -682,7 +683,7 @@ function showCreateDialog() {
     el('input', { type: 'text', id: 'dlg-label', placeholder: 'e.g. Data' }),
   );
   showOverlay('Create Partition', content, () => {
-    const start = parseInt(document.getElementById('dlg-start').value);
+    const start = parseInt(document.getElementById('dlg-start').value, 10);
     const sizeGiB = parseFloat(document.getElementById('dlg-size').value);
     const fsType = document.getElementById('dlg-fs').value;
     const mountpoint = document.getElementById('dlg-mount').value;
