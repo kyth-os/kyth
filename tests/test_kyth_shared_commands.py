@@ -11,7 +11,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.commands import (  # noqa: E402
+    CommandSpec,
     CommandRunner,
+    EnvironmentPolicy,
     ExecutionPolicy,
     command_stdout,
     normalize_command,
@@ -132,6 +134,30 @@ class CommandRunnerTests(unittest.TestCase):
                 }
             ),
             {"PATH": "/usr/bin", "LANG": "C"},
+        )
+
+    def test_command_spec_applies_policy_and_redacts_sensitive_values(self) -> None:
+        executor = mock.Mock(return_value=subprocess.CompletedProcess(["tool"], 0))
+        runner = CommandRunner(executor)
+        spec = CommandSpec(
+            argv=("tool", "--token", "secret"),
+            name="secure-tool",
+            timeout=9,
+            environment=EnvironmentPolicy.DESKTOP,
+            sensitive_options=("--token",),
+            invalidates=frozenset({"apps"}),
+        )
+
+        runner.run(spec, env={"PATH": "/usr/bin", "DISPLAY": ":0", "LD_PRELOAD": "bad"})
+
+        self.assertEqual(spec.display_command(), ["tool", "--token", "<redacted>"])
+        self.assertEqual(spec.invalidates, frozenset({"apps"}))
+        executor.assert_called_once_with(
+            ["tool", "--token", "secret"],
+            check=False,
+            shell=False,
+            timeout=9,
+            env={"PATH": "/usr/bin", "DISPLAY": ":0"},
         )
 
 

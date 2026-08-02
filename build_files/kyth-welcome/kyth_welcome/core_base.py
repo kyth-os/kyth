@@ -13,7 +13,7 @@ import time
 
 from kyth_welcome.services.command import run_sync
 from kyth_welcome.services.process import is_live_session, run_command
-from kyth_welcome.services.runtime import Worker
+from kyth_welcome.services.runtime import TASK_SUPERVISOR, Worker
 
 from .qt import (
     QLabel, QPushButton, QTextEdit, QWidget,
@@ -165,6 +165,7 @@ def run_worker(
     """
     worker = Worker(cmd, input_text=input_text)
     setattr(owner, attr, worker)
+    TASK_SUPERVISOR.attach(worker, owner, attr, task_id=attr.removeprefix("_"))
     if session_inhibit_reason is not None:
         set_session_inhibit(owner, session_inhibit_reason)
     worker.line.connect(on_line)

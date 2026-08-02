@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-02 14:19:02 UTC
+- Last refreshed (UTC): 2026-08-02 14:34:32 UTC
 - Current branch: testing
-- HEAD commit: 1a86790
-- Last commit title: standardize shell script source paths
-- Last commit date: 2026-08-01T22:53:28-04:00
+- HEAD commit: b24396e
+- Last commit title: refactor: make installer transactions immutable
+- Last commit date: 2026-08-02T10:19:02-04:00
 - CI workflow files: 8
 - Build script files: 21
 

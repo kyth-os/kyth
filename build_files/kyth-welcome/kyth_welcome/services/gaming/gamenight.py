@@ -7,6 +7,8 @@ import shutil
 import subprocess
 from typing import ClassVar
 
+from kyth_shared.commands import APPLICATION_RUNNER, command_spec
+
 _logger = logging.getLogger(__name__)
 
 
@@ -20,7 +22,11 @@ class GameNightManager:
         cls._action_procs = [proc for proc in cls._action_procs if proc.poll() is None]
         try:
             cls._action_procs.append(
-                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                APPLICATION_RUNNER.spawn(
+                    command_spec(cmd, name="game-night-action", timeout=None),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
             )
         except FileNotFoundError:
             pass
@@ -38,14 +44,15 @@ class GameNightManager:
 
         if shutil.which("systemd-inhibit"):
             try:
-                cls._inhibit_proc = subprocess.Popen(
-                    [
+                command = [
                         "systemd-inhibit",
                         "--what=idle:sleep",
                         "--why=KythOS Game Night Mode",
                         "sleep",
                         "14400",
-                    ],
+                    ]
+                cls._inhibit_proc = APPLICATION_RUNNER.spawn(
+                    command_spec(command, name="game-night-inhibit", timeout=None),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )

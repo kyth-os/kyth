@@ -176,7 +176,7 @@ class ProbeExpandedTests(unittest.TestCase):
             "kyth_shared.system.probe._count_flatpak_updates",
             return_value=3,
         ), mock.patch(
-            "kyth_welcome.services.hardware.drives._detect_controllers",
+            "kyth_shared.system.controllers.detect_controllers",
             return_value={"secure_boot": False},
         ):
             def side_effect(cmd, timeout=5):

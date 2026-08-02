@@ -86,10 +86,10 @@ COPY build_files/plymouth/kyth.script               /tmp/kyth-plymouth/kyth.scri
 COPY build_files/branding/kyth-logo-transparent.svg /tmp/kyth-branding/kyth-logo-transparent.svg
 COPY build_files/branding/transparent-watermark.svg /tmp/kyth-branding/transparent-watermark.svg
 COPY build_files/scripts/plymouth-setup.sh          /tmp/plymouth-setup.sh
-COPY build_files/scripts/lib/plymouth-config.sh     /tmp/lib/plymouth-config.sh
+COPY build_base/plymouth/kyth-plymouth-configure    /tmp/kyth-plymouth-configure
 COPY build_files/scripts/plymouth-branding-guard.sh /tmp/plymouth-branding-guard.sh
 RUN bash /tmp/plymouth-setup.sh && \
-    rm -rf /tmp/kyth-plymouth /tmp/kyth-branding /tmp/plymouth-setup.sh /tmp/plymouth-branding-guard.sh /tmp/lib
+    rm -rf /tmp/kyth-plymouth /tmp/kyth-branding /tmp/plymouth-setup.sh /tmp/kyth-plymouth-configure /tmp/plymouth-branding-guard.sh
 
 # kyth-vscode-wallet and kyth-ai-dev are needed by both sysconfig-static and
 # sysconfig layers. COPY once so neither layer needs a redundant bind-mount.

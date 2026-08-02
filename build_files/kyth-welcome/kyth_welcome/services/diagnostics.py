@@ -4,6 +4,8 @@ import shlex
 import shutil
 import subprocess
 
+from kyth_shared.commands import APPLICATION_RUNNER, command_spec
+
 from kyth_welcome.services.hardware.types import HardwareProbe
 from kyth_welcome.services.command import run_sync
 from datetime import datetime
@@ -176,8 +178,8 @@ def _health_command_report() -> str:
             results[title] = {"error": f"missing: {exe}", "cmd": cmd}
             continue
         try:
-            p = subprocess.Popen(
-                cmd,
+            p = APPLICATION_RUNNER.spawn(
+                command_spec(cmd, name=f"health-{title.lower().replace(' ', '-')}", timeout=None),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -298,8 +300,11 @@ def storage_sense_set(enable: bool) -> tuple[bool, str]:
 
 def storage_sense_run_now() -> tuple[bool, str]:
     try:
-        subprocess.Popen(
-            ["systemd-run", "--user", "--collect", "/usr/bin/kyth-storage-sense"],
+        APPLICATION_RUNNER.spawn(
+            command_spec(
+                ["systemd-run", "--user", "--collect", "/usr/bin/kyth-storage-sense"],
+                name="storage-sense", timeout=None,
+            ),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,

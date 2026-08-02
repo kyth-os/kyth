@@ -7,18 +7,6 @@ install -Dm0755 /ctx/scripts/plymouth-branding-guard.sh \
 /usr/libexec/kyth-plymouth-branding-guard \
 	/ctx/branding/transparent-watermark.svg
 
-mkdir -p /etc/dracut.conf.d
-if [[ -f /etc/dracut.conf.d/99-kyth.conf ]]; then
-	grep -q 'add_dracutmodules+=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.conf ||
-		printf '\nadd_dracutmodules+=" kyth-plymouth "\n' >>/etc/dracut.conf.d/99-kyth.conf
-else
-	write_config /etc/dracut.conf.d/99-kyth.conf <<'DRACUTEOF'
-add_dracutmodules+=" ostree drm plymouth kyth-plymouth "
-DRACUTEOF
-fi
-grep -q 'force_add_dracutmodules+=.*kyth-plymouth' /etc/dracut.conf.d/99-kyth.conf ||
-	printf 'force_add_dracutmodules+=" kyth-plymouth "\n' >>/etc/dracut.conf.d/99-kyth.conf
-
 write_config /usr/lib/systemd/system/kyth-boot-splash-kargs.service <<'SPLASHKARGSEOF'
 [Unit]
 Description=KythOS boot splash kernel argument migration

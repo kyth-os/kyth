@@ -150,81 +150,9 @@ rm -rf /usr/share/plymouth/themes/bgrt
 
 dnf5 remove -y librsvg2-tools || true
 
-# CachyOS rebuilds its initramfs in this base layer, before the main image layer
-# installs the reusable KythOS Plymouth guard. Provide the same dracut module
-# locally so dracut can resolve kyth-plymouth here too.
-rm -rf /usr/lib/dracut/modules.d/46kyth-plymouth
-KYTH_PLYMOUTH_DRACUT_DIR=/usr/lib/dracut/modules.d/99kyth-plymouth
-mkdir -p "${KYTH_PLYMOUTH_DRACUT_DIR}"
-cat >"${KYTH_PLYMOUTH_DRACUT_DIR}/module-setup.sh" <<'KYTHPLYMOUTHEOF'
-#!/usr/bin/bash
-
-check() {
-    return 0
-}
-
-depends() {
-    echo plymouth
-    return 0
-}
-
-install() {
-    mkdir -p \
-        "${initdir}/etc/plymouth" \
-        "${initdir}/usr/share/plymouth" \
-        "${initdir}/usr/share/pixmaps" \
-        "${initdir}/usr/share/plymouth/themes"
-    cat > "${initdir}/etc/plymouth/plymouthd.conf" <<'PLYMOUTHCONF'
-[Daemon]
-Theme=kyth
-ShowDelay=0
-DeviceTimeout=8
-UseFirmwareBackground=false
-PLYMOUTHCONF
-    command install -m 0644 "${initdir}/etc/plymouth/plymouthd.conf" \
-        "${initdir}/usr/share/plymouth/plymouthd.defaults"
-    rm -rf \
-        "${initdir}/usr/share/plymouth/themes/default.plymouth" \
-        "${initdir}/usr/share/plymouth/themes/bgrt-fedora" \
-        "${initdir}/usr/share/plymouth/themes/bgrt" \
-        "${initdir}/usr/share/plymouth/themes/spinner"
-    ln -sfn kyth/kyth.plymouth \
-        "${initdir}/usr/share/plymouth/themes/default.plymouth"
-    inst_libdir_file "plymouth/script.so"
-    inst_multiple \
-        /usr/share/plymouth/themes/kyth/kyth.plymouth \
-        /usr/share/plymouth/themes/kyth/kyth.script \
-        /usr/share/plymouth/themes/kyth/kyth-logo.png
-    inst_multiple -o \
-        /etc/os-release \
-        /usr/lib/os-release \
-        /usr/share/kyth/branding/transparent-watermark.svg \
-        /usr/share/kyth/branding/transparent-watermark.png
-    rm -f "${initdir}/usr/share/pixmaps/system-logo-white.png"
-    inst_simple \
-        /usr/share/kyth/branding/transparent-watermark.png \
-        /usr/share/pixmaps/system-logo-white.png
-    rm -rf \
-        "${initdir}/usr/share/plymouth/themes/bgrt-fedora" \
-        "${initdir}/usr/share/plymouth/themes/bgrt" \
-        "${initdir}/usr/share/plymouth/themes/spinner"
-}
-KYTHPLYMOUTHEOF
-chmod 0755 "${KYTH_PLYMOUTH_DRACUT_DIR}/module-setup.sh"
-unset KYTH_PLYMOUTH_DRACUT_DIR
-
-# Write dracut config — applies on next initramfs regeneration (bootc deploy,
-# or dracut run in the cachy path below). do_hardlink="no" sidesteps a
-# util-linux hardlink/kernel AF_ALG crypto-API interaction that reliably
-# SIGSEGVs dracut's post-build dedup pass in containerized builders
-# (util-linux/util-linux#4334); costs a few KB of initramfs size, nothing else.
-mkdir -p /etc/dracut.conf.d
-cat >/etc/dracut.conf.d/99-kyth.conf <<'DRACUTEOF'
-add_dracutmodules+=" ostree drm plymouth kyth-plymouth "
-force_add_dracutmodules+=" kyth-plymouth "
-add_drivers+=" virtio_blk virtio_scsi virtio_pci nvme ahci virtio_gpu qxl bochs overlay "
-do_hardlink="no"
-DRACUTEOF
+# One canonical script owns host defaults, dracut policy, and the late module
+# for both kernel flavors and every later repair path.
+/run/plymouth/kyth-plymouth-configure
 
 # Boot-leanness: drop initramfs modules for network/SAN root scenarios that a
 # gaming/desktop workstation never boots from. Root is local (btrfs on
@@ -241,21 +169,6 @@ DRACUTEOF
 cat >/etc/dracut.conf.d/90-kyth-lean.conf <<'DRACUTEOF'
 omit_dracutmodules+=" nfs cifs iscsi fcoe fcoe-uefi nbd multipath "
 DRACUTEOF
-
-# Write Plymouth defaults unconditionally so both Fedora and CachyOS images ship
-# a host config that agrees with the late kyth-plymouth dracut module. This
-# build runs in the separate build_base/ Docker context, so it can't source
-# build_files/scripts/lib/plymouth-config.sh — keep this in sync with
-# KYTH_PLYMOUTHD_CONF there by hand.
-mkdir -p /etc/plymouth /usr/share/plymouth
-cat >/etc/plymouth/plymouthd.conf <<'PLYMOUTHCONF'
-[Daemon]
-Theme=kyth
-ShowDelay=0
-DeviceTimeout=8
-UseFirmwareBackground=false
-PLYMOUTHCONF
-install -m 0644 /etc/plymouth/plymouthd.conf /usr/share/plymouth/plymouthd.defaults
 
 # For the CachyOS kernel we must rebuild the initramfs at image-build time
 # because the kernel itself was just replaced.  For the stock Fedora kernel

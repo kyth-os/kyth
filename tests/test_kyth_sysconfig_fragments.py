@@ -61,9 +61,9 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertNotIn("Exec=openrgb", body)
 
     def test_initramfs_includes_account_databases(self):
-        setup = (SCRIPTS / "plymouth-setup.sh").read_text(encoding="utf-8")
+        owner = (ROOT / "build_base" / "plymouth" / "kyth-plymouth-configure").read_text(encoding="utf-8")
         final = (SCRIPTS / "plymouth-initramfs.sh").read_text(encoding="utf-8")
-        self.assertIn('install_items+=" /etc/passwd /etc/group "', setup)
+        self.assertIn('install_items+=" /etc/passwd /etc/group "', owner)
         self.assertIn("etc/passwd etc/group", final)
 
     def test_late_plasma_splash_is_kyth_owned(self):

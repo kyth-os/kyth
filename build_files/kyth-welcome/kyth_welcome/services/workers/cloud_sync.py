@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import subprocess
 
+from kyth_shared.commands import APPLICATION_RUNNER, command_spec
+
 from ...qt import Signal
 from ..cloud_sync import extract_rclone_token, rclone_sync_command, rsync_copy_command
 from ..runtime import StreamingProcessWorker, TrackedThread
@@ -43,8 +45,8 @@ class RcloneAuthorizeWorker(TrackedThread):
 
     def run(self):
         try:
-            self._proc = subprocess.Popen(
-                ["rclone", "authorize", self._remote_type],
+            self._proc = APPLICATION_RUNNER.spawn(
+                command_spec(["rclone", "authorize", self._remote_type], name="rclone-authorize", timeout=None),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,

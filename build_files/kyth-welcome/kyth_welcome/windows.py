@@ -1,7 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, load_profile, restyle
 from .services.bootc import current_branch
-from .services.runtime import running_threads
+from .services.runtime import has_blocking_tasks
 from .page_registry import (
     PROBLEM_ROUTES, SEARCH_ALIASES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups,
 )
@@ -462,13 +462,7 @@ class MainWindow(QMainWindow):
             self._crumb_lbl.setText(f"›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
 
     def closeEvent(self, event):
-        # Registry catches workers regardless of which attribute a page keeps
-        # them in; the findChildren scan keeps covering page-local QThreads
-        # that follow the `_worker` convention without subclassing Worker.
-        busy = any(t.BLOCKS_CLOSE for t in running_threads()) or any(
-            (w := getattr(child, "_worker", None)) is not None and w.isRunning()
-            for child in self.findChildren(QWidget)
-        )
+        busy = has_blocking_tasks()
         if busy:
             QMessageBox.warning(
                 self,

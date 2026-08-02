@@ -11,6 +11,23 @@ PACKAGE = ROOT / "build_files" / "kyth-welcome" / "kyth_welcome"
 
 
 class RefactorRuntimeImportTests(unittest.TestCase):
+    def test_hub_services_do_not_launch_subprocesses_directly(self):
+        allowed = {"privileged.py"}
+        violations = []
+        for path in PACKAGE.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "subprocess"
+                    and node.func.attr in {"run", "Popen", "call", "check_call", "check_output"}
+                    and path.name not in allowed
+                ):
+                    violations.append(f"{path.relative_to(PACKAGE)}:{node.lineno}")
+        self.assertEqual(violations, [])
+
     def test_deferred_callback_dependencies_are_imported(self):
         required = {
             "page_hardware.py": {"command_stdout"},

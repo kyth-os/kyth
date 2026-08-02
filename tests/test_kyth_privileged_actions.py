@@ -12,6 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 
 from kyth_welcome.services import network_share_helper as shares  # noqa: E402
+from kyth_shared.commands import CommandSpec  # noqa: E402
 from kyth_welcome.services.privileged import (  # noqa: E402
     AuthFrontend,
     PrivilegedActionError,
@@ -27,8 +28,11 @@ from kyth_welcome.services.privileged import (  # noqa: E402
 
 class PrivilegedActionTests(unittest.TestCase):
     def test_bootc_policy_rejects_shell_data(self):
+        action = bootc_action("switch", "ghcr.io/example/kyth:testing")
+        self.assertIsInstance(action, CommandSpec)
+        self.assertEqual(action.invalidates, frozenset({"bootc"}))
         self.assertEqual(
-            bootc_action("switch", "ghcr.io/example/kyth:testing").command(),
+            action.command(),
             ["sudo", "-A", "bootc", "switch", "ghcr.io/example/kyth:testing"],
         )
         with self.assertRaises(PrivilegedActionError):

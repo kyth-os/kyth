@@ -9,10 +9,34 @@ import json
 import os
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
+
+
+class ProbeStatus(StrEnum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    key: str
+    status: ProbeStatus
+    data: Any = None
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class ProbeCollector:
+    name: str
+    keys: tuple[str, ...]
+    collect: Callable[[], dict[str, Any]]
 
 DISK_TTL: dict[str, float] = {
     "bootc-status-data": 90.0,
@@ -201,7 +225,7 @@ def _count_flatpak_updates() -> int | None:
     return total if saw_ok else None
 
 
-def collect_snapshot() -> dict[str, Any]:
+def _collect_bootc() -> dict[str, Any]:
     from kyth_shared.system.bootc import (
         branch_from_ref,
         current_kernel_flavor,
@@ -209,53 +233,95 @@ def collect_snapshot() -> dict[str, Any]:
         fetch_bootc_status_text,
         image_reference_from_status,
     )
-    from kyth_shared.system.process import run_command
-
-    sections: dict[str, Any] = {}
-
     data = fetch_bootc_status_data()
-    sections["bootc-status-data"] = data
     text = fetch_bootc_status_text()
-    sections["bootc-status-text"] = text
-
     ref = image_reference_from_status(data or {}, status_text=text)
-    sections["bootc-branch"] = branch_from_ref(ref)
     try:
-        sections["kernel-flavor"] = current_kernel_flavor()
+        kernel = current_kernel_flavor()
     except Exception:
-        sections["kernel-flavor"] = "fedora"
+        kernel = "fedora"
+    return {
+        "bootc-status-data": data,
+        "bootc-status-text": text,
+        "bootc-branch": branch_from_ref(ref),
+        "kernel-flavor": kernel,
+    }
+
+
+def _collect_flatpak_apps() -> dict[str, Any]:
+    from kyth_shared.system.process import run_command
 
     result = run_command(["flatpak", "list", "--app", "--columns=application"], timeout=15)
     if result is not None and result.returncode == 0:
         apps = sorted({ln.strip() for ln in result.stdout.splitlines() if ln.strip()})
-        sections["flatpak-apps"] = apps
-    else:
-        sections["flatpak-apps"] = None
+        return {"flatpak-apps": apps}
+    return {"flatpak-apps": None}
 
-    sections["flatpak-updates"] = _count_flatpak_updates()
+
+def _collect_flatpak_updates() -> dict[str, Any]:
+    return {"flatpak-updates": _count_flatpak_updates()}
+
+
+def _collect_nvidia() -> dict[str, Any]:
+    from kyth_shared.system.process import run_command
 
     try:
-        r = run_command(["lspci"], timeout=5)
-        sections["nvidia-detect"] = bool(r and "nvidia" in (r.stdout or "").lower())
+        result = run_command(["lspci"], timeout=5)
+        value = bool(result and "nvidia" in (result.stdout or "").lower())
     except Exception:
-        sections["nvidia-detect"] = False
+        value = False
+    return {"nvidia-detect": value}
 
+
+def _collect_controllers() -> dict[str, Any]:
+    from kyth_shared.system.controllers import detect_controllers
+
+    return {"controllers-detect": detect_controllers()}
+
+
+def default_collectors() -> tuple[ProbeCollector, ...]:
+    return (
+        ProbeCollector("bootc", ("bootc-status-data", "bootc-status-text", "bootc-branch", "kernel-flavor"), _collect_bootc),
+        ProbeCollector("flatpak-apps", ("flatpak-apps",), _collect_flatpak_apps),
+        ProbeCollector("flatpak-updates", ("flatpak-updates",), _collect_flatpak_updates),
+        ProbeCollector("nvidia", ("nvidia-detect",), _collect_nvidia),
+        ProbeCollector("controllers", ("controllers-detect",), _collect_controllers),
+    )
+
+
+def _run_collector(collector: ProbeCollector) -> dict[str, ProbeResult]:
     try:
-        # Avoid circular dependencies by dynamically importing drives module from kyth-welcome
-        # or kyth_welcome.services.hardware.drives if it can be found.
-        # But wait! Can we import kyth_welcome here?
-        # Yes, kyth-welcome is allowed to import from kyth_shared, and since collect_snapshot
-        # is run during oneshot refresh, we can dynamically look it up.
-        try:
-            from kyth_welcome.services.hardware import drives as drives_mod
-            sections["controllers-detect"] = drives_mod._detect_controllers()
-        except ImportError:
-            # Fallback when running outside welcome environment
-            sections["controllers-detect"] = None
-    except Exception:
-        sections["controllers-detect"] = None
+        values = collector.collect()
+    except Exception as exc:
+        return {
+            key: ProbeResult(key, ProbeStatus.FAILED, error=str(exc))
+            for key in collector.keys
+        }
+    return {
+        key: ProbeResult(
+            key,
+            ProbeStatus.AVAILABLE if values.get(key) is not None else ProbeStatus.UNAVAILABLE,
+            data=values.get(key),
+        )
+        for key in collector.keys
+    }
 
-    return sections
+
+def collect_probe_results(
+    collectors: Iterable[ProbeCollector] | None = None,
+) -> dict[str, ProbeResult]:
+    """Run independent probe groups concurrently and retain failure state."""
+    selected = tuple(collectors or default_collectors())
+    results: dict[str, ProbeResult] = {}
+    with ThreadPoolExecutor(max_workers=len(selected), thread_name_prefix="kyth-probe") as pool:
+        for group in pool.map(_run_collector, selected):
+            results.update(group)
+    return results
+
+
+def collect_snapshot() -> dict[str, Any]:
+    """Compatibility snapshot containing values while typed results retain errors."""
+    return {key: result.data for key, result in collect_probe_results().items()}
 
 
 def invalidate_after_flatpak_change() -> None:

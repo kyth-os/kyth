@@ -6,12 +6,16 @@ is cheap to test and usable by non-UI callers.
 """
 from __future__ import annotations
 
-import os
 import re
 import subprocess
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable, Mapping
+
+from kyth_shared.commands import (
+    CommandSpec,
+    EnvironmentPolicy,
+    desktop_environment,
+)
 
 
 class PrivilegedActionError(ValueError):
@@ -23,44 +27,13 @@ class AuthFrontend(StrEnum):
     PKEXEC = "pkexec"
 
 
-@dataclass(frozen=True)
-class PrivilegedAction:
-    name: str
-    argv: tuple[str, ...]
-    timeout: float = 300
-    sensitive_options: tuple[str, ...] = ()
-
-    def command(self) -> list[str]:
-        return list(self.argv)
-
-    def display_command(self) -> list[str]:
-        command = self.command()
-        for index, value in enumerate(command[:-1]):
-            if value in self.sensitive_options:
-                command[index + 1] = "<redacted>"
-        return command
-
-
-_SAFE_ENV_KEYS = frozenset({
-    "DBUS_SESSION_BUS_ADDRESS",
-    "DESKTOP_STARTUP_ID",
-    "DISPLAY",
-    "HOME",
-    "LANG",
-    "LC_ALL",
-    "PATH",
-    "SUDO_ASKPASS",
-    "WAYLAND_DISPLAY",
-    "XAUTHORITY",
-    "XDG_CURRENT_DESKTOP",
-    "XDG_RUNTIME_DIR",
-})
+class PrivilegedAction(CommandSpec):
+    """CommandSpec that has passed a System Hub privilege allowlist."""
 
 
 def sanitized_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Keep desktop/auth context while dropping loader and interpreter injection."""
-    environment = source if source is not None else os.environ
-    return {key: value for key, value in environment.items() if key in _SAFE_ENV_KEYS}
+    """Compatibility alias for the shared desktop environment policy."""
+    return desktop_environment(source)
 
 
 class PrivilegedGateway:
@@ -135,6 +108,9 @@ def bootc_action(action: str, image_ref: str | None = None) -> PrivilegedAction:
     return PrivilegedAction(
         name=f"bootc-{action}",
         argv=(*_prefix(AuthFrontend.SUDO_ASKPASS), *args),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
+        invalidates=frozenset({"bootc"}),
     )
 
 
@@ -160,6 +136,8 @@ def systemctl_action(
     return PrivilegedAction(
         name=f"systemctl-{action}",
         argv=(*_prefix(frontend), *args),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
     )
 
 
@@ -188,6 +166,8 @@ def helper_action(
     return PrivilegedAction(
         name=helper,
         argv=(*_prefix(frontend), executable, *args),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
     )
 
 
@@ -231,6 +211,8 @@ def openconnect_action(
     return PrivilegedAction(
         name="openconnect",
         argv=tuple(args),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
         sensitive_options=("--cookie",),
     )
 
@@ -241,4 +223,6 @@ def scheduler_action(name: str) -> PrivilegedAction:
     return PrivilegedAction(
         name="scheduler-set",
         argv=("sudo", "-n", "/usr/bin/kyth-scx", "set", name),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
     )

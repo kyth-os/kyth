@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import subprocess
 
+from kyth_shared.commands import APPLICATION_RUNNER, EnvironmentPolicy, command_spec
+
 from ...qt import Signal
 from ..runtime import TrackedThread
 from ..vpn import saml_url_from_log_line
@@ -26,8 +28,11 @@ class VpnConnectWorker(TrackedThread):
         env.setdefault("SUDO_PROMPT", "Password:")
         stdin_pipe = subprocess.PIPE if self._password else subprocess.DEVNULL
         try:
-            self._proc = subprocess.Popen(
-                self._cmd,
+            self._proc = APPLICATION_RUNNER.spawn(
+                command_spec(
+                    self._cmd, name="vpn-connect", timeout=None,
+                    environment=EnvironmentPolicy.DESKTOP,
+                ),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=stdin_pipe,

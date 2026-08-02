@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.system import probe as probe_mod  # noqa: E402
 from kyth_shared.system import process as process_mod  # noqa: E402
+from kyth_shared.system import controllers as controller_mod  # noqa: E402
 
 
 class ProbeCacheFileTests(unittest.TestCase):
@@ -142,6 +143,41 @@ class ProbeCachedIntegrationTests(unittest.TestCase):
 
 
 class CollectSnapshotTests(unittest.TestCase):
+    def test_shared_controller_detector_parses_known_usb_device(self):
+        def output(command, timeout=5):
+            if command[0] == "lsusb":
+                return "Bus 001 Device 005: ID 045e:02e6 Xbox Wireless Adapter\n"
+            if command[0] == "lsmod":
+                return "xone_hid 40960 0\n"
+            return ""
+
+        with mock.patch.object(controller_mod, "command_stdout", side_effect=output), \
+             mock.patch.object(controller_mod.os, "listdir", return_value=[]), \
+             mock.patch.object(controller_mod.shutil, "which", return_value=None):
+            result = controller_mod.detect_controllers()
+
+        self.assertTrue(result["xone_dongle"])
+        self.assertTrue(result["xone_loaded"])
+
+    def test_typed_collectors_preserve_unavailable_and_failure_states(self):
+        collectors = (
+            probe_mod.ProbeCollector("ok", ("available", "missing"), lambda: {
+                "available": {"value": 1}, "missing": None,
+            }),
+            probe_mod.ProbeCollector("bad", ("failed",), lambda: (_ for _ in ()).throw(RuntimeError("boom"))),
+        )
+
+        results = probe_mod.collect_probe_results(collectors)
+
+        self.assertEqual(results["available"].status, probe_mod.ProbeStatus.AVAILABLE)
+        self.assertEqual(results["missing"].status, probe_mod.ProbeStatus.UNAVAILABLE)
+        self.assertEqual(results["failed"].status, probe_mod.ProbeStatus.FAILED)
+        self.assertIn("boom", results["failed"].error)
+
+    def test_shared_probe_has_no_welcome_dependency(self):
+        source = pathlib.Path(probe_mod.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("kyth_welcome", source)
+
     def test_collect_snapshot_keys(self):
         with mock.patch(
             "kyth_shared.system.bootc.fetch_bootc_status_data",

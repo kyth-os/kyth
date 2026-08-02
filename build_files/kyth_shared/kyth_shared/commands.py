@@ -11,6 +11,7 @@ import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 CommandPart = str | os.PathLike[str]
@@ -20,6 +21,50 @@ CompletedTextCommand = subprocess.CompletedProcess[str]
 _EXPECTED_COMMAND_ERRORS = (OSError, subprocess.SubprocessError)
 _UNSAFE_ENV_PREFIXES = ("LD_", "PYTHON")
 _UNSAFE_ENV_NAMES = {"BASH_ENV", "ENV", "GCONV_PATH", "PERL5LIB", "RUBYLIB"}
+_DESKTOP_ENV_KEYS = frozenset({
+    "DBUS_SESSION_BUS_ADDRESS", "DESKTOP_STARTUP_ID", "DISPLAY", "HOME",
+    "LANG", "LC_ALL", "PATH", "SUDO_ASKPASS", "WAYLAND_DISPLAY",
+    "XAUTHORITY", "XDG_CURRENT_DESKTOP", "XDG_RUNTIME_DIR",
+})
+
+
+class EnvironmentPolicy(StrEnum):
+    INHERIT = "inherit"
+    SANITIZED = "sanitized"
+    DESKTOP = "desktop"
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    """Immutable description of an external process boundary."""
+
+    argv: tuple[str, ...]
+    name: str = "command"
+    timeout: float | None = 30
+    environment: EnvironmentPolicy = EnvironmentPolicy.SANITIZED
+    sensitive_options: tuple[str, ...] = ()
+    invalidates: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        normalize_command(self.argv)
+
+    def command(self) -> list[str]:
+        return list(self.argv)
+
+    def display_command(self) -> list[str]:
+        command = self.command()
+        for index, value in enumerate(command[:-1]):
+            if value in self.sensitive_options:
+                command[index + 1] = "<redacted>"
+        return command
+
+
+def command_spec(command: Command | CommandSpec, **kwargs: Any) -> CommandSpec:
+    if isinstance(command, CommandSpec):
+        if kwargs:
+            raise TypeError("cannot override an existing CommandSpec")
+        return command
+    return CommandSpec(argv=tuple(normalize_command(command)), **kwargs)
 
 
 def normalize_command(command: Command) -> list[str]:
@@ -40,6 +85,23 @@ def sanitized_environment(env: Mapping[str, str] | None = None) -> dict[str, str
         if key not in _UNSAFE_ENV_NAMES
         and not any(key.startswith(prefix) for prefix in _UNSAFE_ENV_PREFIXES)
     }
+
+
+def desktop_environment(env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Keep only environment needed for desktop session authentication."""
+    source = os.environ if env is None else env
+    return {key: value for key, value in source.items() if key in _DESKTOP_ENV_KEYS}
+
+
+def environment_for(
+    policy: EnvironmentPolicy,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, str] | None:
+    if policy is EnvironmentPolicy.INHERIT:
+        return dict(os.environ if env is None else env)
+    if policy is EnvironmentPolicy.DESKTOP:
+        return desktop_environment(env)
+    return sanitized_environment(env)
 
 
 @dataclass(frozen=True)
@@ -74,26 +136,39 @@ class CommandRunner:
             enforce_no_shell=False,
         )
 
-    def _apply_policy(self, kwargs: dict[str, Any], *, bounded: bool) -> None:
-        if self._policy.enforce_no_shell:
+    def _apply_policy(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        bounded: bool,
+        spec: CommandSpec | None = None,
+    ) -> None:
+        if spec is not None or self._policy.enforce_no_shell:
             kwargs.setdefault("shell", False)
-        if self._policy.sanitize_env:
-            kwargs["env"] = sanitized_environment(kwargs.get("env"))
-        if bounded and self._policy.timeout is not None:
-            kwargs.setdefault("timeout", self._policy.timeout)
+        if spec is not None:
+            kwargs["env"] = environment_for(spec.environment, kwargs.get("env"))
+            if bounded and spec.timeout is not None:
+                kwargs.setdefault("timeout", spec.timeout)
+        else:
+            if self._policy.sanitize_env:
+                kwargs["env"] = sanitized_environment(kwargs.get("env"))
+            if bounded and self._policy.timeout is not None:
+                kwargs.setdefault("timeout", self._policy.timeout)
 
-    def run(self, command: Command, **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+    def run(self, command: Command | CommandSpec, **kwargs: Any) -> subprocess.CompletedProcess[Any]:
         """Run a command without raising solely because it returned non-zero."""
         kwargs.setdefault("check", False)
-        self._apply_policy(kwargs, bounded=True)
+        spec = command if isinstance(command, CommandSpec) else None
+        self._apply_policy(kwargs, bounded=True, spec=spec)
         executor = self._executor or subprocess.run
-        return executor(normalize_command(command), **kwargs)
+        return executor(spec.command() if spec else normalize_command(command), **kwargs)
 
-    def spawn(self, command: Command, **kwargs: Any) -> subprocess.Popen[Any]:
+    def spawn(self, command: Command | CommandSpec, **kwargs: Any) -> subprocess.Popen[Any]:
         """Start a process through the same normalization and environment policy."""
-        self._apply_policy(kwargs, bounded=False)
+        spec = command if isinstance(command, CommandSpec) else None
+        self._apply_policy(kwargs, bounded=False, spec=spec)
         spawner = self._spawner or subprocess.Popen
-        return spawner(normalize_command(command), **kwargs)
+        return spawner(spec.command() if spec else normalize_command(command), **kwargs)
 
     def optional(
         self,

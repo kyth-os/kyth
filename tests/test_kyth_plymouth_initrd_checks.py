@@ -14,9 +14,11 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
+import os
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LIB = ROOT / "build_files" / "scripts" / "lib" / "plymouth-initrd-checks.sh"
+OWNER = ROOT / "build_base" / "plymouth" / "kyth-plymouth-configure"
 
 
 def _run(function_call: str, *, cwd: pathlib.Path) -> subprocess.CompletedProcess:
@@ -30,6 +32,44 @@ def _run(function_call: str, *, cwd: pathlib.Path) -> subprocess.CompletedProces
 
 
 class PlymouthInitrdChecksTests(unittest.TestCase):
+    def test_canonical_configuration_owner_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            env = {**os.environ, "KYTH_PLYMOUTH_ROOT": str(root)}
+            subprocess.run([str(OWNER)], env=env, check=True)
+            first = {
+                path.relative_to(root).as_posix(): path.read_bytes()
+                for path in root.rglob("*") if path.is_file()
+            }
+            subprocess.run([str(OWNER)], env=env, check=True)
+            second = {
+                path.relative_to(root).as_posix(): path.read_bytes()
+                for path in root.rglob("*") if path.is_file()
+            }
+
+        self.assertEqual(first, second)
+        daemon = subprocess.run(
+            [str(OWNER), "--print-daemon-config"], capture_output=True, text=True, check=True,
+        ).stdout
+        self.assertEqual(first["etc/plymouth/plymouthd.conf"].decode(), daemon)
+        self.assertIn(b'force_add_dracutmodules+=" kyth-plymouth "', first["etc/dracut.conf.d/99-kyth.conf"])
+
+    def test_every_entry_point_delegates_to_canonical_owner(self):
+        base = (ROOT / "build_base" / "build.sh").read_text(encoding="utf-8")
+        setup = (ROOT / "build_files" / "scripts" / "plymouth-setup.sh").read_text(encoding="utf-8")
+        guard = (ROOT / "build_files" / "scripts" / "plymouth-branding-guard.sh").read_text(encoding="utf-8")
+        branding = (
+            ROOT / "build_files" / "scripts" / "branding"
+            / "28-bootc-kernel-arguments-and-boot-splash.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("/run/plymouth/kyth-plymouth-configure", base)
+        self.assertIn("/usr/libexec/kyth-plymouth-configure", setup)
+        self.assertIn("KYTH_PLYMOUTH_CONFIGURE", guard)
+        self.assertIn("kyth-plymouth-branding-guard", branding)
+        for non_owner in (base, setup, guard, branding):
+            self.assertNotIn('cat >/etc/dracut.conf.d/99-kyth.conf', non_owner)
+
     def test_lib_parses_as_bash(self):
         subprocess.run(["bash", "-n", str(LIB)], check=True)
 

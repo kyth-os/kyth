@@ -7,6 +7,8 @@ import logging
 import os
 import subprocess
 
+from kyth_shared.commands import APPLICATION_RUNNER, command_spec
+
 from kyth_welcome.services.command import run_sync
 from pathlib import Path
 from typing import Any
@@ -66,8 +68,8 @@ def apply_scheduler(name: str) -> None:
     if not name:
         return
     try:
-        subprocess.Popen(
-            scheduler_action(name).command(),
+        APPLICATION_RUNNER.spawn(
+            scheduler_action(name),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception:
@@ -77,8 +79,11 @@ def apply_scheduler(name: str) -> None:
 def set_sched_daemon_enabled(enabled: bool) -> None:
     cmd = "start" if enabled else "stop"
     try:
-        subprocess.Popen(
-            ["systemctl", "--user", cmd, "kyth-sched.service"],
+        APPLICATION_RUNNER.spawn(
+            command_spec(
+                ["systemctl", "--user", cmd, "kyth-sched.service"],
+                name="scheduler-daemon", timeout=None,
+            ),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception:
