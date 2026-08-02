@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── KWallet PAM bridge: wire pam_kwallet5.so into the SDDM PAM stack ─────────
 # kwallet-pam is installed but Fedora's sddm package does NOT always enable it.

@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Homebrew shell profile ────────────────────────────────────────────────────
 write_config /etc/profile.d/brew.sh <<'BREWSHEOF'

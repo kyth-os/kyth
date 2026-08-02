@@ -5,11 +5,11 @@
 set -euo pipefail
 
 # shellcheck source=lib/plymouth-initrd-checks.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-initrd-checks.sh"
+source "lib/plymouth-initrd-checks.sh"
 # shellcheck source=lib/plymouth-stock-themes.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-stock-themes.sh"
+source "lib/plymouth-stock-themes.sh"
 # shellcheck source=lib/plymouth-config.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-config.sh"
+source "lib/plymouth-config.sh"
 
 if [[ "${EUID}" -ne 0 ]]; then
 	printf 'ERROR: run as root, for example: run0 --pty /usr/bin/bash %q\n' "$0" >&2

@@ -2,7 +2,7 @@
 # Shared helpers for thirdparty tool installer fragments.
 # Source this before defining per-tool install functions.
 
-source "$(dirname "${BASH_SOURCE[0]}")/curl-common.sh"
+source "curl-common.sh"
 CURL_COMMON_ARGS+=(--max-time 300)
 
 is_enabled() {

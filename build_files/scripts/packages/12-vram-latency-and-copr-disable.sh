@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck source=../lib/gaming-coprs.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/gaming-coprs.sh"
+source "../lib/gaming-coprs.sh"
 
 # ── VRAM foreground prioritization + Vulkan low-latency layer ────────────────
 # dmemcg-booster (Valve, gitlab.steamos.cloud/holo/dmemcg-booster) enables the

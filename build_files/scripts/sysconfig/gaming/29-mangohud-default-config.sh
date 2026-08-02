@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── MangoHud default config ───────────────────────────────────────────────────
 # Pre-configure a curated overlay: useful OOTB without being overwhelming.

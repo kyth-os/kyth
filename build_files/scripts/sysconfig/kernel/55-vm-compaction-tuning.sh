@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── VM Memory Compaction Tuning ──────────────────────────────────────────────
 # Reduces memory compaction frequency by increasing the fragmentation threshold,

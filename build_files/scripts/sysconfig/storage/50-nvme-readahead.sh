@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── NVMe Read-Ahead Tuning ───────────────────────────────────────────────────
 # Increases block device read-ahead to 2048 KB for NVMe drives,

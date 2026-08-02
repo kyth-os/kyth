@@ -354,11 +354,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-01 14:16:23 UTC
+- Last refreshed (UTC): 2026-08-02 02:53:28 UTC
 - Current branch: testing
-- HEAD commit: 02841b3
-- Last commit title: refactor: modularize thirdparty software installers and performance tuning into kyth_shared
-- Last commit date: 2026-08-01T10:09:07-04:00
+- HEAD commit: 438c8ae
+- Last commit title: refactor: convert user polish to systemd user unit and add system probe cache export
+- Last commit date: 2026-08-01T10:16:23-04:00
 - CI workflow files: 8
 - Build script files: 21
 

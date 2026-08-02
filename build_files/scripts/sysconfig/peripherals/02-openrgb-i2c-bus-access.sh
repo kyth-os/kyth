@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── OpenRGB — i2c bus access ──────────────────────────────────────────────────
 # i2c-dev: exposes /dev/i2c-* devices to userspace so OpenRGB can talk to

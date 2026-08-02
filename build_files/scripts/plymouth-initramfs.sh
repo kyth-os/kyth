@@ -5,13 +5,13 @@
 set -euo pipefail
 
 # shellcheck source=lib/find-kver.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/find-kver.sh"
+source "lib/find-kver.sh"
 # shellcheck source=lib/plymouth-initrd-checks.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-initrd-checks.sh"
+source "lib/plymouth-initrd-checks.sh"
 # shellcheck source=lib/plymouth-config.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-config.sh"
+source "lib/plymouth-config.sh"
 # shellcheck source=lib/dracut-retry.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/dracut-retry.sh"
+source "lib/dracut-retry.sh"
 
 /usr/libexec/kyth-plymouth-branding-guard /ctx/branding/transparent-watermark.svg
 

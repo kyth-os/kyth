@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Baloo file indexer — disabled by default ─────────────────────────────────
 # Baloo (KDE's file indexer) runs heavy I/O scans on first boot and after game

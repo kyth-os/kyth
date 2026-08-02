@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── WiFi driver tweaks ───────────────────────────────────────────────────────
 write_config /etc/modprobe.d/cfg80211-kyth.conf <<'CFG80211EOF'

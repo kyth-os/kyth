@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Wacom / drawing tablet — udev hidraw access ───────────────────────────────
 # libwacom (installed in packages.sh) provides the tablet database that KWin and

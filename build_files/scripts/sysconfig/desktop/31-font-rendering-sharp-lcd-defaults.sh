@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Font rendering — sharp LCD defaults ──────────────────────────────────────
 # Linux freetype defaults vary by distro; Fedora's are conservative. hintfull

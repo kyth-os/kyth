@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── rtkit Audio Priority ─────────────────────────────────────────────────────
 # Configures rtkit daemon limits so PipeWire and WirePlumber can reliably claim

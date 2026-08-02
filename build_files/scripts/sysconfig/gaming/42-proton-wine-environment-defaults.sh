@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Proton/Wine environment defaults ──────────────────────────────────────────
 write_config /etc/environment.d/proton-radv.conf <<'PROTONEOF'

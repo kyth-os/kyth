@@ -3,11 +3,11 @@
 set -euo pipefail
 
 # shellcheck source=../lib/check-multilib.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/check-multilib.sh"
+source "../lib/check-multilib.sh"
 # shellcheck source=../lib/gaming-coprs.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/gaming-coprs.sh"
+source "../lib/gaming-coprs.sh"
 # shellcheck source=../lib/packages-helpers.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/packages-helpers.sh"
+source "../lib/packages-helpers.sh"
 
 # Enable COPRs for gaming packages
 for copr in "${KYTH_GAMING_COPRS[@]}"; do

@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── systemd-oomd hardening ────────────────────────────────────────────────────
 # By default systemd-oomd runs but monitors nothing — cgroups must explicitly

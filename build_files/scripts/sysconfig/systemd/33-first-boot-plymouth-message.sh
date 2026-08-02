@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── First-boot Plymouth message ───────────────────────────────────────────────
 # On the very first boot after install, the SELinux relabel and other setup

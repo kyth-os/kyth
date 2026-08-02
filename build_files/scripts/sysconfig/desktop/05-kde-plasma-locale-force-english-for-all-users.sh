@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── KDE Plasma locale: force English for all users ───────────────────────────
 # KDE applications (including Discover) use their own locale stack: they read

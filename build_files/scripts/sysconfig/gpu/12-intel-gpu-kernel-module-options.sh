@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Intel GPU kernel module options ─────────────────────────────────────────
 # enable_guc=3: enables GuC firmware submission (command scheduling) and HuC

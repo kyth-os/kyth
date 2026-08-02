@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── SELinux: relabel /var/home after each new deployment ──────────────────────
 # bootc/ostree relabels the OS tree (/usr, /etc) on every deployment, but /var

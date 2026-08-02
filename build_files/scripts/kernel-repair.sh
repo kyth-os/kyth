@@ -6,9 +6,9 @@
 set -euo pipefail
 
 # shellcheck source=lib/find-kver.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/find-kver.sh"
+source "lib/find-kver.sh"
 # shellcheck source=lib/dracut-retry.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/dracut-retry.sh"
+source "lib/dracut-retry.sh"
 
 KVER="$(find_active_kver)"
 if [ -z "${KVER}" ]; then

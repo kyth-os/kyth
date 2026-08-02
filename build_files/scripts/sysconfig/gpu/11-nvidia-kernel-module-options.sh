@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── NVIDIA kernel module options ─────────────────────────────────────────────
 # nvidia-drm.modeset=1  — required for Wayland/SDDM to use the NVIDIA KMS driver

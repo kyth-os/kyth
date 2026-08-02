@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── TCP BBRv3 Congestion Tuning ──────────────────────────────────────────────
 # Enables Explicit Congestion Notification (ECN) and disables slow start after idle

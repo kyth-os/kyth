@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── KWallet: login-unlocked session defaults ─────────────────────────────────
 # KWallet's normal low-friction path is a wallet named "kdewallet" protected by

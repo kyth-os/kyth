@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # shellcheck source=lib/curl-common.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/curl-common.sh"
+source "lib/curl-common.sh"
 CURL_COMMON_ARGS+=(--max-time 3600)
 
 # ── Proton-CachyOS ───────────────────────────────────────────────────────────

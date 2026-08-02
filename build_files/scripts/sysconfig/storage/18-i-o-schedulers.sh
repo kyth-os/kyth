@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── I/O schedulers ─────────────────────────────────────────────────────────
 # Keep NVMe on kernel defaults. Testers can opt into the experimental KythOS

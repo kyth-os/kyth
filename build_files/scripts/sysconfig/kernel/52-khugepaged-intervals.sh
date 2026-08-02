@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── khugepaged Compaction Tuning ─────────────────────────────────────────────
 # Relaxes Transparent Huge Pages (THP) collapse frequency and limits scanning overhead

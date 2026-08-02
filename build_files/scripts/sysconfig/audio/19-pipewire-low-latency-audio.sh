@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── PipeWire low-latency audio ─────────────────────────────────────────────────
 # 128 samples at 48 kHz = ~2.7 ms latency — low enough to eliminate perceptible

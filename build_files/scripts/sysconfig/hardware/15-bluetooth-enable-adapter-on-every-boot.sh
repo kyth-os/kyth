@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Bluetooth — enable adapter on every boot ────────────────────────────────
 # BlueZ ships with AutoEnable commented out (value is 'false' in modern versions).

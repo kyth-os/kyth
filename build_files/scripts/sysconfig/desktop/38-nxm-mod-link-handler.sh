@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── NXM mod link handler ──────────────────────────────────────────────────────
 # Nexus Mods uses nxm:// URIs to hand off mod downloads to a local manager

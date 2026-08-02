@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── ASUS D-Bus policy fixup ───────────────────────────────────────────────────
 # asusctl/supergfxctl are opt-in (ujust install-asus-tools), layered at runtime

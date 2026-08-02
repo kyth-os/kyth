@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── irqbalance Tuning ────────────────────────────────────────────────────────
 # Configures irqbalance to avoid migrating interrupts across CPU cache domains (CCDs),

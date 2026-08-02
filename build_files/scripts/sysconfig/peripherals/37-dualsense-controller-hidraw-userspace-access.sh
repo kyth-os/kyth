@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── DualSense controller — hidraw userspace access ───────────────────────────
 # The hid-playstation kernel module exposes PS5 DualSense haptics and adaptive

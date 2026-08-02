@@ -7,7 +7,7 @@
 set -euo pipefail
 
 # shellcheck source=lib/plymouth-config.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-config.sh"
+source "lib/plymouth-config.sh"
 
 PLYMOUTH_THEME_DIR=/usr/share/plymouth/themes/kyth
 mkdir -p "${PLYMOUTH_THEME_DIR}"

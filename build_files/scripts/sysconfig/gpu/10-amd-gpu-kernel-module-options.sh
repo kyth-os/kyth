@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── AMD GPU kernel module options ────────────────────────────────────────────
 # ppfeaturemask=0xffffffff: enables all PowerPlay features including fine-grained

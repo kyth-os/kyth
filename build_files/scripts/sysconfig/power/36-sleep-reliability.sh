@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Sleep reliability ─────────────────────────────────────────────────────────
 # Hybrid sleep and suspend-then-hibernate are common causes of black screen on

@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Flatpak overrides: Steam OpenXR/OpenVR sockets for WiVRn ───────────────
 write_config /etc/flatpak/overrides/com.valvesoftware.Steam <<'FLATPAKONEOF'

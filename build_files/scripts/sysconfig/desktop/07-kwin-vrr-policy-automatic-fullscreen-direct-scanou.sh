@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── KWin VRR policy — Automatic (fullscreen / direct scanout) ────────────────
 # KDE Plasma ships with VRR disabled (VrrPolicy=0 / Never). Gaming users expect

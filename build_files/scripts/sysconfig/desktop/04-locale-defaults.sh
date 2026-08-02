@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Locale defaults ─────────────────────────────────────────────────────────
 # Force a 12-hour AM/PM clock by default on installed systems.

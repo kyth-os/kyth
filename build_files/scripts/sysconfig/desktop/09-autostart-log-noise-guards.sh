@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── Autostart log-noise guards ────────────────────────────────────────────────
 # Fedora does not define Debian's plugdev group, but several third-party udev

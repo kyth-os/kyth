@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck source=../lib/packages-helpers.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/packages-helpers.sh"
+source "../lib/packages-helpers.sh"
 
 # ── Desktop helper, Plymouth, mutable-workspace, and creator tooling ─────────
 # Keep required desktop helper packages in one transaction. Optional niceties

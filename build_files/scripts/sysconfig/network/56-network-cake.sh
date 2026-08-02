@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── CAKE Network Queueing Discipline ──────────────────────────────────────────
 # Switches default network queueing discipline to CAKE to prioritize low-latency

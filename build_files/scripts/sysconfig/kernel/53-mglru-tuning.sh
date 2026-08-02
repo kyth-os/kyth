@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/../../lib/config-helpers.sh"
+source "../../lib/config-helpers.sh"
 
 # ── MGLRU Thrashing Mitigation ───────────────────────────────────────────────
 # Enables Multi-Gen LRU page reclamation on all paths to optimize memory eviction
