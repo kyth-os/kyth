@@ -1,48 +1,5 @@
 /* global document, fetch, Headers, setTimeout, setInterval, clearInterval, Intl, EventSource, navigator */
-const S = globalThis.KythInstallerState;
-let SESSION_TOKEN = 'SESSION_TOKEN_PLACEHOLDER';
 const STEPS = ['welcome','disk','kernel','config','review','install'];
-// Build DOM nodes directly instead of assembling HTML strings — keeps
-// backend-provided values (disk models, labels, …) out of markup entirely.
-function el(tag, attrs = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v === null || v === undefined || v === false) continue;
-    if (k === 'class') node.className = v;
-    else if (k === 'text') node.textContent = v;
-    else if (k === 'dataset') Object.assign(node.dataset, v);
-    else if (k === 'style') node.style.cssText = v;
-    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
-    else node.setAttribute(k, v);
-  }
-  for (const c of children.flat()) {
-    if (c !== null && c !== undefined) node.append(c.nodeType ? c : String(c));
-  }
-  return node;
-}
-
-function apiFetch(url, opts={}) {
-  if (typeof url !== 'string' || !url.startsWith('/api/')) {
-    throw new TypeError('API requests must use a same-origin /api/ route');
-  }
-  const o = {...opts, credentials:'same-origin'};
-  const h = new Headers(o.headers || {});
-  if (SESSION_TOKEN) h.set('X-Kyth-Session-Token', SESSION_TOKEN);
-  o.headers = h;
-  return fetch(url, o); // nosemgrep -- url is constrained to a same-origin API route above
-}
-
-function postRequest(url, body) {
-  return apiFetch(url, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body),
-  });
-}
-
-function postJSON(url, body) {
-  return postRequest(url, body).then(r => r.json());
-}
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function goto(name) {
@@ -1268,145 +1225,13 @@ function listenSSE() {
   };
 }
 
-function setProgress(pct) {
-  document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('install-pct').textContent   = pct + '%';
-  const fill = document.getElementById('progress-fill');
-  fill.parentElement.setAttribute('aria-valuenow', String(pct));
-  if (pct >= 100) fill.classList.remove('pulsing');
-  const imagePhase = S.kernel === 'fedora' && S.source && S.source.kind === 'embedded'
-    ? 'Writing verified offline image…' : 'Downloading OS image…';
-  const phases = {5:imagePhase,90:'Configuring…',95:'Creating user…',99:'Running final checks…'};
-  for (const [p, label] of Object.entries(phases).reverse()) {
-    if (pct >= parseInt(p)) { document.getElementById('install-phase').textContent = label; break; }
-  }
-}
-
-function toggleAccessibility(feature) {
-  document.body.classList.toggle(feature);
-  const button = document.getElementById('toggle-' + feature);
-  button.setAttribute('aria-pressed', document.body.classList.contains(feature) ? 'true' : 'false');
-}
-
-function showStats(s) {
-  const dl   = fmtBytes(s.downloaded), tot = fmtBytes(s.total);
-  const spd  = fmtBytes(s.speed) + '/s';
-  const eta  = s.eta_sec > 0 ? fmtEta(s.eta_sec) : '';
-  document.getElementById('stats-row').textContent = `${dl} / ${tot}  ·  ${spd}${eta ? '  ·  ETA ' + eta : ''}`;
-}
-
-function fmtBytes(n) {
-  if (n < 1024) return n + ' B';
-  if (n < 1024**2) return (n/1024).toFixed(1) + ' KB';
-  if (n < 1024**3) return (n/1024**2).toFixed(1) + ' MB';
-  return (n/1024**3).toFixed(2) + ' GB';
-}
-function fmtEta(s) {
-  if (s < 60) return s + 's';
-  return Math.floor(s/60) + 'm ' + (s%60) + 's';
-}
-
-function appendLog(text) {
-  const wrap = document.getElementById('log-wrap');
-  const line = document.createElement('div');
-  if (text.startsWith('$ '))       line.className = 'log-cmd';
-  else if (text.startsWith('──')) line.className = 'log-sep';
-  line.textContent = text;
-  wrap.appendChild(line);
-  wrap.scrollTop = wrap.scrollHeight;
-}
-
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text || '');
-  } catch (e) {
-    const area = document.createElement('textarea');
-    area.value = text || '';
-    document.body.appendChild(area);
-    area.select();
-    document.execCommand('copy');
-    document.body.removeChild(area);
-  }
-}
-
-function copyVisibleLog() {
-  copyText(document.getElementById('log-wrap').innerText || '');
-}
-
-// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
-// eslint-disable-next-line no-unused-vars
-function copyFullLog() {
-  apiFetch('/api/log')
-    .then(r => r.text())
-    .then(t => copyText(t))
-    .catch(() => copyVisibleLog());
-}
-
-// Called from completion and error page buttons.
-// eslint-disable-next-line no-unused-vars
-function copyInstallReport() {
-  apiFetch('/api/report')
-    .then(r => r.json())
-    .then(report => copyText(JSON.stringify(report, null, 2)))
-    .catch(() => copyText('{"status":"report unavailable"}'));
-}
-
-// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
-// eslint-disable-next-line no-unused-vars
-function toggleLog() {
-  const wrap  = document.getElementById('log-wrap');
-  const arrow = document.getElementById('log-arrow');
-  const toggle = document.getElementById('log-toggle');
-  const label = document.getElementById('log-toggle-label');
-  const open  = wrap.classList.toggle('open');
-  arrow.classList.toggle('open', open);
-  wrap.setAttribute('aria-hidden', String(!open));
-  toggle.setAttribute('aria-expanded', String(open));
-  label.textContent = open ? 'Hide install log' : 'Show install log';
-}
-
-function onDone(mokState) {
-  clearInterval(S.elapsedTimer);
-  if (mokState === 'staged' || mokState === 'pending') {
-    document.getElementById('done-sb-notice').style.display = '';
-  }
-  const isPartial = S.install_mode === 'alongside' || S.install_mode === 'resize_ntfs' || S.install_mode === 'free_space' || S.install_mode === 'manual';
-  if (isPartial) {
-    document.getElementById('done-boot-notice').style.display = '';
-  }
-  goto('done');
-}
-
-function showError(msg) {
-  clearInterval(S.elapsedTimer);
-  document.getElementById('err-msg').textContent = msg;
-  goto('error');
-}
-
-// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
-// eslint-disable-next-line no-unused-vars
-function backFromError() {
-  // S.password is wiped once an install starts, so a retry straight from the
-  // review page would POST an empty password. Route through Configure to make
-  // the user re-enter it whenever it is gone.
-  goto(S.password ? 'review' : 'config');
-}
-
-// Called from index.html's inline onclick/oninput handlers, not referenced within this file.
-// eslint-disable-next-line no-unused-vars
-function reboot() {
-  document.body.innerHTML = '<div id="main" style="display:flex;align-items:center;justify-content:center"><div class="card" style="text-align:center;padding:48px 40px"><div class="done-title">Restarting</div><p class="hero-body">Remove the installation media when your computer begins to restart.</p></div></div>';
-  apiFetch('/api/reboot', {method:'POST'}).catch(()=>{});
-}
-
 // These handlers are referenced by inline event attributes in index.html.
 // Keeping an explicit reference list lets standalone JS analyzers see the
 // cross-file usage without changing the browser-facing API.
 void [
   onSliderMove, showNewTableDialog, showCreateDialog, showDeleteDialog,
   showResizeDialog, showFormatDialog, showMountDialog, commitPartitions,
-  rollbackPartitions, saveConfig, startInstall, copyFullLog, toggleLog,
-  toggleAccessibility, backFromError, copyInstallReport, reboot,
+  rollbackPartitions, saveConfig, startInstall,
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────

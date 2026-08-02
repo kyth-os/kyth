@@ -9,6 +9,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -117,8 +118,8 @@ class ServerStaticAssetTests(unittest.TestCase):
         self.assertIn("text/css", content_type_calls[0].args[1])
         self.assertIn(b"{", handler.wfile.getvalue())
 
-    def test_app_js_has_session_token_placeholder_replaced(self):
-        handler = _make_handler("/app.js", host=f"127.0.0.1:{config.PORT}")
+    def test_api_js_has_session_token_placeholder_replaced(self):
+        handler = _make_handler("/api.js", host=f"127.0.0.1:{config.PORT}")
         handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
         handler.do_GET()
         handler.send_error.assert_not_called()
@@ -240,11 +241,14 @@ class ServerSseTests(unittest.TestCase):
 
 class ServerConstructionTests(unittest.TestCase):
     def test_server_defaults_to_a_fresh_context_when_none_given(self):
-        srv = server._Server(("127.0.0.1", 0), server.Handler)
-        try:
-            self.assertIsInstance(srv.context, InstallerContext)
-        finally:
-            srv.server_close()
+        # Construction semantics do not require a real listening socket. Keep
+        # this unit test runnable in restricted CI/sandbox environments.
+        with mock.patch.object(
+            server.ThreadingHTTPServer, "__init__", return_value=None,
+        ) as parent_init:
+            srv = server._Server(("127.0.0.1", 0), server.Handler)
+        self.assertIsInstance(srv.context, InstallerContext)
+        parent_init.assert_called_once_with(("127.0.0.1", 0), server.Handler)
 
 
 if __name__ == "__main__":

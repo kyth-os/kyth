@@ -21,6 +21,7 @@ class TestKythSharedApps(unittest.TestCase):
     def test_load_app_db_valid_json(self):
         # Valid JSON path
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+        temp_file.close()
         try:
             custom_db = [
                 ["pattern1", "App Name 1", "Suggestion 1", "Flatpak 1"],
@@ -39,6 +40,7 @@ class TestKythSharedApps(unittest.TestCase):
     def test_load_app_db_invalid_json(self):
         # Corrupted/invalid JSON file returns default
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+        temp_file.close()
         try:
             with open(temp_file.name, "w", encoding="utf-8") as fh:
                 fh.write("{invalid: json}")

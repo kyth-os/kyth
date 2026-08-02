@@ -36,8 +36,31 @@ class QualityContractsTests(unittest.TestCase):
 
     def test_critical_modules_have_explicit_thresholds(self):
         gate = (ROOT / "build_files/scripts/check-critical-coverage.py").read_text()
-        for module in ("recovery.py", "privileged.py", "updates.py", "user_polish.py"):
+        for module in (
+            "installer_service.py",
+            "recovery.py",
+            "privileged.py",
+            "updates.py",
+            "windows_installer.py",
+            "thirdparty.py",
+            "user_polish.py",
+            "vm_acceptance.py",
+        ):
             self.assertIn(module, gate)
+
+    def test_readme_is_not_rewritten_with_volatile_git_metadata(self):
+        hook = (ROOT / ".githooks/pre-commit").read_text()
+        readme = (ROOT / "README.md").read_text()
+        self.assertNotIn("update-readme-snapshot", hook)
+        self.assertNotIn("AUTO-README-START", readme)
+
+    def test_optimization_budgets_are_part_of_validation(self):
+        validation = (ROOT / "build_files/scripts/validate.sh").read_text()
+        report = ROOT / "build_files/scripts/optimization-report.py"
+        budgets = ROOT / "build_files/config/optimization-budgets.json"
+        self.assertIn("optimization-report.py --check", validation)
+        self.assertTrue(report.is_file())
+        self.assertTrue(budgets.is_file())
 
     def test_primary_ui_shells_do_not_bypass_command_gateway(self):
         ui_paths = (

@@ -290,7 +290,7 @@ ENABLE_VIRTUALIZATION_HOST=1 just build
 ENABLE_KSM=1 just build
 ```
 
-Install the tracked hooks once per clone to run the same README snapshot and
+Install the tracked hooks once per clone to run staged-file checks and the same
 pre-push validation used by maintainers:
 
 ```bash
@@ -336,6 +336,7 @@ cover the hardware behavior.
 - [Security model](docs/security-model.md)
 - [Release support](docs/release-support.md)
 - [Dependency management](docs/dependency-management.md)
+- [Optimization measurements](docs/optimization-budgets.md)
 - [Gaming validation matrix](docs/gaming-validation-matrix.md)
 - [Modding on KythOS](docs/modding-on-kythos.md)
 - [Game-save migration](docs/game-save-migration.md)
@@ -358,16 +359,3 @@ aggregate.
 The project is licensed under [Apache License 2.0](LICENSE). KythOS is not
 affiliated with Fedora, Universal Blue, KDE, Valve, CachyOS, or any game
 publisher.
-
-<!-- AUTO-README-START -->
-## Auto Project Snapshot
-
-- Last refreshed (UTC): 2026-08-02 16:21:47 UTC
-- Current branch: testing
-- HEAD commit: a906f58
-- Last commit title: fix container fragment source resolution
-- Last commit date: 2026-08-02T11:49:19-04:00
-- CI workflow files: 8
-- Build script files: 21
-
-<!-- AUTO-README-END -->

@@ -39,6 +39,9 @@ done
 echo "==> Python syntax"
 python3 build_files/scripts/validate-python-syntax.py
 
+echo "==> Optimization budgets"
+python3 build_files/scripts/optimization-report.py --check
+
 echo "==> JavaScript syntax"
 js_files=()
 while IFS= read -r -d '' file; do
@@ -61,7 +64,7 @@ export XDG_CONFIG_HOME="${test_home}/config"
 export XDG_DATA_HOME="${test_home}/data"
 export XDG_STATE_HOME="${test_home}/state"
 mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}"
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests -b
 
 echo "==> Structured configuration"
 while IFS= read -r -d '' file; do

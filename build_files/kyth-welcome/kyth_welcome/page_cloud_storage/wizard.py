@@ -43,7 +43,7 @@ class RcloneSetupWizard(QDialog):
         self.setMinimumSize(600, 500)
         self.resize(640, 540)
         self.setModal(True)
-        self.setStyleSheet("background: #1e1e1e;")
+        self.setObjectName("cloud-wizard")
 
         self._auth_worker: RcloneAuthorizeWorker | None = None
         self._token = ""
@@ -56,17 +56,15 @@ class RcloneSetupWizard(QDialog):
 
         # ── Header ──────────────────────────────────────────────────────
         header = QWidget()
-        header.setStyleSheet(
-            "QWidget { background: #1b1b1c; border-bottom: 1px solid #2e2e2e; }"
-        )
+        header.setObjectName("cloud-wizard-header")
         hdr_layout = QHBoxLayout(header)
         hdr_layout.setContentsMargins(28, 16, 28, 16)
         title_lbl = QLabel("Cloud Storage Setup")
-        title_lbl.setStyleSheet("font-size: 16px; font-weight: 700; color: #ffffff;")
+        title_lbl.setObjectName("cloud-wizard-title")
         hdr_layout.addWidget(title_lbl)
         hdr_layout.addStretch()
         self._step_label = QLabel()
-        self._step_label.setStyleSheet("font-size: 12px; color: #858585;")
+        self._step_label.setObjectName("cloud-step-label")
         hdr_layout.addWidget(self._step_label)
         root.addWidget(header)
 
@@ -80,9 +78,7 @@ class RcloneSetupWizard(QDialog):
 
         # ── Footer ──────────────────────────────────────────────────────
         footer = QWidget()
-        footer.setStyleSheet(
-            "QWidget { background: #181818; border-top: 1px solid #2b2b2b; }"
-        )
+        footer.setObjectName("cloud-wizard-footer")
         ftr_layout = QHBoxLayout(footer)
         ftr_layout.setContentsMargins(28, 14, 28, 14)
         ftr_layout.setSpacing(10)
@@ -115,7 +111,7 @@ class RcloneSetupWizard(QDialog):
         page, layout = self._page_container()
 
         heading = QLabel("Choose your cloud storage service")
-        heading.setStyleSheet("font-size: 17px; font-weight: 700; color: #ffffff;")
+        heading.setObjectName("cloud-page-heading")
         layout.addWidget(heading)
 
         sub = QLabel(
@@ -133,20 +129,16 @@ class RcloneSetupWizard(QDialog):
             btn = QPushButton()
             btn.setCheckable(True)
             btn.setMinimumHeight(96)
-            btn.setStyleSheet("QPushButton { text-align: left; border-radius: 8px; }")
+            btn.setObjectName("cloud-service")
             inner = QVBoxLayout(btn)
             inner.setContentsMargins(16, 14, 16, 14)
             inner.setSpacing(6)
             name_lbl = QLabel(info["label"])
-            name_lbl.setStyleSheet(
-                "font-size: 14px; font-weight: 700; background: transparent; border: none;"
-            )
+            name_lbl.setObjectName("cloud-service-name")
             inner.addWidget(name_lbl)
             desc_lbl = QLabel(info["description"])
             desc_lbl.setWordWrap(True)
-            desc_lbl.setStyleSheet(
-                "font-size: 12px; color: #a6a6a6; background: transparent; border: none;"
-            )
+            desc_lbl.setObjectName("cloud-service-copy")
             inner.addWidget(desc_lbl)
             btn.clicked.connect(lambda _checked, s=svc_id: self._select_service(s))
             self._service_btns[svc_id] = btn
@@ -161,7 +153,7 @@ class RcloneSetupWizard(QDialog):
         page, layout = self._page_container()
 
         heading = QLabel("Name and local folder")
-        heading.setStyleSheet("font-size: 17px; font-weight: 700; color: #ffffff;")
+        heading.setObjectName("cloud-page-heading")
         layout.addWidget(heading)
 
         sub = QLabel(
@@ -176,7 +168,7 @@ class RcloneSetupWizard(QDialog):
         form_layout.setSpacing(10)
 
         name_lbl = QLabel("Remote name")
-        name_lbl.setStyleSheet("font-weight: 600; color: #cccccc;")
+        name_lbl.setObjectName("cloud-field-label")
         form_layout.addWidget(name_lbl)
         self._name_edit = QLineEdit()
         self._name_edit.setPlaceholderText("e.g. gdrive")
@@ -187,11 +179,11 @@ class RcloneSetupWizard(QDialog):
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("background: #26293a; max-height: 1px; border: none;")
+        sep.setObjectName("cloud-divider")
         form_layout.addWidget(sep)
 
         folder_lbl = QLabel("Local sync folder")
-        folder_lbl.setStyleSheet("font-weight: 600; color: #cccccc;")
+        folder_lbl.setObjectName("cloud-field-label")
         form_layout.addWidget(folder_lbl)
         folder_row = QHBoxLayout()
         folder_row.setSpacing(8)
@@ -214,9 +206,7 @@ class RcloneSetupWizard(QDialog):
         page, layout = self._page_container()
 
         self._auth_heading = QLabel("Authorize access")
-        self._auth_heading.setStyleSheet(
-            "font-size: 17px; font-weight: 700; color: #ffffff;"
-        )
+        self._auth_heading.setObjectName("cloud-page-heading")
         layout.addWidget(self._auth_heading)
 
         self._auth_sub = QLabel(
@@ -261,9 +251,7 @@ class RcloneSetupWizard(QDialog):
         page, layout = self._page_container()
 
         done_heading = QLabel("All set!")
-        done_heading.setStyleSheet(
-            "font-size: 22px; font-weight: 700; color: #4dbb6f;"
-        )
+        done_heading.setObjectName("cloud-done-heading")
         layout.addWidget(done_heading)
 
         self._done_sub = QLabel("")
@@ -283,11 +271,11 @@ class RcloneSetupWizard(QDialog):
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("background: #26293a; max-height: 1px; border: none;")
+        sep.setObjectName("cloud-divider")
         done_card_layout.addWidget(sep)
 
         cmds_lbl = QLabel("Useful commands:")
-        cmds_lbl.setStyleSheet("font-weight: 600; color: #cccccc; font-size: 13px;")
+        cmds_lbl.setObjectName("cloud-command-label")
         done_card_layout.addWidget(cmds_lbl)
 
         self._done_cmds = QTextEdit()
@@ -361,19 +349,7 @@ class RcloneSetupWizard(QDialog):
     def _select_service(self, svc_id: str):
         self._selected_service = svc_id
         for sid, btn in self._service_btns.items():
-            if sid == svc_id:
-                btn.setChecked(True)
-                btn.setStyleSheet(
-                    "QPushButton { background: rgba(79, 140, 255, 0.18); "
-                    "border: 2px solid #4f8cff; "
-                    "border-radius: 6px; text-align: left; }"
-                )
-            else:
-                btn.setChecked(False)
-                btn.setStyleSheet(
-                    "QPushButton { background: #151722; border: 1px solid #26293a; "
-                    "border-radius: 8px; text-align: left; }"
-                )
+            btn.setChecked(sid == svc_id)
 
     # ── Remote page ───────────────────────────────────────────────────────
 

@@ -50,14 +50,13 @@ def recent_sessions(limit: int = 15) -> list[SessionRow]:
     if not db_path.exists():
         return []
     try:
-        conn = sqlite3.connect(str(db_path), timeout=3)
-        rows = conn.execute(
-            "SELECT game_name, started_at, duration_s, avg_fps, p1_low_fps, "
-            "stutter_count, scheduler FROM sessions "
-            "ORDER BY started_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        conn.close()
+        with sqlite3.connect(str(db_path), timeout=3) as conn:
+            rows = conn.execute(
+                "SELECT game_name, started_at, duration_s, avg_fps, p1_low_fps, "
+                "stutter_count, scheduler FROM sessions "
+                "ORDER BY started_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
     except Exception:
         return []
 

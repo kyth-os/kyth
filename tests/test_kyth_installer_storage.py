@@ -25,6 +25,13 @@ from kyth_installer.context import InstallerContext  # noqa: E402
 
 
 class InstallerWebuiTests(unittest.TestCase):
+    @staticmethod
+    def _javascript() -> str:
+        return "\n".join(
+            path.read_text()
+            for path in sorted(WEBUI_DIR.glob("*.js"))
+        )
+
     def test_accessibility_and_region_controls_are_exposed(self):
         html = (WEBUI_DIR / "index.html").read_text()
 
@@ -35,7 +42,7 @@ class InstallerWebuiTests(unittest.TestCase):
         self.assertIn('id="sel-keymap"', html)
 
     def test_ntfs_resize_ui_uses_backend_safety_flag(self):
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
 
         self.assertIn("p.ntfs_resize_candidate", js)
         self.assertIn("block.ref.ntfs_resize_candidate", js)
@@ -43,7 +50,7 @@ class InstallerWebuiTests(unittest.TestCase):
     def test_install_log_is_collapsed_until_toggle_opens_it(self):
         html = (WEBUI_DIR / "index.html").read_text()
         css = (WEBUI_DIR / "style.css").read_text()
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
 
         self.assertIn('id="log-toggle"', html)
         self.assertIn('aria-expanded="false"', html)
@@ -54,7 +61,7 @@ class InstallerWebuiTests(unittest.TestCase):
 
     def test_disk_continue_button_id_matches_updater(self):
         html = (WEBUI_DIR / "index.html").read_text()
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
 
         self.assertIn('id="disk-next"', html)
         self.assertIn("document.getElementById('disk-next').disabled", js)
@@ -71,7 +78,7 @@ class InstallerWebuiTests(unittest.TestCase):
         self.assertNotIn("S.target_partition.fstype", js)
 
     def test_back_from_error_routes_to_config_not_configure(self):
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
         self.assertIn("goto(S.password ? 'review' : 'config')", js)
         self.assertNotIn("goto(S.password ? 'review' : 'configure')", js)
 
@@ -89,7 +96,7 @@ class InstallerWebuiTests(unittest.TestCase):
         self.assertTrue(expected.issubset(actual))
 
     def test_webui_and_backend_share_install_mode_names(self):
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
 
         for field in (
             "install_mode",

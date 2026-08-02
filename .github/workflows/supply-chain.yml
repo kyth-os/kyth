@@ -220,6 +220,20 @@ jobs:
             --output "${OUT_FILE}"
           echo "path=${OUT_FILE}" >> "$GITHUB_OUTPUT"
 
+      - name: Capture optimization measurements
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.current_digest }}
+          RPM_MANIFEST: ${{ steps.rpm_manifest.outputs.path }}
+        run: |
+          mkdir -p output/supply-chain
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --raw > "${RUNNER_TEMP}/kyth-oci-manifest.json"
+          python3 build_files/scripts/optimization-report.py \
+            --check \
+            --oci-manifest "${RUNNER_TEMP}/kyth-oci-manifest.json" \
+            --rpm-manifest "${RPM_MANIFEST}" \
+            --output output/supply-chain/optimization.json
+
       - name: Setup Grype
         id: setup_grype
         uses: ./.github/actions/setup-anchore-tool

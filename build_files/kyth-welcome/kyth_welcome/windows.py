@@ -2,9 +2,7 @@
 from .core_base import IS_LIVE, load_profile, restyle
 from .services.bootc import current_branch
 from .services.runtime import has_blocking_tasks
-from .page_registry import (
-    PROBLEM_ROUTES, SEARCH_ALIASES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups,
-)
+from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups
 from .qt import (
     QCompleter, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
 )
@@ -262,16 +260,14 @@ class MainWindow(QMainWindow):
     # Familiar phrasings mapped to page keys, including migration/search terms
     # people bring with them from another desktop.
     _SEARCH_ITEMS = SEARCH_ITEMS
-    _SEARCH_ALIASES = SEARCH_ALIASES
     _PROBLEM_ROUTES = PROBLEM_ROUTES
 
     def _setup_search(self):
         self._search_key_by_entry: dict[str, str] = {}
-        for key, aliases in self._SEARCH_ALIASES.items():
+        for key, (title, _description, terms) in self._SEARCH_ITEMS.items():
             if key not in self._page_index_by_key:
                 continue
-            title, _description, extra_terms = self._SEARCH_ITEMS.get(key, (key, "", []))
-            for alias in [title, key, *aliases, *extra_terms]:
+            for alias in [title, key, *terms]:
                 self._search_key_by_entry.setdefault(alias, key)
 
         entries = sorted(self._search_key_by_entry)
@@ -320,12 +316,10 @@ class MainWindow(QMainWindow):
             key = descriptor.key
             if key not in self._page_index_by_key:
                 continue
-            aliases = self._SEARCH_ALIASES.get(key, [])
             terms = [
                 descriptor.key,
                 descriptor.title,
                 descriptor.search_description,
-                *aliases,
                 *descriptor.search_terms,
             ]
             score = 0

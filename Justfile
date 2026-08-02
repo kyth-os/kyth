@@ -36,7 +36,7 @@ check-dockerfile check_base_image=default_base_image:
 # Run Python unit tests.
 [group('Quality')]
 test:
-    python3 -m unittest discover -s tests
+    python3 -m unittest discover -s tests -b
 
 # Run Python unit tests with a statement coverage report.
 [group('Quality')]
@@ -44,6 +44,20 @@ test-coverage:
     ./build_files/scripts/run-quality.sh
     echo ""
     echo "HTML report: coverage-html/index.html"
+
+# Check maintainability/optimization budgets tracked in source control.
+[group('Quality')]
+check-optimization:
+    python3 build_files/scripts/optimization-report.py --check
+
+# Print source metrics; pass runtime=1 on a representative installed system.
+[group('Quality')]
+optimization-report runtime="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=()
+    if [[ "{{ runtime }}" == "1" ]]; then args+=(--runtime); fi
+    python3 build_files/scripts/optimization-report.py "${args[@]}"
 
 # Create/update the local pinned quality-tool environment.
 [group('Quality')]
@@ -119,20 +133,13 @@ export-kali-apps:
     set -euo pipefail
     exec just --justfile build_files/just/kyth.just export-kali-apps
 
-# Refresh the auto-generated README project snapshot section.
-[group('Utility')]
-sync-readme:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    ./build_files/scripts/update-readme-snapshot.sh
-
-# Install tracked git hooks for automatic README snapshot and commit message helpers.
+# Install tracked git hooks for validation and commit message helpers.
 [group('Utility')]
 install-git-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
     git config core.hooksPath .githooks
-    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/update-readme-snapshot.sh build_files/scripts/install-validation-tools.sh build_files/scripts/validate.sh build_files/scripts/run-quality.sh build_files/scripts/ci-preflight.sh
+    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/install-validation-tools.sh build_files/scripts/validate.sh build_files/scripts/run-quality.sh build_files/scripts/ci-preflight.sh
     echo "Git hooks installed via core.hooksPath=.githooks"
 
 # Remove old output ISOs — keeps only the current live ISO and current BIB ISO.

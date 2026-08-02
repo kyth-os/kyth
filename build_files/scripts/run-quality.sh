@@ -20,7 +20,7 @@ echo "==> Python correctness"
 
 echo "==> Python coverage"
 "${quality_python}" -m coverage erase
-"${quality_python}" -m coverage run -m unittest discover -s tests
+"${quality_python}" -m coverage run -m unittest discover -s tests -b
 "${quality_python}" -m coverage report -m
 "${quality_python}" -m coverage json
 "${quality_python}" build_files/scripts/check-critical-coverage.py
