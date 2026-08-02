@@ -43,3 +43,6 @@ function postRequest(url, body) {
 function postJSON(url, body) {
   return postRequest(url, body).then(response => response.json());
 }
+
+// S, el, postJSON are used from app.js and install-ui.js.
+void [S, el, postJSON];
