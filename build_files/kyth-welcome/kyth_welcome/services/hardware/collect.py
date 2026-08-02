@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from kyth_shared.hardware_policy import evaluate_system, read_applied_state
+
 from .types import HardwareProbe
 from .nvidia import _gpu_probe
 from .io import (
@@ -25,6 +27,44 @@ from .codec import _codec_probe
 from ..process import command_stdout, probe_cached
 
 
+def _hardware_policy_probe() -> HardwareProbe:
+    try:
+        evaluation = evaluate_system()
+    except Exception as exc:
+        return HardwareProbe(
+            "Hardware policy", "warn",
+            "Hardware policy could not be evaluated.",
+            str(exc),
+            "Run kyth-hardware-policy validate and review the service journal.",
+        )
+    profiles = [profile["title"] for profile in evaluation.profiles]
+    quirks = [quirk["id"] for quirk in evaluation.quirks]
+    applied = read_applied_state()
+    details = [
+        f"Policy revision: {evaluation.policy_revision}",
+        f"Applied state: {applied.get('status', 'not yet applied')}",
+        f"Booted image: {applied.get('image_reference', 'unknown')}",
+        f"Image digest: {applied.get('image_digest', 'unknown')}",
+        f"Recommended image variant: {evaluation.recommended_variant}",
+        f"Matched profiles: {', '.join(profiles) or 'none'}",
+        f"Active quirks: {', '.join(quirks) or 'none'}",
+        f"Capabilities: {', '.join(evaluation.capabilities) or 'none'}",
+    ]
+    if evaluation.warnings:
+        details.extend(["", *evaluation.warnings])
+        return HardwareProbe(
+            "Hardware policy", "warn",
+            "Hardware matched, but one or more quirks need maintainer review.",
+            "\n".join(details),
+            "Update or remove the expired hardware quirk before the next release.",
+        )
+    return HardwareProbe(
+        "Hardware policy", "ok",
+        f"Matched {len(profiles)} versioned hardware profile{'s' if len(profiles) != 1 else ''}.",
+        "\n".join(details),
+    )
+
+
 def _collect_hardware_probes() -> list[HardwareProbe]:
     def fetch() -> list[HardwareProbe]:
         from ..diagnostics import _system_hub_probe
@@ -34,6 +74,7 @@ def _collect_hardware_probes() -> list[HardwareProbe]:
         return [
             # Gaming-critical first
             _gpu_probe(pci_text, lsmod_text),
+            _hardware_policy_probe(),
             _cpu_probe(),
             _display_probe(),
             _memory_probe(),

@@ -173,7 +173,7 @@ Do these intentionally. Evangelists are made when recovery works.
    softly instead of blocking the desktop.
 3. Interrupt or fail a Flatpak metadata refresh, then confirm System Hub and
    `ujust smoke-check` explain the missing app state.
-4. On NVIDIA hardware, remove `/var/lib/kyth/hw-setup-done`, reboot, and confirm
+4. On NVIDIA hardware, run `sudo kyth-hardware-policy apply --force`, reboot, and confirm
    the setup path retries instead of silently giving up.
 5. Connect a hibernated Windows volume and confirm migration tools warn the user
    to fully shut down Windows.

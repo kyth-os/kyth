@@ -105,6 +105,7 @@ ujust status                    # booted, staged, and rollback deployments
 ujust kyth-upgrade              # stage OS updates and update Flatpaks
 ujust switch-channel testing   # stage the testing channel
 ujust switch-channel stable    # return to the stable channel
+ujust hardware-policy          # matched profiles, quirks, and applied state
 ```
 
 Channel or kernel switches create a new bootc deployment and take effect after
@@ -229,6 +230,8 @@ See [Architecture](docs/architecture.md) and the
 [security model](docs/security-model.md) for the detailed component and trust
 boundaries. The [health-aware update lifecycle](docs/update-safety.md) explains
 boot validation, automatic rollback, rollout rings, and digest quarantine.
+The [hardware policy](docs/hardware-policy.md) documents device matching,
+managed quirks, and the generated [support matrix](docs/hardware-support-matrix.md).
 
 ## Security and release integrity
 
@@ -328,6 +331,8 @@ cover the hardware behavior.
 - [Architecture](docs/architecture.md)
 - [Stability principles](docs/stability-principles.md)
 - [Daily-driver validation](docs/daily-driver-validation.md)
+- [Hardware policy](docs/hardware-policy.md)
+- [Hardware support matrix](docs/hardware-support-matrix.md)
 - [Security model](docs/security-model.md)
 - [Release support](docs/release-support.md)
 - [Dependency management](docs/dependency-management.md)
@@ -357,11 +362,11 @@ publisher.
 <!-- AUTO-README-START -->
 ## Auto Project Snapshot
 
-- Last refreshed (UTC): 2026-08-02 15:17:53 UTC
+- Last refreshed (UTC): 2026-08-02 15:36:09 UTC
 - Current branch: testing
-- HEAD commit: e8a4b49
-- Last commit title: feat: add release qualification framework
-- Last commit date: 2026-08-02T11:04:03-04:00
+- HEAD commit: 1f75088
+- Last commit title: feat: add health-aware update recovery
+- Last commit date: 2026-08-02T11:17:53-04:00
 - CI workflow files: 8
 - Build script files: 21
 

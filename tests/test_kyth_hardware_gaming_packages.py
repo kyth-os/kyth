@@ -150,9 +150,8 @@ class NvidiaStatusViewTests(unittest.TestCase):
         self.assertFalse(view.install_visible)
 
     def test_failed_state_without_hw_setup_done_falls_through_to_installed(self):
-        # svc_state == "failed" alone isn't enough to offer a retry — the
-        # hw-setup-done marker must also be present, otherwise this looks
-        # like the ordinary "not built yet" case.
+        # svc_state == "failed" alone isn't enough to offer a retry — a policy
+        # result must also exist, otherwise this looks like ordinary pre-setup.
         view = self._view(installed=True, svc_state="failed", hw_setup_done=False)
         self.assertEqual(view.install_text, "Build Driver Now")
 

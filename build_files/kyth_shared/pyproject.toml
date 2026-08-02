@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 [project.scripts]
 kyth-ai-dev = "kyth_shared.ai_dev:main"
 kyth-boot-health = "kyth_shared.boot_health:main"
+kyth-hardware-policy = "kyth_shared.hardware_policy:main"
 kyth-qualify = "kyth_shared.qualification:main"
 kyth-safe-upgrade = "kyth_shared.safe_upgrade:main"
 kyth-smoke-check = "kyth_shared.smoke_check:main"

@@ -67,16 +67,9 @@ install-nvidia-driver:
     echo "  This may take 5–15 minutes on first compile…"
     echo
 
-    sudo rm -f /var/lib/kyth/hw-setup-done
-    sudo akmods --force --kernels "$(uname -r)"
-
-    # Keep nouveau available if compilation fails. Only switch the next boot to
-    # the proprietary driver after its module has compiled successfully.
-    KARGS="rd.driver.blacklist=nouveau,nova_core modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1"
-    sudo grubby --update-kernel=ALL --args="${KARGS}" 2>/dev/null || \
-        echo "  (grubby: non-fatal — kargs.d applies on next deployment)"
-
-    sudo touch /var/lib/kyth/hw-setup-done
+    # The policy engine owns module compilation, kernel arguments, suspend
+    # services, and durable setup state so the UI and boot service agree.
+    sudo /usr/bin/kyth-hardware-policy apply --force
 
     echo
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

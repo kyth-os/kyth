@@ -167,6 +167,7 @@ def _health_command_report() -> str:
         ("Daily-driver health model", ["/usr/bin/kyth-smoke-check", "--json"], 90),
         ("Post-update confidence", ["/usr/bin/kyth-post-update-check", "--force", "--no-notify"], 45),
         ("NVIDIA status", ["/usr/bin/kyth-nvidia-status"], 30),
+        ("Hardware policy", ["/usr/bin/kyth-hardware-policy", "status"], 30),
         ("Controller readiness", ["/usr/bin/kyth-controller-check"], 30),
         ("Suspend/resume readiness", ["/usr/bin/kyth-resume-check"], 45),
         ("Raw support snapshot", ["/usr/bin/kyth-device-info"], 60),

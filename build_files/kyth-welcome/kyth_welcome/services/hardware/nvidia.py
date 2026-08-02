@@ -1,7 +1,7 @@
-"""NVIDIA detection, first-boot setup flags, and GPU probe."""
+"""NVIDIA detection, declarative setup state, and GPU probe."""
 from __future__ import annotations
 
-import os
+import json
 from kyth_welcome.services.command import run_sync
 from dataclasses import dataclass
 
@@ -57,7 +57,12 @@ def _hw_setup_service_state() -> str:
  # _hw_setup_service_state
 
 def _hw_setup_done() -> bool:
-    return os.path.exists("/var/lib/kyth/hw-setup-done")
+    try:
+        with open("/var/lib/kyth/hardware-policy.json", encoding="utf-8") as stream:
+            state = json.load(stream)
+        return state.get("status") in {"applied", "failed"}
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return False
 
 
 @dataclass(frozen=True)
@@ -188,4 +193,3 @@ def _gpu_probe(pci_text: str, lsmod_text: str) -> HardwareProbe:
 
     return HardwareProbe("Graphics", "dim", "GPU detected, vendor not recognized.", "Detected:\n" + "\n".join(gpu_lines))
  # _gpu_probe
-

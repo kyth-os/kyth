@@ -69,6 +69,15 @@ while IFS= read -r -d '' file; do
 	jq empty "${file}"
 done < <(git ls-files -z '*.json')
 python3 build_files/scripts/validate-toml-syntax.py
+PYTHONPATH=build_files/kyth_shared python3 -m kyth_shared.hardware_policy \
+	--policy build_files/config/hardware-profiles.toml validate --fail-expired
+hardware_matrix="${test_home}/hardware-support-matrix.md"
+PYTHONPATH=build_files/kyth_shared python3 -m kyth_shared.hardware_policy \
+	--policy build_files/config/hardware-profiles.toml matrix --output "${hardware_matrix}"
+cmp --silent "${hardware_matrix}" docs/hardware-support-matrix.md || {
+	echo "Hardware support matrix is stale; regenerate it with kyth-hardware-policy matrix." >&2
+	exit 1
+}
 
 echo "==> systemd units"
 output="$(systemd-analyze verify build_files/*.service build_files/*.timer 2>&1 || true)"

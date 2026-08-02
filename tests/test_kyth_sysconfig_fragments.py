@@ -130,7 +130,6 @@ class ConfigHelperTests(unittest.TestCase):
         # Fragments run in isolated bash subshells, so each must source the
         # helper via a path relative to its own location and then call it.
         migrated = {
-            "gpu/10-amd-gpu-kernel-module-options.sh": ["write_config"],
             "kernel/13-ntsync.sh": ["write_config", "write_line"],
             "storage/18-i-o-schedulers.sh": ["write_config"],
         }
