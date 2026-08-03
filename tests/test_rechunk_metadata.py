@@ -1,3 +1,4 @@
+import fnmatch
 import json
 import re
 import unittest
@@ -46,6 +47,37 @@ class RechunkMetadataTests(unittest.TestCase):
         self.assertIn("/usr/lib/systemd/user/kyth*", paths)
         self.assertIn("/usr/share/applications/kyth*", paths)
         self.assertIn("/usr/share/kyth*", paths)
+
+    def test_kyth_group_covers_pip_installed_site_packages(self):
+        # kyth_shared/kyth_welcome/kyth_installer are `pip install --prefix=/usr`'d
+        # (not RPM packages), landing at
+        # /usr/lib{,64}/python3.<minor>/site-packages/kyth_<name>/ — none of the
+        # /usr/bin, /usr/lib/kyth-*, /usr/share/kyth* globs above match that nested
+        # path, so without this the highest-churn Python source in the whole image
+        # fell through to the single shared "unpackaged" dedicated layer alongside
+        # unrelated large blobs like Proton-CachyOS.
+        paths = set(self.groups["kyth"]["files"])
+        self.assertIn("/usr/lib/python3*/site-packages/kyth_*", paths)
+        self.assertIn("/usr/lib64/python3*/site-packages/kyth_*", paths)
+        for pattern in ("/usr/lib/python3*/site-packages/kyth_*", "/usr/lib64/python3*/site-packages/kyth_*"):
+            for pkg in ("kyth_shared", "kyth_welcome", "kyth_installer"):
+                self.assertTrue(
+                    fnmatch.fnmatch(f"/usr/lib/python3.13/site-packages/{pkg}", pattern.replace("lib64", "lib")),
+                    f"{pattern} does not match a real {pkg} site-packages path",
+                )
+
+    def test_proton_cachyos_is_its_own_dedicated_layer(self):
+        # A large, independently-versioned binary blob (extracted by
+        # proton-cachyos.sh, not RPM-packaged) that previously had no group of
+        # its own and fell through to "unpackaged" alongside unrelated content —
+        # bundling it with the Python source above would have meant every
+        # kyth_welcome/kyth_installer edit re-downloading a multi-hundred-MB
+        # Proton build, and vice versa.
+        self.assertEqual(
+            self.groups["proton-cachyos"]["files"],
+            ["/usr/share/steam/compatibilitytools.d/*"],
+        )
+        self.assertIs(self.groups["proton-cachyos"]["dedicated"], True)
 
     def test_custom_groups_precede_upstream_default_groups(self):
         names = list(self.groups)
