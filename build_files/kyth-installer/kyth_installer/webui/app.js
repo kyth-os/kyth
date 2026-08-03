@@ -561,7 +561,7 @@ function renderPendingOps() {
     const desc = describeOp(op);
     return el('div', { class: 'pending-item' },
       el('span', { style: 'flex:1;font-size:13px;', text: desc }),
-      el('button', {
+      S.manualCommitted ? null : el('button', {
         class: 'undo-btn',
         text: '✕',
         title: 'Remove this operation',
@@ -583,12 +583,16 @@ function describeOp(op) {
   }
 }
 
-function removePendingOp() {
-  // Remove from local state and force a re-fetch from server
-  // The server may not support individual removal, so we reload
-  showOverlay('Removing operation...', '', null);
-  // For now, just reload the pending ops from the server
-  loadPendingOps();
+function removePendingOp(index) {
+  postJSON('/api/disk/pending/remove', { disk: S.disk.name, index }).then(j => {
+    if (j.ok) {
+      loadPendingOps();
+      loadPartitions();
+      renderDiskLayouts();
+    } else {
+      showOverlay('Error', el('div', { class: 'validation-errors', text: j.message || 'Could not remove operation' }), null);
+    }
+  });
 }
 
 function updateManualButtons() {
@@ -744,6 +748,27 @@ function showDeleteDialog() {
   });
 }
 
+function _updateResizeSliderBounds() {
+  const parts = S.partitions || [];
+  const partName = document.getElementById('dlg-resize-part').value;
+  const part = parts.find(p => p.name === partName);
+  if (!part) return;
+  const currentGiB = Math.floor(part.size_bytes / 1024**3);
+  const maxNewGiB = Math.max(1, currentGiB - 1);
+  const slider = document.getElementById('dlg-resize-slider');
+  slider.max = maxNewGiB;
+  slider.min = 1;
+  const defaultVal = Math.min(maxNewGiB, Math.max(1, Math.floor(currentGiB / 2)));
+  slider.value = defaultVal;
+  _onResizeSliderMove(defaultVal, currentGiB);
+}
+
+// Called from index.html-equivalent inline oninput handler built via el() below.
+function _onResizeSliderMove(newGiB, currentGiB) {
+  document.getElementById('dlg-resize-new-label').textContent = `New size: ${newGiB} GiB`;
+  document.getElementById('dlg-resize-freed-label').textContent = `Freed: ${currentGiB - newGiB} GiB`;
+}
+
 function showResizeDialog() {
   const parts = S.partitions || [];
   const selectable = parts.filter(p => !p.current && !p.in_use && !p.efi && p.size_bytes >= 40 * 1024**3);
@@ -755,16 +780,29 @@ function showResizeDialog() {
   const content = el('div', {},
     el('div', { class: 'modal-title', text: 'Resize Partition (Shrink)' }),
     el('div', { class: 'field-label', text: 'Select Partition' }),
-    el('select', { id: 'dlg-resize-part' },
-      ...selectable.map(p => el('option', { value: p.name, text: `${p.name} (${p.size})` }))),
-    el('div', { class: 'field-label', text: 'New Size (GiB)' }),
-    el('input', { type: 'number', id: 'dlg-resize-size', value: 32, min: 32, max: 100 }),
+    el('select', {
+      id: 'dlg-resize-part',
+      onchange: _updateResizeSliderBounds,
+    }, ...selectable.map(p => el('option', { value: p.name, text: `${p.name} (${p.size})` }))),
+    el('div', { class: 'field-label', text: 'New Size' }),
+    el('div', { class: 'slider-labels' },
+      el('span', { id: 'dlg-resize-new-label', text: 'New size: -- GiB' }),
+      el('span', { id: 'dlg-resize-freed-label', text: 'Freed: -- GiB' })),
+    el('input', {
+      type: 'range', id: 'dlg-resize-slider', class: 'slider-input', min: 1, max: 100, value: 32,
+      oninput: (e) => {
+        const partName = document.getElementById('dlg-resize-part').value;
+        const p = parts.find(pt => pt.name === partName);
+        _onResizeSliderMove(parseInt(e.target.value, 10), Math.floor((p ? p.size_bytes : 0) / 1024**3));
+      },
+    }),
+    el('div', { class: 'slider-subtext', text: 'Drag the slider to choose the partition’s new (shrunk) size.' }),
     el('div', { style: 'color:var(--amber);font-size:12px;margin-top:8px;',
       text: '⚠ Only shrinking is supported. The partition will be shrunk from its end.' }),
   );
   showOverlay('Resize Partition', content, () => {
     const part = document.getElementById('dlg-resize-part').value;
-    const newSizeGiB = parseFloat(document.getElementById('dlg-resize-size').value);
+    const newSizeGiB = parseInt(document.getElementById('dlg-resize-slider').value, 10);
     const newSizeBytes = Math.floor(newSizeGiB * 1024**3);
     postJSON('/api/disk/resize', { disk: S.disk.name, partition: part, new_size_bytes: newSizeBytes }).then(j => {
       if (j.ok) {
@@ -775,6 +813,7 @@ function showResizeDialog() {
       }
     });
   });
+  _updateResizeSliderBounds();
 }
 
 function showFormatDialog() {

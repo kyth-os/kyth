@@ -24,6 +24,7 @@ class PostRouteService:
         "resize_partition",
         "format_partition",
         "set_mountpoint",
+        "remove_pending",
         "commit_partitions",
         "rollback_partitions",
     }
@@ -37,6 +38,7 @@ class PostRouteService:
         "resize_partition",
         "format_partition",
         "set_mountpoint",
+        "remove_pending",
     )
 
     def __init__(self, context: InstallerContext):

@@ -44,6 +44,7 @@ ROUTES = {
     # Manual partition management
     "partition_pending": RouteSpec("GET", "/api/disk/pending"),
     "filesystems": RouteSpec("GET", "/api/disk/filesystems"),
+    "remove_pending": RouteSpec("POST", "/api/disk/pending/remove", requires_same_origin=True),
     "new_table": RouteSpec("POST", "/api/disk/new-table", requires_same_origin=True),
     "create_partition": RouteSpec("POST", "/api/disk/create", requires_same_origin=True),
     "delete_partition": RouteSpec("POST", "/api/disk/delete", requires_same_origin=True),

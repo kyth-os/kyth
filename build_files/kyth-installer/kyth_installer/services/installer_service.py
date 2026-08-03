@@ -118,6 +118,17 @@ class InstallerService:
         })
         return {"ok": True, "pending": len(journal.ops)}
 
+    def remove_pending(self, body: dict) -> dict:
+        _disk, journal, error = self._journal_for(body)
+        if error:
+            return error
+        if journal.committed:
+            return {"ok": False, "message": "Partition changes have already been committed and cannot be edited."}
+        index = disk._safe_int(body.get("index"), -1)
+        if index < 0 or not journal.remove_op(index):
+            return {"ok": False, "message": "Invalid pending operation index."}
+        return {"ok": True, "pending": len(journal.ops)}
+
     def set_mountpoint(self, body: dict) -> dict:
         _disk, journal, partition, error = self._partition_for(body)
         if error:

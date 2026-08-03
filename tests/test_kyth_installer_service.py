@@ -11,6 +11,7 @@ INSTALLER_ROOT = ROOT / "build_files/kyth-installer"
 if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
+from kyth_installer import partition_ops
 from kyth_installer.context import InstallerContext
 from kyth_installer.services.installer_service import InstallerService
 from kyth_installer.app import _load_answer_file, run_headless
@@ -60,6 +61,40 @@ class TestInstallerService(unittest.TestCase):
         body["hostname"] = "invalid_hostname_!!!"
         res = self.service.start_install(body)
         self.assertFalse(res.get("started"))
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_remove_pending_drops_the_targeted_op_only(self, mock_list_disks):
+        mock_list_disks.return_value = [{"name": "/dev/sda"}]
+        self.service.new_table({"disk": "/dev/sda", "table_type": "gpt"})
+        res = self.service.create_partition({
+            # Starts past the 1 MiB automatic BIOS boot partition new_table
+            # reserves on GPT disks, so this doesn't overlap it.
+            "disk": "/dev/sda", "start_bytes": 4 * 1024**2, "size_bytes": 10 * 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/",
+        })
+        self.assertTrue(res.get("ok"))
+        self.assertEqual(res.get("pending"), 2)
+
+        remove_res = self.service.remove_pending({"disk": "/dev/sda", "index": 1})
+        self.assertTrue(remove_res.get("ok"))
+        self.assertEqual(remove_res.get("pending"), 1)
+        journal = partition_ops.get_journal(self.context)
+        self.assertEqual(journal.ops[0]["kind"], "new_table")
+
+        bad_res = self.service.remove_pending({"disk": "/dev/sda", "index": 99})
+        self.assertFalse(bad_res.get("ok"))
+        self.assertEqual(len(journal.ops), 1)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_remove_pending_rejects_after_commit(self, mock_list_disks):
+        mock_list_disks.return_value = [{"name": "/dev/sda"}]
+        self.service.new_table({"disk": "/dev/sda", "table_type": "gpt"})
+        journal = partition_ops.get_journal(self.context)
+        journal._committed = True
+
+        res = self.service.remove_pending({"disk": "/dev/sda", "index": 0})
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(len(journal.ops), 1)
 
 
 class AnswerFileTests(unittest.TestCase):
