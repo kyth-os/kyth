@@ -9,8 +9,8 @@ class _StoreLandingMixin:
     def _fallback_store_names(self) -> dict[str, tuple[str, str]]:
         names: dict[str, tuple[str, str]] = {}
         for pack in self._STARTER_PACKS:
-            for app_id, label, _ in pack["apps"]:
-                names[app_id] = (label, pack["desc"])
+            for app_id, label, _selected_by_default, desc in pack["apps"]:
+                names[app_id] = (label, desc)
         for tool in self._CR_TOOLS + self._SEC_HOST_TOOLS:
             names[tool["flatpak"]] = (tool["name"], tool["desc"])
         for _, desc, app_id in self._FAMILIAR_APPS:

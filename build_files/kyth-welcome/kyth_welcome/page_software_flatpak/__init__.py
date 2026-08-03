@@ -46,16 +46,15 @@ class _FlatpakStoreTabMixin(
         hero_layout.addLayout(hero_text, 1)
         hero_actions = QVBoxLayout()
         hero_actions.setSpacing(8)
+        # "Browse Catalog" and "Refresh" used to be repeated here AND in
+        # action_row below with the exact same handlers — two visually
+        # distinct buttons doing the literal same thing. Keep the one unique
+        # hero action; action_row (loading-state-aware via _catalog.py) owns
+        # Refresh/Browse All.
         featured_btn = QPushButton("Show Featured")
         featured_btn.setObjectName("primary")
         featured_btn.clicked.connect(lambda _=False: self._render_store_landing())
         hero_actions.addWidget(featured_btn)
-        browse_btn = QPushButton("Browse Catalog")
-        browse_btn.clicked.connect(lambda _=False: self._load_fp_catalog())
-        hero_actions.addWidget(browse_btn)
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self._refresh_fp_metadata)
-        hero_actions.addWidget(refresh_btn)
         hero_actions.addStretch()
         hero_layout.addLayout(hero_actions)
         layout.addWidget(hero)

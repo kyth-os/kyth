@@ -336,12 +336,12 @@ class _StarterPackTabMixin:
         details.hide()
 
         checks = []
-        for app_id, label, selected_by_default in apps:
+        for app_id, label, selected_by_default, desc in apps:
             installed = _is_flatpak_installed(app_id)
             check = QCheckBox(label)
             check.setChecked(selected_by_default and not installed)
             check.setEnabled(not installed)
-            check.setToolTip(app_id)
+            check.setToolTip(f"{desc}\n{app_id}")
             state_text = "Installed" if installed else ("Available" if selected_by_default else "Optional")
 
             app_row = QHBoxLayout()
