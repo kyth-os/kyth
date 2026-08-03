@@ -31,7 +31,7 @@ def recommended_launcher_for_game(game) -> str:
 
 def recommended_profile_for_game(game) -> str:
     if game.status == "blocked":
-        return "Do not try bypass launch options; use other system or wait for publisher support."
+        return "Do not try bypass launch options; use another system or wait for publisher support."
     if any(token in game.name.lower() for token in ("cyberpunk", "red dead", "hogwarts")):
         return "kyth-gamescope quality -- %command%"
     if game.anticheat in ("EAC", "BattlEye", "VAC", "Warden"):
@@ -93,7 +93,7 @@ def readiness_result_text(game) -> str:
         else "Do not migrate saves until the game has a supported Linux path."
     )
     mod_note = (
-        "Use the Modding guide before applying other system mod managers."
+        "Use the Modding guide before applying mod managers on another system."
         if game.status != "blocked"
         else "Modding is irrelevant while the game is blocked."
     )

@@ -15,7 +15,7 @@ class _SavesMixin:
         saves_layout.addWidget(saves_title)
         saves_desc = QLabel(
             "KythOS recommends Ludusavi for game save backup and restore. Run it "
-            "before a other system migration, after importing a library, and before "
+            "before another system migration, after importing a library, and before "
             "large modding sessions."
         )
         saves_desc.setObjectName("card-copy")

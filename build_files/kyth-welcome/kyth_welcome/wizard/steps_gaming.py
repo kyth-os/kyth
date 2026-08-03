@@ -11,7 +11,7 @@ from __future__ import annotations
 from ..core_base import IS_LIVE
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives
 from ..qt import QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget
-from ..widgets import _divider, _make_card
+from ..widgets import _divider, _make_card, _make_flow_step
 
 
 class _GamingStepMixin:
@@ -31,7 +31,7 @@ class _GamingStepMixin:
         body = QLabel(
             f"Detected: {listed}. Do not point Steam at the NTFS library and start playing. "
             "Copy the library into Steam on a Linux-formatted disk first, then let Proton "
-            "build clean prefixes there. The migration tool below mounts other system read-only."
+            "build clean prefixes there. The migration tool below mounts the other system's drive read-only."
         )
         body.setObjectName("wiz-card-copy")
         body.setWordWrap(True)
@@ -89,17 +89,14 @@ class _GamingStepMixin:
         intro_copy.setObjectName("wiz-card-copy")
         pc_layout.addWidget(intro_copy)
 
-        for step in [
-            "1.  Open Steam",
-            "2.  Steam  →  Settings  →  Compatibility",
-            "3.  Turn on  Enable Steam Play for all other titles",
-            "4.  Select  Proton-CachyOS  from the version dropdown",
-            "5.  Restart Steam — your full game library now appears",
-        ]:
-            lbl = QLabel(step)
-            lbl.setObjectName("wiz-card-copy")
-            lbl.setStyleSheet("padding-left: 8px;")
-            pc_layout.addWidget(lbl)
+        for index, (step_title, copy) in enumerate((
+            ("Open Steam", ""),
+            ("Go to Settings → Compatibility", ""),
+            ("Turn on \"Enable Steam Play for all other titles\"", ""),
+            ("Select Proton-CachyOS", "From the version dropdown."),
+            ("Restart Steam", "Your full game library now appears."),
+        ), 1):
+            pc_layout.addWidget(_make_flow_step(index, step_title, copy))
 
         tip = QLabel(
             "Proton-CachyOS is already installed on this system and kept up to date automatically."

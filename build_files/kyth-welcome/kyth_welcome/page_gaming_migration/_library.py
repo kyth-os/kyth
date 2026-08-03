@@ -15,7 +15,7 @@ class _LibraryMixin:
         migrate_head.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
         self._add(migrate_head)
         migrate_sub = QLabel(
-            "Dual-booting? Use this tool to copy your Steam library from a other system "
+            "Dual-booting? Use this tool to copy your Steam library from another system's "
             "NTFS partition directly into Steam on KythOS. The drive is mounted "
             "read-only \u2014 your original install is never modified."
         )
