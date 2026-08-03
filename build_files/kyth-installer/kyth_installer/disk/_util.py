@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
+
+from kyth_shared.runtime_output import parse_lsblk_devices
 
 import kyth_installer.disk as _disk
 
@@ -71,8 +72,7 @@ def _lsblk_blockdevices(args: list[str], timeout: int = 5) -> list[dict]:
         ["lsblk", "--json", "--bytes", *args],
         capture_output=True, text=True, check=True, timeout=timeout,
     )
-    out = result.stdout
-    return json.loads(out).get("blockdevices", [])
+    return parse_lsblk_devices(result.stdout)
 
 
 

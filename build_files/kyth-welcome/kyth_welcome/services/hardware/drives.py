@@ -1,11 +1,13 @@
 """NTFS/BitLocker drive listing and controller detection snapshot."""
 from __future__ import annotations
 
-import json
+from kyth_shared.runtime_output import parse_lsblk_devices
 from kyth_shared.system.controllers import detect_controllers
 from kyth_welcome.services.command import run_sync
 
 from ..process import probe_cached
+
+_NTFS_LIKE_FSTYPES = ("ntfs", "ntfs3", "bitlocker")
 
 
 def _find_ntfs_drives() -> list[dict]:
@@ -15,7 +17,7 @@ def _find_ntfs_drives() -> list[dict]:
             ["lsblk", "--json", "--output", "NAME,FSTYPE,SIZE,LABEL,MOUNTPOINT,PATH"],
             capture_output=True, text=True, timeout=10, check=False,
         )
-        data = json.loads(r.stdout)
+        devices = parse_lsblk_devices(r.stdout)
     except Exception:
         return []
 
@@ -26,7 +28,7 @@ def _find_ntfs_drives() -> list[dict]:
             if not isinstance(dev, dict):
                 continue
             fstype = (dev.get("fstype") or "").lower()
-            if fstype in ("ntfs", "ntfs3", "bitlocker"):
+            if fstype in _NTFS_LIKE_FSTYPES:
                 name = dev.get("name") or ""
                 path = dev.get("path") or (f"/dev/{name}" if name else "")
                 if not path:
@@ -41,7 +43,7 @@ def _find_ntfs_drives() -> list[dict]:
                 })
             _walk(dev.get("children") or [])
 
-    _walk(data.get("blockdevices", []))
+    _walk(devices)
     return results
  # _find_ntfs_drives
 
