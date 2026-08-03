@@ -17,7 +17,7 @@ from .qt import (
     QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QTextEdit, QUrl,
 )
 from .widgets import (
-    Page, _make_card, _set_log_panel,
+    FlowLayout, Page, _make_card, _set_log_panel,
 )
 
 
@@ -71,8 +71,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         quick_body.setObjectName("card-copy")
         quick_body.setWordWrap(True)
         quick_layout.addWidget(quick_body)
-        quick_btns = QHBoxLayout()
-        quick_btns.setSpacing(8)
+        quick_btns = FlowLayout(spacing=8)
         panic_btn = QPushButton("Panic Button")
         panic_btn.setObjectName("primary")
         panic_btn.setToolTip("Run the safe repair bundle: app menu, user polish, Flatpak repair, audio restart, and snapshot.")
@@ -145,7 +144,6 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         nightlight_btn.setToolTip("Open KDE Night Light / blue light filter settings to set a schedule.")
         nightlight_btn.clicked.connect(self._open_night_light)
         quick_btns.addWidget(nightlight_btn)
-        quick_btns.addStretch()
         quick_layout.addLayout(quick_btns)
         self._add(quick)
 
