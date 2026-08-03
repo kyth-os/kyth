@@ -24,9 +24,9 @@ class _LibraryMixin:
         self._add(migrate_sub)
 
         hibernate_warn = QLabel(
-            "\u26a0  Before scanning: boot the other system and do a full Shut Down (not Restart). "
-            "other system Fast Startup leaves NTFS volumes in a hibernated state \u2014 Linux "
-            "can read them safely read-only, but other system may report errors on resume "
+            "\u26a0  Before scanning: boot Windows and do a full Shut Down (not Restart). "
+            "Windows Fast Startup leaves NTFS volumes in a hibernated state \u2014 Linux "
+            "can read them safely read-only, but Windows may report errors on resume "
             "if any other tool writes to the partition. This tool never writes to it."
         )
         hibernate_warn.setObjectName("card-copy")

@@ -120,7 +120,7 @@ class _LibraryMixin:
             ac_badge = QLabel(f"  ⛔ {compat.anticheat}  ")
             ac_badge.setToolTip(
                 f"Blocked by {compat.anticheat} anti-cheat — not supported on Linux. "
-                "No workaround exists; this game requires other system."
+                "No workaround exists; this game requires Windows."
             )
             ac_badge.setStyleSheet(
                 "background:#3a1010; color:#f48771; border:1px solid #f48771;"
