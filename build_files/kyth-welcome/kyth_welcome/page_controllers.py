@@ -10,7 +10,7 @@ from .qt import (
 )
 from .services.launch import flatpak_run, popen, systemsettings
 from .widgets import (
-    Page, _make_card,
+    Page, _make_card, _make_flow_step,
 )
 
 
@@ -69,14 +69,15 @@ class ControllerPage(Page):
         self._xone_btn.clicked.connect(self._flash_xone)
         xbox_layout.addWidget(self._xone_btn)
 
-        xbox_bt_steps = QLabel(
-            "Pair over Bluetooth (no dongle):\n"
-            "  1.  Press and hold the Xbox button for 3 seconds until it flashes\n"
-            "  2.  Hold the Sync button (top of controller) until it flashes rapidly\n"
-            "  3.  Open System Tray → Bluetooth → Add Device"
-        )
-        xbox_bt_steps.setObjectName("card-copy")
-        xbox_layout.addWidget(xbox_bt_steps)
+        xbox_bt_label = QLabel("Pair over Bluetooth (no dongle):")
+        xbox_bt_label.setObjectName("card-copy")
+        xbox_layout.addWidget(xbox_bt_label)
+        for index, (step_title, copy) in enumerate((
+            ("Press and hold the Xbox button", "For 3 seconds, until it flashes."),
+            ("Hold the Sync button", "Top of the controller, until it flashes rapidly."),
+            ("Add the device", "System Tray → Bluetooth → Add Device."),
+        ), 1):
+            xbox_layout.addWidget(_make_flow_step(index, step_title, copy))
 
         xbox_bt_btn = QPushButton("Open Bluetooth Settings")
         xbox_bt_btn.clicked.connect(lambda: systemsettings("kcm_bluetooth"))
@@ -97,19 +98,25 @@ class ControllerPage(Page):
         ps_desc.setWordWrap(True)
         ps_layout.addWidget(ps_desc)
 
-        ps_bt_steps = QLabel(
-            "Pair over Bluetooth:\n"
-            "  DualSense (PS5):  hold PS + Create until the light bar blinks\n"
-            "  DualShock 4 (PS4):  hold PS + Share until the light bar blinks\n"
-            "  Then: System Tray → Bluetooth → Add Device\n\n"
-            "For haptics and adaptive triggers in Proton games:\n"
-            "  Steam → Settings → Controller → Enable PlayStation controller support\n"
-            "  In each game's controller settings: enable DualSense features\n"
-            "  Avoid third-party controller emulation tools — they hide the native DualSense\n"
-            "  from Proton and prevent haptic/trigger passthrough"
-        )
-        ps_bt_steps.setObjectName("card-copy")
-        ps_layout.addWidget(ps_bt_steps)
+        ps_bt_label = QLabel("Pair over Bluetooth:")
+        ps_bt_label.setObjectName("card-copy")
+        ps_layout.addWidget(ps_bt_label)
+        for index, (step_title, copy) in enumerate((
+            ("DualSense (PS5)", "Hold PS + Create until the light bar blinks."),
+            ("DualShock 4 (PS4)", "Hold PS + Share until the light bar blinks."),
+            ("Add the device", "System Tray → Bluetooth → Add Device."),
+        ), 1):
+            ps_layout.addWidget(_make_flow_step(index, step_title, copy))
+
+        ps_haptics_label = QLabel("For haptics and adaptive triggers in Proton games:")
+        ps_haptics_label.setObjectName("card-copy")
+        ps_layout.addWidget(ps_haptics_label)
+        for index, (step_title, copy) in enumerate((
+            ("Enable PlayStation controller support", "Steam → Settings → Controller."),
+            ("Enable DualSense features", "In each game's own controller settings."),
+            ("Avoid third-party controller emulation tools", "They hide the native DualSense from Proton and prevent haptic/trigger passthrough."),
+        ), 1):
+            ps_layout.addWidget(_make_flow_step(index, step_title, copy))
 
         self._ds_status_lbl = QLabel()
         self._ds_status_lbl.setObjectName("card-copy")
@@ -139,17 +146,12 @@ class ControllerPage(Page):
         other_title = QLabel("Nintendo Switch Pro, 8BitDo & Other Controllers")
         other_title.setObjectName("card-title")
         other_layout.addWidget(other_title)
-        other_steps = QLabel(
-            "Nintendo Switch Pro (Bluetooth):\n"
-            "  Hold the Sync button on the top edge until the lights cycle\n\n"
-            "8BitDo (Bluetooth):\n"
-            "  Hold Start + B (Android mode) or Start + X (macOS mode, best for Linux)\n"
-            "  Then hold the Pair button for 3 seconds\n\n"
-            "Most USB controllers (HORI, PowerA, PDP, Razer):\n"
-            "  Plug in — they appear immediately as standard HID gamepads"
-        )
-        other_steps.setObjectName("card-copy")
-        other_layout.addWidget(other_steps)
+        for index, (step_title, copy) in enumerate((
+            ("Nintendo Switch Pro (Bluetooth)", "Hold the Sync button on the top edge until the lights cycle."),
+            ("8BitDo (Bluetooth)", "Hold Start + B (Android mode) or Start + X (macOS mode, best for Linux), then hold Pair for 3 seconds."),
+            ("Most USB controllers", "HORI, PowerA, PDP, Razer, and similar — plug in and they appear immediately as standard HID gamepads."),
+        ), 1):
+            other_layout.addWidget(_make_flow_step(index, step_title, copy))
 
         other_bt_btn = QPushButton("Open Bluetooth Settings")
         other_bt_btn.clicked.connect(lambda: systemsettings("kcm_bluetooth"))
