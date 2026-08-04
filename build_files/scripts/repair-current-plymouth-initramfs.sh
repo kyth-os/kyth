@@ -25,7 +25,24 @@ kernel="${1:-$(uname -r)}"
 include_root="$(mktemp -d /tmp/kyth-plymouth-repair.XXXXXX)"
 boot_was_ro=0
 
+# Tracks the image currently being repaired so cleanup() can restore it from
+# its pre-repair backup if we exit (dracut failure, or a plymouth_require_*
+# validation failure below) before the repair for that image is confirmed
+# good. Without this, a failed repair can leave a truncated or unverified
+# initramfs sitting on the live boot path.
+current_image=""
+current_backup=""
+repair_incomplete=0
+
 cleanup() {
+	if [[ -n "${current_image}" && "${repair_incomplete}" -eq 1 ]]; then
+		echo "ERROR: repair of ${current_image} did not complete; restoring pre-repair backup" >&2
+		if cp -a "${current_backup}" "${current_image}"; then
+			echo "Restored ${current_image} from ${current_backup}" >&2
+		else
+			echo "ERROR: FAILED to restore ${current_backup} -> ${current_image}; this kernel may not boot. Restore it manually." >&2
+		fi
+	fi
 	rm -rf "${include_root}"
 	if [[ "${boot_was_ro}" -eq 1 ]]; then
 		mount -o remount,ro /boot || true
@@ -90,21 +107,44 @@ for image in "${images[@]}"; do
 		cp -a "${image}" "${backup}"
 	fi
 
+	current_image="${image}"
+	current_backup="${backup}"
+	repair_incomplete=1
+
 	# --nohardlink: dracut's hardlink-dedup pass can SIGSEGV inside
 	# containerized build environments due to a util-linux/kernel AF_ALG
 	# interaction (util-linux/util-linux#4334) — harmless to skip everywhere.
-	TMPDIR=/var/tmp dracut \
-		--tmpdir /var/tmp \
-		--no-hostonly \
-		--compress "zstd -1" \
-		--kver "${kernel}" \
-		--force \
-		--nohardlink \
-		--add "drm plymouth ostree kyth-plymouth" \
-		--include "${include_root}/etc/plymouth" /etc/plymouth \
-		--include "${include_root}/usr/share/plymouth" /usr/share/plymouth \
-		--include "${include_root}/usr/share/pixmaps/system-logo-white.png" /usr/share/pixmaps/system-logo-white.png \
-		"${image}"
+	# Retry once from a known-good state (the pre-repair backup) before
+	# giving up: this is the live deployed initramfs, not a fresh build
+	# artifact, so a transient dracut failure must not leave it truncated.
+	dracut_status=1
+	for attempt in 1 2; do
+		if TMPDIR=/var/tmp dracut \
+			--tmpdir /var/tmp \
+			--no-hostonly \
+			--compress "zstd -1" \
+			--kver "${kernel}" \
+			--force \
+			--nohardlink \
+			--add "drm plymouth ostree kyth-plymouth" \
+			--include "${include_root}/etc/plymouth" /etc/plymouth \
+			--include "${include_root}/usr/share/plymouth" /usr/share/plymouth \
+			--include "${include_root}/usr/share/pixmaps/system-logo-white.png" /usr/share/pixmaps/system-logo-white.png \
+			"${image}"; then
+			dracut_status=0
+			break
+		fi
+		dracut_status=$?
+		echo "WARNING: dracut failed with status ${dracut_status} for ${image} (attempt ${attempt}/2)" >&2
+		if ((attempt < 2)); then
+			echo "Restoring pre-repair backup before retrying..." >&2
+			cp -a "${backup}" "${image}"
+		fi
+	done
+	if ((dracut_status != 0)); then
+		echo "ERROR: dracut failed twice for ${image}; leaving it unrepaired" >&2
+		exit "${dracut_status}"
+	fi
 
 	defaults="$(mktemp /tmp/kyth-plymouth-defaults.XXXXXX)"
 	listing="$(mktemp /tmp/kyth-plymouth-listing.XXXXXX)"
@@ -136,6 +176,8 @@ for image in "${images[@]}"; do
 
 	rm -f "${defaults}" "${listing}" "${logo}"
 
+	repair_incomplete=0
 	echo "Repaired ${image}"
 	echo "Backup: ${backup}"
 done
+current_image=""
