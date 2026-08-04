@@ -28,6 +28,78 @@ class RefactorRuntimeImportTests(unittest.TestCase):
                     violations.append(f"{path.relative_to(PACKAGE)}:{node.lineno}")
         self.assertEqual(violations, [])
 
+    # Functions backed by a subprocess call (bootc status, lspci, ...) that
+    # WelcomePage and MainWindow's sidebar used to call directly during
+    # construction — freezing the whole app before any window appeared,
+    # since these are the very first widgets built at startup. Each is
+    # wrapped in probe_cached() so it's cheap *after* the first real call,
+    # but that first call still blocks the GUI thread if made synchronously
+    # from a constructor. Fixed for those two; this guards against a new
+    # instance being introduced in any page's __init__ (or in
+    # get_nav_groups(), which is MainWindow's sidebar builder) elsewhere.
+    _BLOCKING_PROBE_NAMES = frozenset({
+        "_detect_nvidia",
+        "current_branch",
+        "current_kernel_flavor",
+        "has_staged_update",
+        "has_rollback_deployment",
+        "bootc_image_timestamp",
+        "bootc_image_digest",
+        "bootc_status_text",
+        "bootc_status_data",
+        "active_bootc_operation",
+        "bootc_proxy_running",
+    })
+
+    class _DirectCallFinder(ast.NodeVisitor):
+        """Collects calls to banned names, but does not descend into a
+        lambda or nested def — those run later (as a worker/timer
+        callback), not synchronously at construction time."""
+
+        def __init__(self, banned: frozenset[str]):
+            self.banned = banned
+            self.found: list[tuple[str, int]] = []
+
+        def visit_Lambda(self, node):  # noqa: N802
+            pass
+
+        def visit_FunctionDef(self, node):  # noqa: N802
+            pass
+
+        def visit_AsyncFunctionDef(self, node):  # noqa: N802
+            pass
+
+        def visit_Call(self, node):  # noqa: N802
+            name = None
+            if isinstance(node.func, ast.Name):
+                name = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                name = node.func.attr
+            if name in self.banned:
+                self.found.append((name, node.lineno))
+            self.generic_visit(node)
+
+    def test_page_constructors_do_not_call_blocking_probes_directly(self):
+        violations = []
+        for path in sorted(PACKAGE.glob("page_*.py")) + [PACKAGE / "windows.py", PACKAGE / "page_registry.py"]:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            targets = [
+                node for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef) and node.name in ("__init__", "get_nav_groups")
+            ]
+            for target in targets:
+                finder = self._DirectCallFinder(self._BLOCKING_PROBE_NAMES)
+                for stmt in target.body:
+                    finder.visit(stmt)
+                for name, lineno in finder.found:
+                    violations.append(f"{path.relative_to(PACKAGE)}:{lineno} calls {name}() directly")
+        self.assertEqual(violations, [], (
+            "Found blocking probe calls directly inside a constructor/sidebar-builder. "
+            "Defer these to a background probe (see WelcomePage._refresh_system_status "
+            "or MainWindow._refresh_nvidia_nav_visibility for the pattern):\n"
+            + "\n".join(violations)
+        ))
+
     def test_deferred_callback_dependencies_are_imported(self):
         required = {
             "page_hardware.py": {"command_stdout"},

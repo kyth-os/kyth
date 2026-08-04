@@ -2,7 +2,7 @@ import os
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .services.bootc import has_rollback_deployment
+from .services.bootc import bootc_image_timestamp, has_rollback_deployment
 from .page_repair_components import repair_overview_cards, rollback_card
 from .services.launch import kcmshell, popen_privileged
 from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
@@ -10,14 +10,15 @@ from .services.hardware import _detect_nvidia
 from .services.repair import _read_sys_text, quick_fixes, sleep_mode_label
 from .services.flatpak import _is_flatpak_installed
 from .services.privileged import systemctl_action
+from .services.runtime import DataWorker
 from .page_repair_assist import _AssistMixin
 from .page_repair_quick import _QuickFixMixin
 from .page_repair_reset import _ResetMixin
 from .qt import (
-    QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QTextEdit, QUrl,
+    QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QUrl, single_shot,
 )
 from .widgets import (
-    FlowLayout, Page, _make_card, _set_log_panel,
+    CollapsibleLogPanel, FlowLayout, Page, _make_card,
 )
 
 
@@ -28,7 +29,14 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._snapshot_worker = None
         self._assist_worker = None
         self._setup_worker = None
-        self._has_rollback = has_rollback_deployment()
+        # Safe default — has_rollback_deployment() and bootc_image_timestamp()
+        # are subprocess-backed. RepairPage is built lazily (on first visit,
+        # not at app startup like WelcomePage), but it must still not block
+        # on them here; _refresh_rollback_state() below fetches the real
+        # values on a background thread and rebuilds the card in place.
+        self._has_rollback = False
+        self._rollback_timestamp = None
+        self._rollback_state_worker = None
         self._setup_operation = ""
         self._navigate = navigate or (lambda _key: None)
 
@@ -40,10 +48,11 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
 
         for card in repair_overview_cards(self._navigate):
             self._add(card)
-        rollback, self._rollback_repair_btn = rollback_card(
-            self._has_rollback, self._run_rollback, self._navigate
+        self._rollback_insert_index = self._layout.count()
+        self._rollback_card, self._rollback_repair_btn = rollback_card(
+            self._has_rollback, self._run_rollback, self._navigate, self._rollback_timestamp
         )
-        self._add(rollback)
+        self._add(self._rollback_card)
 
         self._build_quick_fixes_card()
         self._build_assist_card()
@@ -57,6 +66,34 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._build_sleep_diagnostics_card()
 
         self._stretch()
+        single_shot(self, 0, self._refresh_rollback_state)
+
+    @staticmethod
+    def _fetch_rollback_state() -> tuple[bool, str | None]:
+        """Run off the GUI thread by _refresh_rollback_state()'s DataWorker."""
+        has_rollback = has_rollback_deployment()
+        timestamp = bootc_image_timestamp("rollback") if has_rollback else None
+        return has_rollback, timestamp
+
+    def _refresh_rollback_state(self):
+        if self._rollback_state_worker is not None:
+            return
+        self._rollback_state_worker = DataWorker("repair-rollback-state", self._fetch_rollback_state)
+        self._rollback_state_worker.result.connect(self._on_rollback_state_ready)
+        self._rollback_state_worker.failed.connect(lambda _key, _message: None)
+        self._rollback_state_worker.finished.connect(lambda: setattr(self, "_rollback_state_worker", None))
+        self._rollback_state_worker.start()
+
+    def _on_rollback_state_ready(self, _key: str, data: object):
+        has_rollback, timestamp = data
+        self._has_rollback = has_rollback
+        self._rollback_timestamp = timestamp
+        new_card, new_btn = rollback_card(has_rollback, self._run_rollback, self._navigate, timestamp)
+        self._layout.removeWidget(self._rollback_card)
+        self._rollback_card.deleteLater()
+        self._layout.insertWidget(self._rollback_insert_index, new_card)
+        self._rollback_card = new_card
+        self._rollback_repair_btn = new_btn
 
     def _build_quick_fixes_card(self) -> None:
         quick, quick_layout = _make_card("card-accent-ok")
@@ -374,18 +411,8 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._progress.hide()
         self._add(self._progress)
 
-        self._log_toggle = QPushButton("Show details")
-        self._log_toggle.setCheckable(True)
-        self._log_toggle.clicked.connect(lambda checked: _set_log_panel(self._log_toggle, self._log, checked))
-        self._log_toggle.hide()
-        self._add(self._log_toggle)
-
-        self._log = QTextEdit()
-        self._log.document().setMaximumBlockCount(5000)
-        self._log.setReadOnly(True)
-        self._log.setMinimumHeight(120)
-        self._log.hide()
-        self._add(self._log)
+        self._log_panel = CollapsibleLogPanel(min_height=120)
+        self._add(self._log_panel)
 
     def _build_sleep_diagnostics_card(self) -> None:
         sleep_card, sleep_layout = _make_card()

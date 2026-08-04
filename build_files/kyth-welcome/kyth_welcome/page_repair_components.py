@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .services.bootc import bootc_image_timestamp
 from .qt import QHBoxLayout, QLabel, QPushButton
 from .widgets import _make_card, _make_flow_step
 
@@ -65,12 +64,17 @@ def rollback_card(
     has_rollback: bool,
     run_rollback: Callable[[], None],
     navigate: Callable[[str], None],
+    timestamp: str | None = None,
 ) -> tuple[object, QPushButton]:
+    """timestamp: pre-fetched bootc_image_timestamp("rollback"), or None.
+    Fetching it is a subprocess call — callers building this eagerly (e.g.
+    a page constructor) should pass None and refresh it in asynchronously,
+    the same way has_rollback itself should be treated as a placeholder
+    until a background probe confirms it."""
     card, layout = _make_card("card-accent-warn" if has_rollback else None)
     title = QLabel("Undo last update")
     title.setObjectName("card-title")
     layout.addWidget(title)
-    timestamp = bootc_image_timestamp("rollback")
     body = QLabel(
         (
             "A previous system image is available. Rollback restores that image on the next boot; "

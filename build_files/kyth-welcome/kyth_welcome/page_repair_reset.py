@@ -8,7 +8,6 @@ from .services.bootc import has_rollback_deployment
 from .services.repair import rollback_command, reset_command
 from .services.runtime import finish_worker
 from .qt import single_shot
-from .widgets import _set_log_panel
 
 
 class _ResetMixin:
@@ -21,10 +20,7 @@ class _ResetMixin:
         self._confirm_edit.setEnabled(False)
         self._reset_btn.setEnabled(False)
         self._rollback_repair_btn.setEnabled(False)
-        self._log.clear()
-        self._log.append("→ bootc rollback\n")
-        self._log_toggle.show()
-        _set_log_panel(self._log_toggle, self._log, False)
+        self._log_panel.reset("→ bootc rollback\n")
         self._progress.show()
         self._status_lbl.setText("Staging previous system image…")
         self._status_lbl.setObjectName("subheading")
@@ -48,7 +44,7 @@ class _ResetMixin:
         if code == 0:
             self._status_lbl.setText("Rollback staged — rebooting into the previous system image…")
             self._status_lbl.setObjectName("status-ok")
-            self._log.append("\nDone. Rebooting now.")
+            self._log_panel.append("\nDone. Rebooting now.")
             single_shot(self, 2000, reboot)
         else:
             self._status_lbl.setText(f"Rollback failed (exit code {code}).")
@@ -59,10 +55,7 @@ class _ResetMixin:
     def _run_reset(self):
         self._confirm_edit.setEnabled(False)
         self._reset_btn.setEnabled(False)
-        self._log.clear()
-        self._log.append("→ bootc reset\n")
-        self._log_toggle.show()
-        _set_log_panel(self._log_toggle, self._log, False)
+        self._log_panel.reset("→ bootc reset\n")
         self._progress.show()
         self._status_lbl.setText("Resetting system…")
         self._status_lbl.setObjectName("subheading")
@@ -78,8 +71,7 @@ class _ResetMixin:
         )
 
     def _on_line(self, text: str):
-        self._log.append(text)
-        self._log.ensureCursorVisible()
+        self._log_panel.append(text)
 
     def _on_done(self, code: int):
         self._progress.hide()
@@ -89,7 +81,7 @@ class _ResetMixin:
         if code == 0:
             self._status_lbl.setText("Reset staged — rebooting…")
             self._status_lbl.setObjectName("status-ok")
-            self._log.append("\nDone. Rebooting now.")
+            self._log_panel.append("\nDone. Rebooting now.")
             restyle(self._status_lbl)
             single_shot(self, 2000, reboot)
         else:

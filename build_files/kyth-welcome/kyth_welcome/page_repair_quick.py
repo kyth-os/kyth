@@ -17,7 +17,6 @@ from .services.flatpak import _is_flatpak_installed
 from .services.runtime import finish_worker
 from .services.privileged import systemctl_action
 from .qt import QDesktopServices, QMessageBox, QUrl
-from .widgets import _set_log_panel
 
 
 class _QuickFixMixin:
@@ -117,10 +116,7 @@ class _QuickFixMixin:
             return
         self._confirm_edit.setEnabled(False)
         self._reset_btn.setEnabled(False)
-        self._log.clear()
-        self._log.append("→ " + " ".join(shlex.quote(part) for part in cmd) + "\n")
-        self._log_toggle.show()
-        _set_log_panel(self._log_toggle, self._log, False)
+        self._log_panel.reset("→ " + " ".join(shlex.quote(part) for part in cmd) + "\n")
         self._progress.show()
         self._status_lbl.setText(f"{label}…")
         self._status_lbl.setObjectName("subheading")
@@ -142,7 +138,7 @@ class _QuickFixMixin:
         self._status_lbl.setText(view.message)
         self._status_lbl.setObjectName(view.style)
         if view.state == "succeeded":
-            self._log.append("\nDone.")
+            self._log_panel.append("\nDone.")
         if view.expand_log:
-            _set_log_panel(self._log_toggle, self._log, True)
+            self._log_panel.set_expanded(True)
         restyle(self._status_lbl)
