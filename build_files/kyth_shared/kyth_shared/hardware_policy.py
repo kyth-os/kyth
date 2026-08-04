@@ -195,6 +195,99 @@ def _validate_selector(selector: dict[str, Any], field: str) -> None:
             raise PolicyError(f"{field}.drivers contains invalid driver {driver!r}")
 
 
+def _validate_variant_entry(entry: dict[str, Any], index: int, seen: set[str]) -> None:
+    """Validate a single variant entry from the policy."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+        raise PolicyError(f"variants[{index}] requires a string id")
+    entry_id = entry["id"]
+    if not _POLICY_ID.fullmatch(entry_id):
+        raise PolicyError(f"invalid policy id: {entry_id!r}")
+    if entry_id in seen:
+        raise PolicyError(f"duplicate policy id: {entry_id}")
+    seen.add(entry_id)
+
+
+def _validate_match_section(entry_id: str, match: dict[str, Any], kind: str) -> None:
+    """Validate the match section of a profile or quirk entry."""
+    if not isinstance(match, dict):
+        raise PolicyError(f"{entry_id}.match must be a table")
+    match_fields = {
+        "always", "pci", "usb", "cpu_vendors", "dmi_vendors",
+        "dmi_products", "dmi_boards",
+    }
+    unknown_match = set(match) - match_fields
+    if unknown_match:
+        raise PolicyError(
+            f"{entry_id}.match has unknown keys: {', '.join(sorted(unknown_match))}"
+        )
+    if not match:
+        raise PolicyError(f"{entry_id}.match must not be empty")
+    if "always" in match and match["always"] is not True:
+        raise PolicyError(f"{entry_id}.match.always may only be true")
+    if match.get("always") and len(match) != 1:
+        raise PolicyError(f"{entry_id}.match.always cannot be combined with selectors")
+    for bus in ("pci", "usb"):
+        selectors = match.get(bus, [])
+        if not isinstance(selectors, list):
+            raise PolicyError(f"{entry_id}.match.{bus} must be an array")
+        for selector_index, selector in enumerate(selectors):
+            if not isinstance(selector, dict):
+                raise PolicyError(f"{entry_id}.match.{bus}[{selector_index}] must be a table")
+            _validate_selector(selector, f"{entry_id}.match.{bus}[{selector_index}]")
+    for field in ("cpu_vendors", "dmi_vendors", "dmi_products", "dmi_boards"):
+        _string_list(match.get(field, []), f"{entry_id}.match.{field}")
+
+
+def _validate_profile_entry(entry: dict[str, Any], variant_ids: set[str]) -> None:
+    """Validate a single profile entry from the policy."""
+    profile_id = entry["id"]
+    variant = entry.get("image_variant")
+    if variant not in variant_ids:
+        raise PolicyError(f"profile {profile_id} references unknown image variant {variant!r}")
+    profile_policy = entry.get("policy", {})
+    if not isinstance(profile_policy, dict):
+        raise PolicyError(f"profile {profile_id}.policy must be a table")
+    unknown = set(profile_policy) - {"scheduler_candidates", "nvidia_setup"}
+    if unknown:
+        raise PolicyError(f"profile {profile_id} has unknown policy keys")
+    for scheduler in _string_list(
+        profile_policy.get("scheduler_candidates", []),
+        f"profile {profile_id}.policy.scheduler_candidates",
+    ):
+        if not _MODULE.fullmatch(scheduler):
+            raise PolicyError(f"profile {profile_id} has invalid scheduler {scheduler!r}")
+    if "nvidia_setup" in profile_policy and not isinstance(profile_policy["nvidia_setup"], bool):
+        raise PolicyError(f"profile {profile_id}.policy.nvidia_setup must be boolean")
+
+
+def _validate_quirk_entry(entry: dict[str, Any]) -> None:
+    """Validate a single quirk entry from the policy."""
+    quirk_id = entry["id"]
+    for field in ("reason", "provenance"):
+        value = entry.get(field)
+        if not isinstance(value, str) or not value or "\n" in value or "\r" in value:
+            raise PolicyError(f"quirk {quirk_id} requires single-line {field}")
+    try:
+        date.fromisoformat(str(entry["expires_on"]))
+    except (KeyError, ValueError) as exc:
+        raise PolicyError(f"quirk {quirk_id} requires ISO expires_on") from exc
+    actions = entry.get("actions", [])
+    if not actions:
+        raise PolicyError(f"quirk {quirk_id} requires at least one action")
+    for action in actions:
+        if set(action) != {"kind", "module", "options"} or action.get("kind") != "modprobe":
+            raise PolicyError(f"quirk {quirk_id} contains an unsupported action")
+        module = action.get("module", "")
+        if not _MODULE.fullmatch(module):
+            raise PolicyError(f"quirk {quirk_id} has invalid module {module!r}")
+        options = action.get("options")
+        if not isinstance(options, dict) or not options:
+            raise PolicyError(f"quirk {quirk_id} requires modprobe options")
+        for key, value in options.items():
+            if not _OPTION.fullmatch(str(key)) or not _VALUE.fullmatch(str(value)):
+                raise PolicyError(f"quirk {quirk_id} has unsafe modprobe option")
+
+
 def validate_policy(data: dict[str, Any]) -> None:
     if data.get("schema_version") != 1:
         raise PolicyError("hardware policy schema_version must be 1")
@@ -207,7 +300,7 @@ def validate_policy(data: dict[str, Any]) -> None:
         if not isinstance(entries, list):
             raise PolicyError(f"{kind} must be an array of tables")
         for index, entry in enumerate(entries):
-            if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+            if not isinstance(entry.get("id"), str):
                 raise PolicyError(f"{kind}[{index}] requires a string id")
             entry_id = entry["id"]
             if not _POLICY_ID.fullmatch(entry_id):
@@ -215,80 +308,19 @@ def validate_policy(data: dict[str, Any]) -> None:
             if entry_id in seen:
                 raise PolicyError(f"duplicate policy id: {entry_id}")
             seen.add(entry_id)
+
+            if kind == "variants":
+                continue
+
             match = entry.get("match", {})
-            if kind != "variants":
-                if not isinstance(match, dict):
-                    raise PolicyError(f"{entry_id}.match must be a table")
-                match_fields = {
-                    "always", "pci", "usb", "cpu_vendors", "dmi_vendors",
-                    "dmi_products", "dmi_boards",
-                }
-                unknown_match = set(match) - match_fields
-                if unknown_match:
-                    raise PolicyError(
-                        f"{entry_id}.match has unknown keys: {', '.join(sorted(unknown_match))}"
-                    )
-                if not match:
-                    raise PolicyError(f"{entry_id}.match must not be empty")
-                if "always" in match and match["always"] is not True:
-                    raise PolicyError(f"{entry_id}.match.always may only be true")
-                if match.get("always") and len(match) != 1:
-                    raise PolicyError(f"{entry_id}.match.always cannot be combined with selectors")
-                for bus in ("pci", "usb"):
-                    selectors = match.get(bus, [])
-                    if not isinstance(selectors, list):
-                        raise PolicyError(f"{entry_id}.match.{bus} must be an array")
-                    for selector_index, selector in enumerate(selectors):
-                        if not isinstance(selector, dict):
-                            raise PolicyError(f"{entry_id}.match.{bus}[{selector_index}] must be a table")
-                        _validate_selector(selector, f"{entry_id}.match.{bus}[{selector_index}]")
-                for field in ("cpu_vendors", "dmi_vendors", "dmi_products", "dmi_boards"):
-                    _string_list(match.get(field, []), f"{entry_id}.match.{field}")
+            _validate_match_section(entry_id, match, kind)
 
     variant_ids = {entry["id"] for entry in data.get("variants", [])}
     for profile in data.get("profiles", []):
-        variant = profile.get("image_variant")
-        if variant not in variant_ids:
-            raise PolicyError(f"profile {profile['id']} references unknown image variant {variant!r}")
-        profile_policy = profile.get("policy", {})
-        if not isinstance(profile_policy, dict):
-            raise PolicyError(f"profile {profile['id']}.policy must be a table")
-        unknown = set(profile_policy) - {"scheduler_candidates", "nvidia_setup"}
-        if unknown:
-            raise PolicyError(f"profile {profile['id']} has unknown policy keys")
-        for scheduler in _string_list(
-            profile_policy.get("scheduler_candidates", []),
-            f"profile {profile['id']}.policy.scheduler_candidates",
-        ):
-            if not _MODULE.fullmatch(scheduler):
-                raise PolicyError(f"profile {profile['id']} has invalid scheduler {scheduler!r}")
-        if "nvidia_setup" in profile_policy and not isinstance(profile_policy["nvidia_setup"], bool):
-            raise PolicyError(f"profile {profile['id']}.policy.nvidia_setup must be boolean")
+        _validate_profile_entry(profile, variant_ids)
 
     for quirk in data.get("quirks", []):
-        for field in ("reason", "provenance"):
-            value = quirk.get(field)
-            if not isinstance(value, str) or not value or "\n" in value or "\r" in value:
-                raise PolicyError(f"quirk {quirk['id']} requires single-line {field}")
-        try:
-            date.fromisoformat(str(quirk["expires_on"]))
-        except (KeyError, ValueError) as exc:
-            raise PolicyError(f"quirk {quirk['id']} requires ISO expires_on") from exc
-        actions = quirk.get("actions", [])
-        if not actions:
-            raise PolicyError(f"quirk {quirk['id']} requires at least one action")
-        for action in actions:
-            if set(action) != {"kind", "module", "options"} or action.get("kind") != "modprobe":
-                raise PolicyError(f"quirk {quirk['id']} contains an unsupported action")
-            module = action.get("module", "")
-            if not _MODULE.fullmatch(module):
-                raise PolicyError(f"quirk {quirk['id']} has invalid module {module!r}")
-            options = action.get("options")
-            if not isinstance(options, dict) or not options:
-                raise PolicyError(f"quirk {quirk['id']} requires modprobe options")
-            for key, value in options.items():
-                if not _OPTION.fullmatch(str(key)) or not _VALUE.fullmatch(str(value)):
-                    raise PolicyError(f"quirk {quirk['id']} has unsafe modprobe option")
+        _validate_quirk_entry(quirk)
 
 
 def _device_matches(device: Device, selector: dict[str, Any]) -> bool:

@@ -18,7 +18,10 @@ def _format_display_mode(mode: str) -> str:
     except ValueError:
         return mode
     return f"{m.group(1)}×{m.group(2)} @ {hz:.0f}Hz"  # noqa: RUF001 — multiplication sign, deliberate typography
- # _format_display_mode
+
+
+# _format_display_mode
+
 
 def _display_probe() -> HardwareProbe:
     kscreen_raw = command_stdout(["kscreen-doctor", "-o"], timeout=8)
@@ -52,13 +55,40 @@ def _display_probe() -> HardwareProbe:
     return HardwareProbe(
         "Display", "ok",
         f"{len(connected)} display{'s' if len(connected) > 1 else ''} connected.",
-        "Outputs:\n" + "\n".join(f"  {c}" for c in connected) + "\n\n(Install kscreen for refresh rate and VRR details.)",
+        "Outputs:\n" + "\n".join(f"  {c}" for c in connected) +
+        "\n\n(Install kscreen for refresh rate and VRR details.)",
     )
- # _display_probe
+
+
+# _display_probe
+
 
 def _parse_kscreen_output(raw: str) -> HardwareProbe:
     text = strip_ansi(raw)
+    outputs = _extract_outputs_from_kscreen(text)
 
+    active = [o for o in outputs if o["connected"] and o["enabled"]]
+    if not active:
+        return HardwareProbe("Display", "dim", "No active displays detected.", text.strip()[:600])
+
+    display_strs, details_parts, vrr_warnings = _build_display_info(active)
+    n = len(active)
+    summary = f"{n} display{'s' if n > 1 else ''}: " + " · ".join(display_strs) + "."
+    details = "\n\n".join(details_parts)
+
+    if vrr_warnings:
+        return HardwareProbe(
+            "Display", "warn",
+            summary,
+            details + "\n\n" + "\n".join(vrr_warnings),
+            "Enable VRR in System Settings → Display & Monitor for smoother gameplay.",
+        )
+
+    return HardwareProbe("Display", "ok", summary, details)
+
+
+def _extract_outputs_from_kscreen(text: str) -> list[dict]:
+    """Parse kscreen-doctor output into a list of output dictionaries."""
     outputs: list[dict] = []
     cur: dict | None = None
 
@@ -94,10 +124,11 @@ def _parse_kscreen_output(raw: str) -> HardwareProbe:
     if cur is not None:
         outputs.append(cur)
 
-    active = [o for o in outputs if o["connected"] and o["enabled"]]
-    if not active:
-        return HardwareProbe("Display", "dim", "No active displays detected.", text.strip()[:600])
+    return outputs
 
+
+def _build_display_info(active: list[dict]) -> tuple[list[str], list[str], list[str]]:
+    """Build display strings, details, and VRR warnings from active outputs."""
     display_strs: list[str] = []
     details_parts: list[str] = []
     vrr_warnings: list[str] = []
@@ -146,20 +177,10 @@ def _parse_kscreen_output(raw: str) -> HardwareProbe:
                     f"{out['name']} supports up to {max_hz:.0f}Hz but VRR/FreeSync is set to Never."
                 )
 
-    n = len(active)
-    summary = f"{n} display{'s' if n > 1 else ''}: " + " · ".join(display_strs) + "."
-    details = "\n\n".join(details_parts)
+    return display_strs, details_parts, vrr_warnings
 
-    if vrr_warnings:
-        return HardwareProbe(
-            "Display", "warn",
-            summary,
-            details + "\n\n" + "\n".join(vrr_warnings),
-            "Enable VRR in System Settings → Display & Monitor for smoother gameplay.",
-        )
 
-    return HardwareProbe("Display", "ok", summary, details)
- # _parse_kscreen_output
+# _parse_kscreen_output
 
 
 def hdr_vrr_status_text(raw: str) -> str:

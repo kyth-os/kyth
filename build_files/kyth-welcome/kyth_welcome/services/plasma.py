@@ -95,10 +95,8 @@ def kread(file_name: str, group: str, key: str) -> str:
 _kread = kread
 
 
-def collect_wayland_probes() -> list[HardwareProbe]:
-    probes: list[HardwareProbe] = []
-
-    session = session_kind()
+def _probe_session(session: str) -> HardwareProbe:
+    """Probe the current session type (Wayland/X11)."""
     session_status = "ok" if session == "wayland" else ("dim" if session == "x11" else "warn")
     session_summary = (
         "Wayland session active" if session == "wayland"
@@ -106,31 +104,39 @@ def collect_wayland_probes() -> list[HardwareProbe]:
         if session == "x11"
         else "Session type could not be identified"
     )
-    probes.append(HardwareProbe(
+    return HardwareProbe(
         "Session",
         session_status,
         session_summary,
         f"XDG_SESSION_TYPE={session or 'unknown'}",
-    ))
+    )
 
-    desktop = desktop_name()
+
+def _probe_desktop(desktop: str) -> HardwareProbe:
+    """Probe whether Plasma desktop is active."""
     is_plasma = "kde" in desktop.lower() or "plasma" in desktop.lower()
-    probes.append(HardwareProbe(
+    return HardwareProbe(
         "Plasma desktop",
         "ok" if is_plasma else "dim",
         "Plasma session detected" if is_plasma else "Plasma session not detected from environment",
         f"XDG_CURRENT_DESKTOP={desktop or 'unknown'}",
-    ))
+    )
 
+
+def _probe_pipewire() -> HardwareProbe:
+    """Probe PipeWire and WirePlumber status."""
     pipewire = user_unit_active("pipewire.service") or user_unit_active("pipewire.socket")
     wireplumber = user_unit_active("wireplumber.service")
-    probes.append(HardwareProbe(
+    return HardwareProbe(
         "PipeWire",
         "ok" if pipewire and wireplumber else "warn",
         "Audio and capture session services are active" if pipewire and wireplumber else "PipeWire or WirePlumber is not active",
         f"pipewire={'active' if pipewire else 'inactive'}, wireplumber={'active' if wireplumber else 'inactive'}",
-    ))
+    )
 
+
+def _probe_portals() -> HardwareProbe:
+    """Probe desktop portal status."""
     portal = user_unit_active("xdg-desktop-portal.service") or user_bus_name_available("org.freedesktop.portal.Desktop")
     portal_kde_unit = first_active_user_unit(KDE_PORTAL_UNITS)
     portal_kde = bool(portal_kde_unit) or user_bus_name_available("org.freedesktop.impl.portal.desktop.kde")
@@ -140,32 +146,41 @@ def collect_wayland_probes() -> list[HardwareProbe]:
     ]
     if portal_kde_unit:
         portal_details.append(f"KDE backend unit: {portal_kde_unit}")
-    probes.append(HardwareProbe(
+    return HardwareProbe(
         "Desktop portals",
         "ok" if portal and portal_kde else "warn",
         "KDE portal services are ready for file pickers, permissions, and screen sharing"
         if portal and portal_kde else "Restart the capture stack if screen sharing or file pickers misbehave",
         "\n".join(portal_details),
-    ))
+    )
 
+
+def _probe_portal_diagnostics() -> HardwareProbe:
+    """Probe availability of portal diagnostic tools."""
     has_busctl = bool(shutil.which("busctl"))
     qdbus_binary = first_available_binary(QDBUS_CANDIDATES)
     has_qdbus = bool(qdbus_binary)
-    probes.append(HardwareProbe(
+    return HardwareProbe(
         "Portal diagnostics",
         "ok" if has_busctl or has_qdbus else "dim",
         "Portal diagnostic tools are available" if has_busctl or has_qdbus else "Portal diagnostic tools are not installed",
         f"busctl: {'available' if has_busctl else 'not found'}\nqdbus: {qdbus_binary or 'not found'}",
-    ))
+    )
 
+
+def _probe_display_tuning() -> HardwareProbe:
+    """Probe display tuning environment variables."""
     vrr = os.environ.get("KWIN_DRM_ALLOW_VRR", "").strip()
-    probes.append(HardwareProbe(
+    return HardwareProbe(
         "Display tuning",
         "dim" if not vrr else "ok",
         "Display Settings controls VRR, HDR, scale, refresh rate, and monitor layout",
         f"KWin VRR environment policy: {vrr or 'not set; using Plasma defaults'}",
-    ))
+    )
 
+
+def _probe_theme_layer() -> HardwareProbe:
+    """Probe KythOS visual theme configuration."""
     color_scheme = kread("kdeglobals", "General", "ColorScheme")
     ui_font = kread("kdeglobals", "General", "font")
     fixed_font = kread("kdeglobals", "General", "fixed")
@@ -178,7 +193,7 @@ def collect_wayland_probes() -> list[HardwareProbe]:
         and ui_font.startswith("Inter,")
         and fixed_font.startswith("Cascadia Code,")
     )
-    probes.append(HardwareProbe(
+    return HardwareProbe(
         "KythOS theme layer",
         "ok" if visual_ok else "dim",
         "KythOS color, icon, font, and panel theme are active"
@@ -190,28 +205,53 @@ def collect_wayland_probes() -> list[HardwareProbe]:
             f"UI font: {ui_font or 'unset'}",
             f"Fixed font: {fixed_font or 'unset'}",
         )),
-    ))
+    )
 
+
+def _probe_comfort_defaults() -> HardwareProbe:
+    """Probe desktop comfort defaults (single-click, clipboard)."""
     single_click = kread("kdeglobals", "KDE", "SingleClick").lower()
     clip_items = kread("klipperrc", "General", "MaxClipItems")
-    probes.append(HardwareProbe(
+    return HardwareProbe(
         "Desktop comfort defaults",
         "ok" if single_click == "false" and clip_items == "25" else "dim",
         "Comfortable double-click and clipboard history defaults are configured"
         if single_click == "false" and clip_items == "25" else "Comfort defaults are not fully applied; restore them below when wanted",
         f"Single-click open: {single_click or 'unset'}\nClipboard history size: {clip_items or 'unset'}",
-    ))
+    )
 
+
+def _probe_default_layout() -> HardwareProbe:
+    """Probe KythOS default desktop layout."""
     layout_marker = kread("plasma-org.kde.plasma.desktop-appletsrc", "KythOS", "KythComfortLayout")
     legacy_layout_marker = kread("plasma-org.kde.plasma.desktop-appletsrc", "KythOS", "WindowsFamiliarLayout")
     layout_ok = layout_marker in ("kyth-comfort-v2", "kyth-comfort-v3") or legacy_layout_marker == "windows-familiar-v1"
-    probes.append(HardwareProbe(
+    return HardwareProbe(
         "KythOS default layout",
         "ok" if layout_ok else "dim",
         "KythOS bottom taskbar and pinned launcher layout are active"
         if layout_ok else "Standard KythOS layout is not marked active; restore it below when wanted",
         f"KythOS layout marker: {layout_marker or 'unset'}\nLegacy layout marker: {legacy_layout_marker or 'unset'}",
-    ))
+    )
+
+
+def collect_wayland_probes() -> list[HardwareProbe]:
+    probes: list[HardwareProbe] = []
+
+    session = session_kind()
+    probes.append(_probe_session(session))
+
+    desktop = desktop_name()
+    probes.append(_probe_desktop(desktop))
+
+    probes.append(_probe_pipewire())
+    probes.append(_probe_portals())
+    probes.append(_probe_portal_diagnostics())
+    probes.append(_probe_display_tuning())
+    probes.append(_probe_theme_layer())
+    probes.append(_probe_comfort_defaults())
+    probes.append(_probe_default_layout())
+
     return probes
 
 

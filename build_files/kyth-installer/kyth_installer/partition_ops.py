@@ -19,6 +19,7 @@ from .disk import (
 from .fsresize import shrink_filesystem
 from .services.disk_service import DiskService
 
+
 def _require_sgdisk(log=None):
     if not shutil.which("sgdisk"):
         raise RuntimeError("sgdisk (gptfdisk) is required for partition table operations.")
@@ -214,79 +215,47 @@ class Journal:
                     )
 
             elif kind == "create":
-                start = _safe_int(p.get("start_bytes"), -1)
-                size = _safe_int(p.get("size_bytes"), -1)
-                fs = (p.get("fs_type") or "").lower()
-                mount = (p.get("mountpoint") or "").lower()
-
-                if start < 0 or size < 0:
-                    errors.append("Create partition: invalid start or size.")
-                    continue
-
-                end = start + size
-                for s, e, n in allocated.values():
-                    if s >= 0 and e > s and start < e and end > s:
-                        errors.append(f"New partition overlaps with existing region ({n}).")
-                allocated[f"new:{op['index']}"] = (start, end, fs)
-
-                if table_type == "msdos":
-                    primary_count += 1
-                    if primary_count > 4:
-                        errors.append(
-                            "MBR (msdos) partition tables support at most 4 primary "
-                            "partitions, and this installer does not create extended/"
-                            "logical partitions. Use a GPT table instead, or remove a "
-                            "partition from this layout."
-                        )
-
-                if mount == "/":
-                    if fs != "btrfs":
-                        errors.append("Root partition (/) must use the Btrfs filesystem.")
-                    root_count += 1
-                if mount == "/boot/efi" and fs != "fat32":
-                    errors.append("EFI System Partition (/boot/efi) must use FAT32.")
-                if mount:
-                    if mount in mountpoints:
-                        errors.append(f"Mount point {mount} is assigned more than once.")
-                    mountpoints.add(mount)
+                error = self._validate_create_op(p, table_type, primary_count, allocated, mountpoints)
+                if error:
+                    errors.append(error)
+                else:
+                    # Update state after successful validation
+                    start = _safe_int(p.get("start_bytes"), -1)
+                    size = _safe_int(p.get("size_bytes"), -1)
+                    fs = (p.get("fs_type") or "").lower()
+                    allocated[f"new:{op['index']}"] = (start, start + size, fs)
+                    if table_type == "msdos":
+                        primary_count += 1
+                    mount = (p.get("mountpoint") or "").lower()
+                    if mount == "/":
+                        root_count += 1
+                    if mount:
+                        mountpoints.add(mount)
 
             elif kind in ("delete", "format", "resize", "set_mountpoint"):
-                partition = _normal_device_path(p.get("partition"))
-                if not partition or _parent_disk(partition) != self.disk:
-                    errors.append(f"{kind.replace('_', ' ').title()}: partition does not belong to {self.disk}.")
-                    continue
-                if partition not in allocated:
-                    errors.append(f"{kind.replace('_', ' ').title()}: {partition} is not present on {self.disk}.")
-                    continue
-                if kind == "delete":
-                    allocated.pop(partition, None)
-                    if table_type == "msdos":
-                        primary_count = max(0, primary_count - 1)
-                elif kind == "resize":
-                    start, _end, fs = allocated[partition]
-                    new_size = _safe_int(p.get("new_size_bytes"), -1)
-                    if new_size <= 0:
-                        errors.append("Resize partition: invalid new size.")
-                    else:
+                error = self._validate_existing_partition_op(kind, p, allocated, mountpoints, table_type)
+                if error:
+                    errors.append(error)
+                else:
+                    # Update state after successful validation
+                    partition = _normal_device_path(p.get("partition"))
+                    if kind == "delete":
+                        allocated.pop(partition, None)
+                        if table_type == "msdos":
+                            primary_count = max(0, primary_count - 1)
+                    elif kind == "resize":
+                        start, _end, fs = allocated[partition]
+                        new_size = _safe_int(p.get("new_size_bytes"), -1)
                         allocated[partition] = (start, start + new_size, fs)
-                elif kind == "format":
-                    start, end, _fs = allocated[partition]
-                    allocated[partition] = (
-                        start, end, (p.get("fs_type") or "").lower()
-                    )
-                elif kind == "set_mountpoint":
-                    mount = str(p.get("mountpoint") or "").strip()
-                    fs = allocated[partition][2].lower()
-                    if mount == "/":
-                        if fs != "btrfs":
-                            errors.append("Root partition (/) must use the Btrfs filesystem.")
-                        root_count += 1
-                    if mount == "/boot/efi" and fs not in ("fat", "fat32", "vfat"):
-                        errors.append("EFI System Partition (/boot/efi) must use FAT32.")
-                    if mount:
-                        if mount in mountpoints:
-                            errors.append(f"Mount point {mount} is assigned more than once.")
-                        mountpoints.add(mount)
+                    elif kind == "format":
+                        start, end, _fs = allocated[partition]
+                        allocated[partition] = (start, end, (p.get("fs_type") or "").lower())
+                    elif kind == "set_mountpoint":
+                        mount = str(p.get("mountpoint") or "").strip()
+                        if mount == "/":
+                            root_count += 1
+                        if mount:
+                            mountpoints.add(mount)
 
         if root_count == 0:
             errors.append("No root partition (/) configured. Mount at least one partition as '/' with Btrfs.")
@@ -296,6 +265,73 @@ class Journal:
         errors.extend(self._validate_not_in_use(current_parts))
 
         return errors
+
+    def _validate_create_op(self, p: dict, table_type: str, primary_count: int,
+                            allocated: dict[str, tuple[int, int, str]],
+                            mountpoints: set[str]) -> str | None:
+        """Validate a create partition operation. Returns error message or None."""
+        start = _safe_int(p.get("start_bytes"), -1)
+        size = _safe_int(p.get("size_bytes"), -1)
+        fs = (p.get("fs_type") or "").lower()
+        mount = (p.get("mountpoint") or "").lower()
+
+        if start < 0 or size < 0:
+            return "Create partition: invalid start or size."
+
+        end = start + size
+        for s, e, n in allocated.values():
+            if s >= 0 and e > s and start < e and end > s:
+                return f"New partition overlaps with existing region ({n})."
+
+        if table_type == "msdos" and primary_count >= 4:
+            return (
+                "MBR (msdos) partition tables support at most 4 primary "
+                "partitions, and this installer does not create extended/"
+                "logical partitions. Use a GPT table instead, or remove a "
+                "partition from this layout."
+            )
+
+        if mount == "/":
+            if fs != "btrfs":
+                return "Root partition (/) must use the Btrfs filesystem."
+
+        if mount == "/boot/efi" and fs != "fat32":
+            return "EFI System Partition (/boot/efi) must use FAT32."
+
+        if mount and mount in mountpoints:
+            return f"Mount point {mount} is assigned more than once."
+
+        return None
+
+    def _validate_existing_partition_op(self, kind: str, p: dict,
+                                        allocated: dict[str, tuple[int, int, str]],
+                                        mountpoints: set[str],
+                                        table_type: str) -> str | None:
+        """Validate an operation on an existing partition. Returns error message or None."""
+        partition = _normal_device_path(p.get("partition"))
+        if not partition or _parent_disk(partition) != self.disk:
+            return f"{kind.replace('_', ' ').title()}: partition does not belong to {self.disk}."
+
+        if partition not in allocated:
+            return f"{kind.replace('_', ' ').title()}: {partition} is not present on {self.disk}."
+
+        if kind == "resize":
+            new_size = _safe_int(p.get("new_size_bytes"), -1)
+            if new_size <= 0:
+                return "Resize partition: invalid new size."
+
+        elif kind == "set_mountpoint":
+            mount = str(p.get("mountpoint") or "").strip()
+            fs = allocated[partition][2].lower()
+            if mount == "/":
+                if fs != "btrfs":
+                    return "Root partition (/) must use the Btrfs filesystem."
+            if mount == "/boot/efi" and fs not in ("fat", "fat32", "vfat"):
+                return "EFI System Partition (/boot/efi) must use FAT32."
+            if mount and mount in mountpoints:
+                return f"Mount point {mount} is assigned more than once."
+
+        return None
 
     def _commit_new_table(self, p: dict, log) -> None:
         table_type = p.get("table_type", "gpt")
