@@ -417,6 +417,60 @@ def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_
     )
     return "", get_root_partition(disk), alongside_mount
 
+def _blkid_uuid(part: str, log, *, timeout: float = 5) -> str | None:
+    """Look up a partition's filesystem UUID via blkid, for building an
+    fstab entry. Returns None (after logging a warning) on any failure —
+    callers should skip that fstab entry rather than write one with a
+    blank UUID. Shared by every fstab-writing path so they see the same
+    lookup behavior (same timeout, same failure handling) instead of each
+    reimplementing it slightly differently."""
+    try:
+        result = run_command(
+            ["blkid", "-s", "UUID", "-o", "value", part],
+            capture_output=True, text=True, check=True, timeout=timeout,
+        )
+    except Exception as exc:
+        log(f"Warning: could not read UUID for {part}: {exc}")
+        return None
+    uuid_out = result.stdout.strip()
+    if not uuid_out:
+        log(f"Warning: blkid returned no UUID for {part}")
+        return None
+    return uuid_out
+
+
+def _fsck_pass_for(fstype: str) -> int:
+    """fstab fsck pass number for a non-root mount. 0 for swap and btrfs —
+    btrfs has no traditional boot-time fsck integration, so passing it to
+    e2fsck-style checking is a no-op at best and a boot delay at worst — 2
+    for everything else with a real fsck tool. Never 1: that's reserved
+    for the root filesystem, which isn't written through this path."""
+    return 0 if fstype in ("linux-swap", "btrfs") else 2
+
+
+def _append_fstab_line(etc, fstab_line: str, log, description: str) -> bool:
+    """Append one line to the target system's fstab. Returns whether it
+    succeeded; callers decide whether that's fatal for the mount it was
+    building an entry for."""
+    try:
+        run_command(
+            _as_root(["/usr/bin/tee", "-a", str(Path(etc, "fstab"))]),
+            input=fstab_line, text=True,
+            stdout=subprocess.DEVNULL, check=True,
+        )
+    except OSError as fe:
+        log(
+            f"Warning: failed to update fstab for {description}: "
+            f"{format_os_error(fe, path=Path(etc, 'fstab'))}"
+        )
+        return False
+    except Exception as fe:
+        log(f"Warning: failed to update fstab for {description}: {fe}")
+        return False
+    log(f"Fstab updated for {description}: {fstab_line.strip()}")
+    return True
+
+
 def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
     """Mount the alongside-install target's @home subvolume under the ostree
     deploy root and wire it into the target system's fstab."""
@@ -425,28 +479,11 @@ def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
     _safe_umount(run_command, str(target_home))
     run_command(_as_root(["mount", "-o", "subvol=@home", target_part, str(target_home)]), check=True)
 
-    try:
-        result = run_command(
-            ["blkid", "-s", "UUID", "-o", "value", target_part],
-            capture_output=True, text=True, check=True,
-        )
-        uuid_out = result.stdout.strip()
-        if uuid_out:
-            fstab_path = Path(etc, "fstab")
-            fstab_line = f"UUID={uuid_out} /var/home btrfs subvol=@home,compress=zstd:1 0 0\n"
-            run_command(
-                _as_root(["/usr/bin/tee", "-a", str(fstab_path)]),
-                input=fstab_line, text=True,
-                stdout=subprocess.DEVNULL, check=True
-            )
-            log(f"Fstab updated with Btrfs subvolume @home: {fstab_line.strip()}")
-    except OSError as fe:
-        log(
-            "Warning: failed to update fstab with @home subvolume: "
-            f"{format_os_error(fe, path=Path(etc, 'fstab'))}"
-        )
-    except Exception as fe:
-        log(f"Warning: failed to update fstab with @home subvolume: {fe}")
+    uuid_out = _blkid_uuid(target_part, log)
+    if uuid_out is None:
+        return
+    fstab_line = f"UUID={uuid_out} /var/home btrfs subvol=@home,compress=zstd:1 0 {_fsck_pass_for('btrfs')}\n"
+    _append_fstab_line(etc, fstab_line, log, "@home subvolume")
 
 
 def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -> None:
@@ -458,33 +495,26 @@ def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -
         mp = mnt["mountpoint"]
         fs = mnt["fstype"]
         try:
-            result = run_command(
-                ["blkid", "-s", "UUID", "-o", "value", part],
-                capture_output=True, text=True, check=True, timeout=5,
-            )
-            uuid_out = result.stdout.strip()
-            if not uuid_out:
-                log(f"Warning: could not get UUID for {part}, skipping fstab entry for {mp}")
+            uuid_out = _blkid_uuid(part, log)
+            if uuid_out is None:
+                log(f"Warning: skipping fstab entry for {mp} ({part}) — no UUID")
                 continue
             # Map /home to /var/home in ostree layout
             fstab_mp = "/var/home" if mp == "/home" else mp
             target_path = Path(config_root) / fstab_mp.lstrip("/")
             if fs == "linux-swap":
-                fstab_line = f"UUID={uuid_out} none swap defaults 0 0\n"
+                fstab_line = f"UUID={uuid_out} none swap defaults 0 {_fsck_pass_for(fs)}\n"
             else:
                 mount_options = "defaults,compress=zstd:1" if fs == "btrfs" else "defaults"
-                fstab_line = f"UUID={uuid_out} {fstab_mp} {fs} {mount_options} 0 2\n"
+                fstab_line = f"UUID={uuid_out} {fstab_mp} {fs} {mount_options} 0 {_fsck_pass_for(fs)}\n"
                 run_command(
                     _as_root(["mkdir", "-p", str(target_path)]),
                     check=False,
                 )
                 # Unmount any existing mount at this path (e.g. @home subvolume)
                 _safe_umount(run_command, str(target_path))
-            run_command(
-                _as_root(["/usr/bin/tee", "-a", str(Path(etc, "fstab"))]),
-                input=fstab_line, text=True,
-                stdout=subprocess.DEVNULL, check=True,
-            )
+            if not _append_fstab_line(etc, fstab_line, log, f"{part} at {mp}"):
+                continue
             if fs != "linux-swap":
                 run_command(
                     _as_root(["mount", part, str(target_path)]),
