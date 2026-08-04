@@ -1,1 +1,51 @@
-Nothing should be ignored based on the provided file changes. The modified file 'build_files/kyth-installer/kyth_installer/partition_ops.py' is a Python source file which should not be added to .gitignore. Since there are no build artifacts, dependencies, temporary files, or other ignorable items in the changes, no .gitignore rules need to be added or modified.
+```
+# Dependencies
+.kyth_analysis/
+
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+dist/
+build/
+target/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Python specific
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg-info/
+.eggs/
+
+# MyPy cache
+.mypy_cache/
+```
