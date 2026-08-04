@@ -77,7 +77,29 @@ class HardwarePage(Page):
         self._summary_card.hide()
         self._add(self._summary_card)
 
-        # Two-column probe card grid
+        # Two-column probe card grid, grouped into "Needs Attention" (warn/err)
+        # and "Healthy & Info" sections instead of one flat interleaved grid —
+        # with ~20 checks on a fresh probe, a flat grid means the 1-2 things
+        # that actually need a look are scattered among a wall of "OK" cards.
+        self._attention_heading = QLabel("Needs Attention")
+        self._attention_heading.setObjectName("section-heading")
+        self._attention_heading.hide()
+        self._add(self._attention_heading)
+
+        self._attention_container = QWidget()
+        self._attention_col = QGridLayout(self._attention_container)
+        self._attention_col.setContentsMargins(0, 0, 0, 0)
+        self._attention_col.setSpacing(12)
+        self._attention_col.setColumnStretch(0, 1)
+        self._attention_col.setColumnStretch(1, 1)
+        self._attention_container.hide()
+        self._add(self._attention_container)
+
+        self._healthy_heading = QLabel("Healthy & Info")
+        self._healthy_heading.setObjectName("section-heading")
+        self._healthy_heading.hide()
+        self._add(self._healthy_heading)
+
         self._card_container = QWidget()
         self._card_col = QGridLayout(self._card_container)
         self._card_col.setContentsMargins(0, 0, 0, 0)
@@ -256,15 +278,30 @@ class HardwarePage(Page):
         self._worker.start()
 
     def _replace_cards(self, probes: list[HardwareProbe]):
-        while self._card_col.count():
-            item = self._card_col.takeAt(0)
-            if w := item.widget():
-                w.deleteLater()
+        for grid in (self._attention_col, self._card_col):
+            while grid.count():
+                item = grid.takeAt(0)
+                if w := item.widget():
+                    w.deleteLater()
+
+        # self._cards stays in the same order as `probes` — _wire_wizard_action_buttons
+        # zips them positionally (strict=True), so card[i] must stay the card for
+        # probe[i] regardless of which grid it's visually placed into below.
         self._cards = []
-        for i, probe in enumerate(probes):
+        attention_n = healthy_n = 0
+        for probe in probes:
             card = HardwareCard(probe)
             self._cards.append(card)
-            self._card_col.addWidget(card, i // 2, i % 2)
+            if probe.status in ("warn", "err"):
+                self._attention_col.addWidget(card, attention_n // 2, attention_n % 2)
+                attention_n += 1
+            else:
+                self._card_col.addWidget(card, healthy_n // 2, healthy_n % 2)
+                healthy_n += 1
+
+        self._attention_heading.setVisible(attention_n > 0)
+        self._attention_container.setVisible(attention_n > 0)
+        self._healthy_heading.setVisible(healthy_n > 0)
 
     def _on_done(self, probes: list[HardwareProbe]):
         self._progress.hide()
