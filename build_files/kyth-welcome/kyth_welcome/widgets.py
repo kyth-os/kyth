@@ -5,7 +5,7 @@ from typing import ClassVar
 from .core_base import restyle
 from .services.hardware import HardwareProbe
 from .qt import (
-    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QLayout, QPushButton, QRect, QScrollArea, QSize, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, single_shot,
+    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QLayout, QPushButton, QRect, QScrollArea, QSize, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
 from .ui_tokens import STATUS_ERROR, STATUS_OK, STATUS_WARN
 
@@ -108,6 +108,67 @@ def _make_card(name: str = "card") -> tuple[QFrame, QVBoxLayout]:
     layout.setContentsMargins(24, 22, 24, 22)
     layout.setSpacing(12)
     return card, layout
+
+
+class SegmentedTabBar(QFrame):
+    """Shared row of checkable "segmented" buttons for sub-navigation within
+    a page — Gaming's section switcher, the App Store's tab bar, and
+    Compatibility's game-list filter all built this same row (checkable
+    QPushButtons, one active at a time, syncing checked/objectName/restyle
+    across the group) independently before this existed.
+
+    This widget owns only the bar itself — what "activating a tab" *does*
+    (build a panel, filter a list, whatever) stays entirely up to the
+    caller via the `activated` signal. That keeps this reusable across
+    pages whose content-switching semantics differ (lazily-built panels vs.
+    filtering an already-built list) while still sharing the one thing that
+    was actually identical: the button-row bookkeeping.
+    """
+    activated = Signal(object)  # emits the newly active tab's key
+
+    def __init__(self, items: list[tuple[object, str]], *, active: object = None, kicker: str = ""):
+        """items: (key, label) pairs in display order. key can be any
+        hashable value (an int index, a string) — whatever the caller finds
+        natural to switch on."""
+        super().__init__()
+        self.setObjectName("segmented-tab-row")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(8)
+
+        if kicker:
+            kicker_lbl = QLabel(kicker)
+            kicker_lbl.setObjectName("home-kicker")
+            layout.addWidget(kicker_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self._buttons: dict[object, QPushButton] = {}
+        self._active = active if active is not None else (items[0][0] if items else None)
+        for key, label in items:
+            btn = QPushButton(label)
+            btn.setObjectName("segmented-tab")
+            btn.setCheckable(True)
+            btn.setChecked(key == self._active)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _checked=False, k=key: self._on_clicked(k))
+            layout.addWidget(btn)
+            self._buttons[key] = btn
+        layout.addStretch()
+
+    def _on_clicked(self, key: object) -> None:
+        # Always resync (even a re-click of the already-active tab) so the
+        # bar can never end up with a button left unchecked because a
+        # caller's activated handler no-ops on an unchanged key.
+        self.set_active(key)
+        self.activated.emit(key)
+
+    def set_active(self, key: object) -> None:
+        self._active = key
+        for btn_key, btn in self._buttons.items():
+            btn.setChecked(btn_key == key)
+            restyle(btn)
+
+    def button(self, key: object) -> QPushButton:
+        return self._buttons[key]
 
 
 def _launch_opt_label(text: str) -> QLabel:
@@ -373,6 +434,65 @@ def _set_log_panel(toggle: QPushButton, log: QTextEdit, expanded: bool):
     toggle.blockSignals(False)
     toggle.setText("Hide details" if expanded else "Show details")
     log.setVisible(expanded)
+
+
+class CollapsibleLogPanel(QWidget):
+    """Shared "Show details" toggle + read-only log, for pages that stream
+    live worker/command output (kernel switch, branch rebase, driver and
+    tool installs, ...). CommandResultPanel doesn't fit these — it renders
+    one result after a command finishes, not a live-appended stream — but
+    17 pages had each hand-rolled this exact toggle+QTextEdit pairing
+    independently, and three of those copies had already drifted to omit
+    the block-count cap, letting a chatty install grow the widget's
+    document unbounded.
+
+    Height is per-page configurable (existing call sites use everything
+    from a 100px max height to a 200px min height) via min_height/max_height
+    — pass whichever the page previously set, to keep layouts unchanged.
+    """
+
+    def __init__(self, *, min_height: int | None = None, max_height: int | None = None):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.toggle = QPushButton("Show details")
+        self.toggle.setCheckable(True)
+        self.toggle.clicked.connect(self._on_toggle)
+        self.toggle.hide()
+        layout.addWidget(self.toggle)
+
+        self.log = QTextEdit()
+        self.log.document().setMaximumBlockCount(5000)
+        self.log.setReadOnly(True)
+        if min_height is not None:
+            self.log.setMinimumHeight(min_height)
+        if max_height is not None:
+            self.log.setMaximumHeight(max_height)
+        self.log.hide()
+        layout.addWidget(self.log)
+
+    def _on_toggle(self, checked: bool) -> None:
+        _set_log_panel(self.toggle, self.log, checked)
+
+    def set_expanded(self, expanded: bool) -> None:
+        """Force the log open or collapsed — e.g. auto-expand on failure so
+        the user doesn't have to click "Show details" to see why."""
+        _set_log_panel(self.toggle, self.log, expanded)
+
+    def reset(self, first_line: str = "") -> None:
+        """Clear the log and collapse it, ready for a fresh run. Reveals
+        the toggle (hidden until the first run) when first_line is given."""
+        self.log.clear()
+        _set_log_panel(self.toggle, self.log, False)
+        if first_line:
+            self.log.append(first_line)
+            self.toggle.show()
+
+    def append(self, text: str) -> None:
+        self.log.append(text)
+        self.log.ensureCursorVisible()
 
 
 # ── Hardware card widget ───────────────────────────────────────────────────────

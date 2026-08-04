@@ -137,8 +137,12 @@ PROBLEM_ROUTES: dict[str, str] = {
 
 
 def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
-    from .services.hardware import _detect_nvidia
-
+    # No _detect_nvidia() call here — this used to gate the "NVIDIA Drivers"
+    # nav item, but get_nav_groups() runs synchronously in MainWindow.__init__
+    # before any window is shown, so an lspci call here blocked the whole
+    # app's startup. The NVIDIA item is always included now; MainWindow
+    # hides it by default and reveals it via a background probe (see
+    # windows.py's _refresh_nvidia_nav_visibility).
     nav_groups: list[tuple[str | None, list[NavItem]]] = [
         (None, [
             (("go-home",), "⌂", "Home", "Welcome", _page_factory("page_welcome", "WelcomePage", navigate=navigate)),
@@ -168,9 +172,9 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
         ]),
     ]
 
-    advanced_items: list[NavItem] = []
-    if _detect_nvidia():
-        advanced_items.append((("video-display", "preferences-desktop-display"), "▣", "NVIDIA Drivers", "NVIDIA", _page_factory("page_nvidia", "NvidiaPage")))
+    advanced_items: list[NavItem] = [
+        (("video-display", "preferences-desktop-display"), "▣", "NVIDIA Drivers", "NVIDIA", _page_factory("page_nvidia", "NvidiaPage")),
+    ]
     advanced_items.append((("cpu", "applications-system"), "◌", "Kernel", "Kernel", _page_factory("page_kernel", "KernelPage")))
     advanced_items.append((("vcs-branch", "system-switch-user"), "⎇", "Channels", "Channels", _page_factory("page_branches", "BranchesPage")))
     advanced_items.append((("mail-send", "mail-message"), "✉", "Feedback", "Feedback", _page_factory("page_feedback", "FeedbackPage")))

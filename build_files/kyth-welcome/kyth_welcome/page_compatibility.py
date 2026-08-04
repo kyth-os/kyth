@@ -16,7 +16,7 @@ from .qt import (
     QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
 )
 from .widgets import (
-    Page, _make_card,
+    Page, SegmentedTabBar, _make_card,
 )
 
 
@@ -120,19 +120,17 @@ class CompatibilityPage(Page):
         games_head.setObjectName("section-heading")
         self._add(games_head)
 
-        filter_bar = QFrame()
-        filter_bar.setObjectName("segmented-tab-row")
-        filter_row = QHBoxLayout(filter_bar)
-        filter_row.setContentsMargins(16, 10, 16, 10)
-        filter_row.setSpacing(8)
-        self._filter_all  = self._make_filter_btn("All",     None,        True)
-        self._filter_works = self._make_filter_btn("Works",  ("native", "proton"), False)
-        self._filter_tweaks = self._make_filter_btn("Tweaks", ("tweaks",), False)
-        self._filter_blocked = self._make_filter_btn("Blocked", ("blocked",), False)
-        for btn in (self._filter_all, self._filter_works, self._filter_tweaks, self._filter_blocked):
-            filter_row.addWidget(btn)
-        filter_row.addStretch()
-        self._add(filter_bar)
+        self._filter_bar = SegmentedTabBar(
+            [
+                (None, "All"),
+                (("native", "proton"), "Works"),
+                (("tweaks",), "Tweaks"),
+                (("blocked",), "Blocked"),
+            ],
+            active=None,
+        )
+        self._filter_bar.activated.connect(self._apply_filter)
+        self._add(self._filter_bar)
 
         self._game_rows: list[tuple[QFrame, str]] = []  # (widget, status)
         self._active_filter: tuple | None = None
@@ -335,27 +333,8 @@ class CompatibilityPage(Page):
     def _on_compat_unchanged(self):
         self._update_summary()
 
-    def _make_filter_btn(self, label: str, statuses: tuple | None, active: bool) -> QPushButton:
-        btn = QPushButton(label)
-        btn.setObjectName("segmented-tab")
-        btn.setCheckable(True)
-        btn.setChecked(active)
-        btn.clicked.connect(lambda _=False, s=statuses: self._apply_filter(s))
-        return btn
-
     def _apply_filter(self, statuses: tuple | None):
         self._active_filter = statuses
-        for btn in (self._filter_all, self._filter_works, self._filter_tweaks, self._filter_blocked):
-            btn.setChecked(False)
-        if statuses is None:
-            self._filter_all.setChecked(True)
-        elif "blocked" in statuses:
-            self._filter_blocked.setChecked(True)
-        elif "tweaks" in statuses:
-            self._filter_tweaks.setChecked(True)
-        else:
-            self._filter_works.setChecked(True)
-
         for row, status in self._game_rows:
             row.setVisible(statuses is None or status in statuses)
 

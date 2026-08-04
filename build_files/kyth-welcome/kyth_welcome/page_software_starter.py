@@ -6,9 +6,9 @@ from .services.software import find_familiar_app_match
 from .services.runtime import Worker, finish_worker
 from .qt import (
     QCheckBox, QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QProgressBar,
-    QPushButton, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
+    QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
 )
-from .widgets import _make_card, _set_log_panel
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _StarterPackTabMixin:
@@ -47,20 +47,8 @@ class _StarterPackTabMixin:
         self._starter_progress.hide()
         layout.addWidget(self._starter_progress)
 
-        self._starter_log_toggle = QPushButton("Show details")
-        self._starter_log_toggle.setCheckable(True)
-        self._starter_log_toggle.hide()
-        layout.addWidget(self._starter_log_toggle)
-
-        self._starter_log = QTextEdit()
-        self._starter_log.document().setMaximumBlockCount(5000)
-        self._starter_log.setReadOnly(True)
-        self._starter_log.setMaximumHeight(130)
-        self._starter_log.hide()
-        layout.addWidget(self._starter_log)
-        self._starter_log_toggle.clicked.connect(
-            lambda checked: _set_log_panel(self._starter_log_toggle, self._starter_log, checked)
-        )
+        self._starter_log_panel = CollapsibleLogPanel(max_height=130)
+        layout.addWidget(self._starter_log_panel)
         return tab
 
     def _make_ms_fonts_card(self) -> QFrame:
@@ -425,12 +413,9 @@ class _StarterPackTabMixin:
             "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
             " && flatpak install -y flathub " + " ".join(shlex.quote(app_id) for app_id in missing),
         ]
-        self._starter_log.clear()
-        self._starter_log.append(f"→ install selected {name} apps\n")
+        self._starter_log_panel.reset(f"→ install selected {name} apps\n")
         for app_id in missing:
-            self._starter_log.append(f"  {app_id}")
-        self._starter_log_toggle.show()
-        _set_log_panel(self._starter_log_toggle, self._starter_log, False)
+            self._starter_log_panel.append(f"  {app_id}")
         self._starter_progress.show()
         self._starter_status.setText(f"Installing {name} starter pack…")
         self._starter_status.setObjectName("subheading")
@@ -445,8 +430,7 @@ class _StarterPackTabMixin:
         self._starter_worker.start()
 
     def _on_starter_line(self, ln: str):
-        self._starter_log.append(ln)
-        self._starter_log.ensureCursorVisible()
+        self._starter_log_panel.append(ln)
 
     def _on_starter_done(self, code: int, name: str, installed_ids: list[str]):
         self._starter_progress.hide()
@@ -455,7 +439,7 @@ class _StarterPackTabMixin:
         if code == 0:
             self._starter_status.setText(f"Selected {name} apps installed.")
             self._starter_status.setObjectName("status-ok")
-            self._starter_log.append("\nDone.")
+            self._starter_log_panel.append("\nDone.")
             installed_set = set(installed_ids)
             for check, app_id, _, state in self._starter_pack_checks.get(name, []):
                 if app_id in installed_set:
@@ -465,5 +449,5 @@ class _StarterPackTabMixin:
         else:
             self._starter_status.setText(f"{name} app install failed (exit {code}).")
             self._starter_status.setObjectName("status-err")
-            _set_log_panel(self._starter_log_toggle, self._starter_log, True)
+            self._starter_log_panel.set_expanded(True)
         restyle(self._starter_status)

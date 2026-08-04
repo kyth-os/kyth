@@ -8,10 +8,10 @@ from .services.runtime import finish_worker, start_or_extend_dl_monitor, stop_do
 from .services.privileged import bootc_action
 from .services.bootc import REGISTRY, bootc_image_digest, bootc_image_timestamp, branch_display_name, branches_view, current_branch, image_tag_for_channel
 from .qt import (
-    QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,
+    QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer, Qt,
 )
 from .widgets import (
-    Page, _make_card, _set_log_panel,
+    CollapsibleLogPanel, Page, _make_card,
 )
 
 # ── Page: Branches ────────────────────────────────────────────────────────────
@@ -132,18 +132,8 @@ class BranchesPage(Page):
         self._progress.hide()
         self._add(self._progress)
 
-        self._log_toggle = QPushButton("Show details")
-        self._log_toggle.setCheckable(True)
-        self._log_toggle.clicked.connect(lambda checked: _set_log_panel(self._log_toggle, self._log, checked))
-        self._log_toggle.hide()
-        self._add(self._log_toggle)
-
-        self._log = QTextEdit()
-        self._log.document().setMaximumBlockCount(5000)
-        self._log.setReadOnly(True)
-        self._log.setMinimumHeight(120)
-        self._log.hide()
-        self._add(self._log)
+        self._log_panel = CollapsibleLogPanel(min_height=120)
+        self._add(self._log_panel)
 
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
@@ -196,10 +186,7 @@ class BranchesPage(Page):
         self._dl_eta = 0
         self._op_start_ts = time.monotonic()
         self._current_phase = ""
-        self._log.clear()
-        self._log.append(f"→ bootc switch {ref}\n")
-        self._log_toggle.show()
-        _set_log_panel(self._log_toggle, self._log, False)
+        self._log_panel.reset(f"→ bootc switch {ref}\n")
         self._progress.setRange(0, 0)
         self._progress.show()
         self._status_lbl.setText("Switching branch…")
@@ -236,8 +223,7 @@ class BranchesPage(Page):
         if started:
             self._dl_monitor.stats.connect(self._on_dl_stats)
             self._dl_monitor.start()
-        self._log.append(text)
-        self._log.ensureCursorVisible()
+        self._log_panel.append(text)
 
     def _on_dl_stats(self, downloaded: int, total: int, speed_bps: int, eta_sec: int):
         self._dl_speed = speed_bps
@@ -273,7 +259,7 @@ class BranchesPage(Page):
         if code == 0:
             self._status_lbl.setText("Branch staged — reboot to apply.")
             self._status_lbl.setObjectName("status-ok")
-            self._log.append("\nDone. Reboot to boot into the new branch.")
+            self._log_panel.append("\nDone. Reboot to boot into the new branch.")
             self._reboot_btn.show()
         else:
             self._status_lbl.setText(f"Switch failed (exit code {code}).")

@@ -3,8 +3,8 @@ from .core_base import restyle
 from .services.launch import popen
 from .services.flatpak import _is_flatpak_installed
 from .services.runtime import Worker, finish_worker
-from .qt import QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QWidget
-from .widgets import _make_card, _set_log_panel
+from .qt import QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QWidget
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _HostSecurityToolsMixin:
@@ -86,25 +86,13 @@ class _HostSecurityToolsMixin:
         progress.hide()
         layout.addWidget(progress)
 
-        log_toggle = QPushButton("Show details")
-        log_toggle.setCheckable(True)
-        log_toggle.hide()
-        layout.addWidget(log_toggle)
-
-        log = QTextEdit()
-        log.setReadOnly(True)
-        log.setMaximumHeight(100)
-        log.hide()
-        layout.addWidget(log)
-
-        log_toggle.clicked.connect(
-            lambda checked, lt=log_toggle, lg=log: _set_log_panel(lt, lg, checked)
-        )
+        log_panel = CollapsibleLogPanel(max_height=100)
+        layout.addWidget(log_panel)
 
         refs = {
             "tool": tool, "install": install_btn, "launch": launch_btn,
             "uninstall": uninstall_btn, "status": status_lbl,
-            "progress": progress, "log_toggle": log_toggle, "log": log,
+            "progress": progress, "log_panel": log_panel,
         }
         return card, refs
 
@@ -116,17 +104,13 @@ class _HostSecurityToolsMixin:
         for refs in self._sec_host_tool_refs:
             refs["install"].setEnabled(False)
             refs["uninstall"].setEnabled(False)
-        log = active_refs["log"]
-        log_toggle = active_refs["log_toggle"]
+        log_panel = active_refs["log_panel"]
         progress = active_refs["progress"]
         status_lbl = active_refs["status"]
-        log.clear()
-        log.append(
+        log_panel.reset(
             f"→ flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo\n"
             f"→ flatpak install -y flathub {tool['flatpak']}\n"
         )
-        log_toggle.show()
-        _set_log_panel(log_toggle, log, False)
         progress.show()
         status_lbl.setText(f"Installing {tool['name']}…")
         status_lbl.setObjectName("subheading")
@@ -137,9 +121,7 @@ class _HostSecurityToolsMixin:
             f"flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
             f" && flatpak install -y flathub {tool['flatpak']}",
         ])
-        self._sec_host_tool_worker.line.connect(lambda ln: (
-            log.append(ln), log.ensureCursorVisible(),
-        ))
+        self._sec_host_tool_worker.line.connect(log_panel.append)
         self._sec_host_tool_worker.done.connect(
             lambda code, name=tool["name"]: self._sec_on_host_tool_install_done(code, name)
         )
@@ -155,7 +137,7 @@ class _HostSecurityToolsMixin:
         if code == 0:
             active_refs["status"].setText(f"{name} installed.")
             active_refs["status"].setObjectName("status-ok")
-            active_refs["log"].append("\nDone.")
+            active_refs["log_panel"].append("\nDone.")
         else:
             active_refs["status"].setText(f"Installation failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
@@ -177,23 +159,17 @@ class _HostSecurityToolsMixin:
         for refs in self._sec_host_tool_refs:
             refs["install"].setEnabled(False)
             refs["uninstall"].setEnabled(False)
-        log = active_refs["log"]
-        log_toggle = active_refs["log_toggle"]
+        log_panel = active_refs["log_panel"]
         progress = active_refs["progress"]
         status_lbl = active_refs["status"]
-        log.clear()
-        log.append(f"→ flatpak uninstall -y {tool['flatpak']}\n")
-        log_toggle.show()
-        _set_log_panel(log_toggle, log, False)
+        log_panel.reset(f"→ flatpak uninstall -y {tool['flatpak']}\n")
         progress.show()
         status_lbl.setText(f"Uninstalling {tool['name']}…")
         status_lbl.setObjectName("subheading")
         status_lbl.show()
         restyle(status_lbl)
         self._sec_host_tool_worker = Worker(["flatpak", "uninstall", "-y", tool["flatpak"]])
-        self._sec_host_tool_worker.line.connect(lambda ln: (
-            log.append(ln), log.ensureCursorVisible(),
-        ))
+        self._sec_host_tool_worker.line.connect(log_panel.append)
         self._sec_host_tool_worker.done.connect(
             lambda code, name=tool["name"]: self._sec_on_host_tool_uninstall_done(code, name)
         )
@@ -209,7 +185,7 @@ class _HostSecurityToolsMixin:
         if code == 0:
             active_refs["status"].setText(f"{name} uninstalled.")
             active_refs["status"].setObjectName("status-ok")
-            active_refs["log"].append("\nDone.")
+            active_refs["log_panel"].append("\nDone.")
         else:
             active_refs["status"].setText(f"Uninstall failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")

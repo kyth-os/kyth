@@ -11,8 +11,8 @@ from .services.updates import (
     UpdateOperationController, full_update_operation,
     image_update_operation, rollback_operation,
 )
-from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
-from .widgets import _make_card, _set_log_panel
+from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _UpdateOpsMixin:
@@ -115,21 +115,12 @@ class _UpdateOpsMixin:
         cancel_row.addStretch()
         self._add_layout(cancel_row)
 
-        self._log_toggle = QPushButton("Show details")
-        self._log_toggle.setCheckable(True)
-        self._log_toggle.setToolTip("Show or hide the update log output")
-        self._log_toggle.clicked.connect(self._set_log_expanded)
-        self._log_toggle.hide()
-        self._add(self._log_toggle)
-
-        self._log = QTextEdit()
-        # A chatty bootc pull can emit tens of thousands of lines; unbounded
-        # QTextEdit appends get slower and eat memory as the document grows.
-        self._log.document().setMaximumBlockCount(5000)
-        self._log.setReadOnly(True)
-        self._log.setMinimumHeight(200)
-        self._log.hide()
-        self._add(self._log)
+        # A chatty bootc pull can emit tens of thousands of lines; CollapsibleLogPanel
+        # caps the document's block count so unbounded appends don't slow down or
+        # balloon memory as the log grows.
+        self._log_panel = CollapsibleLogPanel(min_height=200)
+        self._log_panel.toggle.setToolTip("Show or hide the update log output")
+        self._add(self._log_panel)
 
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
@@ -143,9 +134,6 @@ class _UpdateOpsMixin:
         self._fw_btn.setEnabled(enabled)
         rollback_ok = enabled and has_rollback_deployment()
         self._rollback_btn.setEnabled(rollback_ok)
-
-    def _set_log_expanded(self, expanded: bool):
-        _set_log_panel(self._log_toggle, self._log, expanded)
 
     def _set_phase(self, phase: str):
         self._operation.set_phase(phase)
@@ -169,9 +157,8 @@ class _UpdateOpsMixin:
         self._current_phase = ""
         self._cancel_blocked = False
         self._cancel_block_reason = ""
-        self._log.clear()
-        self._log_toggle.show()
-        self._set_log_expanded(False)
+        self._log_panel.reset()
+        self._log_panel.toggle.show()
         self._progress.setRange(0, 0)
         self._progress.show()
         self._status_lbl.setText(label)
@@ -231,8 +218,7 @@ class _UpdateOpsMixin:
             return
         self._update_cancel_state()
         if self._cancel_blocked:
-            self._log.append(f"\nCancel unavailable: {self._cancel_block_reason}")
-            self._log.ensureCursorVisible()
+            self._log_panel.append(f"\nCancel unavailable: {self._cancel_block_reason}")
             return
         reply = QMessageBox.question(
             self,
@@ -249,8 +235,7 @@ class _UpdateOpsMixin:
         self._cancel_btn.setText("Cancelling…")
         self._cancel_note.setText("Cancel requested. Waiting for the update process to stop cleanly…")
         self._status_lbl.setText("Cancelling update…")
-        self._log.append("\nCancel requested by user. Waiting for the update process to stop…")
-        self._log.ensureCursorVisible()
+        self._log_panel.append("\nCancel requested by user. Waiting for the update process to stop…")
         self._worker.cancel()
 
     def _run_full_update(self):
@@ -283,8 +268,7 @@ class _UpdateOpsMixin:
         if started:
             self._dl_monitor.stats.connect(self._on_dl_stats)
             self._dl_monitor.start()
-        self._log.append(text)
-        self._log.ensureCursorVisible()
+        self._log_panel.append(text)
 
     def _stop_dl_monitor(self):
         stop_download_monitor(self._dl_monitor)
@@ -379,8 +363,7 @@ class _UpdateOpsMixin:
                 msg = f"  [staging] writing image to disk… {human_bytes(written)} written · {elapsed_str} elapsed"
             else:
                 msg = f"  [staging] committing image to repository… {elapsed_str} elapsed"
-            self._log.append(msg)
-            self._log.ensureCursorVisible()
+            self._log_panel.append(msg)
         self._update_activity()
 
     def _on_done(self, code: int):
@@ -401,13 +384,13 @@ class _UpdateOpsMixin:
         if code == Worker.CANCELLED:
             self._status_lbl.setText(completion.message)
             self._status_lbl.setObjectName(completion.style)
-            self._log.append("\nCancelled. You can start the update again when ready.")
+            self._log_panel.append("\nCancelled. You can start the update again when ready.")
             self._check_for_update(force_refresh=True)
         elif code == 0:
             if self._mode == "firmware":
                 self._status_lbl.setText("Firmware updates queued — reboot to flash.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nDone. Firmware will be applied during the next reboot (EFI capsule).")
+                self._log_panel.append("\nDone. Firmware will be applied during the next reboot (EFI capsule).")
                 self._reboot_btn.show()
                 self._fw_btn.hide()
                 self._fw_status_lbl.setText("Firmware update queued — reboot to apply.")
@@ -418,30 +401,30 @@ class _UpdateOpsMixin:
             if self._mode == "rollback":
                 self._status_lbl.setText("Rollback staged — restart to return to the previous system.")
                 self._status_lbl.setObjectName("status-warn")
-                self._log.append("\nDone. Restart to switch to the previous deployment.")
+                self._log_panel.append("\nDone. Restart to switch to the previous deployment.")
                 self._reboot_btn.show()
                 self._check_for_update(force_refresh=True)
             elif self._mode == "switch":
                 self._status_lbl.setText("Branch staged — restart to apply the new channel.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nDone. Restart to boot into the new branch.")
+                self._log_panel.append("\nDone. Restart to boot into the new branch.")
                 self._reboot_btn.show()
                 self._check_for_update(force_refresh=True)
             elif has_staged_update():
                 self._status_lbl.setText("Update staged — restart when you're ready to apply it.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nDone. Your next system image is staged and waiting for restart.")
+                self._log_panel.append("\nDone. Your next system image is staged and waiting for restart.")
                 self._reboot_btn.show()
                 self._check_for_update(force_refresh=True)
             elif self._mode == "full-update":
                 self._status_lbl.setText("Update complete — everything is up to date.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nDone. All managed tools and apps are up to date.")
+                self._log_panel.append("\nDone. All managed tools and apps are up to date.")
                 self._check_for_update(force_refresh=True)
             else:
                 self._status_lbl.setText("Already on the latest deployment — no image update was staged.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nNo OS image update was staged. System is current.")
+                self._log_panel.append("\nNo OS image update was staged. System is current.")
                 self._check_for_update(force_refresh=True)
         else:
             self._status_lbl.setText(completion.message)

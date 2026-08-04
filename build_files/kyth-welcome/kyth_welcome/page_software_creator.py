@@ -9,9 +9,9 @@ from .services.creator import (
 )
 from .qt import (
     QDesktopServices, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
-    QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
+    QUrl, QVBoxLayout, QWidget, Qt,
 )
-from .widgets import _divider, _make_card, _set_log_panel
+from .widgets import CollapsibleLogPanel, _divider, _make_card
 
 
 class _CreatorTabMixin:
@@ -109,19 +109,8 @@ class _CreatorTabMixin:
         self._dv_progress.setRange(0, 0)
         self._dv_progress.hide()
         dv_layout.addWidget(self._dv_progress)
-        self._dv_log_toggle = QPushButton("Show details")
-        self._dv_log_toggle.setCheckable(True)
-        self._dv_log_toggle.clicked.connect(
-            lambda checked: _set_log_panel(self._dv_log_toggle, self._dv_log, checked)
-        )
-        self._dv_log_toggle.hide()
-        dv_layout.addWidget(self._dv_log_toggle)
-        self._dv_log = QTextEdit()
-        self._dv_log.document().setMaximumBlockCount(5000)
-        self._dv_log.setReadOnly(True)
-        self._dv_log.setMaximumHeight(120)
-        self._dv_log.hide()
-        dv_layout.addWidget(self._dv_log)
+        self._dv_log_panel = CollapsibleLogPanel(max_height=120)
+        dv_layout.addWidget(self._dv_log_panel)
         layout.addWidget(dv_card)
 
         self._refresh_cr_status()
@@ -168,22 +157,12 @@ class _CreatorTabMixin:
         progress.hide()
         layout.addWidget(progress)
 
-        log_toggle = QPushButton("Show details")
-        log_toggle.setCheckable(True)
-        log_toggle.hide()
-        layout.addWidget(log_toggle)
-
-        log = QTextEdit()
-        log.setReadOnly(True)
-        log.setMaximumHeight(100)
-        log.hide()
-        layout.addWidget(log)
-
-        log_toggle.clicked.connect(lambda checked, lt=log_toggle, lg=log: _set_log_panel(lt, lg, checked))
+        log_panel = CollapsibleLogPanel(max_height=100)
+        layout.addWidget(log_panel)
 
         refs = {
             "tool": tool, "install": install_btn, "launch": launch_btn, "uninstall": uninstall_btn,
-            "status": status_lbl, "progress": progress, "log_toggle": log_toggle, "log": log,
+            "status": status_lbl, "progress": progress, "log_panel": log_panel,
         }
         return card, refs
 
@@ -210,14 +189,10 @@ class _CreatorTabMixin:
             refs["install"].setEnabled(False)
             refs["uninstall"].setEnabled(False)
         self._dv_install_btn.setEnabled(False)
-        log = active_refs["log"]
-        log_toggle = active_refs["log_toggle"]
+        log_panel = active_refs["log_panel"]
         progress = active_refs["progress"]
         status_lbl = active_refs["status"]
-        log.clear()
-        log.append(f"→ flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo\n→ flatpak install -y flathub {tool['flatpak']}\n")
-        log_toggle.show()
-        _set_log_panel(log_toggle, log, False)
+        log_panel.reset(f"→ flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo\n→ flatpak install -y flathub {tool['flatpak']}\n")
         progress.show()
         status_lbl.setText(f"Installing {tool['name']}…")
         status_lbl.setObjectName("subheading")
@@ -228,10 +203,7 @@ class _CreatorTabMixin:
             f"flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
             f" && flatpak install -y flathub {tool['flatpak']}",
         ])
-        self._cr_tool_worker.line.connect(lambda ln: (
-            log.append(ln),
-            log.ensureCursorVisible(),
-        ))
+        self._cr_tool_worker.line.connect(log_panel.append)
         self._cr_tool_worker.done.connect(
             lambda code, name=tool["name"]: self._on_cr_tool_install_done(code, name)
         )
@@ -248,7 +220,7 @@ class _CreatorTabMixin:
         if code == 0:
             active_refs["status"].setText(f"{name} installed.")
             active_refs["status"].setObjectName("status-ok")
-            active_refs["log"].append("\nDone.")
+            active_refs["log_panel"].append("\nDone.")
         else:
             active_refs["status"].setText(f"Installation failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
@@ -271,14 +243,10 @@ class _CreatorTabMixin:
             refs["install"].setEnabled(False)
             refs["uninstall"].setEnabled(False)
         self._dv_install_btn.setEnabled(False)
-        log = active_refs["log"]
-        log_toggle = active_refs["log_toggle"]
+        log_panel = active_refs["log_panel"]
         progress = active_refs["progress"]
         status_lbl = active_refs["status"]
-        log.clear()
-        log.append(f"→ flatpak uninstall -y {tool['flatpak']}\n")
-        log_toggle.show()
-        _set_log_panel(log_toggle, log, False)
+        log_panel.reset(f"→ flatpak uninstall -y {tool['flatpak']}\n")
         progress.show()
         status_lbl.setText(f"Uninstalling {tool['name']}…")
         status_lbl.setObjectName("subheading")
@@ -287,10 +255,7 @@ class _CreatorTabMixin:
         self._cr_tool_worker = Worker(
             ["flatpak", "uninstall", "-y", tool["flatpak"]]
         )
-        self._cr_tool_worker.line.connect(lambda ln: (
-            log.append(ln),
-            log.ensureCursorVisible(),
-        ))
+        self._cr_tool_worker.line.connect(log_panel.append)
         self._cr_tool_worker.done.connect(
             lambda code, name=tool["name"]: self._on_cr_tool_uninstall_done(code, name)
         )
@@ -303,7 +268,7 @@ class _CreatorTabMixin:
         if code == 0:
             active_refs["status"].setText(f"{name} uninstalled.")
             active_refs["status"].setObjectName("status-ok")
-            active_refs["log"].append("\nDone.")
+            active_refs["log_panel"].append("\nDone.")
         else:
             active_refs["status"].setText(f"Uninstall failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
@@ -361,11 +326,8 @@ class _CreatorTabMixin:
             return
 
         if not shutil.which("flatpak-builder"):
-            self._dv_log.clear()
-            self._dv_log.append("Missing required tool: flatpak-builder\n")
-            self._dv_log.append("Update KythOS to the latest image, then try again.\n")
-            self._dv_log_toggle.show()
-            _set_log_panel(self._dv_log_toggle, self._dv_log, False)
+            self._dv_log_panel.reset("Missing required tool: flatpak-builder\n")
+            self._dv_log_panel.append("Update KythOS to the latest image, then try again.\n")
             self._dv_op_status.setText(
                 "DaVinci installer tools are missing. Please run a system update first."
             )
@@ -379,13 +341,10 @@ class _CreatorTabMixin:
             candidates = davinci_zip_candidates()
             zip_path = candidates[0] if candidates else ""
         if not zip_path:
-            self._dv_log.clear()
-            self._dv_log.append("No DaVinci Resolve Linux ZIP was found.\n")
-            self._dv_log.append(
+            self._dv_log_panel.reset("No DaVinci Resolve Linux ZIP was found.\n")
+            self._dv_log_panel.append(
                 f"Download the ZIP from Blackmagic to {davinci_download_dir()} or click Choose ZIP… and retry.\n"
             )
-            self._dv_log_toggle.show()
-            _set_log_panel(self._dv_log_toggle, self._dv_log, False)
             self._dv_op_status.setText("Download the Linux ZIP first, or choose it manually.")
             self._dv_op_status.setObjectName("status-warn")
             self._dv_op_status.show()
@@ -403,24 +362,18 @@ class _CreatorTabMixin:
             refs["install"].setEnabled(False)
         self._dv_install_btn.setEnabled(False)
         self._dv_choose_btn.setEnabled(False)
-        self._dv_log.clear()
-        self._dv_log.append(f"→ /usr/bin/kyth-davinci-install {zip_path}\n")
-        self._dv_log.append(
+        self._dv_log_panel.reset(f"→ /usr/bin/kyth-davinci-install {zip_path}\n")
+        self._dv_log_panel.append(
             "Kyth will repackage the official Blackmagic download as a user Flatpak. "
             "The first build can take a few minutes.\n"
         )
-        self._dv_log_toggle.show()
-        _set_log_panel(self._dv_log_toggle, self._dv_log, False)
         self._dv_progress.show()
         self._dv_op_status.setText("Building and installing DaVinci Resolve…")
         self._dv_op_status.setObjectName("subheading")
         self._dv_op_status.show()
         restyle(self._dv_op_status)
         self._dv_worker = Worker(["/usr/bin/kyth-davinci-install", zip_path])
-        self._dv_worker.line.connect(lambda ln: (
-            self._dv_log.append(ln),
-            self._dv_log.ensureCursorVisible(),
-        ))
+        self._dv_worker.line.connect(self._dv_log_panel.append)
         self._dv_worker.done.connect(self._on_davinci_install_done)
         self._dv_worker.start()
 
@@ -435,7 +388,7 @@ class _CreatorTabMixin:
         if code == 0 and installed:
             self._dv_op_status.setText("DaVinci Resolve installed. Launch it from here or the app menu.")
             self._dv_op_status.setObjectName("status-ok")
-            self._dv_log.append("\nDone.")
+            self._dv_log_panel.append("\nDone.")
         else:
             self._dv_op_status.setText(
                 f"Installation failed (exit {code}). Check the details below — a fresh ZIP or system update may be needed."

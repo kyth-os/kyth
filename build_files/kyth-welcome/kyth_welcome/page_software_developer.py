@@ -4,9 +4,9 @@ from .services.launch import popen
 from .services.runtime import Worker
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
-    QTextEdit, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
-from .widgets import _make_card, _set_log_panel
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _DeveloperTabMixin:
@@ -43,8 +43,6 @@ class _DeveloperTabMixin:
         self._ai_stop_btn = QPushButton("Stop AI Service")
         self._ai_delete_btn = QPushButton("Delete")
         self._ai_delete_btn.setObjectName("danger")
-        self._ai_log_toggle = QPushButton("Show Log")
-        self._ai_log_toggle.setCheckable(True)
         self._ai_setup_btn.clicked.connect(lambda _=False: self._ai_run("setup"))
         self._ai_status_btn.clicked.connect(lambda _=False: self._ai_run("status"))
         self._ai_enter_btn.clicked.connect(self._ai_enter_box)
@@ -58,7 +56,6 @@ class _DeveloperTabMixin:
             self._ai_start_btn,
             self._ai_stop_btn,
             self._ai_delete_btn,
-            self._ai_log_toggle,
         ):
             ai_btn_row.addWidget(btn)
         ai_btn_row.addStretch(1)
@@ -73,14 +70,8 @@ class _DeveloperTabMixin:
         self._ai_progress.hide()
         ai_layout.addWidget(self._ai_progress)
 
-        self._ai_log = QTextEdit()
-        self._ai_log.document().setMaximumBlockCount(5000)
-        self._ai_log.setReadOnly(True)
-        self._ai_log.hide()
-        ai_layout.addWidget(self._ai_log)
-        self._ai_log_toggle.clicked.connect(
-            lambda checked: _set_log_panel(self._ai_log_toggle, self._ai_log, checked)
-        )
+        self._ai_log_panel = CollapsibleLogPanel()
+        ai_layout.addWidget(self._ai_log_panel)
         layout.addWidget(ai_card)
         layout.addStretch(1)
         return page
@@ -117,7 +108,8 @@ class _DeveloperTabMixin:
         self._ai_set_running(True)
         self._ai_status_lbl.setObjectName("status-muted")
         self._ai_status_lbl.setText(f"Running {action}...")
-        self._ai_log.clear()
+        self._ai_log_panel.reset()
+        self._ai_log_panel.toggle.show()
         command = ["/usr/bin/kyth-ai-dev", action]
         self._ai_worker = Worker(command)
         self._ai_worker.line.connect(self._ai_on_line)
@@ -125,7 +117,7 @@ class _DeveloperTabMixin:
         self._ai_worker.start()
 
     def _ai_on_line(self, line: str):
-        self._ai_log.append(line)
+        self._ai_log_panel.append(line)
 
     def _ai_on_done(self, action: str, code: int):
         self._ai_set_running(False)

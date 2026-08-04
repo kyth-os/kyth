@@ -1,7 +1,8 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, load_profile, restyle
 from .services.bootc import current_branch
-from .services.runtime import has_blocking_tasks
+from .services.hardware import _detect_nvidia
+from .services.runtime import DataWorker, has_blocking_tasks
 from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups
 from .qt import (
     QCompleter, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
@@ -220,6 +221,15 @@ class MainWindow(QMainWindow):
             key: idx for idx, (key, _) in enumerate(page_specs)
         }
 
+        # NVIDIA nav item: always built above (fixed position, so nothing
+        # downstream keyed on page index needs to shift), but hidden until a
+        # background probe confirms there's actually an NVIDIA GPU. See
+        # _refresh_nvidia_nav_visibility below.
+        self._nvidia_nav_worker = None
+        nvidia_btn = self._nav_button_by_key.get("NVIDIA")
+        if nvidia_btn is not None:
+            nvidia_btn.setVisible(False)
+
         sidebar_layout.addStretch()
 
         # Bottom version hint
@@ -254,6 +264,7 @@ class MainWindow(QMainWindow):
         self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
         self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
         self._switch_page(0)
+        single_shot(self, 0, self._refresh_nvidia_nav_visibility)
 
     # ── Search ("Find a setting") ─────────────────────────────────────────────
 
@@ -400,6 +411,22 @@ class MainWindow(QMainWindow):
         branch = current_branch()
         text = {"latest": "Stable Channel", "testing": "Testing Channel"}.get(branch or "", "System Hub")
         self._sidebar_ver_lbl.setText(text)
+
+    def _refresh_nvidia_nav_visibility(self):
+        """The NVIDIA nav button starts hidden (see __init__) since
+        detecting a GPU means an lspci call. Run it on a background thread
+        and reveal the button afterward instead of blocking startup."""
+        if self._nvidia_nav_worker is not None or "NVIDIA" not in self._nav_button_by_key:
+            return
+        self._nvidia_nav_worker = DataWorker("nav-nvidia-detect", _detect_nvidia)
+        self._nvidia_nav_worker.result.connect(self._on_nvidia_nav_detected)
+        self._nvidia_nav_worker.failed.connect(lambda _key, _message: None)
+        self._nvidia_nav_worker.finished.connect(lambda: setattr(self, "_nvidia_nav_worker", None))
+        self._nvidia_nav_worker.start()
+
+    def _on_nvidia_nav_detected(self, _key: str, has_nvidia: object):
+        if has_nvidia:
+            self._nav_button_by_key["NVIDIA"].setVisible(True)
 
     def _ensure_page(self, index: int) -> QWidget:
         if self._pages[index] is None:

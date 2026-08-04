@@ -8,10 +8,10 @@ from .services.diagnostics import command_stdout
 from .services.runtime import Worker, finish_worker
 from .services.privileged import bootc_action
 from .qt import (
-    QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, single_shot,
+    QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, single_shot,
 )
 from .widgets import (
-    Page, _make_card, _set_log_panel,
+    CollapsibleLogPanel, Page, _make_card,
 )
 
 # ── Page: Kernel ──────────────────────────────────────────────────────────────
@@ -110,18 +110,8 @@ class KernelPage(Page):
         cancel_row.addStretch()
         self._add_layout(cancel_row)
 
-        self._log_toggle = QPushButton("Show details")
-        self._log_toggle.setCheckable(True)
-        self._log_toggle.clicked.connect(lambda checked: _set_log_panel(self._log_toggle, self._log, checked))
-        self._log_toggle.hide()
-        self._add(self._log_toggle)
-
-        self._log = QTextEdit()
-        self._log.document().setMaximumBlockCount(5000)
-        self._log.setReadOnly(True)
-        self._log.setMinimumHeight(140)
-        self._log.hide()
-        self._add(self._log)
+        self._log_panel = CollapsibleLogPanel(min_height=140)
+        self._add(self._log_panel)
 
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
@@ -163,10 +153,7 @@ class KernelPage(Page):
         self._current_phase = ""
         self._cancel_blocked = False
         self._cancel_block_reason = ""
-        self._log.clear()
-        self._log.append(f"-> sudo bootc switch {ref}\n")
-        self._log_toggle.show()
-        _set_log_panel(self._log_toggle, self._log, False)
+        self._log_panel.reset(f"-> sudo bootc switch {ref}\n")
         self._progress.show()
         self._status_lbl.setText("Switching kernel image…")
         self._status_lbl.setObjectName("subheading")
@@ -198,8 +185,7 @@ class KernelPage(Page):
             self._current_phase = phase
             self._status_lbl.setText(phase)
             self._update_cancel_state()
-        self._log.append(text)
-        self._log.ensureCursorVisible()
+        self._log_panel.append(text)
 
     def _update_cancel_state(self):
         reason = bootc_cancel_block_reason("switch", self._current_phase)
@@ -218,7 +204,7 @@ class KernelPage(Page):
             return
         self._update_cancel_state()
         if self._cancel_blocked:
-            self._log.append(f"\nCancel unavailable: {self._cancel_block_reason}")
+            self._log_panel.append(f"\nCancel unavailable: {self._cancel_block_reason}")
             return
         reply = QMessageBox.question(
             self,
@@ -246,11 +232,11 @@ class KernelPage(Page):
         if code == Worker.CANCELLED:
             self._status_lbl.setText("Kernel switch cancelled.")
             self._status_lbl.setObjectName("status-warn")
-            self._log.append("\nCancelled. The current kernel remains selected.")
+            self._log_panel.append("\nCancelled. The current kernel remains selected.")
         elif code == 0:
             self._status_lbl.setText("Kernel image staged — reboot to apply it.")
             self._status_lbl.setObjectName("status-ok")
-            self._log.append("\nDone. Reboot to activate the selected kernel.")
+            self._log_panel.append("\nDone. Reboot to activate the selected kernel.")
             self._reboot_btn.show()
         else:
             self._status_lbl.setText(f"Kernel switch failed (exit code {code}).")

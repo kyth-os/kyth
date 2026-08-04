@@ -1,11 +1,10 @@
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import restyle
 from .lazy_page import compose_on_first_init
 from .services.runtime import Worker
-from .qt import QFrame, QHBoxLayout, QPushButton, QWidget
-from .widgets import Page, _divider
+from .qt import QPushButton, QWidget
+from .widgets import Page, SegmentedTabBar, _divider
 
 
 def _load_software_mixins() -> tuple[type, ...]:
@@ -344,26 +343,12 @@ class SoftwarePage(Page):
 
         # Tab bar — inserted into _outer between the page-header divider and the
         # scroll area. After _page_header(), _outer contains [hdr, div, scroll].
-        # Shared segmented-tab component (same pill-checkable-button pattern as
-        # Home's workstation-mode switcher) instead of a bespoke underline row —
-        # one "sub-navigation within a page" pattern instead of each page
-        # inventing its own tab styling.
-        tab_bar = QFrame()
-        tab_bar.setObjectName("segmented-tab-row")
-        tab_bar_layout = QHBoxLayout(tab_bar)
-        tab_bar_layout.setContentsMargins(16, 10, 16, 10)
-        tab_bar_layout.setSpacing(8)
-        self._tab_btns: list[QPushButton] = []
-        for i, label in enumerate(("Start", "Create", "Develop", "Security", "App Store", "AppImages", "Installed")):
-            btn = QPushButton(label)
-            btn.setObjectName("segmented-tab")
-            btn.setCheckable(True)
-            btn.setChecked(i == self._initial_tab)
-            btn.clicked.connect(lambda _=False, idx=i: self._switch_tab(idx))
-            tab_bar_layout.addWidget(btn)
-            self._tab_btns.append(btn)
-        tab_bar_layout.addStretch()
-        self._outer.insertWidget(2, tab_bar)
+        # SegmentedTabBar (widgets.py) owns the button row/checked-state
+        # bookkeeping; this page only decides what "activating a tab" does.
+        tab_labels = ("Start", "Create", "Develop", "Security", "App Store", "AppImages", "Installed")
+        self._tab_bar = SegmentedTabBar(list(enumerate(tab_labels)), active=self._initial_tab)
+        self._tab_bar.activated.connect(self._switch_tab)
+        self._outer.insertWidget(2, self._tab_bar)
         self._outer.insertWidget(3, _divider())
 
         self._current_tab = self._initial_tab
@@ -398,13 +383,9 @@ class SoftwarePage(Page):
         if idx == self._current_tab:
             return
         self._ensure_tab(idx)
-        for i, btn in enumerate(self._tab_btns):
-            active = i == idx
-            btn.setChecked(active)
-            restyle(btn)
-            widget = self._tab_widgets[i]
+        for i, widget in enumerate(self._tab_widgets):
             if widget is not None:
-                widget.setVisible(active)
+                widget.setVisible(i == idx)
         self._current_tab = idx
         if idx == 3:
             self._refresh_sec_status()

@@ -1,7 +1,7 @@
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import apply_install_badge, restyle
+from .core_base import apply_install_badge
 from .services.diagnostics import command_stdout
 from .services.gaming import (
     DataWorker, GameNightManager, _ProtonDbBatchWorker, _collect_gaming_dashboard, _compat_tool_version,
@@ -11,10 +11,10 @@ from .services.gaming import (
 from .services.flatpak import _is_flatpak_installed
 from .services.workers.windows_migration import WindowsLibraryWorker
 from .qt import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt, single_shot
+    QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget, Qt, single_shot
 )
 from .lazy_page import compose_on_first_init
-from .widgets import Page, StatusBadge
+from .widgets import Page, SegmentedTabBar, StatusBadge
 
 
 def _load_gaming_mixins() -> tuple[type, ...]:
@@ -57,17 +57,7 @@ class GamingPage(Page):
         wrapper.setLayout(layout)
         self._add(wrapper)
 
-    def _make_section_switcher(self) -> QFrame:
-        bar = QFrame()
-        bar.setObjectName("segmented-tab-row")
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(16, 10, 16, 10)
-        layout.setSpacing(12)
-
-        lbl = QLabel("GAMING HUB:")
-        lbl.setObjectName("home-kicker")
-        layout.addWidget(lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-
+    def _make_section_switcher(self) -> SegmentedTabBar:
         display_labels = {
             "all": "🎮 Dashboard",
             "setup": "⚙️ Setup",
@@ -76,18 +66,9 @@ class GamingPage(Page):
             "tuning": "⚡ Performance & Tuning",
             "fixes": "🛠️ Fixes",
         }
-
-        for key, label in self._SECTION_LABELS.items():
-            display_label = display_labels.get(key, label)
-            btn = QPushButton(display_label)
-            btn.setObjectName("segmented-tab")
-            btn.setCheckable(True)
-            btn.setChecked(key == self._current_gaming_section)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda _=False, k=key: self._switch_gaming_section(k))
-            self._gaming_section_buttons[key] = btn
-            layout.addWidget(btn)
-        layout.addStretch()
+        items = [(key, display_labels.get(key, label)) for key, label in self._SECTION_LABELS.items()]
+        bar = SegmentedTabBar(items, active=self._current_gaming_section, kicker="GAMING HUB:")
+        bar.activated.connect(self._switch_gaming_section)
         return bar
 
     def _switch_gaming_section(self, active: str) -> None:
@@ -99,11 +80,8 @@ class GamingPage(Page):
             self._ensure_gaming_section(active)
             self._kick_section_refresh(active)
 
-        for key, btn in self._gaming_section_buttons.items():
-            selected = key == active
-            btn.setChecked(selected)
-            btn.setObjectName("segmented-tab")
-            restyle(btn)
+        if self._tab_bar is not None:
+            self._tab_bar.set_active(active)
 
         dashboard_visible = (active == "all")
         for widget in self._dashboard_widgets:
@@ -130,7 +108,7 @@ class GamingPage(Page):
         self._protondb_worker: _ProtonDbBatchWorker | None = None
         self._last_detected_games: list[dict] = []
         self._gaming_section_widgets: dict[str, list[QWidget]] = {}
-        self._gaming_section_buttons: dict[str, QPushButton] = {}
+        self._tab_bar: SegmentedTabBar | None = None
         self._current_gaming_section = "setup" if wizard_mode else "all"
         self._active_gaming_section = None
 
@@ -142,7 +120,8 @@ class GamingPage(Page):
         )
 
         if not wizard_mode:
-            self._add(self._make_section_switcher())
+            self._tab_bar = self._make_section_switcher()
+            self._add(self._tab_bar)
             self._hero_card = self._make_gaming_hero_banner()
             self._hud_grid_widget = self._make_gaming_hud_grid()
             self._dashboard_widgets = [self._hero_card, self._hud_grid_widget]

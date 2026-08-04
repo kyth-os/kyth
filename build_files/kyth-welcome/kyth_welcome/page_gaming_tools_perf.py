@@ -2,8 +2,8 @@
 from .core_base import restyle
 from .services.gaming import scx_scheduler_command
 from .services.runtime import Worker, finish_worker
-from .qt import QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, Qt
-from .widgets import _copy_text, _launch_opt_label, _launch_opt_value, _make_card, _set_log_panel
+from .qt import QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, Qt
+from .widgets import CollapsibleLogPanel, _copy_text, _launch_opt_label, _launch_opt_value, _make_card
 
 
 class _PerfTuningMixin:
@@ -163,17 +163,8 @@ class _PerfTuningMixin:
         self._scx_progress.setRange(0, 0)
         self._scx_progress.hide()
         scx_layout.addWidget(self._scx_progress)
-        self._scx_log_toggle = QPushButton("Show details")
-        self._scx_log_toggle.setCheckable(True)
-        self._scx_log_toggle.clicked.connect(lambda checked: _set_log_panel(self._scx_log_toggle, self._scx_log, checked))
-        self._scx_log_toggle.hide()
-        scx_layout.addWidget(self._scx_log_toggle)
-        self._scx_log = QTextEdit()
-        self._scx_log.document().setMaximumBlockCount(5000)
-        self._scx_log.setReadOnly(True)
-        self._scx_log.setMaximumHeight(100)
-        self._scx_log.hide()
-        scx_layout.addWidget(self._scx_log)
+        self._scx_log_panel = CollapsibleLogPanel(max_height=100)
+        scx_layout.addWidget(self._scx_log_panel)
         self._scx_worker = None
         self._add(scx_card)
 
@@ -198,20 +189,14 @@ class _PerfTuningMixin:
 
         cmd = scx_scheduler_command(scheduler)
 
-        self._scx_log.clear()
-        self._scx_log.append(f"→ {' '.join(cmd)}\n")
-        self._scx_log_toggle.show()
-        _set_log_panel(self._scx_log_toggle, self._scx_log, False)
+        self._scx_log_panel.reset(f"→ {' '.join(cmd)}\n")
         self._scx_progress.show()
         self._scx_status_lbl.setText(f"Setting scheduler: {scheduler}…")
         self._scx_status_lbl.setObjectName("subheading")
         restyle(self._scx_status_lbl)
 
         self._scx_worker = Worker(cmd)
-        self._scx_worker.line.connect(lambda ln: (
-            self._scx_log.append(ln),
-            self._scx_log.ensureCursorVisible(),
-        ))
+        self._scx_worker.line.connect(self._scx_log_panel.append)
         self._scx_worker.done.connect(self._on_scx_done)
         self._scx_worker.start()
 
@@ -221,7 +206,7 @@ class _PerfTuningMixin:
         if code == 0:
             self._scx_status_lbl.setText("sched-ext updated.")
             self._scx_status_lbl.setObjectName("status-ok")
-            self._scx_log.append("\nDone.")
+            self._scx_log_panel.append("\nDone.")
         else:
             self._scx_status_lbl.setText(f"sched-ext update failed (exit {code}).")
             self._scx_status_lbl.setObjectName("status-err")

@@ -11,10 +11,10 @@ from .services.hardware import (
 from .services.runtime import finish_worker
 from .services.privileged import helper_action
 from .qt import (
-    QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer,
+    QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer,
 )
 from .widgets import (
-    Page, _make_card, _set_log_panel,
+    CollapsibleLogPanel, Page, _make_card,
 )
 
 # ── Page: NVIDIA Drivers ──────────────────────────────────────────────────────
@@ -64,18 +64,8 @@ class NvidiaPage(Page):
         self._progress.hide()
         self._add(self._progress)
 
-        self._log_toggle = QPushButton("Show details")
-        self._log_toggle.setCheckable(True)
-        self._log_toggle.clicked.connect(lambda checked: _set_log_panel(self._log_toggle, self._log, checked))
-        self._log_toggle.hide()
-        self._add(self._log_toggle)
-
-        self._log = QTextEdit()
-        self._log.document().setMaximumBlockCount(5000)
-        self._log.setReadOnly(True)
-        self._log.setMinimumHeight(200)
-        self._log.hide()
-        self._add(self._log)
+        self._log_panel = CollapsibleLogPanel(min_height=200)
+        self._add(self._log_panel)
 
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
@@ -124,10 +114,7 @@ class NvidiaPage(Page):
 
     def _build_module(self):
         cmd = helper_action("hardware-setup").command()
-        self._log.clear()
-        self._log.append("→ Building NVIDIA kernel module via akmods…\n")
-        self._log_toggle.show()
-        _set_log_panel(self._log_toggle, self._log, False)
+        self._log_panel.reset("→ Building NVIDIA kernel module via akmods…\n")
         self._progress.show()
         self._install_btn.setEnabled(False)
 
@@ -140,8 +127,7 @@ class NvidiaPage(Page):
         )
 
     def _on_line(self, text: str):
-        self._log.append(text)
-        self._log.ensureCursorVisible()
+        self._log_panel.append(text)
 
     def _on_done(self, code: int):
         self._progress.hide()
@@ -150,8 +136,8 @@ class NvidiaPage(Page):
         set_session_inhibit(self, None)
 
         if code == 0:
-            self._log.append("\nDone. Reboot to activate NVIDIA drivers.")
+            self._log_panel.append("\nDone. Reboot to activate NVIDIA drivers.")
             self._reboot_btn.show()
         else:
-            self._log.append(f"\nInstallation failed (exit code {code}).")
+            self._log_panel.append(f"\nInstallation failed (exit code {code}).")
         self._refresh_status()

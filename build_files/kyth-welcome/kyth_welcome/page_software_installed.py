@@ -11,9 +11,9 @@ from .services.launch import popen
 from .core_base import restyle
 from .services.runtime import Worker, finish_worker
 from .qt import (
-    QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
-from .widgets import _set_log_panel
+from .widgets import CollapsibleLogPanel
 
 
 class _InstalledTabMixin:
@@ -44,20 +44,8 @@ class _InstalledTabMixin:
         self._uninstall_progress.hide()
         layout.addWidget(self._uninstall_progress)
 
-        self._uninstall_log_toggle = QPushButton("Show details")
-        self._uninstall_log_toggle.setCheckable(True)
-        self._uninstall_log_toggle.hide()
-        layout.addWidget(self._uninstall_log_toggle)
-
-        self._uninstall_log = QTextEdit()
-        self._uninstall_log.document().setMaximumBlockCount(5000)
-        self._uninstall_log.setReadOnly(True)
-        self._uninstall_log.setMaximumHeight(130)
-        self._uninstall_log.hide()
-        layout.addWidget(self._uninstall_log)
-        self._uninstall_log_toggle.clicked.connect(
-            lambda checked: _set_log_panel(self._uninstall_log_toggle, self._uninstall_log, checked)
-        )
+        self._uninstall_log_panel = CollapsibleLogPanel(max_height=130)
+        layout.addWidget(self._uninstall_log_panel)
 
         self._uninstall_list = QVBoxLayout()
         self._uninstall_list.setSpacing(8)
@@ -150,10 +138,7 @@ class _InstalledTabMixin:
             return
         cmd = flatpak_uninstall_command(app["app_id"], app["installation"])
         self._set_uninstall_controls_enabled(False)
-        self._uninstall_log.clear()
-        self._uninstall_log.append("→ " + " ".join(shlex.quote(part) for part in cmd) + "\n")
-        self._uninstall_log_toggle.show()
-        _set_log_panel(self._uninstall_log_toggle, self._uninstall_log, False)
+        self._uninstall_log_panel.reset("→ " + " ".join(shlex.quote(part) for part in cmd) + "\n")
         self._uninstall_progress.show()
         self._uninstall_status.setText(f"Uninstalling {app['name']}…")
         self._uninstall_status.setObjectName("subheading")
@@ -200,12 +185,9 @@ class _InstalledTabMixin:
             *safe_targets,
         ]
         self._set_uninstall_controls_enabled(False)
-        self._uninstall_log.clear()
-        self._uninstall_log.append("→ remove AppImage and launcher\n")
+        self._uninstall_log_panel.reset("→ remove AppImage and launcher\n")
         for target in safe_targets:
-            self._uninstall_log.append(f"  {target}")
-        self._uninstall_log_toggle.show()
-        _set_log_panel(self._uninstall_log_toggle, self._uninstall_log, False)
+            self._uninstall_log_panel.append(f"  {target}")
         self._uninstall_progress.show()
         self._uninstall_status.setText(f"Uninstalling {app['name']}…")
         self._uninstall_status.setObjectName("subheading")
@@ -218,20 +200,19 @@ class _InstalledTabMixin:
         self._uninstall_worker.start()
 
     def _on_uninstall_line(self, ln: str):
-        self._uninstall_log.append(ln)
-        self._uninstall_log.ensureCursorVisible()
+        self._uninstall_log_panel.append(ln)
 
     def _on_uninstall_done(self, code: int, name: str):
         self._uninstall_progress.hide()
         finish_worker(self, attr="_uninstall_worker")
         self._set_uninstall_controls_enabled(True)
         if code == 0:
-            self._uninstall_log.append("\nDone.")
+            self._uninstall_log_panel.append("\nDone.")
             self._refresh_installed_list(f"{name} uninstalled.", "status-ok")
         else:
             self._uninstall_status.setText(f"Uninstall failed (exit {code}).")
             self._uninstall_status.setObjectName("status-err")
-            _set_log_panel(self._uninstall_log_toggle, self._uninstall_log, True)
+            self._uninstall_log_panel.set_expanded(True)
             restyle(self._uninstall_status)
 
     # ── Shared helpers ────────────────────────────────────────────────────────
