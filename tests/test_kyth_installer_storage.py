@@ -1062,7 +1062,7 @@ class JournalValidateTests(unittest.TestCase):
         with patch.object(partition_ops, "list_partitions", return_value=[
             {"name": "/dev/nvme0n1p1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fstype": "btrfs"},
             {"name": "/dev/nvme0n1p2", "start_bytes": 1024**2 + 10 * 1024**3, "size_bytes": 10 * 1024**3, "fstype": "ntfs"},
-        ]):
+        ]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
             errors = journal.validate()
         self.assertTrue(any("would overlap with existing region" in e for e in errors))
 
@@ -1074,7 +1074,7 @@ class JournalValidateTests(unittest.TestCase):
             {"name": "/dev/nvme0n1", "size_bytes": 20 * 1024**3},
         ]), patch.object(partition_ops, "list_partitions", return_value=[
             {"name": "/dev/nvme0n1p1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fstype": "btrfs"},
-        ]):
+        ]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
             errors = journal.validate()
         self.assertTrue(any("extends past the end of" in e for e in errors))
 
@@ -1085,7 +1085,7 @@ class JournalValidateTests(unittest.TestCase):
         with patch.object(partition_ops, "list_partitions", return_value=[
             {"name": "/dev/nvme0n1p1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fstype": "btrfs"},
             {"name": "/dev/nvme0n1p2", "start_bytes": 1024**2 + 10 * 1024**3, "size_bytes": 10 * 1024**3, "fstype": "ntfs"},
-        ]):
+        ]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
             errors = journal.validate()
         self.assertEqual(errors, [])
 
