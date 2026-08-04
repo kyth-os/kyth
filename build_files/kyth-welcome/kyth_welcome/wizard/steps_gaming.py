@@ -11,6 +11,7 @@ from __future__ import annotations
 from ..core_base import IS_LIVE
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives
 from ..qt import QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget
+from ..ui_tokens import KYTH_TEXT, STATUS_ERROR, STATUS_OK
 from ..widgets import _divider, _make_card, _make_flow_step
 
 
@@ -103,7 +104,7 @@ class _GamingStepMixin:
         )
         tip.setObjectName("wiz-card-copy")
         tip.setWordWrap(True)
-        tip.setStyleSheet("color: #34d399; margin-top: 6px;")
+        tip.setStyleSheet(f"color: {STATUS_OK}; margin-top: 6px;")
         pc_layout.addWidget(tip)
         ps_layout.addWidget(proton_card)
         outer.addWidget(proton_section)
@@ -118,7 +119,7 @@ class _GamingStepMixin:
         cc_layout.setSpacing(6)
         compat_lbl = QLabel("Check your must-play games now — before you commit an evening to one")
         compat_lbl.setObjectName("wiz-card-copy")
-        compat_lbl.setStyleSheet("font-weight: 700; color: #f2f4fb;")
+        compat_lbl.setStyleSheet(f"font-weight: 700; color: {KYTH_TEXT};")
         cc_layout.addWidget(compat_lbl)
         # Front-load the hard wall: kernel-level anti-cheat is the #1 reason
         # other system switchers give up, and no Proton setting will ever fix it.
@@ -133,7 +134,7 @@ class _GamingStepMixin:
             )
             blocked_lbl.setObjectName("wiz-card-copy")
             blocked_lbl.setWordWrap(True)
-            blocked_lbl.setStyleSheet("color: #f7768e;")
+            blocked_lbl.setStyleSheet(f"color: {STATUS_ERROR};")
             cc_layout.addWidget(blocked_lbl)
         compat_sub = QLabel(
             "The rest of the tracked list is marked native, works through Proton, or needs "

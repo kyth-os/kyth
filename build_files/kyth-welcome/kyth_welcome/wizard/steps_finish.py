@@ -4,6 +4,7 @@ from __future__ import annotations
 from ..qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from ..services.launch import flatpak_run
 from ..services.setup_state import STEP_LABELS, load_state, relevant_steps
+from ..ui_tokens import STATUS_OK
 from ..widgets import _make_card
 
 _CHIP_OBJECT_NAME = {
@@ -72,7 +73,7 @@ class _FinishStepMixin:
 
         check = QLabel("✓")
         check.setStyleSheet(
-            "font-size: 52px; color: #34d399; font-weight: 300; background: transparent;"
+            f"font-size: 52px; color: {STATUS_OK}; font-weight: 300; background: transparent;"
         )
         layout.addWidget(check)
         layout.addSpacing(18)
