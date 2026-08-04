@@ -113,6 +113,27 @@ class NetStatsTracker:
         }
 
 
-from .apps import load_app_db, suggest_app
-from .system_probe import SystemProbe
+# Lazy imports to avoid circular dependency at module load time.
+# These are only resolved when explicitly accessed.
+__all__ = [
+    "load_app_db",
+    "suggest_app",
+    "SystemProbe",
+]
 
+
+def __getattr__(name: str):
+    """Lazy attribute resolution to prevent circular imports."""
+    if name in ("load_app_db", "suggest_app"):
+        from .apps import load_app_db, suggest_app
+        return {"load_app_db": load_app_db, "suggest_app": suggest_app}[name]
+    if name == "SystemProbe":
+        from .system_probe import SystemProbe
+        return SystemProbe
+    raise AttributeError(f"module {__name__!r} has no attribute {__name__!r}")
+
+
+# Backwards compatibility: trigger lazy loading on direct module access
+def _lazy_imports():
+    """Placeholder for any future lazy import patterns."""
+    pass

@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import configparser
 import glob
+import logging
 import shutil
 import subprocess
 
 from .commands import run as run_command
 from .runtime_output import parse_secure_boot_state, parse_systemd_state
+
+logger = logging.getLogger(__name__)
 
 
 class SystemProbe:
@@ -24,7 +27,8 @@ class SystemProbe:
                 timeout=5
             )
             return parse_systemd_state(res.stdout)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to get firewall status: %s", exc)
             return "inactive"
 
     @staticmethod
@@ -38,7 +42,8 @@ class SystemProbe:
                 timeout=5
             )
             return res.stdout.strip()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to get SELinux status: %s", exc)
             return ""
 
     @staticmethod
@@ -52,7 +57,8 @@ class SystemProbe:
                 timeout=5
             )
             return parse_secure_boot_state(res.stdout)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to get secure boot status: %s", exc)
             return ""
 
     @staticmethod
@@ -78,7 +84,8 @@ class SystemProbe:
                     timeout=5
                 )
                 return res.stdout.strip()
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to read KDE config %s/%s: %s", file, key, exc)
                 return ""
         return ""
 
@@ -118,6 +125,7 @@ class SystemProbe:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(json.dumps(cls.get_probe_snapshot(), indent=2), encoding="utf-8")
             return True
-        except OSError:
+        except OSError as exc:
+            logger.warning("Failed to export probe cache to %s: %s", path_str, exc)
             return False
 
