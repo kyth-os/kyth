@@ -49,8 +49,18 @@ jobs:
       - name: Install pinned validators
         run: ./build_files/scripts/install-validation-tools.sh
 
+      - name: Install system dependencies for validation
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file systemd
+
       - name: Check Dockerfile build rules
-        run: just check-dockerfile
+        run: |
+          if command -v docker >/dev/null 2>&1; then
+            just check-dockerfile
+          else
+            echo "::notice::Docker not available, skipping Dockerfile build check"
+          fi
 
       - name: Run repository validation suite
         run: ./build_files/scripts/validate.sh
