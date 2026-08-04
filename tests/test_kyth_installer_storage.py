@@ -1051,6 +1051,44 @@ class JournalValidateTests(unittest.TestCase):
             errors = journal.validate()
         self.assertTrue(any("Cannot set /dev/nvme0n1p3 as the root partition" in e for e in errors))
 
+    def test_resize_growing_into_neighboring_partition_is_rejected(self):
+        # The Journal is the authoritative safety gate for partition ops
+        # (see partition_ops.py module docstring); it must not rely on the
+        # only current caller (InstallerService.resize_partition) disallowing
+        # growth to keep a growing resize from overlapping its neighbor.
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p1", "mountpoint": "/"})
+        journal.add_op("resize", {"partition": "/dev/nvme0n1p1", "new_size_bytes": 15 * 1024**3})
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fstype": "btrfs"},
+            {"name": "/dev/nvme0n1p2", "start_bytes": 1024**2 + 10 * 1024**3, "size_bytes": 10 * 1024**3, "fstype": "ntfs"},
+        ]):
+            errors = journal.validate()
+        self.assertTrue(any("would overlap with existing region" in e for e in errors))
+
+    def test_resize_growing_past_end_of_disk_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p1", "mountpoint": "/"})
+        journal.add_op("resize", {"partition": "/dev/nvme0n1p1", "new_size_bytes": 25 * 1024**3})
+        with patch.object(partition_ops, "list_disks", return_value=[
+            {"name": "/dev/nvme0n1", "size_bytes": 20 * 1024**3},
+        ]), patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fstype": "btrfs"},
+        ]):
+            errors = journal.validate()
+        self.assertTrue(any("extends past the end of" in e for e in errors))
+
+    def test_resize_shrink_within_bounds_has_no_errors(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p1", "mountpoint": "/"})
+        journal.add_op("resize", {"partition": "/dev/nvme0n1p1", "new_size_bytes": 5 * 1024**3})
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fstype": "btrfs"},
+            {"name": "/dev/nvme0n1p2", "start_bytes": 1024**2 + 10 * 1024**3, "size_bytes": 10 * 1024**3, "fstype": "ntfs"},
+        ]):
+            errors = journal.validate()
+        self.assertEqual(errors, [])
+
 
 class JournalCommitResizeTests(unittest.TestCase):
     """Journal._commit_resize must shrink the filesystem before ever moving

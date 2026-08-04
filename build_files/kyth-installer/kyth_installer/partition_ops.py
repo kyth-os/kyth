@@ -135,22 +135,25 @@ class Journal:
                         return name
         return None
 
-    def _initial_table_state(self) -> tuple[str, int]:
-        """Return (table_type, primary_count) as the disk stands before this
-        journal's ops are applied — the starting point validate() walks ops
-        forward from, since a new_table op can replace either mid-journal.
+    def _initial_table_state(self) -> tuple[str, int, int]:
+        """Return (table_type, primary_count, disk_size_bytes) as the disk
+        stands before this journal's ops are applied — the starting point
+        validate() walks ops forward from, since a new_table op can replace
+        either mid-journal.
 
         MBR (msdos) tables support at most 4 primary partitions, and this
         installer does not create extended/logical partitions to work around
         that limit — validate() fails closed on a 5th instead of letting it
         hit parted's own cryptic error later."""
         disks_by_name = {d["name"]: d for d in list_disks()}
-        table_type = (disks_by_name.get(self.disk, {}).get("partition_table") or "").lower()
+        disk_info = disks_by_name.get(self.disk, {})
+        table_type = (disk_info.get("partition_table") or "").lower()
         primary_count = (
             len([pt for pt in list_partitions(self.disk) if pt.get("name")])
             if table_type == "msdos" else 0
         )
-        return table_type, primary_count
+        disk_size_bytes = _safe_int(disk_info.get("size_bytes"), -1)
+        return table_type, primary_count, disk_size_bytes
 
     def _validate_not_in_use(self, current_parts: list[dict]) -> list[str]:
         """Reject any op touching a partition the live disk scan shows as
@@ -195,7 +198,7 @@ class Journal:
                     start + size if start >= 0 and size > 0 else -1,
                     part.get("fstype") or "",
                 )
-        table_type, primary_count = self._initial_table_state()
+        table_type, primary_count, disk_size_bytes = self._initial_table_state()
 
         for op in self.ops:
             kind = op["kind"]
@@ -232,7 +235,9 @@ class Journal:
                     mountpoints.add(mount)
 
             elif kind in ("delete", "format", "resize", "set_mountpoint"):
-                error = self._validate_existing_partition_op(kind, p, allocated, mountpoints, table_type)
+                error = self._validate_existing_partition_op(
+                    kind, p, allocated, mountpoints, table_type, disk_size_bytes
+                )
                 if error:
                     errors.append(error)
                 else:
@@ -305,7 +310,8 @@ class Journal:
     def _validate_existing_partition_op(self, kind: str, p: dict,
                                         allocated: dict[str, tuple[int, int, str]],
                                         mountpoints: set[str],
-                                        table_type: str) -> str | None:
+                                        table_type: str,
+                                        disk_size_bytes: int = -1) -> str | None:
         """Validate an operation on an existing partition. Returns error message or None."""
         partition = _normal_device_path(p.get("partition"))
         if not partition or _parent_disk(partition) != self.disk:
@@ -318,6 +324,23 @@ class Journal:
             new_size = _safe_int(p.get("new_size_bytes"), -1)
             if new_size <= 0:
                 return "Resize partition: invalid new size."
+            # A resize only moves this partition's own boundaries — it must
+            # not grow into a neighboring region or past the end of the
+            # disk. This is the same overlap invariant _validate_create_op
+            # enforces for brand-new partitions, kept here so the Journal
+            # itself is the safety gate regardless of which caller staged
+            # the resize op (the current UI only offers shrinking via
+            # InstallerService.resize_partition, but that's a caller-side
+            # restriction, not something this validator should rely on).
+            start, _end, _fs = allocated[partition]
+            new_end = start + new_size
+            if disk_size_bytes > 0 and new_end > disk_size_bytes:
+                return f"Resize partition: new size for {partition} extends past the end of {self.disk}."
+            for name, (other_start, other_end, _other_fs) in allocated.items():
+                if name == partition:
+                    continue
+                if other_start >= 0 and other_end > other_start and start < other_end and new_end > other_start:
+                    return f"Resize partition: new size for {partition} would overlap with existing region ({name})."
 
         elif kind == "set_mountpoint":
             mount = str(p.get("mountpoint") or "").strip()
