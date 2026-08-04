@@ -1,4 +1,3 @@
-```
 # Python cache files
 __pycache__/
 *.pyc
@@ -34,7 +33,13 @@ env/
 # Coverage reports
 .coverage
 coverage/
+coverage.xml
+coverage.json
+coverage-html/
 htmlcov/
+
+# CI tool cache (downloaded + checksum-verified by build_files/scripts/install-validation-tools.sh)
+.cache/
 
 # OS files
 .DS_Store
@@ -43,4 +48,3 @@ Thumbs.db
 # Testing
 .pytest_cache/
 .mypy_cache/
-```
