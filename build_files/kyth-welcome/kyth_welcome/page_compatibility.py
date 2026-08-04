@@ -1,6 +1,7 @@
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
+from .core_base import restyle
 from .services.workers import CompatRefreshWorker
 from .services.gaming import compat_data
 from .services.gaming.compat_data import (
@@ -14,6 +15,7 @@ from .services.gaming.compat_data import (
 from .qt import (
     QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
 )
+from .ui_tokens import STATUS_ERROR, STATUS_OK
 from .widgets import (
     Page, _make_card,
 )
@@ -51,16 +53,12 @@ _COMPAT_AC_EXPLAINERS: list[tuple[str, str, str]] = [
 class CompatibilityPage(Page):
 
     _STATUS_STYLE: ClassVar[dict[str, tuple[str, str, str]]] = {
-        # status → (badge_text, badge_css, row_left_border_color)
-        "native":  ("Native",       "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
-        "proton":  ("Works",        "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
-        "tweaks":  ("Tweaks",       "background:#241808; color:#fbbf24; border:1px solid #f59e0b;",  "#f59e0b"),
-        "blocked": ("Blocked",      "background:#3a1010; color:#f48771; border:1px solid #5a1a1a;",  "#f48771"),
+        # status → (badge_text, hw-card objectName, status-badge objectName)
+        "native":  ("Native",  "hw-card-ok",   "status-ok"),
+        "proton":  ("Works",   "hw-card-ok",   "status-ok"),
+        "tweaks":  ("Tweaks",  "hw-card-warn", "status-warn"),
+        "blocked": ("Blocked", "hw-card-err",  "status-err"),
     }
-    _AC_BADGE_CSS = (
-        "font-size:10px; font-weight:600; border-radius:3px; padding:1px 6px; "
-        "background:#252526; color:#a6a6a6; border:1px solid #3c3c3c;"
-    )
 
     def __init__(self):
         super().__init__()
@@ -90,8 +88,7 @@ class CompatibilityPage(Page):
         # ── Anti-cheat explainers ─────────────────────────────────────────────
         self._divider()
         ac_head = QLabel("How anti-cheat works on Linux")
-        ac_head.setObjectName("heading")
-        ac_head.setStyleSheet("font-size:17px; font-weight:700; color:#ffffff;")
+        ac_head.setObjectName("section-heading")
         self._add(ac_head)
 
         for ac_name, ac_status, ac_text in _COMPAT_AC_EXPLAINERS:
@@ -103,7 +100,7 @@ class CompatibilityPage(Page):
             cl.setSpacing(14)
             dot = QLabel("✓" if ac_status == "ok" else "✗")
             dot.setStyleSheet(
-                f"font-size:18px; font-weight:700; color:{'#4fc1ff' if ac_status == 'ok' else '#f48771'};"
+                f"font-size:18px; font-weight:700; color:{STATUS_OK if ac_status == 'ok' else STATUS_ERROR};"
                 " background:transparent; border:none;"
             )
             dot.setFixedWidth(20)
@@ -112,8 +109,7 @@ class CompatibilityPage(Page):
             text_col = QVBoxLayout()
             text_col.setSpacing(3)
             name_lbl = QLabel(ac_name)
-            name_lbl.setObjectName("card-title")
-            name_lbl.setStyleSheet("font-size:13px;")
+            name_lbl.setObjectName("card-subtitle")
             desc_lbl = QLabel(ac_text)
             desc_lbl.setObjectName("card-copy")
             desc_lbl.setWordWrap(True)
@@ -125,11 +121,13 @@ class CompatibilityPage(Page):
         # ── Game list ─────────────────────────────────────────────────────────
         self._divider()
         games_head = QLabel("Notable games")
-        games_head.setObjectName("heading")
-        games_head.setStyleSheet("font-size:17px; font-weight:700; color:#ffffff;")
+        games_head.setObjectName("section-heading")
         self._add(games_head)
 
-        filter_row = QHBoxLayout()
+        filter_bar = QFrame()
+        filter_bar.setObjectName("segmented-tab-row")
+        filter_row = QHBoxLayout(filter_bar)
+        filter_row.setContentsMargins(16, 10, 16, 10)
         filter_row.setSpacing(8)
         self._filter_all  = self._make_filter_btn("All",     None,        True)
         self._filter_works = self._make_filter_btn("Works",  ("native", "proton"), False)
@@ -138,7 +136,7 @@ class CompatibilityPage(Page):
         for btn in (self._filter_all, self._filter_works, self._filter_tweaks, self._filter_blocked):
             filter_row.addWidget(btn)
         filter_row.addStretch()
-        self._add_layout(filter_row)
+        self._add(filter_bar)
 
         self._game_rows: list[tuple[QFrame, str]] = []  # (widget, status)
         self._active_filter: tuple | None = None
@@ -150,8 +148,7 @@ class CompatibilityPage(Page):
         # ── compatibility apps via Bottles / Lutris ─────────────────────────────────
         self._divider()
         winapps_head = QLabel("Known-working compatibility apps")
-        winapps_head.setObjectName("heading")
-        winapps_head.setStyleSheet("font-size:17px; font-weight:700; color:#ffffff;")
+        winapps_head.setObjectName("section-heading")
         self._add(winapps_head)
 
         winapps_intro = QLabel(
@@ -175,29 +172,22 @@ class CompatibilityPage(Page):
             ("Xbox App",          "blocked", "—",        "No Linux client. Use Xbox Cloud Gaming (above) for Game Pass streaming."),
         ]
         for name, status, tool, note in _WINAPPS:
-            badge_text, badge_css, border_color = CompatibilityPage._STATUS_STYLE.get(
+            badge_text, card_name, badge_name = CompatibilityPage._STATUS_STYLE.get(
                 status, CompatibilityPage._STATUS_STYLE["tweaks"]
             )
             wa_row = QFrame()
-            wa_row.setObjectName("hw-card-dim")
-            wa_row.setStyleSheet(
-                f"QFrame#hw-card-dim {{ border-left: 3px solid {border_color}; border-radius:4px; }}"
-            )
+            wa_row.setObjectName(card_name)
             wa_rl = QHBoxLayout(wa_row)
             wa_rl.setContentsMargins(14, 8, 14, 8)
             wa_rl.setSpacing(10)
             wa_name = QLabel(name)
-            wa_name.setObjectName("card-summary")
-            wa_name.setStyleSheet("font-size:13px; font-weight:600;")
+            wa_name.setObjectName("card-subtitle")
             wa_rl.addWidget(wa_name, 1)
-            wa_tool_lbl = QLabel(f"  {tool}  ")
-            wa_tool_lbl.setStyleSheet(
-                "font-size:10px; font-weight:600; border-radius:3px; padding:1px 6px; "
-                "background:#252526; color:#cccccc; border:1px solid #3c3c3c;"
-            )
+            wa_tool_lbl = QLabel(tool)
+            wa_tool_lbl.setObjectName("status-dim")
             wa_rl.addWidget(wa_tool_lbl)
-            wa_badge = QLabel(f"  {badge_text}  ")
-            wa_badge.setStyleSheet(badge_css + " border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;")
+            wa_badge = QLabel(badge_text)
+            wa_badge.setObjectName(badge_name)
             wa_badge.setToolTip(note)
             wa_rl.addWidget(wa_badge)
             note_lbl = QLabel(note)
@@ -236,8 +226,7 @@ class CompatibilityPage(Page):
         # ── Cloud Gaming — Xbox Game Pass workaround ──────────────────────────
         self._divider()
         cloud_head = QLabel("Cloud gaming (Xbox Game Pass workaround)")
-        cloud_head.setObjectName("heading")
-        cloud_head.setStyleSheet("font-size:17px; font-weight:700; color:#ffffff;")
+        cloud_head.setObjectName("section-heading")
         self._add(cloud_head)
 
         cloud_card, cloud_layout = _make_card("card-accent-warn")
@@ -315,17 +304,18 @@ class CompatibilityPage(Page):
         )
         age = calculate_data_age_days(compat_data._COMPAT_DATA_UPDATED)
         if age is not None and age > _COMPAT_STALE_DAYS:
-            self._freshness_lbl.setStyleSheet("font-size:11px; color:#d4a843;")
+            self._freshness_lbl.setObjectName("prop-val-orange")
             note = (
                 f"⚠ Compatibility data is {age} days old (updated {compat_data._COMPAT_DATA_UPDATED}). "
                 "Double-check ProtonDB before relying on a specific title."
             )
         else:
-            self._freshness_lbl.setStyleSheet("font-size:11px; color:#858585;")
+            self._freshness_lbl.setObjectName("caption-text")
             note = f"Compatibility data updated {compat_data._COMPAT_DATA_UPDATED or 'unknown'}."
         if refresh_note:
             note += f"  {refresh_note}"
         self._freshness_lbl.setText(note)
+        restyle(self._freshness_lbl)
 
     def _rebuild_game_rows(self):
         while self._games_rows_layout.count():
@@ -351,14 +341,9 @@ class CompatibilityPage(Page):
 
     def _make_filter_btn(self, label: str, statuses: tuple | None, active: bool) -> QPushButton:
         btn = QPushButton(label)
+        btn.setObjectName("segmented-tab")
         btn.setCheckable(True)
         btn.setChecked(active)
-        btn.setFixedHeight(28)
-        btn.setStyleSheet(
-            "QPushButton { border-radius:4px; padding:2px 14px; font-size:12px; "
-            "background:#252526; color:#cccccc; border:1px solid #3c3c3c; }"
-            "QPushButton:checked { background:#3a2d3a; color:#4fc1ff; border-color:#4fc1ff; }"
-        )
         btn.clicked.connect(lambda _=False, s=statuses: self._apply_filter(s))
         return btn
 
@@ -379,21 +364,17 @@ class CompatibilityPage(Page):
             row.setVisible(statuses is None or status in statuses)
 
     def _make_game_row(self, game: CompatGame) -> QFrame:
-        badge_text, badge_css, border_color = self._STATUS_STYLE.get(
+        badge_text, card_name, badge_name = self._STATUS_STYLE.get(
             game.status, self._STATUS_STYLE["tweaks"]
         )
         row = QFrame()
-        row.setObjectName("hw-card-dim")
-        row.setStyleSheet(
-            f"QFrame#hw-card-dim {{ border-left: 3px solid {border_color}; border-radius:4px; }}"
-        )
+        row.setObjectName(card_name)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(14, 8, 14, 8)
         rl.setSpacing(10)
 
         name_lbl = QLabel(game.name)
-        name_lbl.setObjectName("card-summary")
-        name_lbl.setStyleSheet("font-size:13px; font-weight:600;")
+        name_lbl.setObjectName("card-subtitle")
         rl.addWidget(name_lbl, 1)
 
         tooltip = (
@@ -405,20 +386,17 @@ class CompatibilityPage(Page):
         row.setToolTip(tooltip)
 
         ac_lbl = QLabel(game.anticheat)
-        ac_lbl.setStyleSheet(self._AC_BADGE_CSS)
+        ac_lbl.setObjectName("status-dim")
         ac_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ac_lbl.setFixedHeight(20)
         rl.addWidget(ac_lbl)
 
         checked_lbl = QLabel(game.checked)
-        checked_lbl.setStyleSheet("font-size:10px; color:#858585;")
+        checked_lbl.setObjectName("prop-val-dim")
         checked_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rl.addWidget(checked_lbl)
 
-        badge = QLabel(f"  {badge_text}  ")
-        badge.setStyleSheet(
-            badge_css + " border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-        )
+        badge = QLabel(badge_text)
+        badge.setObjectName(badge_name)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rl.addWidget(badge)
 
