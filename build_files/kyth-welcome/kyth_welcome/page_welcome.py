@@ -49,14 +49,37 @@ class WelcomePage(Page):
             ""
         )
 
-        branch = branch_display_name(current_branch())
-        staged = has_staged_update()
-        rollback = has_rollback_deployment()
+        # WelcomePage is built eagerly and synchronously by MainWindow before
+        # the app's first window is even shown (see windows.py), so none of
+        # the facts below may block on a subprocess call (bootc status,
+        # lsblk, lspci, systemctl) — that would freeze the whole app on
+        # first boot with no window visible at all. Start from safe
+        # defaults and let _refresh_system_status() (triggered after this
+        # constructor returns) fetch the real values on a background
+        # thread and patch the affected widgets in place; see
+        # _on_status_facts_ready().
         uname = os.uname()
-        kernel = uname.release or "unknown"
         hostname = uname.nodename or "This PC"
-        windows_found = bool(_find_ntfs_drives())
-        hero_view = home_hero_view(staged, rollback, windows_found)
+        self._hostname = hostname
+        self._kernel = uname.release or "unknown"
+        self._session = os.environ.get("XDG_SESSION_TYPE", "unknown").capitalize()
+        self._status_worker = None
+        self._facts = {
+            "branch": "Checking…",
+            "staged": False,
+            "rollback": False,
+            "windows_found": False,
+            "portal": "checking…",
+            "pipewire": "checking…",
+            "has_nvidia": False,
+        }
+        branch = self._facts["branch"]
+        staged = self._facts["staged"]
+        rollback = self._facts["rollback"]
+        windows_found = self._facts["windows_found"]
+        kernel = self._kernel
+        self._hero_view = home_hero_view(staged, rollback, windows_found)
+        hero_view = self._hero_view
 
         # ── 1. The Dynamic Gen Z Hero Banner ──────────────────────────────────
         hero_card = QFrame()
@@ -82,6 +105,7 @@ class WelcomePage(Page):
         status_pill.setText(hero_view.pill_text)
         status_pill.setObjectName(hero_view.pill_object_name)
         hero_layout.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._hero_pill = status_pill
         self._add(hero_card)
 
         # ── 1b. Finish setup (resumable first-boot wizard steps) ──────────────
@@ -147,6 +171,7 @@ class WelcomePage(Page):
         desc1.setObjectName("hud-desc")
         desc1.setWordWrap(True)
         layout1.addWidget(desc1)
+        self._hud1_desc = desc1
         hud_grid.addWidget(card1, 0, 0)
 
         # HUD 2: Environment Summary
@@ -158,9 +183,9 @@ class WelcomePage(Page):
         title2 = QLabel("ENVIRONMENT")
         title2.setObjectName("hud-title")
         layout2.addWidget(title2)
-        session = os.environ.get("XDG_SESSION_TYPE", "unknown").capitalize()
-        portal = command_stdout(["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"], timeout=3) or "unknown"
-        pipewire = command_stdout(["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"], timeout=3) or "unknown"
+        session = self._session
+        portal = self._facts["portal"]
+        pipewire = self._facts["pipewire"]
         desc2 = QLabel(f"<b>Session Type:</b> {session}<br>"
                        f"<b>Audio Engine:</b> PipeWire ({pipewire.strip()})<br>"
                        f"<b>Desktop Portal:</b> {portal.strip()}")
@@ -168,6 +193,7 @@ class WelcomePage(Page):
         desc2.setObjectName("hud-desc")
         desc2.setWordWrap(True)
         layout2.addWidget(desc2)
+        self._hud2_desc = desc2
         hud_grid.addWidget(card2, 0, 1)
 
         # HUD 3: Recovery / Dual-Boot
@@ -188,6 +214,7 @@ class WelcomePage(Page):
         desc3.setObjectName("hud-desc")
         desc3.setWordWrap(True)
         layout3.addWidget(desc3)
+        self._hud3_desc = desc3
         hud_grid.addWidget(card3, 1, 0)
 
         # HUD 4: Recommended / Quick Vibe Actions
@@ -204,15 +231,18 @@ class WelcomePage(Page):
         desc4.setObjectName("hud-desc")
         desc4.setWordWrap(True)
         layout4.addWidget(desc4)
+        self._hud4_desc = desc4
 
         btn4 = QPushButton(hero_view.rec_btn_label)
         btn4.setObjectName("primary")
         btn4.setCursor(Qt.CursorShape.PointingHandCursor)
-        if hero_view.rec_target == "reboot":
-            btn4.clicked.connect(lambda _=False: reboot())
-        else:
-            btn4.clicked.connect(lambda _=False: self._navigate(hero_view.rec_target))
+        # Reads self._hero_view at click time (rather than closing over the
+        # hero_view computed above) since _on_status_facts_ready() replaces
+        # self._hero_view once the real staged/rollback/windows_found facts
+        # are known — the button must follow that, not the placeholder.
+        btn4.clicked.connect(lambda _=False: self._on_recommended_action())
         layout4.addWidget(btn4)
+        self._hud4_btn = btn4
         hud_grid.addWidget(card4, 1, 1)
 
         self._add_layout(hud_grid)
@@ -231,7 +261,11 @@ class WelcomePage(Page):
         self._add(self._make_section_header("Explore Tasks", "Choose a card below to configure launchers, tune displays, or run diagnostics."))
 
         # ── Category Grid (Action Cards) ──────────────────────────────────────
-        categories = home_categories(has_nvidia=_detect_nvidia())
+        # has_nvidia defaults to False here (see self._facts above) — real
+        # GPU detection runs in the background and _rebuild_category_grid()
+        # patches the "Advanced" card's task list in if it was wrong.
+        self._nvidia_at_build = self._facts["has_nvidia"]
+        categories = home_categories(has_nvidia=self._nvidia_at_build)
 
         self._category_grid = QGridLayout()
         self._category_grid.setSpacing(12)
@@ -245,6 +279,9 @@ class WelcomePage(Page):
         self._add_layout(self._category_grid)
 
         self._stretch()
+
+        if not IS_LIVE:
+            single_shot(self, 0, self._refresh_system_status)
 
     def _make_ntfs_library_card(self, libs: list[str]) -> QFrame:
         card, layout = _make_card("card-accent-warn")
@@ -291,6 +328,96 @@ class WelcomePage(Page):
         card = self._make_ntfs_library_card(list(libs))
         self._layout.insertWidget(self._ntfs_library_insert_index, card)
         restyle(card)
+
+    @staticmethod
+    def _gather_status_facts() -> dict:
+        """Run off the GUI thread by _refresh_system_status()'s DataWorker.
+        Everything here is a subprocess/D-Bus call — see the comment at the
+        top of __init__ for why none of it may run synchronously there."""
+        portal = command_stdout(
+            ["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"],
+            timeout=3,
+        ) or "unknown"
+        pipewire = command_stdout(
+            ["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"],
+            timeout=3,
+        ) or "unknown"
+        return {
+            "branch": branch_display_name(current_branch()),
+            "staged": has_staged_update(),
+            "rollback": has_rollback_deployment(),
+            "windows_found": bool(_find_ntfs_drives()),
+            "portal": portal,
+            "pipewire": pipewire,
+            "has_nvidia": _detect_nvidia(),
+        }
+
+    def _refresh_system_status(self):
+        if self._status_worker is not None:
+            return
+        self._status_worker = DataWorker("welcome-status", self._gather_status_facts)
+        self._status_worker.result.connect(self._on_status_facts_ready)
+        self._status_worker.failed.connect(lambda _key, _message: None)
+        self._status_worker.finished.connect(lambda: setattr(self, "_status_worker", None))
+        self._status_worker.start()
+
+    def _on_status_facts_ready(self, _key: str, facts: object):
+        if not isinstance(facts, dict):
+            return
+        self._facts.update(facts)
+        staged = self._facts["staged"]
+        rollback = self._facts["rollback"]
+        windows_found = self._facts["windows_found"]
+
+        self._hero_view = home_hero_view(staged, rollback, windows_found)
+        self._hero_pill.setText(self._hero_view.pill_text)
+        self._hero_pill.setObjectName(self._hero_view.pill_object_name)
+        restyle(self._hero_pill)
+
+        self._hud1_desc.setText(
+            f"<b>Device:</b> {self._hostname}<br>"
+            f"<b>Kernel:</b> {self._kernel}<br>"
+            f"<b>Channel:</b> {self._facts['branch']}"
+        )
+        self._hud2_desc.setText(
+            f"<b>Session Type:</b> {self._session}<br>"
+            f"<b>Audio Engine:</b> PipeWire ({self._facts['pipewire'].strip()})<br>"
+            f"<b>Desktop Portal:</b> {self._facts['portal'].strip()}"
+        )
+        rollback_status = "Available" if rollback else "None"
+        dual_boot_status = "Detected" if windows_found else "Not Detected"
+        self._hud3_desc.setText(
+            f"<b>Previous State:</b> {rollback_status}<br>"
+            f"<b>Windows Disk:</b> {dual_boot_status}<br>"
+            f"<b>Fallback Theme:</b> Verified"
+        )
+        self._hud4_desc.setText(self._hero_view.rec_text)
+        self._hud4_btn.setText(self._hero_view.rec_btn_label)
+
+        if bool(self._facts["has_nvidia"]) != self._nvidia_at_build:
+            self._rebuild_category_grid()
+
+    def _on_recommended_action(self):
+        target = self._hero_view.rec_target
+        if target == "reboot":
+            reboot()
+        else:
+            self._navigate(target)
+
+    def _rebuild_category_grid(self):
+        """Re-derive the category cards once real GPU detection lands, since
+        home_categories()'s "Advanced" card only lists "Manage NVIDIA
+        drivers" when has_nvidia is True and the initial build used the
+        False placeholder from self._facts (see __init__)."""
+        self._nvidia_at_build = self._facts["has_nvidia"]
+        for card, _is_games in self._category_cards:
+            self._category_grid.removeWidget(card)
+            card.deleteLater()
+        self._category_cards = []
+        for icon_names, glyph, title, tasks in home_categories(has_nvidia=self._nvidia_at_build):
+            card = self._make_category_card(icon_names, glyph, title, tasks)
+            self._category_cards.append((card, title == "Games"))
+        self._relayout_categories(self._profile)
 
     def _make_setup_resume_card(self, incomplete: list[tuple[str, str]]) -> QFrame:
         card, layout = _make_card("card-accent-warn")
