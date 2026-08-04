@@ -1,6 +1,7 @@
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
+from .core_base import restyle
 from .services.workers import ControllerProbeWorker
 from .services.hardware import controller_status_view
 from .services.runtime import Worker, release_worker_when_finished
@@ -183,9 +184,8 @@ class ControllerPage(Page):
             "will load. Run  sudo mokutil --import /etc/xone/cert.der  and follow "
             "the prompts, then reboot."
         )
-        self._sb_warn_lbl.setObjectName("card-copy")
+        self._sb_warn_lbl.setObjectName("text-warn")
         self._sb_warn_lbl.setWordWrap(True)
-        self._sb_warn_lbl.setStyleSheet("color: #d4a843; padding: 6px 0;")
         self._sb_warn_lbl.hide()
         self._add(self._sb_warn_lbl)
 
@@ -217,7 +217,8 @@ class ControllerPage(Page):
         self._status_lbl.setText(view.status_text)
 
         self._xone_status_lbl.setText(view.xone_status_text)
-        self._xone_status_lbl.setStyleSheet(view.xone_status_style)
+        self._xone_status_lbl.setObjectName(view.xone_status_object_name)
+        restyle(self._xone_status_lbl)
         self._xone_btn.setVisible(view.xone_button_visible)
 
         self._ds_status_lbl.setText(view.dualsense_status_text)
@@ -247,8 +248,10 @@ class ControllerPage(Page):
         self._xone_btn.setEnabled(True)
         if code == 0:
             self._xone_status_lbl.setText("✓  Firmware flashed. Unplug and re-plug the adapter, then press Refresh.")
-            self._xone_status_lbl.setStyleSheet("color: #4fc1ff;")
+            self._xone_status_lbl.setObjectName("text-blue")
+            restyle(self._xone_status_lbl)
             self._xone_btn.hide()
         else:
             self._xone_status_lbl.setText(f"Firmware flash failed (exit {code}). Check that xone is installed.")
-            self._xone_status_lbl.setStyleSheet("color: #f48771;")
+            self._xone_status_lbl.setObjectName("text-err")
+            restyle(self._xone_status_lbl)

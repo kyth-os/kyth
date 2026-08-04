@@ -112,19 +112,15 @@ def _make_card(name: str = "card") -> tuple[QFrame, QVBoxLayout]:
 
 def _launch_opt_label(text: str) -> QLabel:
     lbl = QLabel(text)
-    lbl.setStyleSheet("font-size: 12px; color: #888888; min-width: 130px;")
+    lbl.setObjectName("launch-opt-label")
+    lbl.setMinimumWidth(130)
     return lbl
 
 
 def _launch_opt_value(text: str) -> QLabel:
     lbl = QLabel(text)
+    lbl.setObjectName("launch-opt-value")
     lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-    lbl.setStyleSheet(
-        "font-family: 'Noto Mono', 'Cascadia Code', monospace; "
-        "font-size: 12px; color: #c0c0c0; "
-        "background: #060606; border: 1px solid #1e1e1e; "
-        "border-radius: 4px; padding: 3px 8px;"
-    )
     return lbl
 
 
@@ -388,10 +384,10 @@ class HardwareCard(QFrame):
         "dim":  "hw-card-dim",
     }
     _BADGE_STYLE: ClassVar[dict[str, tuple[str, str]]] = {
-        "ok":   ("background: #0e2218; color: #34d399; border: 1px solid #10b981;",  "OK"),
-        "warn": ("background: #241808; color: #fbbf24; border: 1px solid #d97706;",  "Warning"),
-        "err":  ("background: #2d1418; color: #f87171; border: 1px solid #ef4444;",  "Issue"),
-        "dim":  ("background: #1a1e29; color: #9ca3af; border: 1px solid #4b5563;",  "Info"),
+        "ok":   ("status-ok",   "OK"),
+        "warn": ("status-warn", "Warning"),
+        "err":  ("status-err",  "Issue"),
+        "dim":  ("status-dim",  "Info"),
     }
 
     def __init__(self, probe: HardwareProbe):
@@ -466,13 +462,12 @@ class HardwareCard(QFrame):
         self._summary.setText(probe.summary)
         self._details.setText(probe.details)
 
-        style, badge_text = self._BADGE_STYLE.get(
+        badge_name, badge_text = self._BADGE_STYLE.get(
             probe.status, self._BADGE_STYLE["dim"]
         )
-        self._badge.setText(f"  {badge_text}  ")
-        self._badge.setStyleSheet(
-            style + " border-radius: 3px; padding: 3px 9px; font-size: 11px; font-weight: 700;"
-        )
+        self._badge.setText(badge_text)
+        self._badge.setObjectName(badge_name)
+        restyle(self._badge)
 
         card_name = self._CARD_NAME.get(probe.status, "hw-card-dim")
         self.setObjectName(card_name)

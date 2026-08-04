@@ -75,7 +75,7 @@ class KernelPage(Page):
 
         warn, warn_layout = _make_card("card-accent-warn")
         warn_title = QLabel("Advanced users only")
-        warn_title.setStyleSheet("color: #d4a843; font-size: 14px; font-weight: 700;")
+        warn_title.setObjectName("card-title-warn")
         warn_layout.addWidget(warn_title)
         warn_body = QLabel(
             "Kernel switches download a different KythOS image and apply after reboot. "

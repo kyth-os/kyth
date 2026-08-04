@@ -472,7 +472,6 @@ class WelcomePage(Page):
         if icon.isNull():
             icon_lbl.setText(glyph)
             icon_lbl.setObjectName("home-action-icon")
-            icon_lbl.setStyleSheet("font-size: 24px;")
         else:
             icon_lbl.setPixmap(icon.pixmap(QSize(32, 32)))
         icon_lbl.setFixedWidth(36)

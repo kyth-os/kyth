@@ -48,8 +48,7 @@ class _CreatorTabMixin:
         layout.addWidget(_divider())
 
         dv_section_head = QLabel("DaVinci Resolve")
-        dv_section_head.setObjectName("heading")
-        dv_section_head.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
+        dv_section_head.setObjectName("section-heading")
         layout.addWidget(dv_section_head)
         dv_section_sub = QLabel(
             "Download the Linux ZIP from Blackmagic, then click Install from Download. "

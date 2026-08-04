@@ -12,8 +12,7 @@ class _HostSecurityToolsMixin:
 
     def _build_host_tools_grid(self, layout):
         host_head = QLabel("Host-side Security Tools")
-        host_head.setObjectName("heading")
-        host_head.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
+        host_head.setObjectName("section-heading")
         layout.addWidget(host_head)
         host_sub = QLabel(
             "These tools run natively on KythOS as Flatpaks — better Wayland integration "

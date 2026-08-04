@@ -26,7 +26,7 @@ class _UpdateAvailabilityMixin:
         self._avail_icon = QLabel("○")
         self._avail_icon.setFixedWidth(40)
         self._avail_icon.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
-        self._avail_icon.setStyleSheet("font-size: 28px; color: #555555;")
+        self._avail_icon.setObjectName("avail-icon-dim")
         avail_hero.addWidget(self._avail_icon)
 
         avail_text_col = QVBoxLayout()
@@ -75,7 +75,8 @@ class _UpdateAvailabilityMixin:
         self._avail_card.setObjectName("card")
         restyle(self._avail_card)
         self._avail_icon.setText("○")
-        self._avail_icon.setStyleSheet("font-size: 28px; color: #555555;")
+        self._avail_icon.setObjectName("avail-icon-dim")
+        restyle(self._avail_icon)
         self._avail_title.setText("Checking for updates…")
         self._avail_lbl.setText("")
         self._update_now_btn.hide()
@@ -124,10 +125,11 @@ class _UpdateAvailabilityMixin:
         if flatpak_count > 0:
             noun = "update" if flatpak_count == 1 else "updates"
             self._au_flatpak_lbl.setText(f"{flatpak_count} {noun} pending")
-            self._au_flatpak_lbl.setStyleSheet("color: #ffa726;")
+            self._au_flatpak_lbl.setObjectName("prop-val-orange")
         else:
             self._au_flatpak_lbl.setText("Up to date")
-            self._au_flatpak_lbl.setStyleSheet("color: #4caf50;")
+            self._au_flatpak_lbl.setObjectName("prop-val-green")
+        restyle(self._au_flatpak_lbl)
 
         view = update_availability_view(
             staged=staged,
@@ -140,7 +142,8 @@ class _UpdateAvailabilityMixin:
         self._avail_card.setObjectName(view.card_style)
         restyle(self._avail_card)
         self._avail_icon.setText(view.icon_text)
-        self._avail_icon.setStyleSheet(f"font-size: 28px; color: {view.icon_color};")
+        self._avail_icon.setObjectName(view.icon_style)
+        restyle(self._avail_icon)
         self._avail_title.setText(view.title)
         self._avail_lbl.setText(view.body)
         self._update_now_btn.setVisible(view.update_btn_visible)

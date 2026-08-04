@@ -123,7 +123,7 @@ def branches_view(tag: str | None, booted_ts: str | None) -> BranchesView:
 class UpdateAvailabilityView:
     card_style: str
     icon_text: str
-    icon_color: str
+    icon_style: str
     title: str
     body: str
     update_btn_visible: bool
@@ -143,7 +143,7 @@ def update_availability_view(
             noun = "update" if flatpak_count == 1 else "updates"
             apps = f" Additionally, {flatpak_count} Flatpak {noun} can be installed."
         return UpdateAvailabilityView(
-            "card-accent-ok", "↻", "#4fc1ff", "Restart required",
+            "card-accent-ok", "↻", "avail-icon-blue", "Restart required",
             f"A new image is staged and waiting{built_staged}.{apps} Restart now or later — your current system stays available as a fallback.{ts_hint}",
             False, True,
         )
@@ -153,24 +153,24 @@ def update_availability_view(
             noun = "update" if flatpak_count == 1 else "updates"
             apps = f" and {flatpak_count} Flatpak {noun} are pending"
         return UpdateAvailabilityView(
-            "card-accent-warn", "↓", "#d4a843", "Update available",
+            "card-accent-warn", "↓", "avail-icon-warn", "Update available",
             f"A new system image is ready{built}{apps}. Run a full update to download and install them.{ts_hint}",
             True, False,
         )
     if flatpak_count > 0:
         noun = "update is" if flatpak_count == 1 else "updates are"
         return UpdateAvailabilityView(
-            "card-accent-warn", "↓", "#d4a843", "App updates available",
+            "card-accent-warn", "↓", "avail-icon-warn", "App updates available",
             f"Your system OS is up to date, but {flatpak_count} Flatpak app {noun} available. Run a full update to install them.{ts_hint}",
             True, False,
         )
     if check_state == "uptodate":
         return UpdateAvailabilityView(
-            "card-accent-ok", "✓", "#4caf50", "Up to date",
+            "card-accent-ok", "✓", "avail-icon-ok", "Up to date",
             f"Running the latest image{built}.{ts_hint}", False, False,
         )
     return UpdateAvailabilityView(
-        "card", "⚠", "#888888", "Check unavailable",
+        "card", "⚠", "avail-icon-dim", "Check unavailable",
         f"Could not reach the update server — check your network connection.{ts_hint}",
         False, False,
     )

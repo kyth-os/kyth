@@ -11,7 +11,6 @@ from __future__ import annotations
 from ..core_base import IS_LIVE
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives
 from ..qt import QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget
-from ..ui_tokens import KYTH_TEXT, STATUS_ERROR, STATUS_OK
 from ..widgets import _divider, _make_card, _make_flow_step
 
 
@@ -81,8 +80,7 @@ class _GamingStepMixin:
             ps_layout.addWidget(self._make_windows_game_drive_card(windows_drives))
 
         proton_head = QLabel("Enable Proton — play your entire game library")
-        proton_head.setObjectName("wiz-card-title")
-        proton_head.setStyleSheet("font-size: 15px;")
+        proton_head.setObjectName("wiz-section-heading")
         ps_layout.addWidget(proton_head)
 
         proton_card, pc_layout = _make_card("wiz-card-ok")
@@ -102,9 +100,9 @@ class _GamingStepMixin:
         tip = QLabel(
             "Proton-CachyOS is already installed on this system and kept up to date automatically."
         )
-        tip.setObjectName("wiz-card-copy")
+        tip.setObjectName("wiz-card-copy-ok")
         tip.setWordWrap(True)
-        tip.setStyleSheet(f"color: {STATUS_OK}; margin-top: 6px;")
+        pc_layout.addSpacing(6)
         pc_layout.addWidget(tip)
         ps_layout.addWidget(proton_card)
         outer.addWidget(proton_section)
@@ -118,8 +116,7 @@ class _GamingStepMixin:
         compat_card, cc_layout = _make_card("wiz-card")
         cc_layout.setSpacing(6)
         compat_lbl = QLabel("Check your must-play games now — before you commit an evening to one")
-        compat_lbl.setObjectName("wiz-card-copy")
-        compat_lbl.setStyleSheet(f"font-weight: 700; color: {KYTH_TEXT};")
+        compat_lbl.setObjectName("wiz-card-copy-strong")
         cc_layout.addWidget(compat_lbl)
         # Front-load the hard wall: kernel-level anti-cheat is the #1 reason
         # other system switchers give up, and no Proton setting will ever fix it.
@@ -132,9 +129,8 @@ class _GamingStepMixin:
             blocked_lbl = QLabel(
                 f"Will NOT run — blocked by kernel-level anti-cheat on every Linux system: {blocked_names}."
             )
-            blocked_lbl.setObjectName("wiz-card-copy")
+            blocked_lbl.setObjectName("wiz-card-copy-err")
             blocked_lbl.setWordWrap(True)
-            blocked_lbl.setStyleSheet(f"color: {STATUS_ERROR};")
             cc_layout.addWidget(blocked_lbl)
         compat_sub = QLabel(
             "The rest of the tracked list is marked native, works through Proton, or needs "

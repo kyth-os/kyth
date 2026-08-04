@@ -1,4 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
+from .core_base import restyle
 from .services.runtime import release_worker_when_finished
 from .services.workers.updates import FirmwareCheckWorker
 from .services.updates import UpdateProbeResult
@@ -14,7 +15,7 @@ class _FirmwareUpdateMixin:
         fw_header = QHBoxLayout()
         fw_header.setSpacing(12)
         self._fw_icon = QLabel("↻")
-        self._fw_icon.setStyleSheet("font-size: 22px; color: #555555;")
+        self._fw_icon.setObjectName("fw-icon-dim")
         self._fw_icon.setFixedWidth(32)
         fw_text_col = QVBoxLayout()
         fw_text_col.setSpacing(2)
@@ -45,7 +46,8 @@ class _FirmwareUpdateMixin:
         if self._worker is not None:
             return
         self._fw_icon.setText("↻")
-        self._fw_icon.setStyleSheet("font-size: 22px; color: #555555;")
+        self._fw_icon.setObjectName("fw-icon-dim")
+        restyle(self._fw_icon)
         self._fw_status_lbl.setText("Checking for firmware updates…")
         self._fw_btn.hide()
         self._fw_check_worker = FirmwareCheckWorker()
@@ -56,19 +58,22 @@ class _FirmwareUpdateMixin:
     def _on_firmware_check_result(self, result: UpdateProbeResult) -> None:
         if result.state == "error":
             self._fw_icon.setText("—")
-            self._fw_icon.setStyleSheet("font-size: 22px; color: #555555;")
+            self._fw_icon.setObjectName("fw-icon-dim")
+            restyle(self._fw_icon)
             self._fw_status_lbl.setText(result.detail or "Firmware check unavailable.")
             self._fw_btn.hide()
         elif int(result.value) == 0:
             self._fw_icon.setText("✓")
-            self._fw_icon.setStyleSheet("font-size: 22px; color: #4caf50;")
+            self._fw_icon.setObjectName("fw-icon-ok")
+            restyle(self._fw_icon)
             self._fw_status_lbl.setText("Firmware up to date.")
             self._fw_btn.hide()
         else:
             count = int(result.value)
             noun = "update" if count == 1 else "updates"
             self._fw_icon.setText("↓")
-            self._fw_icon.setStyleSheet("font-size: 22px; color: #d4a843;")
+            self._fw_icon.setObjectName("fw-icon-warn")
+            restyle(self._fw_icon)
             self._fw_status_lbl.setText(
                 f"{count} firmware {noun} available. "
                 "Updates download now and are flashed during the next reboot."

@@ -28,9 +28,8 @@ class _WinLibMixin:
                 "\u26a0  Your Windows partition is in a hibernated or dirty state \u2014 "
                 "this means Windows used Fast Startup or wasn't shut down cleanly."
             )
-            warn.setObjectName("card-copy")
+            warn.setObjectName("text-warn")
             warn.setWordWrap(True)
-            warn.setStyleSheet("color: #d4a843;")
             self._win_lib_layout.addWidget(warn)
 
             steps_label = QLabel("To safely import your games:")

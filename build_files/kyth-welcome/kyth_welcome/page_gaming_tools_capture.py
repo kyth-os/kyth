@@ -150,7 +150,7 @@ class _CaptureToolsMixin:
         # OBS PipeWire setup
         obs_fix_note = QLabel("Fix OBS audio capture (apply PipeWire/Wayland Flatpak permissions)")
         obs_fix_note.setObjectName("card-title")
-        obs_fix_note.setStyleSheet("margin-top:8px;")
+        discord_fix_layout.addSpacing(8)
         discord_fix_layout.addWidget(obs_fix_note)
         obs_fix_body = QLabel(
             "OBS installed from Flathub may not capture audio or display correctly under Wayland. "

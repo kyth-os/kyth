@@ -157,9 +157,8 @@ class _StarterPackTabMixin:
             "Tip: right-click any open Chromium app window → "
             "\"More tools\" → \"Create shortcut…\" to pin it to the KDE application launcher."
         )
-        note.setObjectName("card-copy")
+        note.setObjectName("caption-text")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #858585; font-size: 11px;")
         layout.addWidget(note)
         return card
 
@@ -178,8 +177,8 @@ class _StarterPackTabMixin:
             row = QHBoxLayout()
             row.setSpacing(10)
             lbl = QLabel(label)
-            lbl.setObjectName("card-summary")
-            lbl.setStyleSheet("font-weight: 700; min-width: 110px;")
+            lbl.setObjectName("card-subtitle")
+            lbl.setMinimumWidth(110)
             lbl.setAlignment(Qt.AlignmentFlag.AlignTop)
             row.addWidget(lbl)
             desc_lbl = QLabel(desc)

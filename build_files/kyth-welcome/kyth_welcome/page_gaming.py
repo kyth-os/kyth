@@ -228,27 +228,21 @@ class GamingPage(Page):
             self._update_profile_builder()
 
     def _make_health_row(self, status: str, title: str, summary: str) -> QFrame:
-        bg, fg, label = {
-            "ok": ("#121e2d", "#4fc1ff", "Ready"),
-            "warn": ("#1e1a06", "#d4a843", "Needs setup"),
-            "err": ("#3a1010", "#f48771", "Needs fix"),
-            "dim": ("#252526", "#858585", "Optional"),
-        }.get(status, ("#252526", "#858585", "Optional"))
+        card_name, badge_name, label = {
+            "ok":   ("hw-card-ok",   "status-ok",   "Ready"),
+            "warn": ("hw-card-warn", "status-warn", "Needs setup"),
+            "err":  ("hw-card-err",  "status-err",  "Needs fix"),
+            "dim":  ("hw-card-dim",  "status-dim",  "Optional"),
+        }.get(status, ("hw-card-dim", "status-dim", "Optional"))
 
         row = QFrame()
-        row.setObjectName({
-            "ok": "hw-card-ok",
-            "warn": "hw-card-warn",
-            "err": "hw-card-err",
-            "dim": "hw-card-dim",
-        }.get(status, "hw-card-dim"))
+        row.setObjectName(card_name)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(10)
 
         title_lbl = QLabel(title)
-        title_lbl.setObjectName("card-summary")
-        title_lbl.setStyleSheet("font-size:13px; font-weight:700;")
+        title_lbl.setObjectName("card-subtitle")
         layout.addWidget(title_lbl)
 
         summary_lbl = QLabel(summary)
@@ -256,12 +250,9 @@ class GamingPage(Page):
         summary_lbl.setWordWrap(True)
         layout.addWidget(summary_lbl, 1)
 
-        badge = QLabel(f"  {label}  ")
+        badge = QLabel(label)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setStyleSheet(
-            f"background:{bg}; color:{fg}; border:1px solid {fg}; "
-            "border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-        )
+        badge.setObjectName(badge_name)
         layout.addWidget(badge)
         return row
 

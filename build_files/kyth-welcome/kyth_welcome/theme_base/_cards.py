@@ -81,6 +81,18 @@ QLabel#card-title {{
     color: {KYTH_TEXT};
 }}
 
+QLabel#card-title-warn {{
+    font-size: 15px;
+    font-weight: 700;
+    color: {STATUS_WARN};
+}}
+
+QLabel#card-title-err {{
+    font-size: 15px;
+    font-weight: 700;
+    color: {STATUS_ERROR};
+}}
+
 QLabel#card-subtitle {{
     font-size: 13px;
     font-weight: 600;
@@ -131,7 +143,7 @@ QLabel#home-section-copy {{
 }}
 
 QLabel#home-action-icon {{
-    font-size: 13px;
+    font-size: 24px;
     font-weight: 600;
     color: {KYTH_BLUE_LIGHT};
 }}

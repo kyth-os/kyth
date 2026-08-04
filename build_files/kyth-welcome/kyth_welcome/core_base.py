@@ -61,23 +61,9 @@ def prefer_xwayland_if_wayland_plugin_missing() -> None:
 
 def apply_install_badge(lbl: QLabel, ok: bool, ok_text: str = "Installed",
                          warn_text: str = "Not Installed") -> None:
-    if ok:
-        bg = "#121e2d"
-        fg = "#4fc1ff"
-        border = "#1c3d60"
-        text = ok_text
-    else:
-        bg = "#171d27"
-        fg = "#a9b5c7"
-        border = "#2e394c"
-        text = warn_text
-
-    lbl.setText(f"  {text}  ")
-    lbl.setStyleSheet(
-        f"background: {bg}; color: {fg}; border: 1px solid {border}; "
-        "border-radius: 10px; padding: 3px 8px; font-size: 11px; "
-        "font-weight: 700; letter-spacing: 0.2px;"
-    )
+    lbl.setText(ok_text if ok else warn_text)
+    lbl.setObjectName("status-ok" if ok else "status-dim")
+    restyle(lbl)
 
 
 def cancel_worker(

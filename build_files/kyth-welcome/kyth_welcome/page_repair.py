@@ -326,7 +326,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
     def _build_warning_card(self) -> None:
         warn, warn_layout = _make_card("card-accent-err")
         warn_title = QLabel("This action cannot be undone")
-        warn_title.setStyleSheet("color: #f7768e; font-size: 14px; font-weight: 700;")
+        warn_title.setObjectName("card-title-err")
         warn_layout.addWidget(warn_title)
         warn_body = QLabel(
             "Running a repair will:\n"
@@ -345,7 +345,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         confirm_row = QHBoxLayout()
         confirm_row.setSpacing(12)
         confirm_lbl = QLabel("Type  RESET  to unlock:")
-        confirm_lbl.setStyleSheet("color: #6c7086;")
+        confirm_lbl.setObjectName("card-copy")
         confirm_row.addWidget(confirm_lbl)
         self._confirm_edit = QLineEdit()
         self._confirm_edit.setFixedWidth(130)

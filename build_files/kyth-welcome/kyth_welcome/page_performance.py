@@ -1,4 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
+from .core_base import restyle
 from .services.sched import (
     apply_scheduler,
     is_sched_daemon_active,
@@ -137,10 +138,11 @@ class PerformancePage(Page):
 
         if gaming:
             self._perf_gaming_lbl.setText("Active")
-            self._perf_gaming_lbl.setStyleSheet("color: #4caf50; font-weight: 700;")
+            self._perf_gaming_lbl.setObjectName("prop-val-green")
         else:
             self._perf_gaming_lbl.setText("Not detected")
-            self._perf_gaming_lbl.setStyleSheet("color: #b0bccf;")
+            self._perf_gaming_lbl.setObjectName("card-copy")
+        restyle(self._perf_gaming_lbl)
 
         self._perf_auto_toggle.blockSignals(True)
         self._perf_auto_toggle.setChecked(is_sched_daemon_active())

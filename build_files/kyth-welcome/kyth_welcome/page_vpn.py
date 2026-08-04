@@ -132,9 +132,6 @@ class VpnPage(Page):
         self._vpn_log = QTextEdit()
         self._vpn_log.document().setMaximumBlockCount(5000)
         self._vpn_log.setReadOnly(True)
-        self._vpn_log.setStyleSheet(
-            "font-family: 'Noto Mono', 'Cascadia Code', monospace; font-size: 12px;"
-        )
         self._vpn_log.setVisible(False)
         self._vpn_log.setMinimumHeight(160)
         ctrl_layout.addWidget(self._vpn_log)

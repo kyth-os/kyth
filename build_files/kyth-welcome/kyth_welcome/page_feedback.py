@@ -114,7 +114,6 @@ class FeedbackPage(Page):
         )
         note.setObjectName("card-copy")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #888888;")
         action_layout.addWidget(note)
         self._add(action_card)
 

@@ -5,6 +5,7 @@ from ..services.plasma import _run_text, gpu_lspci_summary, kscreen_doctor_outpu
 from ..qt import (
     QFrame, QHBoxLayout, QLabel, Qt,
 )
+from ..ui_tokens import KYTH_TEXT_MUTED
 from ..widgets import ActionRow, CommandResultPanel, _make_card
 from ._profiles import DESKTOP_PROFILES
 
@@ -199,9 +200,9 @@ class _CardsMixin:
             ("HDR", self._kscreen_status("hdr")),
         ]
         for name, value in rows:
-            line = QLabel(f"<b>{name}</b><br><span style='color:#95a6b4'>{value}</span>")
+            line = QLabel(f"<b>{name}</b><br><span style='color:{KYTH_TEXT_MUTED}'>{value}</span>")
             line.setTextFormat(Qt.TextFormat.RichText)
-            line.setStyleSheet("QLabel { background:#101820; border:1px solid #2d3a48; border-radius:8px; padding:9px 11px; color:#eef5f7; }")
+            line.setObjectName("wayland-info-row")
             body.addWidget(line)
         return card
 

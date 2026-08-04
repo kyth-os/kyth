@@ -44,10 +44,7 @@ class _ShortcutsPhoneMixin:
             row = QHBoxLayout()
             row.setSpacing(10)
             keys_lbl = QLabel(keys)
-            keys_lbl.setStyleSheet(
-                "font-family: monospace; font-size:12px; font-weight:600; color:#cccccc; "
-                "background:#252526; border:1px solid #3c3c3c; border-radius:3px; padding:2px 8px;"
-            )
+            keys_lbl.setObjectName("launch-opt-value")
             keys_lbl.setMinimumWidth(110)
             row.addWidget(keys_lbl)
             what_lbl = QLabel(what)

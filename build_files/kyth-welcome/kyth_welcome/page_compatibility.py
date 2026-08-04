@@ -15,7 +15,6 @@ from .services.gaming.compat_data import (
 from .qt import (
     QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
 )
-from .ui_tokens import STATUS_ERROR, STATUS_OK
 from .widgets import (
     Page, _make_card,
 )
@@ -99,10 +98,7 @@ class CompatibilityPage(Page):
             cl.setContentsMargins(16, 12, 16, 12)
             cl.setSpacing(14)
             dot = QLabel("✓" if ac_status == "ok" else "✗")
-            dot.setStyleSheet(
-                f"font-size:18px; font-weight:700; color:{STATUS_OK if ac_status == 'ok' else STATUS_ERROR};"
-                " background:transparent; border:none;"
-            )
+            dot.setObjectName("glyph-ok" if ac_status == "ok" else "glyph-err")
             dot.setFixedWidth(20)
             dot.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
             cl.addWidget(dot)

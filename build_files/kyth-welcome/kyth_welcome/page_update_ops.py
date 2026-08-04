@@ -412,7 +412,8 @@ class _UpdateOpsMixin:
                 self._fw_btn.hide()
                 self._fw_status_lbl.setText("Firmware update queued — reboot to apply.")
                 self._fw_icon.setText("✓")
-                self._fw_icon.setStyleSheet("font-size: 22px; color: #4fc1ff;")
+                self._fw_icon.setObjectName("fw-icon-blue")
+                restyle(self._fw_icon)
                 return
             if self._mode == "rollback":
                 self._status_lbl.setText("Rollback staged — restart to return to the previous system.")
@@ -462,7 +463,8 @@ class _UpdateOpsMixin:
 
         if self._worker is not None:
             self._staged_val.setText("Update in progress…")
-            self._staged_val.setStyleSheet("")
+            self._staged_val.setObjectName("prop-val")
+            restyle(self._staged_val)
             self._rollback_val.setText("—")
             self._rollback_btn.setEnabled(False)
             self._rollback_btn.setText("Roll Back")
@@ -478,21 +480,23 @@ class _UpdateOpsMixin:
         if staged:
             staged_text = f"built {staged_ts}  —  reboot to apply" if staged_ts else "Ready — reboot to apply"
             self._staged_val.setText(staged_text)
-            self._staged_val.setStyleSheet("color: #5b9cf6;")
+            self._staged_val.setObjectName("prop-val-blue")
         else:
             self._staged_val.setText("None")
-            self._staged_val.setStyleSheet("color: #888888;")
+            self._staged_val.setObjectName("prop-val-dim")
+        restyle(self._staged_val)
 
         # Rollback row + button label
         if rollback:
             rb_text = f"Available  ·  built {rollback_ts}" if rollback_ts else "Available"
             self._rollback_val.setText(rb_text)
-            self._rollback_val.setStyleSheet("")
+            self._rollback_val.setObjectName("prop-val")
             self._rollback_btn.setText(f"Roll Back  ({rollback_ts})" if rollback_ts else "Roll Back")
         else:
             self._rollback_val.setText("None")
-            self._rollback_val.setStyleSheet("color: #888888;")
+            self._rollback_val.setObjectName("prop-val-dim")
             self._rollback_btn.setText("Roll Back")
+        restyle(self._rollback_val)
 
         self._rollback_btn.setEnabled(rollback and self._worker is None)
 

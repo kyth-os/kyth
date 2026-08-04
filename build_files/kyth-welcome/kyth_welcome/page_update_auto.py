@@ -5,6 +5,7 @@ from kyth_shared.boot_health import read_state as read_boot_health_state
 from kyth_shared.update_status import read_update_snapshot
 
 # __KYTH_GENERATED_IMPORTS__
+from .core_base import restyle
 from .services.dbus_utils import is_systemd_unit_enabled
 from .services.launch import popen_privileged
 from .services.privileged import AuthFrontend, systemctl_action
@@ -85,12 +86,13 @@ class _AutoUpdateMixin:
         self._au_last_lbl.setText(ts_str)
 
         result = status.get("result", "")
-        _colors = {
-            "upgraded": "#4caf50", "no_change": "#b0bccf",
-            "skipped": "#ffa726", "quarantined": "#ef5350", "error": "#ef5350",
+        _result_styles = {
+            "upgraded": "prop-val-green", "no_change": "card-copy",
+            "skipped": "prop-val-orange", "quarantined": "prop-val-red", "error": "prop-val-red",
         }
         self._au_result_lbl.setText(result.replace("_", " ").title() if result else "—")
-        self._au_result_lbl.setStyleSheet(f"color: {_colors.get(result, '#b0bccf')};")
+        self._au_result_lbl.setObjectName(_result_styles.get(result, "card-copy"))
+        restyle(self._au_result_lbl)
         self._au_reason_lbl.setText(status.get("reason") or "—")
 
         health = read_boot_health_state()
@@ -102,20 +104,22 @@ class _AutoUpdateMixin:
         if health.last_recovered_digest:
             health_text += f" · recovered from {health.last_recovered_digest[:19]}…"
         self._au_health_lbl.setText(health_text)
-        health_color = {
-            "healthy": "#4caf50", "recovered": "#4caf50", "unhealthy": "#ffa726",
-            "quarantined": "#ef5350",
-        }.get(health.status, "#b0bccf")
-        self._au_health_lbl.setStyleSheet(f"color: {health_color};")
+        health_style = {
+            "healthy": "prop-val-green", "recovered": "prop-val-green", "unhealthy": "prop-val-orange",
+            "quarantined": "prop-val-red",
+        }.get(health.status, "card-copy")
+        self._au_health_lbl.setObjectName(health_style)
+        restyle(self._au_health_lbl)
 
         flatpak_count = status.get("flatpak_updates", 0)
         if flatpak_count > 0:
             noun = "update" if flatpak_count == 1 else "updates"
             self._au_flatpak_lbl.setText(f"{flatpak_count} {noun} pending")
-            self._au_flatpak_lbl.setStyleSheet("color: #ffa726;")
+            self._au_flatpak_lbl.setObjectName("prop-val-orange")
         else:
             self._au_flatpak_lbl.setText("Up to date")
-            self._au_flatpak_lbl.setStyleSheet("color: #4caf50;")
+            self._au_flatpak_lbl.setObjectName("prop-val-green")
+        restyle(self._au_flatpak_lbl)
 
         # Reflect timer enabled state
         enabled = is_systemd_unit_enabled("kyth-update-watcher.timer")

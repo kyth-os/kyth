@@ -56,4 +56,41 @@ QLabel#ready-row-dim {{
     color: {KYTH_TEXT_MUTED};
     border: 1px solid {KYTH_HAIRLINE};
 }}
+
+/* ── ProtonDB tier badges (bespoke medal-tier identity, not a status scale —
+   platinum/gold/silver/bronze are deliberately distinct hues; borked/pending
+   reuse the shared status-err/status-dim pills instead of duplicating them) */
+QLabel#pdb-tier-platinum,
+QLabel#pdb-tier-gold,
+QLabel#pdb-tier-silver,
+QLabel#pdb-tier-bronze {{
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+}}
+
+QLabel#pdb-tier-platinum {{
+    background: #102010;
+    color: #7ee8a2;
+    border: 1px solid #7ee8a2;
+}}
+
+QLabel#pdb-tier-gold {{
+    background: #2b2410;
+    color: #d4a843;
+    border: 1px solid #d4a843;
+}}
+
+QLabel#pdb-tier-silver {{
+    background: #181e2b;
+    color: #8cadcf;
+    border: 1px solid #8cadcf;
+}}
+
+QLabel#pdb-tier-bronze {{
+    background: #2b1a10;
+    color: #c47c4a;
+    border: 1px solid #c47c4a;
+}}
 """

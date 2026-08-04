@@ -164,7 +164,6 @@ class _AppsStepMixin:
             text_col.setSpacing(2)
             name_lbl = QLabel(name)
             name_lbl.setObjectName("wiz-card-title")
-            name_lbl.setStyleSheet("font-size: 13px;")
             desc_lbl = QLabel("Already installed." if already_installed else desc)
             desc_lbl.setObjectName("wiz-card-copy")
             desc_lbl.setWordWrap(True)

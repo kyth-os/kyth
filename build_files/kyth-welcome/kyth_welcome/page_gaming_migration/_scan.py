@@ -187,19 +187,12 @@ class _ScanMixin:
         name_lbl = QLabel(game["name"])
         name_lbl.setObjectName("card-summary")
         layout.addWidget(name_lbl, 1)
-        badge = QLabel(f"  {badge_text}  ")
+        badge = QLabel(badge_text)
         if category == "blocked":
-            badge.setStyleSheet(
-                "background:#3a1010; color:#f48771; border:1px solid #5a1a1a; "
-                "border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-            )
+            badge.setObjectName("status-err")
         else:
             tier_key = "platinum" if badge_text == "Native" else badge_text.lower()
-            bg, fg = _PROTONDB_TIER_STYLE.get(tier_key, ("#252526", "#cccccc"))
-            badge.setStyleSheet(
-                f"background:{bg}; color:{fg}; "
-                "border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-            )
+            badge.setObjectName(_PROTONDB_TIER_STYLE.get(tier_key, "status-dim"))
         layout.addWidget(badge)
         return row
 

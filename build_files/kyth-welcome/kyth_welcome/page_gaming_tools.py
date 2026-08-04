@@ -24,8 +24,7 @@ class _ToolsMixin(
     def _build_gaming_tools_section(self):
         # ── Gaming Tools ──────────────────────────────────────────────────────
         tools_head = QLabel("Gaming Tools")
-        tools_head.setObjectName("heading")
-        tools_head.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
+        tools_head.setObjectName("section-heading")
         self._add(tools_head)
         tools_sub = QLabel(
             "Install the launchers and tools you want. "

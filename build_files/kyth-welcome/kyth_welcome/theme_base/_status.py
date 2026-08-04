@@ -5,8 +5,8 @@ hand-maintaining a separate set of dark-tinted hex values (Qt QSS rgba()
 alpha is 0-255, not 0-100 — 30/255 ≈ 12% opacity).
 """
 from ..ui_tokens import (
-    KYTH_BLUE_DIM, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_RADIUS_SM, KYTH_SURFACE,
-    KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_MUTED,
+    KYTH_BLUE_DIM, KYTH_BLUE_LIGHT, KYTH_GROUND, KYTH_HAIRLINE, KYTH_RADIUS_SM, KYTH_SURFACE,
+    KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
     STATUS_ERROR, STATUS_OK, STATUS_WARN,
 )
 
@@ -122,5 +122,78 @@ QLabel#flow-step-title {{
 
 QLabel#flow-step-copy {{
     color: {KYTH_TEXT_MUTED};
+}}
+
+/* ── Launch-option key/value rows (Gaming Tools/Fixes) ──────────────────── */
+QLabel#launch-opt-label {{
+    font-size: 12px;
+    color: {KYTH_TEXT_FAINT};
+}}
+
+QLabel#launch-opt-value {{
+    font-family: "Cascadia Code", "Noto Mono", monospace;
+    font-size: 12px;
+    color: {KYTH_TEXT};
+    background: {KYTH_GROUND};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-radius: 4px;
+    padding: 3px 8px;
+}}
+
+QLabel#mono-inline {{
+    font-family: "Cascadia Code", "Noto Mono", monospace;
+    font-size: 12px;
+    color: {KYTH_TEXT_MUTED};
+}}
+
+/* ── Plain inline status text (no pill/box — for warning notes, inline
+   confirmations, etc. that sit next to normal body copy) ────────────────── */
+QLabel#text-ok {{
+    color: {STATUS_OK};
+}}
+
+QLabel#text-warn {{
+    color: {STATUS_WARN};
+}}
+
+QLabel#text-err {{
+    color: {STATUS_ERROR};
+}}
+
+QLabel#text-blue {{
+    color: {KYTH_BLUE_LIGHT};
+}}
+
+/* ── Standalone glyph labels (✓/✗ marks with no pill background) ────────── */
+QLabel#glyph-ok {{
+    font-size: 18px;
+    font-weight: 700;
+    color: {STATUS_OK};
+    background: transparent;
+    border: none;
+}}
+
+QLabel#glyph-err {{
+    font-size: 18px;
+    font-weight: 700;
+    color: {STATUS_ERROR};
+    background: transparent;
+    border: none;
+}}
+
+QLabel#glyph-finish-ok {{
+    font-size: 52px;
+    font-weight: 300;
+    color: {STATUS_OK};
+    background: transparent;
+}}
+
+/* ── Plasma/Wayland readiness info rows ─────────────────────────────────── */
+QLabel#wayland-info-row {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-radius: {KYTH_RADIUS_SM}px;
+    padding: 9px 11px;
+    color: {KYTH_TEXT};
 }}
 """

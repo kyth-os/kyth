@@ -11,8 +11,7 @@ class _LibraryMixin:
     def _build_steam_library_migration_card(self):
         self._divider()
         migrate_head = QLabel("Steam Library \u2014 Migrate from another system")
-        migrate_head.setObjectName("heading")
-        migrate_head.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
+        migrate_head.setObjectName("section-heading")
         self._add(migrate_head)
         migrate_sub = QLabel(
             "Dual-booting? Use this tool to copy your Steam library from another system's "
@@ -29,9 +28,8 @@ class _LibraryMixin:
             "can read them safely read-only, but Windows may report errors on resume "
             "if any other tool writes to the partition. This tool never writes to it."
         )
-        hibernate_warn.setObjectName("card-copy")
+        hibernate_warn.setObjectName("text-warn")
         hibernate_warn.setWordWrap(True)
-        hibernate_warn.setStyleSheet("color: #f0a500; padding: 6px 0;")
         self._add(hibernate_warn)
 
         migrate_card, migrate_layout = _make_card()

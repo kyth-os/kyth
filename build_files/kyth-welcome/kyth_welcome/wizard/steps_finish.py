@@ -4,7 +4,6 @@ from __future__ import annotations
 from ..qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from ..services.launch import flatpak_run
 from ..services.setup_state import STEP_LABELS, load_state, relevant_steps
-from ..ui_tokens import STATUS_OK
 from ..widgets import _make_card
 
 _CHIP_OBJECT_NAME = {
@@ -72,9 +71,7 @@ class _FinishStepMixin:
         layout.addStretch()
 
         check = QLabel("✓")
-        check.setStyleSheet(
-            f"font-size: 52px; color: {STATUS_OK}; font-weight: 300; background: transparent;"
-        )
+        check.setObjectName("glyph-finish-ok")
         layout.addWidget(check)
         layout.addSpacing(18)
 

@@ -43,9 +43,8 @@ class _DrivesMixin:
             "⚡ KythOS NTFS Game Playback: To play games directly off your Windows NTFS drive without redownloading or copying files, "
             "click 'Fix NTFS Games'. This mounts the drive with Linux-safe permissions and symlinks Proton prefixes to native storage."
         )
-        ntfs_info.setObjectName("card-copy")
+        ntfs_info.setObjectName("text-ok")
         ntfs_info.setWordWrap(True)
-        ntfs_info.setStyleSheet("color: #43a047;")
         drives_layout.addWidget(ntfs_info)
 
         ntfs_fix_btn = QPushButton("Fix NTFS Games")
