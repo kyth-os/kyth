@@ -91,7 +91,7 @@ class WelcomePage(Page):
 
         # ── 2. Segmented Focus Vibe Selector ──────────────────────────────────
         vibe_row = QWidget()
-        vibe_row.setObjectName("genz-focus-row")
+        vibe_row.setObjectName("segmented-tab-row")
         vibe_layout = QHBoxLayout(vibe_row)
         vibe_layout.setContentsMargins(16, 10, 16, 10)
         vibe_layout.setSpacing(12)
@@ -106,7 +106,7 @@ class WelcomePage(Page):
             ("gaming", "🎮 Gaming Rig", "Steam, launchers, performance, and controls."),
         ):
             btn = QPushButton(label)
-            btn.setObjectName("genz-mode-btn")
+            btn.setObjectName("segmented-tab")
             btn.setCheckable(True)
             btn.setToolTip(tip)
             btn.clicked.connect(lambda _=False, k=key: self._on_focus_chosen(k))

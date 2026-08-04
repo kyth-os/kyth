@@ -50,9 +50,6 @@ QLabel#glowing-pill-warn {{
     font-weight: 800;
 }}
 
-/* #genz-focus-row / #genz-mode-btn now styled in _segmented_tabs.py, which
-   aliases them to the same rules as #segmented-tab-row / #segmented-tab. */
-
 QFrame#genz-hud-card {{
     background-color: {KYTH_SURFACE};
     border: 1px solid {KYTH_HAIRLINE};

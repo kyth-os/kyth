@@ -59,7 +59,7 @@ class GamingPage(Page):
 
     def _make_section_switcher(self) -> QFrame:
         bar = QFrame()
-        bar.setObjectName("genz-focus-row")
+        bar.setObjectName("segmented-tab-row")
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(12)
@@ -80,7 +80,7 @@ class GamingPage(Page):
         for key, label in self._SECTION_LABELS.items():
             display_label = display_labels.get(key, label)
             btn = QPushButton(display_label)
-            btn.setObjectName("genz-mode-btn")
+            btn.setObjectName("segmented-tab")
             btn.setCheckable(True)
             btn.setChecked(key == self._current_gaming_section)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -102,7 +102,7 @@ class GamingPage(Page):
         for key, btn in self._gaming_section_buttons.items():
             selected = key == active
             btn.setChecked(selected)
-            btn.setObjectName("genz-mode-btn")
+            btn.setObjectName("segmented-tab")
             restyle(btn)
 
         dashboard_visible = (active == "all")
