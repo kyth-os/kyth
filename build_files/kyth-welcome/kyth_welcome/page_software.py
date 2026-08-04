@@ -4,7 +4,7 @@ from typing import ClassVar
 from .core_base import restyle
 from .lazy_page import compose_on_first_init
 from .services.runtime import Worker
-from .qt import QHBoxLayout, QPushButton, QWidget
+from .qt import QFrame, QHBoxLayout, QPushButton, QWidget
 from .widgets import Page, _divider
 
 
@@ -344,15 +344,21 @@ class SoftwarePage(Page):
 
         # Tab bar — inserted into _outer between the page-header divider and the
         # scroll area. After _page_header(), _outer contains [hdr, div, scroll].
-        tab_bar = QWidget()
-        tab_bar.setObjectName("sw-tab-bar")
+        # Shared segmented-tab component (same pill-checkable-button pattern as
+        # Home's workstation-mode switcher) instead of a bespoke underline row —
+        # one "sub-navigation within a page" pattern instead of each page
+        # inventing its own tab styling.
+        tab_bar = QFrame()
+        tab_bar.setObjectName("segmented-tab-row")
         tab_bar_layout = QHBoxLayout(tab_bar)
-        tab_bar_layout.setContentsMargins(56, 0, 56, 0)
-        tab_bar_layout.setSpacing(0)
+        tab_bar_layout.setContentsMargins(16, 10, 16, 10)
+        tab_bar_layout.setSpacing(8)
         self._tab_btns: list[QPushButton] = []
         for i, label in enumerate(("Start", "Create", "Develop", "Security", "App Store", "AppImages", "Installed")):
             btn = QPushButton(label)
-            btn.setObjectName("sw-tab-active" if i == self._initial_tab else "sw-tab")
+            btn.setObjectName("segmented-tab")
+            btn.setCheckable(True)
+            btn.setChecked(i == self._initial_tab)
             btn.clicked.connect(lambda _=False, idx=i: self._switch_tab(idx))
             tab_bar_layout.addWidget(btn)
             self._tab_btns.append(btn)
@@ -394,7 +400,7 @@ class SoftwarePage(Page):
         self._ensure_tab(idx)
         for i, btn in enumerate(self._tab_btns):
             active = i == idx
-            btn.setObjectName("sw-tab-active" if active else "sw-tab")
+            btn.setChecked(active)
             restyle(btn)
             widget = self._tab_widgets[i]
             if widget is not None:

@@ -50,31 +50,8 @@ QLabel#glowing-pill-warn {{
     font-weight: 800;
 }}
 
-QWidget#genz-focus-row {{
-    background-color: {KYTH_SURFACE};
-    border: 1px solid {KYTH_HAIRLINE};
-    border-radius: 12px;
-}}
-
-QPushButton#genz-mode-btn {{
-    background-color: {KYTH_SURFACE};
-    border: 1px solid {KYTH_HAIRLINE};
-    border-radius: 8px;
-    color: {KYTH_TEXT_MUTED};
-    font-weight: 750;
-    padding: 8px 18px;
-}}
-
-QPushButton#genz-mode-btn:hover {{
-    border-color: {KYTH_BLUE};
-    color: {KYTH_TEXT};
-}}
-
-QPushButton#genz-mode-btn:checked {{
-    background-color: {KYTH_BLUE};
-    border-color: {KYTH_BLUE_LIGHT};
-    color: {KYTH_TEXT};
-}}
+/* #genz-focus-row / #genz-mode-btn now styled in _segmented_tabs.py, which
+   aliases them to the same rules as #segmented-tab-row / #segmented-tab. */
 
 QFrame#genz-hud-card {{
     background-color: {KYTH_SURFACE};
