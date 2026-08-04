@@ -218,19 +218,18 @@ class Journal:
                 error = self._validate_create_op(p, table_type, primary_count, allocated, mountpoints)
                 if error:
                     errors.append(error)
-                else:
-                    # Update state after successful validation
-                    start = _safe_int(p.get("start_bytes"), -1)
-                    size = _safe_int(p.get("size_bytes"), -1)
-                    fs = (p.get("fs_type") or "").lower()
-                    allocated[f"new:{op['index']}"] = (start, start + size, fs)
-                    if table_type == "msdos":
-                        primary_count += 1
-                    mount = (p.get("mountpoint") or "").lower()
-                    if mount == "/":
-                        root_count += 1
-                    if mount:
-                        mountpoints.add(mount)
+                # Always update state to track root count and mountpoints for final validation
+                start = _safe_int(p.get("start_bytes"), -1)
+                size = _safe_int(p.get("size_bytes"), -1)
+                fs = (p.get("fs_type") or "").lower()
+                allocated[f"new:{op['index']}"] = (start, start + size, fs)
+                if table_type == "msdos":
+                    primary_count += 1
+                mount = (p.get("mountpoint") or "").lower()
+                if mount == "/":
+                    root_count += 1
+                if mount:
+                    mountpoints.add(mount)
 
             elif kind in ("delete", "format", "resize", "set_mountpoint"):
                 error = self._validate_existing_partition_op(kind, p, allocated, mountpoints, table_type)
