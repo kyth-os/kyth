@@ -1,12 +1,12 @@
 """Tiles QSS styles."""
-from ..ui_tokens import KYTH_TEXT, KYTH_TEXT_FAINT, STATUS_OK, STATUS_WARN
+from ..ui_tokens import KYTH_TEXT, KYTH_TEXT_MUTED, STATUS_OK, STATUS_WARN
 
 TILES_QSS = f"""
 /* ── Stat tiles ──────────────────────────────────────────────────────────── */
 QLabel#stat-label {{
     font-size: 11px;
     font-weight: 600;
-    color: {KYTH_TEXT_FAINT};
+    color: {KYTH_TEXT_MUTED};
 }}
 
 QLabel#stat-value {{

@@ -1,18 +1,17 @@
-"""Hero/HUD/category cards and semantic property-grid labels.
+"""Hero/HUD/category cards and semantic property-grid labels — the Home
+dashboard's "workstation mode" banner and category tiles.
 
-Kyth Theme: structural colors (surfaces, borders, text, status) tokenized
-alongside the rest of the pass. The hero gradient and the five category
-accent hues are deliberately bespoke — they're wayfinding/personality
-color, not structural — but anchored to KYTH_VIOLET where it's already the
-closest match (Gaming's accent).
+The hero gradient and the five category accent hues are deliberately
+bespoke wayfinding/personality color, not structural — anchored to
+KYTH_VIOLET where it's already the closest match (Gaming's accent).
 """
-from .ui_tokens import (
+from ..ui_tokens import (
     KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_SURFACE,
     KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
     KYTH_VIOLET, STATUS_ERROR, STATUS_OK, STATUS_WARN,
 )
 
-GENZ_QSS = f"""
+HERO_QSS = f"""
 /* ── Hero / HUD / category cards ────────────────────────────────────────── */
 QFrame#genz-hero {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a1e29, stop:0.5 #281d3d, stop:1 #1c2b36);
