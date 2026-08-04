@@ -1,3 +1,7 @@
+# Shared variables (kyth_registry). `just` deduplicates repeated imports,
+# so this stays valid both standalone and when pulled in via kyth.just.
+import 'common.just'
+
 # Upgrade the OS and Flatpak apps.
 # Pulls the latest KythOS image via bootc and updates all Flatpak apps.
 
@@ -109,7 +113,7 @@ retry-quarantined-update digest:
 #   ujust rebase kyth:latest
 #   ujust rebase                   (defaults to kyth:latest)
 #
-# Short form "kyth:<tag>" is expanded to ghcr.io/mrtrick37/kyth:<tag>.
+# Short form "kyth:<tag>" is expanded to {{ kyth_registry }}/kyth:<tag>.
 # A full image reference (containing '/') is used as-is.
 
 [group('KythOS')]
@@ -117,9 +121,9 @@ rebase image_ref="kyth:latest":
     #!/usr/bin/env bash
     set -euo pipefail
     ref="{{ image_ref }}"
-    # Expand short form: "kyth:tag" or "kyth" → "ghcr.io/mrtrick37/kyth:tag"
+    # Expand short form: "kyth:tag" or "kyth" → "{{ kyth_registry }}/kyth:tag"
     if [[ "$ref" != *"/"* ]]; then
-        ref="ghcr.io/mrtrick37/${ref}"
+        ref="{{ kyth_registry }}/${ref}"
     fi
     # Default to :latest if no tag was given
     if [[ "$ref" != *":"* ]]; then
@@ -157,7 +161,7 @@ switch-channel channel="stable":
     esac
     tag="${base_tag}${suffix}"
     echo "Switching to KythOS :${tag}..."
-    sudo bootc switch "ghcr.io/mrtrick37/kyth:${tag}"
+    sudo bootc switch "{{ kyth_registry }}/kyth:${tag}"
     echo "Channel switch staged. Reboot to activate."
 
 # Switch to a kernel-flavored KythOS image.
@@ -185,7 +189,7 @@ switch-kernel flavor="fedora":
     status_text="$(sudo -n bootc status 2>/dev/null || bootc status 2>/dev/null || true)"
     current_ref="$(awk '/Booted image:/ {print $NF; exit}' <<<"${status_text}")"
     current_tag=""
-    if [[ "${current_ref}" == ghcr.io/mrtrick37/kyth:* ]]; then
+    if [[ "${current_ref}" == {{ kyth_registry }}/kyth:* ]]; then
         current_tag="${current_ref##*:}"
         current_tag="${current_tag%%@*}"
     fi
@@ -198,7 +202,7 @@ switch-kernel flavor="fedora":
         channel="testing"
     fi
 
-    target="ghcr.io/mrtrick37/kyth:${channel}${suffix}"
+    target="{{ kyth_registry }}/kyth:${channel}${suffix}"
     echo "Switching to ${label} kernel image: ${target}"
     echo "This stages a new deployment and keeps rollback available from the boot menu."
     if ! output="$(sudo bootc switch "${target}" 2>&1)"; then
