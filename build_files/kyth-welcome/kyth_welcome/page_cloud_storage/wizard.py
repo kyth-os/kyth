@@ -9,10 +9,23 @@ from ..services.cloud_sync import (
     rclone_usage_hints,
     rclone_verify_remote,
 )
+from ..services.runtime import DataWorker
 from ..qt import (
     QDesktopServices, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )
 from ..widgets import _make_card
+
+
+def _apply_rclone_config(name: str, svc: str, token: str, folder: str, extra_params: list[str]):
+    """Run off the GUI thread by RcloneSetupWizard's DataWorker. Raises on
+    a hard failure (remote could not be created at all — the wizard stays
+    on the auth page for that); a failed connection *test* is a soft
+    failure the wizard still advances past, so it's returned, not raised."""
+    ok, err = rclone_create_remote(name, svc, token, extra_params=extra_params or None)
+    if not ok:
+        raise RuntimeError(err)
+    conn_ok, err_hint = rclone_verify_remote(name)
+    return name, svc, folder, conn_ok, err_hint
 
 
 class RcloneSetupWizard(QDialog):
@@ -46,6 +59,7 @@ class RcloneSetupWizard(QDialog):
         self.setObjectName("cloud-wizard")
 
         self._auth_worker: RcloneAuthorizeWorker | None = None
+        self._apply_worker: DataWorker | None = None
         self._token = ""
         self._selected_service = preselect if preselect in self._SERVICES else "drive"
         self._local_folder_for_open = ""
@@ -316,7 +330,8 @@ class RcloneSetupWizard(QDialog):
                     "Please complete browser authorization before continuing."
                 )
                 return
-            self._apply_config()
+            self._start_apply_config()
+            return
         elif step == 3:
             self.accept()
         self._update_nav()
@@ -425,7 +440,19 @@ class RcloneSetupWizard(QDialog):
 
     # ── Config creation + done page ─────────────────────────────────────────
 
-    def _apply_config(self):
+    def _set_apply_controls_enabled(self, enabled: bool) -> None:
+        self._next_btn.setEnabled(enabled)
+        self._back_btn.setEnabled(enabled)
+        self._cancel_btn.setEnabled(enabled)
+
+    def _start_apply_config(self):
+        # rclone_create_remote/rclone_verify_remote are plain subprocess
+        # calls with up to a 30s + 20s timeout — not process-group-managed
+        # like Worker, so there's no safe way to cancel them mid-flight.
+        # Disable navigation (see reject() override below for Escape/close)
+        # instead of offering a cancel button we can't honor.
+        if self._apply_worker is not None:
+            return
         name = self._name_edit.text().strip()
         svc = self._selected_service
         folder = self._folder_edit.text().strip()
@@ -443,15 +470,25 @@ class RcloneSetupWizard(QDialog):
         if svc == "onedrive":
             extra_params = ["drive_type", "personal"]
 
-        ok, err = rclone_create_remote(
-            name, svc, self._token, extra_params=extra_params or None,
-        )
-        if not ok:
-            title = "rclone Not Found" if "not installed" in err.lower() else "Config Error"
-            QMessageBox.critical(self, title, f"Failed to write rclone config:\n{err}")
-            return
+        self._set_apply_controls_enabled(False)
+        self._auth_progress.show()
+        self._auth_status_lbl.setText("Saving configuration and testing the connection…")
+        self._auth_status_lbl.setObjectName("subheading")
+        restyle(self._auth_status_lbl)
 
-        conn_ok, err_hint = rclone_verify_remote(name)
+        self._apply_worker = DataWorker(
+            "rclone-apply-config",
+            lambda: _apply_rclone_config(name, svc, self._token, folder, extra_params),
+        )
+        self._apply_worker.result.connect(self._on_apply_config_ready)
+        self._apply_worker.failed.connect(self._on_apply_config_failed)
+        self._apply_worker.finished.connect(lambda: setattr(self, "_apply_worker", None))
+        self._apply_worker.start()
+
+    def _on_apply_config_ready(self, _key: str, data: object):
+        name, svc, folder, conn_ok, err_hint = data
+        self._set_apply_controls_enabled(True)
+        self._auth_progress.hide()
 
         info = self._SERVICES[svc]
         if conn_ok:
@@ -476,6 +513,26 @@ class RcloneSetupWizard(QDialog):
         # Always emit so the cloud page registers the folder and shows sync controls,
         # even if the connection test failed (config is on disk regardless)
         self.finished_ok.emit(name, svc, folder)
+
+    def _on_apply_config_failed(self, _key: str, message: str):
+        self._set_apply_controls_enabled(True)
+        self._auth_progress.hide()
+        self._auth_status_lbl.setText(
+            "Authorization successful!  Click Next → to save and test the connection."
+        )
+        self._auth_status_lbl.setObjectName("status-ok")
+        restyle(self._auth_status_lbl)
+        title = "rclone Not Found" if "not installed" in message.lower() else "Config Error"
+        QMessageBox.critical(self, title, f"Failed to write rclone config:\n{message}")
+
+    def reject(self):
+        if self._apply_worker is not None:
+            # Ignore Escape/window-close while the background config apply
+            # is running — its underlying subprocess calls aren't
+            # cancellable, so closing here would leave a worker running
+            # against a dialog about to be destroyed.
+            return
+        super().reject()
 
     def _open_local_folder(self):
         if self._local_folder_for_open and os.path.isdir(self._local_folder_for_open):
