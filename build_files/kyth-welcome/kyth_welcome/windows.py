@@ -1,8 +1,8 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, load_profile, restyle
 from .services.bootc import current_branch
-from .services.hardware import _detect_nvidia
-from .services.runtime import DataWorker, has_blocking_tasks
+from .services.hardware import detect_nvidia_async
+from .services.runtime import has_blocking_tasks
 from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups
 from .qt import (
     QCompleter, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
@@ -416,15 +416,11 @@ class MainWindow(QMainWindow):
         """The NVIDIA nav button starts hidden (see __init__) since
         detecting a GPU means an lspci call. Run it on a background thread
         and reveal the button afterward instead of blocking startup."""
-        if self._nvidia_nav_worker is not None or "NVIDIA" not in self._nav_button_by_key:
+        if "NVIDIA" not in self._nav_button_by_key:
             return
-        self._nvidia_nav_worker = DataWorker("nav-nvidia-detect", _detect_nvidia)
-        self._nvidia_nav_worker.result.connect(self._on_nvidia_nav_detected)
-        self._nvidia_nav_worker.failed.connect(lambda _key, _message: None)
-        self._nvidia_nav_worker.finished.connect(lambda: setattr(self, "_nvidia_nav_worker", None))
-        self._nvidia_nav_worker.start()
+        detect_nvidia_async(self, self._on_nvidia_nav_detected, attr="_nvidia_nav_worker")
 
-    def _on_nvidia_nav_detected(self, _key: str, has_nvidia: object):
+    def _on_nvidia_nav_detected(self, has_nvidia: bool):
         if has_nvidia:
             self._nav_button_by_key["NVIDIA"].setVisible(True)
 

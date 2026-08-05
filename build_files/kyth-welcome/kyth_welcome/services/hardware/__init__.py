@@ -9,6 +9,7 @@ from .nvidia import (
     _hw_setup_done,
     _hw_setup_service_state,
     _nvidia_module_loaded,
+    detect_nvidia_async,
     nvidia_status_view,
 )
 from .io import (
@@ -75,6 +76,7 @@ __all__ = [
     "_cpu_probe",
     "_detect_controllers",
     "_detect_nvidia",
+    "detect_nvidia_async",
     "bt_audio_device_summary",
     "force_ldac_reconnect",
     "switch_to_bt_audio_output",

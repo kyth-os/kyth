@@ -19,6 +19,32 @@ def _detect_nvidia() -> bool:
     return probe_cached("nvidia-detect", 10.0, fetch)
  # _detect_nvidia
 
+def detect_nvidia_async(owner, on_result, *, attr: str = "_nvidia_probe_worker") -> None:
+    """Run _detect_nvidia() on a background thread and call
+    on_result(has_nvidia: bool) once it resolves, instead of blocking the
+    GUI thread on the lspci call. `owner` is the page/window the worker's
+    lifetime is tracked on via its `<attr>` attribute (need not be
+    pre-declared — defaults to None) — a call made while a previous one is
+    still running is a no-op rather than starting a second probe.
+
+    Shared by every page that needs to react to NVIDIA presence
+    asynchronously instead of hand-rolling this DataWorker wiring itself
+    (MainWindow's sidebar, RepairPage's Quick Fixes NVIDIA buttons, ...).
+    _detect_nvidia() is already probe_cached, so this is about not blocking
+    the *first* call — not about avoiding redundant subprocess calls.
+    """
+    from ..runtime import DataWorker  # local: keep this module Qt-import-free at module scope
+
+    if getattr(owner, attr, None) is not None:
+        return
+    worker = DataWorker("detect-nvidia-async", _detect_nvidia)
+    setattr(owner, attr, worker)
+    worker.result.connect(lambda _key, has_nvidia: on_result(bool(has_nvidia)))
+    worker.failed.connect(lambda _key, _message: None)
+    worker.finished.connect(lambda: setattr(owner, attr, None))
+    worker.start()
+ # detect_nvidia_async
+
 def _nvidia_module_loaded() -> bool:
     try:
         r = run_sync(["lsmod"], capture_output=True, text=True, timeout=5, check=False)

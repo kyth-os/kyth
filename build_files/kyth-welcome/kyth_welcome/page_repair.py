@@ -6,7 +6,7 @@ from .services.bootc import bootc_image_timestamp, has_rollback_deployment
 from .page_repair_components import repair_overview_cards, rollback_card
 from .services.launch import kcmshell, popen_privileged
 from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
-from .services.hardware import _detect_nvidia
+from .services.hardware import detect_nvidia_async
 from .services.repair import _read_sys_text, quick_fixes, sleep_mode_label
 from .services.flatpak import _is_flatpak_installed
 from .services.privileged import systemctl_action
@@ -37,6 +37,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._has_rollback = False
         self._rollback_timestamp = None
         self._rollback_state_worker = None
+        self._nvidia_probe_worker = None
         self._setup_operation = ""
         self._navigate = navigate or (lambda _key: None)
 
@@ -67,6 +68,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
 
         self._stretch()
         single_shot(self, 0, self._refresh_rollback_state)
+        single_shot(self, 0, self._refresh_nvidia_quick_fixes)
 
     @staticmethod
     def _fetch_rollback_state() -> tuple[bool, str | None]:
@@ -94,6 +96,23 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._layout.insertWidget(self._rollback_insert_index, new_card)
         self._rollback_card = new_card
         self._rollback_repair_btn = new_btn
+
+    def _refresh_nvidia_quick_fixes(self):
+        detect_nvidia_async(self, self._on_nvidia_quick_fixes_ready)
+
+    def _on_nvidia_quick_fixes_ready(self, has_nvidia: bool):
+        if not has_nvidia:
+            return
+        nvidia_status_btn = QPushButton("NVIDIA Status")
+        nvidia_status_btn.setToolTip("Show current NVIDIA driver build status and kernel module load state.")
+        nvidia_status_btn.clicked.connect(
+            lambda _=False: self._run_quick_fix("NVIDIA Status", ["/usr/bin/kyth-nvidia-status"])
+        )
+        self._quick_btns.addWidget(nvidia_status_btn)
+        nvidia_fix_btn = QPushButton("Retry NVIDIA Build")
+        nvidia_fix_btn.setToolTip("Open the NVIDIA Drivers page to retry the kernel module build.")
+        nvidia_fix_btn.clicked.connect(lambda _=False: self._navigate("NVIDIA"))
+        self._quick_btns.addWidget(nvidia_fix_btn)
 
     def _build_quick_fixes_card(self) -> None:
         quick, quick_layout = _make_card("card-accent-ok")
@@ -129,17 +148,13 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
                 lambda _=False, f=fix: self._run_quick_fix(f.label, list(f.command))
             )
             quick_btns.addWidget(btn)
-        if _detect_nvidia():
-            nvidia_status_btn = QPushButton("NVIDIA Status")
-            nvidia_status_btn.setToolTip("Show current NVIDIA driver build status and kernel module load state.")
-            nvidia_status_btn.clicked.connect(
-                lambda _=False: self._run_quick_fix("NVIDIA Status", ["/usr/bin/kyth-nvidia-status"])
-            )
-            quick_btns.addWidget(nvidia_status_btn)
-            nvidia_fix_btn = QPushButton("Retry NVIDIA Build")
-            nvidia_fix_btn.setToolTip("Open the NVIDIA Drivers page to retry the kernel module build.")
-            nvidia_fix_btn.clicked.connect(lambda _=False: self._navigate("NVIDIA"))
-            quick_btns.addWidget(nvidia_fix_btn)
+        # NVIDIA Status/Retry Build buttons are added later, once
+        # _refresh_nvidia_quick_fixes() confirms a GPU is actually present
+        # (see __init__) — detecting it is an lspci call, so it must not
+        # block this constructor. FlowLayout only supports appending, so
+        # they land at the end of the row instead of here once revealed,
+        # not mid-row like the other quick fixes.
+        self._quick_btns = quick_btns
         task_btn = QPushButton("Open Task Manager")
         task_btn.setObjectName("primary")
         task_btn.setToolTip("Launch the system task manager to inspect running processes and resource usage.")
