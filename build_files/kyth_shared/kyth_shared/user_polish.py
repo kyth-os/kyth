@@ -20,6 +20,41 @@ USER_FOLDERS = (
     "Public", "Screenshots", "Templates", "Videos",
 )
 
+FOLDER_METADATA = {
+    "Games/.directory": "[Desktop Entry]\nIcon=applications-games\nName=Games\n",
+    "Screenshots/.directory": "[Desktop Entry]\nIcon=folder-pictures\nName=Screenshots\n",
+    "Templates/Plain Text.txt": "",
+}
+
+MIME_DEFAULTS = (
+    ("org.kde.okular.desktop", "application/pdf"),
+    ("org.kde.okular.desktop", "application/epub+zip"),
+    ("org.kde.gwenview.desktop", "image/jpeg"),
+    ("org.kde.gwenview.desktop", "image/png"),
+    ("org.kde.gwenview.desktop", "image/gif"),
+    ("org.videolan.VLC.desktop", "video/mp4"),
+    ("org.videolan.VLC.desktop", "video/x-matroska"),
+    ("org.videolan.VLC.desktop", "video/x-msvideo"),
+    ("org.kde.kwrite.desktop", "text/plain"),
+    ("org.kde.kwrite.desktop", "text/markdown"),
+    ("org.kde.ark.desktop", "application/zip"),
+    ("org.kde.ark.desktop", "application/x-7z-compressed"),
+    ("org.kde.ark.desktop", "application/x-rar"),
+    ("org.kde.ark.desktop", "application/x-tar"),
+    ("kyth-exe-handler.desktop", "application/x-ms-dos-executable"),
+    ("kyth-exe-handler.desktop", "application/x-msdos-program"),
+    ("kyth-exe-handler.desktop", "application/x-dosexec"),
+    ("kyth-exe-handler.desktop", "application/x-msi"),
+    ("kyth-exe-handler.desktop", "application/x-msdownload"),
+    ("kyth-exe-handler.desktop", "application/vnd.microsoft.portable-executable"),
+    ("kyth-exe-handler.desktop", "application/x-rpm"),
+    ("kyth-exe-handler.desktop", "application/x-redhat-package-manager"),
+    ("com.brave.Browser.desktop", "x-scheme-handler/http"),
+    ("com.brave.Browser.desktop", "x-scheme-handler/https"),
+    ("com.getmailspring.Mailspring.desktop", "x-scheme-handler/mailto"),
+    ("org.kde.dolphin.desktop", "inode/directory"),
+)
+
 # The following comments are here to satisfy static assertions in kyth-smoke-check:
 # check_file_contains assertions:
 # Theme org.kythos.desktop
@@ -71,12 +106,7 @@ def _run_operation(name: str, operation: Callable[[], OperationResult]) -> Opera
 def _ensure_user_folders(home: str) -> OperationResult:
     for folder in USER_FOLDERS:
         os.makedirs(os.path.join(home, folder), exist_ok=True)
-    metadata = {
-        "Games/.directory": "[Desktop Entry]\nIcon=applications-games\nName=Games\n",
-        "Screenshots/.directory": "[Desktop Entry]\nIcon=folder-pictures\nName=Screenshots\n",
-        "Templates/Plain Text.txt": "",
-    }
-    for relative, content in metadata.items():
+    for relative, content in FOLDER_METADATA.items():
         path = os.path.join(home, relative)
         if not os.path.exists(path):
             with open(path, "w", encoding="utf-8") as stream:

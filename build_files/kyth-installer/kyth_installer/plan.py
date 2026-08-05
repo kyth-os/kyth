@@ -547,20 +547,34 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     return disk, created
 
 
+def _prepare_ntfs_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
+    _validate_resize_ntfs_target(state)
+    disk, target_partition = _prepare_ntfs_resize_target(state, log)
+    return InstallPlan("alongside", disk=disk, target_partition=target_partition)
+
+
+def _prepare_free_space_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
+    _validate_free_space_target(state)
+    disk, target_partition = _prepare_free_space_target(state, log)
+    return InstallPlan("alongside", disk=disk, target_partition=target_partition)
+
+
+def _prepare_explicit_install_plan(
+    plan: InstallPlan,
+    state: dict | InstallRequest,
+    context=None,
+) -> InstallPlan:
+    disk, target_partition = _validate_install_target(state, context)
+    return InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
+
+
 def _prepare_install_plan(state: dict | InstallRequest, log, context=None) -> InstallPlan:
     plan = _install_plan_from_state(state)
     if plan.mode == "resize_ntfs":
-        _validate_resize_ntfs_target(state)
-        disk, target_partition = _prepare_ntfs_resize_target(state, log)
-        plan = InstallPlan("alongside", disk=disk, target_partition=target_partition)
-    elif plan.mode == "free_space":
-        _validate_free_space_target(state)
-        disk, target_partition = _prepare_free_space_target(state, log)
-        plan = InstallPlan("alongside", disk=disk, target_partition=target_partition)
-    else:
-        disk, target_partition = _validate_install_target(state, context)
-        plan = InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
-    return plan
+        return _prepare_ntfs_install_plan(state, log)
+    if plan.mode == "free_space":
+        return _prepare_free_space_install_plan(state, log)
+    return _prepare_explicit_install_plan(plan, state, context)
 
 
 def _get_manual_mounts(context) -> list[dict]:

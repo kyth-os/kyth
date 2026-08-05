@@ -88,7 +88,32 @@ class MainWindow(QMainWindow):
             banner_layout.addWidget(install_btn)
             central_layout.addWidget(banner)
 
-        # ── Top command bar: back/forward, breadcrumb, search ────────────────
+        self._build_topbar(central_layout)
+        self._build_search_panel(central_layout)
+
+        root = self._create_main_content_root()
+        central_layout.addWidget(root, 1)
+
+        self._build_sidebar(root.layout())
+        self._build_page_stack(root.layout())
+
+        # Build Welcome page eagerly so its profile_changed signal is available.
+        welcome_idx = self._page_index_by_key["Welcome"]
+        welcome_page = self._ensure_page(welcome_idx)
+        welcome_page.profile_changed.connect(self._apply_profile_visibility)
+        self._apply_profile_visibility(load_profile())
+
+        self._history: list[int] = []
+        self._history_pos: int = -1
+        self._setup_search()
+        self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self._search_shortcut.activated.connect(self._focus_search)
+        self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
+        self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
+        self._switch_page(0)
+        single_shot(self, 0, self._refresh_nvidia_nav_visibility)
+
+    def _build_topbar(self, central_layout):
         topbar = QWidget()
         topbar.setObjectName("topbar")
         topbar.setFixedHeight(46)
@@ -134,6 +159,7 @@ class MainWindow(QMainWindow):
 
         central_layout.addWidget(topbar)
 
+    def _build_search_panel(self, central_layout):
         self._search_panel = QFrame()
         self._search_panel.setObjectName("search-results-panel")
         self._search_panel.hide()
@@ -155,14 +181,15 @@ class MainWindow(QMainWindow):
         self._search_panel_layout.addWidget(self._search_results_hint)
         central_layout.addWidget(self._search_panel)
 
+    def _create_main_content_root(self) -> QWidget:
         root = QWidget()
         root.setObjectName("content-area")
         root_layout = QHBoxLayout(root)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
-        central_layout.addWidget(root, 1)
+        return root
 
-        # ── Sidebar ──────────────────────────────────────────────────────────
+    def _build_sidebar(self, parent_layout):
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(244)
@@ -170,7 +197,6 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
 
-        # Header / branding
         logo_area = QWidget()
         logo_area.setObjectName("sidebar-header")
         logo_layout = QVBoxLayout(logo_area)
@@ -188,17 +214,34 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(logo_area)
         sidebar_layout.addWidget(_divider())
 
-        # Nav groups: (section_label, [(icon_names, glyph, label, key, factory), ...])
-        # section_label=None omits the header row (used for Home).
-        page_specs: list[tuple[str, object]] = []
+        self._page_specs: list[tuple[str, object]] = []
+        self._nav_buttons = []
+        self._nav_button_by_key = {}
+        self._nav_section_labels = {}
+        self._page_crumbs = []
 
         nav_groups = get_nav_groups(self._navigate_to)
+        self._initialize_page_specs(nav_groups, sidebar_layout)
+
         self._page_descriptors = descriptors_from_nav_groups(nav_groups, self._SEARCH_ITEMS)
         self._descriptor_by_key = {descriptor.key: descriptor for descriptor in self._page_descriptors}
-        self._nav_buttons: list[NavButton] = []
-        self._nav_button_by_key: dict[str, NavButton] = {}
-        self._nav_section_labels: dict[str, QLabel] = {}
-        self._page_crumbs: list[tuple[str | None, str]] = []
+        self._page_index_by_key = {key: idx for idx, (key, _) in enumerate(self._page_specs)}
+
+        self._nvidia_nav_worker = None
+        nvidia_btn = self._nav_button_by_key.get("NVIDIA")
+        if nvidia_btn is not None:
+            nvidia_btn.setVisible(False)
+
+        sidebar_layout.addStretch()
+        sidebar_layout.addWidget(_divider())
+        ver_hint = QLabel("KythOS System Hub")
+        ver_hint.setObjectName("nav-section")
+        ver_hint.setContentsMargins(20, 10, 16, 12)
+        sidebar_layout.addWidget(ver_hint)
+
+        parent_layout.addWidget(sidebar)
+
+    def _initialize_page_specs(self, nav_groups, sidebar_layout):
         global_idx = 0
         for section_title, items in nav_groups:
             sidebar_layout.addSpacing(4)
@@ -207,7 +250,7 @@ class MainWindow(QMainWindow):
                 self._nav_section_labels[section_title] = section_lbl
                 sidebar_layout.addWidget(section_lbl)
             for icon_names, glyph, label, key, factory in items:
-                page_specs.append((key, factory))
+                self._page_specs.append((key, factory))
                 self._page_crumbs.append((section_title, label))
                 btn = NavButton(icon_names, glyph, label)
                 btn.clicked.connect(self._make_nav_handler(global_idx))
@@ -217,56 +260,14 @@ class MainWindow(QMainWindow):
                 global_idx += 1
             sidebar_layout.addSpacing(2)
 
-        self._page_index_by_key = {
-            key: idx for idx, (key, _) in enumerate(page_specs)
-        }
-
-        # NVIDIA nav item: always built above (fixed position, so nothing
-        # downstream keyed on page index needs to shift), but hidden until a
-        # background probe confirms there's actually an NVIDIA GPU. See
-        # _refresh_nvidia_nav_visibility below.
-        self._nvidia_nav_worker = None
-        nvidia_btn = self._nav_button_by_key.get("NVIDIA")
-        if nvidia_btn is not None:
-            nvidia_btn.setVisible(False)
-
-        sidebar_layout.addStretch()
-
-        # Bottom version hint
-        sidebar_layout.addWidget(_divider())
-        ver_hint = QLabel("KythOS System Hub")
-        ver_hint.setObjectName("nav-section")
-        ver_hint.setContentsMargins(20, 10, 16, 12)
-        sidebar_layout.addWidget(ver_hint)
-
-        root_layout.addWidget(sidebar)
-
-        # ── Page stack ───────────────────────────────────────────────────────
+    def _build_page_stack(self, parent_layout):
         self._stack = QStackedWidget()
         self._stack.setObjectName("content-area")
-        self._page_factories = [factory for _, factory in page_specs]
-        self._pages: list[QWidget | None] = [None] * len(page_specs)
-        for _ in page_specs:
-            self._stack.addWidget(QWidget())  # cheap placeholder; replaced on first visit
-        root_layout.addWidget(self._stack)
-
-        # Build Welcome page eagerly so its profile_changed signal is available.
-        welcome_idx = self._page_index_by_key["Welcome"]
-        welcome_page = self._ensure_page(welcome_idx)
-        welcome_page.profile_changed.connect(self._apply_profile_visibility)
-        self._apply_profile_visibility(load_profile())
-
-        self._history: list[int] = []
-        self._history_pos: int = -1
-        self._setup_search()
-        self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
-        self._search_shortcut.activated.connect(self._focus_search)
-        self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
-        self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
-        self._switch_page(0)
-        single_shot(self, 0, self._refresh_nvidia_nav_visibility)
-
-    # ── Search ("Find a setting") ─────────────────────────────────────────────
+        self._page_factories = [factory for _, factory in self._page_specs]
+        self._pages = [None] * len(self._page_factories)
+        for _ in self._page_factories:
+            self._stack.addWidget(QWidget())
+        parent_layout.addWidget(self._stack)
 
     # Familiar phrasings mapped to page keys, including migration/search terms
     # people bring with them from another desktop.

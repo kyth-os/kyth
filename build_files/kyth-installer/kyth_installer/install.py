@@ -12,6 +12,7 @@ from .config import FAILURE_SUMMARY_FILE, LOG_FILE, SKIP_FETCH_CHECK, TRANSACTIO
 from .cleanup import clear_secrets_and_orphan_mount, unmount_configuration
 from .context import InstallLifecycle, InstallRequest, InstallerContext, InstallPhase
 from .disk import get_root_partition
+from .plan import InstallPlan
 from .imagesrc import (
     _friendly_network_error,
     _install_images,
@@ -159,30 +160,9 @@ def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallP
     context.assurance_checks = [check.as_dict() for check in checks]
     for check in checks:
         log(f"Preflight [{check.status}]: {check.name} — {check.detail}")
-    storage_plan = _prepare_install_plan(request, log, context)
 
-    # Revalidate the effective target immediately before execution. Guided
-    # free-space/NTFS plans resolve to an alongside target without rewriting
-    # the original request object.
-    effective_state = request.as_state()
-    effective_state["install_mode"] = storage_plan.mode
-    if storage_plan.disk:
-        effective_state["disk"] = storage_plan.disk
-    if storage_plan.target_partition:
-        effective_state["target_partition"] = storage_plan.target_partition
-    disk, target_partition = _validate_install_target(effective_state, context)
-    storage_plan = type(storage_plan)(storage_plan.mode, disk=disk, target_partition=target_partition)
-    resolved = ResolvedInstallPlan(
-        request=request,
-        storage=storage_plan,
-        source_ref=src_ref,
-        target_ref=tgt_ref,
-        source_digest=source.digest,
-        source_kind=source.kind,
-        source_verified=source.verified,
-    )
-    context.set_plan(resolved)
-    _record_transaction(context, "prepared", log=log)
+    storage_plan = _prepare_install_plan(request, log, context)
+    resolved = _resolve_and_record_plan(request, storage_plan, src_ref, tgt_ref, source, context, log)
 
     log(f"Mode         : {resolved.mode}")
     log(f"Kernel       : {kernel}")
@@ -195,6 +175,38 @@ def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallP
     log("")
 
     log("── Phase 1: Writing OS image to disk ─────────────────────────────")
+    return resolved
+
+
+def _resolve_and_record_plan(
+    request: InstallRequest,
+    storage_plan: InstallPlan,
+    src_ref: str,
+    tgt_ref: str,
+    source,
+    context: InstallerContext,
+    log,
+) -> ResolvedInstallPlan:
+    effective_state = request.as_state()
+    effective_state["install_mode"] = storage_plan.mode
+    if storage_plan.disk:
+        effective_state["disk"] = storage_plan.disk
+    if storage_plan.target_partition:
+        effective_state["target_partition"] = storage_plan.target_partition
+    disk, target_partition = _validate_install_target(effective_state, context)
+    storage_plan = type(storage_plan)(storage_plan.mode, disk=disk, target_partition=target_partition)
+
+    resolved = ResolvedInstallPlan(
+        request=request,
+        storage=storage_plan,
+        source_ref=src_ref,
+        target_ref=tgt_ref,
+        source_digest=source.digest,
+        source_kind=source.kind,
+        source_verified=source.verified,
+    )
+    context.set_plan(resolved)
+    _record_transaction(context, "prepared", log=log)
     return resolved
 
 

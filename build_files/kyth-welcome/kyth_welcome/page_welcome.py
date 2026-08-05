@@ -73,197 +73,200 @@ class WelcomePage(Page):
             "pipewire": "checking…",
             "has_nvidia": False,
         }
-        branch = self._facts["branch"]
         staged = self._facts["staged"]
         rollback = self._facts["rollback"]
         windows_found = self._facts["windows_found"]
-        kernel = self._kernel
         self._hero_view = home_hero_view(staged, rollback, windows_found)
         hero_view = self._hero_view
 
-        # ── 1. The Dynamic Gen Z Hero Banner ──────────────────────────────────
-        hero_card = QFrame()
-        hero_card.setObjectName("genz-hero")
-        hero_layout = QHBoxLayout(hero_card)
-        hero_layout.setContentsMargins(24, 20, 24, 20)
-        hero_layout.setSpacing(16)
+        self._add(self._make_hero_banner(hero_view))
 
-        hero_text_col = QVBoxLayout()
-        hero_text_col.setSpacing(4)
-        
-        hero_title = QLabel("KYTHOS WORKSTATION")
-        hero_title.setObjectName("genz-hero-title")
-        hero_text_col.addWidget(hero_title)
-
-        hero_sub = QLabel("Atomic immutable workstation. Zero bloat, maximum performance.")
-        hero_sub.setObjectName("genz-hero-subtitle")
-        hero_text_col.addWidget(hero_sub)
-        hero_layout.addLayout(hero_text_col, 1)
-
-        # Status Pill Badge
-        status_pill = QLabel()
-        status_pill.setText(hero_view.pill_text)
-        status_pill.setObjectName(hero_view.pill_object_name)
-        hero_layout.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
-        self._hero_pill = status_pill
-        self._add(hero_card)
-
-        # ── 1b. Finish setup (resumable first-boot wizard steps) ──────────────
         incomplete = [] if IS_LIVE else incomplete_steps(self._profile)
         if incomplete:
             self._add(self._make_setup_resume_card(incomplete))
 
-        # ── 2. Segmented Focus Vibe Selector ──────────────────────────────────
-        vibe_row = QWidget()
-        vibe_row.setObjectName("segmented-tab-row")
-        vibe_layout = QHBoxLayout(vibe_row)
-        vibe_layout.setContentsMargins(16, 10, 16, 10)
-        vibe_layout.setSpacing(12)
+        self._add(self._make_vibe_section())
+        self._add_layout(self._make_hud_grid())
 
-        vibe_lbl = QLabel("WORKSTATION MODE:")
-        vibe_lbl.setObjectName("home-kicker")
-        vibe_layout.addWidget(vibe_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        self._focus_buttons = {}
-        for key, label, tip in (
-            ("everyday", "💻 Everyday Use", "Browser, office, files, and media."),
-            ("gaming", "🎮 Gaming Rig", "Steam, launchers, performance, and controls."),
-        ):
-            btn = QPushButton(label)
-            btn.setObjectName("segmented-tab")
-            btn.setCheckable(True)
-            btn.setToolTip(tip)
-            btn.clicked.connect(lambda _=False, k=key: self._on_focus_chosen(k))
-            self._focus_buttons[key] = btn
-            vibe_layout.addWidget(btn)
-
-        vibe_layout.addSpacing(12)
-
-        apply_btn = QPushButton("Apply Settings")
-        apply_btn.setObjectName("primary")
-        apply_btn.clicked.connect(lambda _=False: self._apply_role_preset())
-        vibe_layout.addWidget(apply_btn)
-
-        self._preset_status = QLabel("Ready to tune.")
-        self._preset_status.setObjectName("status-dim")
-        vibe_layout.addWidget(self._preset_status, 1)
-
-        self._focus_buttons[self._profile].setChecked(True)
-        self._add(vibe_row)
-
-        # ── 3. High-Tech HUD Grid (Merging metadata, readiness, and desktop experience) ──
-        hud_grid = QGridLayout()
-        hud_grid.setSpacing(12)
-
-        # HUD 1: Core System Vibe
-        card1 = QFrame()
-        card1.setObjectName("genz-hud-card")
-        layout1 = QVBoxLayout(card1)
-        layout1.setContentsMargins(18, 16, 18, 16)
-        layout1.setSpacing(8)
-        title1 = QLabel("SYSTEM NODE")
-        title1.setObjectName("hud-title")
-        layout1.addWidget(title1)
-        desc1 = QLabel(f"<b>Device:</b> {hostname}<br>"
-                       f"<b>Kernel:</b> {kernel}<br>"
-                       f"<b>Channel:</b> {branch}")
-        desc1.setTextFormat(Qt.TextFormat.RichText)
-        desc1.setObjectName("hud-desc")
-        desc1.setWordWrap(True)
-        layout1.addWidget(desc1)
-        self._hud1_desc = desc1
-        hud_grid.addWidget(card1, 0, 0)
-
-        # HUD 2: Environment Summary
-        card2 = QFrame()
-        card2.setObjectName("genz-hud-card")
-        layout2 = QVBoxLayout(card2)
-        layout2.setContentsMargins(18, 16, 18, 16)
-        layout2.setSpacing(8)
-        title2 = QLabel("ENVIRONMENT")
-        title2.setObjectName("hud-title")
-        layout2.addWidget(title2)
-        session = self._session
-        portal = self._facts["portal"]
-        pipewire = self._facts["pipewire"]
-        desc2 = QLabel(f"<b>Session Type:</b> {session}<br>"
-                       f"<b>Audio Engine:</b> PipeWire ({pipewire.strip()})<br>"
-                       f"<b>Desktop Portal:</b> {portal.strip()}")
-        desc2.setTextFormat(Qt.TextFormat.RichText)
-        desc2.setObjectName("hud-desc")
-        desc2.setWordWrap(True)
-        layout2.addWidget(desc2)
-        self._hud2_desc = desc2
-        hud_grid.addWidget(card2, 0, 1)
-
-        # HUD 3: Recovery / Dual-Boot
-        card3 = QFrame()
-        card3.setObjectName("genz-hud-card")
-        layout3 = QVBoxLayout(card3)
-        layout3.setContentsMargins(18, 16, 18, 16)
-        layout3.setSpacing(8)
-        title3 = QLabel("RECOVERY & DUAL-BOOT")
-        title3.setObjectName("hud-title")
-        layout3.addWidget(title3)
-        rollback_status = "Available" if rollback else "None"
-        dual_boot_status = "Detected" if windows_found else "Not Detected"
-        desc3 = QLabel(f"<b>Previous State:</b> {rollback_status}<br>"
-                       f"<b>Windows Disk:</b> {dual_boot_status}<br>"
-                       f"<b>Fallback Theme:</b> Verified")
-        desc3.setTextFormat(Qt.TextFormat.RichText)
-        desc3.setObjectName("hud-desc")
-        desc3.setWordWrap(True)
-        layout3.addWidget(desc3)
-        self._hud3_desc = desc3
-        hud_grid.addWidget(card3, 1, 0)
-
-        # HUD 4: Recommended / Quick Vibe Actions
-        card4 = QFrame()
-        card4.setObjectName("genz-hud-card")
-        layout4 = QVBoxLayout(card4)
-        layout4.setContentsMargins(18, 16, 18, 16)
-        layout4.setSpacing(8)
-        title4 = QLabel("RECOMMENDED ACTIONS")
-        title4.setObjectName("hud-title")
-        layout4.addWidget(title4)
-
-        desc4 = QLabel(hero_view.rec_text)
-        desc4.setObjectName("hud-desc")
-        desc4.setWordWrap(True)
-        layout4.addWidget(desc4)
-        self._hud4_desc = desc4
-
-        btn4 = QPushButton(hero_view.rec_btn_label)
-        btn4.setObjectName("primary")
-        btn4.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Reads self._hero_view at click time (rather than closing over the
-        # hero_view computed above) since _on_status_facts_ready() replaces
-        # self._hero_view once the real staged/rollback/windows_found facts
-        # are known — the button must follow that, not the placeholder.
-        btn4.clicked.connect(lambda _=False: self._on_recommended_action())
-        layout4.addWidget(btn4)
-        self._hud4_btn = btn4
-        hud_grid.addWidget(card4, 1, 1)
-
-        self._add_layout(hud_grid)
-
-        # ── NTFS Steam library warning ────────────────────────────────────────
         self._ntfs_library_insert_index = self._layout.count()
         self._ntfs_library_worker = None
         if not IS_LIVE:
             single_shot(self, 0, self._refresh_ntfs_library_warning)
 
-        # ── First-week tips ───────────────────────────────────────────────────
         days = None if IS_LIVE else _first_week_days()
         if days is not None and _FIRST_WEEK_MIN_DAYS <= days <= _FIRST_WEEK_MAX_DAYS:
             self._add(self._make_first_week_card(days))
 
         self._add(self._make_section_header("Explore Tasks", "Choose a card below to configure launchers, tune displays, or run diagnostics."))
+        self._build_category_section()
+        self._stretch()
 
-        # ── Category Grid (Action Cards) ──────────────────────────────────────
-        # has_nvidia defaults to False here (see self._facts above) — real
-        # GPU detection runs in the background and _rebuild_category_grid()
-        # patches the "Advanced" card's task list in if it was wrong.
+        if not IS_LIVE:
+            single_shot(self, 0, self._refresh_system_status)
+
+    def _make_hero_banner(self, hero_view) -> QFrame:
+        card = QFrame()
+        card.setObjectName("genz-hero")
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(16)
+
+        hero_text_col = QVBoxLayout()
+        hero_text_col.setSpacing(4)
+
+        title = QLabel("KYTHOS WORKSTATION")
+        title.setObjectName("genz-hero-title")
+        hero_text_col.addWidget(title)
+
+        subtitle = QLabel("Atomic immutable workstation. Zero bloat, maximum performance.")
+        subtitle.setObjectName("genz-hero-subtitle")
+        hero_text_col.addWidget(subtitle)
+
+        layout.addLayout(hero_text_col, 1)
+
+        status_pill = QLabel()
+        status_pill.setText(hero_view.pill_text)
+        status_pill.setObjectName(hero_view.pill_object_name)
+        layout.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._hero_pill = status_pill
+        return card
+
+    def _new_card(self, object_name: str, *, margins=(18, 16, 18, 16), spacing=8) -> tuple[QFrame, QVBoxLayout]:
+        card = QFrame()
+        card.setObjectName(object_name)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(*margins)
+        layout.setSpacing(spacing)
+        return card, layout
+
+    def _make_card_header(self, title_text: str, layout: QVBoxLayout) -> None:
+        title = QLabel(title_text)
+        title.setObjectName("hud-title")
+        layout.addWidget(title)
+
+    def _make_hud_card(
+        self,
+        title_text: str,
+        body_text: str,
+        grid: QGridLayout,
+        row: int,
+        col: int,
+    ) -> QLabel:
+        card, card_layout = self._new_card("genz-hud-card")
+        self._make_card_header(title_text, card_layout)
+        desc = QLabel(body_text)
+        desc.setTextFormat(Qt.TextFormat.RichText)
+        desc.setObjectName("hud-desc")
+        desc.setWordWrap(True)
+        card_layout.addWidget(desc)
+        grid.addWidget(card, row, col)
+        return desc
+
+    def _make_action_hud_card(
+        self,
+        title_text: str,
+        body_text: str,
+        button_text: str,
+        callback,
+        grid: QGridLayout,
+        row: int,
+        col: int,
+    ) -> tuple[QLabel, QPushButton]:
+        card, card_layout = self._new_card("genz-hud-card")
+        self._make_card_header(title_text, card_layout)
+        desc = QLabel(body_text)
+        desc.setObjectName("hud-desc")
+        desc.setWordWrap(True)
+        card_layout.addWidget(desc)
+        btn = QPushButton(button_text)
+        btn.setObjectName("primary")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(lambda _=False: callback())
+        card_layout.addWidget(btn)
+        grid.addWidget(card, row, col)
+        return desc, btn
+
+    def _make_vibe_section(self) -> QWidget:
+        section = QWidget()
+        section.setObjectName("segmented-tab-row")
+        layout = QHBoxLayout(section)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(12)
+
+        label = QLabel("WORKSTATION MODE:")
+        label.setObjectName("home-kicker")
+        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self._focus_buttons = {}
+        for key, text, tip in (
+            ("everyday", "💻 Everyday Use", "Browser, office, files, and media."),
+            ("gaming", "🎮 Gaming Rig", "Steam, launchers, performance, and controls."),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("segmented-tab")
+            button.setCheckable(True)
+            button.setToolTip(tip)
+            button.clicked.connect(lambda _=False, k=key: self._on_focus_chosen(k))
+            self._focus_buttons[key] = button
+            layout.addWidget(button)
+
+        layout.addSpacing(12)
+
+        apply_btn = QPushButton("Apply Settings")
+        apply_btn.setObjectName("primary")
+        apply_btn.clicked.connect(lambda _=False: self._apply_role_preset())
+        layout.addWidget(apply_btn)
+
+        self._preset_status = QLabel("Ready to tune.")
+        self._preset_status.setObjectName("status-dim")
+        layout.addWidget(self._preset_status, 1)
+
+        self._focus_buttons[self._profile].setChecked(True)
+        return section
+
+    def _make_hud_grid(self) -> QGridLayout:
+        grid = QGridLayout()
+        grid.setSpacing(12)
+
+        self._hud1_desc = self._make_hud_card(
+            "SYSTEM NODE",
+            f"<b>Device:</b> {self._hostname}<br>"
+            f"<b>Kernel:</b> {self._kernel}<br>"
+            f"<b>Channel:</b> {self._facts['branch']}",
+            grid,
+            0,
+            0,
+        )
+        self._hud2_desc = self._make_hud_card(
+            "ENVIRONMENT",
+            f"<b>Session Type:</b> {self._session}<br>"
+            f"<b>Audio Engine:</b> PipeWire ({self._facts['pipewire'].strip()})<br>"
+            f"<b>Desktop Portal:</b> {self._facts['portal'].strip()}",
+            grid,
+            0,
+            1,
+        )
+        self._hud3_desc = self._make_hud_card(
+            "RECOVERY & DUAL-BOOT",
+            f"<b>Previous State:</b> {'Available' if self._facts['rollback'] else 'None'}<br>"
+            f"<b>Windows Disk:</b> {'Detected' if self._facts['windows_found'] else 'Not Detected'}<br>"
+            f"<b>Fallback Theme:</b> Verified",
+            grid,
+            1,
+            0,
+        )
+        self._hud4_desc, self._hud4_btn = self._make_action_hud_card(
+            "RECOMMENDED ACTIONS",
+            self._hero_view.rec_text,
+            self._hero_view.rec_btn_label,
+            self._on_recommended_action,
+            grid,
+            1,
+            1,
+        )
+        return grid
+
+    def _build_category_section(self) -> None:
         self._nvidia_at_build = self._facts["has_nvidia"]
         categories = home_categories(has_nvidia=self._nvidia_at_build)
 
@@ -273,15 +276,11 @@ class WelcomePage(Page):
         for icon_names, glyph, title, tasks in categories:
             card = self._make_category_card(icon_names, glyph, title, tasks)
             self._category_cards.append((card, title == "Games"))
+
         self._relayout_categories(self._profile)
         self._category_grid.setColumnStretch(0, 1)
         self._category_grid.setColumnStretch(1, 1)
         self._add_layout(self._category_grid)
-
-        self._stretch()
-
-        if not IS_LIVE:
-            single_shot(self, 0, self._refresh_system_status)
 
     def _make_ntfs_library_card(self, libs: list[str]) -> QFrame:
         card, layout = _make_card("card-accent-warn")

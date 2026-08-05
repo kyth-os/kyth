@@ -418,6 +418,47 @@ def booted_image_identity() -> tuple[str, str]:
         return "unknown", "unknown"
 
 
+def _current_kernel() -> str:
+    result = run_text(["uname", "-r"])
+    return result.stdout.strip() if result else "unknown"
+
+
+def _build_apply_identity(evaluation: Evaluation) -> dict[str, str]:
+    image_reference, image_digest = booted_image_identity()
+    return {
+        "policy_digest": evaluation.policy_digest,
+        "inventory_digest": evaluation.inventory.digest(),
+        "kernel": _current_kernel(),
+        "image_reference": image_reference,
+        "image_digest": image_digest,
+    }
+
+
+def _should_skip_apply(
+    previous: dict[str, Any],
+    identity: dict[str, Any],
+    expected_modprobe: str,
+    force: bool,
+) -> bool:
+    return (
+        not force
+        and previous.get("status") == "applied"
+        and all(previous.get(key) == value for key, value in identity.items())
+        and _read_text(MANAGED_MODPROBE_PATH) == expected_modprobe.strip()
+    )
+
+
+def _write_state_report(path: Path, evaluation: Evaluation, state: dict[str, Any]) -> None:
+    report = {"evaluation": evaluation.as_dict(), "applied": state}
+    _atomic_write(path, json.dumps(report, indent=2, sort_keys=True) + "\n")
+
+
+def _apply_policy_config(policy: dict[str, Any]) -> dict[str, Any]:
+    config: dict[str, Any] = {"scheduler": _configure_scheduler(policy["scheduler_candidates"])}
+    config["nvidia"] = _configure_nvidia() if policy.get("nvidia_setup") else _clear_nvidia_policy()
+    return config
+
+
 def _atomic_write(path: Path, content: str, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -536,14 +577,8 @@ def apply_system(
     }
     previous = read_applied_state(state_path)
     expected_modprobe = render_modprobe_config(evaluation)
-    if (
-        not force
-        and previous.get("status") == "applied"
-        and all(previous.get(key) == value for key, value in identity.items())
-        and _read_text(MANAGED_MODPROBE_PATH) == expected_modprobe.strip()
-    ):
-        report = {"evaluation": evaluation.as_dict(), "applied": previous}
-        _atomic_write(report_path, json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if _should_skip_apply(previous, identity, expected_modprobe, force):
+        _write_state_report(report_path, evaluation, previous)
         return previous
 
     _atomic_write(MANAGED_MODPROBE_PATH, expected_modprobe)
@@ -560,20 +595,17 @@ def apply_system(
         "warnings": list(evaluation.warnings),
     }
     try:
-        state["scheduler"] = _configure_scheduler(policy["scheduler_candidates"])
-        state["nvidia"] = _configure_nvidia() if policy.get("nvidia_setup") else _clear_nvidia_policy()
+        state.update(_apply_policy_config(policy))
         state["status"] = "applied"
         state["error"] = ""
     except RuntimeError as exc:
         state["status"] = "failed"
         state["error"] = str(exc)
         _atomic_write(state_path, json.dumps(state, indent=2, sort_keys=True) + "\n")
-        report = {"evaluation": evaluation.as_dict(), "applied": state}
-        _atomic_write(report_path, json.dumps(report, indent=2, sort_keys=True) + "\n")
+        _write_state_report(report_path, evaluation, state)
         raise
     _atomic_write(state_path, json.dumps(state, indent=2, sort_keys=True) + "\n")
-    report = {"evaluation": evaluation.as_dict(), "applied": state}
-    _atomic_write(report_path, json.dumps(report, indent=2, sort_keys=True) + "\n")
+    _write_state_report(report_path, evaluation, state)
     return state
 
 
