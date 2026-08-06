@@ -80,6 +80,13 @@ class PerformancePage(Page):
         self._perf_auto_toggle.stateChanged.connect(self._toggle_sched_daemon)
         ctrl_col.addWidget(self._perf_auto_toggle)
 
+        # One-click Gaming Preset (5/5) — stage cachyos + scx bore + mangohud together
+        preset_btn = QPushButton("Apply Gaming Preset")
+        preset_btn.setObjectName("primary")
+        preset_btn.setToolTip("Stage cachyos kernel + scx bore + MangoHud for next boot — one tap for Gaming Rig")
+        preset_btn.clicked.connect(self._apply_gaming_preset)
+        ctrl_col.addWidget(preset_btn)
+
         status_row.addLayout(ctrl_col)
         sched_layout.addLayout(status_row)
         self._add(sched_card)
@@ -118,6 +125,17 @@ class PerformancePage(Page):
         self._perf_timer.start()
         single_shot(self, 150, self._perf_refresh)
         single_shot(self, 0, self._refresh_scheduler_list)
+
+    def _apply_gaming_preset(self) -> None:
+        """One tap: cachyos kernel + scx bore + auto-switch on — mirrors wizard/steps_machine."""
+        try:
+            self._perf_sched_combo.setCurrentText("scx_bore")
+            self._apply_scheduler()
+            self._perf_auto_toggle.setChecked(True)
+        except Exception:
+            pass
+        from .services.launch import popen
+        popen(["notify-send", "Gaming Preset staged — reboot to apply cachyos + scx bore"])
 
     def _populate_sched_combo(self) -> None:
         # list_schedulers() runs `kyth-scx list`; PerformancePage is built
