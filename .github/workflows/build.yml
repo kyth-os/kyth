@@ -51,7 +51,7 @@ env:
 jobs:
   plan:
     name: Plan build matrix
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       branches: ${{ steps.branches.outputs.branches }}
@@ -76,7 +76,7 @@ jobs:
   build_push:
     name: Build and push (${{ matrix.branch }}, ${{ matrix.kernel_flavor }})
     needs: plan
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     # fail-fast is false below, so a cachy failure never blocks the fedora leg
     # or the live ISO dispatch. Let it mark the run red — continue-on-error here
@@ -581,7 +581,7 @@ jobs:
     name: Attest and dispatch (${{ matrix.branch }}, ${{ matrix.kernel_flavor }})
     needs: [plan, build_push]
     if: needs.build_push.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false

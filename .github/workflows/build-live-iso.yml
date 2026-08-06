@@ -65,7 +65,7 @@ env:
 jobs:
   build:
     name: Build ISO (${{ inputs.source_tag }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
       actions: read
@@ -246,7 +246,7 @@ jobs:
   publish:
     name: Publish ISO (${{ inputs.source_tag }})
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     # As a reusable workflow this sees the caller's github context: stable
     # publishes from scheduled rebuilds or the repository owner (push or

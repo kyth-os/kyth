@@ -45,7 +45,7 @@ env:
 jobs:
   prepare:
     name: Prepare metadata (${{ inputs.source_tag }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
       contents: read
@@ -363,7 +363,7 @@ jobs:
   publish:
     name: Publish metadata (${{ inputs.source_tag }})
     needs: prepare
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     # Stable publishes from scheduled rebuilds or the repository owner (push
     # or manual dispatch) go through the reviewer-free stable-release-auto

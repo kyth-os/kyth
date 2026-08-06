@@ -24,7 +24,7 @@ concurrency:
 jobs:
   analysis:
     name: Scorecard analysis
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.event.repository.default_branch == github.ref_name || github.event_name == 'branch_protection_rule' || github.event_name == 'schedule'
     permissions:

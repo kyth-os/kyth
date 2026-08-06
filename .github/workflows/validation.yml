@@ -31,7 +31,7 @@ env:
 jobs:
   validation:
     name: validation
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -67,7 +67,7 @@ jobs:
 
   quality:
     name: coverage and lint
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
