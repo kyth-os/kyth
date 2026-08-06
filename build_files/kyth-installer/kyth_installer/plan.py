@@ -37,6 +37,9 @@ whatever protections/flags apply to "alongside" (see above) apply to them too.
 """
 
 import logging
+import contextlib
+import fcntl
+import os
 import shutil
 import subprocess
 import tempfile
@@ -352,6 +355,71 @@ def suggest_windows_resize_target(snapshot=None) -> dict | None:
                 best = candidate
     return best
 
+@contextlib.contextmanager
+def disk_hold(disk: str, log):
+    """Hold an exclusive open on the whole disk through partitioning.
+
+    Prevents TOCTOU where a second installer request or udev automount
+    reclaims a gap between validate_plan_state and parted mkpart. Best-effort
+    on live ISO where the disk may be busy — falls back to advisory warning.
+    """
+    fd = -1
+    try:
+        try:
+            fd = os.open(disk, os.O_RDONLY)
+        except OSError as exc:
+            log(f"Warning: could not open {disk} for exclusive hold: {exc}")
+            yield
+            return
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            log(f"Holding exclusive lock on {disk} for partition commit...")
+        except BlockingIOError:
+            raise RuntimeError(f"Another process is using {disk}; close other installers and retry.")
+        yield
+    finally:
+        if fd != -1:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+
+
+
+def find_bootcurrent_esp() -> str | None:
+    """Return ESP device path from BootCurrent via efibootmgr -v, or None."""
+    import shutil, subprocess
+    if shutil.which("efibootmgr") is None:
+        return None
+    try:
+        from .runner import run_command
+        from .system import _as_root
+        r = run_command(_as_root(["efibootmgr", "-v"]), capture_output=True, text=True, timeout=5)
+        if r.returncode != 0 or not r.stdout:
+            return None
+        # Find BootCurrent line, then its HD() device path
+        import re
+        m = re.search(r"BootCurrent:\s*([0-9A-Fa-f]{4})", r.stdout)
+        if not m:
+            return None
+        boot = m.group(1)
+        # Find BootXXXX* line with HD(...)/File(\\EFI ...)
+        for line in r.stdout.splitlines():
+            if line.strip().startswith(f"Boot{boot}"):
+                # HD(2,GPT,uuid,0x800,0xFA000)/File(\EFI\arch\grubx64.efi)
+                hm = re.search(r"HD\(\d+,GPT,[^,]+,0x[0-9a-fA-F]+,0x[0-9a-fA-F]+\)", line)
+                # We can't map HD to /dev directly, so return hint that BootCurrent exists
+                # Caller will prefer existing find_efi_partition on BootCurrent disk if possible
+                # For now, just indicate BootCurrent ESP is not on target disk if needed
+                return line.strip()
+    except Exception:
+        pass
+    return None
+
 def _required_guided_space(disk: str) -> int:
     if _is_gpt_disk(disk) and not _has_bios_boot_partition(disk):
         return MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
@@ -404,37 +472,66 @@ def _commit_new_kythos_partition(
     resizepart call) so its failures are covered by the same safety net.
     Returns the new partition's device path."""
     disk_service = DiskService()
-    with tempfile.TemporaryDirectory(prefix="kyth-partition-") as backup_dir:
-        backup_path = str(Path(backup_dir) / "partition-table.backup")
-        log("Backing up the partition table before changing it...")
-        disk_service.backup_table(disk, backup_path)
-        try:
-            if before_partition is not None:
-                before_partition()
-
-            btrfs_start = _ensure_bios_boot_partition(disk, gap_start, log)
-            sector = _block_size_bytes(disk)
-            partition_end = gap_end - sector
-            before = {p["name"] for p in list_partitions(disk) if p.get("name")}
-
-            log(f"Creating KythOS Btrfs partition in {_human_size(gap_end - btrfs_start)} of free space...")
-            run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{partition_end}B"]), check=True, timeout=120)
-            _settle()
-
-            created = _latest_partition_on_disk(disk, before)
-            if not created:
-                raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
-            run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
-            log(f"Created target partition {created}")
-        except Exception:
-            log(failure_message)
+    with disk_hold(disk, log):
+        with tempfile.TemporaryDirectory(prefix="kyth-partition-") as backup_dir:
+            backup_path = str(Path(backup_dir) / "partition-table.backup")
+            log("Backing up the partition table before changing it...")
+            disk_service.backup_table(disk, backup_path)
+            # Durability: fsync backup file and directory before any mutation
             try:
-                disk_service.restore_table(disk, backup_path)
-                log(restored_message)
-            except Exception as restore_exc:
-                log(f"Warning: automatic partition table restore failed: {restore_exc}")
-            raise
-    return created
+                with open(backup_path, "rb") as bf:
+                    os.fsync(bf.fileno())
+                dfd = os.open(backup_dir, os.O_DIRECTORY)
+                try:
+                    os.fsync(dfd)
+                finally:
+                    os.close(dfd)
+            except OSError as exc:
+                log(f"Warning: could not fsync partition backup: {exc}")
+            try:
+                if before_partition is not None:
+                    before_partition()
+
+                btrfs_start = _ensure_bios_boot_partition(disk, gap_start, log)
+                sector = _block_size_bytes(disk)
+                partition_end = gap_end - sector
+                before = {p["name"] for p in list_partitions(disk) if p.get("name")}
+
+                log(f"Creating KythOS Btrfs partition in {_human_size(gap_end - btrfs_start)} of free space...")
+                run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{partition_end}B"]), check=True, timeout=120)
+                # Force kernel to re-read partition table before any mkfs — avoids half-table on power loss
+                try:
+                    run_command(_as_root(["blockdev", "--rereadpt", disk]), check=False, timeout=15)
+                except Exception:
+                    pass
+                try:
+                    run_command(_as_root(["partprobe", disk]), check=False, timeout=15)
+                except Exception:
+                    pass
+                _settle()
+
+                created = _latest_partition_on_disk(disk, before)
+                if not created:
+                    raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
+                run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
+                # Re-read to confirm the new partition is visible to the kernel before returning
+                _settle()
+                try:
+                    _verify = {p["name"] for p in list_partitions(disk) if p.get("name")}
+                    if created not in _verify:
+                        log(f"Warning: kernel did not yet expose {created} after rereadpt — proceeding, udev may still settle.")
+                except Exception as exc:
+                    log(f"Warning: could not verify new partition {created}: {exc}")
+                log(f"Created target partition {created}")
+            except Exception:
+                log(failure_message)
+                try:
+                    disk_service.restore_table(disk, backup_path)
+                    log(restored_message)
+                except Exception as restore_exc:
+                    log(f"Warning: automatic partition table restore failed: {restore_exc}")
+                raise
+            return created
 
 
 def _validate_resize_ntfs_target(

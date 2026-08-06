@@ -32,6 +32,12 @@ class DiskService:
             check=True, timeout=30,
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
+        # Durability: fsync backup file so restore is not truncated on power loss
+        try:
+            with open(backup_path, "rb") as bf:
+                os.fsync(bf.fileno())
+        except OSError:
+            pass
 
     def restore_table(self, disk: str, backup_path: str) -> None:
         if not self.dry_run and not shutil.which("sgdisk"):

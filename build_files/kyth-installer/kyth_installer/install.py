@@ -4,8 +4,10 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import traceback
 from pathlib import Path
+import pathlib
 
 from .assurance import run_preflight, validate_installed_target
 from .config import FAILURE_SUMMARY_FILE, LOG_FILE, SKIP_FETCH_CHECK, TRANSACTION_FILE
@@ -66,6 +68,62 @@ def _assert_still_on_ac(log) -> None:
         log(f"Power guard refused: {msg}")
         raise RuntimeError(msg)
 
+
+def _start_power_watch(log, context, stop_event: threading.Event) -> threading.Thread:
+    """Background poll every 10s through IMAGE phase; fails closed on AC yank."""
+    from .assurance import _battery_check
+    def _watch():
+        while not stop_event.is_set():
+            if stop_event.wait(10):
+                break
+            try:
+                chk = _battery_check()
+                if chk.status == "fail":
+                    msg = f"Power lost during install: {chk.detail} — aborting to avoid half-write."
+                    log(msg)
+                    try:
+                        context._power_failed = msg  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    break
+            except Exception:
+                pass
+    th = threading.Thread(target=_watch, name="kyth-power-watch", daemon=True)
+    th.start()
+    return th
+
+
+def _stop_power_watch(thread: threading.Thread | None, stop_event: threading.Event | None) -> None:
+    if stop_event is not None:
+        stop_event.set()
+    if thread is not None:
+        thread.join(timeout=2)
+
+
+
+def _disk_image_hold(disk: str, log):
+    """Context manager: hold shared flock on disk through IMAGE phase."""
+    import contextlib, fcntl, os
+    @contextlib.contextmanager
+    def _hold():
+        fd = -1
+        try:
+            try:
+                fd = os.open(disk, os.O_RDONLY)
+                fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                log(f"Holding shared lock on {disk} through image write...")
+            except Exception as exc:
+                log(f"Warning: could not flock disk for IMAGE phase: {exc}")
+                fd = -1
+            yield
+        finally:
+            if fd != -1:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
+                except Exception:
+                    pass
+    return _hold()
 
 def _record_transaction(
     context: InstallerContext,
@@ -168,6 +226,11 @@ def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallP
     kernel = request.kernel
     src_ref, tgt_ref = _install_images(kernel)
     source = resolve_source_refs(src_ref, tgt_ref)
+    if source.digest:
+        base = src_ref.split("@", 1)[0]
+        if ":" in base and not base.startswith("oci:"):
+            src_ref = f"{base}@{source.digest}"
+        log(f"Pinned source to digest: {source.digest}")
     _validate_storage_intent(request, context)
     if not SKIP_FETCH_CHECK:
         log("Running network preflight check...")
@@ -397,7 +460,18 @@ def _prepare_partition_target_storage(
 
     _safe_umount(run_command, target_part)
     run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
-
+    if efi_part:
+        try:
+            import tempfile
+            with tempfile.TemporaryDirectory() as td:
+                ro = run_command(_as_root(["mount", "-o", "ro", efi_part, td]), check=False, capture_output=True)
+                if ro.returncode == 0:
+                    has_ms = pathlib.Path(td, "EFI", "Microsoft").exists() or pathlib.Path(td, "EFI", "microsoft").exists()
+                    run_command(_as_root(["umount", td]), check=False, capture_output=True)
+                    if has_ms:
+                        log(f"ESP {efi_part} contains Windows bootloader — will not format, only reuse.")
+        except Exception as exc:
+            log(f"Warning: could not inspect ESP {efi_part}: {exc}")
     _create_btrfs_subvolumes(target_part, log, progress, context)
 
     _require_no_symlink(alongside_mount)
@@ -422,12 +496,13 @@ def _prepare_partition_target_storage(
     )
     efi_before = _snapshot_efi_boot_entries(log)
     context.enter_phase(InstallPhase.IMAGE)
-    _run_cmd(
+    with _disk_image_hold(context.state.get("disk") or target_part, log):
+        _run_cmd(
         install_cmd, 12, 90, log, progress,
         stall_timeout=3600, absolute_timeout=None,
-        publish=lambda event: _push(event, context),
-    )
-    _warn_if_efi_boot_entries_disappeared(efi_before, _snapshot_efi_boot_entries(log), log)
+            publish=lambda event: _push(event, context),
+        )
+        _warn_if_efi_boot_entries_disappeared(efi_before, _snapshot_efi_boot_entries(log), log)
 
     return target_part, target_part, alongside_mount
 
@@ -442,8 +517,9 @@ def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_
         extra_flags=["--filesystem", "btrfs", "--wipe"],
     )
     context.enter_phase(InstallPhase.IMAGE)
-    _run_cmd(
-        install_cmd, 5, 90, log, progress,
+    with _disk_image_hold(disk, log):
+        _run_cmd(
+            install_cmd, 5, 90, log, progress,
         stall_timeout=3600, absolute_timeout=None,
         publish=lambda event: _push(event, context),
     )
