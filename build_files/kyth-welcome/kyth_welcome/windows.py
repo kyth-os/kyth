@@ -108,6 +108,8 @@ class MainWindow(QMainWindow):
         self._setup_search()
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._focus_search)
+        self._palette_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._palette_shortcut.activated.connect(self._focus_search)
         self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
         self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
         self._switch_page(0)
@@ -152,7 +154,7 @@ class MainWindow(QMainWindow):
 
         self._search_box = QLineEdit()
         self._search_box.setObjectName("search-box")
-        self._search_box.setPlaceholderText("Find a setting")
+        self._search_box.setPlaceholderText("Search settings (Ctrl+K)")
         self._search_box.setFixedWidth(280)
         self._search_box.setClearButtonEnabled(True)
         topbar_layout.addWidget(self._search_box)
@@ -192,7 +194,7 @@ class MainWindow(QMainWindow):
     def _build_sidebar(self, parent_layout):
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(244)
+        sidebar.setFixedWidth(240)
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)

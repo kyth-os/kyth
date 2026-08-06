@@ -34,9 +34,45 @@ def _make_card(name: str = "card") -> tuple[QFrame, QVBoxLayout]:
     card = QFrame()
     card.setObjectName(name)
     layout = QVBoxLayout(card)
-    layout.setContentsMargins(24, 22, 24, 22)
-    layout.setSpacing(12)
+    layout.setContentsMargins(20, 18, 20, 18)
+    layout.setSpacing(10)
     return card, layout
+
+
+def _make_section_header(title: str, subtitle: str = "") -> tuple[QFrame, QVBoxLayout]:
+    """Windows Settings-style section header — replaces repeated ad-hoc title+body labels.
+
+    Taste: no tracked all-caps micro-kicker, no emoji, single weight hierarchy (title 15/700, subtitle 12/muted)."""
+    frame = QFrame()
+    frame.setObjectName("section-header")
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(2, 14, 2, 6)
+    layout.setSpacing(4)
+    t = QLabel(title)
+    t.setObjectName("section-title")
+    layout.addWidget(t)
+    if subtitle:
+        s = QLabel(subtitle)
+        s.setObjectName("section-subtitle")
+        s.setWordWrap(True)
+        layout.addWidget(s)
+    return frame, layout
+
+
+def _make_grid(container: QVBoxLayout) -> "QGridLayout":
+    """2-col responsive grid for cards — Windows Settings density without bento.
+
+    Taste: no bento grid for everything, no identical 3-card lucide grid. This
+    is a plain 2-col with 12px gap, cards are still QFrame#card."""
+    from .qt import QGridLayout
+    grid = QGridLayout()
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setHorizontalSpacing(12)
+    grid.setVerticalSpacing(12)
+    grid.setColumnStretch(0, 1)
+    grid.setColumnStretch(1, 1)
+    container.addLayout(grid)
+    return grid
 
 
 class SegmentedTabBar(QFrame):
