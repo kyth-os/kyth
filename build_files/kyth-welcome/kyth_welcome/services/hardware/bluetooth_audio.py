@@ -52,17 +52,37 @@ def switch_to_bt_audio_output() -> str:
 
 
 def force_ldac_reconnect() -> str:
+    """Reconnect BT device with 3× retry — LDAC often falls back to SBC on first connect."""
     connected = command_stdout(["bluetoothctl", "devices", "Connected"], timeout=5)
+    # If nothing connected but paired exists, try the first paired device
+    addrs: list[str] = []
     for line in connected.splitlines():
         parts = line.split(" ", 2)
-        if len(parts) < 2:
-            continue
-        addr = parts[1]
-        run_command(["bluetoothctl", "disconnect", addr], timeout=6)
-        time.sleep(1.5)
-        run_command(["bluetoothctl", "connect", addr], timeout=12)
+        if len(parts) >= 2:
+            addrs.append(parts[1])
+    if not addrs:
+        paired = command_stdout(["bluetoothctl", "devices", "Paired"], timeout=5)
+        for line in paired.splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) >= 2:
+                addrs.append(parts[1])
+                break
+    for addr in addrs:
+        for attempt in range(3):
+            run_command(["bluetoothctl", "disconnect", addr], timeout=6)
+            time.sleep(1.0 + attempt * 0.5)
+            res = run_command(["bluetoothctl", "connect", addr], timeout=12)
+            # Check WirePlumber sink appears — true LDAC vs SBC fallback is headset-side,
+            # but sink presence proves the reconnect succeeded before retrying.
+            sinks = command_stdout(["bash", "-c", "wpctl status 2>/dev/null | grep -E 'bluez_output' | head -1"], timeout=5)
+            if sinks.strip() and (res is None or res.returncode == 0):
+                return (
+                    f"Reconnected {addr} (attempt {attempt+1}/3). LDAC should now be active if your device supports it. "
+                    "Refresh Devices to confirm — if still SBC, tap again."
+                )
+            time.sleep(0.5)
         return (
-            f"Reconnected {addr}. LDAC should now be active if your device supports it. "
-            "Refresh Devices to confirm the WirePlumber sink is present."
+            f"Reconnected {addr} after 3 attempts — sink still not present. "
+            "Try Bluetooth Settings → remove and re-pair the headset."
         )
-    return ""
+    return "No Bluetooth device found to reconnect. Pair a headset first."
