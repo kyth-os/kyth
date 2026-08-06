@@ -84,6 +84,38 @@ def install_shell_command(app_id: str, extra_cmd: str = "") -> str:
     return cmd
 
 
+def flatpak_override_show(app_id: str) -> str:
+    """Return `flatpak override --user --show <app_id>` stdout (empty if no override)."""
+    if not app_id or any(c in app_id for c in ("\0", "\n", "\r", ";", "&")):
+        return ""
+    try:
+        r = run_sync(
+            ["flatpak", "override", "--user", "--show", app_id],
+            capture_output=True, text=True, timeout=8, check=False,
+        )
+        if r.returncode != 0:
+            return ""
+        return r.stdout
+    except Exception:
+        return ""
+ # flatpak_override_show
+
+def flatpak_override_command(app_id: str, filesystem: str, *, allow: bool = True) -> list[str]:
+    """Build `flatpak override --user [--filesystem=|--nofilesystem=]` argv.
+
+    Validates app_id and filesystem against allowlist so callers (Worker)
+    cannot inject shell metacharacters. Returns argv for Worker/mokutil-style
+    off-thread execution. Filesystem allowlist: home, xdg-documents, xdg-downloads,
+    xdg-pictures, xdg-videos, host."""
+    allowed_fs = {"home", "xdg-documents", "xdg-downloads", "xdg-pictures", "xdg-videos", "host"}
+    if filesystem not in allowed_fs:
+        raise ValueError(f"Unsupported filesystem: {filesystem}")
+    if not app_id or any(c in app_id for c in ("\0", "\n", "\r", ";", "&")):
+        raise ValueError(f"Invalid app_id: {app_id!r}")
+    flag = f"--filesystem={filesystem}" if allow else f"--nofilesystem={filesystem}"
+    return ["flatpak", "override", "--user", flag, app_id]
+ # flatpak_override_command
+
 # Compatibility names while callers migrate from services.software.
 _installed_flatpak_ids = installed_app_ids
 list_installed_flatpak_apps = list_installed_apps

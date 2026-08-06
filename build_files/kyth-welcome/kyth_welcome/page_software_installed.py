@@ -11,9 +11,9 @@ from .services.launch import popen
 from .core_base import restyle
 from .services.runtime import DataWorker, Worker, finish_worker
 from .qt import (
-    QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
-from .widgets import CollapsibleLogPanel
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _InstalledTabMixin:
@@ -52,7 +52,94 @@ class _InstalledTabMixin:
         layout.addLayout(self._uninstall_list)
 
         self._refresh_installed_list()
+        layout.addWidget(self._build_flatpak_permissions_card())
         return tab
+
+    def _build_flatpak_permissions_card(self) -> QFrame:
+        """Inline Flatpak file-access overrides — answers 'where are my files?'.
+
+        Windows switcher saves to ~/Documents and Flatpak app cannot see it.
+        Expose --filesystem= overrides without requiring Flatseal. Uses
+        DataWorker for show + Worker for apply (no GUI thread block)."""
+        card, card_layout = _make_card()
+        title = QLabel("Flatpak File Access — Fix 'Can't see my files'")
+        title.setObjectName("card-title")
+        card_layout.addWidget(title)
+        desc = QLabel(
+            "Flatpak apps are sandboxed. If a document saved to Documents/Downloads "
+            "does not appear inside an app, grant that app access here. Uses "
+            "`flatpak override --user --filesystem=` — no restart required."
+        )
+        desc.setObjectName("card-copy")
+        desc.setWordWrap(True)
+        card_layout.addWidget(desc)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._perm_app_combo = QComboBox()
+        self._perm_app_combo.setEditable(True)
+        self._perm_app_combo.setMinimumWidth(280)
+        self._perm_app_combo.setPlaceholderText("App ID, e.g. org.libreoffice.LibreOffice")
+        row.addWidget(self._perm_app_combo, 1)
+        self._perm_fs_combo = QComboBox()
+        for label, val in (
+            ("Documents", "xdg-documents"),
+            ("Downloads", "xdg-downloads"),
+            ("Pictures", "xdg-pictures"),
+            ("Home", "home"),
+            ("Host (all)", "host"),
+        ):
+            self._perm_fs_combo.addItem(label, val)
+        row.addWidget(self._perm_fs_combo)
+        grant_btn = QPushButton("Grant")
+        grant_btn.clicked.connect(lambda _=False: self._apply_flatpak_permission(True))
+        row.addWidget(grant_btn)
+        revoke_btn = QPushButton("Revoke")
+        revoke_btn.clicked.connect(lambda _=False: self._apply_flatpak_permission(False))
+        row.addWidget(revoke_btn)
+        card_layout.addLayout(row)
+        self._perm_status = QLabel("Pick an installed Flatpak app and a folder to grant/revoke.")
+        self._perm_status.setObjectName("card-copy")
+        self._perm_status.setWordWrap(True)
+        card_layout.addWidget(self._perm_status)
+        # Populate combo from installed apps after first fetch
+        return card
+
+    def _apply_flatpak_permission(self, allow: bool) -> None:
+        from .services.flatpak import flatpak_override_command
+        app_id = self._perm_app_combo.currentText().strip()
+        filesystem = self._perm_fs_combo.currentData()
+        if not app_id:
+            self._perm_status.setText("Enter an app ID first.")
+            self._perm_status.setObjectName("status-warn")
+            restyle(self._perm_status)
+            return
+        try:
+            cmd = flatpak_override_command(app_id, filesystem, allow=allow)
+        except ValueError as exc:
+            self._perm_status.setText(str(exc))
+            self._perm_status.setObjectName("status-err")
+            restyle(self._perm_status)
+            return
+        verb = "Granting" if allow else "Revoking"
+        self._perm_status.setText(f"{verb} {filesystem} for {app_id}…")
+        self._perm_status.setObjectName("subheading")
+        restyle(self._perm_status)
+        w = Worker(cmd)
+        w.line.connect(lambda _ln: None)
+        w.done.connect(lambda code: self._on_perm_done(code, app_id, filesystem, allow))
+        w.start()
+        self._perm_worker = w
+
+    def _on_perm_done(self, code: int, app_id: str, filesystem: str, allow: bool) -> None:
+        finish_worker(self, attr="_perm_worker")
+        if code == 0:
+            verb = "Granted" if allow else "Revoked"
+            self._perm_status.setText(f"{verb} {filesystem} for {app_id}. No restart needed.")
+            self._perm_status.setObjectName("status-ok")
+        else:
+            self._perm_status.setText(f"Failed to update override for {app_id} (exit {code}).")
+            self._perm_status.setObjectName("status-err")
+        restyle(self._perm_status)
 
     def _refresh_installed_list(self, status_text: str | None = None, status_object: str = "subheading"):
         # _installed_flatpak_apps() shells out to `flatpak list`, uncached —
