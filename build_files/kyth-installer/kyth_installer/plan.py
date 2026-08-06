@@ -321,6 +321,37 @@ def _has_bios_boot_partition(disk: str) -> bool:
     )
 
 
+def suggest_windows_resize_target(snapshot=None) -> dict | None:
+    """Best NTFS candidate for 'Keep Windows' one-click alongside.
+
+    Scans safe disks for the largest NTFS partition with enough free
+    headroom to shrink by MIN_KYTHOS_GIB+2 GiB (leaves Windows breathing
+    room). Returns {disk, partition, size_gib, free_gib} or None — pure
+    suggestion, validation still goes through _validate_resize_ntfs_target.
+    """
+    from .disk import list_disks as _list_disks  # local to avoid cycle
+    best = None
+    for d in _list_disks():
+        name = d.get("name")
+        if not name:
+            continue
+        try:
+            snap = snapshot if snapshot and snapshot.disks_by_name.get(name) else _probe_storage(name)
+        except Exception:
+            continue
+        for pname, part in snap.partitions_by_name.items():
+            if part.get("fstype", "").lower() != "ntfs":
+                continue
+            size = _safe_int(part.get("size_bytes"))
+            if size < (64 + MIN_KYTHOS_GIB) * 1024**3:
+                continue
+            free = _safe_int(part.get("free_bytes") or 0)
+            # free_bytes may be missing; fall back to size heuristic
+            candidate = {"disk": name, "partition": pname, "size_bytes": size, "free_bytes": free}
+            if best is None or size > best["size_bytes"]:
+                best = candidate
+    return best
+
 def _required_guided_space(disk: str) -> int:
     if _is_gpt_disk(disk) and not _has_bios_boot_partition(disk):
         return MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES

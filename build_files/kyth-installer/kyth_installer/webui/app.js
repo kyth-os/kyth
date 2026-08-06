@@ -169,6 +169,17 @@ function loadPartitions() {
     // Manual mode always available (always needs user interaction)
     
     document.getElementById('mode-section').style.display = '';
+    // One-click Windows suggestion banner
+    if (hasNtfsCandidate) {
+      const best = parts.filter(p=>p.ntfs_resize_candidate).sort((a,b)=>b.size_bytes-a.size_bytes)[0];
+      const banner = document.getElementById('windows-suggest-banner') || (function(){
+        const b=document.createElement('div'); b.id='windows-suggest-banner'; b.className='status-box status-ok';
+        b.style.margin='14px 0';
+        document.getElementById('partition-section').prepend(b); return b;
+      })();
+      banner.textContent = `🪟 Windows found on ${best.name} (${fmtBytes(best.size_bytes)}). Keep Windows will shrink it by ~32 GiB — files preserved, validated before write.`;
+      banner.style.display='block';
+    }
     document.getElementById('partition-section').style.display = '';
     
     populateReplacementList();

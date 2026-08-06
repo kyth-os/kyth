@@ -50,6 +50,7 @@ class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _F
         self._build_availability_card()
         self._build_summary_card()
         self._build_manual_actions_card()
+        self._build_rollback_explainer_card()
         self._build_progress_section()
         self._build_firmware_card()
         self._build_auto_update_card()

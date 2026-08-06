@@ -95,6 +95,10 @@ class WelcomePage(Page):
             self._add(self._make_first_week_card(days))
 
         self._add(self._make_section_header("Explore Tasks", "Choose a card below to configure launchers, tune displays, or run diagnostics."))
+        # Windows transfer prominence (complaint #2) — shown above categories when NTFS found
+        self._windows_transfer_card = self._make_windows_transfer_card()
+        self._windows_transfer_card.hide()
+        self._add(self._windows_transfer_card)
         self._build_category_section()
         self._stretch()
 
@@ -399,6 +403,9 @@ class WelcomePage(Page):
         self._hud4_desc.setText(self._hero_view.rec_text)
         self._hud4_btn.setText(self._hero_view.rec_btn_label)
 
+        # Show Windows transfer card when dual-boot detected (complaint #2)
+        if hasattr(self, "_windows_transfer_card"):
+            self._windows_transfer_card.setVisible(bool(windows_found))
         if bool(self._facts["has_nvidia"]) != self._nvidia_at_build:
             self._rebuild_category_grid()
 
@@ -500,7 +507,10 @@ class WelcomePage(Page):
             text_col.addWidget(lbl)
             row.addLayout(text_col, 1)
 
-            btn = QPushButton("Open" if done else "Set Up")
+            btn = QPushButton("✓ Done" if done else "Set Up")
+            if not done:
+                btn.setObjectName("primary")
+            btn.setToolTip(text)
             btn.clicked.connect(lambda _=False, k=page_key: self._navigate(k))
             row.addWidget(btn, 0, Qt.AlignmentFlag.AlignTop)
             layout.addLayout(row)
@@ -511,6 +521,33 @@ class WelcomePage(Page):
         dismiss_row.addWidget(dismiss_btn)
         dismiss_row.addStretch()
         layout.addLayout(dismiss_row)
+        return card
+
+    def _make_windows_transfer_card(self) -> 'QFrame':
+        """Prominent one-click Windows -> KythOS transfer (complaint #2)."""
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("🪟  Coming from Windows? Transfer in one click")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "KythOS found a Windows partition. Copy your Documents, Desktop, Downloads, "
+            "browser bookmarks, and Steam saves to your new home — originals stay untouched. "
+            "OneDrive/Dropbox can be re-connected on the next page."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        go_btn = QPushButton("Transfer Files from Windows")
+        go_btn.setObjectName("primary")
+        go_btn.clicked.connect(lambda _=False: self._navigate("Move Files"))
+        row.addWidget(go_btn)
+        hw_btn = QPushButton("Check My Games First")
+        hw_btn.clicked.connect(lambda _=False: self._navigate("Gaming"))
+        row.addWidget(hw_btn)
+        row.addStretch()
+        layout.addLayout(row)
         return card
 
     def _dismiss_first_week(self, card: QFrame):

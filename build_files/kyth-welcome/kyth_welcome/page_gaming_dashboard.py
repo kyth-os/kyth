@@ -134,6 +134,30 @@ class _DashboardMixin:
         layout4.addLayout(action_row)
 
         hud_grid.addWidget(card4, 1, 1)
+
+        # Card 5: Steam Compatibility — full width below grid (Windows switcher #3)
+        card5 = QFrame()
+        card5.setObjectName("genz-hud-card")
+        layout5 = QVBoxLayout(card5)
+        layout5.setContentsMargins(18, 16, 18, 16)
+        layout5.setSpacing(8)
+        title5 = QLabel("STEAM COMPATIBILITY — Coming from Windows?")
+        title5.setObjectName("hud-title")
+        layout5.addWidget(title5)
+        self._hud_compat_desc = QLabel("Scan your Windows Steam library — see which games work on Proton, which need anti-cheat, and copy saves safely.")
+        self._hud_compat_desc.setTextFormat(Qt.TextFormat.RichText)
+        self._hud_compat_desc.setObjectName("hud-desc")
+        self._hud_compat_desc.setWordWrap(True)
+        layout5.addWidget(self._hud_compat_desc)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        scan_btn2 = QPushButton("Scan My Windows Steam Library →")
+        scan_btn2.setObjectName("primary")
+        scan_btn2.clicked.connect(lambda _=False: self._switch_gaming_section("migration"))
+        btn_row.addWidget(scan_btn2)
+        btn_row.addStretch()
+        layout5.addLayout(btn_row)
+        hud_grid.addWidget(card5, 2, 0, 1, 2)
         return widget
 
     def _update_gaming_hud(self, data: dict) -> None:

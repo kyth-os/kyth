@@ -82,6 +82,35 @@ class _UpdateOpsMixin:
         action_layout.addLayout(btn_row)
         self._add(action_card)
 
+    def _build_rollback_explainer_card(self) -> None:
+        """Complaint #5: make atomic updates + rollback obvious to Windows switchers."""
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("🛡️  Updates are atomic — rollback is one reboot away")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "KythOS is immutable: updates build a new system image and 'stage' it. "
+            "Nothing changes until you reboot. If the new image breaks anything, reboot, "
+            "hold Shift at the boot menu, and pick the previous deployment — you're back in 30 seconds. "
+            "No reinstall, no lost files."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        how_btn = QPushButton("How staging works")
+        how_btn.setToolTip("Stage → Reboot → Try → Roll back if needed (previous build stays cached)")
+        how_btn.clicked.connect(lambda _=False: self._check_for_update(force_refresh=True))
+        row.addWidget(how_btn)
+        # Roll back button already exists; just explain it here
+        note = QLabel("Previous build is kept automatically — no backup step needed.")
+        note.setObjectName("caption-text")
+        note.setWordWrap(True)
+        row.addWidget(note, 1)
+        layout.addLayout(row)
+        self._add(card)
+
     def _build_progress_section(self):
         self._operation = UpdateOperationController()
         self._status_lbl = QLabel()

@@ -29,6 +29,7 @@ class _StarterPackTabMixin:
         layout.addWidget(intro)
 
         layout.addWidget(self._make_install_hierarchy_card())
+        layout.addWidget(self._make_windows_switcher_card())
         layout.addWidget(self._make_familiar_app_finder())
 
         for pack in self._STARTER_PACKS:
@@ -145,6 +146,46 @@ class _StarterPackTabMixin:
             "Tip: right-click any open Chromium app window → "
             "\"More tools\" → \"Create shortcut…\" to pin it to the KDE application launcher."
         )
+        note.setObjectName("caption-text")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        return card
+
+    def _make_windows_switcher_card(self) -> QFrame:
+        """Complaint #5: If you used X on Windows, use Y on KythOS — one-click."""
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("🪟  Switching from Windows? Start here — one click per app")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "KythOS maps your Windows apps to tuned replacements. Click Install — Flatpak handles updates and sandboxing. No terminal needed."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        mapping = [
+            ("Microsoft Office", "LibreOffice (Writer/Calc)", "org.libreoffice.LibreOffice"),
+            ("Photoshop", "GIMP + Krita", "org.gimp.GIMP"),
+            ("Spotify", "Spotify", "com.spotify.Client"),
+            ("Discord", "Discord", "com.discordapp.Discord"),
+            ("Chrome", "Brave Browser", "com.brave.Browser"),
+            ("VLC", "VLC + Celluloid", "org.videolan.VLC"),
+            ("Steam", "Steam + Heroic", "com.valvesoftware.Steam"),
+            ("Zoom / Teams", "Zoom", "us.zoom.Zoom"),
+        ]
+        for i, (win, kyth, app_id) in enumerate(mapping):
+            row, col = divmod(i, 2)
+            btn = QPushButton(f"{win} → {kyth}")
+            btn.setToolTip(f"Install {kyth} ({app_id})")
+            installed = _is_flatpak_installed(app_id)
+            btn.setEnabled(not installed)
+            btn.setText(f"✓ {kyth}" if installed else f"{win} → {kyth}")
+            btn.clicked.connect(lambda _=False, aid=app_id, n=kyth: self._install_familiar_app(aid, n))
+            grid.addWidget(btn, row, col)
+        layout.addLayout(grid)
+        note = QLabel("Tip: search any other Windows app below in Familiar App Finder.")
         note.setObjectName("caption-text")
         note.setWordWrap(True)
         layout.addWidget(note)
