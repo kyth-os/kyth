@@ -4,13 +4,7 @@ import time
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, load_profile, restyle, save_profile
 from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
-from .services.gaming import (
-    DataWorker, _find_ntfs_drives, _steam_libraries_on_ntfs,
-)
-from .services.hardware import _detect_nvidia
 from .services.launch import reboot
-from .services.process import command_stdout, run_command
-from .services.flatpak import _is_flatpak_installed as _flatpak_installed
 from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (
     FIRST_WEEK_MAX_DAYS as _FIRST_WEEK_MAX_DAYS,
@@ -317,6 +311,8 @@ class WelcomePage(Page):
     def _refresh_ntfs_library_warning(self):
         if self._ntfs_library_worker is not None:
             return
+        from .services.gaming import DataWorker, _steam_libraries_on_ntfs
+
         self._ntfs_library_worker = DataWorker("ntfs-libraries", _steam_libraries_on_ntfs)
         self._ntfs_library_worker.result.connect(self._on_ntfs_library_warning_ready)
         self._ntfs_library_worker.failed.connect(lambda _key, _message: None)
@@ -335,6 +331,11 @@ class WelcomePage(Page):
         """Run off the GUI thread by _refresh_system_status()'s DataWorker.
         Everything here is a subprocess/D-Bus call — see the comment at the
         top of __init__ for why none of it may run synchronously there."""
+        from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
+        from .services.gaming import _find_ntfs_drives
+        from .services.hardware import _detect_nvidia
+        from .services.process import command_stdout
+
         portal = command_stdout(
             ["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"],
             timeout=3,
@@ -356,6 +357,8 @@ class WelcomePage(Page):
     def _refresh_system_status(self):
         if self._status_worker is not None:
             return
+        from .services.gaming import DataWorker
+
         self._status_worker = DataWorker("welcome-status", self._gather_status_facts)
         self._status_worker.result.connect(self._on_status_facts_ready)
         self._status_worker.failed.connect(lambda _key, _message: None)
@@ -556,6 +559,9 @@ class WelcomePage(Page):
         self._preset_status.setObjectName("status-dim")
         self._preset_status.setText("Applying…")
         restyle(self._preset_status)
+
+        from .services.gaming import DataWorker
+        from .services.process import run_command
 
         worker = DataWorker(
             "apply-role-preset",
