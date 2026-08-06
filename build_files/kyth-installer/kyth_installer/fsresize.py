@@ -19,6 +19,11 @@ from .runner import run_command
 from .streaming import StreamingCommandRunner
 from .system import _as_root
 
+NTFS_GUIDANCE = (
+    "Windows left this NTFS volume in an unsafe state. Disable Fast Startup "
+    "and hibernation in Windows, run chkdsk /f, then try again."
+)
+
 _runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
 
 
@@ -50,17 +55,11 @@ def _shrink_ntfs(partition: str, new_size_bytes: int, log) -> None:
     log("Checking NTFS resize safety...")
     _stream(
         ["ntfsresize", "--check", partition], log, timeout=240,
-        error_factory=lambda *_: RuntimeError(
-            "Windows left this NTFS volume in an unsafe state. Disable Fast "
-            "Startup and hibernation, run chkdsk in Windows, then try again."
-        ),
+        error_factory=lambda *_: RuntimeError(NTFS_GUIDANCE),
     )
     _stream(
         ["ntfsresize", "--info", partition], log, timeout=120,
-        error_factory=lambda *_: RuntimeError(
-            "NTFS partition is not clean enough to resize. Boot Windows, "
-            "disable Fast Startup/hibernation, run chkdsk, and try again."
-        ),
+        error_factory=lambda *_: RuntimeError(NTFS_GUIDANCE),
     )
 
     size_arg = str(new_size_bytes)
