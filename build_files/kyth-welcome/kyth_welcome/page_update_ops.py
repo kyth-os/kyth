@@ -3,7 +3,10 @@ import time
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle, run_worker, set_session_inhibit
 from .services.process import format_dl_progress_line, format_elapsed, get_disk_write_bytes, human_bytes, with_idle_inhibit
-from .services.bootc import active_bootc_operation, bootc_image_timestamp, bootc_proxy_running, branch_display_name, current_branch, has_rollback_deployment, has_staged_update
+from .services.bootc import (
+    active_bootc_operation, bootc_image_digest, bootc_image_timestamp, bootc_proxy_running, branch_display_name,
+    bootc_status_data, current_branch, has_rollback_deployment, has_staged_update, nested_get,
+)
 from .services.launch import reboot
 from .services.runtime import Worker, finish_worker, start_or_extend_dl_monitor, stop_download_monitor
 from .services.privileged import bootc_action
@@ -488,9 +491,19 @@ class _UpdateOpsMixin:
         staged_ts = bootc_image_timestamp("staged") if staged else None
         rollback_ts = bootc_image_timestamp("rollback") if rollback else None
 
-        # Staged row
+        # Staged row — include pending image ref + short digest when present (5/5 visibility)
         if staged:
-            staged_text = f"built {staged_ts}  —  reboot to apply" if staged_ts else "Ready — reboot to apply"
+            data = bootc_status_data() or {}
+            staged_ref = nested_get(data, ("status", "staged", "image", "image")) or nested_get(data, ("status", "staged", "image", "transport_image")) or ""
+            staged_digest = bootc_image_digest("staged")
+            short = f"  ·  {staged_digest[0]}" if staged_digest else ""
+            ref_part = f"{staged_ref.split('@')[0]}" if staged_ref else ""
+            # Keep readable: tag or repo, not full digest
+            label = ref_part.split("/")[-1] if "/" in ref_part else ref_part
+            if staged_ts:
+                staged_text = f"{label}{short}  ·  built {staged_ts}  —  reboot to apply" if label else f"built {staged_ts}  —  reboot to apply"
+            else:
+                staged_text = f"{label}{short}  —  reboot to apply" if label else "Ready — reboot to apply"
             self._staged_val.setText(staged_text)
             self._staged_val.setObjectName("prop-val-blue")
         else:
@@ -498,9 +511,12 @@ class _UpdateOpsMixin:
             self._staged_val.setObjectName("prop-val-dim")
         restyle(self._staged_val)
 
-        # Rollback row + button label
+        # Rollback row + button label — also show rollback tag
         if rollback:
-            rb_text = f"Available  ·  built {rollback_ts}" if rollback_ts else "Available"
+            data = bootc_status_data() or {}
+            rb_ref = nested_get(data, ("status", "rollback", "image", "image")) or ""
+            rb_label = (rb_ref.split("@")[0].split("/")[-1] if rb_ref and "/" in rb_ref else rb_ref.split("@")[0] if rb_ref else "")
+            rb_text = f"Available ({rb_label})  ·  built {rollback_ts}" if rollback_ts and rb_label else (f"Available ({rb_label})" if rb_label else (f"Available  ·  built {rollback_ts}" if rollback_ts else "Available"))
             self._rollback_val.setText(rb_text)
             self._rollback_val.setObjectName("prop-val")
             self._rollback_btn.setText(f"Roll Back  ({rollback_ts})" if rollback_ts else "Roll Back")
