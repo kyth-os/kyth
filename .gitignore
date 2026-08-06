@@ -48,3 +48,6 @@ Thumbs.db
 # Testing
 .pytest_cache/
 .mypy_cache/
+
+# Claude Code local state (never pushed)
+.claude/
