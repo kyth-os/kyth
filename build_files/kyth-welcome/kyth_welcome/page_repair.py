@@ -272,6 +272,11 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         backup_body.setObjectName("card-copy")
         backup_body.setWordWrap(True)
         backup_layout.addWidget(backup_body)
+        # Dynamic status line — DataWorker so missing pika/binary does not block GUI
+        self._backup_status_lbl = QLabel("Checking backup status…")
+        self._backup_status_lbl.setObjectName("card-copy")
+        self._backup_status_lbl.setWordWrap(True)
+        backup_layout.addWidget(self._backup_status_lbl)
         backup_btns = QHBoxLayout()
         backup_btns.setSpacing(8)
         pika_installed = _is_flatpak_installed("org.gnome.World.PikaBackup")
@@ -283,6 +288,30 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         backup_btns.addStretch()
         backup_layout.addLayout(backup_btns)
         self._add(backup_card)
+        # Kick off probe off GUI thread
+        try:
+            from .services.backup import _pika_backup_summary
+            w = DataWorker("pika-summary", _pika_backup_summary)
+            w.result.connect(lambda _k, data: self._on_backup_summary_ready(data))
+            w.failed.connect(lambda _k, _m: self._backup_status_lbl.setText("Backup status unavailable."))
+            w.start()
+            self._backup_worker = w
+        except Exception:
+            pass
+
+    def _on_backup_summary_ready(self, data: tuple[str, str, str]) -> None:
+        status, _title, summary = data
+        if hasattr(self, "_backup_status_lbl") and self._backup_status_lbl is not None:
+            self._backup_status_lbl.setText(summary)
+            self._backup_status_lbl.setObjectName({"ok": "status-ok", "warn": "status-warn", "dim": "status-dim"}.get(status, "card-copy"))
+            from .core_base import restyle
+            restyle(self._backup_status_lbl)
+        # Update button label based on summary probe (install vs open)
+        if hasattr(self, "_backup_btn") and self._backup_btn is not None:
+            if status == "dim":
+                self._backup_btn.setText("Set Up File History")
+            else:
+                self._backup_btn.setText("Open Pika Backup")
 
     def _build_restore_setup_card(self) -> None:
         setup_card, setup_layout = _make_card("card-accent-ok")
