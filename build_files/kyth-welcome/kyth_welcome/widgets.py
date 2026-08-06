@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable, Sequence
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
@@ -366,6 +367,65 @@ def _make_flow_step(number: int, title: str, copy: str) -> QFrame:
     text_col.addWidget(copy_lbl)
     layout.addLayout(text_col, 1)
     return step
+
+
+def _make_tip_card(
+    title: str,
+    body: str,
+    *,
+    accent: str = "card",
+    title_object_name: str = "card-title",
+    buttons: Sequence[
+        tuple[str, Callable[[], None] | None]
+        | tuple[str, Callable[[], None] | None, str]
+    ] = (),
+    primary: int | None = 0,
+) -> tuple[QFrame, list[QPushButton]]:
+    """A static info card: title, word-wrapped body copy, and an optional
+    row of action buttons — the "info + call to action" shape that pages
+    across the System Hub (repair, gaming tools, migration, ...) each
+    hand-rolled independently before this existed: a title QLabel, a
+    word-wrapped body QLabel, then a QHBoxLayout of QPushButtons ending in
+    addStretch(). `buttons` is (label, callback) or (label, callback,
+    tooltip) tuples in display order; `primary` is the index styled as the
+    primary action (None for none).
+
+    Returns (card, buttons) — the created QPushButtons, in order. Most
+    callers only need the card; a few (e.g. an inline flatpak-install
+    button that disables/relabels *itself* while running) need a live
+    reference to their own button, which callback=None + the returned list
+    provides — connect it after construction instead of during.
+
+    Cards that keep per-instance state to update later — status labels
+    that get rewritten, rows that get shown/hidden — don't fit this; build
+    those with _make_card() directly, same as before.
+    """
+    card, layout = _make_card(accent)
+    title_lbl = QLabel(title)
+    title_lbl.setObjectName(title_object_name)
+    layout.addWidget(title_lbl)
+    body_lbl = QLabel(body)
+    body_lbl.setObjectName("card-copy")
+    body_lbl.setWordWrap(True)
+    layout.addWidget(body_lbl)
+    created: list[QPushButton] = []
+    if buttons:
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        for i, entry in enumerate(buttons):
+            label, callback, *rest = entry
+            btn = QPushButton(label)
+            if i == primary:
+                btn.setObjectName("primary")
+            if rest:
+                btn.setToolTip(rest[0])
+            if callback is not None:
+                btn.clicked.connect(callback)
+            created.append(btn)
+            btn_row.addWidget(btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+    return card, created
 
 
 class AppImageDropCard(QFrame):

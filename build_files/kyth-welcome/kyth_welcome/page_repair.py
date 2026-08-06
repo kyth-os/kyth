@@ -18,7 +18,7 @@ from .qt import (
     QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QUrl, single_shot,
 )
 from .widgets import (
-    CollapsibleLogPanel, FlowLayout, Page, _make_card,
+    CollapsibleLogPanel, FlowLayout, Page, _make_card, _make_tip_card,
 )
 
 
@@ -236,36 +236,26 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._add(assist_card)
 
     def _build_printer_card(self) -> None:
-        printer_card, printer_layout = _make_card()
-        printer_title = QLabel("Printer Setup")
-        printer_title.setObjectName("card-title")
-        printer_layout.addWidget(printer_title)
-        printer_body = QLabel(
+        def _open_cups(_=False):
+            popen_privileged(systemctl_action("enable", "cups.service", now=True))
+            QDesktopServices.openUrl(QUrl("http://localhost:631"))
+
+        card, _buttons = _make_tip_card(
+            "Printer Setup",
             "Most USB and network printers work automatically via CUPS. "
             "Click Setup Printer to enable the print service and open KDE Printer Settings. "
             "If your printer is not listed, click Add Printer and enter its IP address or use the USB connection.\n\n"
             "For older or unusual printers, the CUPS web interface at http://localhost:631 "
-            "gives you access to every available driver."
+            "gives you access to every available driver.",
+            buttons=[
+                ("Setup Printer", self._open_printer_setup),
+                (
+                    "Open CUPS Web Interface", _open_cups,
+                    "Advanced printer management at http://localhost:631",
+                ),
+            ],
         )
-        printer_body.setObjectName("card-copy")
-        printer_body.setWordWrap(True)
-        printer_layout.addWidget(printer_body)
-        printer_btns = QHBoxLayout()
-        printer_btns.setSpacing(8)
-        printer_open_btn = QPushButton("Setup Printer")
-        printer_open_btn.setObjectName("primary")
-        printer_open_btn.clicked.connect(self._open_printer_setup)
-        printer_btns.addWidget(printer_open_btn)
-        cups_btn = QPushButton("Open CUPS Web Interface")
-        cups_btn.setToolTip("Advanced printer management at http://localhost:631")
-        cups_btn.clicked.connect(lambda _=False: (
-            popen_privileged(systemctl_action("enable", "cups.service", now=True)),
-            QDesktopServices.openUrl(QUrl("http://localhost:631"))
-        ))
-        printer_btns.addWidget(cups_btn)
-        printer_btns.addStretch()
-        printer_layout.addLayout(printer_btns)
-        self._add(printer_card)
+        self._add(card)
 
     def _build_backup_card(self) -> None:
         # File History — backups (Pika Backup wraps borg snapshots)
@@ -350,48 +340,39 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._add(snapshot_card)
 
     def _build_reinstall_card(self) -> None:
-        reinstall_card, reinstall_layout = _make_card()
-        reinstall_title = QLabel("Install KythOS on another disk")
-        reinstall_title.setObjectName("card-title")
-        reinstall_layout.addWidget(reinstall_title)
-        reinstall_body = QLabel(
+        card, _buttons = _make_tip_card(
+            "Install KythOS on another disk",
             "To install KythOS onto a different disk, boot the live ISO — the full graphical "
-            "installer is built in. Back up personal files first; the installer erases the disk you select."
+            "installer is built in. Back up personal files first; the installer erases the disk you select.",
+            primary=None,
+            buttons=[
+                (
+                    "Download Live ISO",
+                    lambda _=False: QDesktopServices.openUrl(QUrl("https://github.com/mrtrick37/kyth/releases")),
+                    "Open the KythOS releases page to download a live ISO for installing on another disk.",
+                ),
+                (
+                    "Open Home Folder",
+                    lambda _=False: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.expanduser("~"))),
+                    "Open your home folder in the file manager to back up personal files before reinstalling.",
+                ),
+            ],
         )
-        reinstall_body.setObjectName("card-copy")
-        reinstall_body.setWordWrap(True)
-        reinstall_layout.addWidget(reinstall_body)
-        reinstall_btns = QHBoxLayout()
-        reinstall_btns.setSpacing(8)
-        iso_btn = QPushButton("Download Live ISO")
-        iso_btn.setToolTip("Open the KythOS releases page to download a live ISO for installing on another disk.")
-        iso_btn.clicked.connect(lambda _=False: QDesktopServices.openUrl(QUrl("https://github.com/mrtrick37/kyth/releases")))
-        reinstall_btns.addWidget(iso_btn)
-        home_btn = QPushButton("Open Home Folder")
-        home_btn.setToolTip("Open your home folder in the file manager to back up personal files before reinstalling.")
-        home_btn.clicked.connect(lambda _=False: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.expanduser("~"))))
-        reinstall_btns.addWidget(home_btn)
-        reinstall_btns.addStretch()
-        reinstall_layout.addLayout(reinstall_btns)
-        self._add(reinstall_card)
+        self._add(card)
 
     def _build_warning_card(self) -> None:
-        warn, warn_layout = _make_card("card-accent-err")
-        warn_title = QLabel("This action cannot be undone")
-        warn_title.setObjectName("card-title-err")
-        warn_layout.addWidget(warn_title)
-        warn_body = QLabel(
+        card, _buttons = _make_tip_card(
+            "This action cannot be undone",
             "Running a repair will:\n"
             "  •  Remove any layered packages and custom OS-level changes\n"
             "  •  Reset system configuration to KythOS defaults\n"
             "  •  Leave everything in /home untouched\n"
             "  •  Reboot automatically after staging\n\n"
-            "If you only need to undo a bad update, use Roll Back in the Update page first."
+            "If you only need to undo a bad update, use Roll Back in the Update page first.",
+            accent="card-accent-err",
+            title_object_name="card-title-err",
         )
-        warn_body.setObjectName("card-copy")
-        warn_body.setWordWrap(True)
-        warn_layout.addWidget(warn_body)
-        self._add(warn)
+        self._add(card)
 
     def _build_reset_controls(self) -> None:
         confirm_row = QHBoxLayout()
