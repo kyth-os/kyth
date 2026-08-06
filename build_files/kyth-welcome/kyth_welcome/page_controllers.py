@@ -39,6 +39,14 @@ class ControllerPage(Page):
         self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.clicked.connect(self._start_probe)
         status_top.addWidget(self._refresh_btn)
+        self._rumble_btn = QPushButton("Test Rumble")
+        self._rumble_btn.setToolTip("Vibrate the first detected gamepad for 1 second (fftest)")
+        self._rumble_btn.clicked.connect(self._test_rumble)
+        status_top.addWidget(self._rumble_btn)
+        self._steam_input_btn = QPushButton("Steam Input")
+        self._steam_input_btn.setToolTip("Open Steam Controller settings")
+        self._steam_input_btn.clicked.connect(lambda: flatpak_run("com.valvesoftware.Steam", "steam://open/controllersettings"))
+        status_top.addWidget(self._steam_input_btn)
         self._status_layout.addLayout(status_top)
         self._status_lbl = QLabel("Scanning…")
         self._status_lbl.setObjectName("card-copy")
@@ -227,6 +235,18 @@ class ControllerPage(Page):
         self._sb_warn_lbl.setVisible(view.secure_boot_warning_visible)
 
     # ── Actions ────────────────────────────────────────────────────────────────
+
+    def _test_rumble(self) -> None:
+        import glob, shutil
+        dev = next(iter(glob.glob("/dev/input/js*") or glob.glob("/dev/input/by-id/*joystick*")), None)
+        if not dev and shutil.which("fftest"):
+            dev = "/dev/input/js0"
+        if not dev:
+            QMessageBox.information(self, "No controller", "No joystick device found at /dev/input/js*. Connect a controller first.")
+            return
+        cmd = ["fftest", dev] if shutil.which("fftest") else ["evtest", dev]
+        # Non-blocking: open terminal with test
+        popen(cmd)
 
     def _flash_xone(self) -> None:
         cmd = shutil.which("xone-dongle-install") or shutil.which("xone-firmware-install")
