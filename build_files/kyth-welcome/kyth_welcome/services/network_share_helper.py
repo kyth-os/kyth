@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 
-CREDS_DIR = Path("/etc/kyth/smb-credentials")
+CREDS_DIR = Path("/etc/kyth/smb-credentials")  # credentials via file (O_TMPFILE pattern), never in ps cmdline
 UNIT_DIR = Path("/etc/systemd/system")
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _SAFE_HOST_RE = re.compile(r"^[A-Za-z0-9._:-]{1,253}$")
@@ -173,6 +173,12 @@ def remove_share(share: dict) -> None:
     if unit_path.is_symlink() or credential_path.is_symlink():
         raise ValueError("refusing to remove a symlinked share artifact")
     unit_path.unlink(missing_ok=True)
+    # Shred credentials before unlink so password does not linger on disk (3/5 SMB hardening)
+    try:
+        if credential_path.is_file() and not credential_path.is_symlink():
+            run_sync(["shred", "-u", "-n", "3", str(credential_path)], check=False, timeout=5)
+    except Exception:
+        pass
     credential_path.unlink(missing_ok=True)
     run_sync(["systemctl", "daemon-reload"], check=True, timeout=30)
 
