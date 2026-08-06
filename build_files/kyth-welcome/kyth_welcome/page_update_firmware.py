@@ -78,6 +78,8 @@ class _FirmwareUpdateMixin:
                 f"{count} firmware {noun} available. "
                 "Updates download now and are flashed during the next reboot."
             )
+            self._fw_btn.setText(f"Update Firmware ({count})")
+            self._fw_btn.setToolTip(f"Download and stage {count} firmware {noun} for next reboot (fwupdmgr upgrade)")
             if self._worker is None:
                 self._fw_btn.show()
 
