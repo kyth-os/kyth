@@ -2,12 +2,15 @@ import os
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.plasma import _run_text, gpu_lspci_summary, kscreen_doctor_output
+from ..services.runtime import DataWorker
 from ..qt import (
     QFrame, QHBoxLayout, QLabel, Qt,
 )
 from ..ui_tokens import KYTH_TEXT_MUTED
 from ..widgets import ActionRow, CommandResultPanel, _make_card
 from ._profiles import DESKTOP_PROFILES
+
+_WAYLAND_ROW_NAMES = ("Session", "GPU", "Portals", "Screen sharing", "VRR", "HDR")
 
 
 class _CardsMixin:
@@ -191,20 +194,53 @@ class _CardsMixin:
         copy.setWordWrap(True)
         body.addWidget(title)
         body.addWidget(copy)
-        rows = [
-            ("Session", self._session_status()),
-            ("GPU", self._gpu_status()),
-            ("Portals", self._portal_status()),
-            ("Screen sharing", self._screen_share_status()),
-            ("VRR", self._kscreen_status("vrr")),
-            ("HDR", self._kscreen_status("hdr")),
-        ]
-        for name, value in rows:
-            line = QLabel(f"<b>{name}</b><br><span style='color:{KYTH_TEXT_MUTED}'>{value}</span>")
+
+        # GPU, portal, and VRR/HDR checks are subprocess-backed (lspci,
+        # systemctl, kscreen-doctor). This card is built eagerly in
+        # PlasmaWaylandPage.__init__ like every other card on this page, so
+        # it starts from "Checking…" placeholders — _refresh_wayland_readiness()
+        # (kicked off from showEvent, alongside the probe-row refresh()
+        # already deferred there) fetches the real values off the GUI
+        # thread and patches these labels in place.
+        self._wayland_readiness_worker = None
+        self._wayland_row_labels: dict[str, QLabel] = {}
+        for name in _WAYLAND_ROW_NAMES:
+            line = QLabel(f"<b>{name}</b><br><span style='color:{KYTH_TEXT_MUTED}'>Checking…</span>")
             line.setTextFormat(Qt.TextFormat.RichText)
             line.setObjectName("wayland-info-row")
             body.addWidget(line)
+            self._wayland_row_labels[name] = line
         return card
+
+    def _fetch_wayland_readiness_facts(self) -> dict[str, str]:
+        """Run off the GUI thread by _refresh_wayland_readiness()'s
+        DataWorker. kscreen-doctor is run once and shared between the VRR
+        and HDR rows instead of spawning it twice."""
+        kscreen_out = kscreen_doctor_output().lower()
+        return {
+            "Session": self._session_status(),
+            "GPU": self._gpu_status(),
+            "Portals": self._portal_status(),
+            "Screen sharing": self._screen_share_status(),
+            "VRR": self._kscreen_status("vrr", kscreen_out),
+            "HDR": self._kscreen_status("hdr", kscreen_out),
+        }
+
+    def _refresh_wayland_readiness(self) -> None:
+        if self._wayland_readiness_worker is not None:
+            return
+        worker = DataWorker("wayland-readiness", self._fetch_wayland_readiness_facts)
+        self._wayland_readiness_worker = worker
+        worker.result.connect(lambda _key, facts: self._apply_wayland_readiness_facts(facts))
+        worker.failed.connect(lambda _key, _message: None)
+        worker.finished.connect(lambda: setattr(self, "_wayland_readiness_worker", None))
+        worker.start()
+
+    def _apply_wayland_readiness_facts(self, facts: dict[str, str]) -> None:
+        for name, value in facts.items():
+            label = self._wayland_row_labels.get(name)
+            if label is not None:
+                label.setText(f"<b>{name}</b><br><span style='color:{KYTH_TEXT_MUTED}'>{value}</span>")
 
     def _session_status(self) -> str:
         session = os.environ.get("XDG_SESSION_TYPE") or "unknown"
@@ -229,8 +265,9 @@ class _CardsMixin:
     def _screen_share_status(self) -> str:
         return "Ready when PipeWire and xdg-desktop-portal-kde are active"
 
-    def _kscreen_status(self, feature: str) -> str:
-        out = kscreen_doctor_output().lower()
+    def _kscreen_status(self, feature: str, out: str | None = None) -> str:
+        if out is None:
+            out = kscreen_doctor_output().lower()
         if not out:
             return "Install/run kscreen-doctor to probe display capabilities"
         if feature in out:

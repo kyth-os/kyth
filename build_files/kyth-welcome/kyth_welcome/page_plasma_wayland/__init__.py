@@ -58,3 +58,4 @@ class PlasmaWaylandPage(Page, _CardsMixin, _ProfilesMixin, _PolishMixin, _Repair
             return
         self._initial_refresh_started = True
         single_shot(self, 0, self.refresh)
+        single_shot(self, 0, self._refresh_wayland_readiness)

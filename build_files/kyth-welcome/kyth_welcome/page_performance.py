@@ -1,5 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
+from .services.runtime import DataWorker
 from .services.sched import (
     apply_scheduler,
     is_sched_daemon_active,
@@ -19,6 +20,8 @@ class PerformancePage(Page):
     def __init__(self):
         super().__init__()
         self._telemetry_worker = None
+        self._sched_daemon_worker = None
+        self._scheduler_list_worker = None
         self._page_header(
             "Gaming",
             "Scheduler & Performance",
@@ -114,10 +117,34 @@ class PerformancePage(Page):
         self._perf_timer.timeout.connect(self._perf_refresh)
         self._perf_timer.start()
         single_shot(self, 150, self._perf_refresh)
+        single_shot(self, 0, self._refresh_scheduler_list)
 
     def _populate_sched_combo(self) -> None:
+        # list_schedulers() runs `kyth-scx list`; PerformancePage is built
+        # lazily on first visit, but this still must not block that first
+        # visit on a subprocess call. Seed the combo with the same
+        # fallback list_schedulers() itself returns when the probe fails,
+        # then _refresh_scheduler_list() (kicked off from __init__ via
+        # single_shot) replaces it with the real list once resolved.
         self._perf_sched_combo.clear()
-        self._perf_sched_combo.addItems(list_schedulers())
+        self._perf_sched_combo.addItem("scx_rusty")
+
+    def _refresh_scheduler_list(self) -> None:
+        if self._scheduler_list_worker is not None:
+            return
+        worker = DataWorker("scheduler-list", list_schedulers)
+        self._scheduler_list_worker = worker
+        worker.result.connect(lambda _key, schedulers: self._apply_scheduler_list(schedulers))
+        worker.failed.connect(lambda _key, _message: None)
+        worker.finished.connect(lambda: setattr(self, "_scheduler_list_worker", None))
+        worker.start()
+
+    def _apply_scheduler_list(self, schedulers: list[str]) -> None:
+        current = self._perf_sched_combo.currentText()
+        self._perf_sched_combo.clear()
+        self._perf_sched_combo.addItems(schedulers)
+        idx = self._perf_sched_combo.findText(current)
+        self._perf_sched_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
     def _perf_refresh(self) -> None:
         self._refresh_sched_status()
@@ -144,8 +171,27 @@ class PerformancePage(Page):
             self._perf_gaming_lbl.setObjectName("card-copy")
         restyle(self._perf_gaming_lbl)
 
+        self._refresh_sched_daemon_state()
+
+    def _refresh_sched_daemon_state(self) -> None:
+        # is_sched_daemon_active() shells out to `systemctl --user
+        # is-active`. This page's 5s heartbeat timer calls
+        # _refresh_sched_status() (and therefore this) for as long as the
+        # page stays open, so it must run off the GUI thread — a call made
+        # while a previous one is still in flight is a no-op, and the next
+        # tick retries.
+        if self._sched_daemon_worker is not None:
+            return
+        worker = DataWorker("sched-daemon-active", is_sched_daemon_active)
+        self._sched_daemon_worker = worker
+        worker.result.connect(lambda _key, active: self._apply_sched_daemon_state(bool(active)))
+        worker.failed.connect(lambda _key, _message: None)
+        worker.finished.connect(lambda: setattr(self, "_sched_daemon_worker", None))
+        worker.start()
+
+    def _apply_sched_daemon_state(self, active: bool) -> None:
         self._perf_auto_toggle.blockSignals(True)
-        self._perf_auto_toggle.setChecked(is_sched_daemon_active())
+        self._perf_auto_toggle.setChecked(active)
         self._perf_auto_toggle.blockSignals(False)
 
     def _refresh_session_history(self) -> None:

@@ -49,6 +49,19 @@ class RefactorRuntimeImportTests(unittest.TestCase):
         "bootc_status_data",
         "active_bootc_operation",
         "bootc_proxy_running",
+        # Added alongside the wizard/NVIDIA-page/Plasma-Wayland-page/
+        # Performance-page fixes (page_nvidia.py's own polling loop,
+        # page_plasma_wayland's readiness card, page_performance.py's 5s
+        # heartbeat, and the wizard's machine/gaming steps) — same
+        # subprocess-blocks-the-GUI-thread anti-pattern, different probes.
+        "_nvidia_module_loaded",
+        "_akmod_nvidia_built",
+        "_akmod_nvidia_installed",
+        "_hw_setup_service_state",
+        "_find_ntfs_drives",
+        "is_sched_daemon_active",
+        "list_schedulers",
+        "kscreen_doctor_output",
     })
 
     class _DirectCallFinder(ast.NodeVisitor):
@@ -79,24 +92,48 @@ class RefactorRuntimeImportTests(unittest.TestCase):
                 self.found.append((name, node.lineno))
             self.generic_visit(node)
 
+    # path (relative to PACKAGE) -> extra function names to scan, beyond the
+    # default __init__/get_nav_groups. Covers pages that build eagerly from
+    # a helper method rather than __init__ itself directly: the wizard's
+    # WizardWindow.__init__ builds every step up front (see
+    # wizard/window.py), so _make_machine_step()/_make_gaming_step() must
+    # stay as free of direct blocking-probe calls as __init__ itself.
+    _EXTRA_SCAN_TARGETS: dict = {
+        "wizard/steps_machine.py": ("_make_machine_step",),
+        "wizard/steps_gaming.py": ("_make_gaming_step",),
+    }
+
     def test_page_constructors_do_not_call_blocking_probes_directly(self):
         violations = []
-        for path in sorted(PACKAGE.glob("page_*.py")) + [PACKAGE / "windows.py", PACKAGE / "page_registry.py"]:
+        scan_paths = (
+            sorted(PACKAGE.glob("page_*.py"))
+            + [
+                PACKAGE / "windows.py",
+                PACKAGE / "page_registry.py",
+                PACKAGE / "page_plasma_wayland" / "__init__.py",
+            ]
+            + [PACKAGE / pathlib.PurePosixPath(rel) for rel in self._EXTRA_SCAN_TARGETS]
+        )
+        for path in scan_paths:
             tree = ast.parse(path.read_text(encoding="utf-8"))
+            relative = path.relative_to(PACKAGE).as_posix()
+            target_names = {"__init__", "get_nav_groups", *self._EXTRA_SCAN_TARGETS.get(relative, ())}
             targets = [
                 node for node in ast.walk(tree)
-                if isinstance(node, ast.FunctionDef) and node.name in ("__init__", "get_nav_groups")
+                if isinstance(node, ast.FunctionDef) and node.name in target_names
             ]
             for target in targets:
                 finder = self._DirectCallFinder(self._BLOCKING_PROBE_NAMES)
                 for stmt in target.body:
                     finder.visit(stmt)
                 for name, lineno in finder.found:
-                    violations.append(f"{path.relative_to(PACKAGE)}:{lineno} calls {name}() directly")
+                    violations.append(f"{relative}:{lineno} calls {name}() directly")
         self.assertEqual(violations, [], (
-            "Found blocking probe calls directly inside a constructor/sidebar-builder. "
-            "Defer these to a background probe (see WelcomePage._refresh_system_status "
-            "or MainWindow._refresh_nvidia_nav_visibility for the pattern):\n"
+            "Found blocking probe calls directly inside a constructor/sidebar-builder/"
+            "eager-step-builder. Defer these to a background probe (see "
+            "WelcomePage._refresh_system_status, MainWindow._refresh_nvidia_nav_visibility, "
+            "page_nvidia.py's _refresh_status, or wizard/steps_machine.py's "
+            "_refresh_machine_facts for the pattern):\n"
             + "\n".join(violations)
         ))
 

@@ -9,12 +9,27 @@ steps were; everything above it is wizard-native.
 from __future__ import annotations
 
 from ..core_base import IS_LIVE
-from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives
+from ..services.gaming import _COMPAT_GAMES
 from ..qt import QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget
 from ..widgets import _divider, _make_card, _make_flow_step
 
 
 class _GamingStepMixin:
+    def _apply_gaming_windows_drives(self, drives: list[dict]) -> None:
+        """Called by _MachineStepMixin._on_machine_facts_ready() once the
+        shared background NTFS scan resolves (see steps_machine.py)."""
+        if self._gaming_drive_card is not None:
+            self._gaming_drive_slot_layout.removeWidget(self._gaming_drive_card)
+            self._gaming_drive_card.deleteLater()
+            self._gaming_drive_card = None
+        if IS_LIVE:
+            return
+        filtered = [d for d in drives if not d.get("is_bitlocker")]
+        if filtered:
+            card = self._make_windows_game_drive_card(filtered)
+            self._gaming_drive_slot_layout.addWidget(card)
+            self._gaming_drive_card = card
+
     def _make_windows_game_drive_card(self, drives: list[dict]) -> QFrame:
         card, layout = _make_card("wiz-card-warn")
         title = QLabel("PC game drive found")
@@ -73,11 +88,18 @@ class _GamingStepMixin:
         ps_layout.setContentsMargins(52, 6, 52, 0)
         ps_layout.setSpacing(10)
 
-        windows_drives = [] if IS_LIVE else [
-            d for d in _find_ntfs_drives() if not d.get("is_bitlocker")
-        ]
-        if windows_drives:
-            ps_layout.addWidget(self._make_windows_game_drive_card(windows_drives))
+        # Populated by _apply_gaming_windows_drives() once
+        # _MachineStepMixin's background NTFS scan resolves — see
+        # steps_machine.py's module docstring. Not fetched here: this step
+        # is built eagerly alongside every other step in WizardWindow's
+        # __init__ (before any window is shown), so it must not run lsblk
+        # itself.
+        self._gaming_drive_slot = QWidget()
+        self._gaming_drive_slot.setObjectName("wiz-body")
+        self._gaming_drive_slot_layout = QVBoxLayout(self._gaming_drive_slot)
+        self._gaming_drive_slot_layout.setContentsMargins(0, 0, 0, 0)
+        self._gaming_drive_card = None
+        ps_layout.addWidget(self._gaming_drive_slot)
 
         proton_head = QLabel("Enable Proton — play your entire game library")
         proton_head.setObjectName("wiz-section-heading")

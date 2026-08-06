@@ -2,7 +2,7 @@ from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
 from .lazy_page import compose_on_first_init
-from .services.runtime import Worker
+from .services.runtime import DataWorker, Worker
 from .qt import QPushButton, QWidget
 from .widgets import Page, SegmentedTabBar, _divider
 
@@ -299,6 +299,7 @@ class SoftwarePage(Page):
         # Worker references
         self._starter_worker: Worker | None = None
         self._uninstall_worker: Worker | None = None
+        self._installed_list_worker: DataWorker | None = None
         self._uninstall_buttons: list[QPushButton] = []
         self._fp_search_worker: Worker | None = None
         self._fp_catalog_worker: Worker | None = None
@@ -382,6 +383,12 @@ class SoftwarePage(Page):
     def _switch_tab(self, idx: int):
         if idx == self._current_tab:
             return
+        # _build_installed_tab() already kicks off its own async refresh the
+        # first time it's built (whether that happens here or from the
+        # initial _ensure_tab() call in __init__) — only re-trigger it here
+        # on a *revisit*, so switching to Installed doesn't fire the flatpak
+        # list fetch twice back to back.
+        already_built = self._tab_widgets[idx] is not None
         self._ensure_tab(idx)
         for i, widget in enumerate(self._tab_widgets):
             if widget is not None:
@@ -389,6 +396,6 @@ class SoftwarePage(Page):
         self._current_tab = idx
         if idx == 3:
             self._refresh_sec_status()
-        elif idx == 6:
+        elif idx == 6 and already_built:
             self._refresh_installed_list()
 

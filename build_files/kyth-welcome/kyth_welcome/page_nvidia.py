@@ -8,7 +8,7 @@ from .services.hardware import (
     _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
     _nvidia_module_loaded, nvidia_status_view,
 )
-from .services.runtime import finish_worker
+from .services.runtime import DataWorker, finish_worker
 from .services.privileged import helper_action
 from .qt import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer,
@@ -22,6 +22,7 @@ class NvidiaPage(Page):
     def __init__(self):
         super().__init__()
         self._worker = None
+        self._status_worker = None
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(8000)
         self._poll_timer.timeout.connect(self._refresh_status)
@@ -76,14 +77,46 @@ class NvidiaPage(Page):
 
         self._refresh_status()
 
+    @staticmethod
+    def _fetch_status_facts() -> dict:
+        """Run off the GUI thread by _refresh_status()'s DataWorker.
+        _detect_nvidia (lspci), _nvidia_module_loaded (lsmod),
+        _akmod_nvidia_built (modinfo), _akmod_nvidia_installed (rpm -q), and
+        _hw_setup_service_state (systemctl is-active) are all
+        subprocess-backed — _hw_setup_done() just reads a local JSON file."""
+        return {
+            "has_gpu": _detect_nvidia(),
+            "loaded": _nvidia_module_loaded(),
+            "built": _akmod_nvidia_built(),
+            "installed": _akmod_nvidia_installed(),
+            "hw_setup_done": _hw_setup_done(),
+            "svc_state": _hw_setup_service_state(),
+        }
+
     def _refresh_status(self):
+        # Called from __init__, from the 8s poll timer while an akmod build
+        # runs in the background, and after a manual build finishes — none
+        # of those may block the GUI thread on the subprocess probes above,
+        # so the actual gathering happens on a DataWorker and this just
+        # kicks it off (a call while a previous one is still in flight is a
+        # no-op; the next poll tick retries).
+        if self._status_worker is not None:
+            return
+        worker = DataWorker("nvidia-status-facts", self._fetch_status_facts)
+        self._status_worker = worker
+        worker.result.connect(lambda _key, facts: self._apply_status_facts(facts))
+        worker.failed.connect(lambda _key, _message: None)
+        worker.finished.connect(lambda: setattr(self, "_status_worker", None))
+        worker.start()
+
+    def _apply_status_facts(self, facts: dict) -> None:
         view = nvidia_status_view(
-            has_gpu=_detect_nvidia(),
-            loaded=_nvidia_module_loaded(),
-            built=_akmod_nvidia_built(),
-            installed=_akmod_nvidia_installed(),
-            hw_setup_done=_hw_setup_done(),
-            svc_state=_hw_setup_service_state(),
+            has_gpu=facts["has_gpu"],
+            loaded=facts["loaded"],
+            built=facts["built"],
+            installed=facts["installed"],
+            hw_setup_done=facts["hw_setup_done"],
+            svc_state=facts["svc_state"],
         )
 
         # Keep polling while the background service is compiling.

@@ -5,12 +5,25 @@ steps, which each embedded a full live Hub page (UpdatePage / HardwarePage).
 This step is wizard-native: a stat bar, an update-status card, and the
 preflight warning card, all built directly from services/ — with a handoff
 button to System Hub for anyone who wants the full page.
+
+WizardWindow.__init__ builds every step eagerly (see wizard/window.py), so
+this step's construction must not block on a subprocess call the way
+WelcomePage/RepairPage/MainWindow's sidebar used to (see git history for
+those fixes) — NVIDIA detection, bootc status (rollback/staged/branch), and
+the NTFS drive scan are all subprocess-backed. _make_machine_step() below
+builds the update card and preflight card from safe defaults; the real
+values are fetched off the GUI thread by _refresh_machine_facts() (kicked
+off once from WizardWindow.__init__ via single_shot) and patched into the
+already-built widgets by _on_machine_facts_ready(), which also feeds the
+same NTFS scan result to the Gaming step (_apply_gaming_windows_drives) so
+the two steps don't each pay for a separate lsblk call.
 """
 from __future__ import annotations
 
 from ..core_base import IS_LIVE
 from ..services.process import command_stdout
 from ..services.bootc import current_branch, has_rollback_deployment, has_staged_update
+from ..services.runtime import DataWorker
 from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives, _proton_cachyos_version
 from ..services.hardware import _detect_nvidia
@@ -28,7 +41,9 @@ class _MachineStepMixin:
             summary += f", and {len(blocked) - limit} more"
         return summary
 
-    def _make_preflight_card(self) -> QFrame | None:
+    def _make_preflight_card(
+        self, *, has_nvidia: bool = False, has_rollback: bool = False, windows_found: bool = False,
+    ) -> QFrame | None:
         rows: list[str] = []
         blocked_summary = self._blocked_game_summary()
         if blocked_summary:
@@ -36,15 +51,15 @@ class _MachineStepMixin:
                 "Known hard blockers: "
                 f"{blocked_summary}. These are publisher anti-cheat decisions, not Proton settings."
             )
-        if not IS_LIVE and _find_ntfs_drives():
+        if not IS_LIVE and windows_found:
             rows.append(
                 "PC game drive detected. Copy Steam libraries to a Linux-formatted disk before using Proton."
             )
-        if _detect_nvidia():
+        if has_nvidia:
             rows.append(
                 "NVIDIA GPU detected. Open Hardware to verify the proprietary module and reboot state."
             )
-        if has_rollback_deployment():
+        if has_rollback:
             rows.append(
                 "Rollback is available. If an update makes things worse, return to the previous image first."
             )
@@ -62,9 +77,19 @@ class _MachineStepMixin:
             layout.addWidget(row)
         return card
 
-    def _make_update_card(self) -> QFrame:
-        staged = has_staged_update()
-        branch = current_branch() or ""
+    def _make_update_card(self, staged: bool | None, branch: str | None) -> QFrame:
+        if staged is None:
+            card, layout = _make_card("wiz-card")
+            title = QLabel("System update")
+            title.setObjectName("wiz-card-title")
+            layout.addWidget(title)
+            copy = QLabel("Checking update status…")
+            copy.setObjectName("wiz-card-copy")
+            copy.setWordWrap(True)
+            layout.addWidget(copy)
+            return card
+
+        branch = branch or ""
         if branch.startswith("testing"):
             channel = "Testing"
         elif branch.startswith("latest"):
@@ -169,11 +194,77 @@ class _MachineStepMixin:
 
         layout.addSpacing(6)
         layout.addWidget(self._make_stat_bar())
-        layout.addWidget(self._make_update_card())
 
-        preflight = self._make_preflight_card()
-        if preflight is not None:
-            layout.addWidget(preflight)
+        # Update card and preflight card start from safe defaults (no
+        # subprocess calls) and get patched in place once
+        # _refresh_machine_facts()'s DataWorker resolves — see module
+        # docstring. Each lives in its own single-widget slot so swapping
+        # the card doesn't disturb the rest of the page's layout.
+        self._machine_facts_worker = None
+        self._machine_facts: dict | None = None
+
+        self._machine_update_slot = QWidget()
+        self._machine_update_slot.setObjectName("wiz-body")
+        self._machine_update_slot_layout = QVBoxLayout(self._machine_update_slot)
+        self._machine_update_slot_layout.setContentsMargins(0, 0, 0, 0)
+        self._update_card = self._make_update_card(None, None)
+        self._machine_update_slot_layout.addWidget(self._update_card)
+        layout.addWidget(self._machine_update_slot)
+
+        self._machine_preflight_slot = QWidget()
+        self._machine_preflight_slot.setObjectName("wiz-body")
+        self._machine_preflight_slot_layout = QVBoxLayout(self._machine_preflight_slot)
+        self._machine_preflight_slot_layout.setContentsMargins(0, 0, 0, 0)
+        self._preflight_card = self._make_preflight_card()
+        if self._preflight_card is not None:
+            self._machine_preflight_slot_layout.addWidget(self._preflight_card)
+        layout.addWidget(self._machine_preflight_slot)
 
         layout.addStretch()
         return page
+
+    @staticmethod
+    def _fetch_machine_facts() -> dict:
+        """Run off the GUI thread by _refresh_machine_facts()'s DataWorker."""
+        return {
+            "has_nvidia": _detect_nvidia(),
+            "has_rollback": has_rollback_deployment(),
+            "has_staged": has_staged_update(),
+            "branch": current_branch() or "",
+            "windows_drives": _find_ntfs_drives(),
+        }
+
+    def _refresh_machine_facts(self) -> None:
+        if self._machine_facts_worker is not None:
+            return
+        worker = DataWorker("wizard-machine-facts", self._fetch_machine_facts)
+        self._machine_facts_worker = worker
+        worker.result.connect(self._on_machine_facts_ready)
+        worker.failed.connect(lambda _key, _message: None)
+        worker.finished.connect(lambda: setattr(self, "_machine_facts_worker", None))
+        worker.start()
+
+    def _on_machine_facts_ready(self, _key: str, facts: object) -> None:
+        self._machine_facts = facts
+
+        new_update = self._make_update_card(facts["has_staged"], facts["branch"])
+        self._machine_update_slot_layout.removeWidget(self._update_card)
+        self._update_card.deleteLater()
+        self._update_card = new_update
+        self._machine_update_slot_layout.addWidget(new_update)
+
+        new_preflight = self._make_preflight_card(
+            has_nvidia=facts["has_nvidia"],
+            has_rollback=facts["has_rollback"],
+            windows_found=bool(facts["windows_drives"]),
+        )
+        if self._preflight_card is not None:
+            self._machine_preflight_slot_layout.removeWidget(self._preflight_card)
+            self._preflight_card.deleteLater()
+        self._preflight_card = new_preflight
+        if new_preflight is not None:
+            self._machine_preflight_slot_layout.addWidget(new_preflight)
+
+        # Gaming step's Windows-drive card reuses this same NTFS scan
+        # instead of running lsblk a second time.
+        self._apply_gaming_windows_drives(facts["windows_drives"])

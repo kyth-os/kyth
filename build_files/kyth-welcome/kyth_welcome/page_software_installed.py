@@ -9,7 +9,7 @@ from .services.appimages import (
 from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
 from .services.launch import popen
 from .core_base import restyle
-from .services.runtime import Worker, finish_worker
+from .services.runtime import DataWorker, Worker, finish_worker
 from .qt import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
@@ -55,10 +55,40 @@ class _InstalledTabMixin:
         return tab
 
     def _refresh_installed_list(self, status_text: str | None = None, status_object: str = "subheading"):
+        # _installed_flatpak_apps() shells out to `flatpak list`, uncached —
+        # run it (and the AppImage scan) off the GUI thread so opening or
+        # refreshing this tab doesn't freeze the page. Guard against both a
+        # running uninstall (which will refresh the list itself when done)
+        # and an already-in-flight list fetch.
         if self._uninstall_worker and self._uninstall_worker.isRunning():
             return
+        if self._installed_list_worker is not None:
+            return
+        self._uninstall_status.setText(status_text or "Checking installed apps…")
+        self._uninstall_status.setObjectName("subheading")
+        restyle(self._uninstall_status)
+        self._uninstall_refresh_btn.setEnabled(False)
+
+        def fetch() -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+            return self._installed_flatpak_apps(), self._installed_appimage_apps()
+
+        worker = DataWorker("installed-apps", fetch)
+        self._installed_list_worker = worker
+        worker.result.connect(
+            lambda _key, data, st=status_text, so=status_object: self._on_installed_list_ready(data, st, so)
+        )
+        worker.failed.connect(lambda _key, _message: self._on_installed_list_failed())
+        worker.finished.connect(lambda: setattr(self, "_installed_list_worker", None))
+        worker.start()
+
+    def _on_installed_list_ready(
+        self, data: tuple[list[dict[str, str]], list[dict[str, str]]],
+        status_text: str | None, status_object: str,
+    ) -> None:
+        self._uninstall_refresh_btn.setEnabled(True)
         self._clear_uninstall_list()
-        apps = self._installed_flatpak_apps() + self._installed_appimage_apps()
+        flatpak_apps, appimage_apps = data
+        apps = flatpak_apps + appimage_apps
         if not apps:
             self._uninstall_status.setText(status_text or "No removable Flatpak apps or AppImages found.")
             self._uninstall_status.setObjectName(status_object)
@@ -81,6 +111,12 @@ class _InstalledTabMixin:
         restyle(self._uninstall_status)
         for app in apps:
             self._uninstall_list.addWidget(self._make_uninstall_app_row(app))
+
+    def _on_installed_list_failed(self) -> None:
+        self._uninstall_refresh_btn.setEnabled(True)
+        self._uninstall_status.setText("Could not check installed apps.")
+        self._uninstall_status.setObjectName("status-err")
+        restyle(self._uninstall_status)
 
     def _clear_uninstall_list(self):
         while self._uninstall_list.count():

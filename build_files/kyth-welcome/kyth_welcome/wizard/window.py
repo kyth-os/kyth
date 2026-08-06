@@ -15,7 +15,7 @@ from ..core_base import load_profile, restyle, save_profile
 from ..services.runtime import running_threads
 from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QMainWindow, QMessageBox, QPushButton,
-    QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
+    QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from ..services.setup_state import STEP_KEYS, mark_step, mark_wizard_closed
 from ..services.launch import popen
@@ -180,6 +180,14 @@ class WizardWindow(
         self._busy_timer.timeout.connect(self._update_nav)
         self._busy_timer.start()
         self._update_nav()
+
+        # Every step above was just built from safe, subprocess-free
+        # defaults (see steps_machine.py's module docstring) — fetch the
+        # real NVIDIA/bootc/NTFS facts off the GUI thread now that the
+        # window itself is fully constructed, instead of blocking this
+        # __init__ (and therefore the very first frame shown on a fresh
+        # install) on lspci/bootc status/lsblk.
+        single_shot(self, 0, self._refresh_machine_facts)
 
     # ── Step/profile plumbing ───────────────────────────────────────────────────
 
