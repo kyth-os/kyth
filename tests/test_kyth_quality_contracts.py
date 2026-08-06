@@ -84,6 +84,47 @@ class QualityContractsTests(unittest.TestCase):
                     )
         self.assertEqual(violations, [])
 
+    def test_page_and_wizard_modules_do_not_call_subprocess_directly(self):
+        """System Hub pages must run commands through the async worker
+        framework in services/runtime.py (TrackedThread/Worker/
+        StreamingProcessWorker), not by shelling out on the GUI thread.
+
+        A multi-commit cleanup (see git log for "blocking the GUI thread")
+        moved every direct subprocess/os.system call out of page_*/wizard/
+        code and into services/. This test keeps a new page or wizard step
+        from silently reintroducing one.
+        """
+        welcome_root = ROOT / "build_files/kyth-welcome/kyth_welcome"
+        checked_dirs = [
+            path for path in welcome_root.glob("page_*") if path.is_dir()
+        ] + [welcome_root / "wizard"]
+        checked_files = [
+            path for path in welcome_root.glob("page_*.py") if path.is_file()
+        ]
+        for directory in checked_dirs:
+            checked_files.extend(directory.rglob("*.py"))
+
+        violations = []
+        for path in checked_files:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    violations.extend(
+                        f"{path.relative_to(ROOT)} imports {alias.name}"
+                        for alias in node.names
+                        if alias.name == "subprocess"
+                    )
+                elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+                    violations.append(f"{path.relative_to(ROOT)} imports from subprocess")
+                elif (
+                    isinstance(node, ast.Attribute)
+                    and node.attr in ("system", "popen")
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "os"
+                ):
+                    violations.append(f"{path.relative_to(ROOT)} calls os.{node.attr}")
+        self.assertEqual(violations, [])
+
 
 if __name__ == "__main__":
     unittest.main()
