@@ -1,6 +1,7 @@
 """Disk execution service for committing partitioning and filesystem creation tasks."""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from ..runner import run_command

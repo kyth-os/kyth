@@ -5,7 +5,7 @@ from .services.flatpak import _is_flatpak_installed
 from .services.software import find_familiar_app_match
 from .services.runtime import Worker, finish_worker
 from .qt import (
-    QCheckBox, QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QProgressBar,
+    QCheckBox, QComboBox, QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar,
     QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
 )
 from .widgets import CollapsibleLogPanel, _make_card
