@@ -91,6 +91,15 @@ def load_appstream_catalog() -> dict[str, dict]:
         matches = glob.glob("/var/lib/flatpak/appstream/flathub/x86_64/*/appstream.xml")
         xml_path = matches[0] if matches else ""
     if not xml_path:
+        # Offline — no appstream.xml (airplane mode / fresh live ISO without Flathub metadata)
+        # Serve cached catalog if present within TTL, mirroring Flathub offline (2ffdcf9)
+        try:
+            if os.path.exists(_APPSTREAM_CACHE_PATH):
+                cached = load_json_config(_APPSTREAM_CACHE_PATH, default=None)
+                if isinstance(cached, dict) and cached:
+                    return cached
+        except Exception:
+            pass
         return {}
     try:
         xml_mtime = os.path.getmtime(xml_path)
@@ -103,6 +112,13 @@ def load_appstream_catalog() -> dict[str, dict]:
     try:
         root = ET.parse(xml_path).getroot()
     except Exception:
+        # Parse failed (corrupt XML / truncated on low disk) — fallback to cached catalog
+        try:
+            cached = load_json_config(_APPSTREAM_CACHE_PATH, default=None)
+            if isinstance(cached, dict) and cached:
+                return cached
+        except Exception:
+            pass
         return {}
 
     catalog: dict[str, dict] = {}
