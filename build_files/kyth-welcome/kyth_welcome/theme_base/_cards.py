@@ -112,6 +112,33 @@ QLabel#card-copy {{
     color: {KYTH_TEXT_MUTED};
 }}
 
+QLabel#section-title {{
+    font-size: 15px;
+    font-weight: 700;
+    color: {KYTH_TEXT};
+}}
+QLabel#section-subtitle {{
+    font-size: 12px;
+    color: {KYTH_TEXT_MUTED};
+}}
+QFrame#section-header {{
+    background: transparent;
+    border: none;
+}}
+QLabel#status-badge-ok,
+QLabel#status-badge-warn,
+QLabel#status-badge-err,
+QLabel#status-badge-dim {{
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}}
+QLabel#status-badge-ok {{ background: {STATUS_OK}; color: #06120e; }}
+QLabel#status-badge-warn {{ background: {STATUS_WARN}; color: #1a1200; }}
+QLabel#status-badge-err {{ background: {STATUS_ERROR}; color: #1a0a0d; }}
+QLabel#status-badge-dim {{ background: {KYTH_SURFACE_RAISED}; color: {KYTH_TEXT_FAINT}; border: 1px solid {KYTH_HAIRLINE}; }}
+
 QFrame#home-recommend-card {{
     background: {KYTH_SURFACE_RAISED};
     border: 1px solid {KYTH_BLUE_DIM};

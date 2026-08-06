@@ -8,7 +8,7 @@ from .services.hardware import HardwareProbe
 from .qt import (
     QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSize, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
-from .ui_tokens import STATUS_ERROR, STATUS_OK, STATUS_WARN
+from .ui_tokens import RADIUS_PILL, STATUS_ERROR, STATUS_OK, STATUS_WARN
 
 # FlowLayout extracted to widgets/layout.py (R8-3) — keep re-export for compat
 from .widgets.layout import FlowLayout  # noqa: F401
@@ -152,6 +152,24 @@ def _launch_opt_value(text: str) -> QLabel:
 
 def _copy_text(text: str):
     QApplication.clipboard().setText(text)
+
+
+class StatusBadge(QLabel):
+    """Pill badge for Windows Settings-like status — ok/warn/err/dim, one radius, no glow.
+
+    Taste: no left-border accent everywhere, no identical glow, single pill radius (999)."""
+    def __init__(self, text: str = "", status: str = "dim"):
+        super().__init__(text)
+        self.set_status(status)
+
+    def set_status(self, status: str):
+        self.setObjectName(f"status-badge-{status}")
+        # Pill via QSS border-radius:999 + padding, not per-card glow
+        restyle(self)
+
+    def setText(self, text: str):  # type: ignore[override]
+        super().setText(text)
+        self.setVisible(bool(text))
 
 
 class StatusBadge(QLabel):
