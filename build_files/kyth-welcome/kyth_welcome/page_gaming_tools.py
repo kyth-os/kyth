@@ -46,6 +46,7 @@ class _ToolsMixin(
         self._build_discord_fix_card()
         self._build_streaming_readiness_card()
         self._build_launcher_setup_card()
+        self._build_overlays_bulk_card()
         self._build_mangohud_card()
         if not self._wizard_mode:
             self._build_gamescope_card()

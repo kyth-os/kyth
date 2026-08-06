@@ -331,6 +331,12 @@ class GamingPage(Page):
             apply_install_badge(self._gs_badge, _gamescope_installed())
         if hasattr(self, "_vk_badge"):
             apply_install_badge(self._vk_badge, _vkbasalt_installed())
+        if hasattr(self, "_bulk_mh_badge"):
+            apply_install_badge(self._bulk_mh_badge, _mangohud_installed())
+        if hasattr(self, "_bulk_gs_badge"):
+            apply_install_badge(self._bulk_gs_badge, _gamescope_installed())
+        if hasattr(self, "_bulk_vk_badge"):
+            apply_install_badge(self._bulk_vk_badge, _vkbasalt_installed())
         if hasattr(self, "_scx_badge"):
             self._refresh_scx_status()
 

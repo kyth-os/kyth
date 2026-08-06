@@ -2,12 +2,60 @@
 from .core_base import restyle
 from .services.gaming import scx_scheduler_command
 from .services.runtime import Worker, finish_worker
-from .qt import QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, Qt
+from .qt import QHBoxLayout, QLabel, QComboBox, QProgressBar, QPushButton, Qt
 from .widgets import CollapsibleLogPanel, _copy_text, _launch_opt_label, _launch_opt_value, _make_card
 
 
 class _PerfTuningMixin:
     """MangoHud, Gamescope, sched-ext, and the per-game launch-option profile builder."""
+
+    def _build_overlays_bulk_card(self):
+        """One-tap MangoHud + Gamescope + vkBasalt — what Windows switcher expects as 'overlays'."""
+        card, layout = _make_card()
+        top = QHBoxLayout()
+        title = QLabel("Overlays — MangoHud + Gamescope + vkBasalt")
+        title.setObjectName("card-title")
+        top.addWidget(title)
+        top.addStretch()
+        # Per-tool badges updated by page_gaming._refresh_status via apply_install_badge
+        from .qt import QLabel as _QLabel  # local to keep import order stable
+        self._bulk_mh_badge = _QLabel()
+        self._bulk_mh_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self._bulk_mh_badge)
+        self._bulk_gs_badge = _QLabel()
+        self._bulk_gs_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self._bulk_gs_badge)
+        self._bulk_vk_badge = _QLabel()
+        self._bulk_vk_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self._bulk_vk_badge)
+        layout.addLayout(top)
+        desc = QLabel(
+            "One-tap performance overlays: MangoHud (FPS/OSD), Gamescope (compositor + FSR), "
+            "and vkBasalt (contrast/sharpen). Toggle MangoHud in-game with Right Shift + F12."
+        )
+        desc.setObjectName("card-copy")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+        # Combined launch options — copy as a single line (Windows muscle memory: one checkbox)
+        for label, opt in (
+            ("MangoHud + vkBasalt:", "MANGOHUD=1 ENABLE_VKBASALT=1 %command%"),
+            ("All three via Gamescope:", "MANGOHUD=1 ENABLE_VKBASALT=1 kyth-gamescope quality -- %command%"),
+        ):
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            row.addWidget(_launch_opt_label(label))
+            row.addWidget(_launch_opt_value(opt))
+            cp = QPushButton("Copy")
+            captured = opt
+            cp.clicked.connect(lambda _=False, t=captured: _copy_text(t))
+            row.addWidget(cp)
+            row.addStretch()
+            layout.addLayout(row)
+        hint = QLabel("Installed badges reflect /usr/bin/mangohud, /usr/bin/gamescope, and libvkbasalt.so — no background scan.")
+        hint.setObjectName("card-copy")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self._add(card)
 
     def _build_mangohud_card(self):
         self._divider()
