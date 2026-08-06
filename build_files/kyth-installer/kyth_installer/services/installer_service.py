@@ -193,3 +193,30 @@ class InstallerService:
         if result.returncode != 0:
             return {"ok": False, "error": result.stderr.strip() or "reboot command failed"}
         return {"ok": True}
+
+    def preview_plan(self, body: dict) -> dict:
+        """Dry-run preview — no disk mutation, returns PlanReport for WebUI banner.
+
+        Used by Review page before confirm_erase so user sees
+        `needs_bios_boot` / `will_shrink` warnings with same checks the
+        commit path will re-run. Does not require confirm_* acknowledgements.
+        """
+        from kyth_installer import plan  # local to avoid circular import
+
+        try:
+            report = plan.validate_plan_state(body, self.context)
+        except RuntimeError as exc:
+            return {"ok": False, "valid": False, "errors": (str(exc),), "warnings": ()}
+        return {
+            "ok": report.valid,
+            "valid": report.valid,
+            "mode": report.mode,
+            "disk": report.disk,
+            "target_partition": report.target_partition,
+            "efi_partition": report.efi_partition,
+            "will_create_partition": report.will_create_partition,
+            "will_shrink_filesystem": report.will_shrink_filesystem,
+            "needs_bios_boot": report.needs_bios_boot,
+            "errors": report.errors,
+            "warnings": report.warnings,
+        }
