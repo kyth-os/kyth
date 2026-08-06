@@ -77,10 +77,13 @@ PYTHONPATH=build_files/kyth_shared python3 -m kyth_shared.hardware_policy \
 hardware_matrix="${test_home}/hardware-support-matrix.md"
 PYTHONPATH=build_files/kyth_shared python3 -m kyth_shared.hardware_policy \
 	--policy build_files/config/hardware-profiles.toml matrix --output "${hardware_matrix}"
-cmp --silent "${hardware_matrix}" docs/hardware-support-matrix.md || {
-	echo "Hardware support matrix is stale; regenerate it with kyth-hardware-policy matrix." >&2
+if ! cmp --silent "${hardware_matrix}" docs/hardware-support-matrix.md; then
+	echo "Hardware support matrix is stale — docs/hardware-support-matrix.md" >&2
+	echo "diff vs generated (build_files/config/hardware-profiles.toml):" >&2
+	diff -u docs/hardware-support-matrix.md "${hardware_matrix}" >&2 || true
+	echo "Fix: PYTHONPATH=build_files/kyth_shared python3 -m kyth_shared.hardware_policy --policy build_files/config/hardware-profiles.toml matrix --output docs/hardware-support-matrix.md" >&2
 	exit 1
-}
+fi
 
 echo "==> systemd units"
 output="$(systemd-analyze verify build_files/*.service build_files/*.timer 2>&1 || true)"
