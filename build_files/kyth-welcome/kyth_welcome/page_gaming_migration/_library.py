@@ -137,3 +137,5 @@ class _LibraryMixin:
         self._add(migrate_card)
         self._migrate_worker = None
         self._scanned_mount = None
+        self._ntfs_drives_worker = None
+        self._steam_scan_worker = None

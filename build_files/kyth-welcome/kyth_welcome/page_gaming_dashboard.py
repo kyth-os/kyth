@@ -1,7 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
 from .services.gaming import (
-    _find_ntfs_drives, _gamescope_installed, _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed,
+    _gamescope_installed, _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed,
 )
 from .services.flatpak import _is_flatpak_installed
 from .qt import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt
@@ -195,7 +195,13 @@ class _DashboardMixin:
         elif "run a backup" in saves_details:
             saves_details = "Ludusavi installed; no backups made yet."
 
-        windows_drives = _find_ntfs_drives()
+        # _update_gaming_hud runs from _on_data_result (page_gaming.py), a
+        # DataWorker.result *signal handler* — that executes on the GUI
+        # thread, so calling _find_ntfs_drives() here would still be a
+        # synchronous lsblk spawn even though the surrounding flow looks
+        # async. _collect_gaming_dashboard() already scans drives on the
+        # background thread for the health/checklist cards below; reuse it.
+        windows_drives = data.get("windows_drives") or []
         ntfs_count = sum(not d.get("is_bitlocker") for d in windows_drives)
         bitlocker_count = sum(bool(d.get("is_bitlocker")) for d in windows_drives)
 

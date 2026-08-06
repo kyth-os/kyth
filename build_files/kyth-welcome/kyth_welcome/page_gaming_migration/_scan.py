@@ -2,7 +2,7 @@ import re
 
 # __KYTH_GENERATED_IMPORTS__
 from ..core_base import restyle
-from ..services.runtime import release_worker_when_finished
+from ..services.runtime import DataWorker, release_worker_when_finished
 from ..services.process import run_command
 from ..services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _find_ntfs_drives, _find_steam_libraries,
@@ -11,7 +11,7 @@ from ..services.gaming import (
 from ..services.cloud_sync import SteamCopyWorker
 from ..services.gaming import _COMPAT_GAMES
 from ..qt import (
-    QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QFileDialog, QFrame, QHBoxLayout, QLabel,
 )
 from ..widgets import _set_log_panel
 
@@ -20,30 +20,67 @@ class _ScanMixin:
     _READY_TIERS = ("native", "platinum", "gold", "silver")
 
     def _refresh_ntfs_drives(self):
+        # _find_ntfs_drives() is probe_cached (services/hardware/drives.py)
+        # but a cold cache still means a synchronous lsblk spawn here \u2014 and
+        # this now fires automatically every time the Migration tab is
+        # opened (page_gaming.py's _kick_section_refresh), not just on an
+        # explicit Refresh click.
+        if self._ntfs_drives_worker is not None:
+            return
         self._drive_combo.clear()
-        drives = [d for d in _find_ntfs_drives() if not d.get("is_bitlocker")]
-        if not drives:
+        self._drive_combo.addItem("Checking for NTFS partitions\u2026")
+        worker = DataWorker("migration-ntfs-drives", _find_ntfs_drives)
+        self._ntfs_drives_worker = worker
+        worker.result.connect(lambda _key, drives: self._on_ntfs_drives_ready(drives))
+        worker.failed.connect(lambda _key, _message: self._on_ntfs_drives_ready([]))
+        worker.finished.connect(lambda: setattr(self, "_ntfs_drives_worker", None))
+        worker.start()
+
+    def _on_ntfs_drives_ready(self, drives: object):
+        self._drive_combo.clear()
+        filtered = [d for d in (drives or []) if not d.get("is_bitlocker")]
+        if not filtered:
             self._drive_combo.addItem("No NTFS partitions found")
             return
-        for d in drives:
+        for d in filtered:
             label = f"{d['dev']}  {d['size']}  {d['label'] or '(no label)'}"
             if d["mount"]:
                 label += f"  [mounted at {d['mount']}]"
             self._drive_combo.addItem(label, userData=d)
 
     def _scan_steam_on_drive(self):
+        if self._steam_scan_worker is not None:
+            return
         drive = self._drive_combo.currentData()
         if not drive:
             return
 
+        self._migrate_status.setText(f"Checking {drive['dev']}\u2026")
+        self._migrate_status.setObjectName("subheading")
+        self._migrate_status.show()
+        restyle(self._migrate_status)
+
+        # Mounting (udisksctl) and scanning are both subprocess-backed and
+        # used to run synchronously here, papered over with
+        # QApplication.processEvents() instead of a real worker. Both steps
+        # move to a background DataWorker; _on_steam_scan_ready() applies
+        # whichever outcome it reports to the widgets below.
+        worker = DataWorker("migration-steam-scan", lambda: self._fetch_steam_scan(drive))
+        self._steam_scan_worker = worker
+        worker.result.connect(lambda _key, result: self._on_steam_scan_ready(result))
+        worker.failed.connect(lambda _key, message: self._on_steam_scan_ready({"error_kind": "worker", "detail": message}))
+        worker.finished.connect(lambda: setattr(self, "_steam_scan_worker", None))
+        worker.start()
+
+    @staticmethod
+    def _fetch_steam_scan(drive: dict) -> dict:
+        """Run off the GUI thread by _scan_steam_on_drive()'s DataWorker:
+        mount the drive (if not already mounted) and scan it for Steam
+        libraries. Returns {"mount", "libs"} on success, or
+        {"error_kind", "detail"} \u2014 never touches a widget."""
         mount = drive["mount"]
 
         if not mount:
-            self._migrate_status.setText(f"Mounting {drive['dev']}\u2026")
-            self._migrate_status.setObjectName("subheading")
-            self._migrate_status.show()
-            restyle(self._migrate_status)
-            QApplication.processEvents()
             try:
                 r = run_command(
                     ["udisksctl", "mount", "-b", drive["dev"], "-t", "ntfs3",
@@ -57,38 +94,43 @@ class _ScanMixin:
                         timeout=15,
                     )
                 if r is None or r.returncode != 0:
-                    err = (r.stderr if r else "").strip()
-                    if "hibernate" in err.lower() or "windows" in err.lower():
-                        self._migrate_status.setText(
-                            "Mount blocked: The other system did not shut down cleanly (Fast Startup / hibernate). "
-                            "Boot the other system and do a full shut down, then try again."
-                        )
-                    else:
-                        self._migrate_status.setText(f"Mount failed: {err}")
-                    self._migrate_status.setObjectName("status-err")
-                    restyle(self._migrate_status)
-                    return
+                    return {"error_kind": "mount", "detail": (r.stderr if r else "").strip()}
                 m = re.search(r" at (.+?)\.$", r.stdout.strip())
                 mount = m.group(1) if m else None
                 if not mount:
-                    self._migrate_status.setText("Could not determine mount point from udisksctl output.")
-                    self._migrate_status.setObjectName("status-err")
-                    restyle(self._migrate_status)
-                    return
+                    return {"error_kind": "mount-point", "detail": ""}
             except Exception as exc:
-                self._migrate_status.setText(f"Mount error: {exc}")
-                self._migrate_status.setObjectName("status-err")
-                restyle(self._migrate_status)
-                return
+                return {"error_kind": "mount-exception", "detail": str(exc)}
 
+        return {"mount": mount, "libs": _find_steam_libraries(mount)}
+
+    def _on_steam_scan_ready(self, result: object) -> None:
+        result = result if isinstance(result, dict) else {"error_kind": "worker", "detail": ""}
+        error_kind = result.get("error_kind")
+        if error_kind:
+            detail = result.get("detail") or ""
+            if error_kind == "mount":
+                if "hibernate" in detail.lower() or "windows" in detail.lower():
+                    self._migrate_status.setText(
+                        "Mount blocked: The other system did not shut down cleanly (Fast Startup / hibernate). "
+                        "Boot the other system and do a full shut down, then try again."
+                    )
+                else:
+                    self._migrate_status.setText(f"Mount failed: {detail}")
+            elif error_kind == "mount-point":
+                self._migrate_status.setText("Could not determine mount point from udisksctl output.")
+            elif error_kind == "mount-exception":
+                self._migrate_status.setText(f"Mount error: {detail}")
+            else:
+                self._migrate_status.setText(f"Scan error: {detail or 'unknown error'}")
+            self._migrate_status.setObjectName("status-err")
+            restyle(self._migrate_status)
+            return
+
+        mount = result["mount"]
+        libs = result["libs"]
         self._scanned_mount = mount
-        self._migrate_status.setText(f"Scanning {mount} for Steam libraries\u2026")
-        self._migrate_status.setObjectName("subheading")
-        self._migrate_status.show()
-        restyle(self._migrate_status)
-        QApplication.processEvents()
 
-        libs = _find_steam_libraries(mount)
         self._lib_combo.clear()
         self._clear_rows(self._winlib_rows)
         self._winlib_summary_lbl.hide()

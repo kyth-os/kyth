@@ -235,7 +235,16 @@ class HardwareDrivesTests(unittest.TestCase):
     """_find_ntfs_drives() now parses lsblk output through the shared
     kyth_shared.runtime_output.parse_lsblk_devices() instead of hand-rolling
     json.loads(...)['blockdevices'] — same behavior, one fewer duplicate
-    lsblk-JSON-tree implementation across installer/hub/kyth-ntfs-repair."""
+    lsblk-JSON-tree implementation across installer/hub/kyth-ntfs-repair.
+
+    _find_ntfs_drives() is also probe_cached (10s TTL, matching
+    _detect_nvidia()'s pattern) so repeat callers across a Gaming Hub visit
+    share one lsblk spawn — clear the process-wide cache before each test
+    here so one test's mocked result can't leak into the next."""
+
+    def setUp(self):
+        from kyth_shared.system.process import invalidate_probe_caches
+        invalidate_probe_caches()
 
     def _lsblk_payload(self, blockdevices):
         return SimpleNamespace(stdout=json.dumps({"blockdevices": blockdevices}), returncode=0)

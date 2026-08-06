@@ -163,6 +163,10 @@ def _collect_gaming_dashboard() -> dict:
         "streaming": _streaming_health_items(),
         "saves": saves,
         "games": _detect_installed_games(),
+        # Reused by page_gaming_dashboard.py's _update_gaming_hud() so it
+        # doesn't need a second (GUI-thread) lsblk call for data already
+        # gathered here on this DataWorker's background thread.
+        "windows_drives": windows_drives,
     }
  # _collect_gaming_dashboard
 

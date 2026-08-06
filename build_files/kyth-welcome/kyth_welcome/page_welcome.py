@@ -88,6 +88,8 @@ class WelcomePage(Page):
         self._add(self._make_vibe_section())
         self._add_layout(self._make_hud_grid())
 
+        self._apply_preset_worker = None
+
         self._ntfs_library_insert_index = self._layout.count()
         self._ntfs_library_worker = None
         if not IS_LIVE:
@@ -212,10 +214,10 @@ class WelcomePage(Page):
 
         layout.addSpacing(12)
 
-        apply_btn = QPushButton("Apply Settings")
-        apply_btn.setObjectName("primary")
-        apply_btn.clicked.connect(lambda _=False: self._apply_role_preset())
-        layout.addWidget(apply_btn)
+        self._apply_preset_btn = QPushButton("Apply Settings")
+        self._apply_preset_btn.setObjectName("primary")
+        self._apply_preset_btn.clicked.connect(lambda _=False: self._apply_role_preset())
+        layout.addWidget(self._apply_preset_btn)
 
         self._preset_status = QLabel("Ready to tune.")
         self._preset_status.setObjectName("status-dim")
@@ -542,12 +544,36 @@ class WelcomePage(Page):
         self.profile_changed.emit(profile)
 
     def _apply_role_preset(self):
-        result = run_command(["/usr/bin/kyth-apply-role-preset", self._profile], timeout=20)
+        # kyth-apply-role-preset runs with a 20s timeout; every other
+        # subprocess call on this page (WelcomePage is built eagerly at
+        # app startup — see __init__) was moved to a background worker for
+        # exactly this reason, but this button's handler ran the command
+        # synchronously and could freeze the whole app for up to 20s.
+        if self._apply_preset_worker is not None:
+            return
+        profile = self._profile
+        self._apply_preset_btn.setEnabled(False)
+        self._preset_status.setObjectName("status-dim")
+        self._preset_status.setText("Applying…")
+        restyle(self._preset_status)
+
+        worker = DataWorker(
+            "apply-role-preset",
+            lambda: run_command(["/usr/bin/kyth-apply-role-preset", profile], timeout=20),
+        )
+        self._apply_preset_worker = worker
+        worker.result.connect(lambda _key, result: self._on_role_preset_result(result, profile))
+        worker.failed.connect(lambda _key, message: self._on_role_preset_result(None, profile, message))
+        worker.finished.connect(lambda: setattr(self, "_apply_preset_worker", None))
+        worker.start()
+
+    def _on_role_preset_result(self, result, profile: str, error: str | None = None):
+        self._apply_preset_btn.setEnabled(True)
         if result is not None and result.returncode == 0:
             self._preset_status.setObjectName("status-ok")
-            self._preset_status.setText(f"{self._profile.title()} preset applied.")
+            self._preset_status.setText(f"{profile.title()} preset applied.")
         else:
-            detail = ""
+            detail = error or ""
             if result is not None:
                 detail = (result.stderr or result.stdout or "").strip()
             self._preset_status.setObjectName("status-warn")

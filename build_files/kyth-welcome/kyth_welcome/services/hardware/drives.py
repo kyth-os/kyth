@@ -11,7 +11,16 @@ _NTFS_LIKE_FSTYPES = ("ntfs", "ntfs3", "bitlocker")
 
 
 def _find_ntfs_drives() -> list[dict]:
-    """Return other system NTFS and locked BitLocker partitions visible to lsblk."""
+    """Return other system NTFS and locked BitLocker partitions visible to
+    lsblk. probe_cached like _detect_controllers()/_detect_nvidia() below —
+    this has several callers (page_welcome.py, page_gaming_dashboard.py,
+    page_gaming_migration, services/work.py, services/gaming/health.py)
+    that can land within the same TTL window, and an uncached lsblk spawn
+    on every one of them added up across a single Gaming Hub visit."""
+    return probe_cached("ntfs-drives", 10.0, _fetch_ntfs_drives)
+
+
+def _fetch_ntfs_drives() -> list[dict]:
     try:
         r = run_sync(
             ["lsblk", "--json", "--output", "NAME,FSTYPE,SIZE,LABEL,MOUNTPOINT,PATH"],

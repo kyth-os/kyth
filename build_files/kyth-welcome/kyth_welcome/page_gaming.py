@@ -111,6 +111,7 @@ class GamingPage(Page):
         self._tab_bar: SegmentedTabBar | None = None
         self._current_gaming_section = "setup" if wizard_mode else "all"
         self._active_gaming_section = None
+        self._scx_status_worker: DataWorker | None = None
 
         self._page_header(
             "Gaming",
@@ -331,18 +332,7 @@ class GamingPage(Page):
         if hasattr(self, "_vk_badge"):
             apply_install_badge(self._vk_badge, _vkbasalt_installed())
         if hasattr(self, "_scx_badge"):
-            scx_status = command_stdout(["kyth-scx", "status"], timeout=5)
-            scx_active = "Service: active" in scx_status
-            apply_install_badge(self._scx_badge, scx_active, ok_text="Active", warn_text="Inactive")
-            if scx_status:
-                configured = "unknown"
-                for line in scx_status.splitlines():
-                    if line.startswith("Configured scheduler:"):
-                        configured = line.split(":", 1)[1].strip() or "unknown"
-                        break
-                self._scx_status_lbl.setText(f"Configured: {configured}")
-            else:
-                self._scx_status_lbl.setText("sched-ext status unavailable.")
+            self._refresh_scx_status()
 
         if hasattr(self, "_pc_badge"):
             pc_ver = _proton_cachyos_version()
@@ -398,3 +388,32 @@ class GamingPage(Page):
                     "idle",
                     "Ready.",
                 )
+
+    def _refresh_scx_status(self) -> None:
+        # `kyth-scx status` shells out — page_performance.py's sibling
+        # `kyth-scx list` call had the same construction-time-blocking bug,
+        # fixed earlier; this is the matching fix for GamingPage's own
+        # call, which fires 80ms after __init__ and again after any tool
+        # install/uninstall (see page_gaming_tools_*.py's _refresh_status
+        # callers).
+        if self._scx_status_worker is not None:
+            return
+        worker = DataWorker("gaming-scx-status", lambda: command_stdout(["kyth-scx", "status"], timeout=5))
+        self._scx_status_worker = worker
+        worker.result.connect(lambda _key, scx_status: self._apply_scx_status(scx_status))
+        worker.failed.connect(lambda _key, _message: self._apply_scx_status(""))
+        worker.finished.connect(lambda: setattr(self, "_scx_status_worker", None))
+        worker.start()
+
+    def _apply_scx_status(self, scx_status: str) -> None:
+        scx_active = "Service: active" in scx_status
+        apply_install_badge(self._scx_badge, scx_active, ok_text="Active", warn_text="Inactive")
+        if scx_status:
+            configured = "unknown"
+            for line in scx_status.splitlines():
+                if line.startswith("Configured scheduler:"):
+                    configured = line.split(":", 1)[1].strip() or "unknown"
+                    break
+            self._scx_status_lbl.setText(f"Configured: {configured}")
+        else:
+            self._scx_status_lbl.setText("sched-ext status unavailable.")
