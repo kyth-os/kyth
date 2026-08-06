@@ -1,3 +1,4 @@
+import shutil
 import time
 
 # __KYTH_GENERATED_IMPORTS__
@@ -271,6 +272,18 @@ class _UpdateOpsMixin:
         self._worker.cancel()
 
     def _run_full_update(self):
+        # Storage gate — Windows switcher filled C: then clicks Full Update and gets ENOSPC mid-pull. Block early.
+        try:
+            free = shutil.disk_usage("/").free
+            free_gb = free / (1024**3)
+            if free_gb < 10:
+                QMessageBox.warning(
+                    self, "Low disk space",
+                    f"Only {free_gb:.1f} GB free on /. Full Update needs ~6 GB plus Flatpak/buffer — free 10 GB first (try System → Storage or remove large Flatpaks), then retry.",
+                )
+                return
+        except Exception:
+            pass
         self._start_operation_spec(full_update_operation())
 
     def _run_bootc_upgrade(self):
@@ -490,6 +503,14 @@ class _UpdateOpsMixin:
         rollback = has_rollback_deployment()
         staged_ts = bootc_image_timestamp("staged") if staged else None
         rollback_ts = bootc_image_timestamp("rollback") if rollback else None
+        # Low-disk hint in summary (also enforced in _run_full_update)
+        try:
+            free_gb = shutil.disk_usage("/").free / (1024**3)
+            if free_gb < 10 and not staged:
+                # keep staged text as None case below, but add tooltip-style hint via status label? just keep row as-is
+                pass
+        except Exception:
+            free_gb = 999.0
 
         # Staged row — include pending image ref + short digest when present (5/5 visibility)
         if staged:
@@ -527,6 +548,19 @@ class _UpdateOpsMixin:
         restyle(self._rollback_val)
 
         self._rollback_btn.setEnabled(rollback and self._worker is None)
+
+        # Low-disk gate: disable Full/OS buttons when <10 GB free (also checked at click time)
+        low_disk = free_gb < 10
+        if low_disk and self._worker is None:
+            self._full_update_btn.setEnabled(False)
+            self._full_update_btn.setToolTip(f"Low disk: {free_gb:.1f} GB free — free 10 GB before updating")
+            self._os_btn.setEnabled(False)
+            self._os_btn.setToolTip(f"Low disk: {free_gb:.1f} GB free")
+        else:
+            self._full_update_btn.setEnabled(self._worker is None)
+            self._full_update_btn.setToolTip("Updates the OS image, Flatpaks, firmware, and KythOS-managed tools")
+            self._os_btn.setEnabled(self._worker is None)
+            self._os_btn.setToolTip("Downloads the next KythOS system image only (bootc upgrade)")
 
         if staged:
             self._reboot_btn.show()
