@@ -1,10 +1,15 @@
+SPACING_XS = 4
 SPACING_TINY = 4
 SPACING_SMALL = 8
 SPACING_MEDIUM = 12
 SPACING_LARGE = 16
 SPACING_XLARGE = 24
+SPACING_2XL = 32
 
-RADIUS_CARD = 8
+RADIUS_SM = 6
+RADIUS_CARD = 10
+RADIUS_PILL = 999
+RADIUS_BUTTON = 6
 ACCENT_BLUE = "#4f8cff"
 # Canonical status trio (Phase 3): previously theme_hub_overlay.py carried its
 # own separate ok/warn/err values that didn't match these, and even
@@ -20,6 +25,17 @@ TEXT_MUTED = "#8cadcf"
 def accent_line_style(color: str = ACCENT_BLUE) -> str:
     return f"background: {color}; border: none;"
 
+
+# ── Spacing / motion tokens (Phase 1 polish) ─────────────────────────────────
+MOTION_FAST = 120  # ms
+MOTION_NORMAL = 200
+
+# ── Typography (Windows Settings match: 12/13/15/22, not Inter-everywhere) ──
+FONT_SIZE_CAPTION = 11
+FONT_SIZE_COPY = 12
+FONT_SIZE_SUBTITLE = 13
+FONT_SIZE_TITLE = 15
+FONT_SIZE_HERO = 22
 
 # ── Kyth Theme tokens (wizard shell) ───────────────────────────────────────────
 # Grounded in the palette already shipping in theme_hub_overlay.py / theme_genz.py

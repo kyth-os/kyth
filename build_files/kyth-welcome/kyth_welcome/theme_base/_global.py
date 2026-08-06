@@ -10,9 +10,12 @@ from ..ui_tokens import KYTH_GROUND, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_TEXT
 
 GLOBAL_QSS = f"""
 * {{
-    font-family: "Noto Sans", "Segoe UI", sans-serif;
+    font-family: "Noto Sans", "Segoe UI Variable", "Segoe UI", "Cantarell", sans-serif;
     font-size: 13px;
     color: {KYTH_TEXT};
+}}
+@media (prefers-reduced-motion: reduce) {{
+    * {{ transition: none; }}
 }}
 
 QMainWindow,
