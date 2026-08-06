@@ -39,6 +39,7 @@ class _SearchMixin:
         query = self._fp_search_box.text().strip()
         if not query:
             return
+        self._fp_search_query = query
         self._clear_fp_results()
         self._fp_search_lines = []
         self._fp_progress.show()
@@ -80,7 +81,7 @@ class _SearchMixin:
         else:
             # Offline fallback: if flatpak search failed and cache exists, show cached
             if code != 0 and not results:
-                cached = self._load_flathub_cache(query)
+                cached = self._load_flathub_cache(getattr(self, "_fp_search_query", ""))
                 if cached:
                     results = cached
                     self._set_fp_task_state("Offline — showing cached results from last search", "offline")

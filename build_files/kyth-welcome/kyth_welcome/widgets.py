@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 from collections.abc import Callable, Sequence
 from typing import ClassVar
@@ -6,7 +8,7 @@ from typing import ClassVar
 from .core_base import restyle
 from .services.hardware import HardwareProbe
 from .qt import (
-    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSize, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, Signal, single_shot,
+    QApplication, QFrame, QGridLayout, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSize, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
 from .ui_tokens import RADIUS_PILL, STATUS_ERROR, STATUS_OK, STATUS_WARN
 
@@ -59,12 +61,11 @@ def _make_section_header(title: str, subtitle: str = "") -> tuple[QFrame, QVBoxL
     return frame, layout
 
 
-def _make_grid(container: QVBoxLayout) -> "QGridLayout":
+def _make_grid(container: QVBoxLayout) -> QGridLayout:
     """2-col responsive grid for cards — Windows Settings density without bento.
 
     Taste: no bento grid for everything, no identical 3-card lucide grid. This
     is a plain 2-col with 12px gap, cards are still QFrame#card."""
-    from .qt import QGridLayout
     grid = QGridLayout()
     grid.setContentsMargins(0, 0, 0, 0)
     grid.setHorizontalSpacing(12)

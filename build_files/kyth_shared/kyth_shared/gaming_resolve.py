@@ -57,7 +57,7 @@ def gaming_versions() -> GamingVersions:
     file_vals = _load_file_versions()
     # Offline cache — once resolved, persist to /var/lib/kyth/gaming-versions.json so Hub
     # can show Proton/umu versions even when offline or env vars are unset. Hash-gated like RPM cache.
-    cache_path = pathlib.Path("/var/lib/kyth/gaming-versions.json")
+    cache_path = Path("/var/lib/kyth/gaming-versions.json")
     if not file_vals and cache_path.is_file():
         try:
             cache_vals = json.loads(cache_path.read_text(encoding="utf-8"))

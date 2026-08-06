@@ -2,7 +2,8 @@
 .git/
 .agents/
 **/.claude/
-.codex/
+**/.codex/
+.codex
 output/
 tmp/
 __pycache__/

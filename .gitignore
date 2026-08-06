@@ -49,5 +49,7 @@ Thumbs.db
 .pytest_cache/
 .mypy_cache/
 
-# Claude Code local state (never pushed)
+# Muse local state (never pushed)
 **/.claude/
+**/.codex/
+.codex
