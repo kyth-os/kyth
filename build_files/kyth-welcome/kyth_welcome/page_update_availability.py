@@ -7,7 +7,7 @@ from .services.runtime import release_worker_when_finished
 from .services.launch import reboot
 from .services.updates import AvailabilityCheckResult, UpdateProbeResult
 from .services.workers.updates import FlatpakCheckWorker, UpdateCheckWorker
-from .qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt
+from .qt import QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, Qt, single_shot
 from .widgets import _make_card
 
 
@@ -85,6 +85,17 @@ class _UpdateAvailabilityMixin:
         self._check_coordinator.begin()
         self._flatpak_count = 0
         self._remote_manifest = ""
+        # Hub-side deadline — issue #164: neither skopeo (45 s) nor flatpak
+        # should keep the spinner forever. After 15 s force a terminal state.
+        if getattr(self, "_avail_deadline_timer", None):
+            try:
+                self._avail_deadline_timer.stop()
+            except Exception:
+                pass
+        self._avail_deadline_timer = QTimer(self)
+        self._avail_deadline_timer.setSingleShot(True)
+        self._avail_deadline_timer.timeout.connect(self._on_availability_timeout)
+        self._avail_deadline_timer.start(15000)
 
         # Start system update check
         self._check_worker = UpdateCheckWorker(use_cached_snapshot=not force_refresh)
@@ -98,6 +109,23 @@ class _UpdateAvailabilityMixin:
         release_worker_when_finished(self, "_flatpak_check_worker", self._flatpak_check_worker)
         self._flatpak_check_worker.start()
 
+    def _on_availability_timeout(self):
+        if self._check_state != "checking":
+            return
+        # If one probe already returned, complete with what we have; otherwise
+        # surface a retryable error instead of an infinite spinner.
+        if self._check_coordinator.has_partial():
+            partial = self._check_coordinator.as_result(timeout_detail="Check timed out — showing partial result.")
+            self._finish_availability_check(partial)
+        else:
+            self._finish_availability_check(AvailabilityCheckResult(
+                system_state="error",
+                system_detail="Checking timed out after 15 s. Click Check Now to retry (skopeo/flatpak may be slow offline).",
+                flatpak_count=0,
+                manifest_raw="",
+                flatpak_detail="",
+            ))
+
     def _on_system_check_result(self, result: UpdateProbeResult):
         self._accept_update_probe(result)
 
@@ -105,6 +133,11 @@ class _UpdateAvailabilityMixin:
         self._accept_update_probe(result)
 
     def _accept_update_probe(self, result: UpdateProbeResult):
+        if getattr(self, "_avail_deadline_timer", None):
+            try:
+                self._avail_deadline_timer.stop()
+            except Exception:
+                pass
         completed = self._check_coordinator.accept(result)
         if completed is None:
             return

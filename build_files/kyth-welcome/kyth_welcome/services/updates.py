@@ -79,6 +79,34 @@ class UpdateCheckCoordinator:
     def begin(self) -> None:
         self._results.clear()
 
+    def has_partial(self) -> bool:
+        return bool(self._results)
+
+    def as_result(self, *, timeout_detail: str = "") -> AvailabilityCheckResult:
+        system = self._results.get("system")
+        flatpak = self._results.get("flatpak")
+        if system is None:
+            system_state = "error"
+            system_detail = timeout_detail or "System check did not return."
+            manifest_raw = ""
+        else:
+            system_state = str(system.value) if system.state == "ok" else "error"
+            system_detail = system.detail or timeout_detail
+            manifest_raw = system.manifest_raw
+        if flatpak is None:
+            flatpak_count = 0
+            flatpak_detail = timeout_detail if system is None else ""
+        else:
+            flatpak_count = max(0, int(flatpak.value)) if flatpak.state == "ok" else 0
+            flatpak_detail = flatpak.detail if flatpak.state == "error" else ""
+        return AvailabilityCheckResult(
+            system_state=system_state,
+            system_detail=system_detail,
+            flatpak_count=flatpak_count,
+            manifest_raw=manifest_raw,
+            flatpak_detail=flatpak_detail,
+        )
+
     def accept(self, result: UpdateProbeResult) -> AvailabilityCheckResult | None:
         if result.probe not in self.REQUIRED_PROBES:
             raise ValueError(f"Unexpected availability probe: {result.probe}")
