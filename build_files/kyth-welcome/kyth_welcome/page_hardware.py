@@ -5,6 +5,7 @@ from .services.gaming import DataWorker
 from .services.hardware import (
     HardwareProbe,
     HardwareProbeWorker,
+    _parse_kscreen_output,
     bt_audio_device_summary,
     force_ldac_reconnect,
     hardware_summary_view,
@@ -139,12 +140,35 @@ class HardwarePage(Page):
         self._display_worker.start()
 
     def _on_display_status_ready(self, _key: str, raw: object):
+        text = str(raw or "")
         if self._display_status_lbl is not None:
-            self._display_status_lbl.setText(hdr_vrr_status_text(str(raw or "")))
+            self._display_status_lbl.setText(hdr_vrr_status_text(text))
+        if getattr(self, "_display_vrr_warn_lbl", None) is not None:
+            try:
+                probe = _parse_kscreen_output(text)
+                warn = getattr(probe, "action", "") or ""
+                # _parse_kscreen_output embeds VRR warning in details when VRR=never on 100Hz+
+                if probe.status == "warn" and probe.action:
+                    self._display_vrr_warn_lbl.setText(f"⚠️ {probe.action}")
+                    self._display_vrr_warn_lbl.setObjectName("status-warn")
+                    self._display_vrr_warn_lbl.show()
+                elif "VRR" in probe.details and "Never" in probe.details:
+                    # fallback: surface details hint
+                    self._display_vrr_warn_lbl.setText("⚠️ VRR is set to Never on a high-refresh display — enable VRR in Display Settings for smoother gameplay.")
+                    self._display_vrr_warn_lbl.setObjectName("status-warn")
+                    self._display_vrr_warn_lbl.show()
+                else:
+                    self._display_vrr_warn_lbl.hide()
+                restyle(self._display_vrr_warn_lbl)
+            except Exception:
+                if self._display_vrr_warn_lbl is not None:
+                    self._display_vrr_warn_lbl.hide()
 
     def _on_display_status_failed(self, _key: str, _message: str):
         if self._display_status_lbl is not None:
             self._display_status_lbl.setText("Display info unavailable — kscreen not running or no outputs detected.")
+        if getattr(self, "_display_vrr_warn_lbl", None) is not None:
+            self._display_vrr_warn_lbl.hide()
 
     def _make_display_card(self) -> QFrame:
         card, layout = _make_card()
@@ -157,6 +181,12 @@ class HardwarePage(Page):
         status_lbl.setObjectName("card-copy")
         status_lbl.setWordWrap(True)
         layout.addWidget(status_lbl)
+
+        self._display_vrr_warn_lbl = QLabel("")
+        self._display_vrr_warn_lbl.setObjectName("status-warn")
+        self._display_vrr_warn_lbl.setWordWrap(True)
+        self._display_vrr_warn_lbl.hide()
+        layout.addWidget(self._display_vrr_warn_lbl)
 
         body = QLabel(
             "HDR and Variable Refresh Rate (FreeSync/G-Sync) are configured per monitor in "
