@@ -26,8 +26,11 @@ LABEL org.kyth.profile.virtualization-host="${ENABLE_VIRTUALIZATION_HOST}"
 LABEL org.kyth.profile.ksm="${ENABLE_KSM}"
 
 # Build cache boundary: all RPM package installs (~2-3 GB).
-# Stable — only re-run when packages-static.sh or packages/*.sh fragments
-# change or the base image is updated.
+# Hash-gated — only re-run when packages-static.sh or packages/*.sh fragments
+# change or the base image is updated. RPM_SET_HASH is the SHA256 of those
+# files, computed in CI (build_files/scripts/hash-rpm-set.sh) and passed as
+# --build-arg so a daily dnf mirror refresh does not bust the 2–3 GB layer.
+ARG RPM_SET_HASH=unset
 # Published layer boundaries are defined later by legacy-rechunk metadata.
 RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=bind,source=build_files/config,target=/ctx/config \
@@ -39,6 +42,7 @@ RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
+    : "cache-bust:rpm=${RPM_SET_HASH}" && \
     PYTHONPATH="/ctx/kyth_shared" \
     ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS}" \
     ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST}" \
