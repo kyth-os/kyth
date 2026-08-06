@@ -49,6 +49,17 @@ def write_failure_summary(
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(payload, stream, indent=2, sort_keys=True)
         stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    # fsync directory so the rename survives a power-loss immediately after install
+    try:
+        dfd = os.open(str(path.parent), os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
     os.replace(temporary, path)
 
 
@@ -97,6 +108,17 @@ def write_transaction_state(
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(payload, stream, indent=2, sort_keys=True)
         stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    # fsync directory so the rename survives a power-loss immediately after install
+    try:
+        dfd = os.open(str(path.parent), os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
     os.replace(temporary, path)
 
 
