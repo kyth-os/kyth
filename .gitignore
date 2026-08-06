@@ -50,4 +50,4 @@ Thumbs.db
 .mypy_cache/
 
 # Claude Code local state (never pushed)
-.claude/
+**/.claude/

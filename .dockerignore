@@ -3,7 +3,7 @@
 
 # Local agent/editor state.
 .agents/
-.claude/
+**/.claude/
 .codex/
 
 # Generated build artifacts. These can be huge locally and are recreated by
