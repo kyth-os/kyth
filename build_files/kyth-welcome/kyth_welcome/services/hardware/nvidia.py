@@ -11,6 +11,17 @@ from ..process import probe_cached
 
 def _detect_nvidia() -> bool:
     def fetch() -> bool:
+        # Canonical path: hardware_policy inventory via hardware_view probe cache
+        # — single PCI parse for Hub hardware page, window sidebar, and
+        # kyth-hw-setup. Falls back to raw lspci if policy load fails (live
+        # session without /usr/share/kyth/hardware-profiles.toml).
+        try:
+            from kyth_shared.system.hardware_view import get_hardware_view
+
+            view = get_hardware_view()
+            return bool(view.has_nvidia)
+        except Exception:
+            pass
         try:
             r = run_sync(["lspci"], capture_output=True, text=True, timeout=5, check=False)
             return "nvidia" in r.stdout.lower()

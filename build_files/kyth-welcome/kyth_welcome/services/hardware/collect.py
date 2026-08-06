@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from kyth_shared.hardware_policy import evaluate_system, read_applied_state
+from kyth_shared.system.hardware_view import get_hardware_view
 
 from .types import HardwareProbe
 from .nvidia import _gpu_probe
@@ -28,18 +29,25 @@ from ..process import command_stdout, probe_cached
 
 
 def _hardware_policy_probe() -> HardwareProbe:
+    # Use the single hardware_view probe cache — one PCI/LSUSB parse behind
+    # evaluate_system() instead of parsing again per probe.
     try:
-        evaluation = evaluate_system()
-    except Exception as exc:
-        return HardwareProbe(
-            "Hardware policy", "warn",
-            "Hardware policy could not be evaluated.",
-            str(exc),
-            "Run kyth-hardware-policy validate and review the service journal.",
-        )
+        view = get_hardware_view()
+        evaluation = view.evaluation
+        applied = view.applied
+    except Exception:
+        try:
+            evaluation = evaluate_system()
+            applied = read_applied_state()
+        except Exception as exc:
+            return HardwareProbe(
+                "Hardware policy", "warn",
+                "Hardware policy could not be evaluated.",
+                str(exc),
+                "Run kyth-hardware-policy validate and review the service journal.",
+            )
     profiles = [profile["title"] for profile in evaluation.profiles]
     quirks = [quirk["id"] for quirk in evaluation.quirks]
-    applied = read_applied_state()
     details = [
         f"Policy revision: {evaluation.policy_revision}",
         f"Applied state: {applied.get('status', 'not yet applied')}",
