@@ -47,9 +47,13 @@ def _hardware_policy_probe() -> HardwareProbe:
                 "Run kyth-hardware-policy validate and review the service journal.",
             )
     profiles = [profile["title"] for profile in evaluation.profiles]
+    tiers = sorted({str(p.get("tier", "supported")).lower() for p in evaluation.profiles if isinstance(p, dict)} or {"supported"})
     quirks = [quirk["id"] for quirk in evaluation.quirks]
+    # User-visible tier — the support matrix is already validated in CI (validate.sh cmp docs/hardware-support-matrix.md)
+    # but was never shown in the Hub, so users never knew if their laptop is Tier 1.
     details = [
         f"Policy revision: {evaluation.policy_revision}",
+        f"Hardware tier: {', '.join(tiers) or 'supported'} — see docs/hardware-support-matrix.md",
         f"Applied state: {applied.get('status', 'not yet applied')}",
         f"Booted image: {applied.get('image_reference', 'unknown')}",
         f"Image digest: {applied.get('image_digest', 'unknown')}",
