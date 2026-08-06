@@ -55,12 +55,30 @@ def _load_file_versions() -> dict[str, str]:
 
 def gaming_versions() -> GamingVersions:
     file_vals = _load_file_versions()
-    return GamingVersions(
+    # Offline cache — once resolved, persist to /var/lib/kyth/gaming-versions.json so Hub
+    # can show Proton/umu versions even when offline or env vars are unset. Hash-gated like RPM cache.
+    cache_path = pathlib.Path("/var/lib/kyth/gaming-versions.json")
+    if not file_vals and cache_path.is_file():
+        try:
+            cache_vals = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(cache_vals, dict):
+                file_vals = {str(k): str(v) for k, v in cache_vals.items()}
+        except Exception:
+            pass
+    gv = GamingVersions(
         umu_version=os.environ.get("UMU_VERSION") or file_vals.get("umu_version", ""),
         proton_cachyos_version=os.environ.get("PROTON_CACHYOS_VER") or file_vals.get("proton_cachyos_version", ""),
         proton_cachyos_repo=file_vals.get("proton_cachyos_repo", "CachyOS/proton-cachyos"),
         mesa_git_copr=file_vals.get("mesa_git_copr", ""),
     )
+    # Write back to cache when we have a pinned version and cache is missing/stale
+    if gv.is_pinned() and not cache_path.is_file():
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps({"umu_version": gv.umu_version, "proton_cachyos_version": gv.proton_cachyos_version}, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+    return gv
 
 
 def gaming_versions_label() -> str:
