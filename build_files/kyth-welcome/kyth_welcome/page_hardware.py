@@ -18,7 +18,7 @@ from .qt import (
     QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QUrl, QVBoxLayout, QWidget, Signal, single_shot,
 )
 from .widgets import (
-    HardwareCard, Page, _make_card,
+    HardwareCard, Page, _make_card, _make_section_header,
 )
 
 # ── Page: Hardware ────────────────────────────────────────────────────────────
@@ -109,10 +109,9 @@ class HardwarePage(Page):
         self._card_col.setColumnStretch(1, 1)
         self._add(self._card_container)
 
-        # Configuration section
-        config_lbl = QLabel("Configuration")
-        config_lbl.setObjectName("section-heading")
-        self._add(config_lbl)
+        # Configuration section — Windows Settings-style header
+        hdr, _ = _make_section_header("Configuration", "Bluetooth audio and display")
+        self._add(hdr)
 
         self._add(self._make_bt_audio_card())
         self._add(self._make_display_card())

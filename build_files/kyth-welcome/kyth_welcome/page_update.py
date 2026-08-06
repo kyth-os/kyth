@@ -1,6 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from .qt import QTimer, single_shot
-from .widgets import Page
+from .widgets import Page, _make_section_header
 from .page_update_auto import _AutoUpdateMixin
 from .page_update_availability import _UpdateAvailabilityMixin
 from .page_update_firmware import _FirmwareUpdateMixin
@@ -47,11 +47,19 @@ class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _F
             "Check update status, stage new images, and restart when you are ready.",
         )
 
+        hdr, _ = _make_section_header("Status", "Current image, staged update and rollback")
+        self._add(hdr)
         self._build_availability_card()
         self._build_summary_card()
+        hdr2, _ = _make_section_header("Actions", "Stage the next image or roll back")
+        self._add(hdr2)
         self._build_manual_actions_card()
         self._build_rollback_explainer_card()
+        hdr3, _ = _make_section_header("Progress", "Download and staging log")
+        self._add(hdr3)
         self._build_progress_section()
+        hdr4, _ = _make_section_header("Devices", "Firmware and automatic updates")
+        self._add(hdr4)
         self._build_firmware_card()
         self._build_auto_update_card()
         single_shot(self, 300, self._refresh_auto_update_status)
