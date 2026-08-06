@@ -6,7 +6,7 @@ from .core_base import (
 )
 from .services.hardware import (
     _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
-    _nvidia_module_loaded, nvidia_status_view,
+    _nvidia_module_loaded, _secureboot_state, nvidia_status_view,
 )
 from .services.runtime import DataWorker, finish_worker
 from .services.privileged import helper_action
@@ -83,7 +83,8 @@ class NvidiaPage(Page):
         _detect_nvidia (lspci), _nvidia_module_loaded (lsmod),
         _akmod_nvidia_built (modinfo), _akmod_nvidia_installed (rpm -q), and
         _hw_setup_service_state (systemctl is-active) are all
-        subprocess-backed — _hw_setup_done() just reads a local JSON file."""
+        subprocess-backed — _hw_setup_done() just reads a local JSON file.
+        _secureboot_state (mokutil) is also cached — missing mokutil -> unknown."""
         return {
             "has_gpu": _detect_nvidia(),
             "loaded": _nvidia_module_loaded(),
@@ -91,6 +92,7 @@ class NvidiaPage(Page):
             "installed": _akmod_nvidia_installed(),
             "hw_setup_done": _hw_setup_done(),
             "svc_state": _hw_setup_service_state(),
+            "secureboot": _secureboot_state(),
         }
 
     def _refresh_status(self):
@@ -117,6 +119,7 @@ class NvidiaPage(Page):
             installed=facts["installed"],
             hw_setup_done=facts["hw_setup_done"],
             svc_state=facts["svc_state"],
+            secureboot=facts.get("secureboot", "unknown"),
         )
 
         # Keep polling while the background service is compiling.

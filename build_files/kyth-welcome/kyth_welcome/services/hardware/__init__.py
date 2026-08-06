@@ -9,6 +9,7 @@ from .nvidia import (
     _hw_setup_done,
     _hw_setup_service_state,
     _nvidia_module_loaded,
+    _secureboot_state,
     detect_nvidia_async,
     nvidia_status_view,
 )

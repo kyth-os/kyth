@@ -102,6 +102,38 @@ def _hw_setup_done() -> bool:
         return False
 
 
+def _secureboot_state() -> str:
+    """Return 'enabled:enrolled' / 'enabled:not-enrolled' / 'disabled' / 'unknown'.
+
+    Probes mokutil --sb-state and, when enabled, mokutil --list-enrolled for
+    the Kyth MOK. probe_cached 30s — avoids re-running mokutil on every Hub
+    tab switch. Missing mokutil -> unknown (e.g. test hosts)."""
+    def fetch() -> str:
+        try:
+            r = run_sync(["mokutil", "--sb-state"], capture_output=True, text=True, timeout=5, check=False)
+            out = (r.stdout + r.stderr).lower()
+            if "secureboot enabled" in out:
+                enabled = True
+            elif "secureboot disabled" in out:
+                return "disabled"
+            else:
+                return "unknown"
+        except Exception:
+            return "unknown"
+        if not enabled:
+            return "disabled"
+        try:
+            r2 = run_sync(["mokutil", "--list-enrolled"], capture_output=True, text=True, timeout=5, check=False)
+            hay = (r2.stdout + r2.stderr).lower()
+            if "kyth" in hay:
+                return "enabled:enrolled"
+            return "enabled:not-enrolled"
+        except Exception:
+            return "enabled:unknown"
+    return probe_cached("secureboot-state", 30.0, fetch)
+ # _secureboot_state
+
+
 @dataclass(frozen=True)
 class NvidiaStatusView:
     """What page_nvidia.py's NvidiaPage should show, driven purely by probe
@@ -114,66 +146,74 @@ class NvidiaStatusView:
     progress_visible: bool
     reboot_visible: bool
     keep_polling: bool
+    secureboot: str = "unknown"
 
 
 def nvidia_status_view(
     *, has_gpu: bool, loaded: bool, built: bool, installed: bool,
-    hw_setup_done: bool, svc_state: str,
+    hw_setup_done: bool, svc_state: str, secureboot: str = "unknown",
 ) -> NvidiaStatusView:
     auto_building = svc_state == "activating"
+    sb_hint = ""
+    if secureboot == "enabled:not-enrolled":
+        sb_hint = " Secure Boot is on but the Kyth key is not enrolled — the driver will not load until you enroll (Reboot → Enroll MOK → Continue)."
+    elif secureboot == "enabled:unknown":
+        sb_hint = " Secure Boot is on — if the driver fails to load, enroll the Kyth MOK at boot."
+    elif secureboot == "enabled:enrolled":
+        sb_hint = " Secure Boot: Kyth key enrolled."
 
     if not has_gpu:
         return NvidiaStatusView(
             "No NVIDIA GPU detected in this system.",
             "No NVIDIA hardware found.", "status-dim",
-            False, "", False, False, auto_building,
+            False, "", False, False, auto_building, secureboot=secureboot,
         )
     if loaded:
         return NvidiaStatusView(
             "NVIDIA GPU detected.",
-            "Drivers are active and the kernel module is loaded.", "status-ok",
-            False, "", False, False, auto_building,
+            "Drivers are active and the kernel module is loaded." + sb_hint, "status-ok",
+            False, "", False, False, auto_building, secureboot=secureboot,
         )
     if built:
         return NvidiaStatusView(
             "NVIDIA GPU detected.",
-            "Drivers installed — reboot to activate.", "status-warn",
-            False, "", False, True, auto_building,
+            "Drivers installed — reboot to activate." + sb_hint, "status-warn",
+            False, "", False, True, auto_building, secureboot=secureboot,
         )
     if auto_building:
         # kyth-hw-setup is running akmods in the background right now.
         return NvidiaStatusView(
             "NVIDIA GPU detected.",
             "Building NVIDIA kernel module automatically — this takes 5–15 minutes.\n"  # noqa: RUF001 — en dash, deliberate typography
-            "You can keep using the system. This page will update when the build finishes.",
+            "You can keep using the system. This page will update when the build finishes." + sb_hint,
             "subheading",
-            False, "", True, False, True,
+            False, "", True, False, True, secureboot=secureboot,
         )
     if hw_setup_done and svc_state == "failed":
         # Service ran but akmods failed — offer a manual retry.
         return NvidiaStatusView(
             "NVIDIA GPU detected — automatic build failed.",
             "kyth-hw-setup could not build the kernel module. "
-            "Check journalctl -u kyth-hw-setup for details, then click below to retry.",
+            "Check journalctl -u kyth-hw-setup for details, then click below to retry." + sb_hint,
             "status-err",
-            True, "Retry Build", False, False, False,
+            True, "Retry Build", False, False, False, secureboot=secureboot,
         )
     if installed:
         # Service hasn't run yet or was reset — offer a manual kick-off.
         return NvidiaStatusView(
             "NVIDIA GPU detected.",
             "Kernel module will be compiled automatically on next boot, "
-            "or click below to build it now.",
+            "or click below to build it now." + sb_hint,
             "subheading",
-            True, "Build Driver Now", False, False, False,
+            True, "Build Driver Now", False, False, False, secureboot=secureboot,
         )
     # akmod-nvidia missing — should never happen on a correctly built image.
     return NvidiaStatusView(
         "NVIDIA GPU detected — driver package missing.",
         "akmod-nvidia is not installed. This is unexpected on KythOS.\n"
-        "Run: rpm-ostree install akmod-nvidia, then reboot and return here.",
+        "Run: rpm-ostree install akmod-nvidia, then reboot and return here." + sb_hint,
         "status-err",
-        False, "", False, False, False,
+        False, "", False, False, False, secureboot=secureboot,
     )
 
 
