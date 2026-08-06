@@ -20,6 +20,7 @@ from .services.welcome import (
     home_hero_view,
     visible_category_indexes,
 )
+from .services.flatpak import _is_flatpak_installed as _flatpak_installed
 from .qt import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
