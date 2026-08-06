@@ -537,6 +537,12 @@ class WelcomePage(Page):
         body.setObjectName("card-copy")
         body.setWordWrap(True)
         layout.addWidget(body)
+        # Dynamic NTFS user dirs line — populated off-thread via _ntfs_user_dirs (2/5 reuse of drives probe)
+        self._win_transfer_detail = QLabel("")
+        self._win_transfer_detail.setObjectName("card-copy")
+        self._win_transfer_detail.setWordWrap(True)
+        self._win_transfer_detail.hide()
+        layout.addWidget(self._win_transfer_detail)
         row = QHBoxLayout()
         row.setSpacing(8)
         go_btn = QPushButton("Transfer Files from Windows")
@@ -548,7 +554,42 @@ class WelcomePage(Page):
         row.addWidget(hw_btn)
         row.addStretch()
         layout.addLayout(row)
+        # Kick off NTFS scan off GUI thread (probe_cached 30s, never auto-mounts BitLocker)
+        try:
+            from .services.migration import _ntfs_user_dirs
+            from .services.runtime import DataWorker
+            if not hasattr(self, "_win_dirs_worker") or self._win_dirs_worker is None:
+                w = DataWorker("win-user-dirs", _ntfs_user_dirs)
+                self._win_dirs_worker = w
+                w.result.connect(lambda _k, dirs: self._on_win_dirs_ready(dirs))
+                w.failed.connect(lambda _k, _m: None)
+                w.finished.connect(lambda: setattr(self, "_win_dirs_worker", None))
+                w.start()
+        except Exception:
+            pass
         return card
+
+    def _on_win_dirs_ready(self, dirs: list[dict]) -> None:
+        if not hasattr(self, "_win_transfer_detail") or self._win_transfer_detail is None:
+            return
+        found = [d for d in dirs if d.get("exists")]
+        if not found:
+            self._win_transfer_detail.hide()
+            return
+        # Summarize: e.g. "Found: Alice — Documents, Pictures (D:) · Bob — Documents"
+        by_user: dict[str, list[str]] = {}
+        mounts: set[str] = set()
+        for d in found:
+            by_user.setdefault(d.get("user", "?"), []).append(d.get("kind", "?"))
+            mounts.add(d.get("mount", ""))
+        parts = []
+        for user, kinds in sorted(by_user.items()):
+            parts.append(f"{user} — {', '.join(sorted(kinds))}")
+        mount_hint = sorted(mounts)[0] if mounts else ""
+        text = "Found on " + mount_hint + ": " + " · ".join(parts) if mount_hint else "Found: " + " · ".join(parts)
+        self._win_transfer_detail.setText(text)
+        self._win_transfer_detail.show()
+        restyle(self._win_transfer_detail)
 
     def _dismiss_first_week(self, card: QFrame):
         try:
