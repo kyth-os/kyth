@@ -17,7 +17,7 @@ def _find_ntfs_drives() -> list[dict]:
     page_gaming_migration, services/work.py, services/gaming/health.py)
     that can land within the same TTL window, and an uncached lsblk spawn
     on every one of them added up across a single Gaming Hub visit."""
-    return probe_cached("ntfs-drives", 10.0, _fetch_ntfs_drives)
+    return probe_cached("ntfs-drives", 30.0, _fetch_ntfs_drives)  # coalesce with hardware-probes window
 
 
 def _fetch_ntfs_drives() -> list[dict]:

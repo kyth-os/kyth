@@ -100,7 +100,7 @@ def _collect_hardware_probes() -> list[HardwareProbe]:
             _platform_probe(),
             _system_hub_probe(),
         ]
-    return probe_cached("hardware-probes", 5.0, fetch)
+    return probe_cached("hardware-probes", 30.0, fetch)  # one PCI/LSUSB parse for Hub cold start — matches hardware_view cache
 
 
 @dataclass(frozen=True)
