@@ -1,14 +1,15 @@
-"""Windows Migration page — transfer extras cards + handlers, _TransferExtrasMixin."""
+"""Windows Migration page — wallpaper/fonts/saves/sticky-notes/RDP cards and
+the single PC-drive scan that populates all of them, _PcDriveExtrasMixin.
+"""
 
 from __future__ import annotations
 
 import os
 import shutil
-from ..services.process import run_command
+from ..services.process import human_bytes, run_command
 from ..services.runtime import (
-    DataWorker,
+    DataWorker, release_worker_when_finished,
 )
-from ..services.runtime import Worker, release_worker_when_finished
 from ..services.launch import popen
 from ..services.windows_migration import (
     _copy_game_saves,
@@ -16,6 +17,7 @@ from ..services.windows_migration import (
     _export_sticky_notes,
     _image_extension,
     _import_rdp_bookmarks,
+    _scan_windows_extras,
     _windows_folder_dest,
 )
 from ..qt import (
@@ -26,7 +28,7 @@ from ..widgets import (
 )
 
 
-class _TransferExtrasMixin:
+class _PcDriveExtrasMixin:
     def _build_wallpaper_card(self):
         # ── Windows wallpaper ─────────────────────────────────────────────────
         wp_card, wp_layout = _make_card()
@@ -58,8 +60,6 @@ class _TransferExtrasMixin:
         wp_layout.addLayout(wp_btns)
         self._add(wp_card)
 
-
-
     def _build_fonts_card(self):
         # ── system fonts ─────────────────────────────────────────────────────
         fonts_card, fonts_layout = _make_card()
@@ -88,8 +88,6 @@ class _TransferExtrasMixin:
         fonts_btns.addStretch()
         fonts_layout.addLayout(fonts_btns)
         self._add(fonts_card)
-
-
 
     def _build_saves_card(self):
         # ── Game saves rescue ─────────────────────────────────────────────────
@@ -129,8 +127,6 @@ class _TransferExtrasMixin:
         saves_layout.addLayout(saves_btns)
         self._add(saves_card)
 
-
-
     def _build_sticky_card(self):
         # ── Sticky Notes ──────────────────────────────────────────────────────
         sticky_card, sticky_layout = _make_card()
@@ -165,8 +161,6 @@ class _TransferExtrasMixin:
         sticky_layout.addLayout(sticky_btns)
         self._add(sticky_card)
 
-
-
     def _build_rdp_card(self):
         # ── Remote Desktop connections ────────────────────────────────────────
         rdp_card, rdp_layout = _make_card()
@@ -200,41 +194,112 @@ class _TransferExtrasMixin:
         rdp_layout.addLayout(rdp_btns)
         self._add(rdp_card)
 
+    # ── PC drive scan — feeds every card built above ────────────────────────
 
+    def _start_extras_scan(self, partitions: list):
+        if self._extras_worker is not None and self._extras_worker.isRunning():
+            return
+        self._extras = {}
+        usable = [
+            part for part in partitions
+            if part.get("mountpoint") or part.get("user_profiles")
+        ]
+        if not usable:
+            no_drive = "No readable PC drive — scan or unlock one above first."
+            for lbl in (self._wp_status, self._fonts_status, self._saves_status,
+                        self._sticky_status, self._rdp_status):
+                lbl.setText(no_drive)
+            for widget in (self._wp_combo, self._wp_apply_btn, self._fonts_btn,
+                           self._saves_btn, self._sticky_btn, self._rdp_btn):
+                widget.hide()
+            self._clear_layout(self._saves_rows)
+            return
+        for lbl in (self._wp_status, self._fonts_status, self._saves_status,
+                    self._sticky_status, self._rdp_status):
+            lbl.setText("Looking on the PC drive…")
+        worker = DataWorker("win-extras", lambda: _scan_windows_extras(usable))
+        worker.result.connect(self._on_extras)
+        worker.failed.connect(
+            lambda _key, message: self._wp_status.setText(
+                f"Could not read the PC drive: {message}"))
+        self._extras_worker = worker
+        release_worker_when_finished(self, "_extras_worker", worker)
+        worker.start()
 
-    def _build_wsl_card(self):
-        # ── WSL equivalent ────────────────────────────────────────────────────
-        wsl_card, wsl_layout = _make_card()
-        wsl_title = QLabel("Where's my WSL?")
-        wsl_title.setObjectName("card-title")
-        wsl_layout.addWidget(wsl_title)
-        wsl_body = QLabel(
-            "For Linux subsystem workflows gave you a Linux environment inside your OS. Here the whole OS "
-            "is Linux — but the same workflow exists as Distrobox: full distros in containers "
-            "that share your home folder, with no VM overhead. One click creates an Ubuntu "
-            "environment; opening a terminal in it works just like typing wsl in PowerShell."
-        )
-        wsl_body.setObjectName("card-copy")
-        wsl_body.setWordWrap(True)
-        wsl_layout.addWidget(wsl_body)
-        self._wsl_status = QLabel("")
-        self._wsl_status.setObjectName("card-copy")
-        self._wsl_status.setWordWrap(True)
-        wsl_layout.addWidget(self._wsl_status)
-        wsl_btns = QHBoxLayout()
-        wsl_btns.setSpacing(8)
-        self._wsl_create_btn = QPushButton("Create Ubuntu Box")
-        self._wsl_create_btn.setObjectName("primary")
-        self._wsl_create_btn.clicked.connect(self._create_wsl_box)
-        wsl_btns.addWidget(self._wsl_create_btn)
-        self._wsl_open_btn = QPushButton("Open Ubuntu Terminal")
-        self._wsl_open_btn.clicked.connect(self._open_wsl_terminal)
-        wsl_btns.addWidget(self._wsl_open_btn)
-        wsl_btns.addStretch()
-        wsl_layout.addLayout(wsl_btns)
-        self._add(wsl_card)
+    def _on_extras(self, _key: str, extras: dict):
+        self._extras = extras
 
+        wallpapers = extras.get("wallpapers") or []
+        self._wp_combo.clear()
+        if wallpapers:
+            for item in wallpapers:
+                self._wp_combo.addItem(f"Wallpaper of Windows user {item['user']}", item["path"])
+            self._wp_combo.setVisible(len(wallpapers) > 1)
+            self._wp_apply_btn.show()
+            self._wp_status.setText(
+                f"Found the desktop wallpaper for {len(wallpapers)} Windows "
+                f"user{'s' if len(wallpapers) != 1 else ''}."
+            )
+        else:
+            self._wp_combo.hide()
+            self._wp_apply_btn.hide()
+            self._wp_status.setText("No cached wallpaper found on the PC drive.")
 
+        fonts = extras.get("fonts") or {}
+        if fonts.get("count"):
+            self._fonts_btn.show()
+            self._fonts_status.setText(
+                f"Found {fonts['count']} font files ({human_bytes(fonts['bytes'])}) "
+                "in the system font folders."
+            )
+        else:
+            self._fonts_btn.hide()
+            self._fonts_status.setText("No font folders found on the PC drive.")
+
+        saves = extras.get("saves") or []
+        self._clear_layout(self._saves_rows)
+        if saves:
+            for item in saves[:8]:
+                where = f"Windows user {item['user']}" if item["user"] else "Drive-level launcher folder"
+                self._saves_rows.addWidget(self._make_migration_row("ok", item["label"], where))
+            if len(saves) > 8:
+                self._saves_rows.addWidget(self._make_migration_row(
+                    "dim", f"+{len(saves) - 8} more", "All found locations are copied together."))
+            self._saves_btn.show()
+            self._saves_status.setText(
+                f"Found {len(saves)} likely save location{'s' if len(saves) != 1 else ''}:"
+            )
+        else:
+            self._saves_btn.hide()
+            self._saves_status.setText("No game save folders found on the PC drive.")
+
+        sticky = extras.get("sticky") or []
+        total_notes = sum(len(src["notes"]) for src in sticky)
+        if total_notes:
+            self._sticky_btn.show()
+            users = ", ".join(src["user"] for src in sticky)
+            self._sticky_status.setText(
+                f"Found {total_notes} sticky note{'s' if total_notes != 1 else ''} "
+                f"from another system user{'s' if len(sticky) != 1 else ''} {users}."
+            )
+        else:
+            self._sticky_btn.hide()
+            self._sticky_status.setText("No Sticky Notes found on the PC drive.")
+
+        rdp = extras.get("rdp") or []
+        if rdp:
+            self._rdp_btn.show()
+            preview = ", ".join(f"{c['name']} ({c['host']})" for c in rdp[:4])
+            if len(rdp) > 4:
+                preview += f", +{len(rdp) - 4} more"
+            self._rdp_status.setText(
+                f"Found {len(rdp)} saved connection{'s' if len(rdp) != 1 else ''}: {preview}"
+            )
+        else:
+            self._rdp_btn.hide()
+            self._rdp_status.setText("No saved .rdp connection files found on the PC drive.")
+
+    # ── Per-card actions ─────────────────────────────────────────────────
 
     def _apply_windows_wallpaper(self):
         src = self._wp_combo.currentData()
@@ -263,7 +328,6 @@ class _TransferExtrasMixin:
             "Wallpaper to apply it."
         )
 
-
     def _copy_fonts_clicked(self):
         if self._fonts_copy_worker is not None and self._fonts_copy_worker.isRunning():
             return
@@ -291,7 +355,6 @@ class _TransferExtrasMixin:
         self._fonts_copy_worker = worker
         release_worker_when_finished(self, "_fonts_copy_worker", worker)
         worker.start()
-
 
     def _copy_saves_clicked(self):
         if self._saves_copy_worker is not None and self._saves_copy_worker.isRunning():
@@ -322,7 +385,6 @@ class _TransferExtrasMixin:
         release_worker_when_finished(self, "_saves_copy_worker", worker)
         worker.start()
 
-
     def _export_sticky_clicked(self):
         sticky = self._extras.get("sticky") or []
         if not sticky:
@@ -338,7 +400,6 @@ class _TransferExtrasMixin:
         )
         self._sticky_show_btn.show()
 
-
     def _import_rdp_clicked(self):
         rdp = self._extras.get("rdp") or []
         if not rdp:
@@ -353,50 +414,3 @@ class _TransferExtrasMixin:
             text += f" {dupes} already existed."
         self._rdp_status.setText(text)
         self._rdp_open_btn.show()
-
-    # ── WSL equivalent ────────────────────────────────────────────────────────
-
-
-    def _create_wsl_box(self):
-        if self._wsl_worker is not None and self._wsl_worker.isRunning():
-            return
-        self._wsl_create_btn.setEnabled(False)
-        self._wsl_status.setText(
-            "Creating the Ubuntu box — the first run downloads the image (a few hundred MB)…"
-        )
-        script = (
-            "set -e\n"
-            "command -v distrobox >/dev/null 2>&1 || { echo 'distrobox is not installed.'; exit 1; }\n"
-            "if distrobox list --no-color 2>/dev/null | awk -F'|' '{print $2}' | grep -qw ubuntu; then\n"
-            "    echo 'already exists'\n"
-            "    exit 0\n"
-            "fi\n"
-            "distrobox create --image ubuntu:24.04 --name ubuntu --yes\n"
-        )
-        worker = Worker(["bash", "-c", script])
-
-        def _done(code: int):
-            self._wsl_create_btn.setEnabled(True)
-            if code == 0:
-                self._wsl_status.setText(
-                    "✓ Ubuntu box ready. Open Ubuntu Terminal drops you at a bash prompt "
-                    "with apt available — your home folder is shared with KythOS."
-                )
-            else:
-                self._wsl_status.setText(
-                    "Could not create the Ubuntu box. Check the network connection and try again."
-                )
-        worker.done.connect(_done)
-        self._wsl_worker = worker
-        release_worker_when_finished(self, "_wsl_worker", worker)
-        worker.start()
-
-
-    def _open_wsl_terminal(self):
-        if not shutil.which("konsole"):
-            self._wsl_status.setText("Konsole is not available in this session.")
-            return
-        popen(["konsole", "-e", "distrobox", "enter", "ubuntu"])
-        self._wsl_status.setText(
-            "If the box doesn't exist yet, the terminal will say so — use Create Ubuntu Box first."
-        )

@@ -20,10 +20,13 @@ from ..widgets import (
 )
 
 from .shortcuts_phone import _ShortcutsPhoneMixin
-from .localsend_misc import _LocalSendMiscMixin
+from .nearby_sharing import _NearbySharingMixin
+from .powertoys import _PowerToysMixin
+from .hw_sanity import _HwSanityMixin
 from .files_copy import _FilesCopyMixin
-from .bookmarks_extras import _BookmarksExtrasMixin
-from .transfer_extras import _TransferExtrasMixin
+from .bookmarks import _BookmarksMixin
+from .pc_drive_extras import _PcDriveExtrasMixin
+from .wsl import _WslMixin
 from .drives import _DrivesMixin
 
 
@@ -31,10 +34,13 @@ from .drives import _DrivesMixin
 class WindowsMigrationPage(
     Page,
     _ShortcutsPhoneMixin,
-    _LocalSendMiscMixin,
+    _NearbySharingMixin,
+    _PowerToysMixin,
+    _HwSanityMixin,
     _FilesCopyMixin,
-    _BookmarksExtrasMixin,
-    _TransferExtrasMixin,
+    _BookmarksMixin,
+    _PcDriveExtrasMixin,
+    _WslMixin,
     _DrivesMixin,
 ):
 
