@@ -12,47 +12,15 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-VERSION = "v13"
-PLACES_VERSION = "v1"
-AUTOSTART_VERSION = "v1"
-USER_FOLDERS = (
-    "Desktop", "Documents", "Downloads", "Games", "Music", "Pictures",
-    "Public", "Screenshots", "Templates", "Videos",
-)
-
-FOLDER_METADATA = {
-    "Games/.directory": "[Desktop Entry]\nIcon=applications-games\nName=Games\n",
-    "Screenshots/.directory": "[Desktop Entry]\nIcon=folder-pictures\nName=Screenshots\n",
-    "Templates/Plain Text.txt": "",
-}
-
-MIME_DEFAULTS = (
-    ("org.kde.okular.desktop", "application/pdf"),
-    ("org.kde.okular.desktop", "application/epub+zip"),
-    ("org.kde.gwenview.desktop", "image/jpeg"),
-    ("org.kde.gwenview.desktop", "image/png"),
-    ("org.kde.gwenview.desktop", "image/gif"),
-    ("org.videolan.VLC.desktop", "video/mp4"),
-    ("org.videolan.VLC.desktop", "video/x-matroska"),
-    ("org.videolan.VLC.desktop", "video/x-msvideo"),
-    ("org.kde.kwrite.desktop", "text/plain"),
-    ("org.kde.kwrite.desktop", "text/markdown"),
-    ("org.kde.ark.desktop", "application/zip"),
-    ("org.kde.ark.desktop", "application/x-7z-compressed"),
-    ("org.kde.ark.desktop", "application/x-rar"),
-    ("org.kde.ark.desktop", "application/x-tar"),
-    ("kyth-exe-handler.desktop", "application/x-ms-dos-executable"),
-    ("kyth-exe-handler.desktop", "application/x-msdos-program"),
-    ("kyth-exe-handler.desktop", "application/x-dosexec"),
-    ("kyth-exe-handler.desktop", "application/x-msi"),
-    ("kyth-exe-handler.desktop", "application/x-msdownload"),
-    ("kyth-exe-handler.desktop", "application/vnd.microsoft.portable-executable"),
-    ("kyth-exe-handler.desktop", "application/x-rpm"),
-    ("kyth-exe-handler.desktop", "application/x-redhat-package-manager"),
-    ("com.brave.Browser.desktop", "x-scheme-handler/http"),
-    ("com.brave.Browser.desktop", "x-scheme-handler/https"),
-    ("com.getmailspring.Mailspring.desktop", "x-scheme-handler/mailto"),
-    ("org.kde.dolphin.desktop", "inode/directory"),
+# Pure data lives in desktop/polish_manifest.py so Hub welcome checks and
+# tests can import USER_FOLDERS/MIME_DEFAULTS without pulling in ET/glob.
+from kyth_shared.desktop.polish_manifest import (  # noqa: E402 — re-export for compat
+    AUTOSTART_VERSION,
+    FOLDER_METADATA,
+    MIME_DEFAULTS,
+    PLACES_VERSION,
+    USER_FOLDERS,
+    VERSION,
 )
 
 # The following comments are here to satisfy static assertions in kyth-smoke-check:
