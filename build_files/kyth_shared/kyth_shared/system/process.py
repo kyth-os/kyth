@@ -1,22 +1,22 @@
 """Process helpers and short-lived probe cache.
 
 Pure stdlib utilities shared by system services and CLI helpers. No Qt.
+
+The hybrid mem+disk probe cache now lives in :mod:`kyth_shared.system.probe`
+as :class:`ProbeService` — this module re-exports the same symbols for
+backwards compatibility so existing ``from kyth_shared.system.process import
+probe_cached`` imports keep working while the implementation is unified.
 """
 from __future__ import annotations
 
-import logging
 import re
 import shutil
 import subprocess
-import threading
-import time
-from typing import Callable, TypeVar
+from typing import Callable, Iterable, TypeVar
 
 from kyth_shared.commands import command_stdout as _raw_command_stdout, run_text
 
 T = TypeVar("T")
-
-_logger = logging.getLogger(__name__)
 
 
 def is_live_session() -> bool:
@@ -27,21 +27,40 @@ def is_live_session() -> bool:
         return False
 
 
-PROBE_CACHE_LOCK = threading.Lock()
-PROBE_CACHE: dict[str, tuple[float, object]] = {}
-BOOTC_CACHE_TTL = 5.0
-FLATPAK_CACHE_TTL = 10.0
+# Re-exported from probe.py — single source of truth (ProbeService.mem+disk).
+# Kept as module-level aliases so ``process.PROBE_CACHE`` etc still resolve for
+# tests that inspect the cache dict directly.
+try:
+    from kyth_shared.system.probe import DISK_BACKED_KEYS as _DISK_BACKED_KEYS  # noqa: F401
+    from kyth_shared.system.probe import DISK_TTL as _DISK_TTL  # noqa: F401
 
-DISK_BACKED_KEYS = frozenset({
-    "bootc-status-data",
-    "bootc-status-text",
-    "bootc-branch",
-    "kernel-flavor",
-    "flatpak-apps",
-    "flatpak-updates",
-    "nvidia-detect",
-    "controllers-detect",
-})
+    DISK_BACKED_KEYS = _DISK_BACKED_KEYS
+    BOOTC_CACHE_TTL = 5.0  # legacy alias; probe.DIS​K_TTL["bootc-status-data"] is canonical
+    FLATPAK_CACHE_TTL = 10.0
+
+    # Expose the ProbeService singleton's mem store for introspection.
+    from kyth_shared.system.probe import _service as _probe_service
+
+    PROBE_CACHE = _probe_service._mem  # type: ignore[attr-defined]
+    PROBE_CACHE_LOCK = _probe_service._lock  # type: ignore[attr-defined]
+except Exception:
+    # Fallback for import-order cycles during early build — tests never hit this.
+    import threading as _threading  # noqa: PLC0415
+
+    DISK_BACKED_KEYS = frozenset({
+        "bootc-status-data",
+        "bootc-status-text",
+        "bootc-branch",
+        "kernel-flavor",
+        "flatpak-apps",
+        "flatpak-updates",
+        "nvidia-detect",
+        "controllers-detect",
+    })
+    BOOTC_CACHE_TTL = 5.0
+    FLATPAK_CACHE_TTL = 10.0
+    PROBE_CACHE_LOCK = _threading.Lock()
+    PROBE_CACHE: dict[str, tuple[float, object]] = {}
 
 
 def run_command(cmd: list[str], timeout: int = 5) -> subprocess.CompletedProcess[str] | None:
@@ -64,64 +83,22 @@ def with_idle_inhibit(cmd: list[str], reason: str) -> list[str]:
     return [inhibit, "--what=idle:sleep", f"--why={reason}", "--mode=block", *cmd]
 
 
-def invalidate_probe_caches() -> None:
-    with PROBE_CACHE_LOCK:
-        PROBE_CACHE.clear()
-    try:
-        from kyth_shared.system.probe import invalidate_disk_sections
-        invalidate_disk_sections(DISK_BACKED_KEYS)
-    except Exception:
-        _logger.warning("invalidate_probe_caches: disk cache invalidation failed — stale values may be served", exc_info=True)
+def invalidate_probe_caches(keys: Iterable[str] | None = None) -> None:  # type: ignore[no-redef]
+    from kyth_shared.system.probe import invalidate_probe_caches as _probe_invalidate
+
+    return _probe_invalidate(keys)
 
 
-def disk_section_usable(key: str, data: object) -> bool:
-    """Whether a disk section value is safe to serve as a cache hit."""
-    if data is None:
-        return False
-    if key == "bootc-status-text" and data == "":
-        return False
-    if key == "bootc-branch" and data == "":
-        return False
-    return True
+def disk_section_usable(key: str, data: object) -> bool:  # noqa: F401 — re-export for legacy callers
+    from kyth_shared.system.probe import _disk_section_usable
+
+    return _disk_section_usable(key, data)
 
 
 def probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
-    with PROBE_CACHE_LOCK:
-        hit = PROBE_CACHE.get(key)
-        if hit is not None and time.monotonic() - hit[0] < ttl:
-            return hit[1]  # type: ignore[return-value]
+    from kyth_shared.system.probe import probe_cached as _probe_cached
 
-    # Warm path: on-disk cache from kyth-probe (or prior write-through).
-    if key in DISK_BACKED_KEYS:
-        try:
-            from kyth_shared.system.probe import DISK_TTL, read_section
-
-            disk_hit = read_section(key, max_age=max(ttl, DISK_TTL.get(key, ttl)))
-            if disk_section_usable(key, disk_hit):
-                with PROBE_CACHE_LOCK:
-                    mem = PROBE_CACHE.get(key)
-                    if mem is not None and time.monotonic() - mem[0] < ttl:
-                        return mem[1]  # type: ignore[return-value]
-                    PROBE_CACHE[key] = (time.monotonic(), disk_hit)
-                return disk_hit  # type: ignore[return-value]
-        except Exception:
-            _logger.debug("probe_cached: disk cache read for %r failed", key, exc_info=True)
-
-    value = fetch()
-    with PROBE_CACHE_LOCK:
-        hit = PROBE_CACHE.get(key)
-        if hit is not None and time.monotonic() - hit[0] < ttl:
-            return hit[1]  # type: ignore[return-value]
-        PROBE_CACHE[key] = (time.monotonic(), value)
-
-    if key in DISK_BACKED_KEYS:
-        try:
-            from kyth_shared.system.probe import update_sections
-
-            update_sections({key: value})
-        except Exception:
-            _logger.debug("probe_cached: disk cache write for %r failed", key, exc_info=True)
-    return value
+    return _probe_cached(key, ttl, fetch)
 
 
 def get_disk_write_bytes() -> int:

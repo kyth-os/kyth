@@ -9,11 +9,16 @@ import json
 import os
 import tempfile
 import time
+import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, TypeVar
+
+T = TypeVar("T")
+_logger = logging.getLogger(__name__)
 
 CACHE_VERSION = 2
 
@@ -50,6 +55,9 @@ DISK_TTL: dict[str, float] = {
 }
 
 COLLECT_SECTIONS: tuple[str, ...] = tuple(DISK_TTL.keys())
+
+# Unified mem+disk cache keys — single source of truth for the hybrid cache.
+DISK_BACKED_KEYS = frozenset(DISK_TTL.keys())
 
 MUTATION_KEYS_FLATPAK = frozenset({"flatpak-apps", "flatpak-updates"})
 MUTATION_KEYS_BOOTC = frozenset({
@@ -337,3 +345,103 @@ def refresh_cache(*, system: bool = False, path: Path | None = None) -> tuple[Pa
     sections = collect_snapshot()
     update_sections(sections, path=target, system=system)
     return target, sections
+
+
+# ── Unified probe cache service (mem + disk) ─────────────────────────────────
+# System Hub and CLI tools previously owned two separate caches:
+#   process.py: PROBE_CACHE (in-memory, per-process, short TTL)
+#   probe.py:   disk JSON cache (cross-process, longer DISK_TTL, written by kyth-probe)
+# ProbeService merges them into one facade so callers do one `cached()` call
+# and get the hierarchy: mem hit → disk hit → fetch() → populate both.
+
+def _disk_section_usable(key: str, data: object) -> bool:
+    if data is None:
+        return False
+    if key == "bootc-status-text" and data == "":
+        return False
+    if key == "bootc-branch" and data == "":
+        return False
+    return True
+
+
+class ProbeService:
+    """Owns the hybrid in-memory + on-disk probe cache.
+
+    The service is intentionally small: it does not know how to *collect* any
+    section, only how to cache/serve values produced by a caller-supplied
+    ``fetch()``. Collection stays in ``default_collectors`` / ``collect_probe_results``.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._mem: dict[str, tuple[float, object]] = {}
+
+    def cached(self, key: str, ttl: float, fetch: Callable[[], T]) -> T:
+        with self._lock:
+            hit = self._mem.get(key)
+            if hit is not None and time.monotonic() - hit[0] < ttl:
+                return hit[1]  # type: ignore[return-value]
+
+        if key in DISK_BACKED_KEYS:
+            try:
+                disk_hit = read_section(key, max_age=max(ttl, DISK_TTL.get(key, ttl)))
+                if _disk_section_usable(key, disk_hit):
+                    with self._lock:
+                        mem = self._mem.get(key)
+                        if mem is not None and time.monotonic() - mem[0] < ttl:
+                            return mem[1]  # type: ignore[return-value]
+                        self._mem[key] = (time.monotonic(), disk_hit)
+                    return disk_hit  # type: ignore[return-value]
+            except Exception:
+                _logger.debug("ProbeService.cached: disk read for %r failed", key, exc_info=True)
+
+        value = fetch()
+        with self._lock:
+            hit = self._mem.get(key)
+            if hit is not None and time.monotonic() - hit[0] < ttl:
+                return hit[1]  # type: ignore[return-value]
+            self._mem[key] = (time.monotonic(), value)
+
+        if key in DISK_BACKED_KEYS:
+            try:
+                update_sections({key: value})
+            except Exception:
+                _logger.debug("ProbeService.cached: disk write for %r failed", key, exc_info=True)
+        return value
+
+    def invalidate(self, keys: Iterable[str] | None = None) -> None:
+        if keys is None:
+            with self._lock:
+                self._mem.clear()
+            try:
+                invalidate_disk_sections()
+            except Exception:
+                _logger.warning("ProbeService.invalidate: disk invalidation failed", exc_info=True)
+            return
+        drop = set(keys)
+        with self._lock:
+            for key in list(self._mem):
+                if key in drop:
+                    self._mem.pop(key, None)
+        try:
+            invalidate_disk_sections(drop)
+        except Exception:
+            _logger.warning("ProbeService.invalidate: disk invalidation failed", exc_info=True)
+
+    def clear_mem(self) -> None:
+        with self._lock:
+            self._mem.clear()
+
+
+# Singleton used by the module-level helpers below and by callers that want
+# to hold a reference (tests may instantiate their own ProbeService).
+_service = ProbeService()
+
+
+def probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
+    return _service.cached(key, ttl, fetch)
+
+
+def invalidate_probe_caches(keys: Iterable[str] | None = None) -> None:
+    """Invalidate both mem and disk caches — drop-in replacement for process.invalidate_probe_caches."""
+    _service.invalidate(keys)

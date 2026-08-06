@@ -72,6 +72,31 @@ _logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class PlanReport:
+    """Dry-run / validate-only report — no disk mutation, safe for UI preview.
+
+    Produced by :func:`validate_plan_state` before any destructive partitioning.
+    The install route can return this to the webui so the user sees exactly
+    what *would* happen and why it would be rejected, mirroring the checks that
+    the commit path will re-run.
+    """
+
+    valid: bool
+    mode: str
+    disk: str = ""
+    target_partition: str = ""
+    efi_partition: str = ""
+    will_create_partition: bool = False
+    will_shrink_filesystem: bool = False
+    required_bytes: int = 0
+    available_bytes: int = 0
+    is_gpt: bool = False
+    needs_bios_boot: bool = False
+    errors: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class InstallPlan:
     mode: str
     disk: Optional[str] = None
@@ -568,7 +593,94 @@ def _prepare_explicit_install_plan(
     return InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
 
 
+def validate_plan_state(
+    state: dict | InstallRequest,
+    context=None,
+    *,
+    snapshot: StorageSnapshot | None = None,
+) -> PlanReport:
+    """Pure validation — no disk writes, no partition-table backup, no mkfs.
+
+    Returns a structured :class:`PlanReport` that the API route can surface
+    before the user confirms destructive work, and that the commit path re-runs
+    as a guard before touching the disk. Keeping this separate from
+    ``_prepare_*`` (which *does* mutate) makes the validate→commit boundary
+    explicit and testable with plain ``StorageSnapshot`` fixtures.
+    """
+    mode = _normalized_install_mode(state if isinstance(state, dict) else state.as_state())
+    disk = _normal_device_path(state.get("disk") if isinstance(state, dict) else state.disk)
+    errors: list[str] = []
+    warnings: list[str] = []
+    efi = ""
+    target = ""
+    required = MIN_KYTHOS_BYTES
+    available = 0
+    is_gpt = False
+    needs_bios = False
+    will_create = mode in ("resize_ntfs", "free_space")
+    will_shrink = mode == "resize_ntfs"
+    try:
+        if mode == "resize_ntfs":
+            d, p, shrink_bytes = _validate_resize_ntfs_target(state, snapshot=snapshot)  # type: ignore[arg-type]
+            disk, target, required = d, p, shrink_bytes
+            snapshot = snapshot or _probe_storage(disk)
+            efi = snapshot.efi_partition or ""
+            is_gpt = snapshot.is_gpt
+            needs_bios = is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+            available = shrink_bytes
+        elif mode == "free_space":
+            d, start, end = _validate_free_space_target(state, snapshot=snapshot)  # type: ignore[arg-type]
+            disk, available = d, end - start
+            snapshot = snapshot or _probe_storage(disk, include_free_space=True)
+            efi = snapshot.efi_partition or ""
+            is_gpt = snapshot.is_gpt
+            needs_bios = is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+            required = MIN_KYTHOS_BYTES + (BIOS_BOOT_BYTES if needs_bios else 0)
+        else:
+            raw = state if isinstance(state, dict) else state.as_state()  # type: ignore[arg-type]
+            eff_snapshot = snapshot or _probe_storage(disk, include_partitions=mode != "wipe")
+            is_gpt = eff_snapshot.is_gpt
+            needs_bios = is_gpt and not eff_snapshot.has_bios_boot_partition(BIOS_BOOT_GUID) if mode == "alongside" else False
+            d, t = _validate_install_target(raw, context, snapshot=eff_snapshot)
+            disk, target = d, t or ""
+            efi = eff_snapshot.efi_partition or ""
+            if mode == "wipe":
+                info = eff_snapshot.disks_by_name.get(disk, {})
+                available = _safe_int(info.get("size_bytes"))
+                required = MIN_KYTHOS_BYTES
+            elif target:
+                part = eff_snapshot.partitions_by_name.get(target, {})
+                available = _safe_int(part.get("size_bytes"))
+                required = MIN_KYTHOS_BYTES
+    except RuntimeError as exc:
+        errors.append(str(exc))
+        return PlanReport(valid=False, mode=mode, disk=disk, target_partition=target, efi_partition=efi,
+                          will_create_partition=will_create, will_shrink_filesystem=will_shrink,
+                          required_bytes=required, available_bytes=available, is_gpt=is_gpt,
+                          needs_bios_boot=needs_bios, errors=tuple(errors), warnings=tuple(warnings))
+    except Exception as exc:
+        errors.append(f"Unexpected validation error: {exc}")
+        return PlanReport(valid=False, mode=mode, disk=disk, target_partition=target, efi_partition=efi,
+                          will_create_partition=will_create, will_shrink_filesystem=will_shrink,
+                          required_bytes=required, available_bytes=available, is_gpt=is_gpt,
+                          needs_bios_boot=needs_bios, errors=tuple(errors), warnings=tuple(warnings))
+
+    if needs_bios and mode in ("alongside", "resize_ntfs", "free_space"):
+        warnings.append("A 1 MiB BIOS boot partition will be created for GRUB on this GPT disk.")
+
+    return PlanReport(valid=True, mode=mode, disk=disk, target_partition=target, efi_partition=efi,
+                      will_create_partition=will_create, will_shrink_filesystem=will_shrink,
+                      required_bytes=required, available_bytes=available, is_gpt=is_gpt,
+                      needs_bios_boot=needs_bios, errors=(), warnings=tuple(warnings))
+
+
 def _prepare_install_plan(state: dict | InstallRequest, log, context=None) -> InstallPlan:
+    # Explicit validate→commit: fail fast with a structured report before any
+    # partition-table backup, ntfsresize, or mkfs is attempted. Mirrors the
+    # UI's dry-run validation so the same message is shown in both places.
+    report = validate_plan_state(state, context)
+    if not report.valid:
+        raise RuntimeError(report.errors[0] if report.errors else "Install plan validation failed")
     plan = _install_plan_from_state(state)
     if plan.mode == "resize_ntfs":
         return _prepare_ntfs_install_plan(state, log)
