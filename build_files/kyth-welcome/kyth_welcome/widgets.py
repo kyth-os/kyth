@@ -6,9 +6,12 @@ from typing import ClassVar
 from .core_base import restyle
 from .services.hardware import HardwareProbe
 from .qt import (
-    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QLayout, QPushButton, QRect, QScrollArea, QSize, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, Signal, single_shot,
+    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSize, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
 from .ui_tokens import STATUS_ERROR, STATUS_OK, STATUS_WARN
+
+# FlowLayout extracted to widgets/layout.py (R8-3) — keep re-export for compat
+from .widgets.layout import FlowLayout  # noqa: F401
 
 def _theme_icon(*names: str) -> QIcon:
     """Return the first available system theme icon, or a null icon."""
@@ -25,81 +28,6 @@ def _divider() -> QFrame:
     f.setFrameShape(QFrame.Shape.HLine)
     f.setFixedHeight(1)
     return f
-
-
-class FlowLayout(QLayout):
-    """Left-to-right layout that wraps to a new row when it runs out of
-    horizontal space, instead of overflowing past the window edge like
-    QHBoxLayout does. Standard Qt "Flow Layout" recipe — Qt has no built-in
-    equivalent. Use for button/chip rows whose item count varies or is too
-    large to reliably fit one line (e.g. Repair's quick-fixes toolbar)."""
-
-    def __init__(self, parent=None, margin: int = 0, spacing: int = 8):
-        super().__init__(parent)
-        if parent is not None:
-            self.setContentsMargins(margin, margin, margin, margin)
-        self.setSpacing(spacing)
-        self._items: list = []
-
-    def addItem(self, item):
-        self._items.append(item)
-
-    def count(self) -> int:
-        return len(self._items)
-
-    def itemAt(self, index):
-        return self._items[index] if 0 <= index < len(self._items) else None
-
-    def takeAt(self, index):
-        return self._items.pop(index) if 0 <= index < len(self._items) else None
-
-    def expandingDirections(self):
-        return Qt.Orientation(0)
-
-    def hasHeightForWidth(self) -> bool:
-        return True
-
-    def heightForWidth(self, width: int) -> int:
-        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
-
-    def setGeometry(self, rect) -> None:
-        super().setGeometry(rect)
-        self._do_layout(rect, test_only=False)
-
-    def sizeHint(self):
-        return self.minimumSize()
-
-    def minimumSize(self):
-        size = QSize()
-        for item in self._items:
-            size = size.expandedTo(item.minimumSize())
-        margins = self.contentsMargins()
-        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
-        return size
-
-    def _do_layout(self, rect, test_only: bool) -> int:
-        left, top, right, bottom = self.getContentsMargins()
-        effective = rect.adjusted(left, top, -right, -bottom)
-        x, y = effective.x(), effective.y()
-        line_height = 0
-        spacing = self.spacing()
-
-        for item in self._items:
-            hint = item.sizeHint()
-            next_x = x + hint.width() + spacing
-            if next_x - spacing > effective.right() and line_height > 0:
-                x = effective.x()
-                y += line_height + spacing
-                next_x = x + hint.width() + spacing
-                line_height = 0
-
-            if not test_only:
-                item.setGeometry(QRect(x, y, hint.width(), hint.height()))
-
-            x = next_x
-            line_height = max(line_height, hint.height())
-
-        return y + line_height - rect.y() + bottom
 
 
 def _make_card(name: str = "card") -> tuple[QFrame, QVBoxLayout]:
