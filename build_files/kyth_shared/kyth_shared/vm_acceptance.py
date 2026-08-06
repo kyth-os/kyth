@@ -18,6 +18,7 @@ STATE_FILE = STATE_DIR / "state"
 SERIAL_DEVICE = Path("/dev/ttyS0")
 LOG_FILE = Path("/var/log/kyth-vm-acceptance.log")
 TARGET_BY_ID = Path("/dev/disk/by-id/virtio-KYTH_ACCEPT")
+INSTALLER_ENV_FILE = Path("/etc/kyth-installer.env")
 UPDATE_REF_PATTERN = re.compile(r"^[A-Za-z0-9._/@:+-]+$")
 
 
@@ -96,7 +97,10 @@ def deployment_count() -> int:
         return 0
     try:
         data = json.loads(result.stdout)
-        deployments = data.get("deployments", data if isinstance(data, list) else [])
+        # A bare top-level list is handled before calling .get(): list has no
+        # .get, so checking isinstance() only inside the default-value
+        # argument would never run — .get itself raises AttributeError first.
+        deployments = data if isinstance(data, list) else data.get("deployments", [])
         return len(deployments)
     except (AttributeError, json.JSONDecodeError, TypeError):
         return 0
@@ -123,9 +127,8 @@ def run_smoke_check(phase: str) -> None:
 
 def _installer_target_ref() -> str:
     default = "ghcr.io/mrtrick37/kyth:testing"
-    env_file = Path("/etc/kyth-installer.env")
     try:
-        for line in env_file.read_text(encoding="utf-8").splitlines():
+        for line in INSTALLER_ENV_FILE.read_text(encoding="utf-8").splitlines():
             if line.startswith("KYTH_TARGET_IMAGE="):
                 return line.partition("=")[2].strip().strip("'\"") or default
     except OSError:
@@ -254,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     if not enabled():
         return 0
     try:
-        if Path("/etc/kyth-installer.env").is_file():
+        if INSTALLER_ENV_FILE.is_file():
             install_from_live_iso()
         else:
             run_installed_lifecycle()

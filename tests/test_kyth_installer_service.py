@@ -12,6 +12,7 @@ if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
 from kyth_installer import partition_ops
+from kyth_installer import context as context_module
 from kyth_installer.context import InstallerContext
 from kyth_installer.services.installer_service import InstallerService
 from kyth_installer.app import _load_answer_file, run_headless
@@ -95,6 +96,290 @@ class TestInstallerService(unittest.TestCase):
         res = self.service.remove_pending({"disk": "/dev/sda", "index": 0})
         self.assertFalse(res.get("ok"))
         self.assertEqual(len(journal.ops), 1)
+
+
+class InstallerServiceCrudTests(unittest.TestCase):
+    """create/delete/resize/format/set_mountpoint/commit/rollback/reboot,
+    plus the _journal_for/_partition_for error branches they all share."""
+
+    def setUp(self):
+        self.context = InstallerContext()
+        self.service = InstallerService(self.context)
+
+    def _new_table(self, mock_list_disks):
+        mock_list_disks.return_value = [{"name": "/dev/sda"}]
+        res = self.service.new_table({"disk": "/dev/sda", "table_type": "gpt"})
+        self.assertTrue(res.get("ok"))
+
+    # ── _journal_for / _partition_for error branches ───────────────────
+
+    def test_journal_for_requires_a_disk(self):
+        res = self.service.create_partition({})
+        self.assertFalse(res.get("ok"))
+        self.assertIn("No disk specified", res.get("message", ""))
+
+    def test_journal_for_requires_an_active_journal(self):
+        res = self.service.create_partition({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+        self.assertIn("No active partition journal", res.get("message", ""))
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_partition_for_requires_a_partition(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.delete_partition({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_partition_for_rejects_a_partition_from_another_disk(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sdb"
+        res = self.service.delete_partition({"disk": "/dev/sda", "partition": "/dev/sdb1"})
+        self.assertFalse(res.get("ok"))
+        self.assertIn("does not belong to the active disk", res.get("message", ""))
+
+    # ── create_partition ─────────────────────────────────────────────
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_create_partition_rejects_invalid_geometry(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.create_partition({
+            "disk": "/dev/sda", "start_bytes": -1, "size_bytes": 0, "fs_type": "btrfs",
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("Invalid start offset or size", res.get("message", ""))
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_create_partition_rejects_unsupported_filesystem(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.create_partition({
+            "disk": "/dev/sda", "start_bytes": 4 * 1024**2, "size_bytes": 10 * 1024**3,
+            "fs_type": "zfs",
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("Unsupported filesystem", res.get("message", ""))
+
+    # ── delete_partition ─────────────────────────────────────────────
+
+    @patch("kyth_installer.disk.list_partitions")
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_delete_partition_not_found(self, mock_list_disks, mock_parent, mock_list_parts):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        mock_list_parts.return_value = []
+        res = self.service.delete_partition({"disk": "/dev/sda", "partition": "/dev/sda1"})
+        self.assertFalse(res.get("ok"))
+        self.assertIn("not found", res.get("message", ""))
+
+    @patch("kyth_installer.disk.list_partitions")
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_delete_partition_rejects_mounted_partition(self, mock_list_disks, mock_parent, mock_list_parts):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        mock_list_parts.return_value = [{"name": "/dev/sda1", "current": True}]
+        res = self.service.delete_partition({"disk": "/dev/sda", "partition": "/dev/sda1"})
+        self.assertFalse(res.get("ok"))
+        self.assertIn("mounted or in-use", res.get("message", ""))
+
+    @patch("kyth_installer.disk.list_partitions")
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_delete_partition_success(self, mock_list_disks, mock_parent, mock_list_parts):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        mock_list_parts.return_value = [{"name": "/dev/sda1", "current": False, "in_use": False}]
+        res = self.service.delete_partition({"disk": "/dev/sda", "partition": "/dev/sda1"})
+        self.assertTrue(res.get("ok"))
+        journal = partition_ops.get_journal(self.context)
+        self.assertEqual(journal.ops[-1]["kind"], "delete")
+
+    # ── resize_partition ─────────────────────────────────────────────
+
+    @patch("kyth_installer.disk.list_partitions")
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_resize_partition_requires_a_new_size(self, mock_list_disks, mock_parent, mock_list_parts):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.resize_partition({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "new_size_bytes": 0,
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("new size is required", res.get("message", ""))
+
+    @patch("kyth_installer.disk.list_partitions")
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_resize_partition_not_found(self, mock_list_disks, mock_parent, mock_list_parts):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        mock_list_parts.return_value = []
+        res = self.service.resize_partition({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "new_size_bytes": 1024,
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("not found", res.get("message", ""))
+
+    @patch("kyth_installer.disk.list_partitions")
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_resize_partition_rejects_growing_the_partition(self, mock_list_disks, mock_parent, mock_list_parts):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        mock_list_parts.return_value = [{"name": "/dev/sda1", "size_bytes": 10 * 1024**3}]
+        res = self.service.resize_partition({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "new_size_bytes": 20 * 1024**3,
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("smaller than current size", res.get("message", ""))
+
+    @patch("kyth_installer.disk.list_partitions")
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_resize_partition_success(self, mock_list_disks, mock_parent, mock_list_parts):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        mock_list_parts.return_value = [{"name": "/dev/sda1", "size_bytes": 10 * 1024**3}]
+        res = self.service.resize_partition({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "new_size_bytes": 5 * 1024**3,
+        })
+        self.assertTrue(res.get("ok"))
+        journal = partition_ops.get_journal(self.context)
+        self.assertEqual(journal.ops[-1]["kind"], "resize")
+
+    # ── format_partition ─────────────────────────────────────────────
+
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_format_partition_rejects_unsupported_filesystem(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.format_partition({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "fs_type": "zfs",
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("Unsupported filesystem", res.get("message", ""))
+
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_format_partition_success(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.format_partition({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "fs_type": "btrfs",
+        })
+        self.assertTrue(res.get("ok"))
+        journal = partition_ops.get_journal(self.context)
+        self.assertEqual(journal.ops[-1]["kind"], "format")
+
+    # ── set_mountpoint ───────────────────────────────────────────────
+
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_set_mountpoint_rejects_relative_path(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.set_mountpoint({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "mountpoint": "home",
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("absolute path", res.get("message", ""))
+
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_set_mountpoint_accepts_swap(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.set_mountpoint({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "mountpoint": "swap",
+        })
+        self.assertTrue(res.get("ok"))
+
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_set_mountpoint_accepts_absolute_path(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.set_mountpoint({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "mountpoint": "/home",
+        })
+        self.assertTrue(res.get("ok"))
+        journal = partition_ops.get_journal(self.context)
+        self.assertEqual(journal.ops[-1]["kind"], "set_mountpoint")
+
+    # ── commit_partitions / rollback_partitions ─────────────────────
+
+    def _committable_journal(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.create_partition({
+            "disk": "/dev/sda", "start_bytes": 4 * 1024**2, "size_bytes": 10 * 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/",
+        })
+        self.assertTrue(res.get("ok"))
+        return partition_ops.get_journal(self.context)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_reports_validation_errors(self, mock_list_disks):
+        self._new_table(mock_list_disks)  # no create op -> no root partition
+        res = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("message"), "Validation failed.")
+        self.assertTrue(res.get("errors"))
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_success_transitions_back_to_idle(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "commit", return_value="/dev/sda1") as mock_commit:
+            res = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertTrue(res.get("ok"))
+        self.assertEqual(res.get("root_partition"), "/dev/sda1")
+        mock_commit.assert_called_once()
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_rolls_back_on_failure(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "commit", side_effect=RuntimeError("sgdisk failed")), \
+             patch.object(journal, "rollback") as mock_rollback:
+            res = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("message"), "sgdisk failed")
+        mock_rollback.assert_called_once()
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.FAILED)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_rollback_partitions_success_resets_the_journal(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "rollback") as mock_rollback:
+            res = self.service.rollback_partitions({"disk": "/dev/sda"})
+        self.assertTrue(res.get("ok"))
+        mock_rollback.assert_called_once()
+        self.assertIsNone(partition_ops.get_journal(self.context))
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_rollback_partitions_reports_runtime_error(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "rollback", side_effect=RuntimeError("sgdisk restore failed")):
+            res = self.service.rollback_partitions({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("message"), "sgdisk restore failed")
+
+    # ── reboot ───────────────────────────────────────────────────────
+
+    def test_reboot_success(self):
+        with patch("kyth_installer.services.installer_service.runner.run_command") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            res = self.service.reboot({})
+        self.assertTrue(res.get("ok"))
+
+    def test_reboot_failure_reports_stderr(self):
+        with patch("kyth_installer.services.installer_service.runner.run_command") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stderr="reboot denied\n")
+            res = self.service.reboot({})
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("error"), "reboot denied")
 
 
 class AnswerFileTests(unittest.TestCase):
