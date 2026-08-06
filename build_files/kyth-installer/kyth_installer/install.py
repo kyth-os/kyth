@@ -49,6 +49,24 @@ def _push(event: dict, context: InstallerContext) -> None:
     context.events.publish(event)
 
 
+def _assert_still_on_ac(log) -> None:
+    """Continuous power guard — re-checks at each phase boundary.
+
+    run_preflight() already gates the start of install; a long shrink or
+    image download can run for many minutes, so we re-check before any
+    destructive storage step and again before the image write. If AC is
+    yanked mid-install the installer fails closed with an actionable
+    message instead of leaving a half-written disk on battery loss.
+    """
+    from .assurance import _battery_check
+
+    check = _battery_check()
+    if check.status == "fail":
+        msg = f"{check.detail} \u2014 Plug in AC power and keep it connected through install."
+        log(f"Power guard refused: {msg}")
+        raise RuntimeError(msg)
+
+
 def _record_transaction(
     context: InstallerContext,
     status: str,
@@ -161,6 +179,7 @@ def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallP
     for check in checks:
         log(f"Preflight [{check.status}]: {check.name} — {check.detail}")
 
+    _assert_still_on_ac(log)
     storage_plan = _prepare_install_plan(request, log, context)
     resolved = _resolve_and_record_plan(request, storage_plan, src_ref, tgt_ref, source, context, log)
 
@@ -238,6 +257,7 @@ def _prepare_install_storage(
     target_partition: str | None = None,
     efi_partition: str | None = None,
 ):
+    _assert_still_on_ac(log)
     context.enter_phase(InstallPhase.STORAGE)
     if install_mode in ("alongside", "manual"):
         target_part = target_partition if target_partition is not None else context.state.get("target_partition", "")
