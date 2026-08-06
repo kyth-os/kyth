@@ -665,8 +665,20 @@ def validate_plan_state(
                           required_bytes=required, available_bytes=available, is_gpt=is_gpt,
                           needs_bios_boot=needs_bios, errors=tuple(errors), warnings=tuple(warnings))
 
-    if needs_bios and mode in ("alongside", "resize_ntfs", "free_space"):
+    if needs_bios and mode in ("resize_ntfs", "free_space"):
         warnings.append("A 1 MiB BIOS boot partition will be created for GRUB on this GPT disk.")
+    if needs_bios and mode == "alongside":
+        errors.append(
+            "Legacy BIOS on GPT requires a 1 MiB BIOS boot partition for GRUB. "
+            "Create a 1 MiB partition with the bios_grub flag in the manual "
+            "partition editor, or use free-space/NTFS-shrink install which "
+            "creates it automatically. Without it GRUB falls back to "
+            "blocklists, which Btrfs rejects."
+        )
+        return PlanReport(valid=False, mode=mode, disk=disk, target_partition=target, efi_partition=efi,
+                          will_create_partition=will_create, will_shrink_filesystem=will_shrink,
+                          required_bytes=required, available_bytes=available, is_gpt=is_gpt,
+                          needs_bios_boot=needs_bios, errors=tuple(errors), warnings=tuple(warnings))
 
     return PlanReport(valid=True, mode=mode, disk=disk, target_partition=target, efi_partition=efi,
                       will_create_partition=will_create, will_shrink_filesystem=will_shrink,
