@@ -78,7 +78,7 @@ class BuildProfileTests(unittest.TestCase):
         gaming = _read("build_files/scripts/packages/06-gaming-core.sh")
         thirdparty = _read("build_files/scripts/thirdparty.sh")
         loader = _read("build_files/kyth-scx-loader")
-        self.assertIn("dnf5 install -y scx_rusty", gaming)
+        self.assertRegex(gaming, r"dnf\w*\s+install.*scx_rusty")
         self.assertNotIn("install_scx", thirdparty)
         self.assertIn('^scx_[a-z0-9_]+$', loader)
 

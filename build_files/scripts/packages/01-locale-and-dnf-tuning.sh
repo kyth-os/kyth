@@ -26,9 +26,18 @@ max_parallel_downloads=10
 excludepkgs=kernel,kernel-core*,kernel-modules*,kernel-modules-core*,kernel-modules-extra*,kernel-devel*,kernel-debug*
 countme=True
 nodocs=True
+retries=10
+timeout=120
 DNFCONFEOF
 
 # KythOS is its own distribution identity. Replace the inherited Fedora artwork
 # package with Fedora's generic drop-in before installing desktop components so
 # upstream boot watermarks and launcher icons cannot leak into the final image.
-dnf5 swap -y --allowerasing fedora-logos generic-logos
+# Use retries — this is the first network-touching dnf operation and a
+# transient mirror blip here would otherwise fail the whole build.
+if ! dnf5 swap -y --allowerasing --setopt=retries=10 --setopt=timeout=120 fedora-logos generic-logos; then
+	echo "WARNING: dnf5 swap fedora-logos failed; retrying after metadata clean..." >&2
+	dnf5 clean metadata 2>/dev/null || true
+	sleep 5
+	dnf5 swap -y --allowerasing --setopt=retries=10 --setopt=timeout=120 fedora-logos generic-logos
+fi

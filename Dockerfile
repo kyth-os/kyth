@@ -149,7 +149,7 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
     --mount=type=tmpfs,dst=/tmp \
     : "cache-bust=${BUILD_DATE}" && \
     set -euo pipefail; \
-    dnf5 upgrade -y --refresh --exclude='akmod-*' --exclude='kmod-*' \
+    dnf5 upgrade -y --refresh --setopt=retries=10 --setopt=timeout=120 --exclude='akmod-*' --exclude='kmod-*' \
         --exclude='gamescope*' \
         --disablerepo='fedora-multimedia' \
         --exclude='gstreamer1-plugins-bad' \

@@ -8,10 +8,12 @@ source "../lib/check-multilib.sh"
 source "../lib/gaming-coprs.sh"
 # shellcheck source=../lib/packages-helpers.sh disable=SC1091
 source "../lib/packages-helpers.sh"
+# shellcheck source=../lib/dnf-retry.sh disable=SC1091
+source "../lib/dnf-retry.sh"
 
-# Enable COPRs for gaming packages
+# Enable COPRs for gaming packages (retry loop survives Copr/Fedora mirror blips)
 for copr in "${KYTH_GAMING_COPRS[@]}"; do
-	dnf5 copr enable -y "${copr}"
+	copr_enable_retry "${copr}"
 done
 
 # Gaming packages
@@ -27,7 +29,7 @@ done
 # Fedora mirror/COPR timing can expose a newer i686 build while the base image
 # still carries the previous x86_64 build; mismatched versions conflict on
 # shared doc/man files.
-dnf5 upgrade -y libatomic.x86_64 nss.x86_64 || true
+dnf_retry upgrade -y libatomic.x86_64 nss.x86_64 || true
 
 # Multilib 32-bit packages are required for 32-bit Windows games running via Steam/Wine.
 # If gaming core features are disabled in custom profile builds, skip 32-bit multilib.
@@ -49,7 +51,7 @@ if is_enabled "${ENABLE_GAMING_CORE:-1}"; then
 	)
 fi
 
-dnf5 install -y --skip-unavailable --exclude=libde265.i686 \
+dnf_retry install -y --skip-unavailable --exclude=libde265.i686 \
 	gamescope \
 	gamescope-shaders \
 	mangohud.x86_64 \
@@ -86,6 +88,6 @@ fi
 # signed RPM instead of silently omitting the scheduler or compiling an
 # untracked payload during the image build.
 if is_enabled "${ENABLE_SCX:-1}"; then
-	dnf5 install -y scx_rusty
+	dnf_retry install -y scx_rusty
 	command -v scx_rusty >/dev/null
 fi
