@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-perf-cpu — 5 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-perf-cpu "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.perf_cpu import load_perf_cpu, perf_cpu_status; c=load_perf_cpu(); print(f\"profile={c['profile']} active={perf_cpu_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.perf_cpu import load_perf_cpu,save_perf_cpu,generate_perf_cpu; c=load_perf_cpu(); c['profile']='gaming'; save_perf_cpu(c); generate_perf_cpu(c)"; sysctl --system >/dev/null 2>&1 || true; echo "perf cpu gaming 5" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.perf_cpu import load_perf_cpu,save_perf_cpu,generate_perf_cpu; c=load_perf_cpu(); c['profile']='balanced'; save_perf_cpu(c); generate_perf_cpu(c)"; echo "perf cpu balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.perf_cpu import load_perf_cpu,generate_perf_cpu; generate_perf_cpu(load_perf_cpu())" ;;
+    *) echo "Usage: kyth-perf-cpu [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

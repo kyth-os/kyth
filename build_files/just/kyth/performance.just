@@ -504,6 +504,41 @@ numa-balancing mode="status":
     set -euo pipefail
     /usr/bin/kyth-numa-balancing "{{ mode }}"
 
+# TCP fastopen 3 gaming (tcp-fastopen.toml)
+[group('KythOS')]
+tcp-fastopen mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-fastopen "{{ mode }}"
+
+# TCP mtu probing 1 gaming (tcp-mtu-probing.toml)
+[group('KythOS')]
+tcp-mtu-probing mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-mtu-probing "{{ mode }}"
+
+# Dirty expire 100 gaming (dirty-expire.toml)
+[group('KythOS')]
+dirty-expire mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-dirty-expire "{{ mode }}"
+
+# File max 2097152 gaming (file-max.toml)
+[group('KythOS')]
+file-max mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-file-max "{{ mode }}"
+
+# Perf cpu 5 gaming (perf-cpu.toml)
+[group('KythOS')]
+perf-cpu mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-perf-cpu "{{ mode }}"
+
 # EPP AC performance vs balanced (epp-ac.toml)
 [group('KythOS')]
 epp-ac mode="status":
