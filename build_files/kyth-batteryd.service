@@ -1,0 +1,11 @@
+[Unit]
+Description=Kyth Battery charge limit daemon
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/kyth-batteryd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
