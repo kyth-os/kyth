@@ -503,12 +503,15 @@ class _UpdateOpsMixin:
         rollback = has_rollback_deployment()
         staged_ts = bootc_image_timestamp("staged") if staged else None
         rollback_ts = bootc_image_timestamp("rollback") if rollback else None
-        # Low-disk hint in summary (also enforced in _run_full_update)
+        # Low-disk hint in summary (also enforced in _run_full_update) — Slice 2/5 storage gate
         try:
             free_gb = shutil.disk_usage("/").free / (1024**3)
             if free_gb < 10 and not staged:
-                # keep staged text as None case below, but add tooltip-style hint via status label? just keep row as-is
-                pass
+                self._staged_val.setText(f"Low disk: {free_gb:.1f} GB free — free 10 GB before Full Update")
+                self._staged_val.setObjectName("prop-val-warn")
+                restyle(self._staged_val)
+                # keep warning visible even though staged is None
+                self._staged_val.setToolTip(f"Only {free_gb:.1f} GB free on /. Full Update needs ~6 GB + buffer.")
         except Exception:
             free_gb = 999.0
 
