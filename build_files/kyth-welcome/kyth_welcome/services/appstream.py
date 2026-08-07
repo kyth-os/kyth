@@ -1,4 +1,4 @@
-"""Local Flathub AppStream catalog parsing and caching."""
+"""Local Flathub AppStream catalog parsing and caching — offline via 1h TTL cache."""
 
 from __future__ import annotations
 
