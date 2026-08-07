@@ -66,6 +66,14 @@ _TRUSTED_EXECUTABLE_DIRS = frozenset(
 )
 
 
+def run_as_root(cmd: list[str]) -> list[str]:
+    """Centralized privilege-escalation helper (was duplicated in system.py).
+
+    Returns `cmd` unchanged when already root, otherwise prepends `sudo -n`.
+    """
+    return cmd if os.geteuid() == 0 else ["sudo", "-n", *cmd]
+
+
 @dataclass(frozen=True)
 class InstallerCommand:
     argv: tuple[str, ...]

@@ -40,6 +40,7 @@ ROUTES = {
     "locales": RouteSpec("GET", "/api/locales"),
     "keymaps": RouteSpec("GET", "/api/keymaps"),
     "start": RouteSpec("POST", "/api/start", requires_same_origin=True),
+    "cancel": RouteSpec("POST", "/api/cancel", requires_same_origin=True),
     "reboot": RouteSpec("POST", "/api/reboot", requires_same_origin=True),
     # Manual partition management
     "partition_pending": RouteSpec("GET", "/api/disk/pending"),
@@ -218,11 +219,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def _serve_log(self) -> None:
+        # Stream log to avoid OOM on large logs (>100 MiB)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
         try:
-            text = LOG_FILE.read_text(errors="replace")
+            with LOG_FILE.open("r", errors="replace") as f:
+                while True:
+                    chunk = f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    try:
+                        self.wfile.write(chunk.encode())
+                    except Exception:
+                        break
         except Exception as exc:
-            text = f"Could not read installer log: {exc}\n"
-        self._send_text(text, "text/plain; charset=utf-8")
+            try:
+                self.wfile.write(f"Could not read installer log: {exc}\n".encode())
+            except Exception:
+                pass
 
     def _send_text(self, text: str, content_type: str) -> None:
         body = text.encode()

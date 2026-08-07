@@ -860,14 +860,14 @@ def _get_manual_mounts(context) -> list[dict]:
     return mounts
 
 
-def _validate_storage_intent(state: dict, context=None) -> None:
+def _validate_storage_intent(state: dict, context=None, snapshot=None) -> None:
     """Validate a review-page storage choice without changing the machine."""
     mode = _normalized_install_mode(state)
     if mode == "resize_ntfs":
-        _validate_resize_ntfs_target(state)
+        _validate_resize_ntfs_target(state, snapshot=snapshot)
     elif mode == "free_space":
-        _validate_free_space_target(state)
+        _validate_free_space_target(state, snapshot=snapshot)
     elif mode == "manual":
-        _validate_install_target(state, context)
+        _validate_install_target(state, context, snapshot=snapshot)
     else:
-        _validate_install_target(state, context)
+        _validate_install_target(state, context, snapshot=snapshot)

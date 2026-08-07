@@ -189,6 +189,7 @@ class InstallerContext:
     cleanup_mounts: list[str] = field(default_factory=list)
     transaction_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     assurance_checks: list[dict[str, str]] = field(default_factory=list)
+    cancel_requested: threading.Event = field(default_factory=threading.Event)
 
     def transition(self, lifecycle: InstallLifecycle) -> None:
         with self.state_lock:
@@ -214,6 +215,7 @@ class InstallerContext:
             self.state = request.as_state()
             self.plan = None
             self.phase = InstallPhase.PREPARE
+            self.cancel_requested.clear()
 
     def clear_secrets(self) -> None:
         with self.state_lock:

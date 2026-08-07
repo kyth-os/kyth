@@ -11,14 +11,10 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
-from .runner import run_command
+from .runner import run_command, run_as_root as _as_root
 from kyth_shared import accounts as _accounts
 
 _logger = logging.getLogger(__name__)
-
-
-def _as_root(cmd: list[str]) -> list[str]:
-    return cmd if os.geteuid() == 0 else ["sudo", "-n", *cmd]
 
 
 def _require_no_symlink(path: str) -> None:

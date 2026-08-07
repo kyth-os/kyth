@@ -221,6 +221,9 @@ def _run_cmd(
     )
 
 def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallPlan:
+    from .execution import check_cancelled
+
+    check_cancelled(context)
     context.enter_phase(InstallPhase.PREPARE)
     request = context.request or InstallRequest.from_state(context.state)
     kernel = request.kernel
@@ -320,12 +323,16 @@ def _prepare_install_storage(
     target_partition: str | None = None,
     efi_partition: str | None = None,
 ):
+    from .execution import check_cancelled
+
+    check_cancelled(context)
     _assert_still_on_ac(log)
     context.enter_phase(InstallPhase.STORAGE)
     if install_mode in ("alongside", "manual"):
         target_part = target_partition if target_partition is not None else context.state.get("target_partition", "")
         efi_part = efi_partition if efi_partition is not None else context.state.get("efi_partition", "")
-        alongside_mount = "/var/tmp/kyth-alongside-target"  # noqa: S108 — _require_no_symlink guards this below
+        from .config import STAGING_ALONGSIDE_MOUNT
+        alongside_mount = STAGING_ALONGSIDE_MOUNT
         return _prepare_partition_target_storage(
             target_part, efi_part, alongside_mount, src_ref, tgt_ref, log, progress, context
         )
@@ -347,7 +354,8 @@ def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerConte
     )
 
     log("Creating Btrfs subvolumes @ and @home ...")
-    btrfs_temp_root = "/var/tmp/kyth-btrfs-root"  # noqa: S108 — _require_no_symlink guards this below
+    from .config import STAGING_BTRFS_ROOT
+    btrfs_temp_root = STAGING_BTRFS_ROOT  # noqa: S108 — _require_no_symlink guards this below
     _safe_umount(run_command, btrfs_temp_root)
     _require_no_symlink(btrfs_temp_root)
     run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
@@ -788,7 +796,8 @@ def _run_install_worker(
         if alongside_mount:
             config_root = alongside_mount
         else:
-            config_root = "/var/tmp/kyth-install-root"  # noqa: S108 — _require_no_symlink guards this below
+            from .config import STAGING_INSTALL_ROOT
+            config_root = STAGING_INSTALL_ROOT  # noqa: S108 — _require_no_symlink guards this below
             _require_no_symlink(config_root)
             run_command(_as_root(["mkdir", "-p", config_root]), check=True)
             # Detach any stale mount left by a previously crashed install attempt.

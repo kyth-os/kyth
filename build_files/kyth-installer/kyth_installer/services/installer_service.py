@@ -185,6 +185,13 @@ class InstallerService:
             return {"started": False, "message": "An installation is already running."}
         return {"started": True}
 
+    def cancel_install(self, _body: dict) -> dict:
+        from kyth_installer import execution
+
+        if execution.request_cancel(self.context):
+            return {"ok": True, "message": "Cancellation requested."}
+        return {"ok": False, "message": "No installation is running to cancel."}
+
     def reboot(self, _body: dict) -> dict:
         result = runner.run_command(
             system._as_root(["systemctl", "reboot"]),

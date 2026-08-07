@@ -51,6 +51,7 @@ class PostRouteService:
             "commit_partitions": self.commit_partitions,
             "rollback_partitions": self.rollback_partitions,
             "start": self.start,
+            "cancel": self.cancel,
             "reboot": self.reboot,
         })
 
@@ -89,6 +90,11 @@ class PostRouteService:
         if "already running" in message or "running the current KythOS session" in message or "already exists" in message:
             return ApiResponse(res, 409)
         return ApiResponse(res, 400)
+
+    def cancel(self, body: dict) -> ApiResponse:
+        res = self.installer_service.cancel_install(body)
+        status = 200 if res.get("ok") else 409
+        return ApiResponse(res, status)
 
     def reboot(self, body: dict) -> ApiResponse:
         res = self.installer_service.reboot(body)

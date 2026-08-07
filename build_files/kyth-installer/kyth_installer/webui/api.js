@@ -44,5 +44,9 @@ function postJSON(url, body) {
   return postRequest(url, body).then(response => response.json());
 }
 
+function cancelInstall() {
+  return postJSON('/api/cancel', {});
+}
+
 // S, el, postJSON are used from app.js and install-ui.js.
 void [S, el, postJSON];

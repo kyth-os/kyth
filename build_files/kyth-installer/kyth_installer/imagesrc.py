@@ -203,8 +203,13 @@ def resolve_install_source(kernel: str) -> ImageSource:
     return resolve_source_refs(source_ref, target_ref)
 
 
+_SOURCE_STATUS_CACHE: dict[str, dict] = {}
+
+
 def source_status(kernel: str = "fedora") -> dict:
     """Return a support-safe source description for the installer UI."""
+    if kernel in _SOURCE_STATUS_CACHE:
+        return _SOURCE_STATUS_CACHE[kernel]
     try:
         source = resolve_install_source(kernel)
     except RuntimeError as exc:
@@ -216,7 +221,7 @@ def source_status(kernel: str = "fedora") -> dict:
             "digest": "",
             "message": str(exc),
         }
-    return {
+    result = {
         "available": True,
         "kind": source.kind,
         "verified": source.verified,
@@ -231,6 +236,8 @@ def source_status(kernel: str = "fedora") -> dict:
             else "Local image selected"
         ),
     }
+    _SOURCE_STATUS_CACHE[kernel] = result
+    return result
 
 
 def resolve_source_refs(source_ref: str, target_ref: str) -> ImageSource:

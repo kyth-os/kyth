@@ -17,7 +17,17 @@ from .disk import (
     _partition_start_bytes, _human_size, _latest_partition_on_disk, _parent_disk,
 )
 from .fsresize import shrink_filesystem
-from .services.disk_service import DiskService
+
+try:
+    from .services.disk_service import DiskService
+except ImportError:
+    DiskService = None  # type: ignore  # fallback for protocol-only import
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .interfaces import DiskServiceProtocol
+    from .services.disk_service import DiskService as _DiskServiceConcrete
 
 
 def _require_sgdisk(log=None):
@@ -44,7 +54,7 @@ def _require_mkfs(fstype: str, log=None):
 class Journal:
     """Transaction journal for partition operations on a single disk."""
 
-    def __init__(self, disk: str, disk_service: DiskService | None = None):
+    def __init__(self, disk: str, disk_service: "DiskServiceProtocol | None" = None):
         resolved = _normal_device_path(disk)
         if not resolved:
             raise RuntimeError("Invalid disk path for journal.")
@@ -54,7 +64,13 @@ class Journal:
         self._committed = False
         self._root_partition: Optional[str] = None
         self._backup_dir: tempfile.TemporaryDirectory[str] | None = None
-        self._disk_service = disk_service or DiskService()
+        if disk_service is not None:
+            self._disk_service = disk_service
+        else:
+            # Lazy import to avoid cycle: partition_ops → services
+            from .services.disk_service import DiskService as _Concrete
+
+            self._disk_service = _Concrete()
 
     @property
     def committed(self) -> bool:

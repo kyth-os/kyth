@@ -43,6 +43,12 @@ MIN_KYTHOS_GIB = 32
 MIN_KYTHOS_BYTES = MIN_KYTHOS_GIB * 1024**3
 BIOS_BOOT_BYTES = 1024**2
 
+# ── Staging mount paths (centralized — was 5× literal in install.py) ──────────
+STAGING_ALONGSIDE_MOUNT = "/var/tmp/kyth-alongside-target"  # noqa: S108 — _require_no_symlink guards this
+STAGING_BTRFS_ROOT = "/var/tmp/kyth-btrfs-root"  # noqa: S108 — _require_no_symlink guards this
+STAGING_INSTALL_ROOT = "/var/tmp/kyth-install-root"  # noqa: S108 — _require_no_symlink guards this
+STAGING_BTRFS_RESIZE_PREFIX = "kyth-btrfs-resize-"
+
 # ── Canonical filesystem metadata ──────────────────────────────────────
 # Single source of truth consumed by partition_ops (mkfs, validation) and
 # server (GET /filesystems).  Keep these in sync — no parallel dicts.
