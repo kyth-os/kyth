@@ -11,10 +11,10 @@ class _OneDriveMixin:
             service="onedrive",
             title="OneDrive",
             desc=(
-                "Sync your Microsoft OneDrive via rclone. "
-                "The setup wizard handles Microsoft OAuth in your browser — no terminal required. "
-                "Works with personal accounts; business / SharePoint accounts can be configured "
-                "manually with rclone config after the initial setup."
+                "Coming from Windows? Bring your OneDrive with one click. "
+                "The wizard handles Microsoft OAuth in your browser — no terminal. "
+                "Personal accounts work out of the box; business / SharePoint can be "
+                "added manually via rclone config after setup."
             ),
             wizard_key="onedrive",
             interval_key="_od_sync_interval_min",
