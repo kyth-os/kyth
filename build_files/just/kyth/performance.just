@@ -92,6 +92,41 @@ nvme-tuning profile="status":
     set -euo pipefail
     /usr/bin/kyth-nvme-tuning "{{ profile }}"
 
+# I/O tune (io.toml) — declarative udev for NVMe+SATA, offline
+[group('KythOS')]
+io-tune profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-io-tune "{{ profile }}"
+
+# Kargs perf profile (kargs.toml) — rpm-ostree kargs, revertible
+[group('KythOS')]
+kargs-apply profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-kargs-apply "{{ profile }}"
+
+# Net latency (net-latency.toml) — BBR+FQ+tcp_fastopen, gaming opt-in
+[group('KythOS')]
+net-tune mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-net-tune "{{ mode }}"
+
+# UKSMD dedup (uksmd.toml) — 15-30% RAM save on >16GB, idle zero when off
+[group('KythOS')]
+uksmd mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-uksmd "{{ mode }}"
+
+# Journal slim (journal.toml) — 200M/64M perf vs 500M base, offline
+[group('KythOS')]
+journal-tune mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-journal-tune "{{ mode }}"
+
 # Run an OpenGL app through Zink.
 [group('KythOS')]
 zink-run +args:

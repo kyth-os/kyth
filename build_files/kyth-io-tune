@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# kyth-io-tune — io.toml driven udev, wraps kyth-nvme-tuning
+set -euo pipefail
+
+need_root() { [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-io-tune "$@"; }
+
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.io_tune import load_io_tune,io_status; c=load_io_tune(); print(f"profile={c[\"profile\"]} read_ahead_kb={c[\"read_ahead_kb\"]} rule={io_status()}"); import pathlib; print(open("/proc/cmdline").read().strip()[:0] or "")'; /usr/bin/kyth-nvme-tuning status || true ;;
+    kyth|balanced) need_root "$@"; python3 -c "from kyth_shared.io_tune import load_io_tune,save_io_tune,generate_io_udev; c=load_io_tune(); c['profile']='$1'; save_io_tune(c); r=generate_io_udev(c); print(f'io profile {c[\"profile\"]} rule={r}')"; udevadm control --reload-rules 2>/dev/null || true; udevadm trigger --action=change --subsystem-match=block 2>/dev/null || true; echo "Applied io profile $1" ;;
+    default) echo "default: kernel defaults" ; need_root "$@"; python3 -c 'from kyth_shared.io_tune import load_io_tune,save_io_tune,generate_io_udev; c=load_io_tune(); c["profile"]="balanced"; save_io_tune(c); generate_io_udev(c)'; rm -f /etc/udev/rules.d/61-kyth-io-tune.rules /etc/udev/rules.d/61-kyth-nvme-tuning.rules 2>&1 | tail; udevadm control --reload-rules 2>/dev/null || true; echo "Reverted to defaults (reboot to restore)" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.io_tune import load_io_tune,generate_io_udev; r=generate_io_udev(load_io_tune()); print(r or "removed")'; udevadm control --reload-rules 2>/dev/null || true; udevadm trigger --action=change --subsystem-match=block 2>/dev/null || true ;;
+esac

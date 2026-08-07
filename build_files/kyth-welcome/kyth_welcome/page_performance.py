@@ -118,6 +118,39 @@ class PerformancePage(Page):
         ai_layout.addLayout(ai_row)
         self._add(ai_card)
 
+                # ── Clean perf — opt-in, zero cost when off (46-50) ───────────────────
+        clean_card, clean_layout = _make_card()
+        clean_title = QLabel("Clean Perf — zero cost when off")
+        clean_title.setObjectName("card-title")
+        clean_layout.addWidget(clean_title)
+        clean_desc = QLabel("Kargs (mitigations=off only in gaming), I/O (NVMe none), net BBR+FQ, uksmd dedup, journal 200M — each is off by default, TOML in /etc/kyth, revertible.")
+        clean_desc.setObjectName("card-copy")
+        clean_desc.setWordWrap(True)
+        clean_layout.addWidget(clean_desc)
+        clean_row = QHBoxLayout()
+        clean_row.setSpacing(8)
+        self._clean_status = QLabel("Clean perf: checking…")
+        self._clean_status.setObjectName("prop-val-dim")
+        clean_row.addWidget(self._clean_status, 1)
+        btn_kargs = QPushButton("Kargs")
+        btn_kargs.setToolTip("kargs.toml profile balanced/performance/gaming (mitigations=off only in gaming)")
+        btn_kargs.clicked.connect(self._clean_kargs_status)
+        clean_row.addWidget(btn_kargs)
+        btn_io = QPushButton("I/O")
+        btn_io.clicked.connect(lambda: self._run_clean("io"))
+        clean_row.addWidget(btn_io)
+        btn_net = QPushButton("Net")
+        btn_net.clicked.connect(lambda: self._run_clean("net"))
+        clean_row.addWidget(btn_net)
+        btn_uksmd = QPushButton("UKSmd")
+        btn_uksmd.clicked.connect(lambda: self._run_clean("uksmd"))
+        clean_row.addWidget(btn_uksmd)
+        btn_journal = QPushButton("Journal")
+        btn_journal.clicked.connect(lambda: self._run_clean("journal"))
+        clean_row.addWidget(btn_journal)
+        clean_layout.addLayout(clean_row)
+        self._add(clean_card)
+
         # ── Session history ────────────────────────────────────────────────────
         self._divider()
         hist_head = QLabel("Session History")
@@ -324,3 +357,37 @@ class PerformancePage(Page):
         except Exception as exc:
             self._ai_status_lbl.setText(f"AI: failed — {exc}")
             restyle(self._ai_status_lbl)
+
+    def _clean_kargs_status(self) -> None:
+        try:
+            from kyth_shared.kargs_preset import load_kargs, kargs_drift
+            c = load_kargs()
+            d = kargs_drift()
+            self._clean_status.setText(f"kargs {c['profile']} missing={d['missing'] or '∅'}")
+            restyle(self._clean_status)
+        except Exception as exc:
+            self._clean_status.setText(f"kargs failed — {exc}")
+            restyle(self._clean_status)
+
+    def _run_clean(self, which: str) -> None:
+        try:
+            if which == "io":
+                from kyth_shared.io_tune import load_io_tune, io_status
+                c = load_io_tune()
+                self._clean_status.setText(f"io {c['profile']} rule={io_status()}")
+            elif which == "net":
+                from kyth_shared.net_latency import load_net_latency, net_latency_status
+                c = load_net_latency()
+                self._clean_status.setText(f"net enabled={c['enabled']} active={net_latency_status()}")
+            elif which == "uksmd":
+                from kyth_shared.uksmd_preset import load_uksmd, uksmd_suggested
+                c = load_uksmd()
+                self._clean_status.setText(f"uksmd enabled={c['enabled']} suggested={uksmd_suggested()}")
+            elif which == "journal":
+                from kyth_shared.journal_tune import load_journal, journal_status
+                c = load_journal()
+                self._clean_status.setText(f"journal perf={c['perf']} active={journal_status()}")
+            restyle(self._clean_status)
+        except Exception as exc:
+            self._clean_status.setText(f"{which} failed — {exc}")
+            restyle(self._clean_status)
