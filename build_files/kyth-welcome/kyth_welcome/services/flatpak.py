@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import shutil
@@ -9,6 +10,8 @@ from kyth_welcome.services.command import run_sync
 from kyth_shared.runtime_output import parse_flatpak_apps
 
 from .process import FLATPAK_CACHE_TTL, probe_cached, run_command
+
+_logger = logging.getLogger(__name__)
 
 
 def installed_app_ids() -> frozenset[str] | None:
@@ -35,6 +38,7 @@ def installed_app_ids() -> frozenset[str] | None:
 def list_installed_apps() -> list[dict[str, str]]:
     """Return installed Flatpak applications with display metadata."""
     if not shutil.which("flatpak"):
+        _logger.debug("flatpak not found on PATH — returning empty app list")
         return []
     env = {**os.environ, "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"}
     try:
@@ -46,9 +50,11 @@ def list_installed_apps() -> list[dict[str, str]]:
             check=False,
             env=env,
         )
-    except Exception:
+    except Exception as exc:
+        _logger.debug("flatpak list failed: %s", exc, exc_info=True)
         return []
     if result.returncode != 0:
+        _logger.debug("flatpak list returned %s: %s", result.returncode, result.stderr.strip()[:200])
         return []
     return parse_flatpak_apps(result.stdout)
 
