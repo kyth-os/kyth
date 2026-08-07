@@ -9,6 +9,8 @@ from enum import Enum
 from typing import TYPE_CHECKING
 from typing import TypedDict
 
+from .mount_registry import MountRegistry
+
 if TYPE_CHECKING:
     from .partition_ops import Journal
     from .plan import ResolvedInstallPlan
@@ -187,6 +189,7 @@ class InstallerContext:
     lifecycle: InstallLifecycle = InstallLifecycle.IDLE
     phase: InstallPhase = InstallPhase.PREPARE
     cleanup_mounts: list[str] = field(default_factory=list)
+    mount_registry: MountRegistry = field(default_factory=MountRegistry)
     transaction_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     assurance_checks: list[dict[str, str]] = field(default_factory=list)
     cancel_requested: threading.Event = field(default_factory=threading.Event)
@@ -251,8 +254,10 @@ class InstallerContext:
         with self.state_lock:
             if mountpoint not in self.cleanup_mounts:
                 self.cleanup_mounts.append(mountpoint)
+            self.mount_registry.register(mountpoint)
 
     def release_mount(self, mountpoint: str) -> None:
         with self.state_lock:
             if mountpoint in self.cleanup_mounts:
                 self.cleanup_mounts.remove(mountpoint)
+            self.mount_registry.release(mountpoint)
