@@ -13,10 +13,13 @@ if TYPE_CHECKING:
 
 
 INSTALL_MODES = frozenset({"wipe", "alongside", "resize_ntfs", "free_space", "manual"})
-USERNAME_PATTERN = re.compile(r"[a-z_][a-z0-9_-]{0,30}")
-HOSTNAME_PATTERN = re.compile(r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?")
-LOCALE_PATTERN = re.compile(r"[A-Za-z0-9_.@-]{1,64}")
-KEYMAP_PATTERN = re.compile(r"[A-Za-z0-9_.+@/-]{1,64}")
+# Single contract — see kyth_shared.installer_validation (and validation_rules.json for JS)
+from kyth_shared.installer_validation import (
+    HOSTNAME_PATTERN,
+    KEYMAP_PATTERN,
+    LOCALE_PATTERN,
+    USERNAME_PATTERN,
+)
 
 
 class InstallRequestError(ValueError):
