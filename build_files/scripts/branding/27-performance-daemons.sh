@@ -13,6 +13,9 @@ install -m 0755 /ctx/kyth-update-watcher /usr/bin/kyth-update-watcher
 install -m 0644 /ctx/kyth-update-watcher.service /usr/lib/systemd/system/kyth-update-watcher.service
 install -m 0644 /ctx/kyth-update-watcher.timer /usr/lib/systemd/system/kyth-update-watcher.timer
 
+# Declarative cgroup gaming slice — hash-gated, offline
+install -m 0644 /ctx/gaming.slice /usr/lib/systemd/system/gaming.slice
+
 # Shared probe cache — warms bootc/flatpak/nvidia for System Hub cold starts.
 install -m 0755 /ctx/kyth-probe /usr/bin/kyth-probe
 install -m 0644 /ctx/kyth-probe.service /usr/lib/systemd/system/kyth-probe.service

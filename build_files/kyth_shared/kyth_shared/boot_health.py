@@ -305,6 +305,11 @@ def required_checks(
             path_exists(f"/usr/lib/modules/{kernel_release}"),
             f"module tree for {kernel_release}",
         ),
+        BootCheck(
+            "Measured boot",
+            path_exists("/usr/bin/kyth-boot-verify"),
+            "kyth-boot-verify present (composefs + UKI + TPM)",
+        ),
     ]
     return tuple(checks)
 
