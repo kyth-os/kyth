@@ -49,6 +49,7 @@ from typing import Callable, Optional
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
 from .context import InstallationState, InstallRequest
+from .plan_types import InstallPlan, PlanReport, ResolvedInstallPlan  # re-export for compat (monolith split step 1)
 from .disk import (
     _human_size,
     _latest_partition_on_disk,
@@ -73,74 +74,6 @@ from .storage_snapshot import StorageSnapshot
 
 _logger = logging.getLogger(__name__)
 
-
-@dataclass(frozen=True)
-class PlanReport:
-    """Dry-run / validate-only report — no disk mutation, safe for UI preview.
-
-    Produced by :func:`validate_plan_state` before any destructive partitioning.
-    The install route can return this to the webui so the user sees exactly
-    what *would* happen and why it would be rejected, mirroring the checks that
-    the commit path will re-run.
-    """
-
-    valid: bool
-    mode: str
-    disk: str = ""
-    target_partition: str = ""
-    efi_partition: str = ""
-    will_create_partition: bool = False
-    will_shrink_filesystem: bool = False
-    required_bytes: int = 0
-    available_bytes: int = 0
-    is_gpt: bool = False
-    needs_bios_boot: bool = False
-    errors: tuple[str, ...] = ()
-    warnings: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class InstallPlan:
-    mode: str
-    disk: Optional[str] = None
-    target_partition: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class ResolvedInstallPlan:
-    """Complete immutable input consumed by destructive install phases."""
-
-    request: InstallRequest
-    storage: InstallPlan
-    source_ref: str
-    target_ref: str
-    source_digest: str = ""
-    source_kind: str = "network"
-    source_verified: bool = False
-
-    @property
-    def mode(self) -> str:
-        return self.storage.mode
-
-    @property
-    def disk(self) -> str:
-        if not self.storage.disk:
-            raise RuntimeError("Resolved install plan has no target disk")
-        return self.storage.disk
-
-    @property
-    def target_partition(self) -> str:
-        return self.storage.target_partition or ""
-
-    @property
-    def efi_partition(self) -> str:
-        return self.request.efi_partition
-
-    @property
-    def kernel(self) -> str:
-        return self.request.kernel
-
-
 def _as_request(state: "InstallationState | InstallRequest") -> "InstallRequest":
     """Coerce InstallationState dict to InstallRequest — R-02 single-type boundary."""
     from .context import InstallRequest as _Req
@@ -149,11 +82,9 @@ def _as_request(state: "InstallationState | InstallRequest") -> "InstallRequest"
         return state
     return _Req.from_state(state)  # dict -> InstallRequest, InstallationState remains HTTP-only
 
-
 def _normalized_install_mode(state: "InstallationState | InstallRequest") -> str:
     req = _as_request(state)
     return str(req.install_mode or "wipe").strip().lower() or "wipe"
-
 
 def _install_plan_from_state(state: "InstallationState | InstallRequest") -> InstallPlan:
     req = _as_request(state)
@@ -162,7 +93,6 @@ def _install_plan_from_state(state: "InstallationState | InstallRequest") -> Ins
         disk=req.disk,
         target_partition=req.target_partition,
     )
-
 
 def _apply_install_plan(state: "InstallationState | InstallRequest", plan: InstallPlan) -> None:
     # Kept for backward compat with tests that pass dict; now delegates to request
@@ -180,7 +110,6 @@ def _apply_install_plan(state: "InstallationState | InstallRequest", plan: Insta
     if plan.target_partition is not None:
         object.__setattr__(state, "target_partition", plan.target_partition)
 
-
 def _probe_storage(
     disk: str,
     *,
@@ -195,7 +124,6 @@ def _probe_storage(
         efi_partition=find_efi_partition(disk) if include_partitions else None,
         is_gpt=_is_gpt_disk(disk) if include_partitions else False,
     )
-
 
 def _validate_partition_target(
     disk: str,
@@ -222,7 +150,6 @@ def _validate_partition_target(
     if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
         raise RuntimeError(f"The {label} is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
     return part
-
 
 def _validate_efi_target(config: dict, target: str, discovered: str | None) -> str:
     """Revalidate the exact ESP that the install will mount.
@@ -253,7 +180,6 @@ def _validate_efi_target(config: dict, target: str, discovered: str | None) -> s
     if efi_info.get("read_only"):
         raise RuntimeError("The selected EFI System Partition is read-only and cannot receive the KythOS bootloader.")
     return efi
-
 
 def _validate_install_target(
     config: dict,
@@ -314,7 +240,6 @@ def _validate_install_target(
 
     raise RuntimeError(f"Unsupported install mode: {mode}")
 
-
 def _is_gpt_disk(disk: str) -> bool:
     try:
         result = run_command(
@@ -336,13 +261,11 @@ def _is_gpt_disk(disk: str) -> bool:
     except Exception:
         return False
 
-
 def _has_bios_boot_partition(disk: str) -> bool:
     return any(
         (part.get("parttype") or "").lower() == BIOS_BOOT_GUID
         for part in list_partitions(disk)
     )
-
 
 def suggest_windows_resize_target(snapshot=None) -> dict | None:
     """Best NTFS candidate for 'Keep Windows' one-click alongside.
@@ -408,8 +331,6 @@ def disk_hold(disk: str, log):
             except Exception:
                 pass
 
-
-
 def find_bootcurrent_esp() -> str | None:
     """Return ESP device path from BootCurrent via efibootmgr -v, or None."""
     import shutil, subprocess
@@ -445,7 +366,6 @@ def _required_guided_space(disk: str) -> int:
         return MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
     return MIN_KYTHOS_BYTES
 
-
 def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     """Create a 1 MiB bios_grub partition at gap_start if the GPT disk lacks
     one, returning the byte offset where the KythOS partition should begin.
@@ -473,7 +393,6 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     run_command(_as_root(["parted", "-s", disk, "set", str(_partition_number(created)), "bios_grub", "on"]), check=True, timeout=120)
     _settle()
     return bios_end + sector
-
 
 def _commit_new_kythos_partition(
     disk: str,
@@ -536,7 +455,6 @@ def _commit_new_kythos_partition(
             log(f"Created target partition {created}")
             return created
 
-
 def _validate_resize_ntfs_target(
     config: dict,
     snapshot: StorageSnapshot | None = None,
@@ -594,7 +512,6 @@ def _validate_resize_ntfs_target(
         raise RuntimeError("Refusing to leave the NTFS partition smaller than 64 GiB.")
     return disk, partition, shrink_bytes
 
-
 def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     disk, partition, shrink_bytes = _validate_resize_ntfs_target(config)
     missing = [cmd for cmd in ("ntfsresize", "parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk") if shutil.which(cmd) is None]
@@ -650,7 +567,6 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     )
     return disk, created
 
-
 def _validate_free_space_target(
     config: dict,
     snapshot: StorageSnapshot | None = None,
@@ -690,7 +606,6 @@ def _validate_free_space_target(
 
     return disk, start, end
 
-
 def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     disk, start, end = _validate_free_space_target(config)
     missing = [cmd for cmd in ("parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk") if shutil.which(cmd) is None]
@@ -702,18 +617,15 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     created = _commit_new_kythos_partition(disk, start, end, log)
     return disk, created
 
-
 def _prepare_ntfs_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
     _validate_resize_ntfs_target(state)
     disk, target_partition = _prepare_ntfs_resize_target(state, log)
     return InstallPlan("alongside", disk=disk, target_partition=target_partition)
 
-
 def _prepare_free_space_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
     _validate_free_space_target(state)
     disk, target_partition = _prepare_free_space_target(state, log)
     return InstallPlan("alongside", disk=disk, target_partition=target_partition)
-
 
 def _prepare_explicit_install_plan(
     plan: InstallPlan,
@@ -722,7 +634,6 @@ def _prepare_explicit_install_plan(
 ) -> InstallPlan:
     disk, target_partition = _validate_install_target(state, context)
     return InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
-
 
 def validate_plan_state(
     state: "InstallationState | InstallRequest",
@@ -820,7 +731,6 @@ def validate_plan_state(
                       required_bytes=required, available_bytes=available, is_gpt=is_gpt,
                       needs_bios_boot=needs_bios, errors=(), warnings=tuple(warnings))
 
-
 def _prepare_install_plan(state: dict | InstallRequest, log, context=None) -> InstallPlan:
     # Explicit validate→commit: fail fast with a structured report before any
     # partition-table backup, ntfsresize, or mkfs is attempted. Mirrors the
@@ -834,7 +744,6 @@ def _prepare_install_plan(state: dict | InstallRequest, log, context=None) -> In
     if plan.mode == "free_space":
         return _prepare_free_space_install_plan(state, log)
     return _prepare_explicit_install_plan(plan, state, context)
-
 
 def _get_manual_mounts(context) -> list[dict]:
     """Return non-root partition mount assignments from the committed journal."""
@@ -865,7 +774,6 @@ def _get_manual_mounts(context) -> list[dict]:
                     "fstype": fs_type or "btrfs",
                 })
     return mounts
-
 
 def _validate_storage_intent(state: dict, context=None, snapshot=None) -> None:
     """Validate a review-page storage choice without changing the machine."""
