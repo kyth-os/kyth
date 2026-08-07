@@ -62,5 +62,30 @@ class _WinLibMixin:
             msg.setObjectName("card-copy")
             msg.setWordWrap(True)
             self._win_lib_layout.addWidget(msg)
+            # Windowsswitcher win: surface user profiles already probed in windows_partitions.py
+            clean_profiles: list[tuple[str, list[str]]] = []
+            for p in partitions:
+                if p.get("is_dirty") or p.get("is_hibernated"):
+                    continue
+                for prof in p.get("user_profiles") or []:
+                    name = prof.get("name") or ""
+                    folders = prof.get("folders") or []
+                    if name and folders:
+                        clean_profiles.append((name, folders))
+            if clean_profiles:
+                prof_label = QLabel(
+                    "Windows user files found \u2014 you can bring Documents, Pictures, etc. with one click below."
+                )
+                prof_label.setObjectName("card-copy")
+                prof_label.setWordWrap(True)
+                self._win_lib_layout.addWidget(prof_label)
+                # Show first profile as example; full import is in the Files tab
+                example_name, example_folders = clean_profiles[0]
+                example = ", ".join(example_folders[:5])
+                more = f" +{len(example_folders) - 5} more" if len(example_folders) > 5 else ""
+                detail = QLabel(f"{example_name}: {example}{more}")
+                detail.setObjectName("card-copy")
+                detail.setWordWrap(True)
+                self._win_lib_layout.addWidget(detail)
 
         self._win_lib_card.show()
