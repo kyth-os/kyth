@@ -223,3 +223,10 @@ switch-kernel flavor="fedora":
     fi
     printf '%s\n' "${output}"
     echo "Kernel switch staged. Reboot to activate."
+
+# Flatpak trim — weekly unused runtime removal
+[group('KythOS')]
+flatpak-trim mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-flatpak-trim "{{ mode }}"

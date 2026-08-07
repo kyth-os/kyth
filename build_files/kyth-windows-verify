@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# kyth-windows-verify — windows parity check
+set -euo pipefail
+case "${1:-}" in
+    --json) python3 -c 'import json; from kyth_shared.windows_verify import windows_verify; print(json.dumps(windows_verify(), indent=2))' ;;
+    *) python3 -c 'from kyth_shared.windows_verify import windows_verify; import json; r=windows_verify(); print("\n".join(f"{k}: {v}" for k,v in r.items()))' ;;
+esac

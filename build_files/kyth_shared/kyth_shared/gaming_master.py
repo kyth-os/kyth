@@ -49,6 +49,14 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
     if profile is None:
         profile = load_master().get("profile", "balanced")
     gaming = profile == "gaming"
+    # snapshot before gaming master (77)
+    if gaming and not dry_run:
+        try:
+            from .gaming_snapshot import ensure_snapshot_before_master
+
+            ensure_snapshot_before_master()
+        except Exception:
+            pass
     out: dict[str, str] = {}
     # dynamic imports to avoid cycles
     try:

@@ -161,7 +161,34 @@ class WindowsMigrationPage(
             ("dim", "Updates", "KythOS updates stage a new OS image. Reboot when ready; rollbacks stay available."),
         ):
             checklist_layout.addWidget(self._make_migration_row(status, title, text))
+        # verify parity 80
+        verify_row = QHBoxLayout()
+        verify_row.setSpacing(8)
+        self._verify_status = QLabel("Verify: pending")
+        self._verify_status.setObjectName("status-muted")
+        verify_row.addWidget(self._verify_status, 1)
+        btn_verify = QPushButton("Verify Migration")
+        btn_verify.setToolTip("Check bookmarks/drives/files/onedrive/PWA parity")
+        btn_verify.clicked.connect(self._run_verify)
+        verify_row.addWidget(btn_verify)
+        checklist_layout.addLayout(verify_row)
         self._add(checklist)
+
+    def _run_verify(self):
+        try:
+            from kyth_shared.windows_verify import windows_verify
+
+            r = windows_verify()
+            self._verify_status.setText(f"parity {r.get('parity')} — {r}")
+            self._verify_status.setObjectName("status-ok" if r.get("parity") == "ok" else "status-warn")
+            try:
+                from ..core_base import restyle
+
+                restyle(self._verify_status)
+            except Exception:
+                pass
+        except Exception as exc:
+            self._verify_status.setText(f"verify failed — {exc}")
 
 
 
