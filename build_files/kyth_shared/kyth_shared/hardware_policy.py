@@ -22,6 +22,12 @@ from typing import Any
 
 from .commands import run_optional, run_text
 
+# Progressive: per-quirk modules under hardware_quirks/ for testable catalog
+try:
+    from .hardware_quirks import __all__ as _QUIRK_MODULES  # noqa: F401
+except Exception:
+    _QUIRK_MODULES = []  # type: ignore[assignment]
+
 DEFAULT_POLICY_PATH = Path("/usr/share/kyth/hardware-profiles.toml")
 DEFAULT_STATE_PATH = Path("/var/lib/kyth/hardware-policy.json")
 DEFAULT_REPORT_PATH = Path("/var/lib/kyth/hardware-support.json")

@@ -78,6 +78,32 @@ class HubState(Base if Base is not object else object):  # type: ignore[misc]
         except Exception:
             pass
 
+    # --- Control-plane extensions (progressive vs Bazzite/Portal) ---
+    # Hub as OS control plane: track staged/rollback/repair state so
+    # RepairPage and UpdatePage share one source of truth instead of
+    # per-page bootc spawns.
+
+    def set_update_status(self, status: str, detail: str = "") -> None:
+        self.set("update_status", {"status": status, "detail": detail})
+
+    def get_update_status(self) -> dict[str, str]:
+        return self.get("update_status", {"status": "idle", "detail": ""})
+
+    def set_rollback_available(self, available: bool) -> None:
+        self.set("rollback_available", available)
+
+    def is_rollback_available(self) -> bool:
+        return bool(self.get("rollback_available", False))
+
+    def set_repair_plan(self, plan: dict[str, Any] | None) -> None:
+        if plan is None:
+            self.clear("repair_plan")
+        else:
+            self.set("repair_plan", plan)
+
+    def get_repair_plan(self) -> dict[str, Any] | None:
+        return self.get("repair_plan")
+
 
 # Singleton for the running Hub process
 HUB_STATE = HubState()

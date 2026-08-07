@@ -14,6 +14,17 @@ from .tools import (
     _ntsync_state,
     _vulkan_state,
 )
+
+# Progressive: per-game latency env (Bazzite ships global layer, Kyth is per-game + lean)
+LATENCY_PROFILES: dict[str, dict[str, str]] = {
+    "low-latency": {"LOW_LATENCY_LAYER": "1", "MANGOHUD": "1"},
+    "balanced": {"MANGOHUD": "1"},
+    "battery": {},
+}
+
+
+def latency_env_for_profile(profile: str) -> dict[str, str]:
+    return dict(LATENCY_PROFILES.get(profile, LATENCY_PROFILES["balanced"]))
 from ..bootc import has_staged_update
 from ..hardware import _detect_controllers, _find_ntfs_drives
 from ..process import run_command
