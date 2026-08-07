@@ -88,6 +88,7 @@ RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/third
 # the one that ships. Sits after the large Proton-CachyOS/thirdparty download layers
 # (which it does not depend on) so splash tweaks don't re-pull them, and before
 # the BUILD_DATE cache-bust layer.
+ARG PLYMOUTH_HASH=unset
 COPY build_files/plymouth/kyth.plymouth             /tmp/kyth-plymouth/kyth.plymouth
 COPY build_files/plymouth/kyth.script               /tmp/kyth-plymouth/kyth.script
 COPY build_files/branding/kyth-logo-transparent.svg /tmp/kyth-branding/kyth-logo-transparent.svg
@@ -95,7 +96,8 @@ COPY build_files/branding/transparent-watermark.svg /tmp/kyth-branding/transpare
 COPY build_files/scripts/plymouth-setup.sh          /tmp/plymouth-setup.sh
 COPY build_base/plymouth/kyth-plymouth-configure    /tmp/kyth-plymouth-configure
 COPY build_files/scripts/plymouth-branding-guard.sh /tmp/plymouth-branding-guard.sh
-RUN bash /tmp/plymouth-setup.sh && \
+RUN : "cache-bust:plymouth=${PLYMOUTH_HASH}" && \
+    bash /tmp/plymouth-setup.sh && \
     rm -rf /tmp/kyth-plymouth /tmp/kyth-branding /tmp/plymouth-setup.sh /tmp/kyth-plymouth-configure /tmp/plymouth-branding-guard.sh
 
 # kyth-vscode-wallet and the other helpers below are needed by both
