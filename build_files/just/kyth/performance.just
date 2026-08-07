@@ -280,6 +280,41 @@ gaming-audit mode="":
     set -euo pipefail
     /usr/bin/kyth-gaming-audit {{ mode }}
 
+# Steam deadzone 5% gaming (steam-deadzone.toml)
+[group('KythOS')]
+steam-deadzone mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-steam-deadzone "{{ mode }}"
+
+# SELinux gaming allow_execheap (selinux-gaming.toml)
+[group('KythOS')]
+selinux-gaming mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-selinux-gaming "{{ mode }}"
+
+# Fcitx5 latency 10ms gaming (fcitx-latency.toml)
+[group('KythOS')]
+fcitx-latency mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-fcitx-latency "{{ mode }}"
+
+# HDR store preserve (hdr-store.toml)
+[group('KythOS')]
+hdr-store mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-hdr-store "{{ mode }}"
+
+# System audit — ledger + snapshot + trim
+[group('KythOS')]
+system-audit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-system-audit
+
 # Run an OpenGL app through Zink.
 [group('KythOS')]
 zink-run +args:

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-fcitx-latency — fcitx-latency.toml 10ms gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-fcitx-latency "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.fcitx_latency import load_fcitx_latency; c=load_fcitx_latency(); print(f"profile={c[\"profile\"]} latency_ms={c[\"latency_ms\"]}")' ;;
+    gaming) need_root "$@"; python3 -c 'from kyth_shared.fcitx_latency import load_fcitx_latency,save_fcitx_latency,apply_fcitx_latency; c=load_fcitx_latency(); c["profile"]="gaming"; c["latency_ms"]=10; save_fcitx_latency(c); apply_fcitx_latency(c)'; echo "fcitx gaming 10ms" ;;
+    balanced) need_root "$@"; python3 -c 'from kyth_shared.fcitx_latency import load_fcitx_latency,save_fcitx_latency,apply_fcitx_latency; c=load_fcitx_latency(); c["profile"]="balanced"; c["latency_ms"]=50; save_fcitx_latency(c); apply_fcitx_latency(c)'; echo "fcitx balanced 50ms" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.fcitx_latency import load_fcitx_latency,apply_fcitx_latency; apply_fcitx_latency(load_fcitx_latency())' ;;
+    *) echo "Usage: kyth-fcitx-latency [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac
