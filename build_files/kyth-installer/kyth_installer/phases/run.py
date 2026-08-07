@@ -10,7 +10,7 @@ from ..context import InstallerContext, InstallLifecycle, InstallPhase
 from ..cleanup import clear_secrets_and_orphan_mount, unmount_configuration
 from ..recovery import cleanup_registered_mounts
 from ..runner import run_command
-from ..system import _as_root, _require_no_symlink, _safe_umount, _try_stage_mok_enrollment, require_root
+from ..system import _as_root, _require_no_symlink, _safe_umount, _try_stage_mok_enrollment, format_os_error, require_root
 from .common import _push, _record_transaction
 from .finalize import _configure_installed_system, _handle_install_failure
 from .storage import _prepare_storage_for_plan

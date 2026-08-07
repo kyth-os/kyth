@@ -6,7 +6,7 @@ import traceback
 from pathlib import Path
 
 from ..config import STAGING_INSTALL_ROOT  # noqa: F401 - used via install re-export path but kept for completeness
-from ..context import InstallerContext, InstallLifecycle, InstallPhase
+from ..context import InstallRequest, InstallerContext, InstallLifecycle, InstallPhase
 from ..assurance import validate_installed_target
 from ..cleanup import unmount_configuration
 from ..plan import _get_manual_mounts
