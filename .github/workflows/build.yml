@@ -20,6 +20,10 @@ on:
       - 'disk_config/**'
       - 'installer/**'
       - 'Justfile'
+      # Agent/IDE — never land in OCI image, docs-only pushes shouldn't rebuild
+      - '.agents/**'
+      - '.vscode/**'
+      - '.tmp/**'
       # GitHub metadata
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/pull_request_template.md'
@@ -371,10 +375,16 @@ jobs:
           docker: "false"
           sudo-podman: "true"
 
-      - name: Free disk space before rechunking
+      - name: Free disk space before rechunking (conditional)
         run: |
-          docker buildx prune -f
-          docker system prune -f
+          USED_PCT="$(df --output=pcent / | tail -1 | tr -d ' %')"
+          if [ "${USED_PCT:-0}" -gt 80 ]; then
+            echo "::notice::Disk ${USED_PCT}% used on /, pruning buildx cache"
+            docker buildx prune -f
+            docker system prune -f
+          else
+            echo "::notice::Disk ${USED_PCT}% used on /, skipping prune (already freed via free-disk-space)"
+          fi
 
       # Default graphroot (on /) and runroot (tmpfs under /run) are both too
       # small for the rechunk mount; cachy hit the same ENOSPC-driven
