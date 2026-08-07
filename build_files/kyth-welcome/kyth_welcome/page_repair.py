@@ -267,7 +267,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             "Like File History-style backup: pick a backup drive (or network location), "
             "and Pika Backup keeps scheduled snapshots of your files. Restore any "
             "earlier version of a file from the same app. Snapshots are deduplicated, "
-            "so keeping months of history costs little space."
+            "so keeping months of history costs little space. Shows last backup time without opening terminal."
         )
         backup_body.setObjectName("card-copy")
         backup_body.setWordWrap(True)
