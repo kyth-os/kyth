@@ -249,6 +249,11 @@ class InstallerContext:
                     f"Installer phase cannot move backwards: {self.phase.value} -> {phase.value}"
                 )
             self.phase = phase
+            # Publish phase as first-class SSE event (R-05) — keep pct for bar, phase for label
+            try:
+                self.events.publish({"type": "phase", "phase": phase.value})
+            except Exception:
+                pass
 
     def register_mount(self, mountpoint: str) -> None:
         with self.state_lock:
