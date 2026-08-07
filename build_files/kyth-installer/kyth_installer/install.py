@@ -34,7 +34,15 @@ from .streaming import StreamingCommandRunner
 from kyth_shared import get_rx_bytes
 from kyth_shared.accounts import create_installer_user as _shared_create_installer_user
 
-from .phases.common import _push
+from .phases.common import (
+    _assert_still_on_ac,
+    _disk_image_hold,
+    _push,
+    _record_transaction,
+    _start_power_watch,
+    _stop_power_watch,
+)
+from .phases.bootc_cmd import _build_bootc_install_cmd, _run_cmd
 from .system import (
     _as_root,
     _require_no_symlink,
@@ -49,174 +57,6 @@ from .system import (
 )
 
 
-def _assert_still_on_ac(log) -> None:
-    """Continuous power guard — re-checks at each phase boundary.
-
-    run_preflight() already gates the start of install; a long shrink or
-    image download can run for many minutes, so we re-check before any
-    destructive storage step and again before the image write. If AC is
-    yanked mid-install the installer fails closed with an actionable
-    message instead of leaving a half-written disk on battery loss.
-    """
-    from .assurance import _battery_check
-
-    check = _battery_check()
-    if check.status == "fail":
-        msg = f"{check.detail} \u2014 Plug in AC power and keep it connected through install."
-        log(f"Power guard refused: {msg}")
-        raise RuntimeError(msg)
-
-
-def _start_power_watch(log, context, stop_event: threading.Event) -> threading.Thread:
-    """Background poll every 10s through IMAGE phase; fails closed on AC yank."""
-    from .assurance import _battery_check
-    def _watch():
-        while not stop_event.is_set():
-            if stop_event.wait(10):
-                break
-            try:
-                chk = _battery_check()
-                if chk.status == "fail":
-                    msg = f"Power lost during install: {chk.detail} — aborting to avoid half-write."
-                    log(msg)
-                    try:
-                        context._power_failed = msg  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
-                    break
-            except Exception:
-                pass
-    th = threading.Thread(target=_watch, name="kyth-power-watch", daemon=True)
-    th.start()
-    return th
-
-
-def _stop_power_watch(thread: threading.Thread | None, stop_event: threading.Event | None) -> None:
-    if stop_event is not None:
-        stop_event.set()
-    if thread is not None:
-        thread.join(timeout=2)
-
-
-
-def _disk_image_hold(disk: str, log):
-    """Context manager: hold shared flock on disk through IMAGE phase."""
-    import contextlib, fcntl, os
-    @contextlib.contextmanager
-    def _hold():
-        fd = -1
-        try:
-            try:
-                fd = os.open(disk, os.O_RDONLY)
-                fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-                log(f"Holding shared lock on {disk} through image write...")
-            except Exception as exc:
-                log(f"Warning: could not flock disk for IMAGE phase: {exc}")
-                fd = -1
-            yield
-        finally:
-            if fd != -1:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-                    os.close(fd)
-                except Exception:
-                    pass
-    return _hold()
-
-def _record_transaction(
-    context: InstallerContext,
-    status: str,
-    *,
-    message: str = "",
-    log=None,
-) -> None:
-    try:
-        write_transaction_state(
-            TRANSACTION_FILE,
-            context=context,
-            status=status,
-            message=message,
-        )
-    except Exception as exc:
-        if log is not None:
-            log(f"Warning: could not update installer transaction report: {exc}")
-
-
-def _build_bootc_install_cmd(
-    subcmd: str,
-    src_ref: str,
-    tgt_ref: str,
-    target: str,
-    extra_flags: list[str] | None = None,
-) -> list[str]:
-    cmd: list[str] = [
-        "bootc", "install", subcmd,
-        "--source-imgref", src_ref,
-        "--target-imgref", tgt_ref,
-    ]
-    # --acknowledge-destructive only exists on `to-filesystem` (it silences the
-    # warning when the target is the running system's root). `to-disk` has no
-    # such flag at all — bootc rejects it with "unexpected argument" — and
-    # relies solely on --wipe to confirm the destructive intent.
-    if subcmd == "to-filesystem":
-        cmd.append("--acknowledge-destructive")
-    if extra_flags:
-        cmd.extend(extra_flags)
-    if SKIP_FETCH_CHECK and "--skip-fetch-check" not in cmd:
-        cmd.append("--skip-fetch-check")
-    cmd.append(target)
-    return cmd
-
-
-def _run_cmd(
-    cmd: list[str],
-    pct_start: int,
-    pct_end: int,
-    log,
-    progress,
-    stall_timeout: int = 600,
-    absolute_timeout: int | None = 3600,
-    publish=None,
-) -> None:
-    full_cmd = _as_root(cmd)
-    def error_factory(returncode: int, recent_output: list[str], argv: list[str]) -> Exception:
-        lowered = "\n".join(recent_output).lower()
-        network_tokens = (
-            "network is unreachable",
-            "no route to host",
-            "temporary failure in name resolution",
-            "name or service not known",
-            "could not resolve",
-            "connection timed out",
-            "i/o timeout",
-            "tls handshake timeout",
-            "connection reset",
-            "connection refused",
-        )
-        if any(token in lowered for token in network_tokens):
-            return RuntimeError(
-                _friendly_network_error(
-                    "The image download lost network access before it finished."
-                )
-            )
-        detail = "\n".join(recent_output[-10:]) or "No command output was captured."
-        return RuntimeError(
-            f"Command failed (exit {returncode}):\n  {' '.join(argv)}\n\n{detail}"
-        )
-
-    StreamingCommandRunner(
-        rx_bytes=get_rx_bytes,
-        publish=publish or (lambda _event: None),
-    ).run(
-        full_cmd,
-        pct_start,
-        pct_end,
-        log,
-        progress,
-        stall_timeout=stall_timeout,
-        absolute_timeout=absolute_timeout,
-        error_factory=error_factory,
-    )
 
 def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallPlan:
     from .execution import check_cancelled
