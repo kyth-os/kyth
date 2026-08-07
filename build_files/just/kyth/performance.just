@@ -350,6 +350,41 @@ hdr-per-game:
     set -euo pipefail
     /usr/bin/kyth-hdr-per-game
 
+# Bore sched_bore=1 gaming (bore.toml)
+[group('KythOS')]
+bore mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-bore "{{ mode }}"
+
+# Shader cache auto 2G/4G (shader-cache-size.toml)
+[group('KythOS')]
+shader-cache-size mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-shader-cache-size "{{ mode }}"
+
+# Overlay metacopy=on btrfs (podman-overlay.toml)
+[group('KythOS')]
+podman-overlay mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-podman-overlay "{{ mode }}"
+
+# Net backlog 5000 gaming (net-backlog.toml)
+[group('KythOS')]
+net-backlog mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-net-backlog "{{ mode }}"
+
+# EPP AC performance vs balanced (epp-ac.toml)
+[group('KythOS')]
+epp-ac mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-epp-ac "{{ mode }}"
+
 # Run an OpenGL app through Zink.
 [group('KythOS')]
 zink-run +args:

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-net-backlog — net-backlog.toml gaming 5000
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-net-backlog "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.net_backlog import load_backlog,backlog_status; c=load_backlog(); print(f\"profile={c['profile']} active={backlog_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.net_backlog import load_backlog,save_backlog,generate_backlog; c=load_backlog(); c['profile']='gaming'; save_backlog(c); generate_backlog(c)"; sysctl --system >/dev/null 2>&1 || true; echo "net backlog gaming 5000" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.net_backlog import load_backlog,save_backlog,generate_backlog; c=load_backlog(); c['profile']='balanced'; save_backlog(c); generate_backlog(c)"; echo "net backlog balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.net_backlog import load_backlog,generate_backlog; generate_backlog(load_backlog())" ;;
+    *) echo "Usage: kyth-net-backlog [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

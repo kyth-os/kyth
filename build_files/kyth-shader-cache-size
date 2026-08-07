@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# kyth-shader-cache-size — shader-cache-size.toml auto 2G/4G
+set -euo pipefail
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.shader_cache_size import load_shader_size,resolve_size; c=load_shader_size(); print(f\"mode={c['mode']} size={c['size']} resolved={resolve_size(c)}\")" ;;
+    auto) python3 -c "from kyth_shared.shader_cache_size import load_shader_size,save_shader_size,generate_shader_size; c=load_shader_size(); c['mode']='auto'; save_shader_size(c); generate_shader_size(c)"; echo "shader cache auto" ;;
+    *) echo "Usage: kyth-shader-cache-size [status|auto]" >&2; exit 1 ;;
+esac
