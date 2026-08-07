@@ -210,6 +210,41 @@ readahead-run +args:
     set -euo pipefail
     exec /usr/bin/kyth-readahead-run {{ args }}
 
+# Master gaming (gaming-performance.toml) — one toggle for 46-60
+[group('KythOS')]
+gaming-master profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-gaming-master "{{ profile }}"
+
+# Wine sync (wine-sync.toml) — NTSync/futex2 auto
+[group('KythOS')]
+wine-sync mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-wine-sync "{{ mode }}"
+
+# KWin latency (kwin-latency.toml) — tearing/MaxFPS for VRR
+[group('KythOS')]
+kwin-latency profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-kwin-latency "{{ profile }}"
+
+# PipeWire gaming quantum (pipewire-gaming.toml)
+[group('KythOS')]
+pipewire-gaming profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-pipewire-gaming "{{ profile }}"
+
+# Btrfs autotune weekly (btrfs-autotune.toml)
+[group('KythOS')]
+btrfs-autotune mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-btrfs-autotune "{{ mode }}"
+
 # Run an OpenGL app through Zink.
 [group('KythOS')]
 zink-run +args:

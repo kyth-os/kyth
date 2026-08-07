@@ -189,6 +189,27 @@ class PerformancePage(Page):
         btn_readahead.clicked.connect(lambda: self._run_clean("readahead"))
         clean_row3.addWidget(btn_readahead)
         clean_layout.addLayout(clean_row3)
+        # row 4: 61-65 master + wine/kwin/pipewire/btrfs-autotune
+        clean_row4 = QHBoxLayout()
+        clean_row4.setSpacing(8)
+        btn_master = QPushButton("MASTER Gaming")
+        btn_master.setObjectName("primary")
+        btn_master.setToolTip("gaming-performance.toml one toggle for 46-60 (kargs/io/thp/irq/btrfs/trim/ananicy/zswap/sched/net)")
+        btn_master.clicked.connect(lambda: self._run_clean("master"))
+        clean_row4.addWidget(btn_master)
+        btn_wine = QPushButton("WineSync")
+        btn_wine.clicked.connect(lambda: self._run_clean("wine"))
+        clean_row4.addWidget(btn_wine)
+        btn_kwin = QPushButton("KWin")
+        btn_kwin.clicked.connect(lambda: self._run_clean("kwin"))
+        clean_row4.addWidget(btn_kwin)
+        btn_pipe = QPushButton("PipeWG")
+        btn_pipe.clicked.connect(lambda: self._run_clean("pipewire"))
+        clean_row4.addWidget(btn_pipe)
+        btn_bauto = QPushButton("BtrfsAuto")
+        btn_bauto.clicked.connect(lambda: self._run_clean("btrfsauto"))
+        clean_row4.addWidget(btn_bauto)
+        clean_layout.addLayout(clean_row4)
         self._add(clean_card)
 
         # ── Session history ────────────────────────────────────────────────────
@@ -467,6 +488,26 @@ class PerformancePage(Page):
                 from kyth_shared.readahead_preset import load_readahead
                 c = load_readahead()
                 self._clean_status.setText(f"readahead {c['enabled']} {c['size_mb']}MB")
+            elif which == "master":
+                from kyth_shared.gaming_master import load_master
+                c = load_master()
+                self._clean_status.setText(f"master {c['profile']} 46-60")
+            elif which == "wine":
+                from kyth_shared.wine_sync import load_wine_sync, wine_sync_status, probe_wine_sync
+                c = load_wine_sync()
+                self._clean_status.setText(f"wine {c['mode']} probe={probe_wine_sync()} env={wine_sync_status()}")
+            elif which == "kwin":
+                from kyth_shared.kwin_latency import load_kwin_latency, kwin_latency_status
+                c = load_kwin_latency()
+                self._clean_status.setText(f"kwin {c['profile']} active={kwin_latency_status()}")
+            elif which == "pipewire":
+                from kyth_shared.pipewire_gaming import load_pipewire_gaming, pipewire_gaming_status
+                c = load_pipewire_gaming()
+                self._clean_status.setText(f"pipewire {c['profile']} q={c['quantum']} active={pipewire_gaming_status()}")
+            elif which == "btrfsauto":
+                from kyth_shared.btrfs_autotune import load_btrfs_autotune
+                c = load_btrfs_autotune()
+                self._clean_status.setText(f"btrfs-auto {c['enabled']} thr={c['threshold']}")
             restyle(self._clean_status)
         except Exception as exc:
             self._clean_status.setText(f"{which} failed — {exc}")
