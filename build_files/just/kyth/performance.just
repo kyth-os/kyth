@@ -574,6 +574,41 @@ min-free-kbytes mode="status":
     set -euo pipefail
     /usr/bin/kyth-min-free-kbytes "{{ mode }}"
 
+# Rmem max 16777216 gaming (rmem-max.toml)
+[group('KythOS')]
+rmem-max mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-rmem-max "{{ mode }}"
+
+# Wmem max 16777216 gaming (wmem-max.toml)
+[group('KythOS')]
+wmem-max mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-wmem-max "{{ mode }}"
+
+# Aio max 1048576 gaming (aio-max.toml)
+[group('KythOS')]
+aio-max mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-aio-max "{{ mode }}"
+
+# Overcommit memory 1 gaming (overcommit-memory.toml)
+[group('KythOS')]
+overcommit-memory mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-overcommit-memory "{{ mode }}"
+
+# Netdev budget 600 gaming (netdev-budget.toml)
+[group('KythOS')]
+netdev-budget mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-netdev-budget "{{ mode }}"
+
 # EPP AC performance vs balanced (epp-ac.toml)
 [group('KythOS')]
 epp-ac mode="status":
