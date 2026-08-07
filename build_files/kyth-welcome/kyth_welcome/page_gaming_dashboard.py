@@ -198,14 +198,16 @@ class _DashboardMixin:
             f"<b>Bottles:</b> {bottles_status}"
         )
 
-        # 2. Runtime Engine
+        # 2. Runtime Engine — Windows switchers need to see Windows games translate
         pc_ver = _proton_cachyos_version() or "None"
-        mangohud = "🟢 Active" if _mangohud_installed() else "🔴 Missing"
+        # Show version with Windows-games framing: "Windows games via Proton-CachyOS 11"
+        pc_label = pc_ver if pc_ver == "None" else f"{pc_ver} — Windows games ready"
+        mangohud = "🟢 Active" if _mangohud_installed() else "🔴 Missing — install via Gaming → Tools"
         vkbasalt = "🟢 Active" if _vkbasalt_installed() else "⚪ Optional"
-        gamescope = "🟢 Active" if _gamescope_installed() else "🔴 Missing"
+        gamescope = "🟢 Active" if _gamescope_installed() else "🔴 Missing — install via Gaming → Tools"
 
         self._hud_runtime_desc.setText(
-            f"<b>Proton-CachyOS:</b> {pc_ver}<br>"
+            f"<b>Proton-CachyOS:</b> {pc_label}<br>"
             f"<b>Gamescope compositor:</b> {gamescope}<br>"
             f"<b>MangoHud overlay:</b> {mangohud}<br>"
             f"<b>vkBasalt post-processing:</b> {vkbasalt}"
