@@ -315,6 +315,41 @@ system-audit:
     set -euo pipefail
     /usr/bin/kyth-system-audit
 
+# PSI gaming 90% avoid (psi.toml)
+[group('KythOS')]
+psi-gaming mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-psi-gaming "{{ mode }}"
+
+# NUMA X3D CCD0 (numa.toml)
+[group('KythOS')]
+numa mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-numa "{{ mode }}"
+
+# PCIe ASPM L1 off gaming (pcie.toml)
+[group('KythOS')]
+pcie mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-pcie "{{ mode }}"
+
+# THP collapse defrag 0 gaming (thp-collapse.toml)
+[group('KythOS')]
+thp-collapse mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-thp-collapse "{{ mode }}"
+
+# HDR per-game peak (hdr-per-game.toml)
+[group('KythOS')]
+hdr-per-game:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-hdr-per-game
+
 # Run an OpenGL app through Zink.
 [group('KythOS')]
 zink-run +args:
