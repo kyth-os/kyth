@@ -52,6 +52,24 @@ dualboot-status:
     echo "         'just reclaim-windows' when you're ready to grow KythOS."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Reclaim Windows space after 30-day try — guided, needs confirmation.
+[group('KythOS')]
+reclaim-windows:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ Reclaim Windows Space — guided —━━━"
+    echo "  This will list the Windows NTFS partitions for removal."
+    echo "  You must confirm with 'yes' to proceed. No data is touched until you confirm."
+    sudo lsblk -o NAME,FSTYPE,LABEL,SIZE,MOUNTPOINT | grep -i ntfs || echo "  No NTFS partitions found."
+    echo
+    read -p "  Type 'yes' to open System Hub → Disks to reclaim (or 'no' to cancel): " ans
+    if [[ "$ans" == "yes" ]]; then
+        echo "  Opening System Hub — use Disks to delete the Windows partition and grow KythOS."
+        nohup /usr/bin/kyth-welcome >/dev/null 2>&1 &
+    else
+        echo "  Cancelled — your Windows install is untouched. Run 'just dualboot-status' anytime."
+    fi
+
 # Fix the clock skew between KythOS and a dual-booted Windows install.
 #
 # Windows stores the hardware clock as local time; Linux stores it as UTC.
