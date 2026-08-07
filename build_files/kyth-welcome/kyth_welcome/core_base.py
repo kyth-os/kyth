@@ -46,17 +46,41 @@ def prefer_xwayland_if_wayland_plugin_missing() -> None:
         "/usr/lib/x86_64-linux-gnu/qt6/plugins/platforms",
         "/usr/lib/aarch64-linux-gnu/qt6/plugins/platforms",
     ]
+    # Also check pip wheel locations (PySide6/PyQt6 bundle Qt under site-packages).
+    try:
+        import importlib.util as _ilu
+
+        for _binding in ("PySide6", "PyQt6"):
+            _spec = _ilu.find_spec(_binding)
+            if _spec and _spec.origin:
+                _wheel_dir = os.path.join(
+                    os.path.dirname(_spec.origin), "Qt", "plugins", "platforms"
+                )
+                if _wheel_dir not in QT6_PLATFORM_DIRS:
+                    QT6_PLATFORM_DIRS.append(_wheel_dir)
+    except Exception:
+        pass
     for platform_dir in QT6_PLATFORM_DIRS:
         if not os.path.isdir(platform_dir):
             continue
+        try:
+            names = os.listdir(platform_dir)
+        except OSError:
+            continue
         if any(
-            name.startswith("libqwayland-") or name == "libqwayland-generic.so"
-            for name in os.listdir(platform_dir)
+            n == "libqwayland.so"
+            or n.startswith("libqwayland-")
+            or n == "libqwayland-generic.so"
+            or n == "libqwayland-egl.so"
+            for n in names
         ):
             return  # wayland platform plugin present — use it
-        os.environ["QT_QPA_PLATFORM"] = "xcb"
+        # Only force xcb if its plugin actually exists in this dir;
+        # otherwise leave Qt's default chooser alone.
+        if "libqxcb.so" in names:
+            os.environ["QT_QPA_PLATFORM"] = "xcb"
         return
-    os.environ["QT_QPA_PLATFORM"] = "xcb"
+    # No platform dir found at all — don't force; let Qt choose (wayland via wheel may still work).
 
 
 def apply_install_badge(lbl: QLabel, ok: bool, ok_text: str = "Installed",

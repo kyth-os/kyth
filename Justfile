@@ -260,6 +260,30 @@ format:
     fi
     /usr/bin/find . -iname "*.sh" -type f -exec shfmt --write "{}" ';'
 
+# Set up a local venv to run System Hub outside the image (handles read-only $HOME overlay).
+[group('Utility')]
+setup-hub:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 -m venv .venv
+    .venv/bin/pip install --disable-pip-version-check PySide6
+    .venv/bin/pip install --disable-pip-version-check -e build_files/kyth_shared -e build_files/kyth-welcome
+    echo "Hub venv ready: .venv/bin/kyth-welcome"
+
+# Run System Hub locally from the checkout (uses .venv if present).
+[group('Utility')]
+run-hub *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -x .venv/bin/kyth-welcome ]]; then
+        exec .venv/bin/kyth-welcome {{ args }}
+    fi
+    if /usr/bin/python3 -c "import PySide6" 2>/dev/null || /usr/bin/python3 -c "import PyQt6" 2>/dev/null; then
+        exec env PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome /usr/bin/python3 build_files/kyth-welcome/kyth-welcome {{ args }}
+    fi
+    echo "No Qt binding found. Run: just setup-hub" >&2
+    exit 1
+
 # Preview the installer UI in your browser (no disk changes — safe for dev)
 [group('Utility')]
 preview-installer:
