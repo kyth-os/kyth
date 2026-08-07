@@ -126,10 +126,44 @@ def _probe_storage(
     )
 
 from .plan_validate import (  # canonical (plan.py 788 → split)
-    _validate_efi_target,
-    _validate_install_target,
-    _validate_partition_target,
+    _validate_efi_target as _pv_validate_efi_target,
+    _validate_install_target as _pv_validate_install_target,
+    _validate_partition_target as _pv_validate_partition_target,
 )
+# Wrapper to keep test mocks on plan._parent_disk effective after split
+def _validate_install_target(*args, **kwargs):
+    import importlib
+    pv = importlib.import_module(__name__.rsplit('.', 1)[0] + '.plan_validate')
+    # Sync mocked _parent_disk / _is_gpt_disk / _has_bios_boot etc if tests patched plan.*
+    for attr in ('_parent_disk', '_is_gpt_disk', '_has_bios_boot_partition', 'find_efi_partition', 'list_disks', 'list_partitions'):
+        if hasattr(pv, attr) and attr in globals():
+            try:
+                pv.__dict__[attr] = globals()[attr]
+            except Exception:
+                pass
+    return _pv_validate_install_target(*args, **kwargs)
+
+def _validate_efi_target(*args, **kwargs):
+    import importlib
+    pv = importlib.import_module(__name__.rsplit('.', 1)[0] + '.plan_validate')
+    for attr in ('_parent_disk', '_is_gpt_disk', '_has_bios_boot_partition', 'find_efi_partition', 'list_disks', 'list_partitions'):
+        if hasattr(pv, attr) and attr in globals():
+            try:
+                pv.__dict__[attr] = globals()[attr]
+            except Exception:
+                pass
+    return _pv_validate_efi_target(*args, **kwargs)
+
+def _validate_partition_target(*args, **kwargs):
+    import importlib
+    pv = importlib.import_module(__name__.rsplit('.', 1)[0] + '.plan_validate')
+    for attr in ('_parent_disk', '_is_gpt_disk', '_has_bios_boot_partition', 'find_efi_partition', 'list_disks', 'list_partitions'):
+        if hasattr(pv, attr) and attr in globals():
+            try:
+                pv.__dict__[attr] = globals()[attr]
+            except Exception:
+                pass
+    return _pv_validate_partition_target(*args, **kwargs)
 
 def _is_gpt_disk(disk: str) -> bool:
     try:
