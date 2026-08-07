@@ -119,14 +119,16 @@ RUN python3 -m pip install \
 
 # Static system configuration — sysctl, kernel modules, PipeWire, Proton env
 # vars, gamemode, MangoHud, vkBasalt, bluetooth, and kyth-* service units.
-# Stable — only re-runs when sysconfig-static.sh or config defaults change,
-# not on every daily dnf5 upgrade. This keeps the post-upgrade layer chain
-# short and avoids users pulling a new sysconfig layer when only packages changed.
+# Hash-gated — only re-runs when sysconfig-static.sh or sysconfig/ or data/
+# change. Keeps the post-upgrade layer chain short and avoids users pulling
+# a new sysconfig layer when only packages changed.
+ARG SYSCONFIG_HASH=unset
 RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx/sysconfig-static.sh \
     --mount=type=bind,source=build_files/scripts/sysconfig,target=/ctx/sysconfig \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/data,target=/ctx/data \
     --mount=type=tmpfs,dst=/tmp \
+    : "cache-bust:sysconfig=${SYSCONFIG_HASH}" && \
     bash /ctx/sysconfig-static.sh
 
 # BUILD_DATE busts the cache for the upgrade layer and everything after it on

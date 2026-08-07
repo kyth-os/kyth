@@ -15,6 +15,9 @@ from ..ui_tokens import RADIUS_PILL, STATUS_ERROR, STATUS_OK, STATUS_WARN
 # FlowLayout extracted to widgets/layout.py (R8-3) — keep re-export for compat
 from .layout import FlowLayout  # noqa: F401
 
+# Cards/sections extracted to widgets/cards.py (slice 4) — keep re-export for compat
+from .cards import _divider, _make_card, _make_grid, _make_section_header  # noqa: F401
+
 def _theme_icon(*names: str) -> QIcon:
     """Return the first available system theme icon, or a null icon."""
     for name in names:
@@ -22,58 +25,6 @@ def _theme_icon(*names: str) -> QIcon:
         if not icon.isNull():
             return icon
     return QIcon()
-
-
-def _divider() -> QFrame:
-    f = QFrame()
-    f.setObjectName("divider")
-    f.setFrameShape(QFrame.Shape.HLine)
-    f.setFixedHeight(1)
-    return f
-
-
-def _make_card(name: str = "card") -> tuple[QFrame, QVBoxLayout]:
-    card = QFrame()
-    card.setObjectName(name)
-    layout = QVBoxLayout(card)
-    layout.setContentsMargins(20, 18, 20, 18)
-    layout.setSpacing(10)
-    return card, layout
-
-
-def _make_section_header(title: str, subtitle: str = "") -> tuple[QFrame, QVBoxLayout]:
-    """Windows Settings-style section header — replaces repeated ad-hoc title+body labels.
-
-    Taste: no tracked all-caps micro-kicker, no emoji, single weight hierarchy (title 15/700, subtitle 12/muted)."""
-    frame = QFrame()
-    frame.setObjectName("section-header")
-    layout = QVBoxLayout(frame)
-    layout.setContentsMargins(2, 14, 2, 6)
-    layout.setSpacing(4)
-    t = QLabel(title)
-    t.setObjectName("section-title")
-    layout.addWidget(t)
-    if subtitle:
-        s = QLabel(subtitle)
-        s.setObjectName("section-subtitle")
-        s.setWordWrap(True)
-        layout.addWidget(s)
-    return frame, layout
-
-
-def _make_grid(container: QVBoxLayout) -> QGridLayout:
-    """2-col responsive grid for cards — Windows Settings density without bento.
-
-    Taste: no bento grid for everything, no identical 3-card lucide grid. This
-    is a plain 2-col with 12px gap, cards are still QFrame#card."""
-    grid = QGridLayout()
-    grid.setContentsMargins(0, 0, 0, 0)
-    grid.setHorizontalSpacing(12)
-    grid.setVerticalSpacing(12)
-    grid.setColumnStretch(0, 1)
-    grid.setColumnStretch(1, 1)
-    container.addLayout(grid)
-    return grid
 
 
 class SegmentedTabBar(QFrame):
@@ -155,7 +106,7 @@ def _copy_text(text: str):
     QApplication.clipboard().setText(text)
 
 
-class StatusBadge(QLabel):
+class PillBadge(QLabel):
     """Pill badge for Windows Settings-like status — ok/warn/err/dim, one radius, no glow.
 
     Taste: no left-border accent everywhere, no identical glow, single pill radius (999)."""
@@ -165,7 +116,6 @@ class StatusBadge(QLabel):
 
     def set_status(self, status: str):
         self.setObjectName(f"status-badge-{status}")
-        # Pill via QSS border-radius:999 + padding, not per-card glow
         restyle(self)
 
     def setText(self, text: str):  # type: ignore[override]
@@ -173,7 +123,11 @@ class StatusBadge(QLabel):
         self.setVisible(bool(text))
 
 
-class StatusBadge(QLabel):
+# Back-compat alias — older pages used StatusBadge for pill; keep it.
+StatusBadgePill = PillBadge
+
+
+class TaskStatusBadge(QLabel):
     """Compact shared status label for page and task feedback."""
     _STATE_NAMES: ClassVar[dict[str, str]] = {
         "idle": "task-status-idle",
@@ -187,7 +141,6 @@ class StatusBadge(QLabel):
         super().__init__()
         self.setWordWrap(True)
         self.setMinimumWidth(220)
-
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.set_state(state, text)
 
@@ -195,6 +148,12 @@ class StatusBadge(QLabel):
         self.setText(text)
         self.setObjectName(self._STATE_NAMES.get(state, "task-status-idle"))
         restyle(self)
+
+
+# The historic duplicate definition made StatusBadge point at the task badge.
+# Keep that behavior so `from widgets import StatusBadge` expecting
+# set_state still works, while new code can use PillBadge/TaskStatusBadge.
+StatusBadge = TaskStatusBadge
 
 
 def status_color(state: str) -> str:
@@ -216,7 +175,7 @@ class ActionRow(QFrame):
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(10)
-        self.status = StatusBadge(status_text, status_state)
+        self.status = TaskStatusBadge(status_text, status_state)
 
     def add_button(self, text: str, callback=None, *, primary: bool = False) -> QPushButton:
         button = QPushButton(text)
@@ -273,7 +232,7 @@ class CommandResultPanel(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        self.status = StatusBadge(idle_text, "idle")
+        self.status = TaskStatusBadge(idle_text, "idle")
         layout.addWidget(self.status)
 
         row = QHBoxLayout()
