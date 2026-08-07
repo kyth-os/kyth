@@ -34,6 +34,24 @@ setup-boot-windows-steam:
     echo "Add it to Steam:"
     echo "  Steam → Add a game → Add a Non-Steam Game → Browse → /usr/local/bin/boot-windows"
 
+# Show dual-boot status and reclaim help — the 30-day "try with Windows" win.
+# Keeps Windows boot entry while you evaluate; when ready, reclaim its space.
+[group('KythOS')]
+dualboot-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ KythOS Dual-Boot Status ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if sudo efibootmgr -v 2>/dev/null | grep -qi "windows"; then
+        echo "  Windows EFI entry: found (dual-boot active — safe to keep or reclaim)"
+        sudo efibootmgr -v | grep -i windows || true
+    else
+        echo "  Windows EFI entry: not found (single-boot)"
+    fi
+    echo
+    echo "  Space: use System Hub → Gaming Migration to copy files, then"
+    echo "         'just reclaim-windows' when you're ready to grow KythOS."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
 # Fix the clock skew between KythOS and a dual-booted Windows install.
 #
 # Windows stores the hardware clock as local time; Linux stores it as UTC.
