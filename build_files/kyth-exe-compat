@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""kyth-exe-compat — Dolphin xdg-open interceptor for .exe (offline compat check)."""
+import sys
+from pathlib import Path
+from kyth_shared.exe_compat import check_exe
+def main():
+    exe=sys.argv[1] if len(sys.argv)>1 else ""
+    if not exe:
+        print("Usage: kyth-exe-compat <exe>"); return 1
+    r=check_exe(exe)
+    print(f"{r['status']} via {r['runner']}: {r['reason']}")
+    # Also suggest runner
+    if r["runner"]=="Bottles":
+        print("Run with: bottles-cli run <exe>  or  Lutris")
+    return 0
+if __name__=="__main__":
+    raise SystemExit(main())
