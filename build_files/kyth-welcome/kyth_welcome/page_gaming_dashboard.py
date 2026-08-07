@@ -25,8 +25,9 @@ class _DashboardMixin:
         hero_title.setObjectName("genz-hero-title")
         hero_text_col.addWidget(hero_title)
 
-        hero_sub = QLabel("Curated launchers, Gamescope compositing, MangoHud overlay, and performance-tuned Proton runners.")
+        hero_sub = QLabel("Your Windows games, tuned — Proton-CachyOS, Gamescope, MangoHud, all wired for one-click launch.")
         hero_sub.setObjectName("genz-hero-subtitle")
+        hero_sub.setWordWrap(True)
         hero_text_col.addWidget(hero_sub)
         hero_layout.addLayout(hero_text_col, 1)
 
