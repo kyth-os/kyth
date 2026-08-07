@@ -63,6 +63,19 @@ class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _H
         self._banner_card.hide()
         self._add(self._banner_card)
 
+        # R6: AI control plane — same repair plan that Welcome/ Repair use,
+        # shown here as a compact summary above hardware cards (no new probe).
+        self._ai_card, self._ai_layout = _make_card("card-accent-ok")
+        self._ai_title = QLabel("AI Control Plane — offline")
+        self._ai_title.setObjectName("card-title")
+        self._ai_layout.addWidget(self._ai_title)
+        self._ai_body = QLabel("AI check will run with the hardware probe.")
+        self._ai_body.setObjectName("card-copy")
+        self._ai_body.setWordWrap(True)
+        self._ai_layout.addWidget(self._ai_body)
+        self._ai_card.hide()
+        self._add(self._ai_card)
+
         self._cards_widget = QWidget()
         self._cards_layout = QVBoxLayout(self._cards_widget)
         self._cards_layout.setContentsMargins(0, 0, 0, 0)

@@ -104,6 +104,26 @@ class _HealthMixin:
         else:
             self._set_status("ok", "Hardware checks passed \u2014 running extended checks\u2026")
 
+        # R6: AI plan from same snapshot + boot_health + Evaluation (no extra probe)
+        try:
+            from kyth_shared.ai_assist import build_repair_plan as _build_ai
+
+            ai_plan = _build_ai()
+            summary = str(ai_plan.get("summary", "")).strip()
+            actions = ai_plan.get("actions", [])
+            if summary and summary != "System looks healthy. No repair actions needed.":
+                self._ai_body.setText(summary + ("\n\nActions: " + ", ".join(a.get("label","") for a in actions[:3]) if actions else ""))
+                self._ai_card.setObjectName("card-accent-warn" if actions else "card-accent-ok")
+            else:
+                self._ai_body.setText("System looks healthy. No AI repair actions needed.")
+                self._ai_card.setObjectName("card-accent-ok")
+            from ..core_base import restyle as _restyle
+
+            _restyle(self._ai_card)
+            self._ai_card.show()
+        except Exception:
+            self._ai_card.hide()
+
         self._health_worker = DataWorker("health", _health_command_report)
         self._health_worker.result.connect(self._on_health_done)
         self._health_worker.failed.connect(self._on_health_failed)

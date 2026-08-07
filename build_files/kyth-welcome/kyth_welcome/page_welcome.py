@@ -90,6 +90,23 @@ class WelcomePage(Page):
 
         self._add(self._make_vibe_section())
         self._add_layout(self._make_hud_grid())
+        # R6: AI control plane — surface deterministic repair plan from same
+        # probe snapshot + boot_health + Evaluation that RepairPage uses.
+        self._ai_card, ai_layout = _make_card("card-accent-ok")
+        ai_title = QLabel("AI Control Plane — offline")
+        ai_title.setObjectName("card-title")
+        ai_layout.addWidget(ai_title)
+        self._ai_desc = QLabel("Checking system health…")
+        self._ai_desc.setObjectName("card-copy")
+        self._ai_desc.setWordWrap(True)
+        ai_layout.addWidget(self._ai_desc)
+        self._ai_btn = QPushButton("Open Repair")
+        self._ai_btn.setToolTip("Open Repair for the AI-suggested action")
+        self._ai_btn.clicked.connect(lambda _=False: self._navigate("Repair"))
+        self._ai_btn.hide()
+        ai_layout.addWidget(self._ai_btn)
+        self._add(self._ai_card)
+        self._ai_worker = None
 
         self._apply_preset_worker = None
 
@@ -112,6 +129,7 @@ class WelcomePage(Page):
 
         if not IS_LIVE:
             single_shot(self, 0, self._refresh_system_status)
+            single_shot(self, 0, self._refresh_ai_plan)
 
     # hero/hud/grid moved to _Welcome*Mixin (page_welcome_hero/hud/grid.py) — compose_on_first_init provides them
 
@@ -201,6 +219,41 @@ class WelcomePage(Page):
         self._status_worker.failed.connect(lambda _key, _message: None)
         self._status_worker.finished.connect(lambda: setattr(self, "_status_worker", None))
         self._status_worker.start()
+
+    @staticmethod
+    def _gather_ai_plan() -> dict:
+        try:
+            from kyth_shared.ai_assist import build_repair_plan
+
+            return build_repair_plan()
+        except Exception as exc:
+            return {"summary": f"AI check unavailable: {exc}", "actions": []}
+
+    def _refresh_ai_plan(self):
+        if self._ai_worker is not None:
+            return
+        from .services.gaming import DataWorker
+
+        self._ai_worker = DataWorker("welcome-ai-plan", self._gather_ai_plan)
+        self._ai_worker.result.connect(self._on_ai_plan_ready)
+        self._ai_worker.failed.connect(lambda _k, _m: self._ai_desc.setText("AI check failed"))
+        self._ai_worker.finished.connect(lambda: setattr(self, "_ai_worker", None))
+        self._ai_worker.start()
+
+    def _on_ai_plan_ready(self, _key: str, plan: object):
+        if not isinstance(plan, dict):
+            return
+        summary = str(plan.get("summary", "")) or "System looks healthy. No repair actions needed."
+        self._ai_desc.setText(summary)
+        actions = plan.get("actions", [])
+        # Show button only when at least one actionable item exists
+        has_action = bool(actions) and any(a.get("id") != "refresh-probe" for a in actions if isinstance(a, dict))
+        self._ai_btn.setVisible(bool(has_action))
+        if has_action:
+            self._ai_card.setObjectName("card-accent-warn")
+        else:
+            self._ai_card.setObjectName("card-accent-ok")
+        restyle(self._ai_card)
 
     def _on_status_facts_ready(self, _key: str, facts: object):
         if not isinstance(facts, dict):
