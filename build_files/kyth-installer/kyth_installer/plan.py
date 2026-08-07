@@ -141,24 +141,44 @@ class ResolvedInstallPlan:
         return self.request.kernel
 
 
-def _normalized_install_mode(state: dict) -> str:
-    return str(state.get("install_mode") or "wipe").strip().lower() or "wipe"
+def _as_request(state: "InstallationState | InstallRequest") -> "InstallRequest":
+    """Coerce InstallationState dict to InstallRequest — R-02 single-type boundary."""
+    from .context import InstallRequest as _Req
+
+    if isinstance(state, _Req):
+        return state
+    return _Req.from_state(state)  # dict -> InstallRequest, InstallationState remains HTTP-only
 
 
-def _install_plan_from_state(state: dict) -> InstallPlan:
+def _normalized_install_mode(state: "InstallationState | InstallRequest") -> str:
+    req = _as_request(state)
+    return str(req.install_mode or "wipe").strip().lower() or "wipe"
+
+
+def _install_plan_from_state(state: "InstallationState | InstallRequest") -> InstallPlan:
+    req = _as_request(state)
     return InstallPlan(
-        mode=_normalized_install_mode(state),
-        disk=state.get("disk"),
-        target_partition=state.get("target_partition"),
+        mode=_normalized_install_mode(req),
+        disk=req.disk,
+        target_partition=req.target_partition,
     )
 
 
-def _apply_install_plan(state: dict, plan: InstallPlan) -> None:
-    state["install_mode"] = plan.mode
+def _apply_install_plan(state: "InstallationState | InstallRequest", plan: InstallPlan) -> None:
+    # Kept for backward compat with tests that pass dict; now delegates to request
+    if isinstance(state, dict):
+        state["install_mode"] = plan.mode
+        if plan.disk is not None:
+            state["disk"] = plan.disk
+        if plan.target_partition is not None:
+            state["target_partition"] = plan.target_partition
+        return
+    # InstallRequest is frozen — use object.__setattr__ to mutate for compat
+    object.__setattr__(state, "install_mode", plan.mode)
     if plan.disk is not None:
-        state["disk"] = plan.disk
+        object.__setattr__(state, "disk", plan.disk)
     if plan.target_partition is not None:
-        state["target_partition"] = plan.target_partition
+        object.__setattr__(state, "target_partition", plan.target_partition)
 
 
 def _probe_storage(
@@ -705,7 +725,7 @@ def _prepare_explicit_install_plan(
 
 
 def validate_plan_state(
-    state: dict | InstallRequest,
+    state: "InstallationState | InstallRequest",
     context=None,
     *,
     snapshot: StorageSnapshot | None = None,
@@ -717,9 +737,13 @@ def validate_plan_state(
     as a guard before touching the disk. Keeping this separate from
     ``_prepare_*`` (which *does* mutate) makes the validate→commit boundary
     explicit and testable with plain ``StorageSnapshot`` fixtures.
+
+    R-02: InstallationState is HTTP-only; destructive validation consumes
+    InstallRequest via _as_request.
     """
-    mode = _normalized_install_mode(state if isinstance(state, dict) else state.as_state())
-    disk = _normal_device_path(state.get("disk") if isinstance(state, dict) else state.disk)
+    req = _as_request(state)
+    mode = _normalized_install_mode(req)
+    disk = _normal_device_path(req.disk)
     errors: list[str] = []
     warnings: list[str] = []
     efi = ""
@@ -748,7 +772,7 @@ def validate_plan_state(
             needs_bios = is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
             required = MIN_KYTHOS_BYTES + (BIOS_BOOT_BYTES if needs_bios else 0)
         else:
-            raw = state if isinstance(state, dict) else state.as_state()  # type: ignore[arg-type]
+            raw = _as_request(state).as_state()
             eff_snapshot = snapshot or _probe_storage(disk, include_partitions=mode != "wipe")
             is_gpt = eff_snapshot.is_gpt
             needs_bios = is_gpt and not eff_snapshot.has_bios_boot_partition(BIOS_BOOT_GUID) if mode == "alongside" else False
