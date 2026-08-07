@@ -247,6 +247,11 @@ def apply_policy(policy: PerfPolicy, ttl: int = POLICY_TTL_S) -> bool:
             marker.write_text(str(int(time.time()) + ttl), encoding="utf-8")
         except Exception:
             pass
+        # Also expose current SCX for gamescope env merge (KYTH_AI_SCX)
+        try:
+            Path("/run/kyth-ai-perfd-scx").write_text(policy.scx, encoding="utf-8")
+        except Exception:
+            pass
         # Push to HUB_STATE so Welcome/Performance cards show it without extra probe
         try:
             from kyth_welcome.services.hub_state import HUB_STATE

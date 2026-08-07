@@ -32,7 +32,20 @@ HELPEOF
 }
 
 preset="balanced"
+# Per-game env merge — KYTH_HDR=1 from gaming_per_game.py + AI daemon hint
+# (offline, no cloud) — respects preset.toml per-game HDR flag.
 hdr=0
+if [[ "${KYTH_HDR:-}" == "1" ]]; then
+    hdr=1
+fi
+# AI perf hint: daemon writes /run/kyth-ai-perfd-scx (30s TTL) — prefer
+# low-latency when scx_rusty active and caller didn't force a preset.
+if [[ -z "${KYTH_AI_SCX:-}" && -f /run/kyth-ai-perfd-scx ]]; then
+    KYTH_AI_SCX="$(cat /run/kyth-ai-perfd-scx 2>/dev/null || true)"
+fi
+if [[ "${KYTH_AI_SCX:-}" == "scx_rusty" && "${1:-}" == "" ]]; then
+    preset="latency"
+fi
 vrr=0
 mangohud=0
 vkbasalt=0
