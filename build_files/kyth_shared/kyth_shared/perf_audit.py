@@ -1,4 +1,4 @@
-"""Perf audit — collects 46-120 status + systemd-analyze + probe (consolidated base for system_audit)."""
+"""Perf audit — collects 46-125 status + systemd-analyze + probe (consolidated base for system_audit)."""
 from __future__ import annotations
 
 import time
@@ -60,6 +60,11 @@ def collect_audit() -> dict[str, Any]:
         ("dirty_expire", "dirty_expire", "dirty_expire_status"),
         ("file_max", "file_max", "file_max_status"),
         ("perf_cpu", "perf_cpu", "perf_cpu_status"),
+        ("swappiness", "swappiness", "swappiness_status"),
+        ("tcp_fin_timeout", "tcp_fin_timeout", "tcp_fin_timeout_status"),
+        ("somaxconn", "somaxconn", "somaxconn_status"),
+        ("inotify_watches", "inotify_watches", "inotify_watches_status"),
+        ("min_free_kbytes", "min_free_kbytes", "min_free_kbytes_status"),
     ]:
         try:
             m = __import__(f"kyth_shared.{mod}", fromlist=[fn])
@@ -83,8 +88,8 @@ def collect_audit() -> dict[str, Any]:
 
 
 def format_audit(a: dict[str, Any]) -> str:
-    lines = ["# Kyth perf audit — 46-120"]
-    for k in ("master", "loader", "oom_gaming", "shader_tmpfs", "gaming_cfs", "thp", "irq", "btrfs", "trim", "ananicy", "zswap", "sched", "wine", "kwin", "pipewire_gaming", "vm_watermark", "tcp_notsent", "max_map_count", "dirty_ratio", "vfs_cache", "tcp_ecn", "tcp_slow_start", "autogroup", "nr_migrate", "page_cluster", "tcp_retries2", "tcp_keepalive", "sched_child", "vm_stat", "numa_balancing", "tcp_fastopen", "tcp_mtu_probing", "dirty_expire", "file_max", "perf_cpu"):
+    lines = ["# Kyth perf audit — 46-125"]
+    for k in ("master", "loader", "oom_gaming", "shader_tmpfs", "gaming_cfs", "thp", "irq", "btrfs", "trim", "ananicy", "zswap", "sched", "wine", "kwin", "pipewire_gaming", "vm_watermark", "tcp_notsent", "max_map_count", "dirty_ratio", "vfs_cache", "tcp_ecn", "tcp_slow_start", "autogroup", "nr_migrate", "page_cluster", "tcp_retries2", "tcp_keepalive", "sched_child", "vm_stat", "numa_balancing", "tcp_fastopen", "tcp_mtu_probing", "dirty_expire", "file_max", "perf_cpu", "swappiness", "tcp_fin_timeout", "somaxconn", "inotify_watches", "min_free_kbytes"):
         lines.append(f"{k}: {a.get(k)}")
     lines.append(f"systemd-analyze: {a.get('systemd_analyze')}")
     return "\n".join(lines) + "\n"

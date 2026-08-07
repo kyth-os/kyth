@@ -539,6 +539,41 @@ perf-cpu mode="status":
     set -euo pipefail
     /usr/bin/kyth-perf-cpu "{{ mode }}"
 
+# Swappiness 10 gaming (swappiness.toml)
+[group('KythOS')]
+swappiness mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-swappiness "{{ mode }}"
+
+# TCP fin timeout 30 gaming (tcp-fin-timeout.toml)
+[group('KythOS')]
+tcp-fin-timeout mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-fin-timeout "{{ mode }}"
+
+# Somaxconn 8192 gaming (somaxconn.toml)
+[group('KythOS')]
+somaxconn mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-somaxconn "{{ mode }}"
+
+# Inotify watches 1048576 gaming (inotify-watches.toml)
+[group('KythOS')]
+inotify-watches mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-inotify-watches "{{ mode }}"
+
+# Min free kbytes 131072 gaming (min-free-kbytes.toml)
+[group('KythOS')]
+min-free-kbytes mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-min-free-kbytes "{{ mode }}"
+
 # EPP AC performance vs balanced (epp-ac.toml)
 [group('KythOS')]
 epp-ac mode="status":
