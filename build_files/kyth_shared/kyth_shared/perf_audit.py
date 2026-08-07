@@ -1,4 +1,4 @@
-"""Perf audit — collects 46-70 status + systemd-analyze + probe."""
+"""Perf audit — collects 46-105 status + systemd-analyze + probe (consolidated base for system_audit)."""
 from __future__ import annotations
 
 import time
@@ -40,6 +40,11 @@ def collect_audit() -> dict[str, Any]:
         ("wine", "wine_sync", "wine_sync_status"),
         ("kwin", "kwin_latency", "kwin_latency_status"),
         ("pipewire_gaming", "pipewire_gaming", "pipewire_gaming_status"),
+        ("vm_watermark", "vm_watermark", "watermark_status"),
+        ("tcp_notsent", "tcp_notsent", "tcp_notsent_status"),
+        ("max_map_count", "max_map_count", "max_map_count_status"),
+        ("dirty_ratio", "dirty_ratio", "dirty_ratio_status"),
+        ("vfs_cache", "vfs_cache_pressure", "vfs_cache_status"),
     ]:
         try:
             m = __import__(f"kyth_shared.{mod}", fromlist=[fn])
@@ -63,8 +68,8 @@ def collect_audit() -> dict[str, Any]:
 
 
 def format_audit(a: dict[str, Any]) -> str:
-    lines = ["# Kyth perf audit — 46-70"]
-    for k in ("master", "loader", "oom_gaming", "shader_tmpfs", "gaming_cfs", "thp", "irq", "btrfs", "trim", "ananicy", "zswap", "sched", "wine", "kwin", "pipewire_gaming"):
+    lines = ["# Kyth perf audit — 46-105"]
+    for k in ("master", "loader", "oom_gaming", "shader_tmpfs", "gaming_cfs", "thp", "irq", "btrfs", "trim", "ananicy", "zswap", "sched", "wine", "kwin", "pipewire_gaming", "vm_watermark", "tcp_notsent", "max_map_count", "dirty_ratio", "vfs_cache"):
         lines.append(f"{k}: {a.get(k)}")
     lines.append(f"systemd-analyze: {a.get('systemd_analyze')}")
     return "\n".join(lines) + "\n"

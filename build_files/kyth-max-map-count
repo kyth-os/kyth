@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-max-map-count — vm.max_map_count 2147483642 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-max-map-count "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.max_map_count import load_max_map_count, max_map_count_status; c=load_max_map_count(); print(f\"profile={c['profile']} active={max_map_count_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.max_map_count import load_max_map_count,save_max_map_count,generate_max_map_count; c=load_max_map_count(); c['profile']='gaming'; save_max_map_count(c); generate_max_map_count(c)"; sysctl --system >/dev/null 2>&1 || true; echo "max_map_count gaming 2147483642" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.max_map_count import load_max_map_count,save_max_map_count,generate_max_map_count; c=load_max_map_count(); c['profile']='balanced'; save_max_map_count(c); generate_max_map_count(c)"; echo "max_map_count balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.max_map_count import load_max_map_count,generate_max_map_count; generate_max_map_count(load_max_map_count())" ;;
+    *) echo "Usage: kyth-max-map-count [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

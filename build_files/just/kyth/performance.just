@@ -399,6 +399,41 @@ net-backlog mode="status":
     set -euo pipefail
     /usr/bin/kyth-net-backlog "{{ mode }}"
 
+# VM watermark 500 gaming (vm-watermark.toml)
+[group('KythOS')]
+vm-watermark mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-vm-watermark "{{ mode }}"
+
+# TCP notsent 16384 gaming (tcp-notsent.toml)
+[group('KythOS')]
+tcp-notsent mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-notsent "{{ mode }}"
+
+# max_map_count 2G gaming (max-map-count.toml)
+[group('KythOS')]
+max-map-count mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-max-map-count "{{ mode }}"
+
+# Dirty ratio 5/5 gaming (dirty-ratio.toml)
+[group('KythOS')]
+dirty-ratio mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-dirty-ratio "{{ mode }}"
+
+# VFS cache 50 gaming (vfs-cache.toml)
+[group('KythOS')]
+vfs-cache mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-vfs-cache "{{ mode }}"
+
 # EPP AC performance vs balanced (epp-ac.toml)
 [group('KythOS')]
 epp-ac mode="status":

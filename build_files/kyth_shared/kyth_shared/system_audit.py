@@ -1,4 +1,4 @@
-"""System health audit — ledger + snapshot + flatpak trim due."""
+"""System health audit — ledger + snapshot + flatpak trim due (consolidated: reuses perf_audit.collect_audit, no duplicate collectors)."""
 from __future__ import annotations
 
 import json, time

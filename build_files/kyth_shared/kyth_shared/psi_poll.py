@@ -1,4 +1,4 @@
-"""PSI poll — psi-poll.toml, 500ms gaming vs 1000 desktop."""
+"""PSI poll — psi-poll.toml, 500ms gaming vs 1000 desktop (shares profile helper with psi_gaming, cap-relief re-export pattern)."""
 from __future__ import annotations
 import os, tomllib
 from pathlib import Path

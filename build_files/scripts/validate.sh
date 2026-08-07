@@ -48,6 +48,12 @@ bash build_files/scripts/hash-gaming-versions.sh
 echo "==> RPM lock hash gate"
 bash build_files/scripts/hash-rpm-lock.sh
 
+echo "==> Perf gate (5% ledger, stale p95 check)"
+PYTHONPATH=build_files/kyth_shared python3 -c "from kyth_shared.perf_gate import check_perf_gate; r=check_perf_gate(current_ms=None); assert r.get('pass') is True, r; print(f\"perf gate ok threshold={r.get('threshold')}%\")"
+
+echo "==> Sysconfig hash gate (must stay unset locally, pinned in CI)"
+if grep -qE '^ARG SYSCONFIG_HASH=unset' Dockerfile && grep -qE '^ARG RPM_SET_HASH=unset' Dockerfile && grep -qE '^ARG GAMING_VERSIONS_HASH=unset' Dockerfile; then echo "hash ARGs unset locally — ok"; else echo "hash ARGs must be unset locally (pinned only in CI)" >&2; exit 1; fi
+
 echo "==> JavaScript syntax"
 js_files=()
 while IFS= read -r -d '' file; do
