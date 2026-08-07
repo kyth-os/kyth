@@ -100,6 +100,7 @@ def _get_live_usb_disk() -> Optional[str]:
                     _logger.debug("_get_live_usb_disk: TYPE lookup for %s failed", source, exc_info=True)
         except Exception:
             _logger.debug("_get_live_usb_disk: findmnt probe of %s failed", path, exc_info=True)
+        _logger.warning("_get_live_usb_disk: all lsblk fallbacks failed for %s — live USB may be exposed as wipe candidate", source)
     return None
 
 

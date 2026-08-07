@@ -17,10 +17,10 @@ SOURCE_DIGEST = os.environ.get("KYTH_SOURCE_DIGEST", "").strip()
 SOURCE_METADATA_FILE = Path(
     os.environ.get("KYTH_SOURCE_METADATA", "/usr/share/kyth/image-source.json")
 )
-LOG_FILE     = Path(os.environ.get("KYTH_INSTALLER_LOG", "/tmp/kyth-installer.log"))  # noqa: S108 — created with O_EXCL|O_NOFOLLOW in install.py
+LOG_FILE     = Path(os.environ.get("KYTH_INSTALLER_LOG", "/run/kyth-installer/log"))  # noqa: S108 — under /run 0700, was /tmp sticky
 FAILURE_SUMMARY_FILE = Path(
-    os.environ.get("KYTH_INSTALLER_FAILURE_SUMMARY", "/tmp/kyth-installer-failure.json")
-)  # noqa: S108 — support artifact with mode 0600
+    os.environ.get("KYTH_INSTALLER_FAILURE_SUMMARY", "/run/kyth-installer/failure.json")
+)  # noqa: S108 — under /run 0700
 TRANSACTION_FILE = Path(
     os.environ.get("KYTH_INSTALLER_TRANSACTION", "/run/kyth-installer/transaction.json")
 )

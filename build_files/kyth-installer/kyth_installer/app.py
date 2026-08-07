@@ -80,6 +80,13 @@ def run_headless() -> None:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
 
+    if getattr(args, "password", None):
+        print(
+            "Warning: --password on the command line exposes the password in /proc/cmdline and shell history. "
+            "Prefer --answer-file (mode 0600 JSON) instead.",
+            file=sys.stderr,
+        )
+
     def setting(name: str, default=None):
         cli_value = getattr(args, name, None)
         if isinstance(cli_value, (str, int, bool)) and cli_value not in (None, ""):

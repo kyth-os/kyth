@@ -42,8 +42,30 @@ def _battery_check(power_root: Path = Path("/sys/class/power_supply")) -> Assura
     return AssuranceCheck("power", "pass", f"Battery is {capacity}% ({status})")
 
 
-def _encryption_check(disk: str | None = None) -> AssuranceCheck | None:
-    """Detect BitLocker/LUKS/LVM on the target that would block install."""
+def _encryption_check(disk: str | None = None, snapshot=None) -> AssuranceCheck | None:
+    """Detect BitLocker/LUKS/LVM on the target that would block install.
+
+    When snapshot is given, scan StorageSnapshot.fstype/parttype/children directly (R-07).
+    """
+    if snapshot is not None:
+        try:
+            # Snapshot has partitions as dicts with fstype/parttype
+            for name, part in (snapshot.partitions_by_name.items() if hasattr(snapshot, "partitions_by_name") else []):
+                fstype = (part.get("fstype") or part.get("FSTYPE") or "").lower()
+                if fstype == "crypto_luks":
+                    return AssuranceCheck("encryption", "warn", f"Partition {name} is LUKS-encrypted — unlock or disable before installing.")
+                # children indicates LVM/LUKS wrapper
+                if part.get("children"):
+                    for child in part.get("children") or []:
+                        ctype = (child.get("fstype") or "").lower()
+                        if ctype == "crypto_luks":
+                            return AssuranceCheck("encryption", "warn", f"Partition {name} is LUKS-encrypted — unlock or disable before installing.")
+            # Also check disks for BitLocker via snapshot's in_use
+            for part in snapshot.partitions_by_name.values() if hasattr(snapshot, "partitions_by_name") else []:
+                if part.get("in_use") and (part.get("fstype") or "").lower() in ("ntfs", "ntfs3"):
+                    return AssuranceCheck("encryption", "warn", f"Partition {part.get('name')} appears BitLocker-locked — suspend BitLocker in Windows before resizing.")
+        except Exception:
+            pass
     if not disk:
         return None
     try:
