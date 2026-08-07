@@ -34,6 +34,7 @@ from .streaming import StreamingCommandRunner
 from kyth_shared import get_rx_bytes
 from kyth_shared.accounts import create_installer_user as _shared_create_installer_user
 
+from .phases.common import _push
 from .system import (
     _as_root,
     _require_no_symlink,
@@ -46,9 +47,6 @@ from .system import (
     require_root,
     unmount_target_disk,
 )
-
-def _push(event: dict, context: InstallerContext) -> None:
-    context.events.publish(event)
 
 
 def _assert_still_on_ac(log) -> None:
