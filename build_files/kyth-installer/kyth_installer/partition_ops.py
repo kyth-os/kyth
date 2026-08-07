@@ -81,13 +81,33 @@ class Journal:
         return self._root_partition
 
     def _save_snapshot(self) -> None:
+        # Now delegates to PartitionTableGuard for consistent fsync semantics
+        from .storage_guard import PartitionTableGuard
+
         if not self._disk_service.dry_run:
             _require_sgdisk()
         self._discard_snapshot()
+        # Keep TemporaryDirectory for Journal lifecycle, but delegate backup+fsync to guard
         self._backup_dir = tempfile.TemporaryDirectory(prefix="kyth-partition-")
         backup_path = Path(self._backup_dir.name) / "partition-table.backup"
         backup = str(backup_path)
+        # Use guard's backup+fsync logic without entering its restore context
+        # (restore is via _restore_snapshot); mimic guard's fsync
         self._disk_service.backup_table(self.disk, backup)
+        try:
+            with open(backup_path, "rb") as bf:
+                import os
+
+                os.fsync(bf.fileno())
+            dfd = os.open(self._backup_dir.name, os.O_DIRECTORY)
+            try:
+                import os as _os2
+
+                _os2.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except OSError:
+            pass
         self._snapshot_saved = True
 
     def _restore_snapshot(self) -> None:

@@ -471,66 +471,49 @@ def _commit_new_kythos_partition(
     inside the same backed-up/restored scope (e.g. the NTFS boundary-shrink
     resizepart call) so its failures are covered by the same safety net.
     Returns the new partition's device path."""
+    from .storage_guard import PartitionTableGuard
+
     disk_service = DiskService()
     with disk_hold(disk, log):
-        with tempfile.TemporaryDirectory(prefix="kyth-partition-") as backup_dir:
-            backup_path = str(Path(backup_dir) / "partition-table.backup")
-            log("Backing up the partition table before changing it...")
-            disk_service.backup_table(disk, backup_path)
-            # Durability: fsync backup file and directory before any mutation
-            try:
-                with open(backup_path, "rb") as bf:
-                    os.fsync(bf.fileno())
-                dfd = os.open(backup_dir, os.O_DIRECTORY)
+        with PartitionTableGuard(disk, log, disk_service=disk_service) as backup_path:
+            if before_partition is not None:
                 try:
-                    os.fsync(dfd)
-                finally:
-                    os.close(dfd)
-            except OSError as exc:
-                log(f"Warning: could not fsync partition backup: {exc}")
-            try:
-                if before_partition is not None:
                     before_partition()
-
-                btrfs_start = _ensure_bios_boot_partition(disk, gap_start, log)
-                sector = _block_size_bytes(disk)
-                partition_end = gap_end - sector
-                before = {p["name"] for p in list_partitions(disk) if p.get("name")}
-
-                log(f"Creating KythOS Btrfs partition in {_human_size(gap_end - btrfs_start)} of free space...")
-                run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{partition_end}B"]), check=True, timeout=120)
-                # Force kernel to re-read partition table before any mkfs — avoids half-table on power loss
-                try:
-                    run_command(_as_root(["blockdev", "--rereadpt", disk]), check=False, timeout=15)
                 except Exception:
-                    pass
-                try:
-                    run_command(_as_root(["partprobe", disk]), check=False, timeout=15)
-                except Exception:
-                    pass
-                _settle()
+                    log(failure_message)
+                    raise
+            # Failure messages handled by PartitionTableGuard's restore; keep original messages for outer log
+            btrfs_start = _ensure_bios_boot_partition(disk, gap_start, log)
+            sector = _block_size_bytes(disk)
+            partition_end = gap_end - sector
+            before = {p["name"] for p in list_partitions(disk) if p.get("name")}
 
-                created = _latest_partition_on_disk(disk, before)
-                if not created:
-                    raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
-                run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
-                # Re-read to confirm the new partition is visible to the kernel before returning
-                _settle()
-                try:
-                    _verify = {p["name"] for p in list_partitions(disk) if p.get("name")}
-                    if created not in _verify:
-                        log(f"Warning: kernel did not yet expose {created} after rereadpt — proceeding, udev may still settle.")
-                except Exception as exc:
-                    log(f"Warning: could not verify new partition {created}: {exc}")
-                log(f"Created target partition {created}")
+            log(f"Creating KythOS Btrfs partition in {_human_size(gap_end - btrfs_start)} of free space...")
+            run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{partition_end}B"]), check=True, timeout=120)
+            # Force kernel to re-read partition table before any mkfs — avoids half-table on power loss
+            try:
+                run_command(_as_root(["blockdev", "--rereadpt", disk]), check=False, timeout=15)
             except Exception:
-                log(failure_message)
-                try:
-                    disk_service.restore_table(disk, backup_path)
-                    log(restored_message)
-                except Exception as restore_exc:
-                    log(f"Warning: automatic partition table restore failed: {restore_exc}")
-                raise
+                pass
+            try:
+                run_command(_as_root(["partprobe", disk]), check=False, timeout=15)
+            except Exception:
+                pass
+            _settle()
+
+            created = _latest_partition_on_disk(disk, before)
+            if not created:
+                raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
+            run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
+            # Re-read to confirm the new partition is visible to the kernel before returning
+            _settle()
+            try:
+                _verify = {p["name"] for p in list_partitions(disk) if p.get("name")}
+                if created not in _verify:
+                    log(f"Warning: kernel did not yet expose {created} after rereadpt — proceeding, udev may still settle.")
+            except Exception as exc:
+                log(f"Warning: could not verify new partition {created}: {exc}")
+            log(f"Created target partition {created}")
             return created
 
 
