@@ -434,6 +434,41 @@ vfs-cache mode="status":
     set -euo pipefail
     /usr/bin/kyth-vfs-cache "{{ mode }}"
 
+# TCP ECN 1 gaming (tcp-ecn.toml)
+[group('KythOS')]
+tcp-ecn mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-ecn "{{ mode }}"
+
+# TCP slow start 0 gaming (tcp-slow-start.toml)
+[group('KythOS')]
+tcp-slow-start mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-slow-start "{{ mode }}"
+
+# Sched autogroup 0 gaming (sched-autogroup.toml)
+[group('KythOS')]
+sched-autogroup mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-sched-autogroup "{{ mode }}"
+
+# Sched nr_migrate 64 gaming (sched-nr-migrate.toml)
+[group('KythOS')]
+sched-nr-migrate mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-sched-nr-migrate "{{ mode }}"
+
+# Page cluster 0 gaming (page-cluster.toml)
+[group('KythOS')]
+page-cluster mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-page-cluster "{{ mode }}"
+
 # EPP AC performance vs balanced (epp-ac.toml)
 [group('KythOS')]
 epp-ac mode="status":

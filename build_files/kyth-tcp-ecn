@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-tcp-ecn — tcp_ecn 1 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-ecn "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.tcp_ecn import load_tcp_ecn, tcp_ecn_status; c=load_tcp_ecn(); print(f\"profile={c['profile']} active={tcp_ecn_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_ecn import load_tcp_ecn,save_tcp_ecn,generate_tcp_ecn; c=load_tcp_ecn(); c['profile']='gaming'; save_tcp_ecn(c); generate_tcp_ecn(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp ecn gaming 1" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_ecn import load_tcp_ecn,save_tcp_ecn,generate_tcp_ecn; c=load_tcp_ecn(); c['profile']='balanced'; save_tcp_ecn(c); generate_tcp_ecn(c)"; echo "tcp ecn balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_ecn import load_tcp_ecn,generate_tcp_ecn; generate_tcp_ecn(load_tcp_ecn())" ;;
+    *) echo "Usage: kyth-tcp-ecn [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

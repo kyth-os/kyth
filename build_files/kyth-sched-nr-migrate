@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-sched-nr-migrate — 64 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-sched-nr-migrate "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.sched_nr_migrate import load_nr_migrate, nr_migrate_status; c=load_nr_migrate(); print(f\"profile={c['profile']} active={nr_migrate_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.sched_nr_migrate import load_nr_migrate,save_nr_migrate,generate_nr_migrate; c=load_nr_migrate(); c['profile']='gaming'; save_nr_migrate(c); generate_nr_migrate(c)"; sysctl --system >/dev/null 2>&1 || true; echo "nr migrate gaming 64" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.sched_nr_migrate import load_nr_migrate,save_nr_migrate,generate_nr_migrate; c=load_nr_migrate(); c['profile']='balanced'; save_nr_migrate(c); generate_nr_migrate(c)"; echo "nr migrate balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.sched_nr_migrate import load_nr_migrate,generate_nr_migrate; generate_nr_migrate(load_nr_migrate())" ;;
+    *) echo "Usage: kyth-sched-nr-migrate [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac
