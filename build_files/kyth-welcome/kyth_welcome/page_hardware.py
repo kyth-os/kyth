@@ -141,20 +141,24 @@ class HardwarePage(Page):
     def _on_display_status_ready(self, _key: str, raw: object):
         text = str(raw or "")
         if self._display_status_lbl is not None:
+            # Show current mode + VRR/HDR via hdr_vrr_status_text, with formatted mode
             self._display_status_lbl.setText(hdr_vrr_status_text(text))
         if getattr(self, "_display_vrr_warn_lbl", None) is not None:
             try:
                 probe = _parse_kscreen_output(text)
                 warn = getattr(probe, "action", "") or ""
-                # _parse_kscreen_output embeds VRR warning in details when VRR=never on 100Hz+
+                # Surface VRR state per-output: never vs always on high-refresh
                 if probe.status == "warn" and probe.action:
                     self._display_vrr_warn_lbl.setText(f"⚠️ {probe.action}")
                     self._display_vrr_warn_lbl.setObjectName("status-warn")
                     self._display_vrr_warn_lbl.show()
                 elif "VRR" in probe.details and "Never" in probe.details:
-                    # fallback: surface details hint
                     self._display_vrr_warn_lbl.setText("⚠️ VRR is set to Never on a high-refresh display — enable VRR in Display Settings for smoother gameplay.")
                     self._display_vrr_warn_lbl.setObjectName("status-warn")
+                    self._display_vrr_warn_lbl.show()
+                elif "VRR" in probe.details and "always" in probe.details.lower():
+                    self._display_vrr_warn_lbl.setText("✓ VRR is enabled (Always) — adaptive sync active for games.")
+                    self._display_vrr_warn_lbl.setObjectName("status-ok")
                     self._display_vrr_warn_lbl.show()
                 else:
                     self._display_vrr_warn_lbl.hide()
