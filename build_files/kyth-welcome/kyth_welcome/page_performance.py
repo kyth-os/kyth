@@ -91,6 +91,33 @@ class PerformancePage(Page):
         sched_layout.addLayout(status_row)
         self._add(sched_card)
 
+        # ── AI Performance daemon (local, 30s TTL) ───────────────────────────
+        ai_card, ai_layout = _make_card("card-accent-ok")
+        ai_title = QLabel("AI Performance Tuning — offline")
+        ai_title.setObjectName("card-title")
+        ai_layout.addWidget(ai_title)
+        ai_desc = QLabel(
+            "Kyth AI watches gaming/cgroup pressure and power, picks scx + sysctl + GPU via local qwen2.5-coder (or deterministic fallback), and auto-reverts in 30s if p95 worsens. No cloud."
+        )
+        ai_desc.setObjectName("card-copy")
+        ai_desc.setWordWrap(True)
+        ai_layout.addWidget(ai_desc)
+        ai_row = QHBoxLayout()
+        ai_row.setSpacing(12)
+        self._ai_status_lbl = QLabel("AI: checking…")
+        self._ai_status_lbl.setObjectName("prop-val")
+        ai_row.addWidget(self._ai_status_lbl, 1)
+        self._ai_toggle = QCheckBox("Enable AI tuning (kyth-ai-perfd)")
+        self._ai_toggle.setChecked(True)
+        self._ai_toggle.setToolTip("Enable the 5s AI daemon — scx_rusty for gaming, bpfland for desktop, lavd for pressure")
+        self._ai_toggle.stateChanged.connect(self._toggle_ai_perf)
+        ai_row.addWidget(self._ai_toggle)
+        ai_apply = QPushButton("Apply AI policy now")
+        ai_apply.clicked.connect(self._apply_ai_now)
+        ai_row.addWidget(ai_apply)
+        ai_layout.addLayout(ai_row)
+        self._add(ai_card)
+
         # ── Session history ────────────────────────────────────────────────────
         self._divider()
         hist_head = QLabel("Session History")
@@ -276,3 +303,24 @@ class PerformancePage(Page):
 
     def _toggle_sched_daemon(self, state: int) -> None:
         set_sched_daemon_enabled(bool(state))
+
+    def _toggle_ai_perf(self, state: int) -> None:
+        from kyth_shared.commands import run
+
+        action = "enable" if state else "disable"
+        run(["systemctl", "--user", action, "--now", "kyth-ai-perfd.service"], capture_output=True, timeout=10)
+        self._ai_status_lbl.setText(f"AI: {'enabled' if state else 'disabled'}")
+        restyle(self._ai_status_lbl)
+
+    def _apply_ai_now(self) -> None:
+        from kyth_shared.ai_perf_daemon import apply_policy, choose_policy, collect_sample
+
+        try:
+            sample = collect_sample()
+            policy = choose_policy(sample)
+            ok = apply_policy(policy)
+            self._ai_status_lbl.setText(f"AI: {policy.reason} → {policy.scx} ({'ok' if ok else 'failed'})")
+            restyle(self._ai_status_lbl)
+        except Exception as exc:
+            self._ai_status_lbl.setText(f"AI: failed — {exc}")
+            restyle(self._ai_status_lbl)

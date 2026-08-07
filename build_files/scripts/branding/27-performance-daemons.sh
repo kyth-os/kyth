@@ -6,6 +6,9 @@ install -m 0644 /ctx/kyth-sched.service /usr/lib/systemd/system/kyth-sched.servi
 install -m 0755 /ctx/kyth-telem /usr/bin/kyth-telem
 install -m 0644 /ctx/kyth-telem.service /usr/lib/systemd/system/kyth-telem.service
 
+install -m 0755 /ctx/kyth-ai-perfd /usr/bin/kyth-ai-perfd
+install -m 0644 /ctx/kyth-ai-perfd.service /usr/lib/systemd/user/kyth-ai-perfd.service
+
 install -m 0755 /ctx/kyth-update-watcher /usr/bin/kyth-update-watcher
 install -m 0644 /ctx/kyth-update-watcher.service /usr/lib/systemd/system/kyth-update-watcher.service
 install -m 0644 /ctx/kyth-update-watcher.timer /usr/lib/systemd/system/kyth-update-watcher.timer
