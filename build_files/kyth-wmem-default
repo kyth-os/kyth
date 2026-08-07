@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-wmem-default — 262144 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-wmem-default "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.wmem_default import load_wmem_default, wmem_default_status; c=load_wmem_default(); print(f\"profile={c['profile']} active={wmem_default_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.wmem_default import load_wmem_default,save_wmem_default,generate_wmem_default; c=load_wmem_default(); c['profile']='gaming'; save_wmem_default(c); generate_wmem_default(c)"; sysctl --system >/dev/null 2>&1 || true; echo "wmem default gaming 262144" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.wmem_default import load_wmem_default,save_wmem_default,generate_wmem_default; c=load_wmem_default(); c['profile']='balanced'; save_wmem_default(c); generate_wmem_default(c)"; echo "wmem default balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.wmem_default import load_wmem_default,generate_wmem_default; generate_wmem_default(load_wmem_default())" ;;
+    *) echo "Usage: kyth-wmem-default [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

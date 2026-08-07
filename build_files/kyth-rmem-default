@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-rmem-default — 262144 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-rmem-default "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.rmem_default import load_rmem_default, rmem_default_status; c=load_rmem_default(); print(f\"profile={c['profile']} active={rmem_default_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.rmem_default import load_rmem_default,save_rmem_default,generate_rmem_default; c=load_rmem_default(); c['profile']='gaming'; save_rmem_default(c); generate_rmem_default(c)"; sysctl --system >/dev/null 2>&1 || true; echo "rmem default gaming 262144" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.rmem_default import load_rmem_default,save_rmem_default,generate_rmem_default; c=load_rmem_default(); c['profile']='balanced'; save_rmem_default(c); generate_rmem_default(c)"; echo "rmem default balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.rmem_default import load_rmem_default,generate_rmem_default; generate_rmem_default(load_rmem_default())" ;;
+    *) echo "Usage: kyth-rmem-default [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

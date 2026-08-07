@@ -609,6 +609,41 @@ netdev-budget mode="status":
     set -euo pipefail
     /usr/bin/kyth-netdev-budget "{{ mode }}"
 
+# Rmem default 262144 gaming (rmem-default.toml)
+[group('KythOS')]
+rmem-default mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-rmem-default "{{ mode }}"
+
+# Wmem default 262144 gaming (wmem-default.toml)
+[group('KythOS')]
+wmem-default mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-wmem-default "{{ mode }}"
+
+# Tcp window scaling 1 gaming (tcp-window-scaling.toml)
+[group('KythOS')]
+tcp-window-scaling mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-window-scaling "{{ mode }}"
+
+# Tcp sack 1 gaming (tcp-sack.toml)
+[group('KythOS')]
+tcp-sack mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-sack "{{ mode }}"
+
+# Tcp timestamps 1 gaming (tcp-timestamps.toml)
+[group('KythOS')]
+tcp-timestamps mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-timestamps "{{ mode }}"
+
 # EPP AC performance vs balanced (epp-ac.toml)
 [group('KythOS')]
 epp-ac mode="status":
