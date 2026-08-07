@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-flatpak-prefetch — flatpak-prefetch.toml
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-flatpak-prefetch "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.flatpak_prefetch import load_flatpak_prefetch,flatpak_prefetch_status; c=load_flatpak_prefetch(); print(f"enabled={c[\"enabled\"]} time={c[\"time\"]} active={flatpak_prefetch_status()}")' ;;
+    on) need_root "$@"; python3 -c 'from kyth_shared.flatpak_prefetch import load_flatpak_prefetch,save_flatpak_prefetch,generate_flatpak_prefetch; c=load_flatpak_prefetch(); c["enabled"]=True; save_flatpak_prefetch(c); generate_flatpak_prefetch(c)'; systemctl enable --now flatpak-prefetch.timer 2>/dev/null || true; echo "flatpak prefetch on" ;;
+    off) need_root "$@"; python3 -c 'from kyth_shared.flatpak_prefetch import load_flatpak_prefetch,save_flatpak_prefetch,generate_flatpak_prefetch; c=load_flatpak_prefetch(); c["enabled"]=False; save_flatpak_prefetch(c); generate_flatpak_prefetch(c)'; systemctl disable --now flatpak-prefetch.timer 2>/dev/null || true; echo "flatpak prefetch off" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.flatpak_prefetch import load_flatpak_prefetch,generate_flatpak_prefetch; generate_flatpak_prefetch(load_flatpak_prefetch())' ;;
+    *) echo "Usage: kyth-flatpak-prefetch [status|on|off|apply]" >&2; exit 1 ;;
+esac

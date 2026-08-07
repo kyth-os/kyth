@@ -73,6 +73,28 @@ class _DeveloperTabMixin:
         self._ai_log_panel = CollapsibleLogPanel()
         ai_layout.addWidget(self._ai_log_panel)
         layout.addWidget(ai_card)
+
+        # ── Dev cache perf 71-75 — zero-cost when off ─────────────────────────
+        cache_card, cache_layout = _make_card()
+        cache_title = QLabel("Dev Container Cache — off by default")
+        cache_title.setObjectName("card-title")
+        cache_layout.addWidget(cache_title)
+        cache_desc = QLabel("Podman btrfs driver, distrobox 4G tmpfs (ccache+cargo), sccache 10G, flatpak prefetch 02:00, work tmpfs 1G — all tmpfs/pre-fetch only when enabled.")
+        cache_desc.setWordWrap(True)
+        cache_layout.addWidget(cache_desc)
+        cache_row = QHBoxLayout()
+        cache_row.setSpacing(8)
+        self._dev_cache_status = QLabel("Dev cache: checking…")
+        self._dev_cache_status.setObjectName("status-muted")
+        cache_row.addWidget(self._dev_cache_status, 1)
+        for label, tip in [("Podman", "podman-btrfs.toml auto→btrfs/overlay"), ("Distrobox", "4G tmpfs ccache"), ("Sccache", "10G Rust/C"), ("Prefetch", "flatpak 02:00"), ("Work", "1G Code/cargo")]:
+            btn = QPushButton(label)
+            btn.setToolTip(tip)
+            # capture label lower
+            btn.clicked.connect(lambda _, l=label.lower(): self._dev_cache_check(l))
+            cache_row.addWidget(btn)
+        cache_layout.addLayout(cache_row)
+        layout.addWidget(cache_card)
         layout.addStretch(1)
         return page
 
@@ -141,3 +163,32 @@ class _DeveloperTabMixin:
             popen(["konsole", "-e", "/usr/bin/kyth-ai-dev", "enter"])
         except Exception as exc:
             QMessageBox.warning(self, "Developer Environment", f"Could not open the developer shell:\n{exc}")
+
+    def _dev_cache_check(self, which: str):
+        try:
+            if which == "podman":
+                from kyth_shared.podman_btrfs import load_podman_btrfs, podman_btrfs_status
+                c = load_podman_btrfs()
+                self._dev_cache_status.setText(f"podman {c['mode']} active={podman_btrfs_status()}")
+            elif which == "distrobox":
+                from kyth_shared.distrobox_cache import load_distrobox_cache, distrobox_cache_status
+                c = load_distrobox_cache()
+                self._dev_cache_status.setText(f"distrobox {c['enabled']} {distrobox_cache_status()}")
+            elif which == "sccache":
+                from kyth_shared.sccache_preset import load_sccache, sccache_status
+                c = load_sccache()
+                self._dev_cache_status.setText(f"sccache {c['enabled']} {sccache_status()}")
+            elif which == "prefetch":
+                from kyth_shared.flatpak_prefetch import load_flatpak_prefetch, flatpak_prefetch_status
+                c = load_flatpak_prefetch()
+                self._dev_cache_status.setText(f"prefetch {c['enabled']} {flatpak_prefetch_status()}")
+            elif which == "work":
+                from kyth_shared.work_cache import load_work_cache, work_cache_status
+                c = load_work_cache()
+                self._dev_cache_status.setText(f"work {c['enabled']} {work_cache_status()}")
+            self._dev_cache_status.setObjectName("status-ok")
+            restyle(self._dev_cache_status)
+        except Exception as exc:
+            self._dev_cache_status.setText(f"{which} failed — {exc}")
+            self._dev_cache_status.setObjectName("status-err")
+            restyle(self._dev_cache_status)

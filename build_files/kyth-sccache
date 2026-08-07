@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-sccache — sccache.toml
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-sccache "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.sccache_preset import load_sccache,sccache_status; c=load_sccache(); print(f"enabled={c[\"enabled\"]} size={c[\"size\"]} active={sccache_status()}")' ;;
+    on) need_root "$@"; python3 -c 'from kyth_shared.sccache_preset import load_sccache,save_sccache,generate_sccache; c=load_sccache(); c["enabled"]=True; save_sccache(c); generate_sccache(c)'; systemctl enable --now sccache.service 2>/dev/null || true; echo "sccache on" ;;
+    off) need_root "$@"; python3 -c 'from kyth_shared.sccache_preset import load_sccache,save_sccache,generate_sccache; c=load_sccache(); c["enabled"]=False; save_sccache(c); generate_sccache(c)'; systemctl disable --now sccache.service 2>/dev/null || true; echo "sccache off" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.sccache_preset import load_sccache,generate_sccache; generate_sccache(load_sccache())' ;;
+    *) echo "Usage: kyth-sccache [status|on|off|apply]" >&2; exit 1 ;;
+esac
