@@ -308,6 +308,8 @@ def _collect_hardware_view() -> dict[str, Any]:
 
 
 def default_collectors() -> tuple[ProbeCollector, ...]:
+    # Slice 2: async pool already uses ThreadPoolExecutor in collect_probe_results();
+    # DISK_TTL below gates disk re-read so repeated Hub nav doesn't re-spawn lspci.
     return (
         ProbeCollector("bootc", ("bootc-status-data", "bootc-status-text", "bootc-branch", "kernel-flavor"), _collect_bootc),
         ProbeCollector("flatpak-apps", ("flatpak-apps",), _collect_flatpak_apps),
