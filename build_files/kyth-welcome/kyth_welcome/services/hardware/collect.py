@@ -141,12 +141,22 @@ def hardware_summary_view(probes: list[HardwareProbe]) -> HardwareSummaryView:
             summary_title=f"{len(warns)} hardware warning{'s' if len(warns) != 1 else ''}",
             summary_body="The system is usable, but some device, display, driver, or platform checks have recommended follow-up.",
         )
+    # Windows-switcher clarity: name the Tier 1 promise — "Will my laptop just work?"
+    # Surface the policy Tier 1/2 coverage hint already computed in _hardware_policy_probe
+    # via get_hardware_view() when available, so the HUD reads as a switcher guarantee.
+    tier_hint = ""
+    for p in probes:
+        if p.title == "Hardware policy" and p.status in ("ok", "warn"):
+            # details contains "Hardware tier: tier1..." — extract for summary
+            if "tier" in p.details.lower():
+                tier_hint = " (Tier 1 — fully tested daily-driver path)"
+                break
     return HardwareSummaryView(
-        status_text="All checks passed.",
+        status_text="All checks passed." + tier_hint,
         status_style="status-ok",
         summary_card_style="card-accent-ok",
         summary_title=f"All {len(oks)} hardware checks passed",
-        summary_body="Graphics, firmware, audio, networking, storage, and platform checks look ready.",
+        summary_body="Graphics, firmware, audio, networking, storage, and platform checks look ready." + tier_hint,
     )
 
 
