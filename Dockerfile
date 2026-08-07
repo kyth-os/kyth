@@ -24,6 +24,7 @@ ARG ENABLE_KSM=0
 LABEL org.kyth.profile.gaming-peripherals="${ENABLE_GAMING_PERIPHERALS}"
 LABEL org.kyth.profile.virtualization-host="${ENABLE_VIRTUALIZATION_HOST}"
 LABEL org.kyth.profile.ksm="${ENABLE_KSM}"
+LABEL org.kyth.gaming-versions="${GAMING_VERSIONS_HASH}"
 
 # Build cache boundary: all RPM package installs (~2-3 GB).
 # Hash-gated — only re-run when packages-static.sh or packages/*.sh fragments
@@ -65,6 +66,7 @@ RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/p
 # release. Exact tags are resolved once by CI and used for both cache identity
 # and downloads; installers never re-resolve "latest" inside the build.
 ARG THIRDPARTY_VERSIONS_HASH=unset
+ARG GAMING_VERSIONS_HASH=unset
 ARG UMU_VERSION
 RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/thirdparty.sh \
     --mount=type=bind,source=build_files/scripts/thirdparty,target=/ctx/thirdparty \
