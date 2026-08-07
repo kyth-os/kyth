@@ -5,15 +5,15 @@ from collections.abc import Callable, Sequence
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import restyle
-from .services.hardware import HardwareProbe
-from .qt import (
+from ..core_base import restyle
+from ..services.hardware import HardwareProbe
+from ..qt import (
     QApplication, QFrame, QGridLayout, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSize, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
-from .ui_tokens import RADIUS_PILL, STATUS_ERROR, STATUS_OK, STATUS_WARN
+from ..ui_tokens import RADIUS_PILL, STATUS_ERROR, STATUS_OK, STATUS_WARN
 
 # FlowLayout extracted to widgets/layout.py (R8-3) — keep re-export for compat
-from .widgets.layout import FlowLayout  # noqa: F401
+from .layout import FlowLayout  # noqa: F401
 
 def _theme_icon(*names: str) -> QIcon:
     """Return the first available system theme icon, or a null icon."""
