@@ -2,7 +2,7 @@
 # kyth-hdr-store — hdr-store.toml preserve
 set -euo pipefail
 case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.hdr_store import load_hdr_store,hdr_store_audit; c=load_hdr_store(); print(f"preserve={c[\"preserve\"]} audit={hdr_store_audit()}")' ;;
+    status) python3 -c "from kyth_shared.hdr_store import load_hdr_store, hdr_store_audit; c=load_hdr_store(); print(f\"preserve={c['preserve']} audit={hdr_store_audit()}\")" ;;
     on) python3 -c 'from kyth_shared.hdr_store import load_hdr_store,save_hdr_store; c=load_hdr_store(); c["preserve"]=True; save_hdr_store(c)'; echo "hdr store on" ;;
     off) python3 -c 'from kyth_shared.hdr_store import load_hdr_store,save_hdr_store; c=load_hdr_store(); c["preserve"]=False; save_hdr_store(c)'; echo "hdr store off" ;;
     *) echo "Usage: kyth-hdr-store [status|on|off]" >&2; exit 1 ;;
