@@ -50,13 +50,13 @@ def _display_probe() -> HardwareProbe:
         connected.append(f"{name}{': ' + first_mode if first_mode else ''}")
 
     if not connected:
-        return HardwareProbe("Display", "dim", "No connected displays detected via DRM.", "kscreen-doctor unavailable and no DRM outputs found.")
+        return HardwareProbe("Display", "dim", "No connected displays detected — switcher check: your monitor may need a cable re-seat.", "kscreen-doctor unavailable and no DRM outputs found. Check System Hub → Hardware after logging in.")
 
     return HardwareProbe(
         "Display", "ok",
         f"{len(connected)} display{'s' if len(connected) > 1 else ''} connected.",
         "Outputs:\n" + "\n".join(f"  {c}" for c in connected) +
-        "\n\n(Install kscreen for refresh rate and VRR details.)",
+        "\n\n(For refresh rate + VRR/HDR details, open System Hub → Hardware → Display; kscreen provides full mode list.)",
     )
 
 
