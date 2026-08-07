@@ -24,11 +24,19 @@ from .services.flatpak import _is_flatpak_installed as _flatpak_installed
 from .qt import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt, Signal, single_shot,
 )
+from .lazy_page import compose_on_first_init
 from .widgets import (
     Page, _make_card, _theme_icon,
 )
 
+def _load_welcome_mixins():
+    from .page_welcome_grid import _WelcomeGridMixin
+    from .page_welcome_hero import _WelcomeHeroMixin
+    from .page_welcome_hud import _WelcomeHudMixin
+    return (_WelcomeGridMixin, _WelcomeHeroMixin, _WelcomeHudMixin)
+
 # ── Page: Welcome (Control Panel-style home) ──────────────────────────────────
+@compose_on_first_init(_load_welcome_mixins)
 class WelcomePage(Page):
     profile_changed = Signal(str)
 
