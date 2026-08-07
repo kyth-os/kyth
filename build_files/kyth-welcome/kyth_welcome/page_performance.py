@@ -123,7 +123,7 @@ class PerformancePage(Page):
         clean_title = QLabel("Clean Perf — zero cost when off")
         clean_title.setObjectName("card-title")
         clean_layout.addWidget(clean_title)
-        clean_desc = QLabel("Kargs (mitigations=off only in gaming), I/O (NVMe none), net BBR+FQ, uksmd dedup, journal 200M — each is off by default, TOML in /etc/kyth, revertible.")
+        clean_desc = QLabel("Kargs/I/O/Net/UKSmd/Journal + THP/Mimalloc/IRQ/Btrfs/Trim — off by default, TOML in /etc/kyth, revertible.")
         clean_desc.setObjectName("card-copy")
         clean_desc.setWordWrap(True)
         clean_layout.addWidget(clean_desc)
@@ -149,6 +149,26 @@ class PerformancePage(Page):
         btn_journal.clicked.connect(lambda: self._run_clean("journal"))
         clean_row.addWidget(btn_journal)
         clean_layout.addLayout(clean_row)
+        # row 2: 51-55
+        clean_row2 = QHBoxLayout()
+        clean_row2.setSpacing(8)
+        clean_row2.addWidget(QLabel(""), 1)
+        btn_thp = QPushButton("THP")
+        btn_thp.clicked.connect(lambda: self._run_clean("thp"))
+        clean_row2.addWidget(btn_thp)
+        btn_mimalloc = QPushButton("Mimalloc")
+        btn_mimalloc.clicked.connect(lambda: self._run_clean("mimalloc"))
+        clean_row2.addWidget(btn_mimalloc)
+        btn_irq = QPushButton("IRQ")
+        btn_irq.clicked.connect(lambda: self._run_clean("irq"))
+        clean_row2.addWidget(btn_irq)
+        btn_btrfs = QPushButton("Btrfs")
+        btn_btrfs.clicked.connect(lambda: self._run_clean("btrfs"))
+        clean_row2.addWidget(btn_btrfs)
+        btn_trim = QPushButton("Trim")
+        btn_trim.clicked.connect(lambda: self._run_clean("trim"))
+        clean_row2.addWidget(btn_trim)
+        clean_layout.addLayout(clean_row2)
         self._add(clean_card)
 
         # ── Session history ────────────────────────────────────────────────────
@@ -387,6 +407,26 @@ class PerformancePage(Page):
                 from kyth_shared.journal_tune import load_journal, journal_status
                 c = load_journal()
                 self._clean_status.setText(f"journal perf={c['perf']} active={journal_status()}")
+            elif which == "thp":
+                from kyth_shared.thp_tune import load_thp, thp_status
+                c = load_thp()
+                self._clean_status.setText(f"thp {c['profile']} active={thp_status()}")
+            elif which == "mimalloc":
+                from kyth_shared.mimalloc_preset import load_mimalloc, mimalloc_status
+                c = load_mimalloc()
+                self._clean_status.setText(f"mimalloc {c['enabled']} {mimalloc_status()}")
+            elif which == "irq":
+                from kyth_shared.irq_tune import load_irq, irq_status
+                c = load_irq()
+                self._clean_status.setText(f"irq {c['profile']} active={irq_status()}")
+            elif which == "btrfs":
+                from kyth_shared.btrfs_perf import load_btrfs_perf, btrfs_perf_status
+                c = load_btrfs_perf()
+                self._clean_status.setText(f"btrfs {c['profile']} active={btrfs_perf_status()}")
+            elif which == "trim":
+                from kyth_shared.trim_preset import load_trim, trim_status
+                c = load_trim()
+                self._clean_status.setText(f"trim {c['profile']} active={trim_status()}")
             restyle(self._clean_status)
         except Exception as exc:
             self._clean_status.setText(f"{which} failed — {exc}")

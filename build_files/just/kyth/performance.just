@@ -127,6 +127,48 @@ journal-tune mode="status":
     set -euo pipefail
     /usr/bin/kyth-journal-tune "{{ mode }}"
 
+# THP khugepaged (thp.toml) — madvise + scan 10s, cuts UE stutter
+[group('KythOS')]
+thp-tune profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-thp-tune "{{ profile }}"
+
+# Mimalloc per-game (mimalloc.toml) — 10-20% p95, no global cost
+[group('KythOS')]
+mimalloc mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-mimalloc "{{ mode }}"
+
+# Mimalloc wrapper — run game with mimalloc
+[group('KythOS')]
+mimalloc-run +args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec /usr/bin/kyth-mimalloc-run {{ args }}
+
+# IRQ affinity (irq.toml) — GPU/NVMe off X3D CCD0
+[group('KythOS')]
+irq-tune profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-irq-tune "{{ profile }}"
+
+# Btrfs mount perf (btrfs-perf.toml) — zstd:1 + noatime
+[group('KythOS')]
+btrfs-tune profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-btrfs-tune "{{ profile }}"
+
+# Trim nodiscard + fstrim weekly (trim.toml)
+[group('KythOS')]
+trim-tune profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-trim-tune "{{ profile }}"
+
 # Run an OpenGL app through Zink.
 [group('KythOS')]
 zink-run +args:

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-btrfs-tune — btrfs-perf.toml → mount drop-in
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-btrfs-tune "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.btrfs_perf import load_btrfs_perf,btrfs_perf_status; c=load_btrfs_perf(); print(f"profile={c[\"profile\"]} compress={c[\"compress\"]} active={btrfs_perf_status()}")' ;;
+    kyth) need_root "$@"; python3 -c 'from kyth_shared.btrfs_perf import load_btrfs_perf,save_btrfs_perf,generate_btrfs_dropin; c=load_btrfs_perf(); c["profile"]="kyth"; save_btrfs_perf(c); generate_btrfs_dropin(c)'; systemctl daemon-reload 2>/dev/null || true; echo "btrfs kyth (reboot to apply mount opts)" ;;
+    balanced|default) need_root "$@"; python3 -c 'from kyth_shared.btrfs_perf import load_btrfs_perf,save_btrfs_perf,generate_btrfs_dropin; c=load_btrfs_perf(); c["profile"]="balanced"; save_btrfs_perf(c); generate_btrfs_dropin(c)'; systemctl daemon-reload 2>/dev/null || true; echo "btrfs balanced" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.btrfs_perf import load_btrfs_perf,generate_btrfs_dropin; generate_btrfs_dropin(load_btrfs_perf())';;
+    *) echo "Usage: kyth-btrfs-tune [status|kyth|balanced|apply]" >&2; exit 1 ;;
+esac
