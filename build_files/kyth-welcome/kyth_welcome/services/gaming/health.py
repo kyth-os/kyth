@@ -16,6 +16,7 @@ from .tools import (
 )
 
 # Progressive: per-game latency env (Bazzite ships global layer, Kyth is per-game + lean)
+# Per-game HDR is KYTH_HDR=1 so kyth-gamescope can add --hdr-enabled without global LD_PRELOAD.
 LATENCY_PROFILES: dict[str, dict[str, str]] = {
     "low-latency": {"LOW_LATENCY_LAYER": "1", "MANGOHUD": "1"},
     "balanced": {"MANGOHUD": "1"},
@@ -25,6 +26,28 @@ LATENCY_PROFILES: dict[str, dict[str, str]] = {
 
 def latency_env_for_profile(profile: str) -> dict[str, str]:
     return dict(LATENCY_PROFILES.get(profile, LATENCY_PROFILES["balanced"]))
+
+
+def gaming_env_for_per_game(appid: str, hdr: bool = False, profile: str = "balanced") -> dict[str, str]:
+    """Env for a Steam app — latency profile + optional HDR, lean (no global layer)."""
+    env = latency_env_for_profile(profile)
+    if hdr:
+        env["KYTH_HDR"] = "1"
+    # Persist choice so gamenight/compat can re-derive without Hub
+    try:
+        from kyth_shared.gaming_per_game import gaming_launch_env_for_appid
+
+        # Merge persisted per-game config (HDR flag) with explicit args
+        persisted = gaming_launch_env_for_appid(appid)
+        # Explicit hdr arg wins; profile already derived
+        if hdr:
+            persisted["KYTH_HDR"] = "1"
+        # Persisted should not override explicit env, but ensure HDR lingers
+        for k, v in persisted.items():
+            env.setdefault(k, v)
+    except Exception:
+        pass
+    return env
 from ..bootc import has_staged_update
 from ..hardware import _detect_controllers, _find_ntfs_drives
 from ..process import run_command

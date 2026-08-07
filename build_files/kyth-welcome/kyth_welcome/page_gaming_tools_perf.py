@@ -138,8 +138,9 @@ class _PerfTuningMixin:
         profile_title.setObjectName("card-title")
         profile_layout.addWidget(profile_title)
         profile_desc = QLabel(
-            "Pick a common goal and copy the Steam launch option. Use this before "
-            "manual tuning so players get a known-good KythOS baseline first."
+            "Pick a common goal and copy the Steam launch option. Per-game HDR "
+            "and latency are saved to ~/.config/kyth/gaming-per-game.toml so "
+            "launches stay lean (no global LD_PRELOAD) and survive reboots."
         )
         profile_desc.setObjectName("card-copy")
         profile_desc.setWordWrap(True)
@@ -171,8 +172,31 @@ class _PerfTuningMixin:
         profile_opt_row.addWidget(profile_copy)
         profile_layout.addLayout(profile_opt_row)
 
+        # R4: per-game persistence — save HDR + latency choice to gaming-per-game.toml
+        per_game_row = QHBoxLayout()
+        per_game_row.setSpacing(8)
+        from .qt import QCheckBox
+
+        self._per_game_hdr_check = QCheckBox("HDR per game (KYTH_HDR=1)")
+        self._per_game_hdr_check.setToolTip("Save HDR=1 for this app so kyth-gamescope adds --hdr-enabled on next launch")
+        per_game_row.addWidget(self._per_game_hdr_check)
+        self._per_game_save_btn = QPushButton("Save per-game")
+        self._per_game_save_btn.setToolTip("Save profile + HDR to ~/.config/kyth/gaming-per-game.toml")
+        self._per_game_save_btn.clicked.connect(self._save_per_game_profile)
+        per_game_row.addWidget(self._per_game_save_btn)
+        self._per_game_status = QLabel("")
+        self._per_game_status.setObjectName("card-copy")
+        per_game_row.addWidget(self._per_game_status, 1)
+        per_game_row.addStretch()
+        profile_layout.addLayout(per_game_row)
+        hint = QLabel("Saved per-game — launch env is KYTH_HDR + LOW_LATENCY_LAYER/MANGOHUD, no global layer.")
+        hint.setObjectName("card-copy")
+        hint.setWordWrap(True)
+        profile_layout.addWidget(hint)
+
         self._profile_goal_combo.currentIndexChanged.connect(self._update_profile_builder)
         self._profile_fps_combo.currentIndexChanged.connect(self._update_profile_builder)
+        self._per_game_hdr_check.toggled.connect(self._update_profile_builder)
         self._add(profile_card)
 
     def _build_scx_card(self):
@@ -221,15 +245,35 @@ class _PerfTuningMixin:
             return
         goal = self._profile_goal_combo.currentData() or "quality"
         fps = self._profile_fps_combo.currentData() or ""
+        hdr = bool(getattr(self, "_per_game_hdr_check", None) and self._per_game_hdr_check.isChecked())
+        hdr_prefix = "KYTH_HDR=1 " if hdr else ""
         fps_arg = f" --fps {fps}" if fps else ""
         launch_options = {
-            "quality": f"kyth-gamescope quality{fps_arg} -- %command%",
-            "hdr": f"kyth-gamescope hdr{fps_arg} -- %command%",
-            "sharp": f"kyth-gamescope sharp --fsr{fps_arg} -- %command%",
-            "latency": f"game-performance --profile gaming -- kyth-gamescope latency{fps_arg} -- %command%",
+            "quality": f"{hdr_prefix}kyth-gamescope quality{fps_arg} -- %command%",
+            "hdr": f"KYTH_HDR=1 kyth-gamescope hdr{fps_arg} -- %command%",
+            "sharp": f"{hdr_prefix}kyth-gamescope sharp --fsr{fps_arg} -- %command%",
+            "latency": f"{hdr_prefix}game-performance --profile gaming -- kyth-gamescope latency{fps_arg} -- %command%",
             "troubleshoot": "PROTON_LOG=1 PROTON_NO_NTSYNC=1 %command%",
         }
         self._profile_launch_value.setText(launch_options.get(goal, launch_options["quality"]))
+
+    def _save_per_game_profile(self):
+        try:
+            from kyth_shared.gaming_per_game import set_profile_for_appid
+
+            goal = self._profile_goal_combo.currentData() or "quality"
+            hdr = bool(self._per_game_hdr_check.isChecked())
+            # Use a placeholder appid for the builder; per-game page will call with real appid
+            appid = getattr(self, "_current_per_game_appid", "builder-default")
+            set_profile_for_appid(appid, profile=goal, hdr=hdr)
+            self._per_game_status.setText(f"Saved {goal} hdr={hdr} for {appid}")
+            self._per_game_status.setObjectName("status-ok")
+        except Exception as exc:
+            self._per_game_status.setText(f"Save failed: {exc}")
+            self._per_game_status.setObjectName("status-err")
+        from .core_base import restyle
+
+        restyle(self._per_game_status)
 
     def _set_scx_scheduler(self, scheduler: str):
         if self._scx_worker and self._scx_worker.isRunning():
