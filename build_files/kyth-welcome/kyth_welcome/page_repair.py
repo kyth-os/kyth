@@ -71,11 +71,36 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         single_shot(self, 0, self._refresh_nvidia_quick_fixes)
 
     @staticmethod
-    def _fetch_rollback_state() -> tuple[bool, str | None]:
-        """Run off the GUI thread by _refresh_rollback_state()'s DataWorker."""
+    def _fetch_rollback_state() -> tuple[bool, str | None, bool]:
+        """Run off the GUI thread by _refresh_rollback_state()'s DataWorker.
+
+        Returns (has_rollback, timestamp, self_heal_warn). self_heal_warn is
+        True when a staged image has failed >=2 boots and a rollback is
+        available — Hub auto-offers rollback as warn (self-healing, Pillar 2).
+        """
         has_rollback = has_rollback_deployment()
         timestamp = bootc_image_timestamp("rollback") if has_rollback else None
-        return has_rollback, timestamp
+        self_heal = False
+        try:
+            from kyth_shared.boot_health import read_state as _read_boot_state
+            from kyth_shared.system.bootc import has_staged_update
+
+            if has_rollback and has_staged_update():
+                state = _read_boot_state()
+                if state.failures >= 2 or state.status in ("quarantined", "unhealthy"):
+                    self_heal = True
+        except Exception:
+            pass
+        # Also propagate to HubState so other pages see staged/rollback coherence
+        try:
+            from kyth_welcome.services.hub_state import HUB_STATE
+
+            HUB_STATE.set_rollback_available(bool(has_rollback))
+            if self_heal:
+                HUB_STATE.set("self_heal_warn", True)
+        except Exception:
+            pass
+        return has_rollback, timestamp, self_heal
 
     def _refresh_rollback_state(self):
         if self._rollback_state_worker is not None:
@@ -87,10 +112,17 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._rollback_state_worker.start()
 
     def _on_rollback_state_ready(self, _key: str, data: object):
-        has_rollback, timestamp = data
+        # Compatibility: old cache may still be 2-tuple; support both.
+        if isinstance(data, tuple) and len(data) == 3:
+            has_rollback, timestamp, self_heal = data  # type: ignore[misc]
+        else:
+            has_rollback, timestamp = data  # type: ignore[misc]
+            self_heal = False
         self._has_rollback = has_rollback
         self._rollback_timestamp = timestamp
-        new_card, new_btn = rollback_card(has_rollback, self._run_rollback, self._navigate, timestamp)
+        # Self-healing: if staged has failed 2 boots, surface rollback as warn with tip.
+        extra_warn = bool(self_heal and has_rollback)
+        new_card, new_btn = rollback_card(has_rollback, self._run_rollback, self._navigate, timestamp, warn=extra_warn)
         self._layout.removeWidget(self._rollback_card)
         self._rollback_card.deleteLater()
         self._layout.insertWidget(self._rollback_insert_index, new_card)

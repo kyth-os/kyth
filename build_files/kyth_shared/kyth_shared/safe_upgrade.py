@@ -80,14 +80,26 @@ def upgrade(
     result = run(["bootc", "upgrade"], check=False)
     if result.returncode:
         return result.returncode
-    write_state(
-        record_staged(
-            state,
-            remote_digest,
-            rollout_ring=image_ring(reference) or ring,
-        ),
-        state_path,
+    new_state = record_staged(
+        state,
+        remote_digest,
+        rollout_ring=image_ring(reference) or ring,
     )
+    write_state(new_state, state_path)
+    # Control-plane: surface staged digest to Hub without per-page bootc spawns.
+    if _HUB_STATE is not None:
+        try:
+            _HUB_STATE.set_update_status("staged", remote_digest)
+            _HUB_STATE.set("staged_digest", remote_digest)
+            # Keep rollback_available in sync so RepairPage can offer one-click rollback
+            try:
+                from .system.bootc import has_rollback_deployment
+
+                _HUB_STATE.set_rollback_available(bool(has_rollback_deployment()))
+            except Exception:
+                pass
+        except Exception:
+            pass
     return 0
 
 

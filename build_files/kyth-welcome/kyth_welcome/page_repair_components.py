@@ -65,26 +65,33 @@ def rollback_card(
     run_rollback: Callable[[], None],
     navigate: Callable[[str], None],
     timestamp: str | None = None,
+    warn: bool = False,
 ) -> tuple[object, QPushButton]:
     """timestamp: pre-fetched bootc_image_timestamp("rollback"), or None.
     Fetching it is a subprocess call — callers building this eagerly (e.g.
     a page constructor) should pass None and refresh it in asynchronously,
     the same way has_rollback itself should be treated as a placeholder
-    until a background probe confirms it."""
-    card, layout = _make_card("card-accent-warn" if has_rollback else None)
+    until a background probe confirms it. warn: self-healing signal."""
+    accent = "card-accent-warn" if (has_rollback or warn) else None
+    card, layout = _make_card(accent)
     title = QLabel("Undo last update")
     title.setObjectName("card-title")
     layout.addWidget(title)
-    body = QLabel(
-        (
+    if warn and has_rollback:
+        body_text = (
+            "⚠ Staged update appears to have failed twice — self-healing recommends rolling back. "
+            "Rollback restores the previous image on next boot; your files in /home stay in place."
+            + (f"\n\nPrevious image built: {timestamp}" if timestamp else "")
+        )
+    elif has_rollback:
+        body_text = (
             "A previous system image is available. Rollback restores that image on the next boot; "
             "your files, saves, and projects in /home stay in place."
             + (f"\n\nPrevious image built: {timestamp}" if timestamp else "")
-        ) if has_rollback else (
-            "No previous system image is available right now. After the next OS update, "
-            "KythOS will keep a rollback target here so you can undo a bad update."
         )
-    )
+    else:
+        body_text = "No previous system image is available right now. After the next OS update, KythOS will keep a rollback target here so you can undo a bad update."
+    body = QLabel(body_text)
     body.setObjectName("card-copy")
     body.setWordWrap(True)
     layout.addWidget(body)
