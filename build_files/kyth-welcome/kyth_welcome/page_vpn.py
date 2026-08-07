@@ -297,11 +297,14 @@ class VpnPage(Page):
     def _on_saml_cookie(self, cookie: str) -> None:
         self._saml_pending = False
         self._vpn_log.append("[SAML authentication complete — reconnecting…]")
-        if self._worker:
+        if self._worker and self._worker.isRunning():
             self._worker.stop()
-            if not self._worker.wait(10000):
-                self._vpn_log.append("[Error: timed out waiting for the first openconnect process to exit]")
-                return
+            # Avoid blocking UI: defer reconnect until the first worker finishes
+            try:
+                self._worker.finished.connect(lambda _c=cookie: self._on_saml_cookie(_c))
+            except RuntimeError:
+                pass
+            return
         cmd, worker_stdin, username = build_saml_reconnect_command(
             self._saml_gateway,
             self._saml_protocol,

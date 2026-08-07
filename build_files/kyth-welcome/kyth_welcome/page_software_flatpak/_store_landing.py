@@ -2,6 +2,8 @@
 from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QVBoxLayout,
 )
+from ..services.appstream import load_appstream_catalog
+from ..services.runtime import DataWorker
 from ..widgets import _make_card
 
 
@@ -38,7 +40,29 @@ class _StoreLandingMixin:
 
     def _render_store_landing(self):
         self._clear_fp_results()
-        catalog = self._fp_appstream_catalog()
+        # Avoid blocking the tab construction on synchronous appstream parse
+        if self._fp_appstream_cache is None and not getattr(self, "_fp_catalog_loading", False):
+            self._fp_catalog_loading = True
+            self._fp_status.setText("Loading catalog…")
+            self._fp_status.setObjectName("status-dim")
+            self._fp_status.show()
+            from ..core_base import restyle
+            restyle(self._fp_status)
+            # Skeleton placeholder while catalog loads
+            placeholder = QLabel("Loading featured apps…")
+            placeholder.setObjectName("card-copy")
+            self._fp_results_layout.addWidget(placeholder)
+            worker = DataWorker("flatpak-appstream", load_appstream_catalog)
+            worker.result.connect(lambda _k, cat: self._on_appstream_loaded(cat))
+            worker.failed.connect(lambda _k, _e: self._on_appstream_loaded({}))
+            worker.start()
+            # Render trending with fallback names immediately so user sees something
+            catalog = {}
+        elif self._fp_appstream_cache is None:
+            # Catalog still loading — show fallback rendering
+            catalog = {}
+        else:
+            catalog = self._fp_appstream_catalog()
         self._fp_status.setText(
             "Featured Kyth picks. Search or browse the catalog for more."
             if catalog else
@@ -73,6 +97,12 @@ class _StoreLandingMixin:
 
         for shelf in self._STORE_SHELVES[:3]:
             self._fp_results_layout.addWidget(self._make_store_shelf(shelf))
+
+    def _on_appstream_loaded(self, catalog: dict):
+        self._fp_appstream_cache = catalog
+        self._fp_catalog_loading = False
+        # Re-render landing with rich names now that catalog is cached
+        self._render_store_landing()
 
     def _make_store_app_card(self, entry: dict) -> QFrame:
         app_id = entry.get("application_id", "").strip()

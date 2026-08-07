@@ -408,7 +408,7 @@ class RcloneSetupWizard(QDialog):
     def _cancel_auth(self):
         if self._auth_worker and self._auth_worker.isRunning():
             self._auth_worker.cancel()
-            self._auth_worker.wait(2000)
+            # Don't block UI — finished signal will clean up
         self._token = ""
         self._auth_start_btn.setEnabled(True)
         self._auth_start_btn.show()
