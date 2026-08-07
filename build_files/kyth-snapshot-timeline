@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""kyth-snapshot-timeline — CLI for snapshot timeline (offline, json)."""
+import argparse, json, sys
+from kyth_shared.snapshot_timeline import snapshot_timeline
+
+def main(argv=None):
+    p=argparse.ArgumentParser(prog="kyth-snapshot-timeline")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--limit", type=int, default=20)
+    args=p.parse_args(argv)
+    rows=snapshot_timeline(limit=args.limit)
+    if args.json:
+        print(json.dumps([r.__dict__ for r in rows], indent=2))
+    else:
+        for r in rows:
+            print(f"{r.type:12} {r.id:12} {r.description}")
+    return 0
+
+if __name__=="__main__":
+    raise SystemExit(main())
