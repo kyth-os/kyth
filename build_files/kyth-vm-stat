@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-vm-stat — 10 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-vm-stat "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.vm_stat import load_vm_stat, vm_stat_status; c=load_vm_stat(); print(f\"profile={c['profile']} active={vm_stat_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.vm_stat import load_vm_stat,save_vm_stat,generate_vm_stat; c=load_vm_stat(); c['profile']='gaming'; save_vm_stat(c); generate_vm_stat(c)"; sysctl --system >/dev/null 2>&1 || true; echo "vm stat gaming 10" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.vm_stat import load_vm_stat,save_vm_stat,generate_vm_stat; c=load_vm_stat(); c['profile']='balanced'; save_vm_stat(c); generate_vm_stat(c)"; echo "vm stat balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.vm_stat import load_vm_stat,generate_vm_stat; generate_vm_stat(load_vm_stat())" ;;
+    *) echo "Usage: kyth-vm-stat [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

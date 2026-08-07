@@ -15,6 +15,7 @@ from .widgets import (
     Page, _make_card,
 )
 
+# 111-115 vm/net headless — no new welcome modules; PerformancePage reuses single _make_card rows, keeping 215 headroom
 # ── Page: Performance ─────────────────────────────────────────────────────────
 class PerformancePage(Page):
     def __init__(self):

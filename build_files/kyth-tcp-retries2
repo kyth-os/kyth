@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-tcp-retries2 — 8 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-retries2 "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.tcp_retries2 import load_tcp_retries2, tcp_retries2_status; c=load_tcp_retries2(); print(f\"profile={c['profile']} active={tcp_retries2_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_retries2 import load_tcp_retries2,save_tcp_retries2,generate_tcp_retries2; c=load_tcp_retries2(); c['profile']='gaming'; save_tcp_retries2(c); generate_tcp_retries2(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp retries2 gaming 8" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_retries2 import load_tcp_retries2,save_tcp_retries2,generate_tcp_retries2; c=load_tcp_retries2(); c['profile']='balanced'; save_tcp_retries2(c); generate_tcp_retries2(c)"; echo "tcp retries2 balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_retries2 import load_tcp_retries2,generate_tcp_retries2; generate_tcp_retries2(load_tcp_retries2())" ;;
+    *) echo "Usage: kyth-tcp-retries2 [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

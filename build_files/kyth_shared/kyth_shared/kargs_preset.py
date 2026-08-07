@@ -71,8 +71,10 @@ def save_kargs(cfg: dict[str, Any], path: Path | None = None) -> Path:
     add = [str(x) for x in cfg.get("custom_add", []) if isinstance(x, (str, int, float))] if isinstance(cfg.get("custom_add"), list) else []
     rem = [str(x) for x in cfg.get("custom_remove", []) if isinstance(x, (str, int, float))] if isinstance(cfg.get("custom_remove"), list) else []
     lines = ["# Kyth kargs perf profile — offline, revertible\n", f'profile = "{prof}"\n']
-    lines.append(f'custom_add = [{", ".join(f"\"{x}\"" for x in add)}]\n')
-    lines.append(f'custom_remove = [{", ".join(f"\"{x}\"" for x in rem)}]\n')
+    add_repr = ", ".join(f'"{x}"' for x in add)
+    rem_repr = ", ".join(f'"{x}"' for x in rem)
+    lines.append(f"custom_add = [{add_repr}]\n")
+    lines.append(f"custom_remove = [{rem_repr}]\n")
     p.write_text("".join(lines), encoding="utf-8")
     return p
 

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-tcp-keepalive — 120 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-keepalive "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.tcp_keepalive import load_tcp_keepalive, tcp_keepalive_status; c=load_tcp_keepalive(); print(f\"profile={c['profile']} active={tcp_keepalive_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_keepalive import load_tcp_keepalive,save_tcp_keepalive,generate_tcp_keepalive; c=load_tcp_keepalive(); c['profile']='gaming'; save_tcp_keepalive(c); generate_tcp_keepalive(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp keepalive gaming 120" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_keepalive import load_tcp_keepalive,save_tcp_keepalive,generate_tcp_keepalive; c=load_tcp_keepalive(); c['profile']='balanced'; save_tcp_keepalive(c); generate_tcp_keepalive(c)"; echo "tcp keepalive balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_keepalive import load_tcp_keepalive,generate_tcp_keepalive; generate_tcp_keepalive(load_tcp_keepalive())" ;;
+    *) echo "Usage: kyth-tcp-keepalive [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

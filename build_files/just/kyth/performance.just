@@ -469,6 +469,41 @@ page-cluster mode="status":
     set -euo pipefail
     /usr/bin/kyth-page-cluster "{{ mode }}"
 
+# TCP retries2 8 gaming (tcp-retries2.toml)
+[group('KythOS')]
+tcp-retries2 mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-retries2 "{{ mode }}"
+
+# TCP keepalive 120 gaming (tcp-keepalive.toml)
+[group('KythOS')]
+tcp-keepalive mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-keepalive "{{ mode }}"
+
+# Sched child runs first 0 gaming (sched-child.toml)
+[group('KythOS')]
+sched-child mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-sched-child "{{ mode }}"
+
+# VM stat 10 gaming (vm-stat.toml)
+[group('KythOS')]
+vm-stat mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-vm-stat "{{ mode }}"
+
+# Numa balancing 0 gaming (numa-balancing.toml)
+[group('KythOS')]
+numa-balancing mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-numa-balancing "{{ mode }}"
+
 # EPP AC performance vs balanced (epp-ac.toml)
 [group('KythOS')]
 epp-ac mode="status":

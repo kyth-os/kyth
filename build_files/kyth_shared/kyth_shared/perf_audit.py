@@ -1,4 +1,4 @@
-"""Perf audit — collects 46-105 status + systemd-analyze + probe (consolidated base for system_audit)."""
+"""Perf audit — collects 46-115 status + systemd-analyze + probe (consolidated base for system_audit)."""
 from __future__ import annotations
 
 import time
@@ -45,6 +45,16 @@ def collect_audit() -> dict[str, Any]:
         ("max_map_count", "max_map_count", "max_map_count_status"),
         ("dirty_ratio", "dirty_ratio", "dirty_ratio_status"),
         ("vfs_cache", "vfs_cache_pressure", "vfs_cache_status"),
+        ("tcp_ecn", "tcp_ecn", "tcp_ecn_status"),
+        ("tcp_slow_start", "tcp_slow_start", "tcp_slow_start_status"),
+        ("autogroup", "sched_autogroup", "autogroup_status"),
+        ("nr_migrate", "sched_nr_migrate", "nr_migrate_status"),
+        ("page_cluster", "page_cluster", "page_cluster_status"),
+        ("tcp_retries2", "tcp_retries2", "tcp_retries2_status"),
+        ("tcp_keepalive", "tcp_keepalive", "tcp_keepalive_status"),
+        ("sched_child", "sched_child", "sched_child_status"),
+        ("vm_stat", "vm_stat", "vm_stat_status"),
+        ("numa_balancing", "numa_balancing", "numa_balancing_status"),
     ]:
         try:
             m = __import__(f"kyth_shared.{mod}", fromlist=[fn])
@@ -68,8 +78,8 @@ def collect_audit() -> dict[str, Any]:
 
 
 def format_audit(a: dict[str, Any]) -> str:
-    lines = ["# Kyth perf audit — 46-105"]
-    for k in ("master", "loader", "oom_gaming", "shader_tmpfs", "gaming_cfs", "thp", "irq", "btrfs", "trim", "ananicy", "zswap", "sched", "wine", "kwin", "pipewire_gaming", "vm_watermark", "tcp_notsent", "max_map_count", "dirty_ratio", "vfs_cache"):
+    lines = ["# Kyth perf audit — 46-115"]
+    for k in ("master", "loader", "oom_gaming", "shader_tmpfs", "gaming_cfs", "thp", "irq", "btrfs", "trim", "ananicy", "zswap", "sched", "wine", "kwin", "pipewire_gaming", "vm_watermark", "tcp_notsent", "max_map_count", "dirty_ratio", "vfs_cache", "tcp_ecn", "tcp_slow_start", "autogroup", "nr_migrate", "page_cluster", "tcp_retries2", "tcp_keepalive", "sched_child", "vm_stat", "numa_balancing"):
         lines.append(f"{k}: {a.get(k)}")
     lines.append(f"systemd-analyze: {a.get('systemd_analyze')}")
     return "\n".join(lines) + "\n"
