@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-oom-gaming — oom-gaming.toml gaming.slice OOM guard
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-oom-gaming "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.oom_gaming import load_oom_gaming,oom_gaming_status; c=load_oom_gaming(); print(f"profile={c[\"profile\"]} limit={c[\"limit\"]} active={oom_gaming_status()}")' ;;
+    gaming) need_root "$@"; python3 -c 'from kyth_shared.oom_gaming import load_oom_gaming,save_oom_gaming,generate_oom_gaming; c=load_oom_gaming(); c["profile"]="gaming"; c["limit"]="75%"; save_oom_gaming(c); generate_oom_gaming(c)'; systemctl daemon-reload 2>/dev/null || true; echo "oom gaming 75%" ;;
+    balanced) need_root "$@"; python3 -c 'from kyth_shared.oom_gaming import load_oom_gaming,save_oom_gaming,generate_oom_gaming; c=load_oom_gaming(); c["profile"]="balanced"; save_oom_gaming(c); generate_oom_gaming(c)'; systemctl daemon-reload 2>/dev/null || true; echo "oom balanced" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.oom_gaming import load_oom_gaming,generate_oom_gaming; generate_oom_gaming(load_oom_gaming())';;
+    *) echo "Usage: kyth-oom-gaming [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

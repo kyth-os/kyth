@@ -245,6 +245,41 @@ btrfs-autotune mode="status":
     set -euo pipefail
     /usr/bin/kyth-btrfs-autotune "{{ mode }}"
 
+# Boot fast-path (loader.toml) — 0s vs 2s greenboot
+[group('KythOS')]
+boot-timeout mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-boot-timeout "{{ mode }}"
+
+# OOM gaming guard (oom-gaming.toml) — 75% vs 50%
+[group('KythOS')]
+oom-gaming profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-oom-gaming "{{ profile }}"
+
+# Shader cache tmpfs (shader-tmpfs.toml) — 2G tmpfs
+[group('KythOS')]
+shader-tmpfs mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-shader-tmpfs "{{ mode }}"
+
+# Gaming CFS burst (gaming-cfs.toml) — 400% CPUQuota
+[group('KythOS')]
+gaming-cfs profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-gaming-cfs "{{ profile }}"
+
+# Perf audit — 46-70 + systemd-analyze + budget
+[group('KythOS')]
+gaming-audit mode="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-gaming-audit {{ mode }}
+
 # Run an OpenGL app through Zink.
 [group('KythOS')]
 zink-run +args:

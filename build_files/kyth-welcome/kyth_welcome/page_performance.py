@@ -210,6 +210,27 @@ class PerformancePage(Page):
         btn_bauto.clicked.connect(lambda: self._run_clean("btrfsauto"))
         clean_row4.addWidget(btn_bauto)
         clean_layout.addLayout(clean_row4)
+        # row 5: 66-70 boot/oom/shader/cfs/audit
+        clean_row5 = QHBoxLayout()
+        clean_row5.setSpacing(8)
+        btn_boot = QPushButton("Boot0")
+        btn_boot.setToolTip("loader.toml fast 0s vs balanced 2s")
+        btn_boot.clicked.connect(lambda: self._run_clean("boot"))
+        clean_row5.addWidget(btn_boot)
+        btn_oomg = QPushButton("OOM-G")
+        btn_oomg.clicked.connect(lambda: self._run_clean("oomg"))
+        clean_row5.addWidget(btn_oomg)
+        btn_shader = QPushButton("ShaderTmp")
+        btn_shader.clicked.connect(lambda: self._run_clean("shader"))
+        clean_row5.addWidget(btn_shader)
+        btn_cfs = QPushButton("CFS")
+        btn_cfs.clicked.connect(lambda: self._run_clean("cfs"))
+        clean_row5.addWidget(btn_cfs)
+        btn_audit = QPushButton("Audit")
+        btn_audit.setObjectName("primary")
+        btn_audit.clicked.connect(lambda: self._run_clean("audit"))
+        clean_row5.addWidget(btn_audit)
+        clean_layout.addLayout(clean_row5)
         self._add(clean_card)
 
         # ── Session history ────────────────────────────────────────────────────
@@ -508,6 +529,26 @@ class PerformancePage(Page):
                 from kyth_shared.btrfs_autotune import load_btrfs_autotune
                 c = load_btrfs_autotune()
                 self._clean_status.setText(f"btrfs-auto {c['enabled']} thr={c['threshold']}")
+            elif which == "boot":
+                from kyth_shared.boot_loader import load_loader, loader_status
+                c = load_loader()
+                self._clean_status.setText(f"boot fast={c['fast']} {loader_status()}")
+            elif which == "oomg":
+                from kyth_shared.oom_gaming import load_oom_gaming, oom_gaming_status
+                c = load_oom_gaming()
+                self._clean_status.setText(f"oom-gaming {c['profile']} {oom_gaming_status()}")
+            elif which == "shader":
+                from kyth_shared.shader_tmpfs import load_shader_tmpfs, shader_tmpfs_status
+                c = load_shader_tmpfs()
+                self._clean_status.setText(f"shader {c['enabled']} {shader_tmpfs_status()}")
+            elif which == "cfs":
+                from kyth_shared.gaming_cfs import load_gaming_cfs, gaming_cfs_status
+                c = load_gaming_cfs()
+                self._clean_status.setText(f"cfs {c['profile']} {gaming_cfs_status()}")
+            elif which == "audit":
+                from kyth_shared.perf_audit import collect_audit, format_audit
+                a = collect_audit()
+                self._clean_status.setText(f"audit master={a.get('master')} {a.get('systemd_analyze','')[:40]}")
             restyle(self._clean_status)
         except Exception as exc:
             self._clean_status.setText(f"{which} failed — {exc}")
