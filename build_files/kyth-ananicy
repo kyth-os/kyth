@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-ananicy — ananicy.toml → 99-kyth-gaming.conf
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-ananicy "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.ananicy_preset import load_ananicy,ananicy_status; c=load_ananicy(); print(f"profile={c[\"profile\"]} nice={c[\"nice\"]} ioclass={c[\"ioclass\"]} active={ananicy_status()}")' ;;
+    kyth) need_root "$@"; python3 -c 'from kyth_shared.ananicy_preset import load_ananicy,save_ananicy,generate_ananicy; c=load_ananicy(); c["profile"]="kyth"; save_ananicy(c); generate_ananicy(c)'; systemctl try-restart ananicy-cpp 2>/dev/null || true; echo "ananicy kyth enabled" ;;
+    balanced|default) need_root "$@"; python3 -c 'from kyth_shared.ananicy_preset import load_ananicy,save_ananicy,generate_ananicy; c=load_ananicy(); c["profile"]="balanced"; save_ananicy(c); generate_ananicy(c)'; systemctl try-restart ananicy-cpp 2>/dev/null || true; echo "ananicy balanced" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.ananicy_preset import load_ananicy,generate_ananicy; generate_ananicy(load_ananicy())';;
+    *) echo "Usage: kyth-ananicy [status|kyth|balanced|apply]" >&2; exit 1 ;;
+esac

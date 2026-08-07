@@ -169,6 +169,47 @@ trim-tune profile="status":
     set -euo pipefail
     /usr/bin/kyth-trim-tune "{{ profile }}"
 
+# Ananicy gaming nice (ananicy.toml) — cgroup realtime
+[group('KythOS')]
+ananicy profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-ananicy "{{ profile }}"
+
+# Zswap tier (zswap.toml) — complements zram on <16GB
+[group('KythOS')]
+zswap profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-zswap "{{ profile }}"
+
+# GPU DPM perf (gpu-power.toml) — high vs auto
+[group('KythOS')]
+gpu-power profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-gpu-power "{{ profile }}"
+
+# Sched latency (sched-latency.toml) — 6ms gaming jitter cut
+[group('KythOS')]
+sched-latency profile="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-sched-latency "{{ profile }}"
+
+# Readahead ephemeral (readahead.toml)
+[group('KythOS')]
+readahead path="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-readahead "{{ path }}"
+
+[group('KythOS')]
+readahead-run +args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec /usr/bin/kyth-readahead-run {{ args }}
+
 # Run an OpenGL app through Zink.
 [group('KythOS')]
 zink-run +args:

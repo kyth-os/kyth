@@ -169,6 +169,26 @@ class PerformancePage(Page):
         btn_trim.clicked.connect(lambda: self._run_clean("trim"))
         clean_row2.addWidget(btn_trim)
         clean_layout.addLayout(clean_row2)
+        # row 3: 56-60
+        clean_row3 = QHBoxLayout()
+        clean_row3.setSpacing(8)
+        clean_row3.addWidget(QLabel(""), 1)
+        btn_ananicy = QPushButton("Ananicy")
+        btn_ananicy.clicked.connect(lambda: self._run_clean("ananicy"))
+        clean_row3.addWidget(btn_ananicy)
+        btn_zswap = QPushButton("Zswap")
+        btn_zswap.clicked.connect(lambda: self._run_clean("zswap"))
+        clean_row3.addWidget(btn_zswap)
+        btn_gpu = QPushButton("GPU")
+        btn_gpu.clicked.connect(lambda: self._run_clean("gpu"))
+        clean_row3.addWidget(btn_gpu)
+        btn_sched = QPushButton("Sched")
+        btn_sched.clicked.connect(lambda: self._run_clean("sched"))
+        clean_row3.addWidget(btn_sched)
+        btn_readahead = QPushButton("Readahead")
+        btn_readahead.clicked.connect(lambda: self._run_clean("readahead"))
+        clean_row3.addWidget(btn_readahead)
+        clean_layout.addLayout(clean_row3)
         self._add(clean_card)
 
         # ── Session history ────────────────────────────────────────────────────
@@ -427,6 +447,26 @@ class PerformancePage(Page):
                 from kyth_shared.trim_preset import load_trim, trim_status
                 c = load_trim()
                 self._clean_status.setText(f"trim {c['profile']} active={trim_status()}")
+            elif which == "ananicy":
+                from kyth_shared.ananicy_preset import load_ananicy, ananicy_status
+                c = load_ananicy()
+                self._clean_status.setText(f"ananicy {c['profile']} active={ananicy_status()}")
+            elif which == "zswap":
+                from kyth_shared.zswap_preset import load_zswap, zswap_status
+                c = load_zswap()
+                self._clean_status.setText(f"zswap {c['profile']} active={zswap_status()}")
+            elif which == "gpu":
+                from kyth_shared.gpu_power import load_gpu_power
+                c = load_gpu_power()
+                self._clean_status.setText(f"gpu {c['profile']} dpm={c['dpm']}")
+            elif which == "sched":
+                from kyth_shared.sched_latency import load_sched_latency, sched_latency_status
+                c = load_sched_latency()
+                self._clean_status.setText(f"sched {c['profile']} active={sched_latency_status()}")
+            elif which == "readahead":
+                from kyth_shared.readahead_preset import load_readahead
+                c = load_readahead()
+                self._clean_status.setText(f"readahead {c['enabled']} {c['size_mb']}MB")
             restyle(self._clean_status)
         except Exception as exc:
             self._clean_status.setText(f"{which} failed — {exc}")

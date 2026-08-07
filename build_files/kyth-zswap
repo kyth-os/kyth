@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-zswap — zswap.toml → 99-kyth-zswap.conf
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-zswap "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.zswap_preset import load_zswap,zswap_status; c=load_zswap(); print(f"profile={c[\"profile\"]} compressor={c[\"compressor\"]} zpool={c[\"zpool\"]} active={zswap_status()}")' ;;
+    kyth) need_root "$@"; python3 -c 'from kyth_shared.zswap_preset import load_zswap,save_zswap,generate_zswap; c=load_zswap(); c["profile"]="kyth"; save_zswap(c); generate_zswap(c)'; sysctl --system >/dev/null 2>&1 || true; echo "zswap kyth (reboot to apply modprobe)" ;;
+    balanced|default) need_root "$@"; python3 -c 'from kyth_shared.zswap_preset import load_zswap,save_zswap,generate_zswap; c=load_zswap(); c["profile"]="balanced"; save_zswap(c); generate_zswap(c)'; echo "zswap balanced" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.zswap_preset import load_zswap,generate_zswap; generate_zswap(load_zswap())';;
+    *) echo "Usage: kyth-zswap [status|kyth|balanced|apply]" >&2; exit 1 ;;
+esac

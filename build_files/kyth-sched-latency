@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-sched-latency — sched-latency.toml → 99-kyth-sched-latency.conf
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-sched-latency "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.sched_latency import load_sched_latency,sched_latency_status; c=load_sched_latency(); print(f"profile={c[\"profile\"]} active={sched_latency_status()}")' ;;
+    kyth) need_root "$@"; python3 -c 'from kyth_shared.sched_latency import load_sched_latency,save_sched_latency,generate_sched_latency; c=load_sched_latency(); c["profile"]="kyth"; save_sched_latency(c); generate_sched_latency(c)'; sysctl --system >/dev/null 2>&1 || true; echo "sched latency kyth 6ms" ;;
+    balanced|default) need_root "$@"; python3 -c 'from kyth_shared.sched_latency import load_sched_latency,save_sched_latency,generate_sched_latency; c=load_sched_latency(); c["profile"]="balanced"; save_sched_latency(c); generate_sched_latency(c)'; echo "sched latency balanced" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.sched_latency import load_sched_latency,generate_sched_latency; generate_sched_latency(load_sched_latency())';;
+    *) echo "Usage: kyth-sched-latency [status|kyth|balanced|apply]" >&2; exit 1 ;;
+esac
