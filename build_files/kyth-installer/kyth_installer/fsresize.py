@@ -20,8 +20,9 @@ from .streaming import StreamingCommandRunner
 from .system import _as_root
 
 NTFS_GUIDANCE = (
-    "Windows left this NTFS volume in an unsafe state. Disable Fast Startup "
-    "and hibernation in Windows, run chkdsk /f, then try again."
+    "Windows left this NTFS volume in an unsafe state. For a smooth switch, "
+    "boot Windows → Settings → Power → disable Fast Startup and hibernation, "
+    "run chkdsk /f, then return to KythOS to retry."
 )
 
 _runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
