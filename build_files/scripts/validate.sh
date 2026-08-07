@@ -45,6 +45,9 @@ python3 build_files/scripts/optimization-report.py --check
 echo "==> Gaming hash gate"
 bash build_files/scripts/hash-gaming-versions.sh
 
+echo "==> RPM lock hash gate"
+bash build_files/scripts/hash-rpm-lock.sh
+
 echo "==> JavaScript syntax"
 js_files=()
 while IFS= read -r -d '' file; do
