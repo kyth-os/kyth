@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from .context import InstallRequest
 
 @dataclass(frozen=True)
 class PlanReport:
