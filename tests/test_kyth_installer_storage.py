@@ -161,8 +161,11 @@ class InstallerCommandTests(unittest.TestCase):
 
     def test_bootc_install_calls_disable_absolute_timeout(self):
         source = (INSTALLER_ROOT / "kyth_installer/install.py").read_text()
+        # Phase 2 verbatim: canonical impl moved to phases/storage.py, install.py re-exports
+        storage = (INSTALLER_ROOT / "kyth_installer/phases/storage.py").read_text()
+        combined = source + "\n" + storage
 
-        self.assertEqual(source.count("stall_timeout=3600, absolute_timeout=None"), 2)
+        self.assertEqual(combined.count("stall_timeout=3600, absolute_timeout=None"), 2)
         self.assertNotIn("absolute_timeout=14400", source)
 
 

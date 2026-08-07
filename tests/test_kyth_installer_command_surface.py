@@ -10,6 +10,9 @@ INSTALLER = ROOT / "build_files" / "kyth-installer" / "kyth_installer"
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
 from kyth_installer import install, post_routes  # noqa: E402
+from kyth_installer.phases import finalize as phases_finalize  # noqa: E402
+from kyth_installer.phases import storage as phases_storage  # noqa: E402
+from kyth_installer.phases import run as phases_run  # noqa: E402  # noqa: E402
 from kyth_installer.context import InstallLifecycle, InstallerContext  # noqa: E402
 from kyth_installer.partition_ops import get_journal, init_journal, reset_journal  # noqa: E402
 from kyth_installer.plan import InstallPlan  # noqa: E402
@@ -232,18 +235,36 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             "find_deploy_etc",
             return_value=Path("/mnt/deploy/etc"),
         ), mock.patch.object(
+            phases_finalize,
+            "find_deploy_etc",
+            return_value=Path("/mnt/deploy/etc"),
+        ), mock.patch.object(
             install,
+            "validate_installed_target",
+            return_value=[],
+        ), mock.patch.object(
+            phases_finalize,
             "validate_installed_target",
             return_value=[],
         ), mock.patch.object(
             install,
             "ensure_system_accounts",
         ), mock.patch.object(
+            phases_finalize,
+            "ensure_system_accounts",
+        ), mock.patch.object(
             install,
             "_try_stage_mok_enrollment",
             return_value={},
         ), mock.patch.object(
+            phases_run,
+            "_try_stage_mok_enrollment",
+            return_value={},
+        ), mock.patch.object(
             install,
+            "unmount_target_disk",
+        ), mock.patch.object(
+            phases_storage,
             "unmount_target_disk",
         ), mock.patch.object(
             install,
