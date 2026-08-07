@@ -1,7 +1,5 @@
-"""System-mutation helpers for kyth-installer: privilege escalation, account
-database repair, MOK/Secure Boot enrollment, timezone listing, and unmounting
-a target disk before a wipe install.
-"""
+"""System-mutation helpers — facade after privilege/mount split."""
+from __future__ import annotations
 
 import glob
 import json
@@ -11,102 +9,23 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
-from .runner import run_command, run_as_root as _as_root
+
+from .runner import run_command
 from kyth_shared import accounts as _accounts
 
+# Canonical modules
+from .system_privilege import (
+    _as_root,
+    _require_no_symlink,
+    _safe_umount,
+    _settle,
+    format_install_error,
+    format_os_error,
+    require_root,
+)
+from .system_mount import _lsblk_target_mounts, unmount_target_disk
+
 _logger = logging.getLogger(__name__)
-
-
-def _require_no_symlink(path: str) -> None:
-    """Refuse to mkdir/mount/write through a pre-existing symlink at `path`.
-
-    The installer runs as root against fixed paths under the world-writable
-    /tmp and /var/tmp (mount staging dirs, log file, partition-table backup).
-    Without this check, a local user could pre-plant a symlink there (e.g.
-    pointing at /etc) before the installer runs, and a root `mkdir -p` +
-    `mount` (or file write) would silently follow it. Call this immediately
-    before the first privileged operation touches the path — once mkdir/open
-    has created a real, root-owned entry there, /tmp's sticky bit stops any
-    other user from swapping it out from under us.
-    """
-    if os.path.islink(path):
-        raise RuntimeError(
-            f"Refusing to use {path}: it already exists as a symlink, which "
-            "may indicate local tampering. Remove it and retry."
-        )
-
-
-def _safe_umount(run, path: str, *, check: bool = False) -> subprocess.CompletedProcess:
-    """Lazily detach `path` via the caller's own run(), swallowing "not
-    mounted" / "target busy" failures by default.
-
-    Install-path unmounts previously duplicated `umount -l` with a slightly
-    different check=/capture_output= combination at each call site (some
-    captured output, one didn't, one used check=True) — centralize on one
-    behavior instead. `run` is passed in rather than imported here so each
-    caller's own run_command reference is what actually executes, keeping
-    existing `run_command` mocks/patches on the caller's module effective.
-    """
-    return run(_as_root(["umount", "-l", path]), check=check, capture_output=True)
-
-
-def _settle():
-    run_command(_as_root(["partprobe"]), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-    run_command(["udevadm", "settle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-
-
-def require_root() -> None:
-    """Refuse to continue unless the process is already privileged.
-
-    The desktop launcher elevates via sudo/pkexec before starting the installer.
-    Install mutations (bootc, mkfs, account databases) must not rely on a later
-    best-effort `sudo -n` that may be missing a TTY or policy.
-    """
-    if os.geteuid() != 0:
-        raise RuntimeError(
-            "The KythOS installer must run as root.\n\n"
-            "Launch it from the desktop Install KythOS tile, or run:\n"
-            "  sudo kyth-installer\n\n"
-            f"Current euid={os.geteuid()}."
-        )
-
-
-def format_os_error(exc: BaseException, *, path: str | Path | None = None) -> str:
-    """Human-readable OSError/PermissionError with path and errno when available."""
-    if not isinstance(exc, OSError):
-        return str(exc)
-
-    parts: list[str] = []
-    msg = (exc.strerror or str(exc) or exc.__class__.__name__).strip()
-    if msg:
-        parts.append(msg)
-
-    filename = path if path is not None else getattr(exc, "filename", None)
-    if filename:
-        parts.append(f"path={filename}")
-    filename2 = getattr(exc, "filename2", None)
-    if filename2:
-        parts.append(f"path2={filename2}")
-
-    err = getattr(exc, "errno", None)
-    if err is not None:
-        try:
-            import errno as errno_mod
-            name = errno_mod.errorcode.get(err, "UNKNOWN")
-        except Exception:
-            name = "UNKNOWN"
-        parts.append(f"errno={err} ({name})")
-
-    return "; ".join(parts) if parts else exc.__class__.__name__
-
-
-def format_install_error(exc: BaseException) -> str:
-    """SSE/log message for install failures, preserving OSError detail."""
-    if isinstance(exc, OSError):
-        detail = format_os_error(exc)
-        return f"{exc.__class__.__name__}: {detail}"
-    return str(exc) or exc.__class__.__name__
-
 
 def list_timezones() -> list[str]:
     try:
@@ -223,77 +142,6 @@ def ensure_system_accounts(deploy_root: str, log) -> None:
         raise RuntimeError(f"Could not repair system accounts under {deploy_root}: {exc}") from exc
 
 
-def _lsblk_target_mounts(disk: str) -> list[tuple[str, str]]:
-    """Return (device, mountpoint) pairs for mounted devices under disk."""
-    result = run_command(
-        ["lsblk", "--json", "--paths", "--output", "NAME,TYPE,MOUNTPOINTS", disk],
-        capture_output=True, text=True, check=True,
-    )
-    out = result.stdout
-    mounts: list[tuple[str, str]] = []
-
-    def walk(dev: dict) -> None:
-        name = dev.get("name") or ""
-        for mount in dev.get("mountpoints") or []:
-            if mount:
-                mounts.append((name, mount))
-        for child in dev.get("children") or []:
-            walk(child)
-
-    for dev in json.loads(out).get("blockdevices", []):
-        walk(dev)
-    mounts.sort(key=lambda item: item[1].count("/"), reverse=True)
-    return mounts
-
-
-# Mountpoints that must never receive a lazy unmount — they are part of the
-# running system and detaching them would destabilize the OS.
-_CRITICAL_MOUNTS = frozenset({"/", "/boot", "/boot/efi", "/efi", "/home", "/var"})
-
-
-def unmount_target_disk(disk: str, log) -> None:
-    """Unmount any live-session mounts that would block wiping disk."""
-    log(f"Unmounting any existing mounts on {disk} ...")
-    for mount in ("/mnt", "/sysroot", "/target"):
-        run_command(_as_root(["umount", "-R", mount]), check=False)
-
-    try:
-        mounts = _lsblk_target_mounts(disk)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Could not inspect mounts on target disk {disk}; no storage changes were made. "
-            f"Retry after checking lsblk/udev. Detail: {exc}"
-        ) from exc
-
-    for dev, mount in mounts:
-        log(f"Unmounting {dev} from {mount}")
-        result = run_command(
-            _as_root(["umount", "-R", mount]),
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout or "").strip()
-            log(f"Normal unmount failed for {mount}: {err}")
-            if mount in _CRITICAL_MOUNTS:
-                log(f"Skipping lazy unmount of running system mount: {mount}")
-            else:
-                _safe_umount(run_command, mount)
-
-    try:
-        remaining = _lsblk_target_mounts(disk)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Could not verify that target disk {disk} is fully unmounted; "
-            f"refusing to continue. Detail: {exc}"
-        ) from exc
-    if remaining:
-        details = ", ".join(f"{dev} at {mount}" for dev, mount in remaining)
-        raise RuntimeError(
-            f"Target disk {disk} still has mounted partitions: {details}. "
-            "Close any file manager or terminal using those paths and retry."
-        )
-
-
 def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "") -> str:
     """Stage Kyth Secure Boot MOK enrollment via mokutil.
 
@@ -381,3 +229,4 @@ def _hash_password(password: str) -> str:
     if not password_hash.startswith("$6$"):
         raise RuntimeError("Password hashing returned an invalid SHA-512 crypt value")
     return password_hash
+
