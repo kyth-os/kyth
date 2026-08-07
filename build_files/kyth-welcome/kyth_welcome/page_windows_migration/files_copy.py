@@ -30,7 +30,7 @@ class _FilesCopyMixin:
         self._files_intro = QLabel(
             "Click Scan Drives above — your Windows user folders show up here, and one click "
             "copies Documents, Pictures, Music, Videos, and more into your KythOS home folder. "
-            "The Windows side is never modified."
+            "Preview uses rsync --dry-run first; the Windows side is never modified."
         )
         self._files_intro.setObjectName("card-copy")
         self._files_intro.setWordWrap(True)
