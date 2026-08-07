@@ -11,10 +11,8 @@ from typing import TYPE_CHECKING
 from .config import BIOS_BOOT_GUID, MIN_KYTHOS_BYTES, MIN_KYTHOS_GIB
 from .disk import (
     _normal_device_path,
-    _parent_disk,
     _safe_int,
     find_efi_partition,
-    list_partitions,
 )
 from .plan_types import PlanReport
 
@@ -31,10 +29,13 @@ def _validate_partition_target(
     snapshot: StorageSnapshot | None = None,
 ) -> dict:
     """Validate `target` is a real, unmounted, adequately-sized, non-EFI partition."""
+    # Resolve via plan module so mock.patch.object(plan, "list_partitions") works
+    from . import plan as _plan_mod
+
     partitions = (
         snapshot.partitions_by_name
         if snapshot is not None
-        else {p["name"]: p for p in list_partitions(disk)}
+        else {p["name"]: p for p in _plan_mod.list_partitions(disk)}
     )
     part = partitions.get(target)
     if not part:
@@ -50,6 +51,8 @@ def _validate_partition_target(
 
 def _validate_efi_target(config: dict, target: str, discovered: str | None) -> str:
     """Revalidate the exact ESP that the install will mount."""
+    from . import plan as _plan_mod
+
     requested = _normal_device_path(config.get("efi_partition"))
     efi = requested or _normal_device_path(discovered)
     if not efi:
@@ -58,10 +61,10 @@ def _validate_efi_target(config: dict, target: str, discovered: str | None) -> s
         raise RuntimeError("The EFI system partition and KythOS target partition must be different.")
     if not requested:
         return efi
-    efi_disk = _parent_disk(efi)
+    efi_disk = _plan_mod._parent_disk(efi)
     if not efi_disk:
         raise RuntimeError("Could not determine which disk contains the EFI system partition.")
-    efi_info = next((part for part in list_partitions(efi_disk) if part.get("name") == efi), None)
+    efi_info = next((part for part in _plan_mod.list_partitions(efi_disk) if part.get("name") == efi), None)
     if not efi_info or not efi_info.get("efi"):
         raise RuntimeError("The selected EFI partition is no longer a valid EFI System Partition.")
     if efi_info.get("read_only"):
@@ -74,8 +77,9 @@ def _validate_install_target(
     context=None,
     snapshot: StorageSnapshot | None = None,
 ) -> tuple[str, str | None]:
-    # Lazy imports to avoid cycle with plan.py
+    # Lazy imports to avoid cycle with plan.py + keep mock.patch.object(plan, ...) working
     from . import partition_ops
+    from . import plan as _plan_mod
     from .plan import _probe_storage
 
     mode = str(config.get("install_mode") or "wipe").strip().lower()
@@ -98,7 +102,7 @@ def _validate_install_target(
         target = _normal_device_path(config.get("target_partition"))
         if not target:
             raise RuntimeError("No target partition was selected for alongside installation.")
-        if _parent_disk(target) != disk:
+        if _plan_mod._parent_disk(target) != disk:
             raise RuntimeError("The selected partition does not belong to the selected disk.")
         _validate_partition_target(disk, target, "target partition", snapshot)
         if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID):
@@ -118,7 +122,7 @@ def _validate_install_target(
         target = _normal_device_path(journal.root_partition or config.get("target_partition"))
         if not target:
             raise RuntimeError("No root partition (/) found in the committed partition layout.")
-        if _parent_disk(target) != disk:
+        if _plan_mod._parent_disk(target) != disk:
             raise RuntimeError("The root partition does not belong to the selected disk.")
         _validate_partition_target(disk, target, "root partition", snapshot)
         _validate_efi_target(config, target, snapshot.efi_partition)
