@@ -343,6 +343,27 @@ thp-collapse mode="status":
     set -euo pipefail
     /usr/bin/kyth-thp-collapse "{{ mode }}"
 
+# PSI poll 500ms gaming (psi-poll.toml)
+[group('KythOS')]
+psi-poll mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-psi-poll "{{ mode }}"
+
+# Compaction 0 gaming (compaction.toml)
+[group('KythOS')]
+compaction mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-compaction "{{ mode }}"
+
+# FSCache 10G (fscache.toml)
+[group('KythOS')]
+fscache mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-fscache "{{ mode }}"
+
 # HDR per-game peak (hdr-per-game.toml)
 [group('KythOS')]
 hdr-per-game:

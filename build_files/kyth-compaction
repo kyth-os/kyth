@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-compaction — compaction.toml 0 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-compaction "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.compaction_tune import load_compaction, compaction_status; c=load_compaction(); print(f\"profile={c['profile']} active={compaction_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.compaction_tune import load_compaction,save_compaction,generate_compaction; c=load_compaction(); c['profile']='gaming'; save_compaction(c); generate_compaction(c)"; sysctl --system >/dev/null 2>&1 || true; echo "compaction gaming 0" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.compaction_tune import load_compaction,save_compaction,generate_compaction; c=load_compaction(); c['profile']='balanced'; save_compaction(c); generate_compaction(c)"; echo "compaction balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.compaction_tune import load_compaction,generate_compaction; generate_compaction(load_compaction())" ;;
+    *) echo "Usage: kyth-compaction [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

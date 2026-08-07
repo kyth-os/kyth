@@ -141,8 +141,42 @@ rebase image_ref="kyth:latest":
 #   ujust switch-channel           (defaults to stable)
 
 # ujust switch-channel testing
+# ujust switch-channel stable --dry-run  (prints perf delta + snapshot cost)
 [group('KythOS')]
-switch-channel channel="stable":
+switch-channel channel="stable" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "{{ args }}" == *--dry-run* ]]; then
+        echo "Dry-run: perf delta + snapshot cost"
+        /usr/bin/kyth-system-audit 2>&1 | head -n 20 || true
+        /usr/bin/kyth-gaming-audit 2>&1 | head -n 20 || true
+        python3 -c "from kyth_shared.perf_gate import check_perf_gate; import json; print(json.dumps(check_perf_gate(current_ms=16.0), indent=2))" 2>&1 | head -n 20 || true
+        echo "Snapshot timeline (last 3):"
+        /usr/bin/btrfs subvolume list / 2>&1 | head -n 20 || /usr/bin/snapper list 2>&1 | head -n 20 || echo "no snapshot tool"
+        exit 0
+    fi
+    case "{{ channel }}" in
+        stable|latest) base_tag="latest" ;;
+        testing)       base_tag="testing" ;;
+        *)
+            echo "Unknown channel: {{ channel }}" >&2
+            echo "Valid channels: stable (default), testing" >&2
+            exit 1
+            ;;
+    esac
+    flavor="$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)"
+    case "${flavor}" in
+        cachy) suffix="-cachy" ;;
+        *) suffix="" ;;
+    esac
+    tag="${base_tag}${suffix}"
+    echo "Switching to KythOS :${tag}..."
+    sudo bootc switch "{{ kyth_registry }}/kyth:${tag}"
+    echo "Channel switch staged. Reboot to activate."
+
+# Compat wrapper for internal tests that call switch-channel-impl
+[group('KythOS')]
+switch-channel-impl channel="stable":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{ channel }}" in
