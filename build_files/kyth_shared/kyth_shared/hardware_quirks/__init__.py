@@ -7,3 +7,7 @@ quirk-specific validation out of hardware_policy.py (708 LOC monolith).
 """
 
 from __future__ import annotations
+
+from .catalog import QUIRK_MODULES, list_managed_quirks
+
+__all__ = [*QUIRK_MODULES, "QUIRK_MODULES", "list_managed_quirks"]
