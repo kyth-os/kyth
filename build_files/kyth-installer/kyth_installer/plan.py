@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
-from .context import InstallRequest
+from .context import InstallationState, InstallRequest
 from .disk import (
     _human_size,
     _latest_partition_on_disk,

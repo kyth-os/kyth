@@ -287,6 +287,26 @@ def _collect_controllers() -> dict[str, Any]:
     return {"controllers-detect": detect_controllers()}
 
 
+def _collect_display() -> dict[str, Any]:
+    try:
+        from kyth_shared.hardware_policy import evaluate_system
+
+        ev = evaluate_system()
+        return {"display-detect": {"capabilities": ev.capabilities[:8], "profiles": [p.id for p in ev.profiles[:3]]}}
+    except Exception:
+        return {"display-detect": None}
+
+
+def _collect_hardware_view() -> dict[str, Any]:
+    from kyth_shared.system.hardware_view import get_hardware_view
+
+    try:
+        view = get_hardware_view()
+        return {"hardware-view": view}
+    except Exception:
+        return {"hardware-view": None}
+
+
 def default_collectors() -> tuple[ProbeCollector, ...]:
     return (
         ProbeCollector("bootc", ("bootc-status-data", "bootc-status-text", "bootc-branch", "kernel-flavor"), _collect_bootc),
@@ -294,6 +314,8 @@ def default_collectors() -> tuple[ProbeCollector, ...]:
         ProbeCollector("flatpak-updates", ("flatpak-updates",), _collect_flatpak_updates),
         ProbeCollector("nvidia", ("nvidia-detect",), _collect_nvidia),
         ProbeCollector("controllers", ("controllers-detect",), _collect_controllers),
+        ProbeCollector("display", ("display-detect",), _collect_display),
+        ProbeCollector("hardware-view", ("hardware-view",), _collect_hardware_view),
     )
 
 
