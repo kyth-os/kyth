@@ -201,9 +201,18 @@ def is_first_run() -> bool:
 # Chosen on the first-run wizard's welcome step; drives which app defaults the
 # wizard pre-selects and which System Hub sections get the most prominence.
 # Older installs used work/both; both are treated as the Everyday preset.
+# Roadmap 3-6M: creator/developer/laptop/docked presets — added as aliases
+# that resolve to the nearest existing preset until dedicated Hub sections exist.
 PROFILE_PATH = os.path.expanduser("~/.local/share/kyth/profile")
-VALID_PROFILES = ("everyday", "gaming")
-PROFILE_ALIASES = {"work": "everyday", "both": "everyday"}
+VALID_PROFILES = ("everyday", "gaming", "creator", "developer", "laptop", "docked")
+PROFILE_ALIASES = {
+    "work": "everyday",
+    "both": "everyday",
+    "creator": "creator",
+    "developer": "developer",
+    "laptop": "laptop",
+    "docked": "docked",
+}
 
 
 def normalize_profile(profile: str) -> str:

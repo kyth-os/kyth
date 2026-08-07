@@ -4,6 +4,7 @@
 import "kyth/common.just"
 import "kyth/system-updates.just"
 import "kyth/diagnostics.just"
+import "kyth/probe.just"
 import "kyth/dualboot.just"
 import "kyth/secureboot.just"
 import "kyth/desktop-tools.just"
