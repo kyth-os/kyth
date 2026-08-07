@@ -644,6 +644,41 @@ tcp-timestamps mode="status":
     set -euo pipefail
     /usr/bin/kyth-tcp-timestamps "{{ mode }}"
 
+# Busy read 50 gaming (busy-read.toml)
+[group('KythOS')]
+busy-read mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-busy-read "{{ mode }}"
+
+# Busy poll 50 gaming (busy-poll.toml)
+[group('KythOS')]
+busy-poll mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-busy-poll "{{ mode }}"
+
+# Tcp no metrics save 1 gaming (tcp-no-metrics-save.toml)
+[group('KythOS')]
+tcp-no-metrics-save mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-no-metrics-save "{{ mode }}"
+
+# Tcp retries1 3 gaming (tcp-retries1.toml)
+[group('KythOS')]
+tcp-retries1 mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-retries1 "{{ mode }}"
+
+# Tcp orphan retries 0 gaming (tcp-orphan-retries.toml)
+[group('KythOS')]
+tcp-orphan-retries mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-tcp-orphan-retries "{{ mode }}"
+
 # EPP AC performance vs balanced (epp-ac.toml)
 [group('KythOS')]
 epp-ac mode="status":

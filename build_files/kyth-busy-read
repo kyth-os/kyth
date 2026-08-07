@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-busy-read — 50 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-busy-read "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.busy_read import load_busy_read, busy_read_status; c=load_busy_read(); print(f\"profile={c['profile']} active={busy_read_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.busy_read import load_busy_read,save_busy_read,generate_busy_read; c=load_busy_read(); c['profile']='gaming'; save_busy_read(c); generate_busy_read(c)"; sysctl --system >/dev/null 2>&1 || true; echo "busy read gaming 50" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.busy_read import load_busy_read,save_busy_read,generate_busy_read; c=load_busy_read(); c['profile']='balanced'; save_busy_read(c); generate_busy_read(c)"; echo "busy read balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.busy_read import load_busy_read,generate_busy_read; generate_busy_read(load_busy_read())" ;;
+    *) echo "Usage: kyth-busy-read [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

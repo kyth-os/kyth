@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-tcp-orphan-retries — 0 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-orphan-retries "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.tcp_orphan_retries import load_tcp_orphan_retries, tcp_orphan_retries_status; c=load_tcp_orphan_retries(); print(f\"profile={c['profile']} active={tcp_orphan_retries_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_orphan_retries import load_tcp_orphan_retries,save_tcp_orphan_retries,generate_tcp_orphan_retries; c=load_tcp_orphan_retries(); c['profile']='gaming'; save_tcp_orphan_retries(c); generate_tcp_orphan_retries(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp orphan retries gaming 0" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_orphan_retries import load_tcp_orphan_retries,save_tcp_orphan_retries,generate_tcp_orphan_retries; c=load_tcp_orphan_retries(); c['profile']='balanced'; save_tcp_orphan_retries(c); generate_tcp_orphan_retries(c)"; echo "tcp orphan retries balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_orphan_retries import load_tcp_orphan_retries,generate_tcp_orphan_retries; generate_tcp_orphan_retries(load_tcp_orphan_retries())" ;;
+    *) echo "Usage: kyth-tcp-orphan-retries [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac
