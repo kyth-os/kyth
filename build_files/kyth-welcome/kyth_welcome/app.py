@@ -55,8 +55,23 @@ def main():
 
     # PyQt6 calls qFatal() (abort + core dump) on any uncaught Python exception
     # in a slot unless an excepthook is installed. Log and keep the app alive.
+    # Also surface to Diagnostics probe via the launcher log and a timestamped
+    # error marker the Diagnostics page can surface.
     def _log_uncaught(exc_type, exc_value, exc_tb):
         traceback.print_exception(exc_type, exc_value, exc_tb, file=sys.stderr)
+        # Ensure the launcher log (stderr) is flushed for _system_hub_probe
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        # Also append a concise marker to the cache error file for diagnostics
+        try:
+            err_path = Path.home() / ".cache" / "kyth" / "kyth-welcome-errors.log"
+            err_path.parent.mkdir(parents=True, exist_ok=True)
+            with err_path.open("a", encoding="utf-8") as fh:
+                fh.write(f"[{exc_type.__name__}] {exc_value}\n")
+        except Exception:
+            pass
     sys.excepthook = _log_uncaught
 
     app = QApplication(sys.argv)

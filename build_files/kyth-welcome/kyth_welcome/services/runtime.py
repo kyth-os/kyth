@@ -63,10 +63,34 @@ class TaskSupervisor:
         worker = getattr(owner, attr, None)
         if worker is None:
             return
-        worker.wait()
-        worker.deleteLater()
-        setattr(owner, attr, None)
-        self._records.pop(worker, None)
+        # Avoid blocking the GUI thread: if the worker already finished,
+        # clean up synchronously; otherwise defer cleanup to the finished
+        # signal (non-blocking). Called from `done` slots where the worker
+        # has just emitted `done` but may still be unwinding.
+        if worker.isFinished():
+            try:
+                worker.deleteLater()
+            except RuntimeError:
+                pass
+            setattr(owner, attr, None)
+            self._records.pop(worker, None)
+            return
+        # Defer — will re-enter this method when finished
+        def _deferred_finish():
+            try:
+                worker.deleteLater()
+            except RuntimeError:
+                pass
+            if getattr(owner, attr, None) is worker:
+                setattr(owner, attr, None)
+            self._records.pop(worker, None)
+
+        try:
+            worker.finished.connect(_deferred_finish)
+        except RuntimeError:
+            # Worker already deleted — just clear
+            setattr(owner, attr, None)
+            self._records.pop(worker, None)
 
     def release_when_finished(self, owner: object, attr: str, worker: QThread) -> None:
         self.attach(worker, owner, attr)
