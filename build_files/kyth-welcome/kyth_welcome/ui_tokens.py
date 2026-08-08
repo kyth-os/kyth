@@ -57,6 +57,14 @@ KYTH_BLUE = "#5b8cff"
 KYTH_BLUE_DIM = "#3d5eb8"
 KYTH_BLUE_LIGHT = "#8fb8ff"
 KYTH_BLUE_GLOW = "rgba(91, 140, 255, 0.18)"
+# Primary button — muted slate-blue, not saturated #5b8cff fill. Keeps the
+# overall theme's cool-slate palette: dark overlay with a desaturated blue
+# border so primary is legible without the neon pop that read as AI-slop.
+KYTH_PRIMARY_BG = "#263a54"
+KYTH_PRIMARY_BORDER = "#3a5378"
+KYTH_PRIMARY_HOVER_BG = "#2e4566"
+KYTH_PRIMARY_HOVER_BORDER = "#4a6fa5"
+KYTH_PRIMARY_PRESSED_BG = "#1e2f4a"
 KYTH_VIOLET = "#bb9af7"
 KYTH_TEXT = "#eef2fb"
 KYTH_TEXT_MUTED = "#8ea0c0"

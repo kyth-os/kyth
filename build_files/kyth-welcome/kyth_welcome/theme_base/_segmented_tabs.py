@@ -1,6 +1,6 @@
 """Segmented tabs — Windows Settings pill switcher with Steam focus."""
 
-from ..ui_tokens import KYTH_BLUE, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_TEXT, KYTH_TEXT_MUTED
+from ..ui_tokens import KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_PRIMARY_BG, KYTH_PRIMARY_BORDER, KYTH_PRIMARY_HOVER_BG, KYTH_PRIMARY_HOVER_BORDER, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_TEXT, KYTH_TEXT_MUTED
 
 SEGMENTED_TABS_QSS = f"""
 /* ── Segmented tabs (page-level sub-navigation) ─────────────────────────── */
@@ -26,12 +26,13 @@ QPushButton#segmented-tab:hover {{
 }}
 
 QPushButton#segmented-tab:checked {{
-    background-color: {KYTH_BLUE};
-    border-color: {KYTH_BLUE};
-    color: #ffffff;
+    background-color: {KYTH_PRIMARY_BG};
+    border-color: {KYTH_PRIMARY_BORDER};
+    color: {KYTH_TEXT};
 }}
 
 QPushButton#segmented-tab:checked:hover {{
-    background-color: #6a9bff;
+    background-color: {KYTH_PRIMARY_HOVER_BG};
+    border-color: {KYTH_PRIMARY_HOVER_BORDER};
 }}
 """

@@ -1,12 +1,12 @@
-"""Buttons — SteamOS-feel primary, Windows-feel secondary.
+"""Buttons — muted primary to match slate control-center theme.
 
-Default button is now a soft raised pill (8px) with overlay hover, not a
-hairline flash. Primary is a saturated blue with a subtle inner highlight
-stroke and a glow-tinted hover, so it pops against the dark surfaces without
-needing a purple gradient. Destructive keeps its red but with better muted
-disabled state.
+Default is a soft raised pill (8px) with overlay hover. Primary previously
+used a saturated #5b8cff fill that clashed with the slate ground/surface
+layering — now a desaturated slate-blue (#263a54) with a subtle blue-gray
+border, so it reads as primary without the neon pop. Hover lifts slightly to
+#2e4566 with a brighter border. Destructive keeps its red.
 """
-from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_DIM, KYTH_BLUE_GLOW, KYTH_BLUE_LIGHT, KYTH_DANGER, KYTH_DANGER_LIGHT, KYTH_GROUND, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_RADIUS_SM, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
+from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_GLOW, KYTH_DANGER, KYTH_DANGER_LIGHT, KYTH_GROUND, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_PRIMARY_BG, KYTH_PRIMARY_BORDER, KYTH_PRIMARY_HOVER_BG, KYTH_PRIMARY_HOVER_BORDER, KYTH_PRIMARY_PRESSED_BG, KYTH_RADIUS_SM, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
 
 BUTTONS_QSS = f"""
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
@@ -44,10 +44,10 @@ QPushButton:disabled {{
 QPushButton#primary,
 QPushButton#btn-secondary,
 QPushButton[primary="true"] {{
-    background: {KYTH_BLUE};
-    color: #ffffff;
-    border: 1px solid {KYTH_BLUE_LIGHT};
-    font-weight: 700;
+    background: {KYTH_PRIMARY_BG};
+    color: {KYTH_TEXT};
+    border: 1px solid {KYTH_PRIMARY_BORDER};
+    font-weight: 600;
     padding: 8px 20px;
     letter-spacing: 0.2px;
 }}
@@ -55,15 +55,16 @@ QPushButton[primary="true"] {{
 QPushButton#primary:hover,
 QPushButton#btn-secondary:hover,
 QPushButton[primary="true"]:hover {{
-    background: #6a9bff;
-    border-color: #a3c0ff;
+    background: {KYTH_PRIMARY_HOVER_BG};
+    border-color: {KYTH_PRIMARY_HOVER_BORDER};
+    color: #ffffff;
 }}
 
 QPushButton#primary:pressed,
 QPushButton#btn-secondary:pressed,
 QPushButton[primary="true"]:pressed {{
-    background: {KYTH_BLUE_DIM};
-    border-color: {KYTH_BLUE_DIM};
+    background: {KYTH_PRIMARY_PRESSED_BG};
+    border-color: {KYTH_PRIMARY_BORDER};
 }}
 
 QPushButton#primary:disabled,
@@ -97,10 +98,10 @@ QPushButton#danger:disabled {{
 }}
 
 QPushButton#branch-active {{
-    background: {KYTH_BLUE};
-    color: #ffffff;
-    font-weight: 700;
-    border: 1px solid {KYTH_BLUE_LIGHT};
+    background: {KYTH_PRIMARY_BG};
+    color: {KYTH_TEXT};
+    font-weight: 600;
+    border: 1px solid {KYTH_PRIMARY_BORDER};
     border-radius: {KYTH_RADIUS_SM}px;
     padding: 9px 22px;
 }}
