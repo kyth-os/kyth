@@ -402,11 +402,15 @@ class AnswerFileTests(unittest.TestCase):
         try:
             os.write(fd, b'{"password":"secret"}')
             os.close(fd)
-            # Intentionally insecure: this fixture verifies answer files that
-            # expose passwords are rejected before their contents are used.
-            os.chmod(path, 0o644)  # lgtm[py/overly-permissive-file]
-            with self.assertRaisesRegex(ValueError, "chmod 600"):
-                _load_answer_file(path)
+            # Keep the test fixture itself secure, and simulate an insecure mode
+            # at read time so validation still exercises the rejection path.
+            os.chmod(path, 0o600)
+            real_stat = os.stat(path)
+            fake_stat = MagicMock(spec=real_stat)
+            fake_stat.st_mode = (real_stat.st_mode & ~0o777) | 0o644
+            with patch("kyth_installer.app.os.stat", return_value=fake_stat):
+                with self.assertRaisesRegex(ValueError, "chmod 600"):
+                    _load_answer_file(path)
         finally:
             try:
                 os.close(fd)
