@@ -1,21 +1,16 @@
-"""Global QSS styles — the whole app's base surface, text, and scroll rules.
+"""Global — layered dark canvas with Windows/Steam depth.
 
-QWidget's real background is KYTH_GROUND, not transparent: a page's root
-QWidget must paint the window color itself (Qt doesn't fill it for you),
-which is why this used to live in theme_hub_overlay.py "applied after the
-base theme so every hub page uses the same surface... without touching
-page behavior" — folded in directly now that there's only one pass.
+Keep the window canvas solid dark; depth comes from surface layering, not a
+gradient wash (Qt's viewport widget would otherwise paint black/white gaps on
+offscreen renders). Labels stay transparent so they float over cards.
 """
-from ..ui_tokens import KYTH_GROUND, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_TEXT
+from ..ui_tokens import KYTH_GROUND, KYTH_HAIRLINE_LIGHT, KYTH_SURFACE_RAISED, KYTH_TEXT
 
 GLOBAL_QSS = f"""
 * {{
     font-family: "Segoe UI Variable", "Segoe UI", "Noto Sans", "Cantarell", sans-serif;
     font-size: 13px;
     color: {KYTH_TEXT};
-}}
-@media (prefers-reduced-motion: reduce) {{
-    * {{ transition: none; }}
 }}
 
 QMainWindow,
@@ -34,16 +29,17 @@ QLabel {{
 
 QScrollArea,
 QScrollArea > QWidget > QWidget {{
-    background: transparent;
+    background: {KYTH_GROUND};
     border: none;
 }}
 
 QToolTip {{
     background: {KYTH_SURFACE_RAISED};
     color: {KYTH_TEXT};
-    border: 1px solid {KYTH_HAIRLINE};
-    padding: 6px 10px;
-    border-radius: 6px;
+    border: 1px solid {KYTH_HAIRLINE_LIGHT};
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 12px;
 }}
 
 /* Focus — visible keyboard ring on interactive controls */

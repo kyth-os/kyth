@@ -1,8 +1,11 @@
-"""Mission bar QSS — the always-visible system strip under topbar.
+"""Mission bar — subtle status strip, not a second header.
 
-Single surface + hairline, no glow, no gradient. Pills reuse status-badge-*.
+SteamOS shows a thin persistent status line (time, battery, network) above the
+library. Windows Settings has no equivalent, so this is Kyth's own: a
+low-contrast strip that reads as chrome, not content. Slightly translucent
+surface + smaller pills so it doesn't compete with the topbar.
 """
-from ..ui_tokens import KYTH_HAIRLINE, KYTH_SURFACE, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
+from ..ui_tokens import KYTH_HAIRLINE, KYTH_SURFACE, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
 
 MISSION_QSS = f"""
 /* ── Mission bar ───────────────────────────────────────────────────────── */
@@ -13,17 +16,17 @@ QWidget#mission-bar {{
 
 QLabel#mission-kicker {{
     color: {KYTH_TEXT_FAINT};
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.6px;
+    letter-spacing: 0.7px;
 }}
 
 QLabel#mission-pill-dim {{
-    background: {KYTH_SURFACE};
+    background: transparent;
     color: {KYTH_TEXT_MUTED};
     border: 1px solid {KYTH_HAIRLINE};
     border-radius: 999px;
-    padding: 3px 10px;
+    padding: 2px 9px;
     font-size: 11px;
     font-weight: 600;
 }}

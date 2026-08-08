@@ -1,4 +1,5 @@
-"""Scrollbars QSS styles."""
+"""Scrollbars — thinner, more Steam-like."""
+
 from ..ui_tokens import KYTH_HAIRLINE, KYTH_TEXT_FAINT
 
 SCROLLBARS_QSS = f"""
@@ -13,7 +14,7 @@ QScrollBar:vertical {{
 QScrollBar::handle:vertical {{
     background: {KYTH_HAIRLINE};
     border-radius: 4px;
-    min-height: 28px;
+    min-height: 32px;
 }}
 
 QScrollBar::handle:vertical:hover {{
@@ -35,7 +36,7 @@ QScrollBar:horizontal {{
 QScrollBar::handle:horizontal {{
     background: {KYTH_HAIRLINE};
     border-radius: 4px;
-    min-width: 28px;
+    min-width: 32px;
 }}
 
 QScrollBar::handle:horizontal:hover {{

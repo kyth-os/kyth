@@ -1,10 +1,6 @@
-"""Segmented-tab QSS — the one shared "sub-navigation within a page"
-control. Used by Home's workstation-mode switcher, App Store's tab bar
-(replacing its old #sw-tab underline row, which looked enough like the
-sidebar's own nav to read as a second, competing navigation system on
-the same page), and Gaming's hub tabs.
-"""
-from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_TEXT, KYTH_TEXT_MUTED
+"""Segmented tabs — Windows Settings pill switcher with Steam focus."""
+
+from ..ui_tokens import KYTH_BLUE, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_TEXT, KYTH_TEXT_MUTED
 
 SEGMENTED_TABS_QSS = f"""
 /* ── Segmented tabs (page-level sub-navigation) ─────────────────────────── */
@@ -24,7 +20,7 @@ QPushButton#segmented-tab {{
 }}
 
 QPushButton#segmented-tab:hover {{
-    background-color: {KYTH_SURFACE};
+    background-color: {KYTH_SURFACE_OVERLAY};
     border-color: {KYTH_HAIRLINE};
     color: {KYTH_TEXT};
 }}
@@ -33,5 +29,9 @@ QPushButton#segmented-tab:checked {{
     background-color: {KYTH_BLUE};
     border-color: {KYTH_BLUE};
     color: #ffffff;
+}}
+
+QPushButton#segmented-tab:checked:hover {{
+    background-color: #6a9bff;
 }}
 """
