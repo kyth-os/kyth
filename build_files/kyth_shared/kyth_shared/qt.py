@@ -15,6 +15,7 @@ __all__ = [
     "QFrame", "QScrollArea", "QFileDialog", "QMessageBox", "QLineEdit",
     "QSizePolicy", "QDialog", "QCheckBox", "QComboBox", "QRadioButton", "QButtonGroup",
     "QDialogButtonBox", "QGridLayout", "QCompleter", "QInputDialog", "QLayout",
+    "QListWidget", "QListWidgetItem",
     "Qt", "QThread", "Signal", "QTimer", "QUrl", "QLibraryInfo", "QSize", "QRect", "QStringListModel",
     "QDesktopServices", "QIcon", "QKeySequence", "QShortcut", "QAction",
     "QDBusConnection", "QDBusInterface",
@@ -36,6 +37,7 @@ try:
         QFrame, QScrollArea, QFileDialog, QMessageBox, QLineEdit,
         QSizePolicy, QDialog, QCheckBox, QComboBox, QRadioButton, QButtonGroup,
         QDialogButtonBox, QGridLayout, QCompleter, QInputDialog, QLayout,
+        QListWidget, QListWidgetItem,
     )
     from PySide6.QtCore import (
         Qt, QThread, Signal, QTimer, QUrl, QLibraryInfo, QSize, QRect, QStringListModel,
@@ -52,6 +54,7 @@ except ImportError:
         QFrame, QScrollArea, QFileDialog, QMessageBox, QLineEdit,
         QSizePolicy, QDialog, QCheckBox, QComboBox, QRadioButton, QButtonGroup,
         QDialogButtonBox, QGridLayout, QCompleter, QInputDialog, QLayout,
+        QListWidget, QListWidgetItem,
     )
     from PyQt6.QtCore import (
         Qt, QThread, QTimer, QUrl, QLibraryInfo, QSize, QRect, QStringListModel,

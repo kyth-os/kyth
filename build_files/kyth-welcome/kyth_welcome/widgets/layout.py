@@ -1,10 +1,13 @@
-"""FlowLayout — extract from widgets.py god module (R8-3).
+"""FlowLayout + HubPage — extracted helpers for Mission Central.
 
-Single reusable layout that wraps to a new row. Keep Qt import local so
-`import kyth_welcome.widgets` cold path does not pay for it until needed.
+FlowLayout: wrap layout. HubPage: structured page base that enforces the
+Mission Central template (header → primary grid → disclosure → log drawer)
+while keeping per-page business logic owned by callers.
 """
 
-from ..qt import QLayout, QRect, QSize, Qt
+from ..qt import QFrame, QLabel, QLayout, QRect, QSize, Qt, QVBoxLayout, QWidget
+
+from .cards import _divider, _make_card, _make_grid, _make_section_header
 
 
 class FlowLayout(QLayout):
@@ -93,3 +96,86 @@ class FlowLayout(QLayout):
             x = next_x
             line_height = max(line_height, hint.height())
         return y + line_height - rect.y() + bottom
+
+
+class HubPage(QWidget):
+    """Structured base for Mission Central pages.
+
+    Thin wrapper over the existing Page scroll pattern, but with named
+    helpers that enforce the template: header → section → 2-col grid →
+    disclosure row → log drawer. Existing Page subclasses can migrate
+    incrementally; new pages should inherit HubPage directly.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("content-area")
+        from ..qt import QFrame, QScrollArea
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self._outer = outer
+
+        # Scroll container mirrors Page's _NoAutoScrollArea contract
+        # but without importing the private class (keep layout.py standalone).
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(scroll)
+
+        container = QWidget()
+        container.setObjectName("content-area")
+        scroll.setWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(48, 34, 56, 42)
+        layout.setSpacing(18)
+        self._layout = layout
+
+    # Re-expose Page API so callers can migrate without rewiring
+    def _page_header(self, eyebrow: str, title: str, subtitle: str = "") -> None:
+        hdr = QWidget()
+        hdr.setObjectName("page-header")
+        hdr_layout = QVBoxLayout(hdr)
+        hdr_layout.setContentsMargins(48, 26, 56, 18)
+        hdr_layout.setSpacing(7)
+        ew = QLabel(eyebrow.upper())
+        ew.setObjectName("eyebrow")
+        hdr_layout.addWidget(ew)
+        ttl = QLabel(title)
+        ttl.setObjectName("heading")
+        hdr_layout.addWidget(ttl)
+        if subtitle:
+            sub = QLabel(subtitle)
+            sub.setObjectName("subheading")
+            sub.setWordWrap(True)
+            hdr_layout.addWidget(sub)
+        self._outer.insertWidget(0, hdr)
+        self._outer.insertWidget(1, _divider())
+
+    def _add(self, widget: QWidget) -> QWidget:
+        self._layout.addWidget(widget)
+        return widget
+
+    def _add_layout(self, layout) -> None:
+        self._layout.addLayout(layout)
+
+    def _stretch(self):
+        self._layout.addStretch()
+
+    def section(self, title: str, subtitle: str = "") -> QVBoxLayout:
+        """Add a Windows-Settings-style section header and return its layout for callers."""
+        frame, layout = _make_section_header(title, subtitle)
+        self._add(frame)
+        return layout
+
+    def grid(self) -> QVBoxLayout:
+        """Create a 2-col card grid attached to this page."""
+        from ..qt import QGridLayout
+
+        return _make_grid(self._layout)
+
+    def card(self, name: str = "card"):
+        return _make_card(name)

@@ -12,8 +12,8 @@ from ..qt import (
 )
 from ..ui_tokens import RADIUS_PILL, STATUS_ERROR, STATUS_OK, STATUS_WARN
 
-# FlowLayout extracted to widgets/layout.py (R8-3) — keep re-export for compat
-from .layout import FlowLayout  # noqa: F401
+# FlowLayout + HubPage extracted to widgets/layout.py — keep re-export for compat
+from .layout import FlowLayout, HubPage  # noqa: F401
 
 # Cards/sections extracted to widgets/cards.py (slice 4) — keep re-export for compat
 from .cards import _divider, _make_card, _make_grid, _make_section_header  # noqa: F401

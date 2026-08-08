@@ -5,7 +5,7 @@ from .services.hardware import detect_nvidia_async
 from .services.runtime import has_blocking_tasks
 from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups
 from .qt import (
-    QCompleter, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
+    QCompleter, QDialog, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .widgets import (
     _divider, _theme_icon,
@@ -89,6 +89,7 @@ class MainWindow(QMainWindow):
             central_layout.addWidget(banner)
 
         self._build_topbar(central_layout)
+        self._build_mission_bar(central_layout)
         self._build_search_panel(central_layout)
 
         root = self._create_main_content_root()
@@ -109,7 +110,9 @@ class MainWindow(QMainWindow):
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._focus_search)
         self._palette_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
-        self._palette_shortcut.activated.connect(self._focus_search)
+        self._palette_shortcut.activated.connect(self._show_palette)
+        self._mission_worker = None
+        single_shot(self, 150, self._refresh_mission_bar)
         self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
         self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
         self._switch_page(0)
@@ -160,6 +163,171 @@ class MainWindow(QMainWindow):
         topbar_layout.addWidget(self._search_box)
 
         central_layout.addWidget(topbar)
+
+    def _build_mission_bar(self, central_layout):
+        bar = QWidget()
+        bar.setObjectName("mission-bar")
+        bar.setFixedHeight(30)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(14, 4, 14, 4)
+        layout.setSpacing(8)
+
+        kicker = QLabel("System")
+        kicker.setObjectName("mission-kicker")
+        layout.addWidget(kicker)
+
+        sep = QLabel("·")
+        sep.setObjectName("mission-sep")
+        layout.addWidget(sep)
+
+        self._mission_pills: list[QLabel] = []
+        for _ in range(4):
+            pill = QLabel("")
+            pill.setObjectName("mission-pill-dim")
+            pill.hide()
+            layout.addWidget(pill)
+            self._mission_pills.append(pill)
+
+        layout.addStretch()
+
+        # AI/repair hint — single muted label, no glow
+        self._mission_ai_hint = QLabel("")
+        self._mission_ai_hint.setObjectName("mission-kicker")
+        self._mission_ai_hint.hide()
+        layout.addWidget(self._mission_ai_hint)
+
+        central_layout.addWidget(bar)
+        self._mission_bar = bar
+
+    def _refresh_mission_bar(self):
+        if self._mission_worker is not None:
+            return
+        from .services.runtime import DataWorker
+
+        def _gather():
+            from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
+            from .services.process import command_stdout
+
+            try:
+                branch = branch_display_name(current_branch())
+            except Exception:
+                branch = "System Hub"
+            try:
+                staged = has_staged_update()
+            except Exception:
+                staged = False
+            try:
+                rollback = has_rollback_deployment()
+            except Exception:
+                rollback = False
+            try:
+                portal = command_stdout(["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"], timeout=2) or ""
+                portal = portal.strip()
+            except Exception:
+                portal = ""
+            return {"branch": branch, "staged": staged, "rollback": rollback, "portal": portal}
+
+        self._mission_worker = DataWorker("mission-bar", _gather)
+        self._mission_worker.result.connect(self._on_mission_bar_ready)
+        self._mission_worker.failed.connect(lambda _k, _m: None)
+        self._mission_worker.finished.connect(lambda: setattr(self, "_mission_worker", None))
+        self._mission_worker.start()
+
+    def _on_mission_bar_ready(self, _key: str, facts: object):
+        if not isinstance(facts, dict):
+            return
+        pills = []
+        branch = str(facts.get("branch") or "")
+        if branch:
+            pills.append(branch)
+        if facts.get("staged"):
+            pills.append("Update staged — reboot to apply")
+        elif facts.get("rollback"):
+            pills.append("Rollback available")
+        else:
+            pills.append("System current")
+        portal = str(facts.get("portal") or "")
+        if portal == "active":
+            pills.append("Portal active")
+        elif portal:
+            pills.append(f"Portal {portal}")
+
+        for i, pill in enumerate(self._mission_pills):
+            if i < len(pills):
+                pill.setText(pills[i])
+                pill.show()
+            else:
+                pill.hide()
+            restyle(pill)
+
+        # AI hint: surface repair plan summary if available (non-blocking, no glow)
+        try:
+            from kyth_shared.ai_assist import build_repair_plan
+
+            plan = build_repair_plan()
+            summary = str(plan.get("summary", ""))[:80]
+            if summary and "healthy" not in summary.lower():
+                self._mission_ai_hint.setText(summary)
+                self._mission_ai_hint.show()
+            else:
+                self._mission_ai_hint.hide()
+        except Exception:
+            self._mission_ai_hint.hide()
+
+    def _show_palette(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Command palette")
+        dlg.setModal(True)
+        dlg.resize(560, 380)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(10)
+
+        hint = QLabel("Type to filter — Enter to open, Esc to close")
+        hint.setObjectName("mission-kicker")
+        lay.addWidget(hint)
+
+        edit = QLineEdit(dlg)
+        edit.setPlaceholderText("Search settings, apps, or Windows name — try hdr, clipboard, fancyzones")
+        edit.setObjectName("search-box")
+        lay.addWidget(edit)
+
+        lst = QListWidget(dlg)
+        lay.addWidget(lst, 1)
+
+        def _refill(text: str):
+            lst.clear()
+            for key, _score in self._rank_search_results(text or " "):
+                desc = self._descriptor_by_key.get(key)
+                if not desc:
+                    continue
+                item = QListWidgetItem(f"{desc.title} — {desc.search_description}")
+                item.setData(Qt.ItemDataRole.UserRole, key)
+                lst.addItem(item)
+            if lst.count():
+                lst.setCurrentRow(0)
+
+        def _accept():
+            it = lst.currentItem()
+            key = it.data(Qt.ItemDataRole.UserRole) if it else None
+            if key:
+                dlg.accept()
+                self._navigate_to(key)
+            else:
+                txt = edit.text().strip()
+                matches = self._rank_search_results(txt)
+                if matches:
+                    dlg.accept()
+                    self._navigate_to(matches[0][0])
+
+        edit.textChanged.connect(_refill)
+        edit.returnPressed.connect(_accept)
+        lst.itemActivated.connect(lambda it: (dlg.accept(), self._navigate_to(it.data(Qt.ItemDataRole.UserRole))))
+        lst.itemClicked.connect(lambda it: (dlg.accept(), self._navigate_to(it.data(Qt.ItemDataRole.UserRole))))
+
+        _refill("")
+        edit.setFocus()
+        dlg.exec()
 
     def _build_search_panel(self, central_layout):
         self._search_panel = QFrame()
