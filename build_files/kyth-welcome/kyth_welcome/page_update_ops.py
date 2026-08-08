@@ -519,9 +519,14 @@ class _UpdateOpsMixin:
         if staged:
             data = bootc_status_data() or {}
             staged_ref = nested_get(data, ("status", "staged", "image", "image")) or nested_get(data, ("status", "staged", "image", "transport_image")) or ""
+            if isinstance(staged_ref, dict):
+                staged_ref = staged_ref.get("image", "") or staged_ref.get("imageref", "") or staged_ref.get("reference", "") or staged_ref.get("transport_image", "") or ""
+                # Some bootc variants nest again
+                if isinstance(staged_ref, dict):
+                    staged_ref = staged_ref.get("image", "") or ""
             staged_digest = bootc_image_digest("staged")
             short = f"  ·  {staged_digest[0]}" if staged_digest else ""
-            ref_part = f"{staged_ref.split('@')[0]}" if staged_ref else ""
+            ref_part = f"{staged_ref.split('@')[0]}" if isinstance(staged_ref, str) and staged_ref else ""
             # Keep readable: tag or repo, not full digest
             label = ref_part.split("/")[-1] if "/" in ref_part else ref_part
             if staged_ts:
