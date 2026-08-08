@@ -161,6 +161,44 @@ class _CardsMixin:
         body.addWidget(self._profile_result)
         return card
 
+    def _make_windows_parity_card(self) -> QFrame:
+        card, body = _make_card("card-accent-ok")
+        body.setContentsMargins(18, 16, 18, 16)
+        body.setSpacing(10)
+        title = QLabel("Windows 11 Comfort — familiar desktop")
+        title.setObjectName("card-title")
+        copy = QLabel(
+            "One toggle to feel at home: double-click to open (not single-click), centered taskbar, "
+            "strong snap zones for 2×2 / 3-column snap layouts, Win+Arrow to tile halves/quarters, "
+            "Win+E for Dolphin, Win+D to show desktop, Win+L to lock. Reversible — switch back to Balanced anytime."
+        )
+        copy.setObjectName("card-copy")
+        copy.setWordWrap(True)
+        body.addWidget(title)
+        body.addWidget(copy)
+        for label, detail in (
+            ("Double-click", "Dolphin opens on double-click like Explorer — single-click just selects."),
+            ("Centered taskbar", "Panel icons centered; notification tray and clock on the right, like Windows 11."),
+            ("Snap Layouts", "Drag a window to a screen edge for halves; to a corner for quarters; Win+Arrow for halves."),
+            ("Familiar keys", "Win+E Dolphin, Win+D show desktop, Win+L lock, Alt-Tab switcher, Win opens launcher."),
+        ):
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            l = QLabel(label)
+            l.setObjectName("card-summary")
+            l.setMinimumWidth(130)
+            row.addWidget(l)
+            c = QLabel(detail)
+            c.setObjectName("card-copy")
+            c.setWordWrap(True)
+            row.addWidget(c, 1)
+            body.addLayout(row)
+        row = ActionRow("Apply Windows comfort in one click")
+        row.add_button("Apply Windows 11 Comfort", lambda _=False: self._apply_desktop_profile("windows"), primary=True)
+        row.add_button("Restore Balanced", lambda _=False: self._apply_desktop_profile("balanced"))
+        body.addWidget(row)
+        return card
+
     def _make_snap_grid_card(self) -> QFrame:
         card, body = _make_card()
         body.setContentsMargins(18, 16, 18, 16)

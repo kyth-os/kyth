@@ -274,6 +274,9 @@ class CompatibilityPage(Page):
         alt_layout.addLayout(alt_btns)
         self._add(alt_card)
 
+        # ── Will My Games Run? — personal library scanner (Truth Engine) ──
+        self._add(self._make_truth_engine_card())
+
         self._stretch()
 
         # Refresh the compatibility data in the background so blocked/working
@@ -337,6 +340,116 @@ class CompatibilityPage(Page):
         self._active_filter = statuses
         for row, status in self._game_rows:
             row.setVisible(statuses is None or status in statuses)
+
+    def _make_truth_engine_card(self):
+        from .widgets import _make_card
+        from .qt import QPushButton, QVBoxLayout
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Will My Games Run? — scan your library")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Scans installed Steam manifests on this PC (no cloud login needed) and maps each title to KythOS compat data: "
+            "Native/Works/Tweaks/Blocked with the vendor anti-cheat reason. Unknown titles suggest a ProtonDB check. "
+            "Also scans a mounted Windows drive's Steam libraries when available."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        self._truth_status = QLabel("Click Scan to check the games installed here.")
+        self._truth_status.setObjectName("card-copy")
+        self._truth_status.setWordWrap(True)
+        layout.addWidget(self._truth_status)
+        self._truth_rows = QVBoxLayout()
+        self._truth_rows.setSpacing(6)
+        layout.addLayout(self._truth_rows)
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        scan_btn = QPushButton("Scan Installed Games")
+        scan_btn.setObjectName("primary")
+        scan_btn.clicked.connect(self._run_truth_scan)
+        btns.addWidget(scan_btn)
+        btns.addStretch()
+        layout.addLayout(btns)
+        return card
+
+    def _run_truth_scan(self):
+        from .services.runtime import DataWorker, release_worker_when_finished
+        self._truth_status.setText("Scanning Steam libraries…")
+        restyle(self._truth_status)
+        while self._truth_rows.count():
+            it = self._truth_rows.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+
+        def _scan():
+            try:
+                from kyth_shared.gaming.truth_engine import classify_library, scan_steam_manifests
+                from kyth_shared.gaming.compat_data import _COMPAT_GAMES as _G
+                # Also include Windows-mounted libraries if probed
+                extra_paths: list[str] = []
+                try:
+                    from kyth_welcome.services.gaming import _find_steam_libraries
+                    for lib in (_find_steam_libraries() or []):
+                        p = lib.get("path") if isinstance(lib, dict) else None
+                        if p:
+                            extra_paths.append(p)
+                except Exception:
+                    pass
+                names = scan_steam_manifests(extra_paths if extra_paths else None)
+                if not names:
+                    # Fallback: scan default local paths too
+                    names = scan_steam_manifests()
+                result = classify_library(names, list(_G))
+                result["names"] = names
+                return result
+            except Exception as exc:
+                return {"error": str(exc), "total": 0, "buckets": {}}
+
+        worker = DataWorker("truth-engine", _scan)
+        worker.result.connect(self._on_truth_result)
+        worker.failed.connect(lambda _k, msg: self._truth_status.setText(f"Scan failed: {msg}"))
+        self._truth_worker = worker
+        release_worker_when_finished(self, "_truth_worker", worker)
+        worker.start()
+
+    def _on_truth_result(self, _key: str, data: dict):
+        if data.get("error"):
+            self._truth_status.setText(f"Scan failed: {data['error']}")
+            restyle(self._truth_status)
+            return
+        total = data.get("total", 0)
+        if total == 0:
+            self._truth_status.setText("No installed Steam games found here. Install Steam, launch it once, or mount your Windows Steam drive and rescan.")
+            restyle(self._truth_status)
+            return
+        self._truth_status.setText(f"{data.get('summary','')}  (checked {total} titles)")
+        self._truth_status.setObjectName("status-ok" if data.get("blocked", 0) == 0 else "status-warn")
+        restyle(self._truth_status)
+        # Show up to 8 per bucket
+        for bucket in ("blocked", "tweaks", "unknown", "proton", "native"):
+            items = (data.get("buckets") or {}).get(bucket) or []
+            for item in items[:4]:
+                name = item.get("name", "")
+                note = item.get("note", "")[:90]
+                status = item.get("status", bucket)
+                badge, card_name, _ = self._STATUS_STYLE.get(status, self._STATUS_STYLE["tweaks"])
+                if bucket == "unknown":
+                    card_name = "hw-card-dim"
+                    badge = "Unknown"
+                row = QFrame()
+                row.setObjectName(card_name)
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(12, 6, 12, 6)
+                rl.setSpacing(10)
+                lbl = QLabel(name)
+                lbl.setObjectName("card-subtitle")
+                lbl.setToolTip(note)
+                rl.addWidget(lbl, 1)
+                b = QLabel(badge)
+                b.setObjectName("status-err" if bucket == "blocked" else ("status-warn" if bucket in ("tweaks","unknown") else "status-ok"))
+                rl.addWidget(b)
+                self._truth_rows.addWidget(row)
 
     def _make_game_row(self, game: CompatGame) -> QFrame:
         badge_text, card_name, badge_name = self._STATUS_STYLE.get(

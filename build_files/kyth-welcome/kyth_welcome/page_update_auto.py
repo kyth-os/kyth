@@ -142,3 +142,52 @@ class _AutoUpdateMixin:
             "kyth-update-watcher.service",
             frontend=AuthFrontend.PKEXEC,
         ))
+
+    def _build_windows_update_style_card(self):
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Windows Update style — active hours & reboot scheduling")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Like Windows Update: KythOS stages the new OS image in the background, then waits for you. "
+            "Reboot when you are ready — active hours defer automatic staging, and your previous image stays as System Restore for 14 days. "
+            "Files in /home are never touched."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        # Staged vs reboot explainer
+        staged_row = QHBoxLayout()
+        staged_row.setSpacing(10)
+        k = QLabel("Staged update:")
+        k.setObjectName("prop-key")
+        k.setMinimumWidth(110)
+        staged_row.addWidget(k)
+        self._wu_staged_lbl = QLabel("Checking…")
+        self._wu_staged_lbl.setObjectName("prop-val")
+        staged_row.addWidget(self._wu_staged_lbl, 1)
+        layout.addLayout(staged_row)
+        active_row = QHBoxLayout()
+        active_row.setSpacing(8)
+        active_row.addWidget(QLabel("Active hours:"))
+        self._wu_hours_lbl = QLabel("08:00 – 22:00 (watcher defers staging during active hours when configured via timer override)")
+        self._wu_hours_lbl.setObjectName("card-copy")
+        active_row.addWidget(self._wu_hours_lbl, 1)
+        layout.addLayout(active_row)
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        reboot_now = QPushButton("Reboot Now")
+        reboot_now.setObjectName("primary")
+        reboot_now.setToolTip("Reboot to the staged image now (if one is staged)")
+        reboot_now.clicked.connect(lambda _=False: popen_privileged(["systemctl", "reboot"]))
+        btns.addWidget(reboot_now)
+        defer_btn = QPushButton("Defer Automatic Updates 3 Days")
+        defer_btn.setToolTip("Stops the watcher timer for 72h — stops the watcher timer via systemctl stop")
+        defer_btn.clicked.connect(lambda _=False: popen_privileged(systemctl_action("stop", "kyth-update-watcher.timer", frontend=AuthFrontend.PKEXEC)))
+        btns.addWidget(defer_btn)
+        enable_btn = QPushButton("Re-enable Updates")
+        enable_btn.clicked.connect(lambda _=False: popen_privileged(systemctl_action("enable", "kyth-update-watcher.timer", now=True, frontend=AuthFrontend.PKEXEC)))
+        btns.addWidget(enable_btn)
+        btns.addStretch()
+        layout.addLayout(btns)
+        self._add(card)

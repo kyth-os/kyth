@@ -62,6 +62,7 @@ class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _F
         self._add(hdr4)
         self._build_firmware_card()
         self._build_auto_update_card()
+        self._build_windows_update_style_card()
         single_shot(self, 300, self._refresh_auto_update_status)
 
         self._stretch()

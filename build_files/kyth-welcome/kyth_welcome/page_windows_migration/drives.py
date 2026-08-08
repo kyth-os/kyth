@@ -122,6 +122,11 @@ class _DrivesMixin:
     def _on_windows_drives(self, partitions: list):
         self._drive_progress.hide()
         finish_worker(self)
+        # Update Takeout wizard first (summary driven from partitions)
+        try:
+            self._update_takeout(partitions)
+        except Exception:
+            pass
         if not partitions:
             self._drive_status.setText("No Windows/NTFS partitions found.")
             self._drive_status.setObjectName("status-warn")
@@ -137,12 +142,22 @@ class _DrivesMixin:
         locked = sum(1 for p in partitions if p.get("is_bitlocker"))
         clean = sum(1 for p in partitions if not p.get("is_dirty") and not p.get("is_hibernated") and not p.get("is_bitlocker"))
         steam = sum(len(p.get("steam_paths") or []) for p in partitions)
+        launcher = sum(len((p.get("launcher_paths") or {})) for p in partitions)
         profiles = sum(len(p.get("user_profiles") or []) for p in partitions)
-        score = 2 + (1 if clean else 0) + (1 if steam else 0) + (1 if profiles else 0)
+        has_onedrive = any(p.get("has_onedrive") for p in partitions)
+        browser = sum(len(p.get("browser_profiles") or []) for p in partitions)
+        # Enriched score via Takeout summary when available
+        try:
+            from ..services.windows_migration import summarize_takeout
+            score = summarize_takeout(partitions).get("score", 2 + (1 if clean else 0) + (1 if steam else 0) + (1 if profiles else 0))
+        except Exception:
+            score = 2 + (1 if clean else 0) + (1 if steam else 0) + (1 if profiles else 0)
         score_text = (
             f"Switch readiness: {score}/5. Found {clean} safely readable drive(s), "
-            f"{steam} Steam folder(s), and {profiles} Windows user profile(s). "
-            "Back up saves with Ludusavi before copying large libraries."
+            f"{steam} Steam folder(s), {launcher} other launcher(s), {profiles} Windows user profile(s)"
+            + (f", {browser} browser profile(s)" if browser else "")
+            + (" + OneDrive" if has_onedrive else "")
+            + ". Back up saves with Ludusavi before copying large libraries."
         )
         if locked:
             score_text += (

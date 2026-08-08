@@ -3,7 +3,7 @@ from .core_base import restyle
 from .actions import _install_flatpak_inline, _open_chromium_webapp
 from .services.flatpak import _is_flatpak_installed
 from .services.software import find_familiar_app_match
-from .services.runtime import Worker, finish_worker
+from .services.runtime import DataWorker, Worker, finish_worker, release_worker_when_finished
 from .qt import (
     QCheckBox, QComboBox, QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar,
     QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
@@ -30,6 +30,7 @@ class _StarterPackTabMixin:
 
         layout.addWidget(self._make_install_hierarchy_card())
         layout.addWidget(self._make_windows_switcher_card())
+        layout.addWidget(self._make_windows_app_scan_card())
         layout.addWidget(self._make_familiar_app_finder())
 
         for pack in self._STARTER_PACKS:
@@ -232,6 +233,112 @@ class _StarterPackTabMixin:
         btns.addStretch()
         layout.addLayout(btns)
         return card
+
+    def _make_windows_app_scan_card(self) -> QFrame:
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Windows App Equivalents — scan your old Program Files")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "If your Windows drive is still connected, KythOS can read its Program Files folders and suggest the Linux equivalent for each app: LibreOffice for Office, GIMP/Krita for Photoshop, Kdenlive/DaVinci for Premiere, and so on. No login needed."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        self._win_app_status = QLabel("Scan your Windows drive from Move Files → Scan Drives first, then run this scan.")
+        self._win_app_status.setObjectName("card-copy")
+        self._win_app_status.setWordWrap(True)
+        layout.addWidget(self._win_app_status)
+        self._win_app_rows = QVBoxLayout()
+        self._win_app_rows.setSpacing(6)
+        layout.addLayout(self._win_app_rows)
+        btns2 = QHBoxLayout()
+        btns2.setSpacing(8)
+        scan_btn = QPushButton("Scan Windows Apps")
+        scan_btn.setObjectName("primary")
+        scan_btn.clicked.connect(self._scan_windows_apps)
+        btns2.addWidget(scan_btn)
+        btns2.addStretch()
+        layout.addLayout(btns2)
+        return card
+
+    def _scan_windows_apps(self):
+        self._win_app_status.setText("Scanning Program Files folders…")
+        restyle(self._win_app_status)
+        while self._win_app_rows.count():
+            it = self._win_app_rows.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+
+        def _scan():
+            try:
+                from kyth_welcome.services.gaming.windows_partitions import _probe_windows_partitions
+                from kyth_welcome.services.windows_migration.win_apps import scan_windows_program_files, map_to_familiar
+                parts = _probe_windows_partitions()
+                names = scan_windows_program_files(parts)
+                mapped = map_to_familiar(names, list(self._FAMILIAR_APPS))
+                return {"names": names, "mapped": mapped}
+            except Exception as exc:
+                return {"error": str(exc)}
+
+        w = DataWorker("win-app-scan", _scan)
+        w.result.connect(self._on_windows_app_scan)
+        w.failed.connect(lambda _k, m: self._win_app_status.setText(f"Scan failed: {m}"))
+        self._win_app_worker = w
+        release_worker_when_finished(self, "_win_app_worker", w)
+        w.start()
+
+    def _on_windows_app_scan(self, _key: str, data: dict):
+        if data.get("error"):
+            self._win_app_status.setText(f"Scan failed: {data['error']}")
+            restyle(self._win_app_status)
+            return
+        names = data.get("names") or []
+        if not names:
+            self._win_app_status.setText("No mounted Windows Program Files found. Connect your Windows drive and Scan Drives from Move Files first.")
+            restyle(self._win_app_status)
+            return
+        mapped = data.get("mapped") or []
+        hits = sum(1 for m in mapped if m.get("match"))
+        self._win_app_status.setText(f"Found {len(names)} Program Files folders — {hits} have a curated Linux path below.")
+        self._win_app_status.setObjectName("status-ok" if hits else "card-copy")
+        restyle(self._win_app_status)
+        for entry in mapped[:12]:
+            win = entry.get("windows_name", "")
+            match = entry.get("match")
+            desc = entry.get("desc", "")
+            app_id = entry.get("app_id", "")
+            if match:
+                row = QFrame()
+                row.setObjectName("hw-card-ok")
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(12, 6, 12, 6)
+                rl.setSpacing(10)
+                lbl = QLabel(f"{win} → {match}")
+                lbl.setObjectName("card-subtitle")
+                lbl.setToolTip(desc)
+                rl.addWidget(lbl, 1)
+                if app_id:
+                    btn = QPushButton("Install")
+                    btn.setToolTip(desc)
+                    btn.clicked.connect(lambda _=False, aid=app_id, n=match: self._install_familiar_app(aid, n))
+                    rl.addWidget(btn)
+                self._win_app_rows.addWidget(row)
+            else:
+                row = QFrame()
+                row.setObjectName("hw-card-dim")
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(12, 6, 12, 6)
+                rl.setSpacing(10)
+                lbl = QLabel(win)
+                lbl.setObjectName("card-copy")
+                lbl.setToolTip(desc)
+                rl.addWidget(lbl, 1)
+                self._win_app_rows.addWidget(row)
+        if len(mapped) > 12:
+            more = QLabel(f"+{len(mapped)-12} more — search them in Familiar App Finder above.")
+            more.setObjectName("caption-text")
+            self._win_app_rows.addWidget(more)
 
     def _make_familiar_app_finder(self) -> QFrame:
         card, layout = _make_card("card-accent-ok")

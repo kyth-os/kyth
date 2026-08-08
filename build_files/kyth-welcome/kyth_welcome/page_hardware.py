@@ -113,6 +113,7 @@ class HardwarePage(Page):
         hdr, _ = _make_section_header("Configuration", "Bluetooth audio and display")
         self._add(hdr)
 
+        self._add(self._make_peripherals_hub_card())
         self._add(self._make_bt_audio_card())
         self._add(self._make_display_card())
 
@@ -376,6 +377,97 @@ class HardwarePage(Page):
     def _run_inline_cmd(self, cmd: list[str]):
         popen(cmd)
         single_shot(self, 1500, self.refresh)
+
+    def _make_peripherals_hub_card(self) -> QFrame:
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Peripherals — RGB, Fans, Controllers, Capture")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Your RGB, fan curves, controller mappings, HDR per-game settings, and audio routing — all in one place. "
+            "KythOS detects what's present and shows the next step. For RGB: OpenRGB or kyth-apply-rgb. Fans: fan-curve.toml + hwmon. "
+            "Controllers: ujust controller-check. HDR: Gaming → HDR. Audio: PipeWire per-app mixer."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        self._peri_status = QLabel("Click Scan Peripherals to detect RGB, fans, controllers, HDR, and audio.")
+        self._peri_status.setObjectName("card-copy")
+        self._peri_status.setWordWrap(True)
+        layout.addWidget(self._peri_status)
+        self._peri_rows = QVBoxLayout()
+        self._peri_rows.setSpacing(6)
+        layout.addLayout(self._peri_rows)
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        scan_btn = QPushButton("Scan Peripherals")
+        scan_btn.setObjectName("primary")
+        scan_btn.clicked.connect(self._scan_peripherals)
+        btns.addWidget(scan_btn)
+        rgb_btn = QPushButton("RGB Settings")
+        rgb_btn.clicked.connect(lambda _=False: popen(["openrgb"]) if __import__("shutil").which("openrgb") else self._navigate("Gaming"))
+        btns.addWidget(rgb_btn)
+        ctrl_btn = QPushButton("Controller Check")
+        ctrl_btn.clicked.connect(lambda _=False: popen(["/usr/bin/kyth-controller-check"]) or self._navigate("Gaming"))
+        btns.addWidget(ctrl_btn)
+        btns.addStretch()
+        layout.addLayout(btns)
+        return card
+
+    def _scan_peripherals(self):
+        from .services.runtime import DataWorker, release_worker_when_finished
+        self._peri_status.setText("Scanning peripherals…")
+        restyle(self._peri_status)
+        while self._peri_rows.count():
+            it = self._peri_rows.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+
+        def _scan():
+            try:
+                from kyth_welcome.services.peripherals_hub import scan_peripherals as _scan_p
+                return _scan_p()
+            except Exception as exc:
+                return {"error": str(exc)}
+
+        worker = DataWorker("peripherals-scan", _scan)
+        worker.result.connect(self._on_peripherals_result)
+        worker.failed.connect(lambda _k, msg: self._peri_status.setText(f"Scan failed: {msg}"))
+        self._peri_worker = worker
+        release_worker_when_finished(self, "_peri_worker", worker)
+        worker.start()
+
+    def _on_peripherals_result(self, _key: str, data: dict):
+        if data.get("error"):
+            self._peri_status.setText(f"Scan failed: {data['error']}")
+            restyle(self._peri_status)
+            return
+        # Render 5 rows: rgb/fan/controllers/hdr/audio
+        for key, label in (("rgb", "RGB Lighting"), ("fan", "Fan / Cooling"), ("controllers", "Controllers"), ("hdr", "HDR"), ("audio", "Audio Routing")):
+            info = data.get(key) or {}
+            detail = info.get("detail", "")
+            avail = info.get("available", False)
+            status = "ok" if avail else "dim"
+            # Controllers blocked reasoning -> warn
+            if key == "controllers" and not avail:
+                status = "warn"
+            row = QFrame()
+            row.setObjectName({"ok": "hw-card-ok", "warn": "hw-card-warn", "dim": "hw-card-dim"}.get(status, "hw-card-dim"))
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(12, 7, 12, 7)
+            rl.setSpacing(10)
+            name_lbl = QLabel(label)
+            name_lbl.setObjectName("card-subtitle")
+            name_lbl.setMinimumWidth(130)
+            rl.addWidget(name_lbl)
+            desc = QLabel(detail)
+            desc.setObjectName("card-copy")
+            desc.setWordWrap(True)
+            rl.addWidget(desc, 1)
+            self._peri_rows.addWidget(row)
+        self._peri_status.setText("Scan complete — see details below. Use the buttons above for deeper settings.")
+        self._peri_status.setObjectName("status-ok")
+        restyle(self._peri_status)
 
     def _on_failed(self, message: str):
         self._progress.hide()

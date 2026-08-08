@@ -228,6 +228,16 @@ class _PcDriveExtrasMixin:
 
     def _on_extras(self, _key: str, extras: dict):
         self._extras = extras
+        # Feed Takeout wizard with saves/wallpaper enrichment
+        try:
+            from ..services.windows_migration import enrich_with_extras
+            if getattr(self, "_takeout_summary", None) is not None:
+                self._takeout_summary = enrich_with_extras(self._takeout_summary, [extras])
+                self._render_takeout()
+            else:
+                self._update_takeout()
+        except Exception:
+            pass
 
         wallpapers = extras.get("wallpapers") or []
         self._wp_combo.clear()

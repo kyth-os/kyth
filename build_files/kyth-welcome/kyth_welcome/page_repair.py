@@ -3,7 +3,7 @@ import shutil
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.bootc import bootc_image_timestamp, has_rollback_deployment
-from .page_repair_components import repair_overview_cards, rollback_card
+from .page_repair_components import repair_overview_cards, rollback_card, system_restore_history_card
 from .services.launch import kcmshell, popen_privileged
 from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
 from .services.hardware import detect_nvidia_async
@@ -49,6 +49,9 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
 
         for card in repair_overview_cards(self._navigate):
             self._add(card)
+        # Windows-style System Restore timeline (booted / staged / rollback)
+        self._history_card = system_restore_history_card(None, self._run_rollback, self._navigate)
+        self._add(self._history_card)
         self._rollback_insert_index = self._layout.count()
         self._rollback_card, self._rollback_repair_btn = rollback_card(
             self._has_rollback, self._run_rollback, self._navigate, self._rollback_timestamp
@@ -80,6 +83,13 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         """
         has_rollback = has_rollback_deployment()
         timestamp = bootc_image_timestamp("rollback") if has_rollback else None
+        # Also fetch deployment history for the timeline card
+        history = None
+        try:
+            from kyth_shared.system.deployment_history import deployment_history
+            history = deployment_history()
+        except Exception:
+            history = None
         self_heal = False
         try:
             from kyth_shared.boot_health import read_state as _read_boot_state
@@ -100,7 +110,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
                 HUB_STATE.set("self_heal_warn", True)
         except Exception:
             pass
-        return has_rollback, timestamp, self_heal
+        return has_rollback, timestamp, self_heal, history
 
     def _refresh_rollback_state(self):
         if self._rollback_state_worker is not None:
@@ -113,13 +123,29 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
 
     def _on_rollback_state_ready(self, _key: str, data: object):
         # Compatibility: old cache may still be 2-tuple; support both.
-        if isinstance(data, tuple) and len(data) == 3:
+        history = None
+        if isinstance(data, tuple) and len(data) == 4:
+            has_rollback, timestamp, self_heal, history = data  # type: ignore[misc]
+        elif isinstance(data, tuple) and len(data) == 3:
             has_rollback, timestamp, self_heal = data  # type: ignore[misc]
         else:
             has_rollback, timestamp = data  # type: ignore[misc]
             self_heal = False
         self._has_rollback = has_rollback
         self._rollback_timestamp = timestamp
+        # Refresh System Restore timeline if available
+        if history is not None and hasattr(self, "_history_card"):
+            try:
+                new_history = system_restore_history_card(history, self._run_rollback, self._navigate)
+                # history card is at index rollback_insert_index -1
+                idx = self._layout.indexOf(self._history_card)
+                if idx >= 0:
+                    self._layout.removeWidget(self._history_card)
+                    self._history_card.deleteLater()
+                    self._layout.insertWidget(idx, new_history)
+                    self._history_card = new_history
+            except Exception:
+                pass
         # Self-healing: if staged has failed 2 boots, surface rollback as warn with tip.
         extra_warn = bool(self_heal and has_rollback)
         new_card, new_btn = rollback_card(has_rollback, self._run_rollback, self._navigate, timestamp, warn=extra_warn)

@@ -26,6 +26,7 @@ from .hw_sanity import _HwSanityMixin
 from .files_copy import _FilesCopyMixin
 from .bookmarks import _BookmarksMixin
 from .pc_drive_extras import _PcDriveExtrasMixin
+from .takeout import _TakeoutMixin
 from .wsl import _WslMixin
 from .drives import _DrivesMixin
 
@@ -40,6 +41,7 @@ class WindowsMigrationPage(
     _FilesCopyMixin,
     _BookmarksMixin,
     _PcDriveExtrasMixin,
+    _TakeoutMixin,
     _WslMixin,
     _DrivesMixin,
 ):
@@ -75,6 +77,7 @@ class WindowsMigrationPage(
 
         self._build_intro_card()
         self._build_flow_card()
+        self._build_takeout_card()
         self._build_checklist_card()
         self._build_hw_card()
         self._build_clock_card()
