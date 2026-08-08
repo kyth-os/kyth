@@ -1,3 +1,4 @@
+import pathlib
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
 from .services.process import command_stdout
@@ -210,6 +211,10 @@ class HardwarePage(Page):
             lambda _=False: kcmshell("kcm_kscreen") or QDesktopServices.openUrl(QUrl("settings://display"))
         )
         btns.addWidget(display_btn)
+        hdr_btn = QPushButton("HDR per-game")
+        hdr_btn.setToolTip("Set per-game HDR via kyth-hdr-per-game")
+        hdr_btn.clicked.connect(lambda _=False: __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["/usr/bin/kyth-hdr-per-game"]) if pathlib.Path("/usr/bin/kyth-hdr-per-game").exists() else None)
+        btns.addWidget(hdr_btn)
         color_btn = QPushButton("Color & Night Light")
         color_btn.setToolTip("Color profiles and Night Light blue-light filter settings.")
         color_btn.clicked.connect(lambda _=False: kcmshell("kcm_nightcolor"))
@@ -254,6 +259,10 @@ class HardwarePage(Page):
         )
         ldac_btn.clicked.connect(self._force_ldac_reconnect)
         btns.addWidget(ldac_btn)
+        easy_btn = QPushButton("Mic Effects (EasyEffects)")
+        easy_btn.setToolTip("Open EasyEffects for noise gate/EQ — for headset mic parity")
+        easy_btn.clicked.connect(lambda: __import__("shutil").which("easyeffects") and __import__("subprocess").Popen(["flatpak","run","com.github.wwmm.easyeffects"]) or __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["flatpak","run","com.github.wwmm.easyeffects"]))
+        btns.addWidget(easy_btn)
         bt_settings_btn = QPushButton("Bluetooth Settings")
         bt_settings_btn.clicked.connect(
             lambda: kcmshell("kcm_bluetooth") or QDesktopServices.openUrl(QUrl("settings://bluetooth"))
