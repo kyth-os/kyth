@@ -219,7 +219,7 @@ class HardwarePolicySafetyTests(unittest.TestCase):
             self.assertEqual(scheduler.call_count, 1)
             nvidia.assert_not_called()
             self.assertEqual(clear_nvidia.call_count, 1)
-            self.assertEqual(state.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(state.stat().st_mode & 0o777, 0o600)
             self.assertEqual(json.loads(report.read_text())["evaluation"]["policy_revision"], "2026.08.1")
 
     def test_generated_support_matrix_is_current(self):

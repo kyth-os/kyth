@@ -405,10 +405,10 @@ class AnswerFileTests(unittest.TestCase):
             # Keep the test fixture itself secure, and simulate an insecure mode
             # at read time so validation still exercises the rejection path.
             os.chmod(path, 0o600)
-            real_stat = os.stat(path)
+            real_stat = os.lstat(path)
             fake_stat = MagicMock(spec=real_stat)
             fake_stat.st_mode = (real_stat.st_mode & ~0o777) | 0o644
-            with patch("kyth_installer.app.os.stat", return_value=fake_stat):
+            with patch("kyth_installer.app.os.lstat", return_value=fake_stat):
                 with self.assertRaisesRegex(ValueError, "chmod 600"):
                     _load_answer_file(path)
         finally:
