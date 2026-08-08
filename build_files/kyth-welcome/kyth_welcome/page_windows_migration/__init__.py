@@ -29,6 +29,7 @@ from .pc_drive_extras import _PcDriveExtrasMixin
 from .takeout import _TakeoutMixin
 from .wsl import _WslMixin
 from .drives import _DrivesMixin
+from .family_hub import _FamilyHubMixin
 
 
 # ── Page: Move Files ──────────────────────────────────────────────────
@@ -42,6 +43,7 @@ class WindowsMigrationPage(
     _BookmarksMixin,
     _PcDriveExtrasMixin,
     _TakeoutMixin,
+    _FamilyHubMixin,
     _WslMixin,
     _DrivesMixin,
 ):
@@ -89,6 +91,7 @@ class WindowsMigrationPage(
         self._build_phone_card()
         self._build_score_card()
         self._build_drives_card()
+        self._build_family_hub_card()
         self._build_files_card()
         self._build_bookmarks_card()
         self._build_wallpaper_card()
