@@ -77,7 +77,10 @@ class PerformancePage(Page):
         ctrl_col.addWidget(apply_btn)
 
         self._perf_auto_toggle = QCheckBox("Auto-switch (kyth-sched)")
+        # Game Boost card will be built below as separate section
         self._perf_auto_toggle.setObjectName("card-copy")
+        # Game Boost — single Game Night switch (17)
+        self._add(self._make_game_boost_card())
         self._perf_auto_toggle.stateChanged.connect(self._toggle_sched_daemon)
         ctrl_col.addWidget(self._perf_auto_toggle)
 
@@ -554,3 +557,59 @@ class PerformancePage(Page):
         except Exception as exc:
             self._clean_status.setText(f"{which} failed — {exc}")
             restyle(self._clean_status)
+
+    def _make_game_boost_card(self):
+        from ..widgets import _make_card
+        from ..qt import QLabel, QPushButton, QHBoxLayout, QCheckBox, QComboBox
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Game Boost — one switch for latency, scheduler, overlay")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Like Windows Game Mode: scx scheduler (scx_rusty/lavd), MangoHud overlay (Right Shift+F12), "
+            "and KWin low-latency compositor. Apply together as Game Night, copy launch options as one line."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._boost_sched_combo = QComboBox()
+        self._boost_sched_combo.addItems(["scx_rusty", "scx_lavd", "scx_bpfland"])
+        row.addWidget(self._boost_sched_combo)
+        self._boost_mh_check = QCheckBox("MangoHud")
+        self._boost_mh_check.setChecked(True)
+        row.addWidget(self._boost_mh_check)
+        self._boost_latency_check = QCheckBox("Low latency")
+        self._boost_latency_check.setChecked(True)
+        row.addWidget(self._boost_latency_check)
+        layout.addLayout(row)
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        apply_btn = QPushButton("Apply Game Night")
+        apply_btn.setObjectName("primary")
+        apply_btn.clicked.connect(self._apply_game_boost)
+        btns.addWidget(apply_btn)
+        copy_btn = QPushButton("Copy Launch Options")
+        copy_btn.clicked.connect(lambda _=False: __import__("kyth_welcome.widgets", fromlist=["_copy_text"])._copy_text("MANGOHUD=1 %command%"))
+        btns.addWidget(copy_btn)
+        btns.addStretch()
+        layout.addLayout(btns)
+        self._boost_status = QLabel("Ready to boost — scx + overlay + latency in one click.")
+        self._boost_status.setObjectName("card-copy")
+        self._boost_status.setWordWrap(True)
+        layout.addWidget(self._boost_status)
+        return card
+
+    def _apply_game_boost(self):
+        from ..services.sched import apply_scheduler
+        from ..core_base import restyle
+        sched = self._boost_sched_combo.currentText()
+        try:
+            apply_scheduler(sched)
+            self._boost_status.setText(f"Game Boost applied: {sched} + MangoHud {'on' if self._boost_mh_check.isChecked() else 'off'} + latency {'on' if self._boost_latency_check.isChecked() else 'off'}")
+            self._boost_status.setObjectName("status-ok")
+        except Exception as exc:
+            self._boost_status.setText(f"Game Boost failed: {exc}")
+            self._boost_status.setObjectName("status-err")
+        restyle(self._boost_status)
