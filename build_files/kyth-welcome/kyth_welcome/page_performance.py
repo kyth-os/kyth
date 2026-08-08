@@ -559,8 +559,8 @@ class PerformancePage(Page):
             restyle(self._clean_status)
 
     def _make_game_boost_card(self):
-        from ..widgets import _make_card
-        from ..qt import QLabel, QPushButton, QHBoxLayout, QCheckBox, QComboBox
+        from .widgets import _make_card
+        from .qt import QLabel, QPushButton, QHBoxLayout, QCheckBox, QComboBox
         card, layout = _make_card("card-accent-ok")
         title = QLabel("Game Boost — one switch for latency, scheduler, overlay")
         title.setObjectName("card-title")
@@ -591,7 +591,8 @@ class PerformancePage(Page):
         apply_btn.clicked.connect(self._apply_game_boost)
         btns.addWidget(apply_btn)
         copy_btn = QPushButton("Copy Launch Options")
-        copy_btn.clicked.connect(lambda _=False: __import__("kyth_welcome.widgets", fromlist=["_copy_text"])._copy_text("MANGOHUD=1 %command%"))
+        from kyth_welcome.widgets import _copy_text as _gb_copy
+        copy_btn.clicked.connect(lambda _=False: _gb_copy("MANGOHUD=1 %command%"))
         btns.addWidget(copy_btn)
         btns.addStretch()
         layout.addLayout(btns)
@@ -602,8 +603,8 @@ class PerformancePage(Page):
         return card
 
     def _apply_game_boost(self):
-        from ..services.sched import apply_scheduler
-        from ..core_base import restyle
+        from .services.sched import apply_scheduler
+        from .core_base import restyle
         sched = self._boost_sched_combo.currentText()
         try:
             apply_scheduler(sched)

@@ -480,8 +480,8 @@ class HardwarePage(Page):
         restyle(self._peri_status)
 
     def _make_cooling_card(self):
-        from ..widgets import _make_card
-        from ..qt import QLabel, QPushButton, QHBoxLayout, QVBoxLayout
+        from .widgets import _make_card
+        from .qt import QLabel, QPushButton, QHBoxLayout, QVBoxLayout
         card, layout = _make_card()
         title = QLabel("Cooling — fan curve, power cap, sleep drain")
         title.setObjectName("card-title")
@@ -522,7 +522,7 @@ class HardwarePage(Page):
             from kyth_shared.fan_curve import load_fan_curve
             cfg = load_fan_curve()
             self._cool_status.setText(f"Fan points {cfg.get('points')} power_cap {cfg.get('power_cap_w')}W — edit /etc/kyth/fan-curve.toml")
-            from ..core_base import restyle
+            from .core_base import restyle
             restyle(self._cool_status)
         except Exception as exc:
             self._cool_status.setText(f"Fan curve read failed: {exc}")
