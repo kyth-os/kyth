@@ -1,0 +1,16 @@
+[Unit]
+Description=Kyth AI performance daemon (SCX + sysctl + GPU, 30s TTL)
+After=graphical-session.target
+Wants=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/kyth-ai-perfd
+Restart=on-failure
+RestartSec=10
+# User service — reads system probe cache, writes /etc via pkexec/sysctl where needed
+Environment=PYTHONPATH=/usr/lib/kyth_shared:/usr/lib/kyth-welcome
+
+[Install]
+WantedBy=graphical-session.target

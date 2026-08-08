@@ -4,11 +4,11 @@ from __future__ import annotations
 import glob
 import re
 
-from ..process import _command_stdout, _run_command, _strip_ansi
+from ..process import command_stdout, run_command, strip_ansi
 
 
 def hw_display_row() -> tuple[str, str, str] | None:
-    out = _strip_ansi(_command_stdout(["kscreen-doctor", "-o"], timeout=10))
+    out = strip_ansi(command_stdout(["kscreen-doctor", "-o"], timeout=10))
     if not out:
         return None
     hdr = [v.lower() for v in re.findall(r"HDR:\s*([A-Za-z]+)", out)]
@@ -45,7 +45,7 @@ def collect_hw_sanity() -> list[tuple[str, str, str]]:
     """Things the previous setup configured silently — degrade when tools are missing."""
     rows: list[tuple[str, str, str]] = []
 
-    state = _command_stdout(["nmcli", "-t", "-f", "STATE", "general"], timeout=5)
+    state = command_stdout(["nmcli", "-t", "-f", "STATE", "general"], timeout=5)
     if state:
         if state.startswith("connected"):
             rows.append(("ok", "Network", "Connected to the internet."))
@@ -56,7 +56,7 @@ def collect_hw_sanity() -> list[tuple[str, str, str]]:
     if display:
         rows.append(display)
 
-    lp = _run_command(["lpstat", "-p"], timeout=8)
+    lp = run_command(["lpstat", "-p"], timeout=8)
     if lp is not None:
         printers = [ln for ln in lp.stdout.splitlines() if ln.startswith("printer")]
         if printers:
@@ -64,7 +64,7 @@ def collect_hw_sanity() -> list[tuple[str, str, str]]:
         else:
             rows.append(("warn", "Printer", "No printers set up yet. Plug one in (or have a network printer on), then run Set Up Printer."))
 
-    rf = _command_stdout(["rfkill", "list", "bluetooth"], timeout=5)
+    rf = command_stdout(["rfkill", "list", "bluetooth"], timeout=5)
     if rf.strip():
         if "soft blocked: yes" in rf.lower() or "hard blocked: yes" in rf.lower():
             rows.append(("warn", "Bluetooth", "Bluetooth is turned off (blocked). Enable it from the system tray or System Settings."))
@@ -72,7 +72,7 @@ def collect_hw_sanity() -> list[tuple[str, str, str]]:
             rows.append(("ok", "Bluetooth", "Bluetooth adapter is on. Pair devices from the system tray."))
 
     if glob.glob("/sys/class/power_supply/BAT*"):
-        prof = _command_stdout(["powerprofilesctl", "get"], timeout=5)
+        prof = command_stdout(["powerprofilesctl", "get"], timeout=5)
         if prof:
             rows.append(("ok", "Power", f"Laptop power profile: {prof}. Switch profiles from the battery icon in the tray."))
 

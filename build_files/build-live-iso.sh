@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${KYTH_ISO_OUTPUT:-${REPO_ROOT}/output/live-iso}"
 BASE_IMAGE="${INSTALLER_BASE_IMAGE:-ghcr.io/mrtrick37/kyth:${SOURCE_TAG}}"
+INSTALL_SOURCE_IMAGE="${BASE_IMAGE}"
 LIVE_TAG="${KYTH_LIVE_TAG:-localhost/kyth-live:${SOURCE_TAG}}"
 TITANOBOA_REF="7737f4748458252ac827dca14b3d6dd09298472a"
 TITANOBOA_DIR="${TITANOBOA_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/kyth/titanoboa}"
@@ -44,6 +45,7 @@ if [[ "${BASE_IMAGE}" == localhost/* ]] && command -v docker >/dev/null; then
 	echo "==> Publishing local build to ${GHCR_REF} so the installer can fetch it from inside the live VM"
 	docker tag "${BASE_IMAGE}" "${GHCR_REF}"
 	docker push "${GHCR_REF}"
+	INSTALL_SOURCE_IMAGE="${GHCR_REF}"
 fi
 
 echo "==> Fetching Titanoboa (background) and building KythOS live payload (foreground) in parallel"
@@ -81,6 +83,7 @@ sudo podman build \
 	--security-opt label=disable \
 	--network host \
 	--build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+	--build-arg "INSTALL_SOURCE_IMAGE=${INSTALL_SOURCE_IMAGE}" \
 	--build-arg "SOURCE_TAG=${SOURCE_TAG}" \
 	--tag "${LIVE_TAG}" \
 	-f installer/Containerfile \

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# mimalloc-run — per-game LD_PRELOAD wrapper, no global cost
+set -euo pipefail
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: mimalloc-run [--global] -- <cmd> | mimalloc-run --status"; exit 0
+fi
+if [[ "${1:-}" == "--status" ]]; then
+    python3 -c 'from kyth_shared.mimalloc_preset import load_mimalloc,mimalloc_status; c=load_mimalloc(); print(f"enabled={c[\"enabled\"]} global={c[\"global\"]} per_game={c[\"per_game\"]} status={mimalloc_status()}")'
+    exit 0
+fi
+# find lib
+lib=""
+for cand in /usr/lib64/libmimalloc.so.2 /usr/lib64/libmimalloc.so /usr/lib/libmimalloc.so; do
+    if [[ -f "$cand" ]]; then lib="$cand"; break; fi
+done
+if [[ -z "$lib" ]]; then echo "mimalloc not installed (install mimalloc package)" >&2; exec "$@"; fi
+export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
+export MIMALLOC_LARGE_OS_PAGES=1
+exec "$@"

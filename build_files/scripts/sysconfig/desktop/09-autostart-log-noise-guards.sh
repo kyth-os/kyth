@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── Autostart log-noise guards ────────────────────────────────────────────────
 # Fedora does not define Debian's plugdev group, but several third-party udev
 # rules installed below reference it. Seed new deployments at image build time;
@@ -11,18 +13,16 @@ getent group plugdev >/dev/null 2>&1 || groupadd --system plugdev
 # nvidia-settings ships an unconditional autostart entry that fails every
 # login on AMD-only systems with "ERROR: NVIDIA driver is not loaded".
 # Run it only when the NVIDIA kernel module is actually loaded.
-install -d -m 0755 /usr/libexec
-cat >/usr/libexec/kyth-nvidia-settings-autostart <<'NVAUTOSTARTEOF'
+write_config /usr/libexec/kyth-nvidia-settings-autostart 0755 <<'NVAUTOSTARTEOF'
 #!/usr/bin/bash
 [ -e /sys/module/nvidia ] || exit 0
 exec nvidia-settings -l
 NVAUTOSTARTEOF
-chmod 0755 /usr/libexec/kyth-nvidia-settings-autostart
 if [ -f /etc/xdg/autostart/nvidia-settings-user.desktop ]; then
 	sed -i 's|^Exec=.*|Exec=/usr/libexec/kyth-nvidia-settings-autostart|' /etc/xdg/autostart/nvidia-settings-user.desktop
 fi
 
-cat >/usr/libexec/kyth-input-remapper-autoload <<'IRAUTOSTARTEOF'
+write_config /usr/libexec/kyth-input-remapper-autoload 0755 <<'IRAUTOSTARTEOF'
 #!/usr/bin/bash
 for _ in $(seq 1 120); do
 	systemd-analyze time >/dev/null 2>&1 && break
@@ -30,12 +30,11 @@ for _ in $(seq 1 120); do
 done
 input-remapper-control --command stop-all && exec input-remapper-control --command autoload
 IRAUTOSTARTEOF
-chmod 0755 /usr/libexec/kyth-input-remapper-autoload
 if [ -f /etc/xdg/autostart/input-remapper-autoload.desktop ]; then
 	sed -i 's|^Exec=.*|Exec=/usr/libexec/kyth-input-remapper-autoload|' /etc/xdg/autostart/input-remapper-autoload.desktop
 fi
 
-cat >/usr/lib/systemd/system/kyth-system-accounts.service <<'SYSACCOUNTUNITEOF'
+write_config /usr/lib/systemd/system/kyth-system-accounts.service <<'SYSACCOUNTUNITEOF'
 [Unit]
 Description=Ensure KythOS system accounts are visible in /etc
 DefaultDependencies=no
@@ -62,7 +61,7 @@ ln -sf /dev/null /etc/udev/rules.d/99-input-remapper.rules
 # ublue-os-udev-rules uses negative TEST expressions, so it tries to chmod
 # battery attributes specifically when they do not exist. Replace it with
 # positive relative sysfs existence tests.
-cat >/etc/udev/rules.d/99-thinkpad-thresholds-udev.rules <<'BATTERYRULESEOF'
+write_config /etc/udev/rules.d/99-thinkpad-thresholds-udev.rules <<'BATTERYRULESEOF'
 # KythOS override: expose only threshold attributes provided by this battery.
 ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_control_start_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_control_start_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_control_start_threshold"
 ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="BAT[0-1]", TEST=="charge_control_end_threshold", RUN+="/bin/chgrp wheel /sys%p/charge_control_end_threshold", RUN+="/bin/chmod 0664 /sys%p/charge_control_end_threshold"
@@ -72,7 +71,7 @@ BATTERYRULESEOF
 
 mkdir -p /etc/asusd
 
-cat >/usr/lib/systemd/system/kyth-dbus-runtime-dir.service <<'DBUSRUNDIREOF'
+write_config /usr/lib/systemd/system/kyth-dbus-runtime-dir.service <<'DBUSRUNDIREOF'
 [Unit]
 Description=Create D-Bus runtime directory
 DefaultDependencies=no
@@ -90,8 +89,7 @@ WantedBy=sysinit.target
 DBUSRUNDIREOF
 systemctl enable kyth-dbus-runtime-dir.service 2>/dev/null || true
 
-mkdir -p /etc/systemd/system/dbus-broker.service.d
-cat >/etc/systemd/system/dbus-broker.service.d/10-kyth-no-audit.conf <<'DBUSBROKEREOF'
+write_config /etc/systemd/system/dbus-broker.service.d/10-kyth-no-audit.conf <<'DBUSBROKEREOF'
 [Service]
 ExecStart=
 ExecStart=/usr/bin/dbus-broker-launch --scope system

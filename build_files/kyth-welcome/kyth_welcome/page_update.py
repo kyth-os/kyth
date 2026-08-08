@@ -1,10 +1,11 @@
 # __KYTH_GENERATED_IMPORTS__
 from .qt import QTimer, single_shot
-from .widgets import Page
+from .widgets import Page, _make_section_header
 from .page_update_auto import _AutoUpdateMixin
 from .page_update_availability import _UpdateAvailabilityMixin
 from .page_update_firmware import _FirmwareUpdateMixin
 from .page_update_ops import _UpdateOpsMixin
+from .services.updates import UpdateCheckCoordinator
 
 # ── Page: Update ──────────────────────────────────────────────────────────────
 class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _FirmwareUpdateMixin, Page):
@@ -34,8 +35,7 @@ class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _F
         self._heartbeat.timeout.connect(self._heartbeat_tick)
         self._check_worker = None
         self._flatpak_check_worker = None
-        self._flatpak_checked = False
-        self._system_checked = False
+        self._check_coordinator = UpdateCheckCoordinator()
         self._flatpak_count = 0
         self._remote_manifest = ""
         self._check_state = "idle"   # idle | checking | available | uptodate | error
@@ -47,12 +47,22 @@ class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _F
             "Check update status, stage new images, and restart when you are ready.",
         )
 
+        hdr, _ = _make_section_header("Status", "Current image, staged update and rollback")
+        self._add(hdr)
         self._build_availability_card()
         self._build_summary_card()
+        hdr2, _ = _make_section_header("Actions", "Stage the next image or roll back")
+        self._add(hdr2)
         self._build_manual_actions_card()
+        self._build_rollback_explainer_card()
+        hdr3, _ = _make_section_header("Progress", "Download and staging log")
+        self._add(hdr3)
         self._build_progress_section()
+        hdr4, _ = _make_section_header("Devices", "Firmware and automatic updates")
+        self._add(hdr4)
         self._build_firmware_card()
         self._build_auto_update_card()
+        self._build_windows_update_style_card()
         single_shot(self, 300, self._refresh_auto_update_status)
 
         self._stretch()

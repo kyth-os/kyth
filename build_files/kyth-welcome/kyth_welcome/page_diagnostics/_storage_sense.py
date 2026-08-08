@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _restyle
+from ..core_base import restyle
 from ..services.diagnostics import (
     storage_sense_enabled as _storage_sense_enabled,
     storage_sense_run_now,
@@ -51,7 +51,7 @@ class _StorageSenseMixin:
         else:
             self._storage_sense_btn.setText("Turn On Storage Sense")
             self._storage_sense_btn.setObjectName("primary")
-        _restyle(self._storage_sense_btn)
+        restyle(self._storage_sense_btn)
 
     def _toggle_storage_sense(self):
         enable = not _storage_sense_enabled()

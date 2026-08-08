@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..services.process import _run_command
+from ..services.process import run_command
 
 
 class _PolishMixin:
@@ -82,7 +82,7 @@ fi
     def _apply_plasma_polish(self):
         cmd = self._plasma_polish_command()
         self._polish_result.set_running("Restoring the KythOS default layout...", self._command_details(cmd))
-        result = _run_command(cmd, timeout=20)
+        result = run_command(cmd, timeout=20)
         if result is None:
             self._polish_result.set_result("err", "Could not apply KythOS polish: command failed to start", self._command_details(cmd))
             return

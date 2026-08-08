@@ -2,12 +2,13 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── MangoHud default config ───────────────────────────────────────────────────
 # Pre-configure a curated overlay: useful OOTB without being overwhelming.
 # Users can override globally via ~/.config/MangoHud/MangoHud.conf or per-game
 # via the MANGOHUD_CONFIG env var / Steam launch options.
-mkdir -p /etc/skel/.config/MangoHud
-cat >/etc/skel/.config/MangoHud/MangoHud.conf <<'MANGOHUDEOF'
+write_config /etc/skel/.config/MangoHud/MangoHud.conf <<'MANGOHUDEOF'
 # KythOS default MangoHud overlay — toggle with Shift_R+F12
 # Full option reference: https://github.com/flightlessmango/MangoHud
 

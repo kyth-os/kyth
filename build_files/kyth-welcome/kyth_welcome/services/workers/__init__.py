@@ -26,11 +26,15 @@ __all__ = [
     "ControllerProbeWorker",
     "CompatRefreshWorker",
     "GitHubIssueWorker",
+    "TelemetryWorker",
 ]
 # pylint: enable=undefined-all-variable
 
 
 def __getattr__(name: str):
+    if name == "TelemetryWorker":
+        from .telemetry import TelemetryWorker
+        return TelemetryWorker
     if name in {"VpnConnectWorker", "_VpnConnectWorker"}:
         from .vpn import VpnConnectWorker
         return VpnConnectWorker

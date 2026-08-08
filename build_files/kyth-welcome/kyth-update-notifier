@@ -15,16 +15,9 @@ import re
 import subprocess
 import sys
 from datetime import datetime
-from pathlib import Path
 
 
-def _ensure_kyth_shared_path() -> None:
-    source_path = Path(__file__).resolve().parent.parent / "kyth_shared"
-    if (source_path / "kyth_shared").is_dir() and str(source_path) not in sys.path:
-        sys.path.insert(0, str(source_path))
 
-
-_ensure_kyth_shared_path()
 
 from kyth_shared.update_status import read_update_snapshot  # noqa: E402
 

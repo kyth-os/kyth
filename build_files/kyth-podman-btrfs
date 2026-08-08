@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# kyth-podman-btrfs — podman-btrfs.toml
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-podman-btrfs "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.podman_btrfs import load_podman_btrfs,podman_btrfs_status; c=load_podman_btrfs(); print(f"mode={c[\"mode\"]} active={podman_btrfs_status()}")' ;;
+    auto) need_root "$@"; python3 -c 'from kyth_shared.podman_btrfs import load_podman_btrfs,save_podman_btrfs,generate_podman_btrfs; c=load_podman_btrfs(); c["mode"]="auto"; save_podman_btrfs(c); generate_podman_btrfs(c)'; echo "podman auto (btrfs if on btrfs)" ;;
+    btrfs) need_root "$@"; python3 -c 'from kyth_shared.podman_btrfs import load_podman_btrfs,save_podman_btrfs,generate_podman_btrfs; c=load_podman_btrfs(); c["mode"]="btrfs"; save_podman_btrfs(c); generate_podman_btrfs(c)'; echo "podman btrfs" ;;
+    overlay) need_root "$@"; python3 -c 'from kyth_shared.podman_btrfs import load_podman_btrfs,save_podman_btrfs,generate_podman_btrfs; c=load_podman_btrfs(); c["mode"]="overlay"; save_podman_btrfs(c); generate_podman_btrfs(c)'; echo "podman overlay" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.podman_btrfs import load_podman_btrfs,generate_podman_btrfs; generate_podman_btrfs(load_podman_btrfs())' ;;
+    *) echo "Usage: kyth-podman-btrfs [status|auto|btrfs|overlay|apply]" >&2; exit 1 ;;
+esac

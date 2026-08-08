@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""kyth-print-check — list printers via lpstat (offline)."""
+from kyth_shared.commands import run
+def main():
+    r=run(["lpstat","-p"], capture_output=True, text=True, timeout=5)
+    if r.returncode==0:
+        print(r.stdout or "No printers")
+    else:
+        print("kyth-print-check: no printers or lpstat missing")
+    return 0
+if __name__=="__main__":
+    import sys; sys.exit(main())

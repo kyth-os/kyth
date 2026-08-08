@@ -4,8 +4,13 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/plymouth-initrd-checks.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-initrd-checks.sh"
+source "${SCRIPT_DIR}/lib/plymouth-initrd-checks.sh"
+# shellcheck source=lib/plymouth-stock-themes.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/plymouth-stock-themes.sh"
+# shellcheck source=lib/plymouth-config.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/plymouth-config.sh"
 
 if [[ "${EUID}" -ne 0 ]]; then
 	printf 'ERROR: run as root, for example: run0 --pty /usr/bin/bash %q\n' "$0" >&2
@@ -20,7 +25,24 @@ kernel="${1:-$(uname -r)}"
 include_root="$(mktemp -d /tmp/kyth-plymouth-repair.XXXXXX)"
 boot_was_ro=0
 
+# Tracks the image currently being repaired so cleanup() can restore it from
+# its pre-repair backup if we exit (dracut failure, or a plymouth_require_*
+# validation failure below) before the repair for that image is confirmed
+# good. Without this, a failed repair can leave a truncated or unverified
+# initramfs sitting on the live boot path.
+current_image=""
+current_backup=""
+repair_incomplete=0
+
 cleanup() {
+	if [[ -n "${current_image}" && "${repair_incomplete}" -eq 1 ]]; then
+		echo "ERROR: repair of ${current_image} did not complete; restoring pre-repair backup" >&2
+		if cp -a "${current_backup}" "${current_image}"; then
+			echo "Restored ${current_image} from ${current_backup}" >&2
+		else
+			echo "ERROR: FAILED to restore ${current_backup} -> ${current_image}; this kernel may not boot. Restore it manually." >&2
+		fi
+	fi
 	rm -rf "${include_root}"
 	if [[ "${boot_was_ro}" -eq 1 ]]; then
 		mount -o remount,ro /boot || true
@@ -39,7 +61,7 @@ mkdir -p \
 	"${include_root}/usr/share/pixmaps" \
 	"${include_root}/usr/share/plymouth/themes"
 
-printf '[Daemon]\nTheme=kyth\nShowDelay=0\nDeviceTimeout=8\nUseFirmwareBackground=false\n' \
+printf '%s\n' "${KYTH_PLYMOUTHD_CONF}" \
 	>"${include_root}/etc/plymouth/plymouthd.conf"
 install -m 0644 \
 	"${include_root}/etc/plymouth/plymouthd.conf" \
@@ -54,10 +76,9 @@ fi
 
 cp -a /usr/share/plymouth/themes/kyth "${include_root}/usr/share/plymouth/themes/kyth"
 ln -sfn kyth/kyth.plymouth "${include_root}/usr/share/plymouth/themes/default.plymouth"
-rm -rf \
-	"${include_root}/usr/share/plymouth/themes/bgrt-fedora" \
-	"${include_root}/usr/share/plymouth/themes/bgrt" \
-	"${include_root}/usr/share/plymouth/themes/spinner"
+for theme_name in "${KYTH_STOCK_PLYMOUTH_THEMES[@]}"; do
+	rm -rf "${include_root}/usr/share/plymouth/themes/${theme_name}"
+done
 
 plugin_dir="$(plymouth --get-splash-plugin-path)"
 if [[ -r "${plugin_dir}/script.so" ]]; then
@@ -86,17 +107,44 @@ for image in "${images[@]}"; do
 		cp -a "${image}" "${backup}"
 	fi
 
-	TMPDIR=/var/tmp dracut \
-		--tmpdir /var/tmp \
-		--no-hostonly \
-		--compress "zstd -1" \
-		--kver "${kernel}" \
-		--force \
-		--add "drm plymouth ostree kyth-plymouth" \
-		--include "${include_root}/etc/plymouth" /etc/plymouth \
-		--include "${include_root}/usr/share/plymouth" /usr/share/plymouth \
-		--include "${include_root}/usr/share/pixmaps/system-logo-white.png" /usr/share/pixmaps/system-logo-white.png \
-		"${image}"
+	current_image="${image}"
+	current_backup="${backup}"
+	repair_incomplete=1
+
+	# --nohardlink: dracut's hardlink-dedup pass can SIGSEGV inside
+	# containerized build environments due to a util-linux/kernel AF_ALG
+	# interaction (util-linux/util-linux#4334) — harmless to skip everywhere.
+	# Retry once from a known-good state (the pre-repair backup) before
+	# giving up: this is the live deployed initramfs, not a fresh build
+	# artifact, so a transient dracut failure must not leave it truncated.
+	dracut_status=1
+	for attempt in 1 2; do
+		if TMPDIR=/var/tmp dracut \
+			--tmpdir /var/tmp \
+			--no-hostonly \
+			--compress "zstd -1" \
+			--kver "${kernel}" \
+			--force \
+			--nohardlink \
+			--add "drm plymouth ostree kyth-plymouth" \
+			--include "${include_root}/etc/plymouth" /etc/plymouth \
+			--include "${include_root}/usr/share/plymouth" /usr/share/plymouth \
+			--include "${include_root}/usr/share/pixmaps/system-logo-white.png" /usr/share/pixmaps/system-logo-white.png \
+			"${image}"; then
+			dracut_status=0
+			break
+		fi
+		dracut_status=$?
+		echo "WARNING: dracut failed with status ${dracut_status} for ${image} (attempt ${attempt}/2)" >&2
+		if ((attempt < 2)); then
+			echo "Restoring pre-repair backup before retrying..." >&2
+			cp -a "${backup}" "${image}"
+		fi
+	done
+	if ((dracut_status != 0)); then
+		echo "ERROR: dracut failed twice for ${image}; leaving it unrepaired" >&2
+		exit "${dracut_status}"
+	fi
 
 	defaults="$(mktemp /tmp/kyth-plymouth-defaults.XXXXXX)"
 	listing="$(mktemp /tmp/kyth-plymouth-listing.XXXXXX)"
@@ -117,13 +165,7 @@ for image in "${images[@]}"; do
 	plymouth_require_match "${logo}" "${include_root}/usr/share/pixmaps/system-logo-white.png" \
 		"repaired initramfs still contains distro Plymouth system logo"
 
-	daemon_patterns=(
-		'^Theme=kyth$|do not force Theme=kyth'
-		'^ShowDelay=0$|do not draw immediately'
-		'^DeviceTimeout=8$|are missing DeviceTimeout=8'
-		'^UseFirmwareBackground=false$|do not suppress BGRT firmware background'
-	)
-	for entry in "${daemon_patterns[@]}"; do
+	for entry in "${KYTH_PLYMOUTH_DAEMON_CHECKS[@]}"; do
 		plymouth_require_pattern "${defaults}" "${entry%%|*}" "repaired initramfs Plymouth defaults ${entry#*|}"
 	done
 
@@ -134,6 +176,8 @@ for image in "${images[@]}"; do
 
 	rm -f "${defaults}" "${listing}" "${logo}"
 
+	repair_incomplete=0
 	echo "Repaired ${image}"
 	echo "Backup: ${backup}"
 done
+current_image=""

@@ -1,35 +1,59 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Read-only creator and OBS media stack readiness check."""
+from __future__ import annotations
 
-section() {
-    echo
-    echo "== $1 =="
-}
+import subprocess
+from kyth_shared.commands import DEFAULT_RUNNER
+from kyth_shared.diagnostics import DiagnosticReporter
 
-safe_cmd() {
-    "$@" 2>/dev/null || true
-}
 
-echo "KythOS Creator Check"
-echo "Generated: $(date -Is)"
+def main() -> None:
+    reporter = DiagnosticReporter("Creator Check")
+    reporter.print_header()
 
-section "Session"
-printf 'Session Type: %s\n' "${XDG_SESSION_TYPE:-unknown}"
-printf 'Desktop: %s\n' "${XDG_CURRENT_DESKTOP:-unknown}"
-safe_cmd loginctl session-status
+    # Audio & Video Stack
+    if reporter.have("pipewire"):
+        res = DEFAULT_RUNNER.stdout(["pipewire", "--version"])
+        reporter.pass_check("PipeWire", res.splitlines()[0] if res else "present")
+    else:
+        reporter.warn_check("PipeWire", "not detected")
 
-section "Audio / Video Stack"
-safe_cmd pipewire --version
-safe_cmd wireplumber --version
-safe_cmd rpm -q pipewire wireplumber xdg-desktop-portal xdg-desktop-portal-kde
+    if reporter.have("wireplumber"):
+        res = DEFAULT_RUNNER.stdout(["wireplumber", "--version"])
+        reporter.pass_check("WirePlumber", res.splitlines()[0] if res else "present")
+    else:
+        reporter.warn_check("WirePlumber", "not detected")
 
-section "OBS Capture Components"
-safe_cmd rpm -q libobs_vkcapture libobs_glcapture
-safe_cmd flatpak info com.obsproject.Studio
+    # OBS VKCapture
+    rpm_res = subprocess.run(["rpm", "-q", "libobs_vkcapture"], capture_output=True, check=False)
+    if rpm_res.returncode == 0:
+        reporter.pass_check("OBS Vulkan Capture", "libobs_vkcapture installed")
+    else:
+        reporter.warn_check("OBS Vulkan Capture", "libobs_vkcapture not detected")
 
-section "Hardware Video"
-safe_cmd vainfo
-safe_cmd lspci -nnk
+    # OBS Studio Flatpak
+    if reporter.have("flatpak"):
+        fp_res = subprocess.run(["flatpak", "info", "com.obsproject.Studio"], capture_output=True, check=False)
+        if fp_res.returncode == 0:
+            reporter.pass_check("OBS Studio Flatpak", "installed")
+        else:
+            reporter.warn_check("OBS Studio Flatpak", "not installed")
+    else:
+        reporter.warn_check("OBS Studio Flatpak", "flatpak command missing")
 
-section "Recent Portal / PipeWire Warnings"
-safe_cmd journalctl -b --no-pager -n 50 -u xdg-desktop-portal.service -u xdg-desktop-portal-kde.service -u pipewire.service -u wireplumber.service
+    # VA-API Codecs
+    if reporter.have("vainfo"):
+        va_res = subprocess.run(["vainfo"], capture_output=True, check=False)
+        if va_res.returncode == 0:
+            reporter.pass_check("VA-API Hardware Video", "hardware encoding/decoding available")
+        else:
+            reporter.warn_check("VA-API Hardware Video", "vainfo failed or software fallback active")
+    else:
+        reporter.warn_check("VA-API Hardware Video", "vainfo command missing")
+
+    reporter.print_result("creator readiness")
+
+
+if __name__ == "__main__":
+    main()
+

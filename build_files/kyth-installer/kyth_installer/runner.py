@@ -27,7 +27,9 @@ _ALLOWED_EXECUTABLES = frozenset({
     "chromium-bin",
     "chromium-browser",
     "cp",
+    "e2fsck",
     "echo",
+    "efibootmgr",
     "false",
     "findmnt",
     "ip",
@@ -45,6 +47,7 @@ _ALLOWED_EXECUTABLES = frozenset({
     "openssl",
     "parted",
     "partprobe",
+    "resize2fs",
     "restorecon",
     "sgdisk",
     "sudo",
@@ -61,6 +64,14 @@ _ALLOWED_EXECUTABLES = frozenset({
 _TRUSTED_EXECUTABLE_DIRS = frozenset(
     os.path.realpath(path) for path in ("/bin", "/sbin", "/usr/bin", "/usr/sbin")
 )
+
+
+def run_as_root(cmd: list[str]) -> list[str]:
+    """Centralized privilege-escalation helper (was duplicated in system.py).
+
+    Returns `cmd` unchanged when already root, otherwise prepends `sudo -n`.
+    """
+    return cmd if os.geteuid() == 0 else ["sudo", "-n", *cmd]
 
 
 @dataclass(frozen=True)

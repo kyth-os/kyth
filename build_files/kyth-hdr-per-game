@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# kyth-hdr-per-game — hdr-per-game.toml per-app peak
+set -euo pipefail
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.hdr_per_game import load_hdr_per_game; print(load_hdr_per_game())" ;;
+    *) echo "Usage: kyth-hdr-per-game status" >&2; exit 1 ;;
+esac

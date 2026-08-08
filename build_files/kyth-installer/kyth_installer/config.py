@@ -13,7 +13,17 @@ from typing import Optional
 
 SOURCE_IMAGE = os.environ.get("KYTH_SOURCE_IMAGE", "ghcr.io/mrtrick37/kyth:latest")
 TARGET_IMAGE = os.environ.get("KYTH_TARGET_IMAGE", SOURCE_IMAGE)
-LOG_FILE     = Path(os.environ.get("KYTH_INSTALLER_LOG", "/tmp/kyth-installer.log"))  # noqa: S108 — created with O_EXCL|O_NOFOLLOW in install.py
+SOURCE_DIGEST = os.environ.get("KYTH_SOURCE_DIGEST", "").strip()
+SOURCE_METADATA_FILE = Path(
+    os.environ.get("KYTH_SOURCE_METADATA", "/usr/share/kyth/image-source.json")
+)
+LOG_FILE     = Path(os.environ.get("KYTH_INSTALLER_LOG", "/run/kyth-installer/log"))  # noqa: S108 — under /run 0700, was /tmp sticky
+FAILURE_SUMMARY_FILE = Path(
+    os.environ.get("KYTH_INSTALLER_FAILURE_SUMMARY", "/run/kyth-installer/failure.json")
+)  # noqa: S108 — under /run 0700
+TRANSACTION_FILE = Path(
+    os.environ.get("KYTH_INSTALLER_TRANSACTION", "/run/kyth-installer/transaction.json")
+)
 PORT         = 7777
 SESSION_TOKEN = secrets.token_urlsafe(32)
 _bootstrap_token: Optional[str] = None
@@ -32,6 +42,12 @@ BIOS_BOOT_GUID = "21686148-6449-6e6f-744e-656564454649"
 MIN_KYTHOS_GIB = 32
 MIN_KYTHOS_BYTES = MIN_KYTHOS_GIB * 1024**3
 BIOS_BOOT_BYTES = 1024**2
+
+# ── Staging mount paths (centralized — was 5× literal in install.py) ──────────
+STAGING_ALONGSIDE_MOUNT = "/var/tmp/kyth-alongside-target"  # noqa: S108 — _require_no_symlink guards this
+STAGING_BTRFS_ROOT = "/var/tmp/kyth-btrfs-root"  # noqa: S108 — _require_no_symlink guards this
+STAGING_INSTALL_ROOT = "/var/tmp/kyth-install-root"  # noqa: S108 — _require_no_symlink guards this
+STAGING_BTRFS_RESIZE_PREFIX = "kyth-btrfs-resize-"
 
 # ── Canonical filesystem metadata ──────────────────────────────────────
 # Single source of truth consumed by partition_ops (mkfs, validation) and

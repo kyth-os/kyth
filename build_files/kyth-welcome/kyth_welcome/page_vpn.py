@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.vpn import (
     VPN_OS_OPTIONS as _VPN_OS_OPTIONS,
     VPN_PROTOCOLS as _VPN_PROTOCOLS,
@@ -132,9 +132,6 @@ class VpnPage(Page):
         self._vpn_log = QTextEdit()
         self._vpn_log.document().setMaximumBlockCount(5000)
         self._vpn_log.setReadOnly(True)
-        self._vpn_log.setStyleSheet(
-            "font-family: 'Noto Mono', 'Cascadia Code', monospace; font-size: 12px;"
-        )
         self._vpn_log.setVisible(False)
         self._vpn_log.setMinimumHeight(160)
         ctrl_layout.addWidget(self._vpn_log)
@@ -300,11 +297,14 @@ class VpnPage(Page):
     def _on_saml_cookie(self, cookie: str) -> None:
         self._saml_pending = False
         self._vpn_log.append("[SAML authentication complete — reconnecting…]")
-        if self._worker:
+        if self._worker and self._worker.isRunning():
             self._worker.stop()
-            if not self._worker.wait(10000):
-                self._vpn_log.append("[Error: timed out waiting for the first openconnect process to exit]")
-                return
+            # Avoid blocking UI: defer reconnect until the first worker finishes
+            try:
+                self._worker.finished.connect(lambda _c=cookie: self._on_saml_cookie(_c))
+            except RuntimeError:
+                pass
+            return
         cmd, worker_stdin, username = build_saml_reconnect_command(
             self._saml_gateway,
             self._saml_protocol,
@@ -333,4 +333,4 @@ class VpnPage(Page):
         view = vpn_status_view(state)
         self._vpn_status.setText(view.text)
         self._vpn_status.setObjectName(view.style)
-        _restyle(self._vpn_status)
+        restyle(self._vpn_status)

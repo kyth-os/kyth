@@ -8,7 +8,7 @@ import os
 import shutil
 
 from .config import load_json_config, save_json_config
-from .process import _run_command
+from .process import run_command
 
 _DYNAMIC_LOCK_CONFIG = os.path.expanduser("~/.config/kyth-dynamic-lock.json")
 
@@ -31,11 +31,11 @@ _save_dynamic_lock_config = save_dynamic_lock_config
 def kdeconnect_devices() -> list[dict]:
     if shutil.which("kdeconnect-cli") is None:
         return []
-    _run_command(["kdeconnect-cli", "--refresh"], timeout=8)
-    all_result = _run_command(
+    run_command(["kdeconnect-cli", "--refresh"], timeout=8)
+    all_result = run_command(
         ["kdeconnect-cli", "--list-devices", "--id-name-only"], timeout=12,
     )
-    available_result = _run_command(
+    available_result = run_command(
         ["kdeconnect-cli", "--list-available", "--id-only"], timeout=12,
     )
     if all_result is None or all_result.returncode != 0:
@@ -63,7 +63,7 @@ _kdeconnect_devices = kdeconnect_devices
 
 
 def run_kdeconnect_action(device_id: str, action: str) -> tuple[bool, str]:
-    result = _run_command(
+    result = run_command(
         ["kdeconnect-cli", "--device", device_id, action], timeout=20,
     )
     if result is None:
@@ -79,7 +79,7 @@ def mount_kdeconnect_device(device_id: str) -> tuple[bool, str]:
     mounted, detail = run_kdeconnect_action(device_id, "--mount")
     if not mounted:
         return False, detail
-    result = _run_command(
+    result = run_command(
         ["kdeconnect-cli", "--device", device_id, "--get-mount-point"], timeout=12,
     )
     if result is None or result.returncode != 0 or not result.stdout.strip():
@@ -93,7 +93,7 @@ _mount_kdeconnect_device = mount_kdeconnect_device
 def send_kdeconnect_sms(
     device_id: str, destination: str, message: str,
 ) -> tuple[bool, str]:
-    result = _run_command([
+    result = run_command([
         "kdeconnect-cli", "--device", device_id,
         "--send-sms", message, "--destination", destination,
     ], timeout=30)
@@ -111,9 +111,9 @@ def configure_dynamic_lock_service(enabled: bool) -> tuple[bool, str]:
     unit = "/usr/lib/systemd/user/kyth-dynamic-lock.service"
     if not os.path.exists(helper) or not os.path.exists(unit):
         return False, "Dynamic Lock will be available after the next KythOS update and restart."
-    _run_command(["systemctl", "--user", "daemon-reload"], timeout=20)
+    run_command(["systemctl", "--user", "daemon-reload"], timeout=20)
     action = "enable" if enabled else "disable"
-    result = _run_command(
+    result = run_command(
         ["systemctl", "--user", action, "--now", "kyth-dynamic-lock.service"],
         timeout=30,
     )

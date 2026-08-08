@@ -5,7 +5,7 @@ import "_internal.just"
 
 # Build the base image from build_base/.
 [group('Build')]
-build-base base_image="ghcr.io/ublue-os/kinoite-main:44" kernel_flavor="fedora":
+build-base base_image=default_base_image kernel_flavor="fedora":
     #!/usr/bin/env bash
     if ! id -nG | grep -qw docker; then
         if ! id -nG "$USER" | grep -qw docker; then
@@ -30,7 +30,7 @@ build-base base_image="ghcr.io/ublue-os/kinoite-main:44" kernel_flavor="fedora":
     docker pull {{ base_image }}
     CACHYOS_KERNEL_VER=unused
     if [[ "{{ kernel_flavor }}" != "fedora" ]]; then
-        CACHYOS_KERNEL_VER=$(./build_files/scripts/resolve-versions.sh cachyos-kernel)
+        CACHYOS_KERNEL_VER=$(python3 ./build_files/scripts/resolve-versions.py cachyos-kernel)
     fi
     echo "CachyOS kernel: ${CACHYOS_KERNEL_VER}"
     echo "Kernel flavor: {{ kernel_flavor }}"
@@ -53,9 +53,9 @@ build: build-base
     BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
 
-    PROTON_CACHYOS_VER=$(./build_files/scripts/resolve-versions.sh proton-cachyos)
+    PROTON_CACHYOS_VER=$(python3 ./build_files/scripts/resolve-versions.py proton-cachyos)
     [[ -n "${PROTON_CACHYOS_VER}" ]] || { echo "Unable to pin Proton-CachyOS" >&2; exit 1; }
-    UMU_VERSION=$(./build_files/scripts/resolve-versions.sh thirdparty-versions)
+    UMU_VERSION=$(python3 ./build_files/scripts/resolve-versions.py thirdparty-versions)
     THIRDPARTY_VERSIONS_HASH=$(printf '%s' "${UMU_VERSION}" | sha256sum | cut -c1-16)
     echo "Pinned third-party release: umu=${UMU_VERSION}"
     MOK_SECRET_ARG=()

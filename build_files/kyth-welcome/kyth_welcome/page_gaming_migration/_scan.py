@@ -1,8 +1,9 @@
 import re
 
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _release_worker_when_finished, _restyle
-from ..services.process import _run_command
+from ..core_base import restyle
+from ..services.runtime import DataWorker, release_worker_when_finished
+from ..services.process import run_command
 from ..services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _find_ntfs_drives, _find_steam_libraries,
     _load_protondb_cache, _save_protondb_cache, _scan_steamapps_manifests, blocked_compat_lookup,
@@ -10,7 +11,7 @@ from ..services.gaming import (
 from ..services.cloud_sync import SteamCopyWorker
 from ..services.gaming import _COMPAT_GAMES
 from ..qt import (
-    QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QFileDialog, QFrame, QHBoxLayout, QLabel,
 )
 from ..widgets import _set_log_panel
 
@@ -19,75 +20,117 @@ class _ScanMixin:
     _READY_TIERS = ("native", "platinum", "gold", "silver")
 
     def _refresh_ntfs_drives(self):
+        # _find_ntfs_drives() is probe_cached (services/hardware/drives.py)
+        # but a cold cache still means a synchronous lsblk spawn here \u2014 and
+        # this now fires automatically every time the Migration tab is
+        # opened (page_gaming.py's _kick_section_refresh), not just on an
+        # explicit Refresh click.
+        if self._ntfs_drives_worker is not None:
+            return
         self._drive_combo.clear()
-        drives = [d for d in _find_ntfs_drives() if not d.get("is_bitlocker")]
-        if not drives:
+        self._drive_combo.addItem("Checking for NTFS partitions\u2026")
+        worker = DataWorker("migration-ntfs-drives", _find_ntfs_drives)
+        self._ntfs_drives_worker = worker
+        worker.result.connect(lambda _key, drives: self._on_ntfs_drives_ready(drives))
+        worker.failed.connect(lambda _key, _message: self._on_ntfs_drives_ready([]))
+        worker.finished.connect(lambda: setattr(self, "_ntfs_drives_worker", None))
+        worker.start()
+
+    def _on_ntfs_drives_ready(self, drives: object):
+        self._drive_combo.clear()
+        filtered = [d for d in (drives or []) if not d.get("is_bitlocker")]
+        if not filtered:
             self._drive_combo.addItem("No NTFS partitions found")
             return
-        for d in drives:
+        for d in filtered:
             label = f"{d['dev']}  {d['size']}  {d['label'] or '(no label)'}"
             if d["mount"]:
                 label += f"  [mounted at {d['mount']}]"
             self._drive_combo.addItem(label, userData=d)
 
     def _scan_steam_on_drive(self):
+        if self._steam_scan_worker is not None:
+            return
         drive = self._drive_combo.currentData()
         if not drive:
             return
 
+        self._migrate_status.setText(f"Checking {drive['dev']}\u2026")
+        self._migrate_status.setObjectName("subheading")
+        self._migrate_status.show()
+        restyle(self._migrate_status)
+
+        # Mounting (udisksctl) and scanning are both subprocess-backed and
+        # used to run synchronously here, papered over with
+        # QApplication.processEvents() instead of a real worker. Both steps
+        # move to a background DataWorker; _on_steam_scan_ready() applies
+        # whichever outcome it reports to the widgets below.
+        worker = DataWorker("migration-steam-scan", lambda: self._fetch_steam_scan(drive))
+        self._steam_scan_worker = worker
+        worker.result.connect(lambda _key, result: self._on_steam_scan_ready(result))
+        worker.failed.connect(lambda _key, message: self._on_steam_scan_ready({"error_kind": "worker", "detail": message}))
+        worker.finished.connect(lambda: setattr(self, "_steam_scan_worker", None))
+        worker.start()
+
+    @staticmethod
+    def _fetch_steam_scan(drive: dict) -> dict:
+        """Run off the GUI thread by _scan_steam_on_drive()'s DataWorker:
+        mount the drive (if not already mounted) and scan it for Steam
+        libraries. Returns {"mount", "libs"} on success, or
+        {"error_kind", "detail"} \u2014 never touches a widget."""
         mount = drive["mount"]
 
         if not mount:
-            self._migrate_status.setText(f"Mounting {drive['dev']}\u2026")
-            self._migrate_status.setObjectName("subheading")
-            self._migrate_status.show()
-            _restyle(self._migrate_status)
-            QApplication.processEvents()
             try:
-                r = _run_command(
+                r = run_command(
                     ["udisksctl", "mount", "-b", drive["dev"], "-t", "ntfs3",
                      "--options", "ro", "--no-user-interaction"],
                     timeout=15,
                 )
                 if r is None or r.returncode != 0:
-                    r = _run_command(
+                    r = run_command(
                         ["udisksctl", "mount", "-b", drive["dev"],
                          "--options", "ro", "--no-user-interaction"],
                         timeout=15,
                     )
                 if r is None or r.returncode != 0:
-                    err = (r.stderr if r else "").strip()
-                    if "hibernate" in err.lower() or "windows" in err.lower():
-                        self._migrate_status.setText(
-                            "Mount blocked: The other system did not shut down cleanly (Fast Startup / hibernate). "
-                            "Boot the other system and do a full shut down, then try again."
-                        )
-                    else:
-                        self._migrate_status.setText(f"Mount failed: {err}")
-                    self._migrate_status.setObjectName("status-err")
-                    _restyle(self._migrate_status)
-                    return
+                    return {"error_kind": "mount", "detail": (r.stderr if r else "").strip()}
                 m = re.search(r" at (.+?)\.$", r.stdout.strip())
                 mount = m.group(1) if m else None
                 if not mount:
-                    self._migrate_status.setText("Could not determine mount point from udisksctl output.")
-                    self._migrate_status.setObjectName("status-err")
-                    _restyle(self._migrate_status)
-                    return
+                    return {"error_kind": "mount-point", "detail": ""}
             except Exception as exc:
-                self._migrate_status.setText(f"Mount error: {exc}")
-                self._migrate_status.setObjectName("status-err")
-                _restyle(self._migrate_status)
-                return
+                return {"error_kind": "mount-exception", "detail": str(exc)}
 
+        return {"mount": mount, "libs": _find_steam_libraries(mount)}
+
+    def _on_steam_scan_ready(self, result: object) -> None:
+        result = result if isinstance(result, dict) else {"error_kind": "worker", "detail": ""}
+        error_kind = result.get("error_kind")
+        if error_kind:
+            detail = result.get("detail") or ""
+            if error_kind == "mount":
+                if "hibernate" in detail.lower() or "windows" in detail.lower():
+                    self._migrate_status.setText(
+                        "Mount blocked: The other system did not shut down cleanly (Fast Startup / hibernate). "
+                        "Boot the other system and do a full shut down, then try again."
+                    )
+                else:
+                    self._migrate_status.setText(f"Mount failed: {detail}")
+            elif error_kind == "mount-point":
+                self._migrate_status.setText("Could not determine mount point from udisksctl output.")
+            elif error_kind == "mount-exception":
+                self._migrate_status.setText(f"Mount error: {detail}")
+            else:
+                self._migrate_status.setText(f"Scan error: {detail or 'unknown error'}")
+            self._migrate_status.setObjectName("status-err")
+            restyle(self._migrate_status)
+            return
+
+        mount = result["mount"]
+        libs = result["libs"]
         self._scanned_mount = mount
-        self._migrate_status.setText(f"Scanning {mount} for Steam libraries\u2026")
-        self._migrate_status.setObjectName("subheading")
-        self._migrate_status.show()
-        _restyle(self._migrate_status)
-        QApplication.processEvents()
 
-        libs = _find_steam_libraries(mount)
         self._lib_combo.clear()
         self._clear_rows(self._winlib_rows)
         self._winlib_summary_lbl.hide()
@@ -98,7 +141,7 @@ class _ScanMixin:
             self._copy_btn.setEnabled(False)
             self._migrate_status.setText("No Steam libraries found on this drive.")
             self._migrate_status.setObjectName("status-err")
-            _restyle(self._migrate_status)
+            restyle(self._migrate_status)
             return
 
         for lib in libs:
@@ -112,7 +155,7 @@ class _ScanMixin:
             "report, or Copy Library to start migrating."
         )
         self._migrate_status.setObjectName("status-ok")
-        _restyle(self._migrate_status)
+        restyle(self._migrate_status)
 
     def _check_windows_library_compat(self):
         steamapps = self._lib_combo.currentText().strip()
@@ -135,7 +178,7 @@ class _ScanMixin:
             worker = _ProtonDbBatchWorker(uncached, cache)
             worker.finished_all.connect(self._on_winlib_protondb_done)
             self._winlib_protondb_worker = worker
-            _release_worker_when_finished(self, "_winlib_protondb_worker", worker)
+            release_worker_when_finished(self, "_winlib_protondb_worker", worker)
             worker.start()
 
     def _on_winlib_protondb_done(self, full_cache: dict):
@@ -186,19 +229,12 @@ class _ScanMixin:
         name_lbl = QLabel(game["name"])
         name_lbl.setObjectName("card-summary")
         layout.addWidget(name_lbl, 1)
-        badge = QLabel(f"  {badge_text}  ")
+        badge = QLabel(badge_text)
         if category == "blocked":
-            badge.setStyleSheet(
-                "background:#3a1010; color:#f48771; border:1px solid #5a1a1a; "
-                "border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-            )
+            badge.setObjectName("status-err")
         else:
             tier_key = "platinum" if badge_text == "Native" else badge_text.lower()
-            bg, fg = _PROTONDB_TIER_STYLE.get(tier_key, ("#252526", "#cccccc"))
-            badge.setStyleSheet(
-                f"background:{bg}; color:{fg}; "
-                "border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-            )
+            badge.setObjectName(_PROTONDB_TIER_STYLE.get(tier_key, "status-dim"))
         layout.addWidget(badge)
         return row
 
@@ -223,7 +259,7 @@ class _ScanMixin:
         self._migrate_status.setText(f"Copying {src} \u2192 {dst}\u2026")
         self._migrate_status.setObjectName("subheading")
         self._migrate_status.show()
-        _restyle(self._migrate_status)
+        restyle(self._migrate_status)
         self._copy_btn.setEnabled(False)
         self._copy_cancel_btn.show()
         self._migrate_worker = SteamCopyWorker(src, dst)
@@ -252,5 +288,5 @@ class _ScanMixin:
         else:
             self._migrate_status.setText(f"Copy failed (exit {code}). See details.")
             self._migrate_status.setObjectName("status-err")
-        _restyle(self._migrate_status)
+        restyle(self._migrate_status)
         _set_log_panel(self._migrate_log_toggle, self._migrate_log, True)

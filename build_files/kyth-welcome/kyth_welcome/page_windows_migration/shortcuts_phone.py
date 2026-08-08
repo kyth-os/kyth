@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from ..core_base import (
-    _release_worker_when_finished,
-    _restyle,
-)
+from ..core_base import restyle
 from ..services.phone_link import (
     _configure_dynamic_lock_service,
     _kdeconnect_devices,
@@ -15,9 +12,7 @@ from ..services.phone_link import (
     _save_dynamic_lock_config,
     _send_kdeconnect_sms,
 )
-from ..services.runtime import (
-    DataWorker,
-)
+from ..services.runtime import DataWorker, release_worker_when_finished
 from ..services.launch import popen, systemsettings, kcmshell
 from ..qt import (
     QCheckBox, QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QUrl, single_shot,
@@ -49,10 +44,7 @@ class _ShortcutsPhoneMixin:
             row = QHBoxLayout()
             row.setSpacing(10)
             keys_lbl = QLabel(keys)
-            keys_lbl.setStyleSheet(
-                "font-family: monospace; font-size:12px; font-weight:600; color:#cccccc; "
-                "background:#252526; border:1px solid #3c3c3c; border-radius:3px; padding:2px 8px;"
-            )
+            keys_lbl.setObjectName("launch-opt-value")
             keys_lbl.setMinimumWidth(110)
             row.addWidget(keys_lbl)
             what_lbl = QLabel(what)
@@ -216,7 +208,7 @@ class _ShortcutsPhoneMixin:
         if self._phone_worker is not None and self._phone_worker.isRunning():
             return
         self._phone_status.setObjectName("card-copy")
-        _restyle(self._phone_status)
+        restyle(self._phone_status)
         self._phone_status.setText("Looking for paired devices…")
         worker = DataWorker("kdeconnect-devices", _kdeconnect_devices)
         worker.result.connect(self._on_phone_devices)
@@ -226,7 +218,7 @@ class _ShortcutsPhoneMixin:
             )
         )
         self._phone_worker = worker
-        _release_worker_when_finished(self, "_phone_worker", worker)
+        release_worker_when_finished(self, "_phone_worker", worker)
         worker.start()
 
 
@@ -306,7 +298,7 @@ class _ShortcutsPhoneMixin:
             if not accepted or not message.strip():
                 return
         self._phone_status.setObjectName("card-copy")
-        _restyle(self._phone_status)
+        restyle(self._phone_status)
         self._phone_status.setText(f"{labels.get(action, 'Contacting device')}…")
         if action == "--mount":
             fn = lambda: _mount_kdeconnect_device(device["id"])
@@ -322,7 +314,7 @@ class _ShortcutsPhoneMixin:
             lambda _key, message: self._phone_status.setText(f"Device action failed: {message}")
         )
         self._phone_action_worker = worker
-        _release_worker_when_finished(self, "_phone_action_worker", worker)
+        release_worker_when_finished(self, "_phone_action_worker", worker)
         worker.start()
 
 
@@ -374,7 +366,7 @@ class _ShortcutsPhoneMixin:
             )
         )
         self._dynamic_lock_worker = worker
-        _release_worker_when_finished(self, "_dynamic_lock_worker", worker)
+        release_worker_when_finished(self, "_dynamic_lock_worker", worker)
         worker.start()
 
 
@@ -382,4 +374,4 @@ class _ShortcutsPhoneMixin:
         ok, detail = result
         self._phone_status.setText(detail)
         self._phone_status.setObjectName("status-ok" if ok else "status-warn")
-        _restyle(self._phone_status)
+        restyle(self._phone_status)

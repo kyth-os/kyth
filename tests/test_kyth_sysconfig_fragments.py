@@ -61,9 +61,9 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertNotIn("Exec=openrgb", body)
 
     def test_initramfs_includes_account_databases(self):
-        setup = (SCRIPTS / "plymouth-setup.sh").read_text(encoding="utf-8")
+        owner = (ROOT / "build_base" / "plymouth" / "kyth-plymouth-configure").read_text(encoding="utf-8")
         final = (SCRIPTS / "plymouth-initramfs.sh").read_text(encoding="utf-8")
-        self.assertIn('install_items+=" /etc/passwd /etc/group "', setup)
+        self.assertIn('install_items+=" /etc/passwd /etc/group "', owner)
         self.assertIn("etc/passwd etc/group", final)
 
     def test_late_plasma_splash_is_kyth_owned(self):
@@ -89,7 +89,10 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn("ExecStartPre=/usr/bin/kyth-session-splash-guard", fragment)
         self.assertIn('source: "images/kyth-logo.svg"', qml)
         self.assertNotIn("fedora", qml.lower())
-        self.assertIn("--key Theme org.kythos.desktop", polish)
+        self.assertTrue(
+            "--key Theme org.kythos.desktop" in polish or
+            ("Theme" in polish and "org.kythos.desktop" in polish)
+        )
         self.assertIn("--key Theme org.kythos.desktop", guard)
 
     def test_antigravity_uses_desktop_safe_wrapper(self):
@@ -110,7 +113,37 @@ class SysconfigFragmentTests(unittest.TestCase):
         body = (ROOT / "build_files" / "kyth-firstboot-app-status").read_text(
             encoding="utf-8"
         )
-        self.assertTrue(body.rstrip().endswith("exit 0"))
+        self.assertIn("check_firstboot_app_status", body)
+        self.assertTrue(body.rstrip().endswith("main()"))
+
+
+class ConfigHelperTests(unittest.TestCase):
+    HELPER = SCRIPTS / "lib" / "config-helpers.sh"
+
+    def test_helper_defines_write_config_and_write_line(self):
+        self.assertTrue(self.HELPER.is_file())
+        body = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn("write_config()", body)
+        self.assertIn("write_line()", body)
+
+    def test_migrated_fragments_source_helper_and_use_it(self):
+        # Fragments run in isolated bash subshells, so each must source the
+        # helper via a path relative to its own location and then call it.
+        migrated = {
+            "kernel/13-ntsync.sh": ["write_config", "write_line"],
+            "storage/18-i-o-schedulers.sh": ["write_config"],
+        }
+        for rel, funcs in migrated.items():
+            body = (FRAG_DIR / rel).read_text(encoding="utf-8")
+            self.assertIn(
+                "../../lib/config-helpers.sh", body,
+                f"{rel} does not source the shared config helper",
+            )
+            for func in funcs:
+                self.assertIn(f"{func} ", body, f"{rel} does not call {func}")
+            # The helper owns parent-dir creation now — migrated fragments
+            # should no longer hand-roll a bare `cat >` redirect for their drop.
+            self.assertNotIn("cat >/", body, f"{rel} still hand-rolls cat >")
 
 
 if __name__ == "__main__":

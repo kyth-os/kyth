@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-epp-ac — epp-ac.toml AC performance
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-epp-ac "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.epp_ac import load_epp_ac; c=load_epp_ac(); print(f\"enabled={c['enabled']}\")" ;;
+    on) need_root "$@"; python3 -c "from kyth_shared.epp_ac import load_epp_ac,save_epp_ac,generate_epp_ac; c=load_epp_ac(); c['enabled']=True; save_epp_ac(c); generate_epp_ac(c)"; udevadm control --reload-rules 2>/dev/null || true; echo "epp-ac on" ;;
+    off) need_root "$@"; python3 -c "from kyth_shared.epp_ac import load_epp_ac,save_epp_ac,generate_epp_ac; c=load_epp_ac(); c['enabled']=False; save_epp_ac(c); generate_epp_ac(c)"; echo "epp-ac off" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.epp_ac import load_epp_ac,generate_epp_ac; generate_epp_ac(load_epp_ac())" ;;
+    *) echo "Usage: kyth-epp-ac [status|on|off|apply]" >&2; exit 1 ;;
+esac

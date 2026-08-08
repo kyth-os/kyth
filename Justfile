@@ -23,7 +23,7 @@ check:
 
 # Check Dockerfile frontend/build rules without requiring the local kyth-base image.
 [group('Build')]
-check-dockerfile check_base_image="ghcr.io/ublue-os/kinoite-main:44":
+check-dockerfile check_base_image=default_base_image:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! id -nG | grep -qw docker; then
@@ -36,22 +36,36 @@ check-dockerfile check_base_image="ghcr.io/ublue-os/kinoite-main:44":
 # Run Python unit tests.
 [group('Quality')]
 test:
-    python3 -m unittest discover -s tests
+    python3 -m unittest discover -s tests -b
 
 # Run Python unit tests with a statement coverage report.
 [group('Quality')]
 test-coverage:
-    #!/usr/bin/env bash
-    set -eou pipefail
-    if ! python3 -m coverage --version &> /dev/null; then
-        echo "coverage.py could not be found. Install it with: pip install --user coverage"
-        exit 1
-    fi
-    python3 -m coverage run --source=build_files -m unittest discover -s tests
-    python3 -m coverage report -m
-    python3 -m coverage html -d /tmp/kyth-coverage-html
+    ./build_files/scripts/run-quality.sh
     echo ""
-    echo "HTML report: /tmp/kyth-coverage-html/index.html"
+    echo "HTML report: coverage-html/index.html"
+
+# Check maintainability/optimization budgets tracked in source control.
+[group('Quality')]
+check-optimization:
+    python3 build_files/scripts/optimization-report.py --check
+
+# Print source metrics; pass runtime=1 on a representative installed system.
+[group('Quality')]
+optimization-report runtime="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=()
+    if [[ "{{ runtime }}" == "1" ]]; then args+=(--runtime); fi
+    python3 build_files/scripts/optimization-report.py "${args[@]}"
+
+# Create/update the local pinned quality-tool environment.
+[group('Quality')]
+setup-quality:
+    python3 -m venv .venv-quality
+    .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-quality.txt
+    .venv-quality/bin/coverage --version
+    .venv-quality/bin/ruff --version
 
 # Run the complete validation suite used by GitHub Actions and pre-push.
 [group('Quality')]
@@ -100,8 +114,7 @@ disk-usage:
     docker system df
     echo ""
     echo "── Output ISOs ───────────────────────────────────────────────────────────"
-    find output -name "*.iso" -o -name "*.qcow2" -o -name "*.raw" 2>/dev/null \
-        | sort | xargs -r du -sh 2>/dev/null || echo "(none)"
+    just _list-output-images
     echo ""
     echo "── /var/tmp kyth-live build dirs ─────────────────────────────────────────"
     find /var/tmp -maxdepth 1 \( -name "kyth-live.*" -o -name "kyth-titanoboa.*" \) -exec du -sh {} \; 2>/dev/null || echo "(none)"
@@ -120,20 +133,13 @@ export-kali-apps:
     set -euo pipefail
     exec just --justfile build_files/just/kyth.just export-kali-apps
 
-# Refresh the auto-generated README project snapshot section.
-[group('Utility')]
-sync-readme:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    ./build_files/scripts/update-readme-snapshot.sh
-
-# Install tracked git hooks for automatic README snapshot and commit message helpers.
+# Install tracked git hooks for validation and commit message helpers.
 [group('Utility')]
 install-git-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
     git config core.hooksPath .githooks
-    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/update-readme-snapshot.sh build_files/scripts/install-validation-tools.sh build_files/scripts/validate.sh build_files/scripts/ci-preflight.sh
+    chmod +x .githooks/pre-commit .githooks/pre-push .githooks/prepare-commit-msg build_files/scripts/install-validation-tools.sh build_files/scripts/validate.sh build_files/scripts/run-quality.sh build_files/scripts/ci-preflight.sh
     echo "Git hooks installed via core.hooksPath=.githooks"
 
 # Remove old output ISOs — keeps only the current live ISO and current BIB ISO.
@@ -142,23 +148,17 @@ clean-output:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Cleaning stale output artefacts..."
-    sudo rm -rf output/previous-built-iso output/archive 2>/dev/null || true
-    sudo rm -f  output/manifest-iso.json.bak 2>/dev/null || true
-    sudo chown -R "$(id -u):$(id -g)" output/ 2>/dev/null || true
+    just _clean-output-artefacts
     echo "Remaining output files:"
-    find output -name "*.iso" -o -name "*.qcow2" -o -name "*.raw" 2>/dev/null \
-        | sort | xargs -r du -sh 2>/dev/null || echo "(none)"
+    just _list-output-images
 
 # Prune Docker build cache and dangling (unreferenced) image layers.
 [group('Utility')]
 clean-docker:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Pruning Docker build cache..."
-    docker builder prune -f
-    echo ""
-    echo "Pruning dangling image layers..."
-    docker image prune -f
+    echo "Pruning Docker build cache and dangling image layers..."
+    just _prune-docker-cache
     echo ""
     docker system df
 
@@ -185,7 +185,7 @@ prune-live-dev:
     find /tmp -maxdepth 1 -type f -name 'kyth-live-test.qcow2' -delete || true
     find /var/tmp -maxdepth 2 -type f -name 'kyth-live-test.qcow2' -delete || true
     find /tmp -maxdepth 1 -type d -name 'kyth-vm-share-*' -exec rm -rf {} + || true
-    sudo find /var/tmp -maxdepth 1 -type d \( -name 'kyth-live.*' -o -name 'kyth-titanoboa.*' \) -exec rm -rf {} + || true
+    just _clean-vartmp-builddirs
 
     echo ""
     echo "── Post-cleanup summary ───────────────────────────────────────────────────"
@@ -214,26 +214,17 @@ purge:
 
     echo ""
     echo "── /var/tmp kyth-live.* / kyth-titanoboa.* build dirs ───────────────────"
-    if sudo find /var/tmp -maxdepth 1 \( -name "kyth-live.*" -o -name "kyth-titanoboa.*" \) -print -exec rm -rf {} + 2>/dev/null | grep -q .; then
-        echo "  Done"
-    else
-        echo "  (none)"
-    fi
-
-    echo ""
-    echo "── Old output artefacts (previous-built-iso, archive, manifest backups) ──"
-    sudo rm -rf output/previous-built-iso output/archive 2>/dev/null || true
-    sudo rm -f  output/manifest-iso.json.bak 2>/dev/null || true
-    sudo chown -R "$(id -u):$(id -g)" output/ 2>/dev/null || true
+    just _clean-vartmp-builddirs
     echo "  Done"
 
     echo ""
-    echo "── Docker build cache ────────────────────────────────────────────────────"
-    docker builder prune -f
+    echo "── Old output artefacts (previous-built-iso, archive, manifest backups) ──"
+    just _clean-output-artefacts
+    echo "  Done"
 
     echo ""
-    echo "── Docker dangling image layers ──────────────────────────────────────────"
-    docker image prune -f
+    echo "── Docker build cache and dangling image layers ──────────────────────────"
+    just _prune-docker-cache
 
     echo ""
     echo "── Podman dangling image layers ──────────────────────────────────────────"
@@ -268,6 +259,30 @@ format:
         exit 1
     fi
     /usr/bin/find . -iname "*.sh" -type f -exec shfmt --write "{}" ';'
+
+# Set up a local venv to run System Hub outside the image (handles read-only $HOME overlay).
+[group('Utility')]
+setup-hub:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 -m venv .venv
+    .venv/bin/pip install --disable-pip-version-check PySide6
+    .venv/bin/pip install --disable-pip-version-check -e build_files/kyth_shared -e build_files/kyth-welcome
+    echo "Hub venv ready: .venv/bin/kyth-welcome"
+
+# Run System Hub locally from the checkout (uses .venv if present).
+[group('Utility')]
+run-hub *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -x .venv/bin/kyth-welcome ]]; then
+        exec .venv/bin/kyth-welcome {{ args }}
+    fi
+    if /usr/bin/python3 -c "import PySide6" 2>/dev/null || /usr/bin/python3 -c "import PyQt6" 2>/dev/null; then
+        exec env PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome /usr/bin/python3 build_files/kyth-welcome/kyth-welcome {{ args }}
+    fi
+    echo "No Qt binding found. Run: just setup-hub" >&2
+    exit 1
 
 # Preview the installer UI in your browser (no disk changes — safe for dev)
 [group('Utility')]

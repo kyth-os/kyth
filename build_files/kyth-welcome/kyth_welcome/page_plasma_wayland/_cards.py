@@ -2,11 +2,15 @@ import os
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.plasma import _run_text, gpu_lspci_summary, kscreen_doctor_output
+from ..services.runtime import DataWorker
 from ..qt import (
     QFrame, QHBoxLayout, QLabel, Qt,
 )
+from ..ui_tokens import KYTH_TEXT_MUTED
 from ..widgets import ActionRow, CommandResultPanel, _make_card
 from ._profiles import DESKTOP_PROFILES
+
+_WAYLAND_ROW_NAMES = ("Session", "GPU", "Portals", "Screen sharing", "VRR", "HDR")
 
 
 class _CardsMixin:
@@ -157,6 +161,67 @@ class _CardsMixin:
         body.addWidget(self._profile_result)
         return card
 
+    def _make_windows_parity_card(self) -> QFrame:
+        card, body = _make_card("card-accent-ok")
+        body.setContentsMargins(18, 16, 18, 16)
+        body.setSpacing(10)
+        title = QLabel("Windows 11 Comfort — familiar desktop")
+        title.setObjectName("card-title")
+        copy = QLabel(
+            "One toggle to feel at home: double-click to open (not single-click), centered taskbar, "
+            "strong snap zones for 2×2 / 3-column snap layouts, Win+Arrow to tile halves/quarters, "
+            "Win+E for Dolphin, Win+D to show desktop, Win+L to lock. Reversible — switch back to Balanced anytime."
+        )
+        copy.setObjectName("card-copy")
+        copy.setWordWrap(True)
+        body.addWidget(title)
+        body.addWidget(copy)
+        for label, detail in (
+            ("Double-click", "Dolphin opens on double-click like Explorer — single-click just selects."),
+            ("Centered taskbar", "Panel icons centered; notification tray and clock on the right, like Windows 11."),
+            ("Snap Layouts", "Drag a window to a screen edge for halves; to a corner for quarters; Win+Arrow for halves."),
+            ("Familiar keys", "Win+E Dolphin, Win+D show desktop, Win+L lock, Alt-Tab switcher, Win opens launcher."),
+        ):
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            l = QLabel(label)
+            l.setObjectName("card-summary")
+            l.setMinimumWidth(130)
+            row.addWidget(l)
+            c = QLabel(detail)
+            c.setObjectName("card-copy")
+            c.setWordWrap(True)
+            row.addWidget(c, 1)
+            body.addLayout(row)
+        row = ActionRow("Apply Windows comfort in one click")
+        row.add_button("Apply Windows 11 Comfort", lambda _=False: self._apply_desktop_profile("windows"), primary=True)
+        row.add_button("Restore Balanced", lambda _=False: self._apply_desktop_profile("balanced"))
+        body.addWidget(row)
+        # Clipboard History + FancyZones — PowerToys parity
+        clip = ActionRow("Clipboard & FancyZones — Win+V history, Win+Ctrl+T thirds")
+        clip.add_button("Enable Clipboard History", lambda _=False: __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["kcmshell6","kcm_klipper"]) or __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["kcmshell","kcm_klipper"]))
+        clip.add_button("Apply FancyZones Thirds", lambda _=False: self._apply_fancyzones_thirds())
+        body.addWidget(row)
+        return card
+
+    def _apply_fancyzones_thirds(self):
+        from ..services.plasma import run_shell_script
+        script = """
+set -e
+kwriteconfig6 --file kwinrc --group Windows --key BorderSnapZone 8
+kwriteconfig6 --file kwinrc --group Windows --key WindowSnapZone 8
+kwriteconfig6 --file kwinrc --group Tiling --key Padding 6
+kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Left" "Meta+Left,Meta+Left,Quick Tile Window to the Left"
+kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Right" "Meta+Right,Meta+Right,Quick Tile Window to the Right"
+qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+"""
+        code, out, err = run_shell_script(script, timeout=10)
+        try:
+            from ..widgets import CommandResultPanel
+            # no-op if panel not present
+        except Exception:
+            pass
+
     def _make_snap_grid_card(self) -> QFrame:
         card, body = _make_card()
         body.setContentsMargins(18, 16, 18, 16)
@@ -190,20 +255,53 @@ class _CardsMixin:
         copy.setWordWrap(True)
         body.addWidget(title)
         body.addWidget(copy)
-        rows = [
-            ("Session", self._session_status()),
-            ("GPU", self._gpu_status()),
-            ("Portals", self._portal_status()),
-            ("Screen sharing", self._screen_share_status()),
-            ("VRR", self._kscreen_status("vrr")),
-            ("HDR", self._kscreen_status("hdr")),
-        ]
-        for name, value in rows:
-            line = QLabel(f"<b>{name}</b><br><span style='color:#95a6b4'>{value}</span>")
+
+        # GPU, portal, and VRR/HDR checks are subprocess-backed (lspci,
+        # systemctl, kscreen-doctor). This card is built eagerly in
+        # PlasmaWaylandPage.__init__ like every other card on this page, so
+        # it starts from "Checking…" placeholders — _refresh_wayland_readiness()
+        # (kicked off from showEvent, alongside the probe-row refresh()
+        # already deferred there) fetches the real values off the GUI
+        # thread and patches these labels in place.
+        self._wayland_readiness_worker = None
+        self._wayland_row_labels: dict[str, QLabel] = {}
+        for name in _WAYLAND_ROW_NAMES:
+            line = QLabel(f"<b>{name}</b><br><span style='color:{KYTH_TEXT_MUTED}'>Checking…</span>")
             line.setTextFormat(Qt.TextFormat.RichText)
-            line.setStyleSheet("QLabel { background:#101820; border:1px solid #2d3a48; border-radius:8px; padding:9px 11px; color:#eef5f7; }")
+            line.setObjectName("wayland-info-row")
             body.addWidget(line)
+            self._wayland_row_labels[name] = line
         return card
+
+    def _fetch_wayland_readiness_facts(self) -> dict[str, str]:
+        """Run off the GUI thread by _refresh_wayland_readiness()'s
+        DataWorker. kscreen-doctor is run once and shared between the VRR
+        and HDR rows instead of spawning it twice."""
+        kscreen_out = kscreen_doctor_output().lower()
+        return {
+            "Session": self._session_status(),
+            "GPU": self._gpu_status(),
+            "Portals": self._portal_status(),
+            "Screen sharing": self._screen_share_status(),
+            "VRR": self._kscreen_status("vrr", kscreen_out),
+            "HDR": self._kscreen_status("hdr", kscreen_out),
+        }
+
+    def _refresh_wayland_readiness(self) -> None:
+        if self._wayland_readiness_worker is not None:
+            return
+        worker = DataWorker("wayland-readiness", self._fetch_wayland_readiness_facts)
+        self._wayland_readiness_worker = worker
+        worker.result.connect(lambda _key, facts: self._apply_wayland_readiness_facts(facts))
+        worker.failed.connect(lambda _key, _message: None)
+        worker.finished.connect(lambda: setattr(self, "_wayland_readiness_worker", None))
+        worker.start()
+
+    def _apply_wayland_readiness_facts(self, facts: dict[str, str]) -> None:
+        for name, value in facts.items():
+            label = self._wayland_row_labels.get(name)
+            if label is not None:
+                label.setText(f"<b>{name}</b><br><span style='color:{KYTH_TEXT_MUTED}'>{value}</span>")
 
     def _session_status(self) -> str:
         session = os.environ.get("XDG_SESSION_TYPE") or "unknown"
@@ -228,8 +326,9 @@ class _CardsMixin:
     def _screen_share_status(self) -> str:
         return "Ready when PipeWire and xdg-desktop-portal-kde are active"
 
-    def _kscreen_status(self, feature: str) -> str:
-        out = kscreen_doctor_output().lower()
+    def _kscreen_status(self, feature: str, out: str | None = None) -> str:
+        if out is None:
+            out = kscreen_doctor_output().lower()
         if not out:
             return "Install/run kscreen-doctor to probe display capabilities"
         if feature in out:

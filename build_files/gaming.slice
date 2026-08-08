@@ -1,0 +1,8 @@
+[Slice]
+Description=Kyth Gaming Slice
+Before=slices.target
+CPUWeight=300
+MemoryMax=80%
+IOWeight=200
+CPUAccounting=yes
+MemoryAccounting=yes

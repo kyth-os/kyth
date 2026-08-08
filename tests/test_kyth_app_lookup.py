@@ -34,26 +34,19 @@ class TestKythAppLookup(unittest.TestCase):
             self.assertEqual(flatpak_id, "org.foobar.FooBar")
 
     def test_exe_handler_lookup_integration(self):
-        # Import the build_files/kyth-exe-handler module dynamically. It has
-        # no .py suffix, so spec_from_file_location needs an explicit loader
-        # to recognize it as source rather than failing to infer one.
         import importlib.util
-        from importlib.machinery import SourceFileLoader
-        from unittest.mock import MagicMock
 
-        # Stub out kyth_shared.qt so it doesn't crash without PyQt6/PySide6
-        sys.modules["kyth_shared.qt"] = MagicMock()
+        if not any(importlib.util.find_spec(b) for b in ("PySide6", "PyQt6")):
+            self.skipTest("PySide6/PyQt6 not available")
 
-        handler_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "build_files", "kyth-exe-handler")
-        loader = SourceFileLoader("kyth_exe_handler", handler_path)
-        spec = importlib.util.spec_from_file_location("kyth_exe_handler", handler_path, loader=loader)
-        kyth_exe_handler = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(kyth_exe_handler)
+        from kyth_shared.desktop.exe_handler import lookup_app_suggestion
 
         # Test normalisation + lookup
-        app_name, _suggestion, flatpak_id = kyth_exe_handler._lookup("Setup_Discord-x64.exe")
+        app_name, _suggestion, flatpak_id = lookup_app_suggestion("Setup_Discord-x64.exe")
         self.assertEqual(app_name, "Discord")
         self.assertEqual(flatpak_id, "com.discordapp.Discord")
+
+
 
 
 if __name__ == "__main__":

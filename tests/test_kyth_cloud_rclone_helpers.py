@@ -26,7 +26,7 @@ class RcloneHelperTests(unittest.TestCase):
 
     def test_create_remote_ok(self):
         with mock.patch(
-            "kyth_welcome.services.process._run_command",
+            "kyth_welcome.services.process.run_command",
             return_value=mock.Mock(returncode=0, stdout="", stderr=""),
         ):
             ok, err = cloud_sync.rclone_create_remote("n", "drive", "{}")
@@ -35,7 +35,7 @@ class RcloneHelperTests(unittest.TestCase):
 
     def test_create_remote_missing(self):
         with mock.patch(
-            "kyth_welcome.services.process._run_command",
+            "kyth_welcome.services.process.run_command",
             return_value=None,
         ):
             ok, err = cloud_sync.rclone_create_remote("n", "drive", "{}")
@@ -44,7 +44,7 @@ class RcloneHelperTests(unittest.TestCase):
 
     def test_verify_remote(self):
         with mock.patch(
-            "kyth_welcome.services.process._run_command",
+            "kyth_welcome.services.process.run_command",
             return_value=mock.Mock(returncode=0, stdout="dir", stderr=""),
         ):
             ok, err = cloud_sync.rclone_verify_remote("n")
@@ -77,7 +77,7 @@ class FlatpakPendingCountTests(unittest.TestCase):
         from kyth_welcome.services import flatpak
 
         with mock.patch.object(
-            flatpak, "_probe_cached", return_value=4,
+            flatpak, "probe_cached", return_value=4,
         ) as cached:
             n = flatpak.pending_update_count()
         self.assertEqual(n, 4)

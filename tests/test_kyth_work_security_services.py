@@ -4,11 +4,13 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_welcome.services import security, work  # noqa: E402
 
@@ -29,15 +31,33 @@ class WorkServiceTests(unittest.TestCase):
             self.assertEqual(work.create_m365_shortcuts(), 0)
 
     def test_convert_pst_missing_tool(self):
-        with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             mock.patch.object(work, "PST_IMPORT_DIR", tmpdir), \
+             mock.patch.object(work, "run_sync", side_effect=FileNotFoundError):
             ok, msg = work.convert_pst("/tmp/mail.pst")  # noqa: S108 — fixture string, not a real path opened on disk
         self.assertFalse(ok)
         self.assertIn("readpst", msg)
 
 
 class SecurityServiceTests(unittest.TestCase):
+    def test_kali_container_parser_exposes_capability_policy(self):
+        from kyth_welcome.services.security_container import parse_kali_inspect_output
+
+        info = parse_kali_inspect_output(
+            "docker.io/kalilinux/kali-rolling\ntrue\n"
+            "label=disable seccomp=unconfined\n",
+        )
+        self.assertTrue(info.socket_capable)
+        self.assertIn("seccomp=unconfined", info.security_options)
+
+    def test_kali_container_policy_rejects_non_kali_image(self):
+        from kyth_welcome.services.security_container import parse_kali_inspect_output
+
+        info = parse_kali_inspect_output("docker.io/fedora\ntrue\nlabel=disable\n")
+        self.assertFalse(info.socket_capable)
+
     def test_kali_box_false_on_failure(self):
-        with mock.patch.object(security, "_run_command", return_value=None):
+        with mock.patch.object(security, "run_command", return_value=None):
             self.assertFalse(security.is_socket_capable_kali_box("kali"))
 
     def test_kali_box_true_when_privileged(self):
@@ -45,7 +65,7 @@ class SecurityServiceTests(unittest.TestCase):
             returncode=0,
             stdout="docker.io/kalilinux/kali-rolling\ntrue\nlabel=disable \n",
         )
-        with mock.patch.object(security, "_run_command", return_value=r):
+        with mock.patch.object(security, "run_command", return_value=r):
             self.assertTrue(security.is_socket_capable_kali_box("kali"))
 
     def test_kali_create_command_shape(self):
@@ -109,17 +129,17 @@ class DiagnosticsDrainTests(unittest.TestCase):
         from kyth_welcome.services import diagnostics
 
         with mock.patch.object(
-            diagnostics, "_run_command", return_value=mock.Mock(returncode=0, stdout="enabled\n", stderr=""),
+            diagnostics, "run_command", return_value=mock.Mock(returncode=0, stdout="enabled\n", stderr=""),
         ):
             self.assertTrue(diagnostics.storage_sense_enabled())
         with mock.patch.object(
-            diagnostics, "_run_command", return_value=mock.Mock(returncode=0, stdout="active\n", stderr=""),
+            diagnostics, "run_command", return_value=mock.Mock(returncode=0, stdout="active\n", stderr=""),
         ), mock.patch.object(
-            diagnostics, "_command_stdout", side_effect=["Enforcing", "SecureBoot enabled"],
+            diagnostics, "command_stdout", side_effect=["Enforcing", "SecureBoot enabled"],
         ), mock.patch.object(
-            diagnostics, "_has_staged_update", return_value=False,
+            diagnostics, "has_staged_update", return_value=False,
         ), mock.patch.object(
-            diagnostics, "_has_rollback_deployment", return_value=True,
+            diagnostics, "has_rollback_deployment", return_value=True,
         ):
             rows = diagnostics.collect_security_status()
         self.assertGreaterEqual(len(rows), 5)
@@ -139,24 +159,24 @@ class ProbeExpandedTests(unittest.TestCase):
             self.assertIn(key, probe.DISK_TTL)
 
     def test_collect_snapshot_includes_new_sections(self):
-        from kyth_welcome.services import probe
+        from kyth_shared.system import probe
 
         with mock.patch(
-            "kyth_welcome.services.bootc._fetch_bootc_status_data",
+            "kyth_shared.system.bootc.fetch_bootc_status_data",
             return_value={"status": {"booted": {"image": {"reference": "ghcr.io/mrtrick37/kyth:testing"}}}},
         ), mock.patch(
-            "kyth_welcome.services.bootc._fetch_bootc_status_text",
+            "kyth_shared.system.bootc.fetch_bootc_status_text",
             return_value="",
         ), mock.patch(
-            "kyth_welcome.services.bootc._current_kernel_flavor",
+            "kyth_shared.system.bootc.current_kernel_flavor",
             return_value="cachy",
         ), mock.patch(
-            "kyth_welcome.services.process._run_command",
+            "kyth_shared.system.process.run_command",
         ) as run, mock.patch(
-            "kyth_welcome.services.probe._count_flatpak_updates",
+            "kyth_shared.system.probe._count_flatpak_updates",
             return_value=3,
         ), mock.patch(
-            "kyth_welcome.services.hardware.drives._detect_controllers",
+            "kyth_shared.system.controllers.detect_controllers",
             return_value={"secure_boot": False},
         ):
             def side_effect(cmd, timeout=5):

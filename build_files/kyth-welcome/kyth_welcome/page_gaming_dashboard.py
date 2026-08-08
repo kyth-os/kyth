@@ -1,7 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.gaming import (
-    _find_ntfs_drives, _gamescope_installed, _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed,
+    _gamescope_installed, _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed,
 )
 from .services.flatpak import _is_flatpak_installed
 from .qt import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt
@@ -25,8 +25,9 @@ class _DashboardMixin:
         hero_title.setObjectName("genz-hero-title")
         hero_text_col.addWidget(hero_title)
 
-        hero_sub = QLabel("Curated launchers, Gamescope compositing, MangoHud overlay, and performance-tuned Proton runners.")
+        hero_sub = QLabel("Your Windows games, tuned — Proton-CachyOS, Gamescope, MangoHud, all wired for one-click launch.")
         hero_sub.setObjectName("genz-hero-subtitle")
+        hero_sub.setWordWrap(True)
         hero_text_col.addWidget(hero_sub)
         hero_layout.addLayout(hero_text_col, 1)
 
@@ -134,6 +135,30 @@ class _DashboardMixin:
         layout4.addLayout(action_row)
 
         hud_grid.addWidget(card4, 1, 1)
+
+        # Card 5: Steam Compatibility — full width below grid (Windows switcher #3)
+        card5 = QFrame()
+        card5.setObjectName("genz-hud-card")
+        layout5 = QVBoxLayout(card5)
+        layout5.setContentsMargins(18, 16, 18, 16)
+        layout5.setSpacing(8)
+        title5 = QLabel("STEAM COMPATIBILITY — Coming from Windows?")
+        title5.setObjectName("hud-title")
+        layout5.addWidget(title5)
+        self._hud_compat_desc = QLabel("Scan your Windows Steam library — see which games work on Proton, which need anti-cheat, and copy saves safely.")
+        self._hud_compat_desc.setTextFormat(Qt.TextFormat.RichText)
+        self._hud_compat_desc.setObjectName("hud-desc")
+        self._hud_compat_desc.setWordWrap(True)
+        layout5.addWidget(self._hud_compat_desc)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        scan_btn2 = QPushButton("Scan My Windows Steam Library →")
+        scan_btn2.setObjectName("primary")
+        scan_btn2.clicked.connect(lambda _=False: self._switch_gaming_section("migration"))
+        btn_row.addWidget(scan_btn2)
+        btn_row.addStretch()
+        layout5.addLayout(btn_row)
+        hud_grid.addWidget(card5, 2, 0, 1, 2)
         return widget
 
     def _update_gaming_hud(self, data: dict) -> None:
@@ -154,7 +179,7 @@ class _DashboardMixin:
         else:
             self._hero_status_pill.setText("GAMING STACK READY")
             self._hero_status_pill.setObjectName("glowing-pill-ok")
-        _restyle(self._hero_status_pill)
+        restyle(self._hero_status_pill)
 
         # 1. Launchers
         steam_ok = _is_flatpak_installed("com.valvesoftware.Steam")
@@ -174,14 +199,16 @@ class _DashboardMixin:
             f"<b>Bottles:</b> {bottles_status}"
         )
 
-        # 2. Runtime Engine
+        # 2. Runtime Engine — Windows switchers need to see Windows games translate
         pc_ver = _proton_cachyos_version() or "None"
-        mangohud = "🟢 Active" if _mangohud_installed() else "🔴 Missing"
+        # Show version with Windows-games framing: "Windows games via Proton-CachyOS 11"
+        pc_label = pc_ver if pc_ver == "None" else f"{pc_ver} — Windows games ready"
+        mangohud = "🟢 Active" if _mangohud_installed() else "🔴 Missing — install via Gaming → Tools"
         vkbasalt = "🟢 Active" if _vkbasalt_installed() else "⚪ Optional"
-        gamescope = "🟢 Active" if _gamescope_installed() else "🔴 Missing"
+        gamescope = "🟢 Active" if _gamescope_installed() else "🔴 Missing — install via Gaming → Tools"
 
         self._hud_runtime_desc.setText(
-            f"<b>Proton-CachyOS:</b> {pc_ver}<br>"
+            f"<b>Proton-CachyOS:</b> {pc_label}<br>"
             f"<b>Gamescope compositor:</b> {gamescope}<br>"
             f"<b>MangoHud overlay:</b> {mangohud}<br>"
             f"<b>vkBasalt post-processing:</b> {vkbasalt}"
@@ -195,7 +222,13 @@ class _DashboardMixin:
         elif "run a backup" in saves_details:
             saves_details = "Ludusavi installed; no backups made yet."
 
-        windows_drives = _find_ntfs_drives()
+        # _update_gaming_hud runs from _on_data_result (page_gaming.py), a
+        # DataWorker.result *signal handler* — that executes on the GUI
+        # thread, so calling _find_ntfs_drives() here would still be a
+        # synchronous lsblk spawn even though the surrounding flow looks
+        # async. _collect_gaming_dashboard() already scans drives on the
+        # background thread for the health/checklist cards below; reuse it.
+        windows_drives = data.get("windows_drives") or []
         ntfs_count = sum(not d.get("is_bitlocker") for d in windows_drives)
         bitlocker_count = sum(bool(d.get("is_bitlocker")) for d in windows_drives)
 

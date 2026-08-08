@@ -1,0 +1,246 @@
+schema_version = 1
+policy_revision = "2026.08.1"
+
+# Variant records are intentionally honest about what is published today.
+# Planned variants can be qualified without making them an updater target.
+[[variants]]
+id = "universal"
+status = "shipping"
+description = "AMD, Intel, NVIDIA and hybrid desktop/laptop systems"
+qualification = "Automated image checks plus the current real-hardware matrix"
+
+[[variants]]
+id = "desktop-amd-intel"
+status = "planned"
+description = "AMD/Intel graphics without the proprietary NVIDIA payload"
+qualification = "Requires representative AMD and Intel suspend, display and gaming results"
+
+[[variants]]
+id = "desktop-nvidia"
+status = "planned"
+description = "NVIDIA proprietary and hybrid graphics with prebuilt modules"
+qualification = "Requires module ABI, Secure Boot, Wayland and suspend qualification"
+
+[[variants]]
+id = "handheld"
+status = "planned"
+description = "Controller-first handheld and couch-PC platforms"
+qualification = "Requires per-device controls, suspend and dock validation"
+
+[[profiles]]
+id = "baseline"
+title = "KythOS baseline"
+tier = "supported"
+priority = 0
+image_variant = "universal"
+capabilities = ["atomic-updates", "hardware-policy", "plasma-wayland"]
+
+[profiles.match]
+always = true
+
+[profiles.policy]
+scheduler_candidates = ["scx_rusty"]
+
+[[profiles]]
+id = "amd-graphics"
+title = "AMD graphics"
+tier = "supported"
+priority = 100
+image_variant = "universal"
+capabilities = ["gpu.amd", "vulkan.radv", "video.vaapi"]
+
+[[profiles.match.pci]]
+vendor = "1002"
+classes = ["0300", "0302", "0380"]
+
+[[profiles]]
+id = "intel-graphics"
+title = "Intel graphics"
+tier = "supported"
+priority = 100
+image_variant = "universal"
+capabilities = ["gpu.intel", "vulkan.anv", "video.vaapi"]
+
+[[profiles.match.pci]]
+vendor = "8086"
+classes = ["0300", "0302", "0380"]
+
+[[profiles]]
+id = "nvidia-proprietary"
+title = "NVIDIA proprietary graphics"
+tier = "supported"
+priority = 120
+image_variant = "universal"
+capabilities = ["gpu.nvidia", "nvidia.proprietary", "wayland.explicit-sync"]
+
+[[profiles.match.pci]]
+vendor = "10de"
+classes = ["0300", "0302", "0380"]
+
+[profiles.policy]
+nvidia_setup = true
+
+[[profiles]]
+id = "intel-nvidia-hybrid"
+title = "Intel plus NVIDIA hybrid graphics"
+tier = "supported"
+priority = 180
+image_variant = "universal"
+capabilities = ["gpu.hybrid", "gpu.offload"]
+
+[[profiles.match.pci]]
+vendor = "8086"
+classes = ["0300", "0302", "0380"]
+
+[[profiles.match.pci]]
+vendor = "10de"
+classes = ["0300", "0302", "0380"]
+
+[[profiles]]
+id = "amd-nvidia-hybrid"
+title = "AMD plus NVIDIA hybrid graphics"
+tier = "supported"
+priority = 180
+image_variant = "universal"
+capabilities = ["gpu.hybrid", "gpu.offload"]
+
+[[profiles.match.pci]]
+vendor = "1002"
+classes = ["0300", "0302", "0380"]
+
+[[profiles.match.pci]]
+vendor = "10de"
+classes = ["0300", "0302", "0380"]
+
+[[profiles]]
+id = "valve-handheld"
+title = "Valve Steam Deck family"
+tier = "experimental"
+priority = 220
+image_variant = "universal"
+capabilities = ["form-factor.handheld", "input.controller-first"]
+
+[profiles.match]
+dmi_vendors = ["Valve"]
+dmi_products = ["Jupiter*", "Galileo*"]
+
+[[profiles]]
+id = "asus-rog-ally"
+title = "ASUS ROG Ally family"
+tier = "experimental"
+priority = 220
+image_variant = "universal"
+capabilities = ["form-factor.handheld", "input.controller-first"]
+
+[profiles.match]
+dmi_vendors = ["ASUSTeK COMPUTER INC."]
+dmi_products = ["RC71L*", "RC72L*"]
+
+# Every workaround must be device-scoped, explain why it exists, point to its
+# provenance, and carry a review deadline. Expiration does not silently remove
+# the workaround; CI fails so a maintainer must renew or delete it deliberately.
+[[quirks]]
+id = "amdgpu-gaming-memory"
+reason = "Expose PowerPlay controls while bounding APU GTT pressure and retaining recoverable VM fault handling"
+expires_on = "2027-08-01"
+provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
+
+[[quirks.match.pci]]
+vendor = "1002"
+classes = ["0300", "0302", "0380"]
+drivers = ["amdgpu"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "amdgpu"
+options = { ppfeaturemask = "0xffffffff", gttsize = "4096", noretry = "0" }
+
+[[quirks]]
+id = "intel-i915-media-firmware"
+reason = "Enable GuC submission and HuC media firmware on systems still using i915"
+expires_on = "2027-08-01"
+provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
+
+[[quirks.match.pci]]
+vendor = "8086"
+classes = ["0300", "0302", "0380"]
+drivers = ["i915"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "i915"
+options = { enable_guc = "3", enable_huc = "2" }
+
+[[quirks]]
+id = "nvidia-wayland-suspend"
+reason = "Enable DRM modesetting and preserve video memory across suspend on the proprietary driver"
+expires_on = "2027-08-01"
+provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
+
+[[quirks.match.pci]]
+vendor = "10de"
+classes = ["0300", "0302", "0380"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "nvidia-drm"
+options = { modeset = "1" }
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "nvidia"
+options = { NVreg_PreserveVideoMemoryAllocations = "1", NVreg_TemporaryFilePath = "/var/tmp" }
+
+[[quirks]]
+id = "mediatek-pcie-wifi-aspm"
+reason = "Avoid intermittent wake and association failures on mt7921e and mt7925e adapters"
+expires_on = "2027-08-01"
+provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
+
+[[quirks.match.pci]]
+vendor = "14c3"
+drivers = ["mt7921e", "mt7925e"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "mt7921e"
+options = { disable_aspm = "1" }
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "mt7925e"
+options = { disable_aspm = "1" }
+
+[[quirks]]
+id = "intel-wifi-association-power"
+reason = "Keep Intel wireless active during WPA association while preserving Bluetooth coexistence"
+expires_on = "2027-08-01"
+provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
+
+[[quirks.match.pci]]
+vendor = "8086"
+drivers = ["iwlwifi"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "iwlwifi"
+options = { power_save = "0", uapsd_disable = "3", bt_coex_active = "1" }
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "iwlmvm"
+options = { power_scheme = "1" }
+
+[[quirks]]
+id = "bluetooth-usb-autosuspend"
+reason = "Prevent missed remote wake traffic from Bluetooth controllers and low-bandwidth peripherals"
+expires_on = "2027-08-01"
+provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
+
+[[quirks.match.usb]]
+drivers = ["btusb"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "btusb"
+options = { enable_autosuspend = "0" }

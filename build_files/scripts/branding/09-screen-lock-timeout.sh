@@ -2,7 +2,7 @@
 # ── Screen lock timeout ───────────────────────────────────────────────────────
 # Default auto-lock after 15 minutes of inactivity. KDE's stock default is 5
 # minutes which is too aggressive for a desktop/gaming workstation.
-cat >/etc/skel/.config/kscreenlockerrc <<'SCREENLOCKEOF'
+write_config /etc/skel/.config/kscreenlockerrc <<'SCREENLOCKEOF'
 [Daemon]
 Autolock=true
 LockGracePeriod=5

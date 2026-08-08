@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-trim-tune — trim.toml nodiscard + fstrim weekly
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-trim-tune "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.trim_preset import load_trim,trim_status; c=load_trim(); print(f"profile={c[\"profile\"]} weekly={c[\"weekly\"]} active={trim_status()}"); import subprocess,pathlib; print("fstrim.timer " + ("active" if pathlib.Path("/usr/lib/systemd/system/fstrim.timer").exists() else "missing"))' ;;
+    kyth) need_root "$@"; python3 -c 'from kyth_shared.trim_preset import load_trim,save_trim,generate_trim_state; c=load_trim(); c["profile"]="kyth"; save_trim(c); generate_trim_state(c)'; systemctl enable --now fstrim.timer 2>/dev/null || true; echo "trim kyth: nodiscard marker set, fstrim weekly enabled (edit /etc/fstab discard→nodiscard and reboot for full effect)" ;;
+    balanced|default) need_root "$@"; python3 -c 'from kyth_shared.trim_preset import load_trim,save_trim,generate_trim_state; c=load_trim(); c["profile"]="balanced"; save_trim(c); generate_trim_state(c)'; echo "trim balanced" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.trim_preset import load_trim,generate_trim_state; generate_trim_state(load_trim())'; [[ $(python3 -c 'from kyth_shared.trim_preset import load_trim; print(load_trim()["profile"])') == "kyth" ]] && systemctl enable --now fstrim.timer 2>/dev/null || true ;;
+    *) echo "Usage: kyth-trim-tune [status|kyth|balanced|apply]" >&2; exit 1 ;;
+esac

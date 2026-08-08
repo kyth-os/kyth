@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from ..core_base import (
-    _release_worker_when_finished,
-    _restyle,
-)
+from ..core_base import restyle
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.runtime import _finish_worker
+from ..services.runtime import finish_worker, release_worker_when_finished
 from ..services.windows_migration import (
     WindowsLibraryWorker,
     _unlock_bitlocker_drive,
@@ -46,9 +43,8 @@ class _DrivesMixin:
             "⚡ KythOS NTFS Game Playback: To play games directly off your Windows NTFS drive without redownloading or copying files, "
             "click 'Fix NTFS Games'. This mounts the drive with Linux-safe permissions and symlinks Proton prefixes to native storage."
         )
-        ntfs_info.setObjectName("card-copy")
+        ntfs_info.setObjectName("text-ok")
         ntfs_info.setWordWrap(True)
-        ntfs_info.setStyleSheet("color: #43a047;")
         drives_layout.addWidget(ntfs_info)
 
         ntfs_fix_btn = QPushButton("Fix NTFS Games")
@@ -117,7 +113,7 @@ class _DrivesMixin:
         self._drive_progress.show()
         self._drive_status.setText("Scanning NTFS partitions…")
         self._drive_status.setObjectName("subheading")
-        _restyle(self._drive_status)
+        restyle(self._drive_status)
         self._worker = WindowsLibraryWorker()
         self._worker.result.connect(self._on_windows_drives)
         self._worker.start()
@@ -125,28 +121,43 @@ class _DrivesMixin:
 
     def _on_windows_drives(self, partitions: list):
         self._drive_progress.hide()
-        _finish_worker(self)
+        finish_worker(self)
+        # Update Takeout wizard first (summary driven from partitions)
+        try:
+            self._update_takeout(partitions)
+        except Exception:
+            pass
         if not partitions:
             self._drive_status.setText("No Windows/NTFS partitions found.")
             self._drive_status.setObjectName("status-warn")
             self._migration_score_lbl.setText("Switch readiness: 2/5. Install your launchers and Ludusavi, then connect your PC drive or cloud backup when ready.")
-            _restyle(self._drive_status)
+            restyle(self._drive_status)
             self._populate_files_card([])
             self._start_bookmark_scan([])
             self._start_extras_scan([])
             return
         self._drive_status.setText(f"Found {len(partitions)} Windows-style partition{'s' if len(partitions) != 1 else ''}.")
         self._drive_status.setObjectName("status-ok")
-        _restyle(self._drive_status)
+        restyle(self._drive_status)
         locked = sum(1 for p in partitions if p.get("is_bitlocker"))
         clean = sum(1 for p in partitions if not p.get("is_dirty") and not p.get("is_hibernated") and not p.get("is_bitlocker"))
         steam = sum(len(p.get("steam_paths") or []) for p in partitions)
+        launcher = sum(len((p.get("launcher_paths") or {})) for p in partitions)
         profiles = sum(len(p.get("user_profiles") or []) for p in partitions)
-        score = 2 + (1 if clean else 0) + (1 if steam else 0) + (1 if profiles else 0)
+        has_onedrive = any(p.get("has_onedrive") for p in partitions)
+        browser = sum(len(p.get("browser_profiles") or []) for p in partitions)
+        # Enriched score via Takeout summary when available
+        try:
+            from ..services.windows_migration import summarize_takeout
+            score = summarize_takeout(partitions).get("score", 2 + (1 if clean else 0) + (1 if steam else 0) + (1 if profiles else 0))
+        except Exception:
+            score = 2 + (1 if clean else 0) + (1 if steam else 0) + (1 if profiles else 0)
         score_text = (
             f"Switch readiness: {score}/5. Found {clean} safely readable drive(s), "
-            f"{steam} Steam folder(s), and {profiles} Windows user profile(s). "
-            "Back up saves with Ludusavi before copying large libraries."
+            f"{steam} Steam folder(s), {launcher} other launcher(s), {profiles} Windows user profile(s)"
+            + (f", {browser} browser profile(s)" if browser else "")
+            + (" + OneDrive" if has_onedrive else "")
+            + ". Back up saves with Ludusavi before copying large libraries."
         )
         if locked:
             score_text += (
@@ -252,11 +263,11 @@ class _DrivesMixin:
         btn.setText("Unlocking…")
         self._drive_status.setText(f"Unlocking {dev}…")
         self._drive_status.setObjectName("subheading")
-        _restyle(self._drive_status)
+        restyle(self._drive_status)
         worker = DataWorker("bitlocker", lambda: _unlock_bitlocker_drive(dev, key))
         worker.result.connect(self._on_bitlocker_unlock)
         self._bitlocker_worker = worker
-        _release_worker_when_finished(self, "_bitlocker_worker", worker)
+        release_worker_when_finished(self, "_bitlocker_worker", worker)
         worker.start()
 
 
@@ -269,7 +280,7 @@ class _DrivesMixin:
         else:
             self._drive_status.setText(f"BitLocker unlock failed: {message}")
             self._drive_status.setObjectName("status-warn")
-            _restyle(self._drive_status)
+            restyle(self._drive_status)
             self._clear_drive_rows()
             self._on_windows_drives_requery()
 
@@ -281,5 +292,5 @@ class _DrivesMixin:
             self._drive_rows.addWidget(self._make_drive_row(p)) for p in parts
         ])
         self._requery_worker = worker
-        _release_worker_when_finished(self, "_requery_worker", worker)
+        release_worker_when_finished(self, "_requery_worker", worker)
         worker.start()

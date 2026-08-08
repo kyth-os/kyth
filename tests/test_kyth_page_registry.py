@@ -31,7 +31,6 @@ _install_qt_stubs()
 
 from kyth_welcome.page_registry import (  # noqa: E402
     PROBLEM_ROUTES,
-    SEARCH_ALIASES,
     SEARCH_ITEMS,
     get_nav_groups,
 )
@@ -50,7 +49,7 @@ class PageRegistryTests(unittest.TestCase):
             self.assertIn(expected, SEARCH_ITEMS)
 
     def test_aliases_and_problem_routes_remain_centralized(self):
-        self.assertIn("Control Panel", SEARCH_ALIASES["Welcome"])
+        self.assertIn("Control Panel", SEARCH_ITEMS["Welcome"][2])
         self.assertEqual(PROBLEM_ROUTES["no audio"], "Hardware")
 
 

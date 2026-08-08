@@ -101,3 +101,10 @@ firmware-update:
     echo
     echo "Applying available firmware updates..."
     fwupdmgr update
+
+# Windows verify — parity + PWA check
+[group('KythOS')]
+windows-verify:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-windows-verify

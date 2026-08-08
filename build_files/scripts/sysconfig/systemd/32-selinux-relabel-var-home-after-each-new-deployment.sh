@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── SELinux: relabel /var/home after each new deployment ──────────────────────
 # bootc/ostree relabels the OS tree (/usr, /etc) on every deployment, but /var
 # is writable state — it is never touched. On enforcing systems, /var/home
@@ -14,7 +16,7 @@ set -euo pipefail
 # last one we relabeled for. After first boot of a new deployment, subsequent
 # reboots skip it entirely. If a user needs to force a relabel, they can remove
 # /var/lib/kyth/selinux-relabel-home.stamp.
-cat >/usr/lib/systemd/system/kyth-selinux-relabel-home.service <<'RELABELEOF'
+write_config /usr/lib/systemd/system/kyth-selinux-relabel-home.service <<'RELABELEOF'
 [Unit]
 Description=SELinux relabel /var/home (once per deployment)
 DefaultDependencies=no

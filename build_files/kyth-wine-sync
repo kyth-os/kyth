@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# kyth-wine-sync — wine-sync.toml probes ntsync/futex2
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-wine-sync "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.wine_sync import load_wine_sync,probe_wine_sync,wine_sync_status; print(f"mode={load_wine_sync()[\"mode\"]} probe={probe_wine_sync()} env={wine_sync_status()}")' ;;
+    auto|ntsync|fsync|esync|off) need_root "$@"; python3 -c "from kyth_shared.wine_sync import load_wine_sync,save_wine_sync,generate_wine_env; c=load_wine_sync(); c['mode']='$1'; save_wine_sync(c); generate_wine_env(c)"; echo "wine sync $1" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.wine_sync import load_wine_sync,generate_wine_env; generate_wine_env(load_wine_sync())' ;;
+    *) echo "Usage: kyth-wine-sync [status|auto|ntsync|fsync|esync|off|apply]" >&2; exit 1 ;;
+esac

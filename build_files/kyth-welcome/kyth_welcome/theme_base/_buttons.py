@@ -1,16 +1,12 @@
-"""Buttons QSS styles.
+"""Buttons — SteamOS-feel primary, Windows-feel secondary.
 
-Kyth Theme: tokenized. Note QPushButton's base rule here is superseded for
-most pages by theme_hub_overlay.py's own QPushButton rule (applied later in
-the cascade) — this file's base rule is the fallback/pre-overlay state, kept
-in sync on the same tokens rather than removed, since #danger/#btn-secondary/
-#branch-* below have no overlay equivalent and are genuinely load-bearing.
+Default button is now a soft raised pill (8px) with overlay hover, not a
+hairline flash. Primary is a saturated blue with a subtle inner highlight
+stroke and a glow-tinted hover, so it pops against the dark surfaces without
+needing a purple gradient. Destructive keeps its red but with better muted
+disabled state.
 """
-from ..ui_tokens import (
-    KYTH_BLUE, KYTH_BLUE_DIM, KYTH_BLUE_LIGHT, KYTH_DANGER, KYTH_DANGER_LIGHT,
-    KYTH_GROUND, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_TEXT,
-    KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
-)
+from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_DIM, KYTH_BLUE_GLOW, KYTH_BLUE_LIGHT, KYTH_DANGER, KYTH_DANGER_LIGHT, KYTH_GROUND, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_RADIUS_SM, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
 
 BUTTONS_QSS = f"""
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
@@ -18,16 +14,20 @@ QPushButton {{
     background: {KYTH_SURFACE_RAISED};
     color: {KYTH_TEXT};
     border: 1px solid {KYTH_HAIRLINE};
-    border-radius: 5px;
-    padding: 7px 16px;
+    border-radius: {KYTH_RADIUS_SM}px;
+    padding: 7px 14px;
     font-size: 13px;
-    font-weight: 400;
+    font-weight: 600;
 }}
 
 QPushButton:hover {{
-    background: {KYTH_HAIRLINE};
+    background: {KYTH_SURFACE_OVERLAY};
     color: {KYTH_TEXT};
-    border-color: {KYTH_TEXT_FAINT};
+    border-color: {KYTH_HAIRLINE_LIGHT};
+}}
+
+QPushButton:focus {{
+    border: 1px solid {KYTH_BLUE};
 }}
 
 QPushButton:pressed {{
@@ -42,28 +42,33 @@ QPushButton:disabled {{
 }}
 
 QPushButton#primary,
-QPushButton#btn-secondary {{
+QPushButton#btn-secondary,
+QPushButton[primary="true"] {{
     background: {KYTH_BLUE};
-    color: {KYTH_TEXT};
+    color: #ffffff;
     border: 1px solid {KYTH_BLUE_LIGHT};
-    font-weight: 600;
+    font-weight: 700;
     padding: 8px 20px;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.2px;
 }}
 
 QPushButton#primary:hover,
-QPushButton#btn-secondary:hover {{
-    background: {KYTH_BLUE_LIGHT};
-    border-color: {KYTH_BLUE_LIGHT};
+QPushButton#btn-secondary:hover,
+QPushButton[primary="true"]:hover {{
+    background: #6a9bff;
+    border-color: #a3c0ff;
 }}
 
 QPushButton#primary:pressed,
-QPushButton#btn-secondary:pressed {{
+QPushButton#btn-secondary:pressed,
+QPushButton[primary="true"]:pressed {{
     background: {KYTH_BLUE_DIM};
+    border-color: {KYTH_BLUE_DIM};
 }}
 
 QPushButton#primary:disabled,
-QPushButton#btn-secondary:disabled {{
+QPushButton#btn-secondary:disabled,
+QPushButton[primary="true"]:disabled {{
     background: {KYTH_SURFACE_RAISED};
     color: {KYTH_TEXT_FAINT};
     border-color: {KYTH_HAIRLINE};
@@ -71,7 +76,7 @@ QPushButton#btn-secondary:disabled {{
 
 QPushButton#danger {{
     background: {KYTH_DANGER};
-    color: {KYTH_TEXT};
+    color: #ffffff;
     border: 1px solid {KYTH_DANGER_LIGHT};
     font-weight: 600;
 }}
@@ -93,10 +98,10 @@ QPushButton#danger:disabled {{
 
 QPushButton#branch-active {{
     background: {KYTH_BLUE};
-    color: {KYTH_TEXT};
-    font-weight: 600;
+    color: #ffffff;
+    font-weight: 700;
     border: 1px solid {KYTH_BLUE_LIGHT};
-    border-radius: 5px;
+    border-radius: {KYTH_RADIUS_SM}px;
     padding: 9px 22px;
 }}
 
@@ -104,13 +109,13 @@ QPushButton#branch-inactive {{
     background: {KYTH_SURFACE_RAISED};
     color: {KYTH_TEXT_MUTED};
     border: 1px solid {KYTH_HAIRLINE};
-    border-radius: 5px;
+    border-radius: {KYTH_RADIUS_SM}px;
     padding: 9px 22px;
 }}
 
 QPushButton#branch-inactive:hover {{
-    background: {KYTH_HAIRLINE};
+    background: {KYTH_SURFACE_OVERLAY};
     color: {KYTH_TEXT};
-    border-color: {KYTH_TEXT_FAINT};
+    border-color: {KYTH_HAIRLINE_LIGHT};
 }}
 """

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-psi-poll — psi-poll.toml 500ms gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-psi-poll "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.psi_poll import load_psi_poll, psi_poll_status; c=load_psi_poll(); print(f\"profile={c['profile']} active={psi_poll_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.psi_poll import load_psi_poll,save_psi_poll,generate_psi_poll; c=load_psi_poll(); c['profile']='gaming'; save_psi_poll(c); generate_psi_poll(c)"; sysctl --system >/dev/null 2>&1 || true; echo "psi poll gaming 500" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.psi_poll import load_psi_poll,save_psi_poll,generate_psi_poll; c=load_psi_poll(); c['profile']='balanced'; save_psi_poll(c); generate_psi_poll(c)"; echo "psi poll balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.psi_poll import load_psi_poll,generate_psi_poll; generate_psi_poll(load_psi_poll())" ;;
+    *) echo "Usage: kyth-psi-poll [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

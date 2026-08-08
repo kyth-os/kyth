@@ -47,6 +47,11 @@ from .storage import (
     unlock_bitlocker_drive,
     windows_folder_dest,
 )
+from .takeout import (
+    enrich_with_extras,
+    summarize_takeout,
+    takeout_checklist,
+)
 
 # pylint: disable=undefined-all-variable
 # UserFilesCopyWorker/WindowsLibraryWorker resolve lazily via __getattr__
@@ -80,6 +85,7 @@ __all__ = [
     "copy_game_saves",
     "copy_windows_fonts",
     "dir_contains_saves",
+    "enrich_with_extras",
     "export_sticky_notes",
     "folder_sizes_calc",
     "hw_display_row",
@@ -92,6 +98,8 @@ __all__ = [
     "scan_profile_game_saves",
     "scan_windows_bookmarks",
     "scan_windows_extras",
+    "summarize_takeout",
+    "takeout_checklist",
     "unlock_bitlocker_drive",
     "windows_folder_dest",
     "write_bookmarks_html",

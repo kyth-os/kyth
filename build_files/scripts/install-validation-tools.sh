@@ -9,6 +9,8 @@ mkdir -p "${cache_dir}" "${bin_dir}"
 ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-1.7.7}"
 HADOLINT_VERSION="${HADOLINT_VERSION:-2.14.0}"
 JUST_VERSION="${JUST_VERSION:-1.52.0}"
+SHELLCHECK_VERSION="${SHELLCHECK_VERSION:-0.10.0}"
+SHELLCHECK_SHA256="${SHELLCHECK_SHA256:-6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87}"
 ZIZMOR_VERSION="${ZIZMOR_VERSION:-1.25.2}"
 ZIZMOR_SHA256="${ZIZMOR_SHA256:-aa1facd105f0d83fe5c55b1adcd9d7417de5d83aa27471f91dc0b66cf3803577}"
 
@@ -41,8 +43,12 @@ download_and_verify() {
 		fi
 	fi
 
-	if [[ "${archive}" == *.tar.gz ]]; then
-		tar -xzf "${work}/${archive}" -C "${work}" "${bin_in_archive}"
+	if [[ "${archive}" == *.tar.gz || "${archive}" == *.tar.xz ]]; then
+		tar_args=(--extract --no-same-owner)
+		[[ "${archive}" == *.tar.gz ]] && tar_args+=(--gzip)
+		[[ "${archive}" == *.tar.xz ]] && tar_args+=(--xz)
+		tar "${tar_args[@]}" --file "${work}/${archive}" \
+			--directory "${work}" "${bin_in_archive}"
 		install -m 0755 "${work}/${bin_in_archive}" "${target}"
 	else
 		install -m 0755 "${work}/${archive}" "${target}"
@@ -66,9 +72,20 @@ download_and_verify "just" \
 	"https://github.com/casey/just/releases/download/${JUST_VERSION}" \
 	"SHA256SUMS" "just"
 
+download_and_verify "shellcheck" \
+	"shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+	"https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}" \
+	"${SHELLCHECK_SHA256}" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+
 download_and_verify "zizmor" \
 	"zizmor-x86_64-unknown-linux-gnu.tar.gz" \
 	"https://github.com/woodruffw/zizmor/releases/download/v${ZIZMOR_VERSION}" \
 	"${ZIZMOR_SHA256}" "zizmor"
+
+# Shell environment changes do not cross GitHub Actions step boundaries.
+# Publish the cached tool directory for subsequent steps, including cache hits.
+if [[ -n "${GITHUB_PATH:-}" ]]; then
+	printf '%s\n' "${bin_dir}" >>"${GITHUB_PATH}"
+fi
 
 printf '%s\n' "${bin_dir}"

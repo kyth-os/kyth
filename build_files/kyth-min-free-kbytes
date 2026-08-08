@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-min-free-kbytes — 131072 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-min-free-kbytes "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.min_free_kbytes import load_min_free_kbytes, min_free_kbytes_status; c=load_min_free_kbytes(); print(f\"profile={c['profile']} active={min_free_kbytes_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.min_free_kbytes import load_min_free_kbytes,save_min_free_kbytes,generate_min_free_kbytes; c=load_min_free_kbytes(); c['profile']='gaming'; save_min_free_kbytes(c); generate_min_free_kbytes(c)"; sysctl --system >/dev/null 2>&1 || true; echo "min free kbytes gaming 131072" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.min_free_kbytes import load_min_free_kbytes,save_min_free_kbytes,generate_min_free_kbytes; c=load_min_free_kbytes(); c['profile']='balanced'; save_min_free_kbytes(c); generate_min_free_kbytes(c)"; echo "min free kbytes balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.min_free_kbytes import load_min_free_kbytes,generate_min_free_kbytes; generate_min_free_kbytes(load_min_free_kbytes())" ;;
+    *) echo "Usage: kyth-min-free-kbytes [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

@@ -2,36 +2,21 @@
 
 from __future__ import annotations
 
-import json
 import os
-import re
+
+from kyth_shared.disk_utils import _normal_device_path as _pure_normal_path
+from kyth_shared.disk_utils import _safe_int as _pure_safe_int
+from kyth_shared.runtime_output import parse_lsblk_devices
 
 import kyth_installer.disk as _disk
-subprocess = _disk.subprocess
-_SAFE_DEVICE_PATH_RE = re.compile(r"^/dev/[A-Za-z0-9._/+:-]+$")
 
+# Re-export pure helpers via the patchable seam — tests patch disk._safe_int etc.
 def _safe_int(value, default: int = 0) -> int:
-    try:
-        return int(value or default)
-    except (TypeError, ValueError):
-        return default
-
+    return _pure_safe_int(value, default)
 
 
 def _normal_device_path(name: str | None) -> str | None:
-    if not name:
-        return None
-    name = str(name).strip()
-    if not name:
-        return None
-    if not name.startswith("/dev/"):
-        name = f"/dev/{name}"
-    real = os.path.realpath(name)
-    if not real.startswith("/dev/"):
-        return None
-    if not _SAFE_DEVICE_PATH_RE.fullmatch(real):
-        return None
-    return real
+    return _pure_normal_path(name)
 
 
 
@@ -71,8 +56,7 @@ def _lsblk_blockdevices(args: list[str], timeout: int = 5) -> list[dict]:
         ["lsblk", "--json", "--bytes", *args],
         capture_output=True, text=True, check=True, timeout=timeout,
     )
-    out = result.stdout
-    return json.loads(out).get("blockdevices", [])
+    return parse_lsblk_devices(result.stdout)
 
 
 

@@ -1,0 +1,8 @@
+[
+  {
+    "name": "flathub",
+    "title": "Flathub Primary Remote",
+    "url": "https://dl.flathub.org/repo/flathub.flatpakrepo",
+    "subset": null
+  }
+]

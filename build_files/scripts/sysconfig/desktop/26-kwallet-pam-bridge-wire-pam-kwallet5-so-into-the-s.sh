@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── KWallet PAM bridge: wire pam_kwallet5.so into the SDDM PAM stack ─────────
 # kwallet-pam is installed but Fedora's sddm package does NOT always enable it.
 # Without the session hook the wallet is never unlocked at login; the first app
@@ -13,13 +15,12 @@ set -euo pipefail
 # by a system-context process (sddm-helper runs as xdm_t; SELinux denies
 # xdm_t→default_t getattr, so pam_kwallet5 cannot read the salt file and
 # silently fails to unlock the wallet on every login).
-cat >/usr/libexec/kyth-kwallet-relabel <<'RELABELEOF'
+write_config /usr/libexec/kyth-kwallet-relabel 0755 <<'RELABELEOF'
 #!/bin/bash
 [[ -n "${PAM_USER:-}" && -d "/var/home/${PAM_USER}/.local/share/kwalletd" ]] && \
     restorecon -RF "/var/home/${PAM_USER}/.local/share/kwalletd" &>/dev/null
 exit 0
 RELABELEOF
-chmod 0755 /usr/libexec/kyth-kwallet-relabel
 
 SDDM_PAM=/etc/pam.d/sddm
 if [ -f "${SDDM_PAM}" ]; then

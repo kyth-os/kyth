@@ -1,96 +1,17 @@
-#!/usr/bin/bash
-# kyth-widevine-install — install Widevine CDM for Flatpak browsers.
-#
-# Downloads the Widevine Content Decryption Module from Google's CDN and
-# installs it for Firefox and/or Chromium Flatpak apps found on this system.
-# Runs as the current user; no root required.
-#
-# DRM-encrypted streaming (Netflix 1080p, Disney+, Spotify, etc.) requires
-# Widevine. Firefox and Chromium Flatpaks do not bundle it; this script
-# fetches the current version and places it where each browser can find it.
+#!/usr/bin/env python3
+"""kyth-widevine-install — install Widevine CDM for Flatpak browsers via kyth_shared."""
+from __future__ import annotations
 
-set -euo pipefail
+import argparse
+import sys
+from kyth_shared.thirdparty import install_widevine_cdm
 
-VERSION_URL="https://dl.google.com/widevine-cdm/versions.txt"
-CDM_BASE="https://dl.google.com/widevine-cdm"
 
-_die()  { echo "Error: $*" >&2; exit 1; }
-_ok()   { printf '\033[0;32m✓\033[0m %s\n' "$*"; }
-_skip() { printf '  (skip) %s\n' "$*"; }
-_info() { printf '  %s\n' "$*"; }
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Install Widevine CDM for Flatpak browsers.")
+    parser.parse_args()
+    sys.exit(install_widevine_cdm())
 
-echo "==> Fetching Widevine CDM version..."
-WIDEVINE_VERSION=$(curl -fsSL "$VERSION_URL" 2>/dev/null | head -1 | tr -d '[:space:]')
-[[ -n "$WIDEVINE_VERSION" ]] || _die "Could not fetch Widevine version list from ${VERSION_URL}"
-_info "Version: ${WIDEVINE_VERSION}"
 
-tmp=$(mktemp -d)
-# shellcheck disable=SC2064
-trap "rm -rf '$tmp'" EXIT
-
-echo ""
-echo "==> Downloading ${WIDEVINE_VERSION}..."
-CDM_ZIP="${tmp}/widevine.zip"
-curl -fsSL --progress-bar \
-    -o "$CDM_ZIP" \
-    "${CDM_BASE}/${WIDEVINE_VERSION}-linux-x64.zip" \
-    || _die "Download failed"
-
-echo ""
-echo "==> Extracting..."
-unzip -q "$CDM_ZIP" -d "${tmp}/cdm"
-LIB="${tmp}/cdm/libwidevinecdm.so"
-MANIFEST="${tmp}/cdm/manifest.json"
-[[ -f "$LIB"      ]] || _die "libwidevinecdm.so not found in archive"
-[[ -f "$MANIFEST" ]] || _die "manifest.json not found in archive"
-
-echo ""
-echo "==> Installing..."
-
-installed=0
-
-# ── Firefox Flatpak ───────────────────────────────────────────────────────────
-# Firefox checks Google Chrome's WidevineCdm directory as a fallback source for
-# the CDM. On Flatpak, that directory lives inside the app's config container.
-# Directory structure required:
-#   .var/app/org.mozilla.firefox/config/google-chrome/WidevineCdm/
-#   └── {version}/
-#       ├── manifest.json
-#       └── _platform_specific/linux_x64/libwidevinecdm.so
-FIREFOX_APP="org.mozilla.firefox"
-if flatpak list --app 2>/dev/null | grep -q "^${FIREFOX_APP}[[:space:]]"; then
-    FF_CDM="${HOME}/.var/app/${FIREFOX_APP}/config/google-chrome/WidevineCdm/${WIDEVINE_VERSION}"
-    FF_LIB_DIR="${FF_CDM}/_platform_specific/linux_x64"
-    mkdir -p "$FF_LIB_DIR"
-    cp "$MANIFEST" "${FF_CDM}/manifest.json"
-    cp "$LIB"      "${FF_LIB_DIR}/libwidevinecdm.so"
-    _ok "Firefox (${FIREFOX_APP})"
-    (( installed++ )) || true
-else
-    _skip "Firefox Flatpak not installed"
-fi
-
-# ── Chromium Flatpak ──────────────────────────────────────────────────────────
-# Chromium stores its WidevineCdm in its own config directory.
-CHROMIUM_APP="org.chromium.Chromium"
-if flatpak list --app 2>/dev/null | grep -q "^${CHROMIUM_APP}[[:space:]]"; then
-    CR_CDM="${HOME}/.var/app/${CHROMIUM_APP}/config/chromium/WidevineCdm/${WIDEVINE_VERSION}"
-    CR_LIB_DIR="${CR_CDM}/_platform_specific/linux_x64"
-    mkdir -p "$CR_LIB_DIR"
-    cp "$MANIFEST" "${CR_CDM}/manifest.json"
-    cp "$LIB"      "${CR_LIB_DIR}/libwidevinecdm.so"
-    _ok "Chromium (${CHROMIUM_APP})"
-    (( installed++ )) || true
-else
-    _skip "Chromium Flatpak not installed"
-fi
-
-echo ""
-if [[ $installed -gt 0 ]]; then
-    echo "Widevine ${WIDEVINE_VERSION} installed for ${installed} browser(s)."
-    echo "Restart your browser(s) to activate DRM playback."
-else
-    echo "No supported Flatpak browsers found."
-    echo "Install Firefox or Chromium from Discover, then run this script again."
-    exit 1
-fi
+if __name__ == "__main__":
+    main()

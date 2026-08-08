@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck source=../lib/packages-helpers.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/packages-helpers.sh"
+source "../lib/packages-helpers.sh"
 
 if ! is_enabled "${ENABLE_VIRTUALIZATION_HOST:-0}"; then
 	echo "Virtualization host profile is disabled; retaining guest integration only."

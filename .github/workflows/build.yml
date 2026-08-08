@@ -20,6 +20,10 @@ on:
       - 'disk_config/**'
       - 'installer/**'
       - 'Justfile'
+      # Agent/IDE — never land in OCI image, docs-only pushes shouldn't rebuild
+      - '.agents/**'
+      - '.vscode/**'
+      - '.tmp/**'
       # GitHub metadata
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/pull_request_template.md'
@@ -49,9 +53,34 @@ env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"  # do not edit
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
+  plan:
+    name: Plan build matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      branches: ${{ steps.branches.outputs.branches }}
+    steps:
+      # Single source of truth for the schedule-builds-both-branches rule,
+      # consumed by every job below that matrixes on branch. Previously this
+      # expression was copy-pasted into three separate `strategy.matrix`
+      # blocks and could drift out of sync.
+      - name: Resolve branch matrix
+        id: branches
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          exec 3>>"${GITHUB_OUTPUT}"
+          if [[ "${EVENT_NAME}" == schedule ]]; then
+            echo 'branches=["main","testing"]' >&3
+          else
+            echo "branches=[\"${REF_NAME}\"]" >&3
+          fi
+
   build_push:
     name: Build and push (${{ matrix.branch }}, ${{ matrix.kernel_flavor }})
-    runs-on: ubuntu-24.04
+    needs: plan
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     # fail-fast is false below, so a cachy failure never blocks the fedora leg
     # or the live ISO dispatch. Let it mark the run red — continue-on-error here
@@ -67,9 +96,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # schedule → build both branches in parallel
-        # push / workflow_dispatch → build only the triggered branch
-        branch: ${{ github.event_name == 'schedule' && fromJSON('["main","testing"]') || fromJSON(format('["{0}"]', github.ref_name)) }}
+        branch: ${{ fromJSON(needs.plan.outputs.branches) }}
         kernel_flavor: [fedora, cachy]
 
     permissions:
@@ -178,7 +205,7 @@ jobs:
         with:
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Version resolution lives in build_files/scripts/resolve-versions.sh,
+      # Version resolution lives in build_files/scripts/resolve-versions.py,
       # shared with the Justfile so the parsing logic exists in one place.
       - name: Resolve latest CachyOS kernel version
         id: cachyos_kernel
@@ -241,6 +268,34 @@ jobs:
           STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_UPSTREAM_BASE_OUTPUTS_PINNED: ${{ steps.upstream_base.outputs.pinned }}
 
+      # Single source of truth for the org.kyth.build.* / base.* provenance
+      # labels — both the buildx build below and the rechunk step further
+      # down need this exact set, and previously typed it out twice.
+      - name: Compose build-provenance labels
+        id: build_labels
+        env:
+          BASE_IMAGE: ${{ steps.build_base.outputs.image }}
+          BASE_DIGEST: ${{ steps.build_base.outputs.digest }}
+          UPSTREAM_BASE: ${{ steps.upstream_base.outputs.pinned }}
+          PROTON_CACHYOS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
+          THIRDPARTY_VERSIONS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
+          UMU_VERSION: ${{ steps.thirdparty_versions.outputs.version }}
+          KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
+          CACHYOS_KERNEL_VERSION: ${{ steps.cachyos_kernel.outputs.version || 'unused' }}
+        run: |
+          {
+            echo "labels<<KYTH_BUILD_LABELS_EOF"
+            echo "org.opencontainers.image.base.name=${BASE_IMAGE}"
+            echo "org.opencontainers.image.base.digest=${BASE_DIGEST}"
+            echo "org.kyth.build.upstream-base=${UPSTREAM_BASE}"
+            echo "org.kyth.build.proton-cachyos-version=${PROTON_CACHYOS_VERSION}"
+            echo "org.kyth.build.thirdparty-versions-hash=${THIRDPARTY_VERSIONS_HASH}"
+            echo "org.kyth.build.umu-version=${UMU_VERSION}"
+            echo "org.kyth.build.kernel-flavor=${KERNEL_FLAVOR}"
+            echo "org.kyth.build.cachyos-kernel-version=${CACHYOS_KERNEL_VERSION}"
+            echo "KYTH_BUILD_LABELS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build final image
         id: build_final
         run: |
@@ -252,17 +307,7 @@ jobs:
           LABEL_ARGS=()
           while IFS= read -r label; do
             [[ -n "${label}" ]] && LABEL_ARGS+=(--label "${label}")
-          done <<< "${STEPS_METADATA_OUTPUTS_LABELS}"
-          LABEL_ARGS+=(
-            --label "org.opencontainers.image.base.name=${STEPS_BUILD_BASE_OUTPUTS_IMAGE}"
-            --label "org.opencontainers.image.base.digest=${STEPS_BUILD_BASE_OUTPUTS_DIGEST}"
-            --label "org.kyth.build.upstream-base=${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}"
-            --label "org.kyth.build.proton-cachyos-version=${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}"
-            --label "org.kyth.build.thirdparty-versions-hash=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}"
-            --label "org.kyth.build.umu-version=${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU}"
-            --label "org.kyth.build.kernel-flavor=${MATRIX_KERNEL_FLAVOR}"
-            --label "org.kyth.build.cachyos-kernel-version=${CACHYOS_KERNEL_VERSION}"
-          )
+          done < <(printf '%s\n%s\n' "${STEPS_METADATA_OUTPUTS_LABELS}" "${STEPS_BUILD_LABELS_OUTPUTS_LABELS}")
 
           # MOK_KEY is optional — builds without it, or with a stale key, skip
           # vmlinuz signing gracefully for the regular container image.
@@ -314,12 +359,9 @@ jobs:
           MOK_KEY: ${{ secrets.MOK_KEY }} # zizmor: ignore[secrets-outside-env]
           MATRIX_BRANCH: ${{ matrix.branch }}
           MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
-          CACHYOS_KERNEL_VERSION: ${{ steps.cachyos_kernel.outputs.version || 'unused' }}
           STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_METADATA_OUTPUTS_LABELS: ${{ steps.metadata.outputs.labels }}
-          STEPS_BUILD_BASE_OUTPUTS_IMAGE: ${{ steps.build_base.outputs.image }}
-          STEPS_BUILD_BASE_OUTPUTS_DIGEST: ${{ steps.build_base.outputs.digest }}
-          STEPS_UPSTREAM_BASE_OUTPUTS_PINNED: ${{ steps.upstream_base.outputs.pinned }}
+          STEPS_BUILD_LABELS_OUTPUTS_LABELS: ${{ steps.build_labels.outputs.labels }}
           STEPS_PROTON_CACHYOS_OUTPUTS_VERSION: ${{ steps.proton_cachyos.outputs.version }}
           STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH: ${{ steps.thirdparty_versions.outputs.hash }}
           STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU: ${{ steps.thirdparty_versions.outputs.version }}
@@ -333,15 +375,22 @@ jobs:
           docker: "false"
           sudo-podman: "true"
 
-      - name: Free disk space before rechunking
+      - name: Free disk space before rechunking (conditional)
         run: |
-          docker buildx prune -f
-          docker system prune -f
+          USED_PCT="$(df --output=pcent / | tail -1 | tr -d ' %')"
+          if [ "${USED_PCT:-0}" -gt 80 ]; then
+            echo "::notice::Disk ${USED_PCT}% used on /, pruning buildx cache"
+            docker buildx prune -f
+            docker system prune -f
+          else
+            echo "::notice::Disk ${USED_PCT}% used on /, skipping prune (already freed via free-disk-space)"
+          fi
 
-      # Only ever added to the fedora leg (7e31fbd); preserved as fedora-only
-      # here rather than guessing it should also apply to cachy.
+      # Default graphroot (on /) and runroot (tmpfs under /run) are both too
+      # small for the rechunk mount; cachy hit the same ENOSPC-driven
+      # `crun: unknown version specified` failure fedora was moved off of
+      # in 7e31fbd, so this now runs for every kernel flavor.
       - name: Relocate containers storage for rechunk
-        if: matrix.kernel_flavor == 'fedora'
         run: |
           sudo mkdir -p /mnt/containers-storage /mnt/containers-runroot
           sudo tee /etc/containers/storage.conf >/dev/null <<'EOF'
@@ -368,14 +417,7 @@ jobs:
           description: ${{ env.IMAGE_DESC }}
           labels: |
             ${{ steps.metadata.outputs.labels }}
-            org.opencontainers.image.base.name=${{ steps.build_base.outputs.image }}
-            org.opencontainers.image.base.digest=${{ steps.build_base.outputs.digest }}
-            org.kyth.build.upstream-base=${{ steps.upstream_base.outputs.pinned }}
-            org.kyth.build.proton-cachyos-version=${{ steps.proton_cachyos.outputs.version }}
-            org.kyth.build.thirdparty-versions-hash=${{ steps.thirdparty_versions.outputs.hash }}
-            org.kyth.build.umu-version=${{ steps.thirdparty_versions.outputs.version }}
-            org.kyth.build.kernel-flavor=${{ matrix.kernel_flavor }}
-            org.kyth.build.cachyos-kernel-version=${{ steps.cachyos_kernel.outputs.version || 'unused' }}
+            ${{ steps.build_labels.outputs.labels }}
 
       - name: Validate rechunked candidate
         env:
@@ -519,12 +561,12 @@ jobs:
 
   build_live_iso:
     name: Build Live ISO (${{ matrix.branch == 'main' && 'latest' || matrix.branch }})
-    needs: build_push
+    needs: [plan, build_push]
     if: ${{ github.event_name != 'pull_request' && needs.build_push.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
-        branch: ${{ github.event_name == 'schedule' && fromJSON('["main","testing"]') || fromJSON(format('["{0}"]', github.ref_name)) }}
+        branch: ${{ fromJSON(needs.plan.outputs.branches) }}
     uses: ./.github/workflows/build-live-iso.yml
     with:
       # The live ISO is built from the Fedora variant only — it must boot the
@@ -547,14 +589,14 @@ jobs:
 
   finalize:
     name: Attest and dispatch (${{ matrix.branch }}, ${{ matrix.kernel_flavor }})
-    needs: build_push
+    needs: [plan, build_push]
     if: needs.build_push.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        branch: ${{ github.event_name == 'schedule' && fromJSON('["main","testing"]') || fromJSON(format('["{0}"]', github.ref_name)) }}
+        branch: ${{ fromJSON(needs.plan.outputs.branches) }}
         kernel_flavor: [fedora, cachy]
     permissions:
       actions: write

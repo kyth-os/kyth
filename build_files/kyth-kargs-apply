@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# kyth-kargs-apply — manage rpm-ostree kargs from kargs.toml, offline
+set -euo pipefail
+
+TOML="/etc/kyth/kargs.toml"
+PROFILE=""
+if [[ -n "${1:-}" ]]; then
+    case "$1" in
+        balanced|performance|gaming|status|apply) PROFILE="$1" ;;
+        -h|--help) echo "Usage: kyth-kargs-apply [balanced|performance|gaming|status|apply]"; exit 0 ;;
+        *) echo "Unknown arg $1" >&2; exit 1 ;;
+    esac
+fi
+
+need_root() {
+    if [[ $EUID -eq 0 ]]; then return 0; fi
+    exec sudo -A /usr/bin/kyth-kargs-apply "$@"
+}
+
+if [[ "$PROFILE" == "status" ]]; then
+    python3 -c 'from kyth_shared.kargs_preset import load_kargs,kargs_drift; d=kargs_drift(); c=load_kargs(); print(f"profile={c[\"profile\"]} desired={d[\"desired\"]} missing={d[\"missing\"]} extra={d[\"extra\"]}"); print(open("/proc/cmdline").read().strip())'
+    exit 0
+fi
+
+if [[ -n "$PROFILE" && "$PROFILE" != "apply" ]]; then
+    need_root "$@"
+    install -d -m 0755 /etc/kyth
+    python3 -c "from kyth_shared.kargs_preset import load_kargs,save_kargs; c=load_kargs(); c['profile']='$PROFILE'; save_kargs(c)"
+    PROFILE="apply"
+fi
+
+if [[ "$PROFILE" == "apply" || -z "$PROFILE" ]]; then
+    need_root "$@"
+    desired=$(python3 -c 'from kyth_shared.kargs_preset import desired_kargs; print("\n".join(desired_kargs()))')
+    # Build rpm-ostree args: append missing, remove custom_remove if present
+    drift_missing=$(python3 -c 'from kyth_shared.kargs_preset import kargs_drift; print("\n".join(kargs_drift()["missing"]))')
+    drift_extra=$(python3 -c 'from kyth_shared.kargs_preset import kargs_drift; print("\n".join(kargs_drift()["extra"]))')
+    if [[ -z "$drift_missing" && -z "$drift_extra" && "$desired" != "" ]]; then
+        echo "kargs already in sync (profile $(python3 -c 'from kyth_shared.kargs_preset import load_kargs; print(load_kargs()["profile"])'))"
+        exit 0
+    fi
+    if ! command -v rpm-ostree >/dev/null 2>&1; then
+        echo "rpm-ostree not present (toolbox/CI) — wrote $TOML, reboot on host to apply: $desired" >&2
+        exit 0
+    fi
+    args=()
+    while IFS= read -r k; do [[ -n "$k" ]] && args+=(--append="$k"); done <<< "$drift_missing"
+    while IFS= read -r k; do [[ -n "$k" ]] && args+=(--delete="$k"); done <<< "$drift_extra"
+    # Also remove stale gaming karg when leaving gaming
+    if [[ "$desired" != *"mitigations=off"* ]] && grep -q "mitigations=off" /proc/cmdline; then
+        args+=(--delete="mitigations=off")
+    fi
+    if ((${#args[@]}==0)); then echo "No kargs changes needed"; exit 0; fi
+    echo "Applying kargs: ${args[*]}"
+    rpm-ostree kargs "${args[@]}"
+    echo "Reboot to apply kargs."
+fi

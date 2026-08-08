@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── DualSense controller — hidraw userspace access ───────────────────────────
 # The hid-playstation kernel module exposes PS5 DualSense haptics and adaptive
 # triggers through the hidraw interface.  Without these rules the device node
@@ -12,7 +14,7 @@ set -euo pipefail
 # 054c = Sony Corp vendor ID
 # 0ce6 = DualSense (USB and BT)
 # 0df2 = DualSense Edge (USB and BT)
-cat >/usr/lib/udev/rules.d/99-kyth-dualsense.rules <<'DSEOF'
+write_config /usr/lib/udev/rules.d/99-kyth-dualsense.rules <<'DSEOF'
 # DualSense (USB)
 KERNEL=="hidraw*", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0ce6", SUBSYSTEM=="hidraw", TAG+="uaccess"
 # DualSense Edge (USB)

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-steam-deadzone — steam-deadzone.toml 5% gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-steam-deadzone "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.steam_deadzone import load_steam_deadzone; c=load_steam_deadzone(); print(f\"profile={c['profile']} deadzone={c['deadzone']}\")" ;;
+    gaming) need_root "$@"; python3 -c 'from kyth_shared.steam_deadzone import load_steam_deadzone,save_steam_deadzone,apply_steam_deadzone; c=load_steam_deadzone(); c["profile"]="gaming"; c["deadzone"]=0.05; save_steam_deadzone(c); apply_steam_deadzone(c)'; echo "steam deadzone gaming 0.05" ;;
+    balanced) need_root "$@"; python3 -c 'from kyth_shared.steam_deadzone import load_steam_deadzone,save_steam_deadzone,apply_steam_deadzone; c=load_steam_deadzone(); c["profile"]="balanced"; c["deadzone"]=0.15; save_steam_deadzone(c); apply_steam_deadzone(c)'; echo "steam deadzone balanced 0.15" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.steam_deadzone import load_steam_deadzone,apply_steam_deadzone; apply_steam_deadzone(load_steam_deadzone())' ;;
+    *) echo "Usage: kyth-steam-deadzone [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

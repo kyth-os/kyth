@@ -1,14 +1,14 @@
 import shlex
-from .core_base import _restyle
+from .core_base import restyle
 from .actions import _install_flatpak_inline, _open_chromium_webapp
 from .services.flatpak import _is_flatpak_installed
 from .services.software import find_familiar_app_match
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import DataWorker, Worker, finish_worker, release_worker_when_finished
 from .qt import (
-    QCheckBox, QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QProgressBar,
-    QPushButton, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt,
+    QCheckBox, QComboBox, QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar,
+    QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
 )
-from .widgets import _make_card, _set_log_panel
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _StarterPackTabMixin:
@@ -29,6 +29,8 @@ class _StarterPackTabMixin:
         layout.addWidget(intro)
 
         layout.addWidget(self._make_install_hierarchy_card())
+        layout.addWidget(self._make_windows_switcher_card())
+        layout.addWidget(self._make_windows_app_scan_card())
         layout.addWidget(self._make_familiar_app_finder())
 
         for pack in self._STARTER_PACKS:
@@ -47,20 +49,8 @@ class _StarterPackTabMixin:
         self._starter_progress.hide()
         layout.addWidget(self._starter_progress)
 
-        self._starter_log_toggle = QPushButton("Show details")
-        self._starter_log_toggle.setCheckable(True)
-        self._starter_log_toggle.hide()
-        layout.addWidget(self._starter_log_toggle)
-
-        self._starter_log = QTextEdit()
-        self._starter_log.document().setMaximumBlockCount(5000)
-        self._starter_log.setReadOnly(True)
-        self._starter_log.setMaximumHeight(130)
-        self._starter_log.hide()
-        layout.addWidget(self._starter_log)
-        self._starter_log_toggle.clicked.connect(
-            lambda checked: _set_log_panel(self._starter_log_toggle, self._starter_log, checked)
-        )
+        self._starter_log_panel = CollapsibleLogPanel(max_height=130)
+        layout.addWidget(self._starter_log_panel)
         return tab
 
     def _make_ms_fonts_card(self) -> QFrame:
@@ -157,9 +147,48 @@ class _StarterPackTabMixin:
             "Tip: right-click any open Chromium app window → "
             "\"More tools\" → \"Create shortcut…\" to pin it to the KDE application launcher."
         )
-        note.setObjectName("card-copy")
+        note.setObjectName("caption-text")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #858585; font-size: 11px;")
+        layout.addWidget(note)
+        return card
+
+    def _make_windows_switcher_card(self) -> QFrame:
+        """Complaint #5: If you used X on Windows, use Y on KythOS — one-click."""
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("🪟  Switching from Windows? Start here — one click per app")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "KythOS maps your Windows apps to tuned replacements. Click Install — Flatpak handles updates and sandboxing. No terminal needed."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        mapping = [
+            ("Microsoft Office", "LibreOffice (Writer/Calc)", "org.libreoffice.LibreOffice"),
+            ("Photoshop", "GIMP + Krita", "org.gimp.GIMP"),
+            ("Spotify", "Spotify", "com.spotify.Client"),
+            ("Discord", "Discord", "com.discordapp.Discord"),
+            ("Chrome", "Brave Browser", "com.brave.Browser"),
+            ("VLC", "VLC + Celluloid", "org.videolan.VLC"),
+            ("Steam", "Steam + Heroic", "com.valvesoftware.Steam"),
+            ("Zoom / Teams", "Zoom", "us.zoom.Zoom"),
+        ]
+        for i, (win, kyth, app_id) in enumerate(mapping):
+            row, col = divmod(i, 2)
+            btn = QPushButton(f"{win} → {kyth}")
+            btn.setToolTip(f"Install {kyth} ({app_id})")
+            installed = _is_flatpak_installed(app_id)
+            btn.setEnabled(not installed)
+            btn.setText(f"✓ {kyth}" if installed else f"{win} → {kyth}")
+            btn.clicked.connect(lambda _=False, aid=app_id, n=kyth: self._install_familiar_app(aid, n))
+            grid.addWidget(btn, row, col)
+        layout.addLayout(grid)
+        note = QLabel("Tip: search any other Windows app below in Familiar App Finder.")
+        note.setObjectName("caption-text")
+        note.setWordWrap(True)
         layout.addWidget(note)
         return card
 
@@ -178,8 +207,8 @@ class _StarterPackTabMixin:
             row = QHBoxLayout()
             row.setSpacing(10)
             lbl = QLabel(label)
-            lbl.setObjectName("card-summary")
-            lbl.setStyleSheet("font-weight: 700; min-width: 110px;")
+            lbl.setObjectName("card-subtitle")
+            lbl.setMinimumWidth(110)
             lbl.setAlignment(Qt.AlignmentFlag.AlignTop)
             row.addWidget(lbl)
             desc_lbl = QLabel(desc)
@@ -204,6 +233,112 @@ class _StarterPackTabMixin:
         btns.addStretch()
         layout.addLayout(btns)
         return card
+
+    def _make_windows_app_scan_card(self) -> QFrame:
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Windows App Equivalents — scan your old Program Files")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "If your Windows drive is still connected, KythOS can read its Program Files folders and suggest the Linux equivalent for each app: LibreOffice for Office, GIMP/Krita for Photoshop, Kdenlive/DaVinci for Premiere, and so on. No login needed."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        self._win_app_status = QLabel("Scan your Windows drive from Move Files → Scan Drives first, then run this scan.")
+        self._win_app_status.setObjectName("card-copy")
+        self._win_app_status.setWordWrap(True)
+        layout.addWidget(self._win_app_status)
+        self._win_app_rows = QVBoxLayout()
+        self._win_app_rows.setSpacing(6)
+        layout.addLayout(self._win_app_rows)
+        btns2 = QHBoxLayout()
+        btns2.setSpacing(8)
+        scan_btn = QPushButton("Scan Windows Apps")
+        scan_btn.setObjectName("primary")
+        scan_btn.clicked.connect(self._scan_windows_apps)
+        btns2.addWidget(scan_btn)
+        btns2.addStretch()
+        layout.addLayout(btns2)
+        return card
+
+    def _scan_windows_apps(self):
+        self._win_app_status.setText("Scanning Program Files folders…")
+        restyle(self._win_app_status)
+        while self._win_app_rows.count():
+            it = self._win_app_rows.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+
+        def _scan():
+            try:
+                from kyth_welcome.services.gaming.windows_partitions import _probe_windows_partitions
+                from kyth_welcome.services.windows_migration.win_apps import scan_windows_program_files, map_to_familiar
+                parts = _probe_windows_partitions()
+                names = scan_windows_program_files(parts)
+                mapped = map_to_familiar(names, list(self._FAMILIAR_APPS))
+                return {"names": names, "mapped": mapped}
+            except Exception as exc:
+                return {"error": str(exc)}
+
+        w = DataWorker("win-app-scan", _scan)
+        w.result.connect(self._on_windows_app_scan)
+        w.failed.connect(lambda _k, m: self._win_app_status.setText(f"Scan failed: {m}"))
+        self._win_app_worker = w
+        release_worker_when_finished(self, "_win_app_worker", w)
+        w.start()
+
+    def _on_windows_app_scan(self, _key: str, data: dict):
+        if data.get("error"):
+            self._win_app_status.setText(f"Scan failed: {data['error']}")
+            restyle(self._win_app_status)
+            return
+        names = data.get("names") or []
+        if not names:
+            self._win_app_status.setText("No mounted Windows Program Files found. Connect your Windows drive and Scan Drives from Move Files first.")
+            restyle(self._win_app_status)
+            return
+        mapped = data.get("mapped") or []
+        hits = sum(1 for m in mapped if m.get("match"))
+        self._win_app_status.setText(f"Found {len(names)} Program Files folders — {hits} have a curated Linux path below.")
+        self._win_app_status.setObjectName("status-ok" if hits else "card-copy")
+        restyle(self._win_app_status)
+        for entry in mapped[:12]:
+            win = entry.get("windows_name", "")
+            match = entry.get("match")
+            desc = entry.get("desc", "")
+            app_id = entry.get("app_id", "")
+            if match:
+                row = QFrame()
+                row.setObjectName("hw-card-ok")
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(12, 6, 12, 6)
+                rl.setSpacing(10)
+                lbl = QLabel(f"{win} → {match}")
+                lbl.setObjectName("card-subtitle")
+                lbl.setToolTip(desc)
+                rl.addWidget(lbl, 1)
+                if app_id:
+                    btn = QPushButton("Install")
+                    btn.setToolTip(desc)
+                    btn.clicked.connect(lambda _=False, aid=app_id, n=match: self._install_familiar_app(aid, n))
+                    rl.addWidget(btn)
+                self._win_app_rows.addWidget(row)
+            else:
+                row = QFrame()
+                row.setObjectName("hw-card-dim")
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(12, 6, 12, 6)
+                rl.setSpacing(10)
+                lbl = QLabel(win)
+                lbl.setObjectName("card-copy")
+                lbl.setToolTip(desc)
+                rl.addWidget(lbl, 1)
+                self._win_app_rows.addWidget(row)
+        if len(mapped) > 12:
+            more = QLabel(f"+{len(mapped)-12} more — search them in Familiar App Finder above.")
+            more.setObjectName("caption-text")
+            self._win_app_rows.addWidget(more)
 
     def _make_familiar_app_finder(self) -> QFrame:
         card, layout = _make_card("card-accent-ok")
@@ -336,12 +471,12 @@ class _StarterPackTabMixin:
         details.hide()
 
         checks = []
-        for app_id, label, selected_by_default in apps:
+        for app_id, label, selected_by_default, desc in apps:
             installed = _is_flatpak_installed(app_id)
             check = QCheckBox(label)
             check.setChecked(selected_by_default and not installed)
             check.setEnabled(not installed)
-            check.setToolTip(app_id)
+            check.setToolTip(f"{desc}\n{app_id}")
             state_text = "Installed" if installed else ("Available" if selected_by_default else "Optional")
 
             app_row = QHBoxLayout()
@@ -411,7 +546,7 @@ class _StarterPackTabMixin:
             self._starter_status.setText(f"No apps selected for {name}.")
             self._starter_status.setObjectName("status-dim")
             self._starter_status.show()
-            _restyle(self._starter_status)
+            restyle(self._starter_status)
             return
         app_ids = [app_id for app_id, _, _ in selected]
         missing = [app_id for app_id in app_ids if not _is_flatpak_installed(app_id)]
@@ -419,24 +554,21 @@ class _StarterPackTabMixin:
             self._starter_status.setText(f"Selected {name} apps are already installed.")
             self._starter_status.setObjectName("status-ok")
             self._starter_status.show()
-            _restyle(self._starter_status)
+            restyle(self._starter_status)
             return
         cmd = [
             "bash", "-c",
             "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
             " && flatpak install -y flathub " + " ".join(shlex.quote(app_id) for app_id in missing),
         ]
-        self._starter_log.clear()
-        self._starter_log.append(f"→ install selected {name} apps\n")
+        self._starter_log_panel.reset(f"→ install selected {name} apps\n")
         for app_id in missing:
-            self._starter_log.append(f"  {app_id}")
-        self._starter_log_toggle.show()
-        _set_log_panel(self._starter_log_toggle, self._starter_log, False)
+            self._starter_log_panel.append(f"  {app_id}")
         self._starter_progress.show()
         self._starter_status.setText(f"Installing {name} starter pack…")
         self._starter_status.setObjectName("subheading")
         self._starter_status.show()
-        _restyle(self._starter_status)
+        restyle(self._starter_status)
         self._set_starter_pack_controls_enabled(False)
         self._starter_worker = Worker(cmd)
         self._starter_worker.line.connect(self._on_starter_line)
@@ -446,17 +578,16 @@ class _StarterPackTabMixin:
         self._starter_worker.start()
 
     def _on_starter_line(self, ln: str):
-        self._starter_log.append(ln)
-        self._starter_log.ensureCursorVisible()
+        self._starter_log_panel.append(ln)
 
     def _on_starter_done(self, code: int, name: str, installed_ids: list[str]):
         self._starter_progress.hide()
-        _finish_worker(self, attr="_starter_worker")
+        finish_worker(self, attr="_starter_worker")
         self._set_starter_pack_controls_enabled(True)
         if code == 0:
             self._starter_status.setText(f"Selected {name} apps installed.")
             self._starter_status.setObjectName("status-ok")
-            self._starter_log.append("\nDone.")
+            self._starter_log_panel.append("\nDone.")
             installed_set = set(installed_ids)
             for check, app_id, _, state in self._starter_pack_checks.get(name, []):
                 if app_id in installed_set:
@@ -466,5 +597,5 @@ class _StarterPackTabMixin:
         else:
             self._starter_status.setText(f"{name} app install failed (exit {code}).")
             self._starter_status.setObjectName("status-err")
-            _set_log_panel(self._starter_log_toggle, self._starter_log, True)
-        _restyle(self._starter_status)
+            self._starter_log_panel.set_expanded(True)
+        restyle(self._starter_status)

@@ -1,29 +1,34 @@
-"""Inputs QSS styles.
+"""Inputs — Windows Settings inset fields with blue focus ring."""
 
-Kyth Theme: tokenized. QCheckBox/QComboBox have no theme_hub_overlay.py
-equivalent and remain fully load-bearing (this is what styles the wizard's
-plain QCheckBox rows on the Get Apps step, for one).
-"""
-from ..ui_tokens import (
-    KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_SURFACE,
-    KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT,
-)
+from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_RADIUS_SM, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT
 
 INPUTS_QSS = f"""
 /* ── Inputs ──────────────────────────────────────────────────────────────── */
-QLineEdit {{
+QLineEdit,
+QTextEdit,
+QComboBox,
+QSpinBox {{
     background: {KYTH_SURFACE_RAISED};
     border: 1px solid {KYTH_HAIRLINE};
-    border-bottom: 1px solid {KYTH_TEXT_FAINT};
-    border-radius: 5px;
-    padding: 7px 11px;
+    border-radius: {KYTH_RADIUS_SM}px;
+    padding: 7px 9px;
     color: {KYTH_TEXT};
-    selection-background-color: {KYTH_HAIRLINE};
+    selection-background-color: {KYTH_BLUE};
+    selection-color: #ffffff;
 }}
 
-QLineEdit:focus {{
-    background: {KYTH_SURFACE_RAISED};
-    border-bottom: 2px solid {KYTH_BLUE_LIGHT};
+QLineEdit:focus,
+QTextEdit:focus,
+QComboBox:focus,
+QSpinBox:focus {{
+    border-color: {KYTH_BLUE};
+    background: {KYTH_SURFACE_OVERLAY};
+}}
+
+QLineEdit:hover,
+QTextEdit:hover,
+QComboBox:hover {{
+    border-color: {KYTH_HAIRLINE_LIGHT};
 }}
 
 QCheckBox {{
@@ -49,17 +54,7 @@ QCheckBox::indicator:hover {{
 }}
 
 QComboBox {{
-    background: {KYTH_SURFACE_RAISED};
-    border: 1px solid {KYTH_HAIRLINE};
-    border-radius: 5px;
-    padding: 7px 11px;
-    color: {KYTH_TEXT};
     min-width: 80px;
-}}
-
-QComboBox:hover {{
-    border-color: {KYTH_TEXT_FAINT};
-    background: {KYTH_SURFACE_RAISED};
 }}
 
 QComboBox::drop-down {{

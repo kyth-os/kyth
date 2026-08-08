@@ -1,35 +1,55 @@
-# Ignore temporary build directories created by _build-bib
-_build-bib.*
-
-# Ignore build logs
-*.log
+# Python cache files
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
 
-# Ignore local output directories (keep committed outputs explicit)
-output/previous-built-iso/
-cosign.key
-*.key
-*secureboot*.pem
-_build_*
-output
-_build-*/**
+# Build artifacts
+build/
+dist/
+*.egg-info/
 
-# Crash dumps (root only, so source files named core.py stay tracked)
-/core
-/core.*
+# Virtual environments
+venv/
+.venv/
+env/
+.ENV/
 
+# Logs
+*.log
 
-#Ignore vscode AI rules
-.github/instructions/codacy.instructions.md
+# Environment files
+.env
+.env.local
+*.env.*
 
-# Local Claude/Codex agent permissions and machine-specific settings
-.claude/settings.json
-.claude/settings.local.json
-mrtrick/
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
 
-# Pinned validators downloaded by local/CI validation.
-.cache/kyth-ci-tools/
-
-# Coverage.py output from `just test-coverage`
+# Coverage reports
 .coverage
-.coverage.*
+coverage/
+coverage.xml
+coverage.json
+coverage-html/
+htmlcov/
+
+# CI tool cache (downloaded + checksum-verified by build_files/scripts/install-validation-tools.sh)
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+
+# Muse local state (never pushed)
+**/.claude/
+**/.codex/
+.codex

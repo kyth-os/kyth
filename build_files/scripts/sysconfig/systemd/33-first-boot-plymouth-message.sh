@@ -2,12 +2,14 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── First-boot Plymouth message ───────────────────────────────────────────────
 # On the very first boot after install, the SELinux relabel and other setup
 # tasks add a few extra seconds before login. Show a message on the boot splash
 # so the user knows something is happening. The sentinel file ensures this only
 # ever runs once — after first boot it is a no-op for all future reboots.
-cat >/usr/lib/systemd/system/kyth-first-boot-message.service <<'FIRSTBOOTEOF'
+write_config /usr/lib/systemd/system/kyth-first-boot-message.service <<'FIRSTBOOTEOF'
 [Unit]
 Description=KythOS first-boot splash message
 DefaultDependencies=no

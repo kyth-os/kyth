@@ -9,14 +9,16 @@ source /src/build_files/scripts/lib/plymouth-initrd-checks.sh
 
 # Tools required by the live installer's NTFS shrink-and-install path.
 if command -v dnf5 >/dev/null 2>&1; then
-	dnf5 install -y ntfs-3g parted btrfs-progs
+	dnf5 install -y ntfs-3g parted btrfs-progs gdisk
 	dnf5 clean all
 else
-	dnf install -y ntfs-3g parted btrfs-progs
+	dnf install -y ntfs-3g parted btrfs-progs gdisk
 	dnf clean all
 fi
 
 SOURCE_TAG=${SOURCE_TAG:?}
+BASE_IMAGE=${BASE_IMAGE:?}
+INSTALL_SOURCE_IMAGE=${INSTALL_SOURCE_IMAGE:-${BASE_IMAGE}}
 
 # bwrap tries to write /proc/sys/user/max_user_namespaces which is mounted as ro
 mount -o remount,rw /proc/sys
@@ -39,7 +41,6 @@ python3 -m pip install \
 	"${installer_package_root}/kyth-installer"
 rm -rf "${installer_package_root}"
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
-install -Dm755 /src/build_files/kyth-partition-install.sh /usr/bin/kyth-partition-install
 install -Dm755 /src/build_files/scripts/plymouth-branding-guard.sh \
 	/usr/libexec/kyth-plymouth-branding-guard
 
@@ -54,8 +55,31 @@ Type=Application
 Categories=System;
 EOF
 
-printf 'KYTH_SOURCE_IMAGE=ghcr.io/mrtrick37/kyth:%s\nKYTH_TARGET_IMAGE=ghcr.io/mrtrick37/kyth:%s\n' \
-	"${SOURCE_TAG}" "${SOURCE_TAG}" >/etc/kyth-installer.env
+# Bundle the exact image used for this live payload. The default Fedora install
+# can then complete without a network connection while retaining the public
+# registry reference for future bootc updates. Optional kernel variants remain
+# registry-backed because they are separate images.
+mkdir -p /usr/share/kyth/image
+skopeo copy --retry-times 3 \
+	"docker://${INSTALL_SOURCE_IMAGE#docker://}" \
+	"oci:/usr/share/kyth/image:latest"
+embedded_digest="$(skopeo inspect --format '{{.Digest}}' 'oci:/usr/share/kyth/image:latest')"
+case "${embedded_digest}" in
+	sha256:[0-9a-f][0-9a-f]*) ;;
+	*)
+		echo "ERROR: embedded installer image has no valid sha256 digest: ${embedded_digest}" >&2
+		exit 1
+		;;
+esac
+expected_digest="${INSTALL_SOURCE_IMAGE##*@}"
+release_digest="${embedded_digest}"
+[[ "${expected_digest}" == sha256:* ]] && release_digest="${expected_digest}"
+target_image="ghcr.io/mrtrick37/kyth:${SOURCE_TAG}"
+printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\n' \
+	"${target_image}" "${embedded_digest}" >/etc/kyth-installer.env
+printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"%s","source_image":"%s"}\n' \
+	"${embedded_digest}" "${release_digest}" "${target_image}" "${INSTALL_SOURCE_IMAGE}" \
+	>/usr/share/kyth/image-source.json
 
 # Install live-only packages in one transaction so dependency solving and
 # repository metadata work happen once. Browsers from the installed image are

@@ -14,11 +14,13 @@ _STEAM_NON_GAME_PATTERNS = (
 )
 
 _PROTONDB_CACHE_PATH = os.path.expanduser("~/.cache/kyth-protondb.json")
+# tier -> QLabel objectName in theme_base/_gaming.py (borked/pending reuse the
+# shared status-err/status-dim pills instead of their own tier-colored ones).
 _PROTONDB_TIER_STYLE = {
-    "platinum": ("#102010", "#7ee8a2"),
-    "gold":     ("#2b2410", "#d4a843"),
-    "silver":   ("#181e2b", "#8cadcf"),
-    "bronze":   ("#2b1a10", "#c47c4a"),
-    "borked":   ("#3a1010", "#f48771"),
-    "pending":  ("#252526", "#858585"),
+    "platinum": "pdb-tier-platinum",
+    "gold":     "pdb-tier-gold",
+    "silver":   "pdb-tier-silver",
+    "bronze":   "pdb-tier-bronze",
+    "borked":   "status-err",
+    "pending":  "status-dim",
 }

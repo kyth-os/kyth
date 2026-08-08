@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-somaxconn — 8192 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-somaxconn "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.somaxconn import load_somaxconn, somaxconn_status; c=load_somaxconn(); print(f\"profile={c['profile']} active={somaxconn_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.somaxconn import load_somaxconn,save_somaxconn,generate_somaxconn; c=load_somaxconn(); c['profile']='gaming'; save_somaxconn(c); generate_somaxconn(c)"; sysctl --system >/dev/null 2>&1 || true; echo "somaxconn gaming 8192" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.somaxconn import load_somaxconn,save_somaxconn,generate_somaxconn; c=load_somaxconn(); c['profile']='balanced'; save_somaxconn(c); generate_somaxconn(c)"; echo "somaxconn balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.somaxconn import load_somaxconn,generate_somaxconn; generate_somaxconn(load_somaxconn())" ;;
+    *) echo "Usage: kyth-somaxconn [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

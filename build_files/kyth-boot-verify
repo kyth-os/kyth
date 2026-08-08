@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# kyth-boot-verify — composefs + UKI + TPM measured-boot verifier (offline, no cloud)
+# Checks: UKI signature (sbverify/sbctl), composefs digest (/usr/.composefs), TPM PCR 7/14 (tpm2_pcrread)
+# Exit 0 = ok/tainted?  2 = mismatch (trigger quarantine), 1 = tool missing (skip gracefully)
+set -euo pipefail
+
+uki="/boot/efi/EFI/kyth/kyth.efi"
+if [[ ! -f "$uki" ]]; then
+    uki="/boot/efi/EFI/fedora/shimx64.efi"
+fi
+
+# 1) UKI / shim signature — best effort, offline
+if command -v sbverify >/dev/null 2>&1 && [[ -f "$uki" ]]; then
+    if ! sbverify --cert /etc/pki/kyth/secureboot.crt "$uki" >/dev/null 2>&1; then
+        echo "kyth-boot-verify: UKI signature mismatch: $uki" >&2
+        exit 2
+    fi
+fi
+
+# 2) composefs digest — if /usr/.composefs exists, verify via composefs-info
+if [[ -f /usr/.composefs/digest ]]; then
+    expected="$(cat /usr/.composefs/digest 2>/dev/null || true)"
+    if command -v composefs-info >/dev/null 2>&1 && [[ -n "$expected" ]]; then
+        actual="$(composefs-info /usr 2>/dev/null | grep -i digest | awk '{print $2}' || true)"
+        if [[ -n "$actual" && "$actual" != "$expected" ]]; then
+            echo "kyth-boot-verify: composefs digest mismatch" >&2
+            exit 2
+        fi
+    fi
+fi
+
+# 3) TPM PCR 7 (SecureBoot) + 14 (MOK) — measured, offline
+if command -v tpm2_pcrread >/dev/null 2>&1; then
+    pcr7="$(tpm2_pcrread sha256:7 2>/dev/null | grep -A1 "7 :" | tail -1 | xargs || true)"
+    if [[ -z "$pcr7" || "$pcr7" == "0000000000000000000000000000000000000000000000000000000000000000" ]]; then
+        echo "kyth-boot-verify: PCR7 zero — not measured" >&2
+        # not fatal, just tainted
+    fi
+fi
+
+echo "kyth-boot-verify: ok"
+exit 0

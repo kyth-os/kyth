@@ -1,70 +1,18 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Keep Chromium/Electron apps from opening KWallet on startup by configuring basic password stores."""
+from __future__ import annotations
 
-# Keep Chromium/Electron apps from opening KWallet on startup.
-# VS Code reads argv.json. Native Brave and Flatpak Brave use Chromium-family
-# flag files; the Flatpak wrapper nests them under Brave's Cobalt ConfigDir and
-# may migrate from chrome-flags.conf. The "basic" password store is quiet/local.
-
-target_home="${HOME:?HOME must be set}"
-export KYTH_WALLET_HOME="${target_home}"
-
-python3 <<'PY'
-import json
-import os
+import getpass
 from pathlib import Path
 
-home = Path(os.environ["KYTH_WALLET_HOME"])
+from kyth_shared.session import disable_vscode_brave_wallet_prompts  # noqa: E402
 
 
-def write_code_argv(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            data = {}
-    except Exception:
-        data = {}
-
-    data["password-store"] = "basic"
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+def main() -> None:
+    disable_vscode_brave_wallet_prompts(Path.home())
+    user = getpass.getuser() or "this user"
+    print(f"VS Code and Brave wallet prompts disabled for {user}.")
 
 
-def write_chromium_flags(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        lines = []
-
-    updated = []
-    wrote_password_store = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("--password-store=") or stripped.startswith("password-store="):
-            if not wrote_password_store:
-                updated.append("--password-store=basic")
-                wrote_password_store = True
-            continue
-        updated.append(line)
-
-    if not wrote_password_store:
-        updated.append("--password-store=basic")
-
-    path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
-
-
-write_code_argv(home / ".config" / "Code" / "argv.json")
-for flags_path in (
-    home / ".config" / "brave-flags.conf",
-    home / ".config" / "BraveSoftware" / "Brave-Browser" / "brave-flags.conf",
-    home / ".config" / "BraveSoftware" / "Brave-Browser" / "chrome-flags.conf",
-    home / ".var" / "app" / "com.brave.Browser" / "config" / "brave-flags.conf",
-    home / ".var" / "app" / "com.brave.Browser" / "config" / "chrome-flags.conf",
-    home / ".var" / "app" / "com.brave.Browser" / "config" / "BraveSoftware" / "Brave-Browser" / "brave-flags.conf",
-    home / ".var" / "app" / "com.brave.Browser" / "config" / "BraveSoftware" / "Brave-Browser" / "chrome-flags.conf",
-):
-    write_chromium_flags(flags_path)
-PY
-
-echo "VS Code and Brave wallet prompts disabled for ${USER:-this user}."
+if __name__ == "__main__":
+    main()

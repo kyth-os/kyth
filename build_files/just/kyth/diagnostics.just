@@ -39,3 +39,17 @@ snappy-bench *args:
     #!/usr/bin/env bash
     set -euo pipefail
     /usr/bin/kyth-snappy-bench {{ args }}
+
+# Perf gate 5% — CI fails if gaming-audit p95 regresses
+[group('KythOS')]
+perf-gate mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-perf-gate "{{ mode }}"
+
+# Telemetry privacy — offline collectors opt-out + purge
+[group('KythOS')]
+telemetry-opt mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-telemetry-opt "{{ mode }}"

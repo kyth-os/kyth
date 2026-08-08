@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-tcp-mtu-probing — 1 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-mtu-probing "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.tcp_mtu_probing import load_tcp_mtu_probing, tcp_mtu_probing_status; c=load_tcp_mtu_probing(); print(f\"profile={c['profile']} active={tcp_mtu_probing_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_mtu_probing import load_tcp_mtu_probing,save_tcp_mtu_probing,generate_tcp_mtu_probing; c=load_tcp_mtu_probing(); c['profile']='gaming'; save_tcp_mtu_probing(c); generate_tcp_mtu_probing(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp mtu probing gaming 1" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_mtu_probing import load_tcp_mtu_probing,save_tcp_mtu_probing,generate_tcp_mtu_probing; c=load_tcp_mtu_probing(); c['profile']='balanced'; save_tcp_mtu_probing(c); generate_tcp_mtu_probing(c)"; echo "tcp mtu probing balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_mtu_probing import load_tcp_mtu_probing,generate_tcp_mtu_probing; generate_tcp_mtu_probing(load_tcp_mtu_probing())" ;;
+    *) echo "Usage: kyth-tcp-mtu-probing [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

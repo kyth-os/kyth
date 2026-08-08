@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-fscache — fscache.toml
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-fscache "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.fscache_tune import load_fscache; c=load_fscache(); print(f\"enabled={c['enabled']}\")" ;;
+    on) need_root "$@"; python3 -c "from kyth_shared.fscache_tune import load_fscache,save_fscache,generate_fscache; c=load_fscache(); c['enabled']=True; save_fscache(c); generate_fscache(c)"; echo "fscache on 10G" ;;
+    off) need_root "$@"; python3 -c "from kyth_shared.fscache_tune import load_fscache,save_fscache,generate_fscache; c=load_fscache(); c['enabled']=False; save_fscache(c); generate_fscache(c)"; echo "fscache off" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.fscache_tune import load_fscache,generate_fscache; generate_fscache(load_fscache())" ;;
+    *) echo "Usage: kyth-fscache [status|on|off|apply]" >&2; exit 1 ;;
+esac

@@ -44,6 +44,7 @@ class PlasmaWaylandPage(Page, _CardsMixin, _ProfilesMixin, _PolishMixin, _Repair
 
         self._add(self._make_settings_card())
         self._add(self._make_polish_card())
+        self._add(self._make_windows_parity_card())
         self._add(self._make_repair_card())
         self._add(self._make_presets_card())
         self._add(self._make_desktop_modes_card())
@@ -58,3 +59,4 @@ class PlasmaWaylandPage(Page, _CardsMixin, _ProfilesMixin, _PolishMixin, _Repair
             return
         self._initial_refresh_started = True
         single_shot(self, 0, self.refresh)
+        single_shot(self, 0, self._refresh_wayland_readiness)

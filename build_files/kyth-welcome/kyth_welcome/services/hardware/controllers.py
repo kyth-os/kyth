@@ -11,7 +11,7 @@ class ControllerStatusView:
     testable without a display."""
     status_text: str
     xone_status_text: str
-    xone_status_style: str
+    xone_status_object_name: str
     xone_button_visible: bool
     dualsense_status_text: str
     dualsense_status_visible: bool
@@ -41,18 +41,18 @@ def controller_status_view(info: dict) -> ControllerStatusView:
             "Xbox Wireless Adapter detected — firmware not yet flashed. "
             "Click the button below to complete setup (requires password)."
         )
-        xone_status_style = "color: #d4a843;"
+        xone_status_object_name = "text-warn"
         xone_button_visible = True
     elif info["xone_dongle"] and info["xone_loaded"]:
         xone_status_text = (
             "✓  Xbox Wireless Adapter is ready. Press the sync button on the "
             "adapter and controller together to pair."
         )
-        xone_status_style = "color: #4fc1ff;"
+        xone_status_object_name = "text-blue"
         xone_button_visible = False
     else:
         xone_status_text = "No Xbox Wireless Adapter detected. If you have one, plug it in and press Refresh."
-        xone_status_style = ""
+        xone_status_object_name = "card-copy"
         xone_button_visible = False
 
     if info["dualsense_found"] and info["dualsensectl_out"]:
@@ -72,7 +72,7 @@ def controller_status_view(info: dict) -> ControllerStatusView:
     return ControllerStatusView(
         status_text=status_text,
         xone_status_text=xone_status_text,
-        xone_status_style=xone_status_style,
+        xone_status_object_name=xone_status_object_name,
         xone_button_visible=xone_button_visible,
         dualsense_status_text=dualsense_status_text,
         dualsense_status_visible=dualsense_status_visible,

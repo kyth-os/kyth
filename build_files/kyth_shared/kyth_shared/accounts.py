@@ -1,23 +1,17 @@
 """Repair account databases on an offline (unbooted) target root.
 
-Both install paths that write a fresh KythOS deployment — the graphical
-kyth-installer and the CLI kyth-partition-install.sh dual-boot script — must
+Both install entry points that write a fresh KythOS deployment — the graphical
+kyth-installer and the kyth-partition-install CLI — must
 apply the exact same fix-up to a target tree's /etc/{passwd,group,shadow}
 after `bootc install`: merge in any system accounts missing from the base
 image's actual /etc (falling back to fixed records for accounts like sddm
 that may not exist yet), complete /etc/shadow for any of them, and lock the
 account database down to the same permissions a booted system would have.
 
-This used to be reimplemented independently in Python (kyth_installer) and
-bash (kyth-partition-install.sh) and had already drifted in minor ways. This
-module is the single canonical implementation; both callers run it through
-an injected ``run`` callable so they keep their own privilege/validation
-model:
-  - kyth_installer wraps every call in its own allowlisted, sudo-escalating
-    run_command (see kyth_installer.system).
-  - kyth-partition-install.sh invokes this module directly as
-    ``python3 -m kyth_shared.accounts <deploy_root>`` from a script that is
-    already running as root, via a plain subprocess.run.
+This used to be reimplemented independently in Python and Bash and had already
+drifted in minor ways. This module is the single canonical implementation.
+Every installer entry point now reaches it through kyth_installer's allowlisted
+command runner (see kyth_installer.system).
 """
 from __future__ import annotations
 

@@ -47,7 +47,7 @@ if command -v flatpak >/dev/null 2>&1; then
 	run_step critical "Flatpak system packages" flatpak update --system --assumeyes --noninteractive
 fi
 
-run_step critical "KythOS system image" sudo -n /usr/bin/bootc upgrade
+run_step critical "KythOS system image" sudo -n /usr/bin/kyth-safe-upgrade
 
 if [[ -x /usr/bin/kyth-rclone-update ]]; then
 	run_step optional "KythOS rclone" sudo -n /usr/bin/kyth-rclone-update

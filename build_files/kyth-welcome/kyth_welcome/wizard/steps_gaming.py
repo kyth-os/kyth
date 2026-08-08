@@ -8,13 +8,28 @@ steps were; everything above it is wizard-native.
 """
 from __future__ import annotations
 
-from ..core_base import _IS_LIVE
-from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives
+from ..core_base import IS_LIVE
+from ..services.gaming import _COMPAT_GAMES
 from ..qt import QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget
-from ..widgets import _divider, _make_card
+from ..widgets import _divider, _make_card, _make_flow_step
 
 
 class _GamingStepMixin:
+    def _apply_gaming_windows_drives(self, drives: list[dict]) -> None:
+        """Called by _MachineStepMixin._on_machine_facts_ready() once the
+        shared background NTFS scan resolves (see steps_machine.py)."""
+        if self._gaming_drive_card is not None:
+            self._gaming_drive_slot_layout.removeWidget(self._gaming_drive_card)
+            self._gaming_drive_card.deleteLater()
+            self._gaming_drive_card = None
+        if IS_LIVE:
+            return
+        filtered = [d for d in drives if not d.get("is_bitlocker")]
+        if filtered:
+            card = self._make_windows_game_drive_card(filtered)
+            self._gaming_drive_slot_layout.addWidget(card)
+            self._gaming_drive_card = card
+
     def _make_windows_game_drive_card(self, drives: list[dict]) -> QFrame:
         card, layout = _make_card("wiz-card-warn")
         title = QLabel("PC game drive found")
@@ -31,7 +46,7 @@ class _GamingStepMixin:
         body = QLabel(
             f"Detected: {listed}. Do not point Steam at the NTFS library and start playing. "
             "Copy the library into Steam on a Linux-formatted disk first, then let Proton "
-            "build clean prefixes there. The migration tool below mounts other system read-only."
+            "build clean prefixes there. The migration tool below mounts the other system's drive read-only."
         )
         body.setObjectName("wiz-card-copy")
         body.setWordWrap(True)
@@ -73,15 +88,21 @@ class _GamingStepMixin:
         ps_layout.setContentsMargins(52, 6, 52, 0)
         ps_layout.setSpacing(10)
 
-        windows_drives = [] if _IS_LIVE else [
-            d for d in _find_ntfs_drives() if not d.get("is_bitlocker")
-        ]
-        if windows_drives:
-            ps_layout.addWidget(self._make_windows_game_drive_card(windows_drives))
+        # Populated by _apply_gaming_windows_drives() once
+        # _MachineStepMixin's background NTFS scan resolves — see
+        # steps_machine.py's module docstring. Not fetched here: this step
+        # is built eagerly alongside every other step in WizardWindow's
+        # __init__ (before any window is shown), so it must not run lsblk
+        # itself.
+        self._gaming_drive_slot = QWidget()
+        self._gaming_drive_slot.setObjectName("wiz-body")
+        self._gaming_drive_slot_layout = QVBoxLayout(self._gaming_drive_slot)
+        self._gaming_drive_slot_layout.setContentsMargins(0, 0, 0, 0)
+        self._gaming_drive_card = None
+        ps_layout.addWidget(self._gaming_drive_slot)
 
         proton_head = QLabel("Enable Proton — play your entire game library")
-        proton_head.setObjectName("wiz-card-title")
-        proton_head.setStyleSheet("font-size: 15px;")
+        proton_head.setObjectName("wiz-section-heading")
         ps_layout.addWidget(proton_head)
 
         proton_card, pc_layout = _make_card("wiz-card-ok")
@@ -89,24 +110,21 @@ class _GamingStepMixin:
         intro_copy.setObjectName("wiz-card-copy")
         pc_layout.addWidget(intro_copy)
 
-        for step in [
-            "1.  Open Steam",
-            "2.  Steam  →  Settings  →  Compatibility",
-            "3.  Turn on  Enable Steam Play for all other titles",
-            "4.  Select  Proton-CachyOS  from the version dropdown",
-            "5.  Restart Steam — your full game library now appears",
-        ]:
-            lbl = QLabel(step)
-            lbl.setObjectName("wiz-card-copy")
-            lbl.setStyleSheet("padding-left: 8px;")
-            pc_layout.addWidget(lbl)
+        for index, (step_title, copy) in enumerate((
+            ("Open Steam", ""),
+            ("Go to Settings → Compatibility", ""),
+            ("Turn on \"Enable Steam Play for all other titles\"", ""),
+            ("Select Proton-CachyOS", "From the version dropdown."),
+            ("Restart Steam", "Your full game library now appears."),
+        ), 1):
+            pc_layout.addWidget(_make_flow_step(index, step_title, copy))
 
         tip = QLabel(
             "Proton-CachyOS is already installed on this system and kept up to date automatically."
         )
-        tip.setObjectName("wiz-card-copy")
+        tip.setObjectName("wiz-card-copy-ok")
         tip.setWordWrap(True)
-        tip.setStyleSheet("color: #34d399; margin-top: 6px;")
+        pc_layout.addSpacing(6)
         pc_layout.addWidget(tip)
         ps_layout.addWidget(proton_card)
         outer.addWidget(proton_section)
@@ -120,8 +138,7 @@ class _GamingStepMixin:
         compat_card, cc_layout = _make_card("wiz-card")
         cc_layout.setSpacing(6)
         compat_lbl = QLabel("Check your must-play games now — before you commit an evening to one")
-        compat_lbl.setObjectName("wiz-card-copy")
-        compat_lbl.setStyleSheet("font-weight: 700; color: #f2f4fb;")
+        compat_lbl.setObjectName("wiz-card-copy-strong")
         cc_layout.addWidget(compat_lbl)
         # Front-load the hard wall: kernel-level anti-cheat is the #1 reason
         # other system switchers give up, and no Proton setting will ever fix it.
@@ -134,9 +151,8 @@ class _GamingStepMixin:
             blocked_lbl = QLabel(
                 f"Will NOT run — blocked by kernel-level anti-cheat on every Linux system: {blocked_names}."
             )
-            blocked_lbl.setObjectName("wiz-card-copy")
+            blocked_lbl.setObjectName("wiz-card-copy-err")
             blocked_lbl.setWordWrap(True)
-            blocked_lbl.setStyleSheet("color: #f7768e;")
             cc_layout.addWidget(blocked_lbl)
         compat_sub = QLabel(
             "The rest of the tracked list is marked native, works through Proton, or needs "

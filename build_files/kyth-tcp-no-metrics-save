@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-tcp-no-metrics-save — 1 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-no-metrics-save "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.tcp_no_metrics_save import load_tcp_no_metrics_save, tcp_no_metrics_save_status; c=load_tcp_no_metrics_save(); print(f\"profile={c['profile']} active={tcp_no_metrics_save_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_no_metrics_save import load_tcp_no_metrics_save,save_tcp_no_metrics_save,generate_tcp_no_metrics_save; c=load_tcp_no_metrics_save(); c['profile']='gaming'; save_tcp_no_metrics_save(c); generate_tcp_no_metrics_save(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp no metrics save gaming 1" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_no_metrics_save import load_tcp_no_metrics_save,save_tcp_no_metrics_save,generate_tcp_no_metrics_save; c=load_tcp_no_metrics_save(); c['profile']='balanced'; save_tcp_no_metrics_save(c); generate_tcp_no_metrics_save(c)"; echo "tcp no metrics save balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_no_metrics_save import load_tcp_no_metrics_save,generate_tcp_no_metrics_save; generate_tcp_no_metrics_save(load_tcp_no_metrics_save())" ;;
+    *) echo "Usage: kyth-tcp-no-metrics-save [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

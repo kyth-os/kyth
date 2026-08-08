@@ -2,17 +2,30 @@ import os
 import re
 from typing import ClassVar
 
-from ..core_base import _restyle
+from ..core_base import restyle
 from ..services.cloud_sync import (
     RcloneAuthorizeWorker,
     rclone_create_remote,
     rclone_usage_hints,
     rclone_verify_remote,
 )
+from ..services.runtime import DataWorker
 from ..qt import (
     QDesktopServices, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )
 from ..widgets import _make_card
+
+
+def _apply_rclone_config(name: str, svc: str, token: str, folder: str, extra_params: list[str]):
+    """Run off the GUI thread by RcloneSetupWizard's DataWorker. Raises on
+    a hard failure (remote could not be created at all — the wizard stays
+    on the auth page for that); a failed connection *test* is a soft
+    failure the wizard still advances past, so it's returned, not raised."""
+    ok, err = rclone_create_remote(name, svc, token, extra_params=extra_params or None)
+    if not ok:
+        raise RuntimeError(err)
+    conn_ok, err_hint = rclone_verify_remote(name)
+    return name, svc, folder, conn_ok, err_hint
 
 
 class RcloneSetupWizard(QDialog):
@@ -43,9 +56,10 @@ class RcloneSetupWizard(QDialog):
         self.setMinimumSize(600, 500)
         self.resize(640, 540)
         self.setModal(True)
-        self.setStyleSheet("background: #1e1e1e;")
+        self.setObjectName("cloud-wizard")
 
         self._auth_worker: RcloneAuthorizeWorker | None = None
+        self._apply_worker: DataWorker | None = None
         self._token = ""
         self._selected_service = preselect if preselect in self._SERVICES else "drive"
         self._local_folder_for_open = ""
@@ -56,17 +70,15 @@ class RcloneSetupWizard(QDialog):
 
         # ── Header ──────────────────────────────────────────────────────
         header = QWidget()
-        header.setStyleSheet(
-            "QWidget { background: #1b1b1c; border-bottom: 1px solid #2e2e2e; }"
-        )
+        header.setObjectName("cloud-wizard-header")
         hdr_layout = QHBoxLayout(header)
         hdr_layout.setContentsMargins(28, 16, 28, 16)
         title_lbl = QLabel("Cloud Storage Setup")
-        title_lbl.setStyleSheet("font-size: 16px; font-weight: 700; color: #ffffff;")
+        title_lbl.setObjectName("cloud-wizard-title")
         hdr_layout.addWidget(title_lbl)
         hdr_layout.addStretch()
         self._step_label = QLabel()
-        self._step_label.setStyleSheet("font-size: 12px; color: #858585;")
+        self._step_label.setObjectName("cloud-step-label")
         hdr_layout.addWidget(self._step_label)
         root.addWidget(header)
 
@@ -80,9 +92,7 @@ class RcloneSetupWizard(QDialog):
 
         # ── Footer ──────────────────────────────────────────────────────
         footer = QWidget()
-        footer.setStyleSheet(
-            "QWidget { background: #181818; border-top: 1px solid #2b2b2b; }"
-        )
+        footer.setObjectName("cloud-wizard-footer")
         ftr_layout = QHBoxLayout(footer)
         ftr_layout.setContentsMargins(28, 14, 28, 14)
         ftr_layout.setSpacing(10)
@@ -115,7 +125,7 @@ class RcloneSetupWizard(QDialog):
         page, layout = self._page_container()
 
         heading = QLabel("Choose your cloud storage service")
-        heading.setStyleSheet("font-size: 17px; font-weight: 700; color: #ffffff;")
+        heading.setObjectName("cloud-page-heading")
         layout.addWidget(heading)
 
         sub = QLabel(
@@ -133,20 +143,16 @@ class RcloneSetupWizard(QDialog):
             btn = QPushButton()
             btn.setCheckable(True)
             btn.setMinimumHeight(96)
-            btn.setStyleSheet("QPushButton { text-align: left; border-radius: 8px; }")
+            btn.setObjectName("cloud-service")
             inner = QVBoxLayout(btn)
             inner.setContentsMargins(16, 14, 16, 14)
             inner.setSpacing(6)
             name_lbl = QLabel(info["label"])
-            name_lbl.setStyleSheet(
-                "font-size: 14px; font-weight: 700; background: transparent; border: none;"
-            )
+            name_lbl.setObjectName("cloud-service-name")
             inner.addWidget(name_lbl)
             desc_lbl = QLabel(info["description"])
             desc_lbl.setWordWrap(True)
-            desc_lbl.setStyleSheet(
-                "font-size: 12px; color: #a6a6a6; background: transparent; border: none;"
-            )
+            desc_lbl.setObjectName("cloud-service-copy")
             inner.addWidget(desc_lbl)
             btn.clicked.connect(lambda _checked, s=svc_id: self._select_service(s))
             self._service_btns[svc_id] = btn
@@ -161,7 +167,7 @@ class RcloneSetupWizard(QDialog):
         page, layout = self._page_container()
 
         heading = QLabel("Name and local folder")
-        heading.setStyleSheet("font-size: 17px; font-weight: 700; color: #ffffff;")
+        heading.setObjectName("cloud-page-heading")
         layout.addWidget(heading)
 
         sub = QLabel(
@@ -176,7 +182,7 @@ class RcloneSetupWizard(QDialog):
         form_layout.setSpacing(10)
 
         name_lbl = QLabel("Remote name")
-        name_lbl.setStyleSheet("font-weight: 600; color: #cccccc;")
+        name_lbl.setObjectName("cloud-field-label")
         form_layout.addWidget(name_lbl)
         self._name_edit = QLineEdit()
         self._name_edit.setPlaceholderText("e.g. gdrive")
@@ -187,11 +193,11 @@ class RcloneSetupWizard(QDialog):
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("background: #26293a; max-height: 1px; border: none;")
+        sep.setObjectName("cloud-divider")
         form_layout.addWidget(sep)
 
         folder_lbl = QLabel("Local sync folder")
-        folder_lbl.setStyleSheet("font-weight: 600; color: #cccccc;")
+        folder_lbl.setObjectName("cloud-field-label")
         form_layout.addWidget(folder_lbl)
         folder_row = QHBoxLayout()
         folder_row.setSpacing(8)
@@ -214,9 +220,7 @@ class RcloneSetupWizard(QDialog):
         page, layout = self._page_container()
 
         self._auth_heading = QLabel("Authorize access")
-        self._auth_heading.setStyleSheet(
-            "font-size: 17px; font-weight: 700; color: #ffffff;"
-        )
+        self._auth_heading.setObjectName("cloud-page-heading")
         layout.addWidget(self._auth_heading)
 
         self._auth_sub = QLabel(
@@ -261,9 +265,7 @@ class RcloneSetupWizard(QDialog):
         page, layout = self._page_container()
 
         done_heading = QLabel("All set!")
-        done_heading.setStyleSheet(
-            "font-size: 22px; font-weight: 700; color: #4dbb6f;"
-        )
+        done_heading.setObjectName("cloud-done-heading")
         layout.addWidget(done_heading)
 
         self._done_sub = QLabel("")
@@ -283,11 +285,11 @@ class RcloneSetupWizard(QDialog):
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("background: #26293a; max-height: 1px; border: none;")
+        sep.setObjectName("cloud-divider")
         done_card_layout.addWidget(sep)
 
         cmds_lbl = QLabel("Useful commands:")
-        cmds_lbl.setStyleSheet("font-weight: 600; color: #cccccc; font-size: 13px;")
+        cmds_lbl.setObjectName("cloud-command-label")
         done_card_layout.addWidget(cmds_lbl)
 
         self._done_cmds = QTextEdit()
@@ -328,7 +330,8 @@ class RcloneSetupWizard(QDialog):
                     "Please complete browser authorization before continuing."
                 )
                 return
-            self._apply_config()
+            self._start_apply_config()
+            return
         elif step == 3:
             self.accept()
         self._update_nav()
@@ -361,19 +364,7 @@ class RcloneSetupWizard(QDialog):
     def _select_service(self, svc_id: str):
         self._selected_service = svc_id
         for sid, btn in self._service_btns.items():
-            if sid == svc_id:
-                btn.setChecked(True)
-                btn.setStyleSheet(
-                    "QPushButton { background: rgba(79, 140, 255, 0.18); "
-                    "border: 2px solid #4f8cff; "
-                    "border-radius: 6px; text-align: left; }"
-                )
-            else:
-                btn.setChecked(False)
-                btn.setStyleSheet(
-                    "QPushButton { background: #151722; border: 1px solid #26293a; "
-                    "border-radius: 8px; text-align: left; }"
-                )
+            btn.setChecked(sid == svc_id)
 
     # ── Remote page ───────────────────────────────────────────────────────
 
@@ -407,7 +398,7 @@ class RcloneSetupWizard(QDialog):
             "Browser opened — please sign in and grant access, then return here."
         )
         self._auth_status_lbl.setObjectName("subheading")
-        _restyle(self._auth_status_lbl)
+        restyle(self._auth_status_lbl)
 
         self._auth_worker = RcloneAuthorizeWorker(self._selected_service)
         self._auth_worker.token_ready.connect(self._on_auth_success)
@@ -417,7 +408,7 @@ class RcloneSetupWizard(QDialog):
     def _cancel_auth(self):
         if self._auth_worker and self._auth_worker.isRunning():
             self._auth_worker.cancel()
-            self._auth_worker.wait(2000)
+            # Don't block UI — finished signal will clean up
         self._token = ""
         self._auth_start_btn.setEnabled(True)
         self._auth_start_btn.show()
@@ -425,7 +416,7 @@ class RcloneSetupWizard(QDialog):
         self._auth_progress.hide()
         self._auth_status_lbl.setText("Ready — click the button below to begin.")
         self._auth_status_lbl.setObjectName("")
-        _restyle(self._auth_status_lbl)
+        restyle(self._auth_status_lbl)
 
     def _on_auth_success(self, token: str):
         self._token = token
@@ -436,7 +427,7 @@ class RcloneSetupWizard(QDialog):
             "Authorization successful!  Click Next → to save and test the connection."
         )
         self._auth_status_lbl.setObjectName("status-ok")
-        _restyle(self._auth_status_lbl)
+        restyle(self._auth_status_lbl)
         self._update_nav()  # reveals Next button
 
     def _on_auth_failed(self, error: str):
@@ -445,11 +436,23 @@ class RcloneSetupWizard(QDialog):
         self._auth_progress.hide()
         self._auth_status_lbl.setText(f"Authorization failed — {error[:200]}")
         self._auth_status_lbl.setObjectName("status-err")
-        _restyle(self._auth_status_lbl)
+        restyle(self._auth_status_lbl)
 
     # ── Config creation + done page ─────────────────────────────────────────
 
-    def _apply_config(self):
+    def _set_apply_controls_enabled(self, enabled: bool) -> None:
+        self._next_btn.setEnabled(enabled)
+        self._back_btn.setEnabled(enabled)
+        self._cancel_btn.setEnabled(enabled)
+
+    def _start_apply_config(self):
+        # rclone_create_remote/rclone_verify_remote are plain subprocess
+        # calls with up to a 30s + 20s timeout — not process-group-managed
+        # like Worker, so there's no safe way to cancel them mid-flight.
+        # Disable navigation (see reject() override below for Escape/close)
+        # instead of offering a cancel button we can't honor.
+        if self._apply_worker is not None:
+            return
         name = self._name_edit.text().strip()
         svc = self._selected_service
         folder = self._folder_edit.text().strip()
@@ -467,15 +470,25 @@ class RcloneSetupWizard(QDialog):
         if svc == "onedrive":
             extra_params = ["drive_type", "personal"]
 
-        ok, err = rclone_create_remote(
-            name, svc, self._token, extra_params=extra_params or None,
-        )
-        if not ok:
-            title = "rclone Not Found" if "not installed" in err.lower() else "Config Error"
-            QMessageBox.critical(self, title, f"Failed to write rclone config:\n{err}")
-            return
+        self._set_apply_controls_enabled(False)
+        self._auth_progress.show()
+        self._auth_status_lbl.setText("Saving configuration and testing the connection…")
+        self._auth_status_lbl.setObjectName("subheading")
+        restyle(self._auth_status_lbl)
 
-        conn_ok, err_hint = rclone_verify_remote(name)
+        self._apply_worker = DataWorker(
+            "rclone-apply-config",
+            lambda: _apply_rclone_config(name, svc, self._token, folder, extra_params),
+        )
+        self._apply_worker.result.connect(self._on_apply_config_ready)
+        self._apply_worker.failed.connect(self._on_apply_config_failed)
+        self._apply_worker.finished.connect(lambda: setattr(self, "_apply_worker", None))
+        self._apply_worker.start()
+
+    def _on_apply_config_ready(self, _key: str, data: object):
+        name, svc, folder, conn_ok, err_hint = data
+        self._set_apply_controls_enabled(True)
+        self._auth_progress.hide()
 
         info = self._SERVICES[svc]
         if conn_ok:
@@ -500,6 +513,26 @@ class RcloneSetupWizard(QDialog):
         # Always emit so the cloud page registers the folder and shows sync controls,
         # even if the connection test failed (config is on disk regardless)
         self.finished_ok.emit(name, svc, folder)
+
+    def _on_apply_config_failed(self, _key: str, message: str):
+        self._set_apply_controls_enabled(True)
+        self._auth_progress.hide()
+        self._auth_status_lbl.setText(
+            "Authorization successful!  Click Next → to save and test the connection."
+        )
+        self._auth_status_lbl.setObjectName("status-ok")
+        restyle(self._auth_status_lbl)
+        title = "rclone Not Found" if "not installed" in message.lower() else "Config Error"
+        QMessageBox.critical(self, title, f"Failed to write rclone config:\n{message}")
+
+    def reject(self):
+        if self._apply_worker is not None:
+            # Ignore Escape/window-close while the background config apply
+            # is running — its underlying subprocess calls aren't
+            # cancellable, so closing here would leave a worker running
+            # against a dialog about to be destroyed.
+            return
+        super().reject()
 
     def _open_local_folder(self):
         if self._local_folder_for_open and os.path.isdir(self._local_folder_for_open):

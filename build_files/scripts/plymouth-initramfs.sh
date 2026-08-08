@@ -4,10 +4,15 @@
 # it in. Run after scripts/branding.sh in the same image layer.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/find-kver.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/find-kver.sh"
+source "${SCRIPT_DIR}/lib/find-kver.sh"
 # shellcheck source=lib/plymouth-initrd-checks.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/plymouth-initrd-checks.sh"
+source "${SCRIPT_DIR}/lib/plymouth-initrd-checks.sh"
+# shellcheck source=lib/plymouth-config.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/plymouth-config.sh"
+# shellcheck source=lib/dracut-retry.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/dracut-retry.sh"
 
 /usr/libexec/kyth-plymouth-branding-guard /ctx/branding/transparent-watermark.svg
 
@@ -19,17 +24,14 @@ test -n "${KVER}" ||
 	}
 
 mkdir -p /etc/plymouth /usr/share/plymouth
-printf '[Daemon]\nTheme=kyth\nShowDelay=0\nDeviceTimeout=8\nUseFirmwareBackground=false\n' >/etc/plymouth/plymouthd.conf
+printf '%s\n' "${KYTH_PLYMOUTHD_CONF}" >/etc/plymouth/plymouthd.conf
 install -m 0644 /etc/plymouth/plymouthd.conf /usr/share/plymouth/plymouthd.defaults
 
-TMPDIR=/var/tmp dracut \
+kyth_build_initramfs "/usr/lib/modules/${KVER}/initramfs" \
 	--no-hostonly \
 	--compress "zstd -3" \
 	--kver "${KVER}" \
-	--force \
-	--add kyth-plymouth \
-	"/usr/lib/modules/${KVER}/initramfs" \
-	2> >(grep -Ev 'xattr|fail to copy' >&2)
+	--add kyth-plymouth
 
 echo "=== POST-DRACUT: plymouthd.defaults from initramfs ===" >&2
 (lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" 2>/dev/null || echo "MISSING") >&2
@@ -56,13 +58,7 @@ if command -v lsinitrd >/dev/null 2>&1; then
 		/usr/share/kyth/branding/transparent-watermark.png \
 		"branded initramfs still contains distro Plymouth system logo"
 
-	daemon_patterns=(
-		'^Theme=kyth$|do not force Theme=kyth'
-		'^ShowDelay=0$|do not draw immediately'
-		'^DeviceTimeout=8$|are missing DeviceTimeout=8'
-		'^UseFirmwareBackground=false$|do not suppress BGRT firmware background'
-	)
-	for entry in "${daemon_patterns[@]}"; do
+	for entry in "${KYTH_PLYMOUTH_DAEMON_CHECKS[@]}"; do
 		plymouth_require_pattern \
 			<(lsinitrd -f /usr/share/plymouth/plymouthd.defaults "${initramfs}") \
 			"${entry%%|*}" "branded initramfs Plymouth defaults ${entry#*|}"

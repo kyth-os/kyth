@@ -6,6 +6,10 @@ import json
 import logging
 import os
 import subprocess
+
+from kyth_shared.commands import APPLICATION_RUNNER, command_spec
+
+from kyth_welcome.services.command import run_sync
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +34,7 @@ def read_sched_status() -> dict[str, Any]:
 
 def list_schedulers() -> list[str]:
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["kyth-scx", "list"],
             capture_output=True, text=True, timeout=5, check=False,
         )
@@ -51,7 +55,7 @@ def list_schedulers() -> list[str]:
 
 def is_sched_daemon_active() -> bool:
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["systemctl", "--user", "is-active", "kyth-sched.service"],
             capture_output=True, text=True, timeout=3, check=False,
         )
@@ -64,8 +68,8 @@ def apply_scheduler(name: str) -> None:
     if not name:
         return
     try:
-        subprocess.Popen(
-            scheduler_action(name).command(),
+        APPLICATION_RUNNER.spawn(
+            scheduler_action(name),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception:
@@ -75,8 +79,11 @@ def apply_scheduler(name: str) -> None:
 def set_sched_daemon_enabled(enabled: bool) -> None:
     cmd = "start" if enabled else "stop"
     try:
-        subprocess.Popen(
-            ["systemctl", "--user", cmd, "kyth-sched.service"],
+        APPLICATION_RUNNER.spawn(
+            command_spec(
+                ["systemctl", "--user", cmd, "kyth-sched.service"],
+                name="scheduler-daemon", timeout=None,
+            ),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception:

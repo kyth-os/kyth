@@ -1,9 +1,8 @@
 """Wizard step builder — _FinishStepMixin."""
 from __future__ import annotations
 
-import subprocess
-
 from ..qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from ..services.launch import flatpak_run
 from ..services.setup_state import STEP_LABELS, load_state, relevant_steps
 from ..widgets import _make_card
 
@@ -72,9 +71,7 @@ class _FinishStepMixin:
         layout.addStretch()
 
         check = QLabel("✓")
-        check.setStyleSheet(
-            "font-size: 52px; color: #34d399; font-weight: 300; background: transparent;"
-        )
+        check.setObjectName("glyph-finish-ok")
         layout.addWidget(check)
         layout.addSpacing(18)
 
@@ -101,7 +98,7 @@ class _FinishStepMixin:
         btn_row.setSpacing(10)
         steam_btn = QPushButton("Open Steam")
         steam_btn.setObjectName("primary")
-        steam_btn.clicked.connect(lambda: subprocess.Popen(["flatpak", "run", "com.valvesoftware.Steam"]))
+        steam_btn.clicked.connect(lambda: flatpak_run("com.valvesoftware.Steam"))
         btn_row.addWidget(steam_btn)
         self._finish_work_btn = QPushButton("Open Work Setup")
         self._finish_work_btn.setToolTip(

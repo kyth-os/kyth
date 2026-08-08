@@ -68,9 +68,9 @@ def rclone_create_remote(
     timeout: int = 30,
 ) -> tuple[bool, str]:
     """Create an rclone remote. Returns (ok, error_or_empty)."""
-    from .process import _run_command
+    from .process import run_command
 
-    result = _run_command(
+    result = run_command(
         rclone_config_create_command(name, service, token, extra_params=extra_params),
         timeout=timeout,
     )
@@ -84,9 +84,9 @@ def rclone_create_remote(
 
 def rclone_verify_remote(name: str, *, timeout: int = 20) -> tuple[bool, str]:
     """List remote root; returns (ok, error_hint)."""
-    from .process import _run_command
+    from .process import run_command
 
-    result = _run_command(
+    result = run_command(
         ["rclone", "lsd", f"{name}:", "--max-depth", "0"],
         timeout=timeout,
     )

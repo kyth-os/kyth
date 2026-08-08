@@ -1,9 +1,11 @@
 import logging
 from datetime import datetime
 
+from kyth_shared.boot_health import read_state as read_boot_health_state
 from kyth_shared.update_status import read_update_snapshot
 
 # __KYTH_GENERATED_IMPORTS__
+from .core_base import restyle
 from .services.dbus_utils import is_systemd_unit_enabled
 from .services.launch import popen_privileged
 from .services.privileged import AuthFrontend, systemctl_action
@@ -43,8 +45,9 @@ class _AutoUpdateMixin:
         last_row, self._au_last_lbl      = _au_row("Last check:")
         result_row, self._au_result_lbl  = _au_row("Result:")
         reason_row, self._au_reason_lbl  = _au_row("Reason:")
+        health_row, self._au_health_lbl = _au_row("Boot health:")
         flatpak_row, self._au_flatpak_lbl = _au_row("Flatpak:")
-        for row in (last_row, result_row, reason_row, flatpak_row):
+        for row in (last_row, result_row, reason_row, health_row, flatpak_row):
             auto_state_col.addLayout(row)
         auto_status_row.addLayout(auto_state_col, 1)
 
@@ -83,19 +86,40 @@ class _AutoUpdateMixin:
         self._au_last_lbl.setText(ts_str)
 
         result = status.get("result", "")
-        _colors = {"upgraded": "#4caf50", "no_change": "#b0bccf", "skipped": "#ffa726", "error": "#ef5350"}
+        _result_styles = {
+            "upgraded": "prop-val-green", "no_change": "card-copy",
+            "skipped": "prop-val-orange", "quarantined": "prop-val-red", "error": "prop-val-red",
+        }
         self._au_result_lbl.setText(result.replace("_", " ").title() if result else "—")
-        self._au_result_lbl.setStyleSheet(f"color: {_colors.get(result, '#b0bccf')};")
+        self._au_result_lbl.setObjectName(_result_styles.get(result, "card-copy"))
+        restyle(self._au_result_lbl)
         self._au_reason_lbl.setText(status.get("reason") or "—")
+
+        health = read_boot_health_state()
+        health_text = health.status.replace("_", " ").title()
+        if health.failures:
+            health_text += f" · {health.failures} failed boot(s)"
+        if health.quarantined:
+            health_text += f" · {len(health.quarantined)} quarantined"
+        if health.last_recovered_digest:
+            health_text += f" · recovered from {health.last_recovered_digest[:19]}…"
+        self._au_health_lbl.setText(health_text)
+        health_style = {
+            "healthy": "prop-val-green", "recovered": "prop-val-green", "unhealthy": "prop-val-orange",
+            "quarantined": "prop-val-red",
+        }.get(health.status, "card-copy")
+        self._au_health_lbl.setObjectName(health_style)
+        restyle(self._au_health_lbl)
 
         flatpak_count = status.get("flatpak_updates", 0)
         if flatpak_count > 0:
             noun = "update" if flatpak_count == 1 else "updates"
             self._au_flatpak_lbl.setText(f"{flatpak_count} {noun} pending")
-            self._au_flatpak_lbl.setStyleSheet("color: #ffa726;")
+            self._au_flatpak_lbl.setObjectName("prop-val-orange")
         else:
             self._au_flatpak_lbl.setText("Up to date")
-            self._au_flatpak_lbl.setStyleSheet("color: #4caf50;")
+            self._au_flatpak_lbl.setObjectName("prop-val-green")
+        restyle(self._au_flatpak_lbl)
 
         # Reflect timer enabled state
         enabled = is_systemd_unit_enabled("kyth-update-watcher.timer")
@@ -118,3 +142,52 @@ class _AutoUpdateMixin:
             "kyth-update-watcher.service",
             frontend=AuthFrontend.PKEXEC,
         ))
+
+    def _build_windows_update_style_card(self):
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Windows Update style — active hours & reboot scheduling")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Like Windows Update: KythOS stages the new OS image in the background, then waits for you. "
+            "Reboot when you are ready — active hours defer automatic staging, and your previous image stays as System Restore for 14 days. "
+            "Files in /home are never touched."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        # Staged vs reboot explainer
+        staged_row = QHBoxLayout()
+        staged_row.setSpacing(10)
+        k = QLabel("Staged update:")
+        k.setObjectName("prop-key")
+        k.setMinimumWidth(110)
+        staged_row.addWidget(k)
+        self._wu_staged_lbl = QLabel("Checking…")
+        self._wu_staged_lbl.setObjectName("prop-val")
+        staged_row.addWidget(self._wu_staged_lbl, 1)
+        layout.addLayout(staged_row)
+        active_row = QHBoxLayout()
+        active_row.setSpacing(8)
+        active_row.addWidget(QLabel("Active hours:"))
+        self._wu_hours_lbl = QLabel("08:00 – 22:00 (watcher defers staging during active hours when configured via timer override)")
+        self._wu_hours_lbl.setObjectName("card-copy")
+        active_row.addWidget(self._wu_hours_lbl, 1)
+        layout.addLayout(active_row)
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        reboot_now = QPushButton("Reboot Now")
+        reboot_now.setObjectName("primary")
+        reboot_now.setToolTip("Reboot to the staged image now (if one is staged)")
+        reboot_now.clicked.connect(lambda _=False: popen_privileged(["systemctl", "reboot"]))
+        btns.addWidget(reboot_now)
+        defer_btn = QPushButton("Defer Automatic Updates 3 Days")
+        defer_btn.setToolTip("Stops the watcher timer for 72h — stops the watcher timer via systemctl stop")
+        defer_btn.clicked.connect(lambda _=False: popen_privileged(systemctl_action("stop", "kyth-update-watcher.timer", frontend=AuthFrontend.PKEXEC)))
+        btns.addWidget(defer_btn)
+        enable_btn = QPushButton("Re-enable Updates")
+        enable_btn.clicked.connect(lambda _=False: popen_privileged(systemctl_action("enable", "kyth-update-watcher.timer", now=True, frontend=AuthFrontend.PKEXEC)))
+        btns.addWidget(enable_btn)
+        btns.addStretch()
+        layout.addLayout(btns)
+        self._add(card)

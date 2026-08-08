@@ -3,6 +3,7 @@ from importlib.machinery import SourceFileLoader
 import subprocess  # nosec B404 # nosemgrep
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -99,6 +100,45 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
             self.watcher.get_remote_digest("ghcr.io/mrtrick37/kyth:latest"),
             "sha256:1111111111111111111111111111111111111111111111111111111111111111"
         )
+
+    def test_quarantined_remote_digest_is_not_staged(self):
+        remote_digest = "sha256:" + "a" * 64
+        status = {
+            "status": {
+                "booted": {
+                    "image": {
+                        "reference": "ghcr.io/mrtrick37/kyth:testing",
+                        "imageDigest": "sha256:" + "b" * 64,
+                    }
+                }
+            }
+        }
+        quarantine = SimpleNamespace(
+            quarantined={
+                remote_digest: SimpleNamespace(
+                    failures=3, reason="greenboot required check failed"
+                )
+            }
+        )
+
+        with (
+            patch.object(self.watcher.os, "geteuid", return_value=0),
+            patch.object(self.watcher, "check_startup_grace", return_value=None),
+            patch.object(self.watcher, "check_quiet_hours", return_value=None),
+            patch.object(self.watcher, "check_gaming", return_value=None),
+            patch.object(self.watcher, "check_metered", return_value=None),
+            patch.object(self.watcher, "check_flatpak_updates", return_value=0),
+            patch.object(self.watcher, "get_bootc_status", return_value=status),
+            patch.object(self.watcher, "get_remote_digest", return_value=remote_digest),
+            patch.object(self.watcher, "read_boot_health_state", return_value=quarantine),
+            patch.object(self.watcher, "write_status") as write_status,
+            patch.object(self.watcher, "run_bootc_upgrade") as upgrade,
+        ):
+            result = self.watcher.UpdateWatcherDaemon().run()
+
+        self.assertEqual(result, 0)
+        upgrade.assert_not_called()
+        self.assertEqual(write_status.call_args.args[0], "quarantined")
 
     @patch("subprocess.run")
     @patch("sys.exit")

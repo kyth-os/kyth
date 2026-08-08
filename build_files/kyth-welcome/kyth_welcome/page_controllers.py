@@ -1,17 +1,17 @@
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _release_worker_when_finished
+from .core_base import restyle
 from .services.workers import ControllerProbeWorker
 from .services.hardware import controller_status_view
-from .services.runtime import Worker
+from .services.runtime import Worker, release_worker_when_finished
 from .services.privileged import AuthFrontend, helper_action
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QPushButton,
 )
 from .services.launch import flatpak_run, popen, systemsettings
 from .widgets import (
-    Page, _make_card,
+    Page, _make_card, _make_flow_step,
 )
 
 
@@ -39,6 +39,14 @@ class ControllerPage(Page):
         self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.clicked.connect(self._start_probe)
         status_top.addWidget(self._refresh_btn)
+        self._rumble_btn = QPushButton("Test Rumble")
+        self._rumble_btn.setToolTip("Vibrate the first detected gamepad for 1 second (fftest)")
+        self._rumble_btn.clicked.connect(self._test_rumble)
+        status_top.addWidget(self._rumble_btn)
+        self._steam_input_btn = QPushButton("Steam Input")
+        self._steam_input_btn.setToolTip("Open Steam Controller settings")
+        self._steam_input_btn.clicked.connect(lambda: flatpak_run("com.valvesoftware.Steam", "steam://open/controllersettings"))
+        status_top.addWidget(self._steam_input_btn)
         self._status_layout.addLayout(status_top)
         self._status_lbl = QLabel("Scanning…")
         self._status_lbl.setObjectName("card-copy")
@@ -70,14 +78,15 @@ class ControllerPage(Page):
         self._xone_btn.clicked.connect(self._flash_xone)
         xbox_layout.addWidget(self._xone_btn)
 
-        xbox_bt_steps = QLabel(
-            "Pair over Bluetooth (no dongle):\n"
-            "  1.  Press and hold the Xbox button for 3 seconds until it flashes\n"
-            "  2.  Hold the Sync button (top of controller) until it flashes rapidly\n"
-            "  3.  Open System Tray → Bluetooth → Add Device"
-        )
-        xbox_bt_steps.setObjectName("card-copy")
-        xbox_layout.addWidget(xbox_bt_steps)
+        xbox_bt_label = QLabel("Pair over Bluetooth (no dongle):")
+        xbox_bt_label.setObjectName("card-copy")
+        xbox_layout.addWidget(xbox_bt_label)
+        for index, (step_title, copy) in enumerate((
+            ("Press and hold the Xbox button", "For 3 seconds, until it flashes."),
+            ("Hold the Sync button", "Top of the controller, until it flashes rapidly."),
+            ("Add the device", "System Tray → Bluetooth → Add Device."),
+        ), 1):
+            xbox_layout.addWidget(_make_flow_step(index, step_title, copy))
 
         xbox_bt_btn = QPushButton("Open Bluetooth Settings")
         xbox_bt_btn.clicked.connect(lambda: systemsettings("kcm_bluetooth"))
@@ -98,19 +107,25 @@ class ControllerPage(Page):
         ps_desc.setWordWrap(True)
         ps_layout.addWidget(ps_desc)
 
-        ps_bt_steps = QLabel(
-            "Pair over Bluetooth:\n"
-            "  DualSense (PS5):  hold PS + Create until the light bar blinks\n"
-            "  DualShock 4 (PS4):  hold PS + Share until the light bar blinks\n"
-            "  Then: System Tray → Bluetooth → Add Device\n\n"
-            "For haptics and adaptive triggers in Proton games:\n"
-            "  Steam → Settings → Controller → Enable PlayStation controller support\n"
-            "  In each game's controller settings: enable DualSense features\n"
-            "  Avoid third-party controller emulation tools — they hide the native DualSense\n"
-            "  from Proton and prevent haptic/trigger passthrough"
-        )
-        ps_bt_steps.setObjectName("card-copy")
-        ps_layout.addWidget(ps_bt_steps)
+        ps_bt_label = QLabel("Pair over Bluetooth:")
+        ps_bt_label.setObjectName("card-copy")
+        ps_layout.addWidget(ps_bt_label)
+        for index, (step_title, copy) in enumerate((
+            ("DualSense (PS5)", "Hold PS + Create until the light bar blinks."),
+            ("DualShock 4 (PS4)", "Hold PS + Share until the light bar blinks."),
+            ("Add the device", "System Tray → Bluetooth → Add Device."),
+        ), 1):
+            ps_layout.addWidget(_make_flow_step(index, step_title, copy))
+
+        ps_haptics_label = QLabel("For haptics and adaptive triggers in Proton games:")
+        ps_haptics_label.setObjectName("card-copy")
+        ps_layout.addWidget(ps_haptics_label)
+        for index, (step_title, copy) in enumerate((
+            ("Enable PlayStation controller support", "Steam → Settings → Controller."),
+            ("Enable DualSense features", "In each game's own controller settings."),
+            ("Avoid third-party controller emulation tools", "They hide the native DualSense from Proton and prevent haptic/trigger passthrough."),
+        ), 1):
+            ps_layout.addWidget(_make_flow_step(index, step_title, copy))
 
         self._ds_status_lbl = QLabel()
         self._ds_status_lbl.setObjectName("card-copy")
@@ -140,17 +155,12 @@ class ControllerPage(Page):
         other_title = QLabel("Nintendo Switch Pro, 8BitDo & Other Controllers")
         other_title.setObjectName("card-title")
         other_layout.addWidget(other_title)
-        other_steps = QLabel(
-            "Nintendo Switch Pro (Bluetooth):\n"
-            "  Hold the Sync button on the top edge until the lights cycle\n\n"
-            "8BitDo (Bluetooth):\n"
-            "  Hold Start + B (Android mode) or Start + X (macOS mode, best for Linux)\n"
-            "  Then hold the Pair button for 3 seconds\n\n"
-            "Most USB controllers (HORI, PowerA, PDP, Razer):\n"
-            "  Plug in — they appear immediately as standard HID gamepads"
-        )
-        other_steps.setObjectName("card-copy")
-        other_layout.addWidget(other_steps)
+        for index, (step_title, copy) in enumerate((
+            ("Nintendo Switch Pro (Bluetooth)", "Hold the Sync button on the top edge until the lights cycle."),
+            ("8BitDo (Bluetooth)", "Hold Start + B (Android mode) or Start + X (macOS mode, best for Linux), then hold Pair for 3 seconds."),
+            ("Most USB controllers", "HORI, PowerA, PDP, Razer, and similar — plug in and they appear immediately as standard HID gamepads."),
+        ), 1):
+            other_layout.addWidget(_make_flow_step(index, step_title, copy))
 
         other_bt_btn = QPushButton("Open Bluetooth Settings")
         other_bt_btn.clicked.connect(lambda: systemsettings("kcm_bluetooth"))
@@ -182,9 +192,8 @@ class ControllerPage(Page):
             "will load. Run  sudo mokutil --import /etc/xone/cert.der  and follow "
             "the prompts, then reboot."
         )
-        self._sb_warn_lbl.setObjectName("card-copy")
+        self._sb_warn_lbl.setObjectName("text-warn")
         self._sb_warn_lbl.setWordWrap(True)
-        self._sb_warn_lbl.setStyleSheet("color: #d4a843; padding: 6px 0;")
         self._sb_warn_lbl.hide()
         self._add(self._sb_warn_lbl)
 
@@ -206,7 +215,7 @@ class ControllerPage(Page):
         worker = ControllerProbeWorker()
         self._probe_worker = worker
         worker.result.connect(self._on_probe_result)
-        _release_worker_when_finished(self, "_probe_worker", worker)
+        release_worker_when_finished(self, "_probe_worker", worker)
         worker.start()
 
     def _on_probe_result(self, info: dict) -> None:
@@ -216,7 +225,8 @@ class ControllerPage(Page):
         self._status_lbl.setText(view.status_text)
 
         self._xone_status_lbl.setText(view.xone_status_text)
-        self._xone_status_lbl.setStyleSheet(view.xone_status_style)
+        self._xone_status_lbl.setObjectName(view.xone_status_object_name)
+        restyle(self._xone_status_lbl)
         self._xone_btn.setVisible(view.xone_button_visible)
 
         self._ds_status_lbl.setText(view.dualsense_status_text)
@@ -225,6 +235,18 @@ class ControllerPage(Page):
         self._sb_warn_lbl.setVisible(view.secure_boot_warning_visible)
 
     # ── Actions ────────────────────────────────────────────────────────────────
+
+    def _test_rumble(self) -> None:
+        import glob, shutil
+        dev = next(iter(glob.glob("/dev/input/js*") or glob.glob("/dev/input/by-id/*joystick*")), None)
+        if not dev and shutil.which("fftest"):
+            dev = "/dev/input/js0"
+        if not dev:
+            QMessageBox.information(self, "No controller", "No joystick device found at /dev/input/js*. Connect a controller first.")
+            return
+        cmd = ["fftest", dev] if shutil.which("fftest") else ["evtest", dev]
+        # Non-blocking: open terminal with test
+        popen(cmd)
 
     def _flash_xone(self) -> None:
         cmd = shutil.which("xone-dongle-install") or shutil.which("xone-firmware-install")
@@ -246,8 +268,10 @@ class ControllerPage(Page):
         self._xone_btn.setEnabled(True)
         if code == 0:
             self._xone_status_lbl.setText("✓  Firmware flashed. Unplug and re-plug the adapter, then press Refresh.")
-            self._xone_status_lbl.setStyleSheet("color: #4fc1ff;")
+            self._xone_status_lbl.setObjectName("text-blue")
+            restyle(self._xone_status_lbl)
             self._xone_btn.hide()
         else:
             self._xone_status_lbl.setText(f"Firmware flash failed (exit {code}). Check that xone is installed.")
-            self._xone_status_lbl.setStyleSheet("color: #f48771;")
+            self._xone_status_lbl.setObjectName("text-err")
+            restyle(self._xone_status_lbl)

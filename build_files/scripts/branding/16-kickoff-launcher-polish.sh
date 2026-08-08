@@ -7,8 +7,7 @@
 # their categories without green dots or "New!" labels.
 install -m 0755 /ctx/kyth-set-kickoff-icon /usr/bin/kyth-set-kickoff-icon
 
-mkdir -p /etc/skel/.config/autostart
-cat >/etc/skel/.config/autostart/kyth-set-kickoff-icon.desktop <<'AUTOSTARTEOF'
+write_config /etc/skel/.config/autostart/kyth-set-kickoff-icon.desktop <<'AUTOSTARTEOF'
 [Desktop Entry]
 Type=Application
 Name=KythOS: Set Kickoff Icon

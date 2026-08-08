@@ -24,18 +24,18 @@ class RepairServiceTests(unittest.TestCase):
         ok_res = MagicMock(returncode=0)
         fail_res = MagicMock(returncode=1, stderr="Operation not permitted")
 
-        with patch("kyth_welcome.services.process._run_command", return_value=ok_res):
+        with patch("kyth_welcome.services.process.run_command", return_value=ok_res):
             ok, err = repair.force_deep_sleep()
             self.assertTrue(ok)
             self.assertEqual(err, "")
 
-        with patch("kyth_welcome.services.process._run_command", return_value=fail_res):
+        with patch("kyth_welcome.services.process.run_command", return_value=fail_res):
             ok, err = repair.force_deep_sleep()
             self.assertFalse(ok)
             self.assertEqual(err, "Operation not permitted")
 
     def test_set_exe_mime_defaults_invokes_xdg_mime(self):
-        with patch("kyth_welcome.services.process._run_command") as run_mock:
+        with patch("kyth_welcome.services.process.run_command") as run_mock:
             repair.set_exe_mime_defaults("custom.desktop")
 
         self.assertEqual(run_mock.call_count, 3)

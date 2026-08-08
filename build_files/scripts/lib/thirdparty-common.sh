@@ -2,7 +2,8 @@
 # Shared helpers for thirdparty tool installer fragments.
 # Source this before defining per-tool install functions.
 
-source "$(dirname "${BASH_SOURCE[0]}")/curl-common.sh"
+THIRDPARTY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${THIRDPARTY_LIB_DIR}/curl-common.sh"
 CURL_COMMON_ARGS+=(--max-time 300)
 
 is_enabled() {

@@ -1,8 +1,6 @@
-"""Switcher QSS styles."""
-from ..ui_tokens import (
-    KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_SURFACE_RAISED,
-    KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
-)
+"""Gaming section switcher — pill tabs."""
+
+from ..ui_tokens import KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_MUTED
 
 SWITCHER_QSS = f"""
 /* ── Gaming section switcher ─────────────────────────────────────────────── */
@@ -17,7 +15,7 @@ QWidget#gaming-section-row {{
 
 QPushButton#gaming-section,
 QPushButton#gaming-section-active {{
-    border-radius: 5px;
+    border-radius: 8px;
     padding: 7px 14px;
     font-weight: 600;
 }}
@@ -31,11 +29,11 @@ QPushButton#gaming-section {{
 QPushButton#gaming-section:hover {{
     background: {KYTH_SURFACE_RAISED};
     color: {KYTH_TEXT};
-    border-color: {KYTH_TEXT_FAINT};
+    border-color: {KYTH_HAIRLINE_LIGHT};
 }}
 
 QPushButton#gaming-section-active {{
-    background: {KYTH_SURFACE_RAISED};
+    background: {KYTH_SURFACE_OVERLAY};
     color: {KYTH_TEXT};
     border: 1px solid {KYTH_BLUE_LIGHT};
 }}

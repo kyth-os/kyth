@@ -5,7 +5,7 @@ import os
 import time
 from dataclasses import dataclass
 
-from .process import _run_command
+from .process import run_command
 
 _FIRST_WEEK_DISMISS = os.path.expanduser("~/.config/kyth-first-week-done")
 _FIRST_BOOT_MARKERS = (
@@ -34,7 +34,7 @@ def controller_seen() -> bool:
 def kdeconnect_configured() -> bool:
     if path_exists("~/.config/kdeconnect"):
         return True
-    result = _run_command(["kdeconnect-cli", "--list-devices"], timeout=6)
+    result = run_command(["kdeconnect-cli", "--list-devices"], timeout=6)
     return bool(result and result.returncode == 0 and result.stdout.strip())
 
 
@@ -43,12 +43,12 @@ def cloud_storage_configured() -> bool:
 
 
 def printer_configured() -> bool:
-    result = _run_command(["lpstat", "-v"], timeout=5)
+    result = run_command(["lpstat", "-v"], timeout=5)
     return bool(result and result.returncode == 0 and result.stdout.strip())
 
 
 def browser_integration_native_ready() -> bool:
-    result = _run_command(["rpm", "-q", "plasma-browser-integration"], timeout=5)
+    result = run_command(["rpm", "-q", "plasma-browser-integration"], timeout=5)
     if result and result.returncode == 0:
         return True
     return path_exists("/usr/bin/plasma-browser-integration-host")
@@ -106,6 +106,35 @@ def home_hero_view(staged: bool, rollback: bool, windows_found: bool) -> HomeHer
         rec_target = "Gaming"
 
     return HomeHeroView(pill_text, pill_object_name, rec_text, rec_btn_label, rec_target)
+
+
+def home_categories(*, has_nvidia: bool):
+    """Return home navigation content independently of Qt construction."""
+    categories = [
+        (("applications-games", "input-gaming"), "◉", "Games", [
+            ("Set up game launchers", "Gaming"), ("Tune performance", "Performance"),
+            ("Check if your games work", "Compatibility"), ("Connect a controller", "Controllers"),
+        ]),
+        (("plasmadiscover", "applications-all"), "⬡", "Apps", [
+            ("Browse and install apps", "App Store"), ("Move files and saves", "Move Files"),
+        ]),
+        (("computer", "computer-laptop"), "◈", "System & Security", [
+            ("Check for updates", "Update"), ("View hardware and devices", "Hardware"),
+            ("Run a health report", "Diagnostics"), ("Fix problems", "Repair"),
+        ]),
+        (("folder-network", "network-workgroup"), "◫", "Network & Internet", [
+            ("Connect to a VPN", "VPN"), ("Map network shares", "Network Shares"),
+            ("Set up cloud storage", "Cloud Storage"),
+        ]),
+    ]
+    advanced = [("Manage NVIDIA drivers", "NVIDIA")] if has_nvidia else []
+    advanced.extend((("Choose a kernel", "Kernel"), ("Pick an update channel", "Channels")))
+    categories.append((("cpu", "applications-system"), "◌", "Advanced", advanced))
+    return categories
+
+
+def visible_category_indexes(profile: str, games_flags: list[bool]) -> list[int]:
+    return [i for i, games in enumerate(games_flags) if profile == "gaming" or not games]
 
 
 # Underscore aliases

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# kyth-perf-gate — perf-gate.toml CI gate
+set -euo pipefail
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.perf_gate import load_perf_gate,check_perf_gate; print(load_perf_gate()); print(check_perf_gate(current_ms=16.0))' ;;
+    check) python3 -c 'import sys; from kyth_shared.perf_gate import check_perf_gate; r=check_perf_gate(current_ms=float(sys.argv[1]) if len(sys.argv)>1 else None); print(r); import sys as _s; _s.exit(0 if r.get("pass") else 2)' "${2:-}" ;;
+    *) echo "Usage: kyth-perf-gate [status|check <ms>]" >&2; exit 1 ;;
+esac

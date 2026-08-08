@@ -4,7 +4,7 @@
 # helpers often advertise Categories=Game, so KDE otherwise mixes them with
 # exported Steam game shortcuts. Match desktop IDs explicitly so optional tools
 # move into this submenu whenever the user installs them.
-cat >/usr/share/desktop-directories/kyth-game-tools.directory <<'GAMETOOLSDIREF'
+write_config /usr/share/desktop-directories/kyth-game-tools.directory <<'GAMETOOLSDIREF'
 [Desktop Entry]
 Version=1.0
 Type=Directory
@@ -13,7 +13,7 @@ Comment=Game launchers, compatibility helpers, and save tools
 Icon=applications-utilities
 GAMETOOLSDIREF
 
-cat >/etc/xdg/menus/applications-merged/kyth-game-tools.menu <<'GAMETOOLSMENUEOF'
+write_config /etc/xdg/menus/applications-merged/kyth-game-tools.menu <<'GAMETOOLSMENUEOF'
 <!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN"
   "http://www.freedesktop.org/standards/menu-spec/menu-1.0.dtd">
 <Menu>
@@ -55,7 +55,7 @@ GAMETOOLSMENUEOF
 # LibreOffice Flatpak launchers intentionally advertise multiple freedesktop
 # categories. Keep the suite together under Office instead of repeating Draw in
 # Graphics and Math throughout KDE's Education submenus.
-cat >/etc/xdg/menus/applications-merged/kyth-libreoffice.menu <<'LIBREOFFICEMENUEOF'
+write_config /etc/xdg/menus/applications-merged/kyth-libreoffice.menu <<'LIBREOFFICEMENUEOF'
 <!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN"
   "http://www.freedesktop.org/standards/menu-spec/menu-1.0.dtd">
 <Menu>

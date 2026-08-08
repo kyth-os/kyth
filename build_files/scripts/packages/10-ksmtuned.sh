@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck source=../lib/packages-helpers.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/packages-helpers.sh"
+source "../lib/packages-helpers.sh"
 
 if ! is_enabled "${ENABLE_KSM:-0}"; then
 	echo "KSM profile is disabled; skipping global memory deduplication."

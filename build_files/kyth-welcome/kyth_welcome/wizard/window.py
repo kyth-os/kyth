@@ -9,15 +9,16 @@ Home page instead of silently marking everything done.
 """
 from __future__ import annotations
 
-import subprocess
 from typing import ClassVar
 
-from ..core_base import _load_profile, _restyle, _running_threads, _save_profile
+from ..core_base import load_profile, restyle, save_profile
+from ..services.runtime import running_threads
 from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QMainWindow, QMessageBox, QPushButton,
-    QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
+    QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from ..services.setup_state import STEP_KEYS, mark_step, mark_wizard_closed
+from ..services.launch import popen
 from .steps_apps import _AppsStepMixin, _default_checked_ids
 from .steps_finish import _FinishStepMixin
 from .steps_gaming import _GamingStepMixin
@@ -64,7 +65,7 @@ class WizardWindow(
         self.setMinimumSize(900, 620)
         self.resize(1040, 720)
 
-        self._profile = _load_profile()
+        self._profile = load_profile()
         self._handoff_win: QMainWindow | None = None
         # Lazy import avoids a circular import cycle with the hub package.
         from ..page_gaming import GamingPage
@@ -180,6 +181,14 @@ class WizardWindow(
         self._busy_timer.start()
         self._update_nav()
 
+        # Every step above was just built from safe, subprocess-free
+        # defaults (see steps_machine.py's module docstring) — fetch the
+        # real NVIDIA/bootc/NTFS facts off the GUI thread now that the
+        # window itself is fully constructed, instead of blocking this
+        # __init__ (and therefore the very first frame shown on a fresh
+        # install) on lspci/bootc status/lsblk.
+        single_shot(self, 0, self._refresh_machine_facts)
+
     # ── Step/profile plumbing ───────────────────────────────────────────────────
 
     def _active_specs(self) -> list[tuple[str, str, str | None]]:
@@ -249,11 +258,8 @@ class WizardWindow(
         self._profile = profile
         for key, card in self._profile_cards.items():
             card.set_checked(key == profile)
-        _save_profile(profile)
-        try:
-            subprocess.Popen(["/usr/bin/kyth-apply-role-preset", profile], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # nosec B603 # nosemgrep
-        except OSError:
-            pass
+        save_profile(profile)
+        popen(["/usr/bin/kyth-apply-role-preset", profile])
         # Re-seed the Get Apps defaults to match the chosen profile. Only
         # enabled boxes are touched — already-installed apps stay locked.
         wanted = _default_checked_ids(profile)
@@ -280,7 +286,7 @@ class WizardWindow(
     # ── Navigation ────────────────────────────────────────────────────────────
 
     def _has_running_operation(self) -> bool:
-        return any(t.BLOCKS_CLOSE for t in _running_threads())
+        return any(t.BLOCKS_CLOSE for t in running_threads())
 
     def _update_nav(self):
         specs = self._active_specs()
@@ -305,12 +311,12 @@ class WizardWindow(
                 num.setText(str(i + 1))
                 num.setObjectName("wiz-step-num-upcoming")
                 text.setObjectName("wiz-step-label-upcoming")
-            _restyle(num)
-            _restyle(text)
+            restyle(num)
+            restyle(text)
 
         for i, rule in enumerate(self._rail_rules):
             rule.setObjectName("wiz-rail-rule-done" if i < idx else "wiz-rail-rule-upcoming")
-            _restyle(rule)
+            restyle(rule)
 
         self._back_btn.setVisible(idx > 0)
         self._skip_btn.setVisible(self._current_key in STEP_KEYS)

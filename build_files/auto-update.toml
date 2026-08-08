@@ -6,6 +6,11 @@
 # Set to false to disable automatic staging entirely
 enabled = true
 
+# Update ring policy. "follow-image" keeps following the channel selected in
+# System Hub. Explicit values (stable, testing, canary) prevent the watcher from
+# staging updates if the booted image belongs to a different ring.
+rollout_ring = "follow-image"
+
 # Do not run during these local wall-clock hours (24h format)
 # Default: stage between 07:00 and 02:00 (i.e. skip 02:00–07:00)
 quiet_hours_start = "02:00"

@@ -1,56 +1,121 @@
-#!/bin/bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""kyth-rclone-update — Install/update the latest rclone release with SHA256 verification."""
+from __future__ import annotations
 
-# kyth-rclone-update
-# Install/update latest rclone release into /usr/local/bin with SHA256 verification.
-# /usr/local is writable on bootc systems and suitable for mutable admin tools.
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
 
-# Resolve the latest release tag live unless explicitly overridden.
-RCLONE_VERSION="${RCLONE_VERSION:-}"
-if [[ -z "${RCLONE_VERSION}" ]]; then
-	RCLONE_VERSION=$(
-		curl -fsSL "https://api.github.com/repos/rclone/rclone/releases/latest" 2>/dev/null \
-		| grep -oP '"tag_name":\s*"\K[^"]+' | head -n1 || echo ""
-	)
-fi
-if [[ -z "${RCLONE_VERSION}" ]]; then
-	echo "ERROR: Could not determine latest rclone release tag" >&2
-	exit 1
-fi
-# Validate the version tag looks like a semver (vX.Y.Z) before using it in a URL.
-if [[ ! "${RCLONE_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-	echo "ERROR: Unexpected rclone version format: ${RCLONE_VERSION}" >&2
-	exit 1
-fi
 
-RCLONE_TARGET_VERSION="${RCLONE_VERSION#v}"
-if [[ -x /usr/local/bin/rclone ]]; then
-	INSTALLED_VERSION=$(/usr/local/bin/rclone --version 2>/dev/null \
-		| awk 'NR == 1 && $1 == "rclone" && $2 == "v" { print $3 }')
-	if [[ "${INSTALLED_VERSION}" == "${RCLONE_TARGET_VERSION}" ]]; then
-		echo "rclone already current: v${INSTALLED_VERSION}"
-		exit 0
-	fi
-fi
 
-RCLONE_BASENAME="rclone-${RCLONE_VERSION}-linux-amd64"
-RCLONE_ZIP="${RCLONE_BASENAME}.zip"
-RCLONE_BASE="https://downloads.rclone.org/${RCLONE_VERSION}"
+from kyth_shared.system.updater import (  # noqa: E402
+    download_file,
+    extract_archive,
+    fetch_github_latest_release,
+    validate_version,
+    verify_checksum_file,
+)
+from kyth_shared.commands import run_text
 
-TMPDIR_RCLONE=$(mktemp -d)
-trap 'rm -rf "${TMPDIR_RCLONE}"' EXIT
 
-cd "${TMPDIR_RCLONE}"
-echo "rclone: downloading ${RCLONE_ZIP}"
-curl -fsSL "${RCLONE_BASE}/${RCLONE_ZIP}" -o "${RCLONE_ZIP}"
-curl -fsSL "${RCLONE_BASE}/SHA256SUMS" -o SHA256SUMS
+def main() -> None:
+    # Resolve the latest release tag live unless explicitly overridden
+    rclone_ver = os.environ.get("RCLONE_VERSION", "")
+    if not rclone_ver:
+        print("Fetching latest rclone release metadata...")
+        try:
+            release = fetch_github_latest_release("rclone/rclone")
+            rclone_ver = release.get("tag_name", "")
+        except Exception as e:
+            print(f"ERROR: Could not determine latest rclone release tag: {e}", file=sys.stderr)
+            sys.exit(1)
 
-# Verify only the pinned archive line.
-# Anchored pattern prevents a filename that contains our zip name as a
-# substring from matching (e.g. rclone-v1.2.3-linux-amd64.zip.bak).
-grep -E "^[0-9a-f]{64}  ${RCLONE_ZIP}$" SHA256SUMS > SHA256SUMS.rclone
-sha256sum -c SHA256SUMS.rclone
+    if not rclone_ver:
+        print("ERROR: Could not determine latest rclone release tag", file=sys.stderr)
+        sys.exit(1)
 
-unzip -o "${RCLONE_ZIP}" "${RCLONE_BASENAME}/rclone"
-install -m 0755 "${RCLONE_BASENAME}/rclone" /usr/local/bin/rclone
-echo "rclone installed: $(/usr/local/bin/rclone --version | head -n1)"
+    # Validate the version tag looks like a semver (vX.Y.Z)
+    try:
+        validate_version(rclone_ver, r"v[0-9]+\.[0-9]+\.[0-9]+", "rclone")
+    except ValueError:
+        print(f"ERROR: Unexpected rclone version format: {rclone_ver}", file=sys.stderr)
+        sys.exit(1)
+
+    target_ver = rclone_ver.lstrip("v")
+    rclone_bin = Path("/usr/local/bin/rclone")
+
+    if rclone_bin.is_file():
+        try:
+            res = run_text([str(rclone_bin), "--version"])
+            if res is None:
+                raise OSError("rclone could not be executed")
+            first_line = res.stdout.splitlines()[0]
+            parts = first_line.split()
+            if len(parts) >= 2 and parts[0] == "rclone" and parts[1].startswith("v"):
+                installed_ver = parts[1].lstrip("v")
+                if installed_ver == target_ver:
+                    print(f"rclone already current: v{installed_ver}")
+                    sys.exit(0)
+        except Exception:
+            pass
+
+    basename = f"rclone-{rclone_ver}-linux-amd64"
+    zip_name = f"{basename}.zip"
+    base_url = f"https://downloads.rclone.org/{rclone_ver}"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_path = Path(tmpdir)
+        zip_dest = temp_path / zip_name
+        sums_dest = temp_path / "SHA256SUMS"
+
+        try:
+            print(f"rclone: downloading {zip_name}...")
+            download_file(f"{base_url}/{zip_name}", zip_dest)
+            print("rclone: downloading SHA256SUMS...")
+            download_file(f"{base_url}/SHA256SUMS", sums_dest)
+        except Exception as e:
+            print(f"ERROR: Failed to download rclone assets: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            print("Verifying checksum...")
+            verify_checksum_file(sums_dest, temp_path, "sha256")
+        except Exception as e:
+            print(f"ERROR: Checksum verification failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            print("Extracting archive...")
+            extract_archive(zip_dest, temp_path)
+        except Exception as e:
+            print(f"ERROR: Extraction failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        extracted_bin = temp_path / basename / "rclone"
+        if not extracted_bin.is_file():
+            # Fallback if ZIP top-level directory naming is slightly different
+            extracted_bin = temp_path / "rclone"
+
+        try:
+            rclone_bin.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(extracted_bin, rclone_bin)
+            rclone_bin.chmod(0o755)
+        except Exception as e:
+            print(f"ERROR: Failed to install rclone binary to {rclone_bin}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Print version of installed binary
+    try:
+        res = run_text([str(rclone_bin), "--version"])
+        if res is None:
+            raise OSError("rclone could not be executed")
+        version_output = res.stdout.splitlines()[0]
+        print(f"rclone installed: {version_output}")
+    except Exception as e:
+        print(f"rclone installed, but version check failed: {e}")
+
+
+if __name__ == "__main__":
+    main()

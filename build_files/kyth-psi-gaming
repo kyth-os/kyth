@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-psi-gaming — psi.toml
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-psi-gaming "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.psi_gaming import load_psi, psi_status; c=load_psi(); print(f\"profile={c['profile']} active={psi_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.psi_gaming import load_psi,save_psi,generate_psi; c=load_psi(); c['profile']='gaming'; save_psi(c); generate_psi(c)"; systemctl daemon-reload 2>/dev/null || true; echo "psi gaming 90% avoid" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.psi_gaming import load_psi,save_psi,generate_psi; c=load_psi(); c['profile']='balanced'; save_psi(c); generate_psi(c)"; systemctl daemon-reload 2>/dev/null || true; echo "psi balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.psi_gaming import load_psi,generate_psi; generate_psi(load_psi())" ;;
+    *) echo "Usage: kyth-psi-gaming [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

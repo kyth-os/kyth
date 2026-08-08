@@ -1,21 +1,23 @@
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _apply_install_badge, _restyle
+from .core_base import apply_install_badge, restyle
 from .services.launch import popen
 from .services.security import (
-    _is_socket_capable_kali_box,
     build_kali_create_command,
     build_kali_export_command,
     build_kali_remove_command,
     KaliInstallProgressTracker,
 )
-from .services.runtime import Worker, _finish_worker
+from .services.security_container import (
+    is_socket_capable_kali_box as _is_socket_capable_kali_box,
+)
+from .services.runtime import Worker, finish_worker
 from .qt import (
     QButtonGroup, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QRadioButton,
-    QTextEdit, Qt,
+    Qt,
 )
-from .widgets import _make_card, _set_log_panel
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _KaliContainerMixin:
@@ -64,10 +66,7 @@ class _KaliContainerMixin:
             "⚠  kali-linux-everything is extremely large — expect 15–20 GB or more of downloads "  # noqa: RUF001 — en dash, deliberate typography
             "and a very long install time. Only choose this if you need every available tool."
         )
-        self._sec_everything_warn.setObjectName("card-copy")
-        self._sec_everything_warn.setStyleSheet("color: #fbbf24; background: #241808; "
-                                                "border: 1px solid #f59e0b; border-radius: 6px; "
-                                                "padding: 6px 10px;")
+        self._sec_everything_warn.setObjectName("status-warn")
         self._sec_everything_warn.setWordWrap(True)
         self._sec_everything_warn.hide()
         kali_layout.addWidget(self._sec_everything_warn)
@@ -106,20 +105,8 @@ class _KaliContainerMixin:
         self._sec_progress.hide()
         kali_layout.addWidget(self._sec_progress)
 
-        self._sec_log_toggle = QPushButton("Show details")
-        self._sec_log_toggle.setCheckable(True)
-        self._sec_log_toggle.hide()
-        self._sec_log_toggle.clicked.connect(
-            lambda checked: _set_log_panel(self._sec_log_toggle, self._sec_log, checked)
-        )
-        kali_layout.addWidget(self._sec_log_toggle)
-
-        self._sec_log = QTextEdit()
-        self._sec_log.document().setMaximumBlockCount(5000)
-        self._sec_log.setReadOnly(True)
-        self._sec_log.setMaximumHeight(150)
-        self._sec_log.hide()
-        kali_layout.addWidget(self._sec_log)
+        self._sec_log_panel = CollapsibleLogPanel(max_height=150)
+        kali_layout.addWidget(self._sec_log_panel)
 
         layout.addWidget(kali_card)
 
@@ -127,7 +114,7 @@ class _KaliContainerMixin:
         if not hasattr(self, "_sec_badge"):
             return
         installed = _is_socket_capable_kali_box(self._SEC_BOX_NAME)
-        _apply_install_badge(self._sec_badge, installed,
+        apply_install_badge(self._sec_badge, installed,
                              ok_text="Installed", warn_text="Not Installed")
         self._sec_create_btn.setVisible(not installed)
         for rb in (self._sec_radio_headless, self._sec_radio_default, self._sec_radio_everything):
@@ -153,7 +140,6 @@ class _KaliContainerMixin:
         self._sec_create_btn.setEnabled(False)
         for rb in (self._sec_radio_headless, self._sec_radio_default, self._sec_radio_everything):
             rb.setEnabled(False)
-        self._sec_log.clear()
         sudo_note = (
             f"→ distrobox enter --root {self._SEC_BOX_NAME} -- configure passwordless sudo\n"
         )
@@ -167,21 +153,19 @@ class _KaliContainerMixin:
             "\nThis pulls the Kali container image and installs the tool metapackage.\n"
             "The first run will take a few minutes depending on your connection.\n"
         )
-        self._sec_log.append(
+        self._sec_log_panel.reset(
             f"→ distrobox create --root --image {self._SEC_BOX_IMAGE} --name {self._SEC_BOX_NAME}"
             f" --additional-flags '--privileged --security-opt label=disable'\n"
             f"→ distrobox enter --root {self._SEC_BOX_NAME} -- noninteractive apt-get install -y {meta}\n"
             + sudo_note + export_note + size_note
         )
-        self._sec_log_toggle.show()
-        _set_log_panel(self._sec_log_toggle, self._sec_log, False)
         self._sec_progress.setRange(0, 100)
         self._sec_progress.setValue(2)
         self._sec_progress.show()
         self._sec_status_lbl.setText("Pulling Kali container image…")
         self._sec_status_lbl.setObjectName("subheading")
         self._sec_status_lbl.show()
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
         self._sec_progress_tracker = KaliInstallProgressTracker()
 
         cmd = build_kali_create_command(self._SEC_BOX_NAME, self._SEC_BOX_IMAGE, meta, has_gui)
@@ -191,20 +175,19 @@ class _KaliContainerMixin:
         self._sec_worker.start()
 
     def _sec_on_create_line(self, ln: str):
-        self._sec_log.append(ln)
-        self._sec_log.ensureCursorVisible()
+        self._sec_log_panel.append(ln)
 
         msg, prog = self._sec_progress_tracker.parse_line(ln)
         if msg is not None:
             self._sec_status_lbl.setText(msg)
-            _restyle(self._sec_status_lbl)
+            restyle(self._sec_status_lbl)
         if prog is not None:
             self._sec_progress.setValue(prog)
 
     def _sec_on_create_done(self, code: int):
         self._sec_progress.setValue(100)
         self._sec_progress.hide()
-        _finish_worker(self, attr="_sec_worker")
+        finish_worker(self, attr="_sec_worker")
         self._sec_create_btn.setEnabled(True)
         for rb in (self._sec_radio_headless, self._sec_radio_default, self._sec_radio_everything):
             rb.setEnabled(True)
@@ -217,11 +200,11 @@ class _KaliContainerMixin:
             else:
                 self._sec_status_lbl.setText("Kali box created. Launch a terminal to start hacking.")
             self._sec_status_lbl.setObjectName("status-ok")
-            self._sec_log.append("\nDone.")
+            self._sec_log_panel.append("\nDone.")
         else:
             self._sec_status_lbl.setText(f"Setup failed (exit {code}). Check the details below.")
             self._sec_status_lbl.setObjectName("status-err")
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
         self._refresh_sec_kali_status()
 
     def _sec_enter_box(self):
@@ -246,20 +229,17 @@ class _KaliContainerMixin:
         self._sec_export_btn.setEnabled(False)
         self._sec_enter_btn.setEnabled(False)
         self._sec_remove_btn.setEnabled(False)
-        self._sec_log.clear()
-        self._sec_log.append(
+        self._sec_log_panel.reset(
             f"→ distrobox enter --root {self._SEC_BOX_NAME} -- distrobox-export (bulk GUI apps)\n"
             f"→ distrobox enter --root {self._SEC_BOX_NAME} -- configure passwordless sudo\n"
             "→ kbuildsycoca6 (refresh KDE application menu)\n\n"
             "Scanning Kali container for GUI apps…\n"
         )
-        self._sec_log_toggle.show()
-        _set_log_panel(self._sec_log_toggle, self._sec_log, False)
         self._sec_progress.show()
         self._sec_status_lbl.setText("Scanning for GUI apps…")
         self._sec_status_lbl.setObjectName("subheading")
         self._sec_status_lbl.show()
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
 
         cmd = build_kali_export_command(self._SEC_BOX_NAME)
         self._sec_worker = Worker(cmd)
@@ -274,12 +254,11 @@ class _KaliContainerMixin:
             except ValueError:
                 pass
         else:
-            self._sec_log.append(ln)
-            self._sec_log.ensureCursorVisible()
+            self._sec_log_panel.append(ln)
 
     def _sec_on_export_done(self, code: int):
         self._sec_progress.hide()
-        _finish_worker(self, attr="_sec_worker")
+        finish_worker(self, attr="_sec_worker")
         self._sec_export_btn.setEnabled(True)
         self._sec_enter_btn.setEnabled(True)
         self._sec_remove_btn.setEnabled(True)
@@ -289,7 +268,7 @@ class _KaliContainerMixin:
                 "Re-create the box with 'Default' or 'Everything' to get exportable GUI apps."
             )
             self._sec_status_lbl.setObjectName("status-err")
-            self._sec_log.append(
+            self._sec_log_panel.append(
                 "\nNo .desktop files found inside the Kali container.\n"
                 "kali-linux-headless does not ship GUI apps — there is nothing to export.\n"
                 "To get GUI apps (Zenmap, Autopsy, Faraday, etc.), remove this box and\n"
@@ -304,18 +283,18 @@ class _KaliContainerMixin:
                     "to get exportable GUI apps (Zenmap, Autopsy, Faraday, etc.)."
                 )
                 self._sec_status_lbl.setObjectName("status-err")
-                _set_log_panel(self._sec_log_toggle, self._sec_log, True)
+                self._sec_log_panel.set_expanded(True)
             else:
                 self._sec_status_lbl.setText(
                     f"Exported {n} app(s) — they should appear in your application menu shortly. "
                     "If you don't see them, try logging out and back in."
                 )
                 self._sec_status_lbl.setObjectName("status-ok")
-            self._sec_log.append("\nDone.")
+            self._sec_log_panel.append("\nDone.")
         else:
             self._sec_status_lbl.setText(f"Export failed (exit {code}). Check the details below.")
             self._sec_status_lbl.setObjectName("status-err")
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
 
     def _sec_remove_box(self):
         if self._sec_worker and self._sec_worker.isRunning():
@@ -330,38 +309,32 @@ class _KaliContainerMixin:
 
         self._sec_enter_btn.setEnabled(False)
         self._sec_remove_btn.setEnabled(False)
-        self._sec_log.clear()
-        self._sec_log.append(
+        self._sec_log_panel.reset(
             f"→ distrobox stop/rm {self._SEC_BOX_NAME} (rootless and rootful)\n"
             "→ verify removal and clean exported launchers\n"
         )
-        self._sec_log_toggle.show()
-        _set_log_panel(self._sec_log_toggle, self._sec_log, False)
         self._sec_progress.show()
         self._sec_status_lbl.setText("Stopping and removing Kali box…")
         self._sec_status_lbl.setObjectName("subheading")
         self._sec_status_lbl.show()
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
 
         self._sec_worker = Worker(build_kali_remove_command(self._SEC_BOX_NAME))
-        self._sec_worker.line.connect(lambda ln: (
-            self._sec_log.append(ln),
-            self._sec_log.ensureCursorVisible(),
-        ))
+        self._sec_worker.line.connect(self._sec_log_panel.append)
         self._sec_worker.done.connect(self._sec_on_remove_done)
         self._sec_worker.start()
 
     def _sec_on_remove_done(self, code: int):
         self._sec_progress.hide()
-        _finish_worker(self, attr="_sec_worker")
+        finish_worker(self, attr="_sec_worker")
         self._sec_enter_btn.setEnabled(True)
         self._sec_remove_btn.setEnabled(True)
         if code == 0:
             self._sec_status_lbl.setText("Kali box removed.")
             self._sec_status_lbl.setObjectName("status-ok")
-            self._sec_log.append("\nDone.")
+            self._sec_log_panel.append("\nDone.")
         else:
             self._sec_status_lbl.setText(f"Removal failed (exit {code}).")
             self._sec_status_lbl.setObjectName("status-err")
-        _restyle(self._sec_status_lbl)
+        restyle(self._sec_status_lbl)
         self._refresh_sec_kali_status()

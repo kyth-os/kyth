@@ -9,7 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "build_files" / "kyth-installer" / "kyth_installer"
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
-from kyth_installer import install, post_routes, runner as command_runner  # noqa: E402
+from kyth_installer import install, post_routes  # noqa: E402
+from kyth_installer.phases import finalize as phases_finalize  # noqa: E402
+from kyth_installer.phases import storage as phases_storage  # noqa: E402
+from kyth_installer.phases import run as phases_run  # noqa: E402  # noqa: E402
 from kyth_installer.context import InstallLifecycle, InstallerContext  # noqa: E402
 from kyth_installer.partition_ops import get_journal, init_journal, reset_journal  # noqa: E402
 from kyth_installer.plan import InstallPlan  # noqa: E402
@@ -232,14 +235,36 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             "find_deploy_etc",
             return_value=Path("/mnt/deploy/etc"),
         ), mock.patch.object(
+            phases_finalize,
+            "find_deploy_etc",
+            return_value=Path("/mnt/deploy/etc"),
+        ), mock.patch.object(
             install,
+            "validate_installed_target",
+            return_value=[],
+        ), mock.patch.object(
+            phases_finalize,
+            "validate_installed_target",
+            return_value=[],
+        ), mock.patch.object(
+            install,
+            "ensure_system_accounts",
+        ), mock.patch.object(
+            phases_finalize,
             "ensure_system_accounts",
         ), mock.patch.object(
             install,
             "_try_stage_mok_enrollment",
             return_value={},
         ), mock.patch.object(
+            phases_run,
+            "_try_stage_mok_enrollment",
+            return_value={},
+        ), mock.patch.object(
             install,
+            "unmount_target_disk",
+        ), mock.patch.object(
+            phases_storage,
             "unmount_target_disk",
         ), mock.patch.object(
             install,
@@ -350,7 +375,7 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         # bootc install to-filesystem onto an alongside/manual target mounts
         # other partitions (e.g. /boot/efi) under it before running; per
         # plan.py's install_mode docstring this needs --skip-fetch-check
-        # unconditionally, the same as kyth-partition-install.sh, regardless
+        # unconditionally for the partition CLI as well, regardless
         # of the unrelated SKIP_FETCH_CHECK network-preflight env toggle.
         context = InstallerContext()
         context.state.update({
@@ -440,12 +465,8 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             monitor_interval=0.01,
         )
         with mock.patch(
-            "kyth_installer.runner._ALLOWED_EXECUTABLES",
-            new={
-                *command_runner._ALLOWED_EXECUTABLES,
-                Path(sys.executable).name,
-                Path(sys.executable).resolve().name,
-            },
+            "kyth_installer.runner._validate_executable",
+            side_effect=lambda executable: executable,
         ):
             runner.run(
                 cmd, 5, 90, logs.append, progress_values.append,
@@ -469,6 +490,179 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         errors = [e for e in context.events.events if e.get("type") == "error"]
         self.assertTrue(errors)
         self.assertIn("root", errors[0].get("message", "").lower())
+
+
+class FstabConfigurationTests(unittest.TestCase):
+    """_configure_alongside_fstab and _configure_manual_mounts each used to
+    hand-roll their own blkid lookup and fstab-line construction, and had
+    already diverged: the alongside path used fsck pass 0 for its btrfs
+    @home subvolume, but the manual-mount path used pass 2 for a btrfs
+    mount reached through it instead — same filesystem type, different
+    (and inconsistent) fsck behavior purely because of which code path
+    built the entry. These pin the shared helpers that fixed it."""
+
+    def test_fsck_pass_is_zero_for_swap_and_btrfs_two_for_others(self):
+        self.assertEqual(install._fsck_pass_for("linux-swap"), 0)
+        self.assertEqual(install._fsck_pass_for("btrfs"), 0)
+        self.assertEqual(install._fsck_pass_for("ext4"), 2)
+        self.assertEqual(install._fsck_pass_for("xfs"), 2)
+
+    def test_blkid_uuid_returns_none_and_logs_on_failure(self):
+        log = mock.Mock()
+        with mock.patch.object(install, "run_command", side_effect=RuntimeError("boom")):
+            result = install._blkid_uuid("/dev/sda1", log)
+        self.assertIsNone(result)
+        log.assert_called_once()
+        self.assertIn("could not read UUID", log.call_args[0][0])
+
+    def test_blkid_uuid_returns_none_and_logs_when_output_is_blank(self):
+        log = mock.Mock()
+        with mock.patch.object(install, "run_command", return_value=mock.Mock(stdout="\n")):
+            result = install._blkid_uuid("/dev/sda1", log)
+        self.assertIsNone(result)
+        log.assert_called_once()
+        self.assertIn("no UUID", log.call_args[0][0])
+
+    def test_blkid_uuid_returns_stripped_value(self):
+        log = mock.Mock()
+        with mock.patch.object(install, "run_command", return_value=mock.Mock(stdout="AAAA-BBBB\n")):
+            result = install._blkid_uuid("/dev/sda1", log)
+        self.assertEqual(result, "AAAA-BBBB")
+        log.assert_not_called()
+
+    @staticmethod
+    def _fake_run_command(blkid_uuid: str):
+        """A run_command stand-in that answers blkid lookups with a fixed
+        UUID and records every other call (tee, mount, mkdir, ...)."""
+        calls = []
+
+        def fake(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[0] == "blkid":
+                return mock.Mock(stdout=f"{blkid_uuid}\n")
+            return mock.Mock(stdout="")
+
+        return fake, calls
+
+    def test_alongside_fstab_entry_uses_fsck_pass_zero(self):
+        fake_run, calls = self._fake_run_command("AAAA-BBBB")
+        log_lines = []
+        with mock.patch.object(install, "run_command", side_effect=fake_run), \
+             mock.patch.object(install, "_safe_umount"):
+            install._configure_alongside_fstab("/tmp/cfgroot", "/dev/sda2", "/tmp/cfgroot/etc", log_lines.append)
+
+        tee_calls = [cmd for cmd in calls if "/usr/bin/tee" in cmd]
+        self.assertEqual(len(tee_calls), 1)
+        fstab_log = next(line for line in log_lines if line.startswith("Fstab updated"))
+        self.assertIn("UUID=AAAA-BBBB /var/home btrfs subvol=@home,compress=zstd:1 0 0", fstab_log)
+
+    def test_manual_mount_btrfs_entry_matches_alongside_fsck_pass(self):
+        """Before the fix, this fs="btrfs" manual mount got fsck pass 2 —
+        different from _configure_alongside_fstab's pass 0 for the exact
+        same filesystem type. They must now agree."""
+        fake_run, _calls = self._fake_run_command("CCCC-DDDD")
+        log_lines = []
+        with mock.patch.object(install, "run_command", side_effect=fake_run), \
+             mock.patch.object(install, "_safe_umount"), \
+             mock.patch.object(install, "_get_manual_mounts", return_value=[
+                 {"partition": "/dev/sda3", "mountpoint": "/data", "fstype": "btrfs"},
+             ]):
+            install._configure_manual_mounts("/tmp/cfgroot", "/tmp/cfgroot/etc", log_lines.append, context=None)
+
+        fstab_log = next(line for line in log_lines if line.startswith("Fstab updated"))
+        self.assertIn(" 0 0", fstab_log)  # dump=0, fsck pass=0 — matches btrfs
+
+    def test_manual_mount_ext4_entry_keeps_fsck_pass_two(self):
+        fake_run, _calls = self._fake_run_command("EEEE-FFFF")
+        log_lines = []
+        with mock.patch.object(install, "run_command", side_effect=fake_run), \
+             mock.patch.object(install, "_safe_umount"), \
+             mock.patch.object(install, "_get_manual_mounts", return_value=[
+                 {"partition": "/dev/sda4", "mountpoint": "/games", "fstype": "ext4"},
+             ]):
+            install._configure_manual_mounts("/tmp/cfgroot", "/tmp/cfgroot/etc", log_lines.append, context=None)
+
+        fstab_log = next(line for line in log_lines if line.startswith("Fstab updated"))
+        self.assertIn(" 0 2", fstab_log)
+
+    def test_manual_mount_swap_entry_uses_fsck_pass_zero(self):
+        fake_run, _calls = self._fake_run_command("1111-2222")
+        log_lines = []
+        with mock.patch.object(install, "run_command", side_effect=fake_run), \
+             mock.patch.object(install, "_safe_umount"), \
+             mock.patch.object(install, "_get_manual_mounts", return_value=[
+                 {"partition": "/dev/sda5", "mountpoint": "swap", "fstype": "linux-swap"},
+             ]):
+            install._configure_manual_mounts("/tmp/cfgroot", "/tmp/cfgroot/etc", log_lines.append, context=None)
+
+        fstab_log = next(line for line in log_lines if line.startswith("Fstab updated"))
+        self.assertIn("none swap defaults 0 0", fstab_log)
+
+    def test_manual_mount_skips_entry_when_uuid_lookup_fails(self):
+        log_lines = []
+        with mock.patch.object(install, "run_command", side_effect=RuntimeError("blkid missing")), \
+             mock.patch.object(install, "_get_manual_mounts", return_value=[
+                 {"partition": "/dev/sda6", "mountpoint": "/extra", "fstype": "ext4"},
+             ]):
+            install._configure_manual_mounts("/tmp/cfgroot", "/tmp/cfgroot/etc", log_lines.append, context=None)
+
+        self.assertFalse(any(line.startswith("Fstab updated") for line in log_lines))
+        self.assertTrue(any("skipping fstab entry" in line for line in log_lines))
+
+
+class EfiBootEntrySnapshotTests(unittest.TestCase):
+    """bootc's bootupd step can rewrite EFI NVRAM boot entries when writing
+    the OS image — this is the safety net that warns if a named entry (e.g.
+    "Windows Boot Manager") present beforehand goes missing afterward."""
+
+    def test_snapshot_returns_empty_when_efibootmgr_is_unavailable(self):
+        with mock.patch.object(install.shutil, "which", return_value=None):
+            self.assertEqual(install._snapshot_efi_boot_entries(lambda _m: None), "")
+
+    def test_snapshot_returns_empty_on_nonzero_exit(self):
+        with mock.patch.object(install.shutil, "which", return_value="/usr/sbin/efibootmgr"), \
+             mock.patch.object(install, "run_command", return_value=mock.MagicMock(returncode=1, stdout="")):
+            self.assertEqual(install._snapshot_efi_boot_entries(lambda _m: None), "")
+
+    def test_snapshot_returns_empty_when_efibootmgr_raises(self):
+        with mock.patch.object(install.shutil, "which", return_value="/usr/sbin/efibootmgr"), \
+             mock.patch.object(install, "run_command", side_effect=RuntimeError("not UEFI")):
+            self.assertEqual(install._snapshot_efi_boot_entries(lambda _m: None), "")
+
+    def test_warns_when_a_named_entry_disappears(self):
+        before = (
+            "BootCurrent: 0001\n"
+            "BootOrder: 0000,0001\n"
+            "Boot0000* KythOS\tHD(1,GPT,...)\n"
+            "Boot0001* Windows Boot Manager\tHD(1,GPT,...)\n"
+        )
+        after = (
+            "BootCurrent: 0000\n"
+            "BootOrder: 0000\n"
+            "Boot0000* KythOS\tHD(1,GPT,...)\n"
+        )
+        logs = []
+        install._warn_if_efi_boot_entries_disappeared(before, after, logs.append)
+        self.assertTrue(any("Windows Boot Manager" in m for m in logs))
+
+    def test_no_warning_when_entries_are_unchanged(self):
+        snapshot = "Boot0000* KythOS\tHD(1,GPT,...)\nBoot0001* Windows Boot Manager\tHD(1,GPT,...)\n"
+        logs = []
+        install._warn_if_efi_boot_entries_disappeared(snapshot, snapshot, logs.append)
+        self.assertEqual(logs, [])
+
+    def test_no_warning_when_reordered_but_not_removed(self):
+        before = "Boot0000* KythOS\tHD(1,GPT,...)\nBoot0001* Windows Boot Manager\tHD(1,GPT,...)\n"
+        after = "Boot0001* Windows Boot Manager\tHD(1,GPT,...)\nBoot0000* KythOS\tHD(1,GPT,...)\n"
+        logs = []
+        install._warn_if_efi_boot_entries_disappeared(before, after, logs.append)
+        self.assertEqual(logs, [])
+
+    def test_no_warning_when_either_snapshot_is_empty(self):
+        logs = []
+        install._warn_if_efi_boot_entries_disappeared("", "Boot0000* KythOS\n", logs.append)
+        install._warn_if_efi_boot_entries_disappeared("Boot0000* KythOS\n", "", logs.append)
+        self.assertEqual(logs, [])
 
 
 if __name__ == "__main__":

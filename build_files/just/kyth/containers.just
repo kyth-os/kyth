@@ -33,3 +33,17 @@ ai-dev-stop: (_ai-dev "stop")
 
 [group('KythOS')]
 ai-dev-remove: (_ai-dev "remove")
+
+# Podman btrfs (podman-btrfs.toml) — btrfs driver when on btrfs
+[group('KythOS')]
+podman-btrfs mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-podman-btrfs "{{ mode }}"
+
+# Distrobox cache tmpfs (distrobox-cache.toml) — 4G ccache+cargo
+[group('KythOS')]
+distrobox-cache mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-distrobox-cache "{{ mode }}"

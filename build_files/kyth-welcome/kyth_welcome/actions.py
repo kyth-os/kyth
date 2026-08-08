@@ -9,7 +9,7 @@ import re
 from .qt import QMessageBox, QPushButton
 from .services.browser_apps import _chromium_app_window_cmd
 from .services.launch import popen
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .services.flatpak import flatpak_install_shell_command
 
 
@@ -33,7 +33,7 @@ def _install_flatpak_inline(owner: object, btn: QPushButton, app_id: str, name: 
     worker = Worker(["bash", "-c", cmd])
 
     def _done(code: int):
-        _finish_worker(owner, attr=attr)
+        finish_worker(owner, attr=attr)
         if code == 0:
             btn.setText("✓ Installed")
             btn.setToolTip(f"{name} is installed. Find it in the app launcher.")

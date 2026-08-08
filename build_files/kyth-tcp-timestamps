@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-tcp-timestamps — 1 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-timestamps "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.tcp_timestamps import load_tcp_timestamps, tcp_timestamps_status; c=load_tcp_timestamps(); print(f\"profile={c['profile']} active={tcp_timestamps_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_timestamps import load_tcp_timestamps,save_tcp_timestamps,generate_tcp_timestamps; c=load_tcp_timestamps(); c['profile']='gaming'; save_tcp_timestamps(c); generate_tcp_timestamps(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp timestamps gaming 1" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_timestamps import load_tcp_timestamps,save_tcp_timestamps,generate_tcp_timestamps; c=load_tcp_timestamps(); c['profile']='balanced'; save_tcp_timestamps(c); generate_tcp_timestamps(c)"; echo "tcp timestamps balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_timestamps import load_tcp_timestamps,generate_tcp_timestamps; generate_tcp_timestamps(load_tcp_timestamps())" ;;
+    *) echo "Usage: kyth-tcp-timestamps [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

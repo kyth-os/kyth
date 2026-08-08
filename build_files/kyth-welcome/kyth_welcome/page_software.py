@@ -1,11 +1,10 @@
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
 from .lazy_page import compose_on_first_init
-from .services.runtime import Worker
-from .qt import QHBoxLayout, QPushButton, QWidget
-from .widgets import Page, _divider
+from .services.runtime import DataWorker, Worker
+from .qt import QPushButton, QWidget
+from .widgets import Page, SegmentedTabBar, _divider
 
 
 def _load_software_mixins() -> tuple[type, ...]:
@@ -33,43 +32,49 @@ def _load_software_mixins() -> tuple[type, ...]:
 class SoftwarePage(Page):
     """App store — Starter Packs | Store | AppImages | Installed."""
 
+    # Each app tuple is (flatpak_id, label, selected_by_default, description).
+    # The description is a per-APP fallback shown on store cards/tooltips when
+    # live Flathub metadata hasn't been fetched yet — it must not be the
+    # pack-level "desc" below (that's a one-line summary of the whole pack,
+    # shown once on the pack's own panel; reusing it per-app previously made
+    # every unrelated app in a pack display identical placeholder text).
     _STARTER_PACKS: ClassVar[list[dict]] = [
         {
             "name": "Gaming",
             "desc": "Steam, Epic/GOG, compatibility launchers, saves, and standalone .exe support.",
             "apps": [
-                ("com.valvesoftware.Steam", "Steam", True),
-                ("com.heroicgameslauncher.hgl", "Heroic Games Launcher", True),
-                ("net.lutris.Lutris", "Lutris", True),
-                ("com.usebottles.bottles", "Bottles", True),
-                ("com.github.mtkennerly.ludusavi", "Ludusavi", True),
-                ("net.davidotek.pupgui2", "ProtonUp-Qt", True),
+                ("com.valvesoftware.Steam", "Steam", True, "Digital game store and library for Windows and Linux-native titles."),
+                ("com.heroicgameslauncher.hgl", "Heroic Games Launcher", True, "Launcher for Epic Games Store and GOG libraries."),
+                ("net.lutris.Lutris", "Lutris", True, "Open-source game manager for Windows, GOG, Amazon, and emulated titles."),
+                ("com.usebottles.bottles", "Bottles", True, "Run Windows software and games in isolated, sandboxed prefixes."),
+                ("com.github.mtkennerly.ludusavi", "Ludusavi", True, "Back up and restore PC game save files across hundreds of titles."),
+                ("net.davidotek.pupgui2", "ProtonUp-Qt", True, "Install and manage custom Proton and Wine-GE compatibility builds."),
             ],
         },
         {
             "name": "Creator",
             "desc": "Streaming, editing, audio, images, and 3D creation.",
             "apps": [
-                ("com.obsproject.Studio", "OBS Studio", True),
-                ("org.kde.kdenlive", "Kdenlive", True),
-                ("org.audacityteam.Audacity", "Audacity", True),
-                ("org.gimp.GIMP", "GIMP", True),
-                ("org.inkscape.Inkscape", "Inkscape", True),
-                ("org.blender.Blender", "Blender", True),
+                ("com.obsproject.Studio", "OBS Studio", True, "Screen recording and live streaming with obs-vkcapture-ready game capture."),
+                ("org.kde.kdenlive", "Kdenlive", True, "Open-source non-linear video editor. Multi-track timeline, effects, and transitions."),
+                ("org.audacityteam.Audacity", "Audacity", True, "Multi-track audio editor and recorder. Noise reduction, EQ, compression, and export."),
+                ("org.gimp.GIMP", "GIMP", True, "GNU Image Manipulation Program. Photo editing, compositing, and graphic design."),
+                ("org.inkscape.Inkscape", "Inkscape", True, "Vector graphics editor for illustrations, logos, and diagrams."),
+                ("org.blender.Blender", "Blender", True, "3D modeling, animation, and rendering suite."),
             ],
         },
         {
             "name": "Everyday",
             "desc": "Browser, chat, media, passwords, app management, and local file sharing.",
             "apps": [
-                ("com.brave.Browser", "Brave Browser", True),
-                ("com.discordapp.Discord", "Discord", True),
-                ("org.videolan.VLC", "VLC", True),
-                ("com.spotify.Client", "Spotify", True),
-                ("com.bitwarden.desktop", "Bitwarden", False),
-                ("org.localsend.localsend_app", "LocalSend", True),
-                ("io.github.vikdevelop.WebApp", "WebApp Manager", True),
-                ("com.github.tchx84.Flatseal", "Flatseal", True),
+                ("com.brave.Browser", "Brave Browser", True, "Privacy-focused web browser with built-in ad and tracker blocking."),
+                ("com.discordapp.Discord", "Discord", True, "Voice, video, and text chat for communities and friends."),
+                ("org.videolan.VLC", "VLC", True, "Plays virtually any video or audio file format."),
+                ("com.spotify.Client", "Spotify", True, "Stream music, podcasts, and playlists."),
+                ("com.bitwarden.desktop", "Bitwarden", False, "Open-source password manager and secure vault."),
+                ("org.localsend.localsend_app", "LocalSend", True, "Send files to nearby devices over the local network — no cloud required."),
+                ("io.github.vikdevelop.WebApp", "WebApp Manager", True, "Turn any website into a standalone, launchable desktop app."),
+                ("com.github.tchx84.Flatseal", "Flatseal", True, "Review and adjust Flatpak app permissions — filesystem, network, and devices."),
             ],
         },
     ]
@@ -294,6 +299,7 @@ class SoftwarePage(Page):
         # Worker references
         self._starter_worker: Worker | None = None
         self._uninstall_worker: Worker | None = None
+        self._installed_list_worker: DataWorker | None = None
         self._uninstall_buttons: list[QPushButton] = []
         self._fp_search_worker: Worker | None = None
         self._fp_catalog_worker: Worker | None = None
@@ -338,20 +344,12 @@ class SoftwarePage(Page):
 
         # Tab bar — inserted into _outer between the page-header divider and the
         # scroll area. After _page_header(), _outer contains [hdr, div, scroll].
-        tab_bar = QWidget()
-        tab_bar.setObjectName("sw-tab-bar")
-        tab_bar_layout = QHBoxLayout(tab_bar)
-        tab_bar_layout.setContentsMargins(56, 0, 56, 0)
-        tab_bar_layout.setSpacing(0)
-        self._tab_btns: list[QPushButton] = []
-        for i, label in enumerate(("Start", "Create", "Develop", "Security", "App Store", "AppImages", "Installed")):
-            btn = QPushButton(label)
-            btn.setObjectName("sw-tab-active" if i == self._initial_tab else "sw-tab")
-            btn.clicked.connect(lambda _=False, idx=i: self._switch_tab(idx))
-            tab_bar_layout.addWidget(btn)
-            self._tab_btns.append(btn)
-        tab_bar_layout.addStretch()
-        self._outer.insertWidget(2, tab_bar)
+        # SegmentedTabBar (widgets.py) owns the button row/checked-state
+        # bookkeeping; this page only decides what "activating a tab" does.
+        tab_labels = ("Start", "Create", "Develop", "Security", "App Store", "AppImages", "Installed")
+        self._tab_bar = SegmentedTabBar(list(enumerate(tab_labels)), active=self._initial_tab)
+        self._tab_bar.activated.connect(self._switch_tab)
+        self._outer.insertWidget(2, self._tab_bar)
         self._outer.insertWidget(3, _divider())
 
         self._current_tab = self._initial_tab
@@ -385,17 +383,19 @@ class SoftwarePage(Page):
     def _switch_tab(self, idx: int):
         if idx == self._current_tab:
             return
+        # _build_installed_tab() already kicks off its own async refresh the
+        # first time it's built (whether that happens here or from the
+        # initial _ensure_tab() call in __init__) — only re-trigger it here
+        # on a *revisit*, so switching to Installed doesn't fire the flatpak
+        # list fetch twice back to back.
+        already_built = self._tab_widgets[idx] is not None
         self._ensure_tab(idx)
-        for i, btn in enumerate(self._tab_btns):
-            active = i == idx
-            btn.setObjectName("sw-tab-active" if active else "sw-tab")
-            _restyle(btn)
-            widget = self._tab_widgets[i]
+        for i, widget in enumerate(self._tab_widgets):
             if widget is not None:
-                widget.setVisible(active)
+                widget.setVisible(i == idx)
         self._current_tab = idx
         if idx == 3:
             self._refresh_sec_status()
-        elif idx == 6:
+        elif idx == 6 and already_built:
             self._refresh_installed_list()
 

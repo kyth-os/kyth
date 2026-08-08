@@ -7,7 +7,7 @@
 install -m 0755 /ctx/kyth-web-app-categorize /usr/bin/kyth-web-app-categorize
 
 mkdir -p /etc/systemd/user/default.target.wants
-cat >/etc/systemd/user/kyth-web-app-categorize.service <<'WEBAPPSERVICEEOF'
+write_config /etc/systemd/user/kyth-web-app-categorize.service <<'WEBAPPSERVICEEOF'
 [Unit]
 Description=Place browser-installed web apps in the Web Apps launcher folder
 
@@ -16,7 +16,7 @@ Type=oneshot
 ExecStart=/usr/bin/kyth-web-app-categorize
 WEBAPPSERVICEEOF
 
-cat >/etc/systemd/user/kyth-web-app-categorize.path <<'WEBAPPPATHEOF'
+write_config /etc/systemd/user/kyth-web-app-categorize.path <<'WEBAPPPATHEOF'
 [Unit]
 Description=Watch for browser-installed web app launchers
 
@@ -41,13 +41,13 @@ mkdir -p \
 	/etc/skel/Templates \
 	/etc/skel/Videos
 
-cat >/etc/skel/Games/.directory <<'GAMESDIREEOF'
+write_config /etc/skel/Games/.directory <<'GAMESDIREEOF'
 [Desktop Entry]
 Icon=applications-games
 Name=Games
 GAMESDIREEOF
 
-cat >/etc/skel/.config/user-dirs.dirs <<'USERDIRSEOF'
+write_config /etc/skel/.config/user-dirs.dirs <<'USERDIRSEOF'
 XDG_DESKTOP_DIR="$HOME/Desktop"
 XDG_DOWNLOAD_DIR="$HOME/Downloads"
 XDG_TEMPLATES_DIR="$HOME/Templates"
@@ -58,7 +58,7 @@ XDG_PICTURES_DIR="$HOME/Pictures"
 XDG_VIDEOS_DIR="$HOME/Videos"
 USERDIRSEOF
 
-cat >/etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc <<'PLASMADESKTOPEOF'
+write_config /etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc <<'PLASMADESKTOPEOF'
 [Containments][1]
 wallpaperplugin=org.kde.image
 

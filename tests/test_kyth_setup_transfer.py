@@ -1,7 +1,6 @@
-import importlib.util
-from importlib.machinery import SourceFileLoader
 import json
 import subprocess  # nosec B404
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -9,19 +8,16 @@ import tarfile
 import tempfile
 
 
-def _load_setup_transfer():
-    path = Path(__file__).resolve().parents[1] / "build_files" / "kyth-setup-transfer"
-    loader = SourceFileLoader("kyth_setup_transfer", str(path))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
+
+from kyth_shared import setup_transfer
 
 
 class SetupTransferTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.transfer = _load_setup_transfer()
+        cls.transfer = setup_transfer
 
     @patch("subprocess.run")
     def test_installed_flatpaks_parsing(self, mock_run):

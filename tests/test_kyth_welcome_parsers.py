@@ -67,15 +67,74 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
-from kyth_welcome import core_base, page_vpn  # noqa: E402
-from kyth_welcome.services import appstream, first_run, gaming, hardware, network, software, welcome  # noqa: E402
+from kyth_welcome import page_vpn  # noqa: E402
+from kyth_welcome.services import appstream, first_run, gaming, hardware, network, process, repair, software, updates, welcome  # noqa: E402
 
 
 class CoreParserTests(unittest.TestCase):
     def test_parse_size_bytes(self):
-        self.assertEqual(core_base._parse_size_bytes("1 KB"), 1024)
-        self.assertEqual(core_base._parse_size_bytes("1.5 GB"), int(1.5 * 1024**3))
-        self.assertEqual(core_base._parse_size_bytes("not a size"), 0)
+        self.assertEqual(process.parse_size_bytes("1 KB"), 1024)
+        self.assertEqual(process.parse_size_bytes("1.5 GB"), int(1.5 * 1024**3))
+        self.assertEqual(process.parse_size_bytes("not a size"), 0)
+
+
+class UpdateOperationControllerTests(unittest.TestCase):
+    def test_operation_controller_tracks_phase_and_irreversible_cancel_boundary(self):
+        controller = updates.UpdateOperationController()
+        controller.start("update", now=100.0)
+
+        phase = controller.receive_line("Deploying image", now=105.0)
+
+        self.assertTrue(phase)
+        self.assertEqual(controller.last_output_at, 105.0)
+        self.assertTrue(controller.cancellation_blocked)
+        self.assertTrue(controller.cancel_block_reason)
+
+    def test_operation_controller_finishes_quiet_download(self):
+        controller = updates.UpdateOperationController()
+        controller.start("update", now=100.0)
+        for _ in range(9):
+            self.assertEqual(
+                controller.update_download(500, 1000, 0, 0, proxy_running=False),
+                "active",
+            )
+
+        self.assertEqual(
+            controller.update_download(500, 1000, 0, 0, proxy_running=False),
+            "complete",
+        )
+        self.assertEqual(controller.final_download_bytes, 500)
+
+    def test_operation_controller_advances_silent_download_phase(self):
+        controller = updates.UpdateOperationController()
+        controller.start("update", now=100.0)
+        controller.set_phase("Downloading image layers…")
+        controller.last_output_at = 100.0
+
+        self.assertEqual(controller.heartbeat_phase(now=111.0), "Processing image layers…")
+
+    def test_operation_completion_is_typed_for_success_failure_and_cancel(self):
+        controller = updates.UpdateOperationController()
+        controller.start("update", now=100.0)
+
+        staged = controller.completion(0, staged=True)
+        failed = controller.completion(7)
+        cancelled = controller.completion(130)
+
+        self.assertEqual(staged.state, "succeeded")
+        self.assertTrue(staged.reboot_visible)
+        self.assertEqual(failed.state, "failed")
+        self.assertIn("exit code 7", failed.message)
+        self.assertEqual(cancelled.state, "cancelled")
+
+    def test_repair_completion_is_independent_of_qt(self):
+        success = repair.quick_fix_completion("Restart Audio", 0)
+        failure = repair.quick_fix_completion("Restart Audio", 4)
+
+        self.assertEqual(success.state, "succeeded")
+        self.assertFalse(success.expand_log)
+        self.assertEqual(failure.style, "status-err")
+        self.assertTrue(failure.expand_log)
 
     def test_parse_steam_acf_text(self):
         acf = gaming._parse_steam_acf_text(
@@ -159,6 +218,13 @@ class VpnParserTests(unittest.TestCase):
 
 
 class HomeHeroViewTests(unittest.TestCase):
+    def test_home_categories_and_profile_filtering(self):
+        categories = welcome.home_categories(has_nvidia=True)
+        self.assertEqual(categories[0][2], "Games")
+        self.assertIn(("Manage NVIDIA drivers", "NVIDIA"), categories[-1][3])
+        self.assertEqual(welcome.visible_category_indexes("everyday", [True, False, False]), [1, 2])
+        self.assertEqual(welcome.visible_category_indexes("gaming", [True, False]), [0, 1])
+
     def test_staged_update_takes_priority(self):
         view = welcome.home_hero_view(staged=True, rollback=True, windows_found=True)
         self.assertEqual(view.pill_text, "RESTART REQUIRED")
@@ -183,6 +249,20 @@ class HomeHeroViewTests(unittest.TestCase):
         self.assertEqual(view.rec_target, "Gaming")
         self.assertEqual(view.rec_btn_label, "Configure Games")
         self.assertEqual(view.pill_text, "SYSTEM UP-TO-DATE")
+
+
+class PageServiceModelTests(unittest.TestCase):
+    def test_update_operations_are_provider_independent(self):
+        full = updates.full_update_operation()
+        image = updates.image_update_operation(lambda: ["pkexec", "bootc", "upgrade"])
+        self.assertEqual(full.mode, "full-update")
+        self.assertEqual(image.command, ("pkexec", "bootc", "upgrade"))
+        self.assertEqual(updates.failed_operation_label("rollback"), "bootc rollback")
+
+    def test_repair_quick_fixes_are_declarative(self):
+        fixes = repair.quick_fixes()
+        self.assertEqual(fixes[0].label, "Refresh App Menu")
+        self.assertTrue(all(fix.command for fix in fixes))
 
 
 class FamiliarAppMatchTests(unittest.TestCase):

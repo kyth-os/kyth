@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import _release_worker_when_finished
+from ..services.runtime import release_worker_when_finished
 from ..services.gaming import DataWorker
 from ..services.hardware import HardwareProbe
 from ..services.plasma import _collect_wayland_probes
@@ -16,7 +16,7 @@ class _RefreshMixin:
         self._worker = DataWorker("plasma-wayland", _collect_wayland_probes)
         self._worker.result.connect(self._on_refresh_done)
         self._worker.failed.connect(self._on_refresh_failed)
-        _release_worker_when_finished(self, "_worker", self._worker)
+        release_worker_when_finished(self, "_worker", self._worker)
         self._worker.start()
 
     def _on_refresh_done(self, _key: str, probes: list[HardwareProbe]):

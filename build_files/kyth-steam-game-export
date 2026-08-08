@@ -1,130 +1,17 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Export Flatpak Steam game shortcuts and icons to system application menus."""
+from __future__ import annotations
 
-data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
-steam_data="${HOME}/.var/app/com.valvesoftware.Steam/.local/share"
-src_apps="${steam_data}/applications"
-src_icons="${steam_data}/icons/hicolor"
-dst_apps="${data_home}/applications"
-dst_icons="${data_home}/icons/hicolor"
 
-if [[ ! -d "${src_apps}" ]]; then
-    echo "No Flatpak Steam application shortcuts found at ${src_apps}."
-    exit 0
-fi
 
-mkdir -p "${dst_apps}"
-shopt -s nullglob
 
-exported=0
-skipped=0
+from kyth_shared.desktop.shortcut import export_steam_games  # noqa: E402
 
-safe_id() {
-    printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//'
-}
 
-copy_icon() {
-    local icon="$1"
-    [[ -n "${icon}" && -d "${src_icons}" ]] || return 0
+def main() -> None:
+    exported, skipped = export_steam_games()
+    print(f"Steam game launcher export complete: {exported} exported, {skipped} skipped.")
 
-    local copied=0
-    while IFS= read -r -d '' icon_file; do
-        rel="${icon_file#${src_icons}/}"
-        mkdir -p "${dst_icons}/$(dirname "${rel}")"
-        cp -f "${icon_file}" "${dst_icons}/${rel}"
-        copied=1
-    done < <(find "${src_icons}" -type f -path "*/apps/${icon}.*" -print0 2>/dev/null)
 
-    [[ "${copied}" -eq 1 ]] || return 0
-}
-
-rewrite_exec() {
-    local exec_line="$1"
-    local target="${exec_line#Exec=}"
-
-    if [[ "${target}" =~ steam://rungameid/[0-9]+ ]]; then
-        printf 'Exec=flatpak run com.valvesoftware.Steam %s\n' "${BASH_REMATCH[0]}"
-        return 0
-    fi
-
-    if [[ "${target}" =~ -applaunch[[:space:]]+([0-9]+) ]]; then
-        printf 'Exec=flatpak run com.valvesoftware.Steam steam://rungameid/%s\n' "${BASH_REMATCH[1]}"
-        return 0
-    fi
-
-    return 1
-}
-
-for src in "${src_apps}"/*.desktop; do
-    name="$(sed -n 's/^Name=//p' "${src}" | head -n1)"
-    icon="$(sed -n 's/^Icon=//p' "${src}" | head -n1)"
-    exec_line="$(sed -n 's/^Exec=/Exec=/p' "${src}" | head -n1)"
-
-    [[ -n "${name}" && -n "${exec_line}" ]] || {
-        skipped=$((skipped + 1))
-        continue
-    }
-
-    if [[ "${exec_line}" =~ rungameid/([0-9]+) ]]; then
-        appid="${BASH_REMATCH[1]}"
-    elif [[ "${exec_line}" =~ -applaunch[[:space:]]+([0-9]+) ]]; then
-        appid="${BASH_REMATCH[1]}"
-    else
-        skipped=$((skipped + 1))
-        continue
-    fi
-
-    dst="${dst_apps}/kyth-steam-${appid:-$(safe_id "${name}")}.desktop"
-    tmp="$(mktemp)"
-    saw_categories=0
-    saw_exec=0
-
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        case "${line}" in
-            Exec=*)
-                if rewrite_exec "${line}" >> "${tmp}"; then
-                    saw_exec=1
-                else
-                    printf '%s\n' "${line}" >> "${tmp}"
-                fi
-                ;;
-            Categories=*)
-                printf 'Categories=Game;\n' >> "${tmp}"
-                saw_categories=1
-                ;;
-            NoDisplay=*|Hidden=*)
-                ;;
-            *)
-                printf '%s\n' "${line}" >> "${tmp}"
-                ;;
-        esac
-    done < "${src}"
-
-    if [[ "${saw_exec}" -ne 1 ]]; then
-        rm -f "${tmp}"
-        skipped=$((skipped + 1))
-        continue
-    fi
-
-    [[ "${saw_categories}" -eq 1 ]] || printf 'Categories=Game;\n' >> "${tmp}"
-    {
-        printf 'X-KythExportedSteamGame=true\n'
-        printf 'X-Flatpak=com.valvesoftware.Steam\n'
-    } >> "${tmp}"
-
-    install -m 0644 "${tmp}" "${dst}"
-    rm -f "${tmp}"
-    copy_icon "${icon}"
-    exported=$((exported + 1))
-    echo "Exported ${name}"
-done
-
-if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database "${dst_apps}" >/dev/null 2>&1 || true
-fi
-
-if command -v gtk-update-icon-cache >/dev/null 2>&1 && [[ -d "${dst_icons}" ]]; then
-    gtk-update-icon-cache -q -t "${dst_icons}" >/dev/null 2>&1 || true
-fi
-
-echo "Steam game launcher export complete: ${exported} exported, ${skipped} skipped."
+if __name__ == "__main__":
+    main()

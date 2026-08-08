@@ -15,7 +15,7 @@ class FullUpdateTests(unittest.TestCase):
 
     def test_full_updater_limits_scope_to_owned_surfaces(self):
         source = SCRIPT.read_text(encoding="utf-8")
-        for expected in ("fwupdmgr", "flatpak update", "bootc upgrade", "kyth-rclone-update"):
+        for expected in ("fwupdmgr", "flatpak update", "kyth-safe-upgrade", "kyth-rclone-update"):
             self.assertIn(expected, source)
         for excluded in ("pipx", "pip3", "npm ", "code --", "gh extension", "topgrade"):
             self.assertNotIn(excluded, source)

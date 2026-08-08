@@ -2,26 +2,30 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import shutil
-import subprocess
+from kyth_welcome.services.command import run_sync
+from kyth_shared.runtime_output import parse_flatpak_apps
 
-from .process import _FLATPAK_CACHE_TTL, _probe_cached, _run_command
+from .process import FLATPAK_CACHE_TTL, probe_cached, run_command
+
+_logger = logging.getLogger(__name__)
 
 
 def installed_app_ids() -> frozenset[str] | None:
     """Return one cached Flatpak application-ID snapshot."""
 
     def fetch() -> list[str] | None:
-        result = _run_command(
+        result = run_command(
             ["flatpak", "list", "--app", "--columns=application"], timeout=10
         )
         if result is None or result.returncode != 0:
             return None
         return sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
 
-    raw = _probe_cached("flatpak-apps", _FLATPAK_CACHE_TTL, fetch)
+    raw = probe_cached("flatpak-apps", FLATPAK_CACHE_TTL, fetch)
     if raw is None:
         return None
     if isinstance(raw, frozenset):
@@ -34,10 +38,11 @@ def installed_app_ids() -> frozenset[str] | None:
 def list_installed_apps() -> list[dict[str, str]]:
     """Return installed Flatpak applications with display metadata."""
     if not shutil.which("flatpak"):
+        _logger.debug("flatpak not found on PATH — returning empty app list")
         return []
     env = {**os.environ, "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"}
     try:
-        result = subprocess.run(
+        result = run_sync(
             ["flatpak", "list", "--app", "--columns=application,name,origin,installation"],
             capture_output=True,
             text=True,
@@ -45,27 +50,13 @@ def list_installed_apps() -> list[dict[str, str]]:
             check=False,
             env=env,
         )
-    except Exception:
+    except Exception as exc:
+        _logger.debug("flatpak list failed: %s", exc, exc_info=True)
         return []
     if result.returncode != 0:
+        _logger.debug("flatpak list returned %s: %s", result.returncode, result.stderr.strip()[:200])
         return []
-    apps: list[dict[str, str]] = []
-    for line in result.stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 4:
-            continue
-        app_id, name, origin, installation = (part.strip() for part in parts[:4])
-        if app_id:
-            apps.append(
-                {
-                    "kind": "flatpak",
-                    "app_id": app_id,
-                    "name": name or app_id,
-                    "origin": origin or "unknown",
-                    "installation": installation or "system",
-                }
-            )
-    return apps
+    return parse_flatpak_apps(result.stdout)
 
 
 def pending_update_count() -> int | None:
@@ -76,14 +67,14 @@ def pending_update_count() -> int | None:
 
         return _count_flatpak_updates()
 
-    return _probe_cached("flatpak-updates", _FLATPAK_CACHE_TTL, fetch)
+    return probe_cached("flatpak-updates", FLATPAK_CACHE_TTL, fetch)
 
 
 def is_installed(app_id: str) -> bool:
     ids = installed_app_ids()
     if ids is not None:
         return app_id in ids
-    result = _run_command(["flatpak", "info", app_id], timeout=8)
+    result = run_command(["flatpak", "info", app_id], timeout=8)
     return result is not None and result.returncode == 0
 
 
@@ -98,6 +89,38 @@ def install_shell_command(app_id: str, extra_cmd: str = "") -> str:
         cmd += f" && {extra_cmd}"
     return cmd
 
+
+def flatpak_override_show(app_id: str) -> str:
+    """Return `flatpak override --user --show <app_id>` stdout (empty if no override)."""
+    if not app_id or any(c in app_id for c in ("\0", "\n", "\r", ";", "&")):
+        return ""
+    try:
+        r = run_sync(
+            ["flatpak", "override", "--user", "--show", app_id],
+            capture_output=True, text=True, timeout=8, check=False,
+        )
+        if r.returncode != 0:
+            return ""
+        return r.stdout
+    except Exception:
+        return ""
+ # flatpak_override_show
+
+def flatpak_override_command(app_id: str, filesystem: str, *, allow: bool = True) -> list[str]:
+    """Build `flatpak override --user [--filesystem=|--nofilesystem=]` argv.
+
+    Validates app_id and filesystem against allowlist so callers (Worker)
+    cannot inject shell metacharacters. Returns argv for Worker/mokutil-style
+    off-thread execution. Filesystem allowlist: home, xdg-documents, xdg-downloads,
+    xdg-pictures, xdg-videos, host."""
+    allowed_fs = {"home", "xdg-documents", "xdg-downloads", "xdg-pictures", "xdg-videos", "host"}
+    if filesystem not in allowed_fs:
+        raise ValueError(f"Unsupported filesystem: {filesystem}")
+    if not app_id or any(c in app_id for c in ("\0", "\n", "\r", ";", "&")):
+        raise ValueError(f"Invalid app_id: {app_id!r}")
+    flag = f"--filesystem={filesystem}" if allow else f"--nofilesystem={filesystem}"
+    return ["flatpak", "override", "--user", flag, app_id]
+ # flatpak_override_command
 
 # Compatibility names while callers migrate from services.software.
 _installed_flatpak_ids = installed_app_ids

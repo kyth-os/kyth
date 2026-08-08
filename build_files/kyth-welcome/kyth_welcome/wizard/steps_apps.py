@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import shlex
 
-from ..core_base import _cancel_worker, _restyle
+from ..core_base import cancel_worker, restyle
 from ..services.flatpak import _is_flatpak_installed
-from ..services.runtime import Worker, _finish_worker
+from ..services.runtime import Worker, finish_worker
 from ..qt import (
     QCheckBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QMessageBox,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QUrl,
@@ -164,7 +164,6 @@ class _AppsStepMixin:
             text_col.setSpacing(2)
             name_lbl = QLabel(name)
             name_lbl.setObjectName("wiz-card-title")
-            name_lbl.setStyleSheet("font-size: 13px;")
             desc_lbl = QLabel("Already installed." if already_installed else desc)
             desc_lbl.setObjectName("wiz-card-copy")
             desc_lbl.setWordWrap(True)
@@ -234,7 +233,7 @@ class _AppsStepMixin:
         if not selected:
             self._wizard_install_status.setText("No optional apps selected.")
             self._wizard_install_status.setObjectName("status-dim")
-            _restyle(self._wizard_install_status)
+            restyle(self._wizard_install_status)
             return
 
         names = ", ".join(name for _, name in selected)
@@ -247,7 +246,7 @@ class _AppsStepMixin:
         self._wizard_install_done = 0
         self._wizard_install_status.setText(f"Preparing to install {names}...")
         self._wizard_install_status.setObjectName("wiz-subheading")
-        _restyle(self._wizard_install_status)
+        restyle(self._wizard_install_status)
         self._wizard_install_progress.setRange(0, len(selected))
         self._wizard_install_progress.setValue(0)
         self._wizard_install_progress.show()
@@ -287,7 +286,7 @@ class _AppsStepMixin:
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        _cancel_worker(
+        cancel_worker(
             self,
             attr="_wizard_extra_worker",
             status_lbl=self._wizard_install_status,
@@ -305,7 +304,7 @@ class _AppsStepMixin:
             total = max(1, getattr(self, "_wizard_install_total", 1))
             self._wizard_install_status.setText(f"Installing {name} ({current} of {total})...")
             self._wizard_install_status.setObjectName("wiz-subheading")
-            _restyle(self._wizard_install_status)
+            restyle(self._wizard_install_status)
             return
         if line.startswith("__KYTH_APP_DONE__:"):
             parts = line.split(":", 2)
@@ -320,7 +319,7 @@ class _AppsStepMixin:
 
 
     def _on_wizard_extra_install_done(self, code: int, installed: list[tuple[str, str]]):
-        _finish_worker(self, attr="_wizard_extra_worker")
+        finish_worker(self, attr="_wizard_extra_worker")
         self._wizard_cancel_install_btn.hide()
         if code == Worker.CANCELLED:
             self._wizard_install_status.setText("Optional app install cancelled. Apps that finished installing are still available.")
@@ -343,5 +342,5 @@ class _AppsStepMixin:
             for check, app_id, _ in self._wizard_extra_checks:
                 check.setEnabled(not _is_flatpak_installed(app_id))
         self._wizard_install_btn.setEnabled(True)
-        _restyle(self._wizard_install_status)
+        restyle(self._wizard_install_status)
         self._update_nav()

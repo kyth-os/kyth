@@ -3,16 +3,22 @@ import re
 import shlex
 import shutil
 import subprocess
+
+from kyth_shared.commands import APPLICATION_RUNNER, command_spec
+from kyth_shared.boot_health import read_state as read_boot_health_state
+
+from kyth_welcome.services.hardware.types import HardwareProbe
+from kyth_welcome.services.command import run_sync
 from datetime import datetime
 
 from .bootc import (
-    _branch_display_name,
-    _current_branch,
-    _has_rollback_deployment,
-    _has_staged_update,
+    branch_display_name,
+    current_branch,
+    has_rollback_deployment,
+    has_staged_update,
 )
-from .hardware import HardwareProbe
-from .process import _command_stdout, _run_command
+from .process import command_stdout, run_command
+
 
 def _tail_file(path: str, max_lines: int = 80) -> str:
     try:
@@ -107,12 +113,13 @@ def _system_hub_probe() -> HardwareProbe:
 
 def _diagnostics_report(probes: list[HardwareProbe]) -> str:
     timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    kernel = _command_stdout(["uname", "-r"], timeout=5) or "unknown"
-    hostname = _command_stdout(["hostnamectl", "--static"], timeout=5) or _command_stdout(["hostname"], timeout=5) or "unknown"
-    branch = _branch_display_name(_current_branch())
-    staged = "yes" if _has_staged_update() else "no"
-    rollback = "yes" if _has_rollback_deployment() else "no"
-    fwupd = _run_command(["fwupdmgr", "get-updates"], timeout=20)
+    kernel = command_stdout(["uname", "-r"], timeout=5) or "unknown"
+    hostname = command_stdout(["hostnamectl", "--static"], timeout=5) or command_stdout(["hostname"], timeout=5) or "unknown"
+    branch = branch_display_name(current_branch())
+    staged = "yes" if has_staged_update() else "no"
+    rollback = "yes" if has_rollback_deployment() else "no"
+    boot_health = read_boot_health_state()
+    fwupd = run_command(["fwupdmgr", "get-updates"], timeout=20)
     if fwupd is None:
         fwupd_status = "fwupd unavailable"
     elif fwupd.returncode == 0:
@@ -132,6 +139,10 @@ def _diagnostics_report(probes: list[HardwareProbe]) -> str:
         f"  Branch:            {branch}",
         f"  Update staged:     {staged}",
         f"  Rollback available:{rollback}",
+        f"  Boot health:       {boot_health.status}",
+        f"  Failed boots:      {boot_health.failures}",
+        f"  Quarantined builds:{len(boot_health.quarantined)}",
+        f"  Last recovery:     {boot_health.last_recovered_digest or 'none'}",
         f"  Firmware state:    {fwupd_status}",
         "",
         "Checks",
@@ -151,47 +162,90 @@ def _diagnostics_report(probes: list[HardwareProbe]) -> str:
  # _diagnostics_report
 
 def _health_command_report() -> str:
+    import time
     checks: list[tuple[str, list[str], int]] = [
-        ("Daily-driver smoke check", ["/usr/bin/kyth-smoke-check", "--verbose"], 90),
+        ("Daily-driver health model", ["/usr/bin/kyth-smoke-check", "--json"], 90),
         ("Post-update confidence", ["/usr/bin/kyth-post-update-check", "--force", "--no-notify"], 45),
         ("NVIDIA status", ["/usr/bin/kyth-nvidia-status"], 30),
+        ("Hardware policy", ["/usr/bin/kyth-hardware-policy", "status"], 30),
         ("Controller readiness", ["/usr/bin/kyth-controller-check"], 30),
         ("Suspend/resume readiness", ["/usr/bin/kyth-resume-check"], 45),
         ("Raw support snapshot", ["/usr/bin/kyth-device-info"], 60),
     ]
 
-    sections = ["", "KythOS Health Command Output", "==========================", ""]
     env = os.environ.copy()
     env.setdefault("SUDO_ASKPASS", "/usr/bin/ksshaskpass")
+
+    running_procs = []
+    results = {}
+
     for title, cmd, timeout in checks:
-        sections.append(f"== {title} ==")
         exe = cmd[0]
         if not os.path.exists(exe) and shutil.which(exe) is None:
-            sections.extend([f"missing: {exe}", ""])
+            results[title] = {"error": f"missing: {exe}", "cmd": cmd}
             continue
         try:
-            r = subprocess.run(
-                cmd,
-                capture_output=True,
+            p = APPLICATION_RUNNER.spawn(
+                command_spec(cmd, name=f"health-{title.lower().replace(' ', '-')}", timeout=None),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
                 env=env,
-                check=False,
             )
-            output = (r.stdout or "").strip()
-            err = (r.stderr or "").strip()
-            sections.append(f"command: {' '.join(shlex.quote(part) for part in cmd)}")
-            sections.append(f"exit: {r.returncode}")
-            if output:
-                sections.append(output)
-            if err:
-                sections.append("")
-                sections.append("stderr:")
-                sections.append(err)
-        except subprocess.TimeoutExpired:
-            sections.append(f"timed out after {timeout}s")
+            running_procs.append((title, p, cmd, timeout, time.monotonic()))
         except Exception as exc:
-            sections.append(f"failed to run: {exc}")
+            results[title] = {"error": f"failed to run: {exc}", "cmd": cmd}
+
+    for title, p, cmd, timeout, start_time in running_procs:
+        elapsed = time.monotonic() - start_time
+        remaining = max(0.1, timeout - elapsed)
+        try:
+            out, err = p.communicate(timeout=remaining)
+            results[title] = {
+                "cmd": cmd,
+                "exit": p.returncode,
+                "stdout": out,
+                "stderr": err,
+            }
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, err = p.communicate()
+            results[title] = {
+                "cmd": cmd,
+                "error": f"timed out after {timeout}s",
+                "stdout": out,
+                "stderr": err,
+            }
+        except Exception as exc:
+            results[title] = {
+                "cmd": cmd,
+                "error": f"failed to read: {exc}",
+            }
+
+    sections = ["", "KythOS Health Command Output", "==========================", ""]
+    for title, cmd, timeout in checks:
+        sections.append(f"== {title} ==")
+        res = results.get(title)
+        if not res:
+            continue
+        if "error" in res and not res.get("stdout") and not res.get("stderr"):
+            sections.extend([res["error"], ""])
+            continue
+        
+        sections.append(f"command: {' '.join(shlex.quote(part) for part in res['cmd'])}")
+        if "error" in res:
+            sections.append(res["error"])
+        else:
+            sections.append(f"exit: {res['exit']}")
+        
+        output = (res.get("stdout") or "").strip()
+        err = (res.get("stderr") or "").strip()
+        if output:
+            sections.append(output)
+        if err:
+            sections.append("")
+            sections.append("stderr:")
+            sections.append(err)
         sections.append("")
     return "\n".join(sections)
  # _health_command_report
@@ -227,7 +281,7 @@ def _health_recommendations(report: str) -> str:
 
 
 def storage_sense_enabled() -> bool:
-    result = _run_command(
+    result = run_command(
         ["systemctl", "--user", "is-enabled", "kyth-storage-sense.timer"],
         timeout=5,
     )
@@ -239,7 +293,7 @@ _storage_sense_enabled = storage_sense_enabled
 
 def storage_sense_set(enable: bool) -> tuple[bool, str]:
     action = "enable" if enable else "disable"
-    result = _run_command(
+    result = run_command(
         ["systemctl", "--user", action, "--now", "kyth-storage-sense.timer"],
         timeout=15,
     )
@@ -253,8 +307,11 @@ def storage_sense_set(enable: bool) -> tuple[bool, str]:
 
 def storage_sense_run_now() -> tuple[bool, str]:
     try:
-        subprocess.Popen(
-            ["systemd-run", "--user", "--collect", "/usr/bin/kyth-storage-sense"],
+        APPLICATION_RUNNER.spawn(
+            command_spec(
+                ["systemd-run", "--user", "--collect", "/usr/bin/kyth-storage-sense"],
+                name="storage-sense", timeout=None,
+            ),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -266,24 +323,24 @@ def storage_sense_run_now() -> tuple[bool, str]:
 
 def collect_security_status() -> list[tuple[str, str, str]]:
     """Security overview rows: (status, area, text)."""
+    from kyth_shared import SystemProbe
     rows: list[tuple[str, str, str]] = []
 
-    result = _run_command(["systemctl", "is-active", "firewalld"], timeout=5)
-    fw_on = bool(result and result.stdout.strip() == "active")
+    fw_active = SystemProbe.get_firewall_status() == "active"
     rows.append((
-        "ok" if fw_on else "warn", "Firewall",
+        "ok" if fw_active else "warn", "Firewall",
         "firewalld is running — inbound connections are filtered."
-        if fw_on else "firewalld is not running — check Repair if you didn't disable it yourself.",
+        if fw_active else "firewalld is not running — check Repair if you didn't disable it yourself.",
     ))
 
-    enforce = (_command_stdout(["getenforce"], timeout=5) or "").strip()
+    enforce = SystemProbe.get_selinux_status()
     rows.append((
         "ok" if enforce == "Enforcing" else "warn", "Access control",
         "SELinux is enforcing — system files and services are isolated."
         if enforce == "Enforcing" else f"SELinux is {enforce or 'unavailable'} (expected: Enforcing).",
     ))
 
-    sb = (_command_stdout(["mokutil", "--sb-state"], timeout=5) or "").lower()
+    sb = SystemProbe.get_secure_boot_status()
     if "enabled" in sb:
         rows.append(("ok", "Secure Boot", "Firmware verifies the boot chain before KythOS starts."))
     elif "disabled" in sb:
@@ -296,7 +353,7 @@ def collect_security_status() -> list[tuple[str, str, str]]:
         "Store apps run as Flatpaks in sandboxes — permissions are reviewable in Flatseal.",
     ))
 
-    staged = _has_staged_update()
+    staged = has_staged_update()
     rows.append((
         "ok", "Updates",
         "An update is downloaded and staged — it applies on the next restart."
@@ -304,9 +361,9 @@ def collect_security_status() -> list[tuple[str, str, str]]:
     ))
 
     rows.append((
-        "ok" if _has_rollback_deployment() else "dim", "Recovery",
+        "ok" if has_rollback_deployment() else "dim", "Recovery",
         "The previous OS version is kept — one-click rollback from Repair."
-        if _has_rollback_deployment() else "A rollback point appears automatically after your first update.",
+        if has_rollback_deployment() else "A rollback point appears automatically after your first update.",
     ))
 
     rows.append((
@@ -322,15 +379,14 @@ _collect_security_status = collect_security_status
 
 def collect_signin_status() -> list[tuple[str, str, str]]:
     """Account and sign-in overview (fingerprint, lock, autologin)."""
-    import configparser
+    from kyth_shared import SystemProbe
     import getpass
-    import glob
 
     rows: list[tuple[str, str, str]] = []
     user = getpass.getuser()
 
     try:
-        result = subprocess.run(
+        result = run_sync(
             ["fprintd-list", user], capture_output=True, text=True, timeout=12, check=False,
         )
         detail = (result.stdout + result.stderr).strip()
@@ -350,27 +406,15 @@ def collect_signin_status() -> list[tuple[str, str, str]]:
     else:
         rows.append(("dim", "Fingerprint", f"Fingerprint state unavailable: {detail or 'unknown state'}."))
 
-    autolock = (_command_stdout([
-        "kreadconfig6", "--file", "kscreenlockerrc", "--group", "Daemon", "--key", "Autolock",
-    ], timeout=5) or "true").lower()
-    lock_resume = (_command_stdout([
-        "kreadconfig6", "--file", "kscreenlockerrc", "--group", "Daemon", "--key", "LockOnResume",
-    ], timeout=5) or "true").lower()
-    lock_ok = autolock not in ("false", "0") and lock_resume not in ("false", "0")
+    autolock_enabled, lock_resume_enabled = SystemProbe.get_screen_lock_status()
+    lock_ok = autolock_enabled and lock_resume_enabled
     rows.append((
         "ok" if lock_ok else "warn", "Screen lock",
         "Automatic locking and lock-on-resume are enabled."
         if lock_ok else "Automatic locking or lock-on-resume is disabled; review Screen Lock settings.",
     ))
 
-    config = configparser.ConfigParser(interpolation=None, strict=False)
-    config.optionxform = str
-    sddm_files = ["/etc/sddm.conf", *sorted(glob.glob("/etc/sddm.conf.d/*.conf"))]
-    try:
-        config.read(sddm_files)
-        autologin_user = config.get("Autologin", "User", fallback="").strip()
-    except (configparser.Error, OSError):
-        autologin_user = ""
+    autologin_user = SystemProbe.get_autologin_user()
     autologin = autologin_user == user
     rows.append((
         "warn" if autologin else "ok", "Automatic login",
@@ -378,9 +422,7 @@ def collect_signin_status() -> list[tuple[str, str, str]]:
         if autologin else "Off for this account; a sign-in is required after startup.",
     ))
 
-    wallet_enabled = (_command_stdout([
-        "kreadconfig6", "--file", "kwalletrc", "--group", "Wallet", "--key", "Enabled",
-    ], timeout=5) or "true").lower() not in ("false", "0")
+    wallet_enabled = SystemProbe.get_kwallet_enabled()
     rows.append((
         "ok" if wallet_enabled else "warn", "Credential vault",
         "KWallet is enabled for saved app and network credentials."

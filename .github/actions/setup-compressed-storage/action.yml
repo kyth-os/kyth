@@ -13,6 +13,10 @@ inputs:
     description: Physical file path for loopback image
     required: false
     default: /mnt/podman-storage.img
+  runroot:
+    description: Rootful podman runroot to relocate off the small root disk
+    required: false
+    default: /run/containers/storage
 runs:
   using: composite
   steps:
@@ -22,10 +26,19 @@ runs:
         SIZE: ${{ inputs.size }}
         MOUNT_POINT: ${{ inputs.mount-point }}
         IMAGE_PATH: ${{ inputs.image-path }}
+        RUNROOT: ${{ inputs.runroot }}
       run: |
         sudo truncate -s "${SIZE}" "${IMAGE_PATH}"
         sudo mkfs.btrfs -f "${IMAGE_PATH}"
         sudo podman system reset --force
         sudo systemctl stop podman.service
         sudo mount -o compress-force=zstd:2 "${IMAGE_PATH}" "${MOUNT_POINT}"
+        # Podman's runroot defaults to a small RAM-backed tmpfs under /run.
+        # Left there, a large multi-layer build can fill it and truncate the
+        # OCI config.json crun reads, surfacing as "crun: unknown version
+        # specified" — the same failure the build_push job's graphroot/runroot
+        # relocation fixes (7e31fbd, 4d9b3b0). Bind-mount it onto the same
+        # large disk backing the graphroot above.
+        sudo mkdir -p /mnt/containers-runroot "${RUNROOT}"
+        sudo mount --bind /mnt/containers-runroot "${RUNROOT}"
         sudo systemctl start podman.service

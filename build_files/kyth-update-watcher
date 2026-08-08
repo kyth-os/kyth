@@ -25,35 +25,31 @@ import tomllib
 from datetime import datetime, time as dtime
 from pathlib import Path
 
-# Shared pure helpers live in the System Hub package (no Qt on this import path).
-def _ensure_kyth_welcome_path() -> None:
-    here = Path(__file__).resolve().parent
-    candidates = (
-        here / "kyth-welcome",                 # repo: build_files/kyth-welcome
-        Path("/usr/lib/kyth-welcome"),        # installed image layout
-    )
-    for candidate in candidates:
-        if (candidate / "kyth_welcome").is_dir():
-            path = str(candidate)
-            if path not in sys.path:
-                sys.path.insert(0, path)
-            return
 
 
-_ensure_kyth_welcome_path()
-
-from kyth_welcome.services.bootc import (  # noqa: E402
+from kyth_shared.system.bootc import (  # noqa: E402
     fetch_bootc_status_data_uncached,
     image_digest_from_status,
     image_reference_from_status,
 )
-from kyth_welcome.services.registry import (  # noqa: E402
+from kyth_shared.system.registry import (  # noqa: E402
     remote_digest_for_ref,
 )
 from kyth_shared.update_status import (  # noqa: E402
     UpdateSnapshot,
     read_update_snapshot,
     write_update_snapshot,
+)
+from kyth_shared.gaming import check_gaming_reason  # noqa: E402
+from kyth_shared.daemon import BaseDaemon  # noqa: E402
+from kyth_shared.boot_health import (  # noqa: E402
+    DEFAULT_STATE_PATH as BOOT_HEALTH_PATH,
+    image_ring,
+    quarantine_reason,
+    read_state as read_boot_health_state,
+    record_staged,
+    rollout_policy_reason,
+    write_state as write_boot_health_state,
 )
 
 # ---------------------------------------------------------------------------
@@ -67,6 +63,7 @@ _STATUS_IDENTITY: dict[str, str] = {}
 
 DEFAULT_CONFIG: dict = {
     "enabled":            True,
+    "rollout_ring":       "follow-image",
     "quiet_hours_start":  "02:00",  # 24-h local time
     "quiet_hours_end":    "07:00",
     "skip_if_metered":    True,
@@ -78,20 +75,7 @@ DEFAULT_CONFIG: dict = {
 SKIP_REASONS = []
 
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
 
-def load_config() -> dict:
-    p = Path("/etc/kyth/auto-update.toml")
-    if p.exists():
-        try:
-            with open(p, "rb") as f:
-                data = tomllib.load(f)
-            return {**DEFAULT_CONFIG, **data.get("auto_update", data)}
-        except Exception as exc:
-            LOG.warning("Could not read config %s: %s", p, exc)
-    return DEFAULT_CONFIG.copy()
 
 
 # ---------------------------------------------------------------------------
@@ -169,52 +153,7 @@ def _active_uids() -> list[int]:
 def check_gaming(cfg: dict) -> str | None:
     if not cfg.get("skip_if_gaming", True):
         return None
-
-    # Check gamescope-session.lock for every active user
-    for uid in _active_uids():
-        lock = Path(f"/run/user/{uid}/gamescope-session.lock")
-        if lock.exists():
-            return f"gamescope session active (uid {uid})"
-
-    # Check GameMode via busctl for every active user session
-    for uid in _active_uids():
-        try:
-            env = {**os.environ, "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"}
-            r = subprocess.run(
-                [
-                    "busctl", "--user",
-                    "--address", f"unix:path=/run/user/{uid}/bus",
-                    "call",
-                    "com.feralinteractive.GameMode",
-                    "/com/feralinteractive/GameMode",
-                    "com.feralinteractive.GameMode",
-                    "QueryStatus", "i", "0",
-                ],
-                capture_output=True, text=True, timeout=3, env=env, check=False,
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                val = r.stdout.strip().split()[-1]
-                if int(val) > 0:
-                    return f"GameMode active (uid {uid})"
-        except Exception:
-            pass
-
-    # Scan /proc for gamescope or pressure-vessel (indicates game running)
-    gaming_exes = frozenset({"gamescope", "pressure-vessel-wrap"})
-    try:
-        for entry in os.scandir("/proc"):
-            if not entry.name.isdigit():
-                continue
-            try:
-                exe = Path(os.readlink(f"/proc/{entry.name}/exe")).name
-                if exe in gaming_exes:
-                    return "gaming process detected (/proc scan)"
-            except OSError:
-                pass
-    except OSError:
-        pass
-
-    return None
+    return check_gaming_reason(check_all_uids=True)
 
 
 def check_metered(cfg: dict) -> str | None:
@@ -410,106 +349,145 @@ def read_last_status() -> dict:
     return snapshot.to_dict() if snapshot else {}
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+class UpdateWatcherDaemon(BaseDaemon):
+    def __init__(self) -> None:
+        super().__init__(
+            "kyth-update-watcher",
+            config_filename="auto-update.toml",
+            config_section="auto_update",
+            default_config=DEFAULT_CONFIG,
+            oneshot=True,
+        )
+
+    def on_start(self) -> None:
+        if os.geteuid() != 0:
+            self.logger.error("kyth-update-watcher must run as root")
+            self._exit_code = 1
+            self.running = False
+            return
+
+        _STATUS_IDENTITY.clear()
+
+    def poll(self) -> None:
+        if self._exit_code != 0:
+            return
+
+        checks = [
+            check_enabled,
+            check_startup_grace,
+            check_quiet_hours,
+            check_gaming,
+            check_metered,
+        ]
+
+        for check in checks:
+            reason = check(self.config)
+            if reason:
+                self.logger.info("Skipping update: %s", reason)
+                write_status("skipped", reason)
+                return
+
+        self.logger.info("All checks passed — checking remote registry digest")
+        start_ts = int(time.time())
+        flatpak_count = check_flatpak_updates()
+        self.logger.info("Flatpak updates pending: %d", flatpak_count)
+
+        # Check digests before downloading (shared bootc + registry helpers)
+        status_data = get_bootc_status()
+        if status_data:
+            try:
+                from kyth_shared.system.probe import update_sections
+                update_sections({"bootc-status-data": status_data}, system=True)
+            except Exception as exc:
+                self.logger.debug("Could not warm system probe cache: %s", exc)
+        if status_data:
+            ref = get_bootc_image_reference(status_data)
+            if ref:
+                booted_digest = image_digest_from_status(status_data, "booted")
+                staged_digest = image_digest_from_status(status_data, "staged")
+                _STATUS_IDENTITY.update(
+                    image_ref=ref,
+                    booted_digest=booted_digest or "",
+                    staged_digest=staged_digest or "",
+                )
+
+                configured_ring = str(self.config.get("rollout_ring", "follow-image"))
+                ring_reason = rollout_policy_reason(ref, configured_ring)
+                if ring_reason:
+                    self.logger.warning("Skipping update: %s", ring_reason)
+                    write_status("skipped", ring_reason, "", start_ts, flatpak_count)
+                    return
+
+                self.logger.info("Booted digest: %s, Staged digest: %s", booted_digest, staged_digest)
+
+                remote_digest = get_remote_digest(ref)
+                if remote_digest:
+                    _STATUS_IDENTITY["remote_digest"] = remote_digest
+                    self.logger.info("Remote registry digest: %s", remote_digest)
+                    quarantined = quarantine_reason(
+                        read_boot_health_state(BOOT_HEALTH_PATH), remote_digest
+                    )
+                    if quarantined:
+                        self.logger.warning("Skipping quarantined update: %s", quarantined)
+                        write_status("quarantined", quarantined, "", start_ts, flatpak_count)
+                        return
+                    if staged_digest and remote_digest == staged_digest:
+                        self.logger.info("System already has staged update matching latest remote digest. Skipping bootc upgrade.")
+                        write_status("no_change", "Update already staged and matches latest registry version", "", start_ts, flatpak_count)
+                        _notify_updates(os_staged=True, flatpak_count=flatpak_count)
+                        return
+                    elif not staged_digest and booted_digest and remote_digest == booted_digest:
+                        self.logger.info("System is already up to date (booted digest matches remote). Skipping bootc upgrade.")
+                        write_status("no_change", None, "Already up to date", start_ts, flatpak_count)
+                        if flatpak_count > 0:
+                            _notify_updates(os_staged=False, flatpak_count=flatpak_count)
+                        return
+
+        self.logger.info("Proceeding to run bootc upgrade")
+        ok, output = run_bootc_upgrade(self.config["bootc_timeout"])
+
+        if ok:
+            if "No update available" in output or "already up to date" in output.lower():
+                self.logger.info("System already up to date")
+                write_status("no_change", None, output, start_ts, flatpak_count)
+                if flatpak_count > 0:
+                    _notify_updates(os_staged=False, flatpak_count=flatpak_count)
+            else:
+                self.logger.info("Upgrade staged successfully")
+                if _STATUS_IDENTITY.get("remote_digest"):
+                    _STATUS_IDENTITY["staged_digest"] = _STATUS_IDENTITY["remote_digest"]
+                    try:
+                        health = read_boot_health_state(BOOT_HEALTH_PATH)
+                        ring = image_ring(_STATUS_IDENTITY.get("image_ref", "")) or str(
+                            self.config.get("rollout_ring", "follow-image")
+                        )
+                        write_boot_health_state(
+                            record_staged(
+                                health,
+                                _STATUS_IDENTITY["remote_digest"],
+                                rollout_ring=ring,
+                            ),
+                            BOOT_HEALTH_PATH,
+                        )
+                    except OSError as exc:
+                        self.logger.warning("Could not record staged digest: %s", exc)
+                write_status("upgraded", None, output, start_ts, flatpak_count)
+                _notify_updates(os_staged=True, flatpak_count=flatpak_count)
+                try:
+                    from kyth_shared.system.probe import invalidate_after_bootc_change, refresh_cache
+                    invalidate_after_bootc_change()
+                    refresh_cache(system=True)
+                except Exception as exc:
+                    self.logger.debug("probe refresh after upgrade failed: %s", exc)
+        else:
+            self.logger.error("bootc upgrade failed: %s", output[:500])
+            write_status("error", output[:500], output, start_ts, flatpak_count)
+            self._exit_code = 1
+
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(name)s: %(levelname)s %(message)s",
-        stream=sys.stderr,
-    )
-
-    if os.geteuid() != 0:
-        LOG.error("kyth-update-watcher must run as root")
-        sys.exit(1)
-
-    _STATUS_IDENTITY.clear()
-    cfg = load_config()
-
-    checks = [
-        check_enabled,
-        check_startup_grace,
-        check_quiet_hours,
-        check_gaming,
-        check_metered,
-    ]
-
-    for check in checks:
-        reason = check(cfg)
-        if reason:
-            LOG.info("Skipping update: %s", reason)
-            write_status("skipped", reason)
-            sys.exit(0)
-
-    LOG.info("All checks passed — checking remote registry digest")
-    start_ts = int(time.time())
-    flatpak_count = check_flatpak_updates()
-    LOG.info("Flatpak updates pending: %d", flatpak_count)
-
-    # Check digests before downloading (shared bootc + registry helpers)
-    status_data = get_bootc_status()
-    if status_data:
-        try:
-            from kyth_welcome.services.probe import update_sections
-            update_sections({"bootc-status-data": status_data}, system=True)
-        except Exception as exc:
-            LOG.debug("Could not warm system probe cache: %s", exc)
-    if status_data:
-        ref = get_bootc_image_reference(status_data)
-        if ref:
-            booted_digest = image_digest_from_status(status_data, "booted")
-            staged_digest = image_digest_from_status(status_data, "staged")
-            _STATUS_IDENTITY.update(
-                image_ref=ref,
-                booted_digest=booted_digest or "",
-                staged_digest=staged_digest or "",
-            )
-
-            LOG.info("Booted digest: %s, Staged digest: %s", booted_digest, staged_digest)
-
-            remote_digest = get_remote_digest(ref)
-            if remote_digest:
-                _STATUS_IDENTITY["remote_digest"] = remote_digest
-                LOG.info("Remote registry digest: %s", remote_digest)
-                if staged_digest and remote_digest == staged_digest:
-                    LOG.info("System already has staged update matching latest remote digest. Skipping bootc upgrade.")
-                    write_status("no_change", "Update already staged and matches latest registry version", "", start_ts, flatpak_count)
-                    _notify_updates(os_staged=True, flatpak_count=flatpak_count)
-                    sys.exit(0)
-                elif not staged_digest and booted_digest and remote_digest == booted_digest:
-                    LOG.info("System is already up to date (booted digest matches remote). Skipping bootc upgrade.")
-                    write_status("no_change", None, "Already up to date", start_ts, flatpak_count)
-                    if flatpak_count > 0:
-                        _notify_updates(os_staged=False, flatpak_count=flatpak_count)
-                    sys.exit(0)
-
-    LOG.info("Proceeding to run bootc upgrade")
-    ok, output = run_bootc_upgrade(cfg["bootc_timeout"])
-
-    if ok:
-        if "No update available" in output or "already up to date" in output.lower():
-            LOG.info("System already up to date")
-            write_status("no_change", None, output, start_ts, flatpak_count)
-            if flatpak_count > 0:
-                _notify_updates(os_staged=False, flatpak_count=flatpak_count)
-        else:
-            LOG.info("Upgrade staged successfully")
-            if _STATUS_IDENTITY.get("remote_digest"):
-                _STATUS_IDENTITY["staged_digest"] = _STATUS_IDENTITY["remote_digest"]
-            write_status("upgraded", None, output, start_ts, flatpak_count)
-            _notify_updates(os_staged=True, flatpak_count=flatpak_count)
-            try:
-                from kyth_welcome.services.probe import invalidate_after_bootc_change, refresh_cache
-                invalidate_after_bootc_change()
-                refresh_cache(system=True)
-            except Exception as exc:
-                LOG.debug("probe refresh after upgrade failed: %s", exc)
-    else:
-        LOG.error("bootc upgrade failed: %s", output[:500])
-        write_status("error", output[:500], output, start_ts, flatpak_count)
-        sys.exit(1)
+    daemon = UpdateWatcherDaemon()
+    sys.exit(daemon.run())
 
 
 if __name__ == "__main__":

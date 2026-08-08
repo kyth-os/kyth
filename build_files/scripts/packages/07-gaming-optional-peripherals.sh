@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck source=../lib/packages-helpers.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/packages-helpers.sh"
+source "../lib/packages-helpers.sh"
 
 if ! is_enabled "${ENABLE_GAMING_PERIPHERALS:-0}"; then
 	echo "Specialized gaming peripheral profile is disabled; keeping the lean base stack."

@@ -3,8 +3,9 @@
 
 # Local agent/editor state.
 .agents/
-.claude/
-.codex/
+**/.claude/
+**/.codex/
+.codex
 
 # Generated build artifacts. These can be huge locally and are recreated by
 # their own workflows, not consumed by Dockerfile builds.

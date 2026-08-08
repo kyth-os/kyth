@@ -1,4 +1,5 @@
-"""Divider QSS styles."""
+"""Divider — faint but present hairline separation."""
+
 from ..ui_tokens import KYTH_HAIRLINE
 
 DIVIDER_QSS = f"""

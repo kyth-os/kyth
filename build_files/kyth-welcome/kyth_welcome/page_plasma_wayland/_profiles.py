@@ -57,6 +57,15 @@ DESKTOP_PROFILES = {
         "animation": 2,
         "tiling_padding": 6,
     },
+    "windows": {
+        "title": "Windows 11 Comfort",
+        "summary": "Feels like Windows: centered taskbar, double-click to open, strong snap zones, Win+arrow halves, Win+E/D/L.",
+        "zones": "Halves and quarters with 8px gaps — drag to snap to 2×2 or 3-column grid, like Windows 11 Snap Layouts.",
+        "snap": 8,
+        "placement": "Smart",
+        "animation": 1,
+        "tiling_padding": 6,
+    },
 }
 
 
@@ -102,6 +111,13 @@ kwriteconfig6 --file kwinrc --group KythOS --key PreferredColumns 2
 kwriteconfig6 --file kwinrc --group KythOS --key UltrawideMode true
 kwriteconfig6 --file kwinrc --group KythOS --key PreferredColumns 3
 kwriteconfig6 --file kwinrc --group KythOS --key CenteredDialogs true
+""",
+            "windows": """
+kwriteconfig6 --file kdeglobals --group KDE --key SingleClick false
+kwriteconfig6 --file dolphinrc --group General --key ShowPreview true
+kwriteconfig6 --file kdeglobals --group General --key XftHintStyle hintslight
+# Windows 11 Snap parity: strong snap + centered taskbar hint
+kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc --group Containments --key alignment 1
 """,
         }.get(profile_key, "")
         return f"""

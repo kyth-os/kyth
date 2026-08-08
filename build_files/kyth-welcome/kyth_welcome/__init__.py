@@ -15,13 +15,3 @@ Package layout:
     wizard/        first-run WizardWindow + step mixins
     app.py         entry point
 """
-
-import sys
-from pathlib import Path
-
-_here = Path(__file__).resolve().parent
-# Source checkout: build_files/kyth-welcome/kyth_welcome/__init__.py
-#   → kyth_shared beside kyth-welcome under build_files.
-_p = _here.parent.parent / "kyth_shared"
-if _p.is_dir() and str(_p) not in sys.path:
-    sys.path.insert(0, str(_p))

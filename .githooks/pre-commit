@@ -4,13 +4,6 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
 
-"${repo_root}/build_files/scripts/update-readme-snapshot.sh"
-
-if ! git diff --quiet -- README.md; then
-    git add README.md
-    echo "[pre-commit] README.md snapshot refreshed and staged."
-fi
-
 # Check staged shell scripts
 staged_sh=()
 while IFS= read -r file; do

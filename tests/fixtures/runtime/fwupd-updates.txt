@@ -1,0 +1,8 @@
+Devices with no available firmware updates:
+ • System Firmware
+
+Device ID: 1111111111111111111111111111111111111111
+Summary: UEFI firmware update
+
+Device ID: 2222222222222222222222222222222222222222
+Summary: Dock firmware update

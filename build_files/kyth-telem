@@ -29,6 +29,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+
+
+from kyth_shared.daemon import BaseDaemon  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -41,8 +45,12 @@ MANGOHUD_CONF = _HOME / ".config/MangoHud/MangoHud.conf"
 
 LOG = logging.getLogger("kyth-telem")
 
-_SCAN_INTERVAL = 10      # seconds between filesystem polls
-_MIN_FILE_AGE  = 15      # seconds old before we consider a CSV stable/complete
+DEFAULT_CONFIG = {
+    "scan_interval": 10,
+    "min_file_age": 15,
+}
+
+
 
 # ---------------------------------------------------------------------------
 # MangoHud config injection
@@ -426,7 +434,7 @@ def ingest_csv(conn: sqlite3.Connection, path: Path) -> bool:
 # Main loop
 # ---------------------------------------------------------------------------
 
-def scan(conn: sqlite3.Connection) -> int:
+def scan(conn: sqlite3.Connection, min_file_age: int = 15) -> int:
     """Scan SESSIONS_DIR for stable new CSVs. Returns count ingested."""
     ingested = 0
     now = time.time()
@@ -438,7 +446,7 @@ def scan(conn: sqlite3.Connection) -> int:
                 age = now - entry.stat().st_mtime
             except OSError:
                 continue
-            if age < _MIN_FILE_AGE:
+            if age < min_file_age:
                 continue  # still being written
             if ingest_csv(conn, entry):
                 ingested += 1
@@ -447,41 +455,37 @@ def scan(conn: sqlite3.Connection) -> int:
     return ingested
 
 
+class TelemetryDaemon(BaseDaemon):
+    def __init__(self) -> None:
+        super().__init__(
+            "kyth-telem",
+            config_filename="telem.toml",
+            config_section="telemetry",
+            default_config=DEFAULT_CONFIG,
+            poll_interval_key="scan_interval",
+            default_poll_interval=10.0,
+        )
+        self.conn = None
+
+    def on_start(self) -> None:
+        ensure_mangohud_output()
+        self.conn = open_db()
+        self.logger.info("Started — watching %s", SESSIONS_DIR)
+
+    def poll(self) -> None:
+        min_file_age = self.config.get("min_file_age", 15)
+        n = scan(self.conn, min_file_age=min_file_age)
+        if n:
+            self.logger.info("Ingested %d new session(s)", n)
+
+    def on_stop(self) -> None:
+        if self.conn:
+            self.conn.close()
+
+
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(name)s: %(levelname)s %(message)s",
-        stream=sys.stderr,
-    )
-
-    ensure_mangohud_output()
-
-    conn = open_db()
-    force_scan = False
-
-    def on_sighup(signum, frame):
-        nonlocal force_scan
-        LOG.info("SIGHUP — re-scanning immediately")
-        force_scan = True
-
-    signal.signal(signal.SIGHUP, on_sighup)
-
-    LOG.info("Started — watching %s", SESSIONS_DIR)
-
-    while True:
-        try:
-            n = scan(conn)
-            if n:
-                LOG.info("Ingested %d new session(s)", n)
-        except Exception as exc:
-            LOG.exception("Scan error: %s", exc)
-
-        force_scan = False
-        # Sleep in small chunks so SIGHUP wakes us promptly
-        for _ in range(_SCAN_INTERVAL * 2):
-            if force_scan:
-                break
-            time.sleep(0.5)
+    daemon = TelemetryDaemon()
+    sys.exit(daemon.run())
 
 
 if __name__ == "__main__":

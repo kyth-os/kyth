@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .core_base import _bootc_image_timestamp
 from .qt import QHBoxLayout, QLabel, QPushButton
 from .widgets import _make_card, _make_flow_step
 
@@ -61,26 +60,92 @@ def repair_overview_cards(navigate: Callable[[str], None]) -> list[object]:
     return [info, order, immutable]
 
 
+def system_restore_history_card(
+    history: list[dict] | None,
+    run_rollback: Callable[[], None],
+    navigate: Callable[[str], None],
+) -> object:
+    """Windows-style System Restore timeline card. Pure layout — caller fetches history off-thread."""
+    accent = "card-accent-ok" if history and any(h.get("available") for h in history) else None
+    card, layout = _make_card(accent)
+    title = QLabel("System Restore — deployment history")
+    title.setObjectName("card-title")
+    layout.addWidget(title)
+    intro = QLabel(
+        "Windows-style restore points: KythOS keeps the current image, any staged update, and the previous image. "
+        "If an update causes trouble, roll back with one click — like File History for the OS. Files in /home are never touched."
+    )
+    intro.setObjectName("card-copy")
+    intro.setWordWrap(True)
+    layout.addWidget(intro)
+    if not history:
+        body = QLabel("Checking deployment history…")
+        body.setObjectName("card-copy")
+        layout.addWidget(body)
+    else:
+        for h in history:
+            label = h.get("label", h.get("section", ""))
+            if not h.get("available"):
+                row_text = f"{label}: — no image (will appear after the next update)"
+                status = "dim"
+            else:
+                ts = h.get("timestamp") or "unknown time"
+                ref = h.get("reference") or h.get("branch") or "KythOS image"
+                short = h.get("short_digest") or ""
+                row_text = f"{label}: {ref} · {ts}" + (f" · {short}" if short else "")
+                status = "ok" if h.get("section") == "booted" else ("warn" if h.get("section") == "staged" else "ok")
+            row = QLabel(row_text)
+            row.setObjectName("card-copy" if status != "dim" else "card-copy")
+            row.setWordWrap(True)
+            layout.addWidget(row)
+    buttons = QHBoxLayout()
+    buttons.setSpacing(8)
+    rollback_btn = QPushButton("Restore Previous Image and Reboot")
+    rollback_btn.setObjectName("primary")
+    has_prev = bool(history and any(h.get("section") == "rollback" and h.get("available") for h in history))
+    rollback_btn.setEnabled(has_prev)
+    rollback_btn.clicked.connect(run_rollback)
+    buttons.addWidget(rollback_btn)
+    buttons.addWidget(QPushButton("Open Update Page"))
+    # second button wired via closure in caller — placeholder here, caller replaces
+    buttons.itemAt(1).widget().clicked.connect(lambda _=False: navigate("Update"))
+    buttons.addStretch()
+    layout.addLayout(buttons)
+    return card
+
+
 def rollback_card(
     has_rollback: bool,
     run_rollback: Callable[[], None],
     navigate: Callable[[str], None],
+    timestamp: str | None = None,
+    warn: bool = False,
 ) -> tuple[object, QPushButton]:
-    card, layout = _make_card("card-accent-warn" if has_rollback else None)
+    """timestamp: pre-fetched bootc_image_timestamp("rollback"), or None.
+    Fetching it is a subprocess call — callers building this eagerly (e.g.
+    a page constructor) should pass None and refresh it in asynchronously,
+    the same way has_rollback itself should be treated as a placeholder
+    until a background probe confirms it. warn: self-healing signal."""
+    accent = "card-accent-warn" if (has_rollback or warn) else None
+    card, layout = _make_card(accent)
     title = QLabel("Undo last update")
     title.setObjectName("card-title")
     layout.addWidget(title)
-    timestamp = _bootc_image_timestamp("rollback")
-    body = QLabel(
-        (
+    if warn and has_rollback:
+        body_text = (
+            "⚠ Staged update appears to have failed twice — self-healing recommends rolling back. "
+            "Rollback restores the previous image on next boot; your files in /home stay in place."
+            + (f"\n\nPrevious image built: {timestamp}" if timestamp else "")
+        )
+    elif has_rollback:
+        body_text = (
             "A previous system image is available. Rollback restores that image on the next boot; "
             "your files, saves, and projects in /home stay in place."
             + (f"\n\nPrevious image built: {timestamp}" if timestamp else "")
-        ) if has_rollback else (
-            "No previous system image is available right now. After the next OS update, "
-            "KythOS will keep a rollback target here so you can undo a bad update."
         )
-    )
+    else:
+        body_text = "No previous system image is available right now. After the next OS update, KythOS will keep a rollback target here so you can undo a bad update."
+    body = QLabel(body_text)
     body.setObjectName("card-copy")
     body.setWordWrap(True)
     layout.addWidget(body)

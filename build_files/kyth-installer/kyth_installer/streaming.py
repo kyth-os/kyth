@@ -11,7 +11,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Sequence
 
-from kyth_shared import _NetStatsTracker, _parse_size_bytes
+from kyth_shared import NetStatsTracker, parse_size_bytes
 from .runner import spawn_command
 
 
@@ -52,21 +52,30 @@ class StreamingCommandRunner:
         stall_timeout: int = 600,
         absolute_timeout: int | None = 3600,
         error_factory: Callable[[int, list[str], Sequence[str]], Exception] | None = None,
+        stdin_data: str | None = None,
     ) -> None:
         argv = list(command)
         log(f"$ {' '.join(argv)}")
         proc = spawn_command(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0,
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE if stdin_data is not None else None, bufsize=0,
         )
         if proc.stdout is None:
             proc.kill()
             proc.wait()
             raise RuntimeError("Could not capture installer command output.")
 
+        if stdin_data is not None:
+            # Short, fixed-size confirmation answers only (e.g. "y\n") — small
+            # enough to never block on pipe buffer capacity, so writing before
+            # the read loop starts below cannot deadlock.
+            proc.stdin.write(stdin_data.encode())
+            proc.stdin.close()
+
         monitor_stop = threading.Event()
         recent_output: deque[str] = deque(maxlen=30)
         output_state = {"total": 0, "rx_start": 0}
-        tracker: _NetStatsTracker | None = None
+        tracker: NetStatsTracker | None = None
 
         def net_monitor() -> None:
             nonlocal tracker
@@ -76,7 +85,7 @@ class StreamingCommandRunner:
                     tracker = None
                     continue
                 if tracker is None:
-                    tracker = _NetStatsTracker(total, output_state["rx_start"])
+                    tracker = NetStatsTracker(total, output_state["rx_start"])
                 stats = tracker.tick(self._rx_bytes())
                 frac = min(0.95, stats["downloaded"] / total)
                 progress(int(pct_start + frac * (pct_end - pct_start)))
@@ -105,7 +114,7 @@ class StreamingCommandRunner:
             try:
                 details = stripped.split("layers needed:", 1)[1]
                 size_str = details.split("(", 1)[1].rstrip(")") if "(" in details else ""
-                output_state["total"] = _parse_size_bytes(size_str)
+                output_state["total"] = parse_size_bytes(size_str)
                 output_state["rx_start"] = self._rx_bytes()
             except (IndexError, TypeError, ValueError):
                 # bootc output is advisory; malformed progress must not abort

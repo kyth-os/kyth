@@ -12,14 +12,12 @@ set -euo pipefail
 # and disabling it immediately keeps it from persisting as an active package
 # source in images that never opt in.
 mkdir -p /etc/yum.repos.d
-cat >/etc/yum.repos.d/tailscale-stable.repo <<'TAILSCALEREPOEOF'
-[tailscale-stable]
-name=Tailscale stable
-baseurl=https://pkgs.tailscale.com/stable/fedora/$releasever/$basearch
-enabled=1
-type=rpm
-repo_gpgcheck=1
-gpgcheck=0
-gpgkey=https://pkgs.tailscale.com/stable/fedora/repo.gpg
-TAILSCALEREPOEOF
+python3 -c "
+from kyth_shared.repos import load_repo_specs
+for repo in load_repo_specs():
+    if repo.name == 'tailscale-stable':
+        with open('/etc/yum.repos.d/tailscale-stable.repo', 'w') as f:
+            f.write(repo.render_yum_repo())
+"
 dnf5 config-manager setopt tailscale-stable.enabled=0
+

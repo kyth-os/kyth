@@ -1,11 +1,11 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _cancel_worker, _restyle
+from .core_base import cancel_worker, restyle
 from .services.launch import popen
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import (
-    QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit,
+    QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
 )
-from .widgets import _make_card, _set_log_panel
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _ToolsGridMixin:
@@ -77,23 +77,13 @@ class _ToolsGridMixin:
         progress.hide()
         layout.addWidget(progress)
 
-        log_toggle = QPushButton("Show details")
-        log_toggle.setCheckable(True)
-        log_toggle.hide()
-        layout.addWidget(log_toggle)
-
-        log = QTextEdit()
-        log.setReadOnly(True)
-        log.setMaximumHeight(100)
-        log.hide()
-        layout.addWidget(log)
-
-        log_toggle.clicked.connect(lambda checked, lt=log_toggle, lg=log: _set_log_panel(lt, lg, checked))
+        log_panel = CollapsibleLogPanel(max_height=100)
+        layout.addWidget(log_panel)
 
         refs = {
             "tool": tool, "install": install_btn, "launch": launch_btn, "uninstall": uninstall_btn,
             "cancel": cancel_btn, "status": status_lbl, "progress": progress,
-            "log_toggle": log_toggle, "log": log,
+            "log_panel": log_panel,
         }
         cancel_btn.clicked.connect(lambda _=False, r=refs: self._cancel_tool_operation(r))
         return card, refs
@@ -106,19 +96,17 @@ class _ToolsGridMixin:
         for refs in self._tool_refs:
             refs["install"].setEnabled(False)
             refs["uninstall"].setEnabled(False)
-        log = active_refs["log"]
-        log_toggle = active_refs["log_toggle"]
+        log_panel = active_refs["log_panel"]
         progress = active_refs["progress"]
         status_lbl = active_refs["status"]
-        log.clear()
-        log.append(f"→ flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo\n→ flatpak install -y flathub {tool['flatpak']}\n")
-        log_toggle.show()
-        _set_log_panel(log_toggle, log, False)
+        log_panel.reset(
+            f"→ flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo\n→ flatpak install -y flathub {tool['flatpak']}\n"
+        )
         progress.show()
         status_lbl.setText(f"Installing {tool['name']}…")
         status_lbl.setObjectName("subheading")
         status_lbl.show()
-        _restyle(status_lbl)
+        restyle(status_lbl)
         active_refs["cancel"].setEnabled(True)
         active_refs["cancel"].show()
         self._tool_worker = Worker([
@@ -126,10 +114,7 @@ class _ToolsGridMixin:
             f"flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
             f" && flatpak install -y flathub {tool['flatpak']}",
         ])
-        self._tool_worker.line.connect(lambda ln: (
-            log.append(ln),
-            log.ensureCursorVisible(),
-        ))
+        self._tool_worker.line.connect(log_panel.append)
         self._tool_worker.done.connect(
             lambda code, name=tool["name"]: self._on_tool_install_done(code, name)
         )
@@ -139,19 +124,19 @@ class _ToolsGridMixin:
         active_refs = self._active_tool_refs
         active_refs["progress"].hide()
         active_refs["cancel"].hide()
-        _finish_worker(self, attr="_tool_worker")
+        finish_worker(self, attr="_tool_worker")
         if code == Worker.CANCELLED:
             active_refs["status"].setText(f"{name} installation cancelled.")
             active_refs["status"].setObjectName("status-warn")
-            active_refs["log"].append("\nCancelled.")
+            active_refs["log_panel"].append("\nCancelled.")
         elif code == 0:
             active_refs["status"].setText(f"{name} installed.")
             active_refs["status"].setObjectName("status-ok")
-            active_refs["log"].append("\nDone.")
+            active_refs["log_panel"].append("\nDone.")
         else:
             active_refs["status"].setText(f"Installation failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
-        _restyle(active_refs["status"])
+        restyle(active_refs["status"])
         for refs in self._tool_refs:
             refs["install"].setEnabled(True)
             refs["uninstall"].setEnabled(True)
@@ -169,11 +154,11 @@ class _ToolsGridMixin:
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        _cancel_worker(
+        cancel_worker(
             self,
             attr="_tool_worker",
             status_lbl=refs["status"],
-            log=refs["log"],
+            log=refs["log_panel"].log,
             cancel_btn=refs["cancel"],
             message="Cancelling app operation…",
         )
@@ -193,28 +178,21 @@ class _ToolsGridMixin:
         for refs in self._tool_refs:
             refs["install"].setEnabled(False)
             refs["uninstall"].setEnabled(False)
-        log = active_refs["log"]
-        log_toggle = active_refs["log_toggle"]
+        log_panel = active_refs["log_panel"]
         progress = active_refs["progress"]
         status_lbl = active_refs["status"]
-        log.clear()
-        log.append(f"→ flatpak uninstall -y {tool['flatpak']}\n")
-        log_toggle.show()
-        _set_log_panel(log_toggle, log, False)
+        log_panel.reset(f"→ flatpak uninstall -y {tool['flatpak']}\n")
         progress.show()
         status_lbl.setText(f"Uninstalling {tool['name']}…")
         status_lbl.setObjectName("subheading")
         status_lbl.show()
-        _restyle(status_lbl)
+        restyle(status_lbl)
         active_refs["cancel"].setEnabled(True)
         active_refs["cancel"].show()
         self._tool_worker = Worker(
             ["flatpak", "uninstall", "-y", tool["flatpak"]]
         )
-        self._tool_worker.line.connect(lambda ln: (
-            log.append(ln),
-            log.ensureCursorVisible(),
-        ))
+        self._tool_worker.line.connect(log_panel.append)
         self._tool_worker.done.connect(
             lambda code, name=tool["name"]: self._on_tool_uninstall_done(code, name)
         )
@@ -224,19 +202,19 @@ class _ToolsGridMixin:
         active_refs = self._active_tool_refs
         active_refs["progress"].hide()
         active_refs["cancel"].hide()
-        _finish_worker(self, attr="_tool_worker")
+        finish_worker(self, attr="_tool_worker")
         if code == Worker.CANCELLED:
             active_refs["status"].setText(f"{name} uninstall cancelled.")
             active_refs["status"].setObjectName("status-warn")
-            active_refs["log"].append("\nCancelled.")
+            active_refs["log_panel"].append("\nCancelled.")
         elif code == 0:
             active_refs["status"].setText(f"{name} uninstalled.")
             active_refs["status"].setObjectName("status-ok")
-            active_refs["log"].append("\nDone.")
+            active_refs["log_panel"].append("\nDone.")
         else:
             active_refs["status"].setText(f"Uninstall failed (exit {code}).")
             active_refs["status"].setObjectName("status-err")
-        _restyle(active_refs["status"])
+        restyle(active_refs["status"])
         for refs in self._tool_refs:
             refs["install"].setEnabled(True)
             refs["uninstall"].setEnabled(True)

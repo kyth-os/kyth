@@ -14,9 +14,43 @@ from .tools import (
     _ntsync_state,
     _vulkan_state,
 )
-from ..bootc import _has_staged_update
+
+# Progressive: per-game latency env (Bazzite ships global layer, Kyth is per-game + lean)
+# Per-game HDR is KYTH_HDR=1 so kyth-gamescope can add --hdr-enabled without global LD_PRELOAD.
+LATENCY_PROFILES: dict[str, dict[str, str]] = {
+    "low-latency": {"LOW_LATENCY_LAYER": "1", "MANGOHUD": "1"},
+    "balanced": {"MANGOHUD": "1"},
+    "battery": {},
+}
+
+
+def latency_env_for_profile(profile: str) -> dict[str, str]:
+    return dict(LATENCY_PROFILES.get(profile, LATENCY_PROFILES["balanced"]))
+
+
+def gaming_env_for_per_game(appid: str, hdr: bool = False, profile: str = "balanced") -> dict[str, str]:
+    """Env for a Steam app — latency profile + optional HDR, lean (no global layer)."""
+    env = latency_env_for_profile(profile)
+    if hdr:
+        env["KYTH_HDR"] = "1"
+    # Persist choice so gamenight/compat can re-derive without Hub
+    try:
+        from kyth_shared.gaming_per_game import gaming_launch_env_for_appid
+
+        # Merge persisted per-game config (HDR flag) with explicit args
+        persisted = gaming_launch_env_for_appid(appid)
+        # Explicit hdr arg wins; profile already derived
+        if hdr:
+            persisted["KYTH_HDR"] = "1"
+        # Persisted should not override explicit env, but ensure HDR lingers
+        for k, v in persisted.items():
+            env.setdefault(k, v)
+    except Exception:
+        pass
+    return env
+from ..bootc import has_staged_update
 from ..hardware import _detect_controllers, _find_ntfs_drives
-from ..process import _run_command
+from ..process import run_command
 from ..flatpak import is_installed
 
 
@@ -112,7 +146,7 @@ def _gaming_health_items(*, controllers: dict | None = None,
         ("ok" if controller_count else "dim", "Controllers", f"{controller_count} controller input(s) detected." if controller_count else "Connect one and press Refresh."),
         ("ok" if heroic_ok or lutris_ok else "dim", "Non-Steam launchers", "Heroic or Lutris installed." if heroic_ok or lutris_ok else "Install Heroic or Lutris for Epic, GOG, Battle.net, EA, and Ubisoft."),
         ("warn" if windows_drives else "ok", "PC game drives", windows_drive_summary if windows_drives else "No PC game drives detected."),
-        ("warn" if _has_staged_update() else "ok", "OS update", "Update staged; reboot before benchmarking." if _has_staged_update() else "No staged OS update."),
+        ("warn" if has_staged_update() else "ok", "OS update", "Update staged; reboot before benchmarking." if has_staged_update() else "No staged OS update."),
     ]
  # _gaming_health_items
 
@@ -163,6 +197,10 @@ def _collect_gaming_dashboard() -> dict:
         "streaming": _streaming_health_items(),
         "saves": saves,
         "games": _detect_installed_games(),
+        # Reused by page_gaming_dashboard.py's _update_gaming_hud() so it
+        # doesn't need a second (GUI-thread) lsblk call for data already
+        # gathered here on this DataWorker's background thread.
+        "windows_drives": windows_drives,
     }
  # _collect_gaming_dashboard
 
@@ -194,7 +232,7 @@ def _streaming_health_items() -> list[tuple[str, str, str]]:
             "/usr/lib/obs-plugins/libobs_vkcapture.so",
         )
     )
-    v4l2_probe = _run_command(["modprobe", "-n", "v4l2loopback"], timeout=4)
+    v4l2_probe = run_command(["modprobe", "-n", "v4l2loopback"], timeout=4)
     v4l2_ok = v4l2_probe is not None and v4l2_probe.returncode == 0
     mic_hint = "PipeWire ready; test mic in Discord/OBS." if pipewire_ok else "PipeWire tools not found."
     obs_ok = is_installed("com.obsproject.Studio")

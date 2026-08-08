@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=KythOS Installer Helper
-Comment=Suggests KythOS-native paths when opening installers or RPM packages
+Comment=Prepares Windows installers safely and suggests KythOS-native alternatives
 Exec=/usr/bin/kyth-exe-handler %f
 MimeType=application/x-ms-dos-executable;application/x-msdos-program;application/x-dosexec;application/x-msi;application/x-msdownload;application/vnd.microsoft.portable-executable;application/x-rpm;application/x-redhat-package-manager;
 NoDisplay=true

@@ -2,20 +2,16 @@ import time
 
 # __KYTH_GENERATED_IMPORTS__
 from .services.launch import reboot
-from .core_base import (
-    _bootc_image_timestamp, _branch_display_name, _format_dl_progress_line, _format_elapsed,
-    _image_tag_for_channel, _restyle, _run_worker, _set_session_inhibit, _start_or_extend_dl_monitor,
-    _stop_download_monitor, _with_idle_inhibit,
-)
-from .services.runtime import _finish_worker
+from .core_base import restyle, run_worker, set_session_inhibit
+from .services.process import format_dl_progress_line, format_elapsed, with_idle_inhibit
+from .services.runtime import finish_worker, start_or_extend_dl_monitor, stop_download_monitor
 from .services.privileged import bootc_action
-from .core_base import REGISTRY, _bootc_image_digest, _current_branch
-from .services.bootc import branches_view
+from .services.bootc import REGISTRY, bootc_image_digest, bootc_image_timestamp, branch_display_name, branches_view, current_branch, image_tag_for_channel
 from .qt import (
-    QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer, Qt,
+    QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer, Qt,
 )
 from .widgets import (
-    Page, _make_card, _set_log_panel,
+    CollapsibleLogPanel, Page, _make_card,
 )
 
 # ── Page: Branches ────────────────────────────────────────────────────────────
@@ -45,8 +41,8 @@ class BranchesPage(Page):
         state_top = QHBoxLayout()
         state_top.setSpacing(16)
         state_branch_lbl = QLabel("Running:")
-        state_branch_lbl.setObjectName("card-copy")
-        state_branch_lbl.setStyleSheet("color: #888888; min-width: 64px;")
+        state_branch_lbl.setObjectName("prop-key")
+        state_branch_lbl.setMinimumWidth(64)
         state_top.addWidget(state_branch_lbl)
         self._state_branch_val = QLabel()
         self._state_branch_val.setObjectName("card-copy")
@@ -56,14 +52,11 @@ class BranchesPage(Page):
         state_bottom = QHBoxLayout()
         state_bottom.setSpacing(16)
         state_digest_lbl = QLabel("Digest:")
-        state_digest_lbl.setObjectName("card-copy")
-        state_digest_lbl.setStyleSheet("color: #888888; min-width: 64px;")
+        state_digest_lbl.setObjectName("prop-key")
+        state_digest_lbl.setMinimumWidth(64)
         state_bottom.addWidget(state_digest_lbl)
         self._state_digest_val = QLabel()
-        self._state_digest_val.setObjectName("card-copy")
-        self._state_digest_val.setStyleSheet(
-            "font-family: 'Noto Mono', 'Cascadia Code', monospace; font-size: 12px;"
-        )
+        self._state_digest_val.setObjectName("mono-inline")
         self._state_digest_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         state_bottom.addWidget(self._state_digest_val, 1)
         self._state_copy_btn = QPushButton("Copy")
@@ -93,12 +86,11 @@ class BranchesPage(Page):
         stable_desc.setWordWrap(True)
         stable_layout.addWidget(stable_desc)
         self._stable_build_lbl = QLabel()
-        self._stable_build_lbl.setObjectName("card-copy")
-        self._stable_build_lbl.setStyleSheet("color: #888888; font-size: 12px;")
+        self._stable_build_lbl.setObjectName("caption-text")
         self._stable_build_lbl.hide()
         stable_layout.addWidget(self._stable_build_lbl)
         self._stable_btn = QPushButton("Switch to Stable")
-        self._stable_btn.clicked.connect(lambda: self._switch(_image_tag_for_channel("latest")))
+        self._stable_btn.clicked.connect(lambda: self._switch(image_tag_for_channel("latest")))
         stable_layout.addWidget(self._stable_btn)
         selector_row.addWidget(stable_card, 1)
 
@@ -114,12 +106,11 @@ class BranchesPage(Page):
         testing_desc.setWordWrap(True)
         testing_layout.addWidget(testing_desc)
         self._testing_build_lbl = QLabel()
-        self._testing_build_lbl.setObjectName("card-copy")
-        self._testing_build_lbl.setStyleSheet("color: #888888; font-size: 12px;")
+        self._testing_build_lbl.setObjectName("caption-text")
         self._testing_build_lbl.hide()
         testing_layout.addWidget(self._testing_build_lbl)
         self._testing_btn = QPushButton("Switch to Testing")
-        self._testing_btn.clicked.connect(lambda: self._switch(_image_tag_for_channel("testing")))
+        self._testing_btn.clicked.connect(lambda: self._switch(image_tag_for_channel("testing")))
         testing_layout.addWidget(self._testing_btn)
         selector_row.addWidget(testing_card, 1)
 
@@ -141,18 +132,8 @@ class BranchesPage(Page):
         self._progress.hide()
         self._add(self._progress)
 
-        self._log_toggle = QPushButton("Show details")
-        self._log_toggle.setCheckable(True)
-        self._log_toggle.clicked.connect(lambda checked: _set_log_panel(self._log_toggle, self._log, checked))
-        self._log_toggle.hide()
-        self._add(self._log_toggle)
-
-        self._log = QTextEdit()
-        self._log.document().setMaximumBlockCount(5000)
-        self._log.setReadOnly(True)
-        self._log.setMinimumHeight(120)
-        self._log.hide()
-        self._add(self._log)
+        self._log_panel = CollapsibleLogPanel(min_height=120)
+        self._add(self._log_panel)
 
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
@@ -164,12 +145,12 @@ class BranchesPage(Page):
         self._refresh_current()
 
     def _refresh_current(self):
-        tag = _current_branch()
-        booted_ts = _bootc_image_timestamp("booted")
-        booted_digest = _bootc_image_digest("booted")
+        tag = current_branch()
+        booted_ts = bootc_image_timestamp("booted")
+        booted_digest = bootc_image_digest("booted")
 
         # State bar
-        branch_text = _branch_display_name(tag)
+        branch_text = branch_display_name(tag)
         if booted_ts:
             branch_text += f"  ·  built {booted_ts}"
         self._state_branch_val.setText(branch_text)
@@ -194,8 +175,8 @@ class BranchesPage(Page):
         self._testing_build_lbl.setText(view.testing.build_label_text)
         self._testing_build_lbl.setVisible(view.testing.build_label_visible)
 
-        _restyle(self._stable_btn)
-        _restyle(self._testing_btn)
+        restyle(self._stable_btn)
+        restyle(self._testing_btn)
 
     def _switch(self, tag: str):
         ref = f"{REGISTRY}:{tag}"
@@ -205,23 +186,20 @@ class BranchesPage(Page):
         self._dl_eta = 0
         self._op_start_ts = time.monotonic()
         self._current_phase = ""
-        self._log.clear()
-        self._log.append(f"→ bootc switch {ref}\n")
-        self._log_toggle.show()
-        _set_log_panel(self._log_toggle, self._log, False)
+        self._log_panel.reset(f"→ bootc switch {ref}\n")
         self._progress.setRange(0, 0)
         self._progress.show()
         self._status_lbl.setText("Switching branch…")
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.show()
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
         self._reboot_btn.hide()
         self._stable_btn.setEnabled(False)
         self._testing_btn.setEnabled(False)
 
-        _run_worker(
+        run_worker(
             self,
-            _with_idle_inhibit(
+            with_idle_inhibit(
                 bootc_action("switch", ref).command(),
                 "KythOS is switching branch",
             ),
@@ -233,11 +211,11 @@ class BranchesPage(Page):
         self._heartbeat.start()
 
     def _stop_dl_monitor(self):
-        _stop_download_monitor(self._dl_monitor)
+        stop_download_monitor(self._dl_monitor)
         self._dl_monitor = None
 
     def _on_line(self, text: str):
-        self._dl_monitor, self._dl_total, started, progress_ready = _start_or_extend_dl_monitor(
+        self._dl_monitor, self._dl_total, started, progress_ready = start_or_extend_dl_monitor(
             text, self._dl_monitor, self._dl_total,
         )
         if progress_ready:
@@ -245,8 +223,7 @@ class BranchesPage(Page):
         if started:
             self._dl_monitor.stats.connect(self._on_dl_stats)
             self._dl_monitor.start()
-        self._log.append(text)
-        self._log.ensureCursorVisible()
+        self._log_panel.append(text)
 
     def _on_dl_stats(self, downloaded: int, total: int, speed_bps: int, eta_sec: int):
         self._dl_speed = speed_bps
@@ -254,13 +231,13 @@ class BranchesPage(Page):
         if total > 0:
             self._progress.setValue(int(min(downloaded / total, 1.0) * 1000))
         if speed_bps > 100_000:
-            self._activity_lbl.setText(_format_dl_progress_line(downloaded, total, speed_bps, eta_sec))
+            self._activity_lbl.setText(format_dl_progress_line(downloaded, total, speed_bps, eta_sec))
             self._activity_lbl.show()
 
     def _update_activity(self):
         elapsed = int(time.monotonic() - self._op_start_ts) if self._op_start_ts else 0
         phase = self._current_phase or "Switching branch…"
-        self._activity_lbl.setText(f"{phase}  ·  {_format_elapsed(elapsed)} elapsed")
+        self._activity_lbl.setText(f"{phase}  ·  {format_elapsed(elapsed)} elapsed")
         self._activity_lbl.show()
 
     def _heartbeat_tick(self):
@@ -276,17 +253,17 @@ class BranchesPage(Page):
         self._activity_lbl.hide()
         self._stable_btn.setEnabled(True)
         self._testing_btn.setEnabled(True)
-        _finish_worker(self)
-        _set_session_inhibit(self, None)
+        finish_worker(self)
+        set_session_inhibit(self, None)
 
         if code == 0:
             self._status_lbl.setText("Branch staged — reboot to apply.")
             self._status_lbl.setObjectName("status-ok")
-            self._log.append("\nDone. Reboot to boot into the new branch.")
+            self._log_panel.append("\nDone. Reboot to boot into the new branch.")
             self._reboot_btn.show()
         else:
             self._status_lbl.setText(f"Switch failed (exit code {code}).")
             self._status_lbl.setObjectName("status-err")
 
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
         self._refresh_current()

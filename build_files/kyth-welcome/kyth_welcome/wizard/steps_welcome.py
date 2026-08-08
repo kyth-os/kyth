@@ -32,7 +32,6 @@ class _ProfileCard(QWidget):
 
         self._name_lbl = QLabel(name)
         self._name_lbl.setObjectName("wiz-card-title")
-        self._name_lbl.setStyleSheet("font-size: 15px;")
         layout.addWidget(self._name_lbl)
 
         desc_lbl = QLabel(desc)

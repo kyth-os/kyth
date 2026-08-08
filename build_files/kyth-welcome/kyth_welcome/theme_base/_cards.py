@@ -1,46 +1,82 @@
-"""Cards QSS styles.
-
-Kyth Theme: tokenized. #card/#card-accent-*/#card-title/#card-summary/
-#card-copy are also set by theme_hub_overlay.py (wins, later in cascade) —
-kept here in sync on the same tokens rather than removed, since this file's
-other selectors (home-recommend-card, store-*, drop-*, home-action-*,
-home-next-*, starter-pack-*) have no overlay equivalent and are load-bearing.
-"""
-from ..ui_tokens import (
-    KYTH_BLUE, KYTH_BLUE_DIM, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_SURFACE,
-    KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
-    STATUS_ERROR, STATUS_OK, STATUS_WARN,
-)
+"""Cards — layered panels with Steam-like hover elevation."""
+from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_RADIUS, KYTH_RADIUS_SM, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED, STATUS_ERROR, STATUS_OK, STATUS_WARN
 
 CARDS_QSS = f"""
-/* ── Cards ───────────────────────────────────────────────────────────────── */
+/* ── Cards — control-center panels ─────────────────────────────────────── */
 QFrame#card,
 QFrame#home-recommend-card,
 QFrame#home-action-card,
 QFrame#stat-tile,
+QFrame#summary-tile,
+QFrame#home-action,
+QFrame#home-section-header,
 QFrame#starter-pack,
 QFrame#ready-panel,
 QFrame#store-app-card,
-QFrame#store-category-card {{
+QFrame#store-category-card,
+QFrame#card-accent-ok,
+QFrame#card-accent-warn,
+QFrame#card-accent-err,
+QFrame#card-accent-dim,
+QFrame#hw-card-dim {{
     background: {KYTH_SURFACE};
     border: 1px solid {KYTH_HAIRLINE};
-    border-radius: 10px;
+    border-radius: {KYTH_RADIUS}px;
+}}
+
+QFrame#card,
+QFrame#home-section-header {{
+    padding: 0;
 }}
 
 QFrame#card:hover,
 QFrame#home-recommend-card:hover,
 QFrame#home-action-card:hover,
 QFrame#stat-tile:hover,
+QFrame#summary-tile:hover,
+QFrame#home-action:hover,
 QFrame#store-app-card:hover,
 QFrame#store-category-card:hover {{
     background: {KYTH_SURFACE_RAISED};
-    border-color: {KYTH_TEXT_FAINT};
+    border-color: {KYTH_HAIRLINE_LIGHT};
+}}
+
+QFrame#card-accent-ok {{
+    border-left: 3px solid {STATUS_OK};
+}}
+
+QFrame#card-accent-warn {{
+    border-left: 3px solid {STATUS_WARN};
+}}
+
+QFrame#card-accent-err {{
+    border-left: 3px solid {STATUS_ERROR};
+}}
+
+QFrame#card-accent-dim,
+QFrame#hw-card-dim {{
+    border-left: 3px solid {KYTH_TEXT_FAINT};
 }}
 
 QLabel#card-title {{
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
     color: {KYTH_TEXT};
+}}
+
+QLabel#card-title-warn {{
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: {STATUS_WARN};
+}}
+
+QLabel#card-title-err {{
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: {STATUS_ERROR};
 }}
 
 QLabel#card-subtitle {{
@@ -49,9 +85,9 @@ QLabel#card-subtitle {{
     color: {KYTH_TEXT};
 }}
 
-QLabel#card-summary {{
-    color: {KYTH_TEXT};
-    font-weight: 600;
+QLabel#card-summary,
+QLabel#subheading {{
+    color: {KYTH_TEXT_MUTED};
 }}
 
 QLabel#card-action {{
@@ -60,20 +96,50 @@ QLabel#card-action {{
 
 QLabel#card-copy {{
     color: {KYTH_TEXT_MUTED};
+    line-height: 1.4;
 }}
 
+QLabel#section-title {{
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: {KYTH_TEXT};
+}}
+QLabel#section-subtitle {{
+    font-size: 12px;
+    color: {KYTH_TEXT_MUTED};
+}}
+QFrame#section-header {{
+    background: transparent;
+    border: none;
+}}
+QLabel#status-badge-ok,
+QLabel#status-badge-warn,
+QLabel#status-badge-err,
+QLabel#status-badge-dim {{
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}}
+QLabel#status-badge-ok {{ background: {STATUS_OK}; color: #06120e; }}
+QLabel#status-badge-warn {{ background: {STATUS_WARN}; color: #1a1200; }}
+QLabel#status-badge-err {{ background: {STATUS_ERROR}; color: #1a0a0d; }}
+QLabel#status-badge-dim {{ background: {KYTH_SURFACE_RAISED}; color: {KYTH_TEXT_FAINT}; border: 1px solid {KYTH_HAIRLINE}; }}
+
 QFrame#home-recommend-card {{
-    background: {KYTH_SURFACE_RAISED};
-    border: 1px solid {KYTH_BLUE_DIM};
-    border-left: 5px solid {KYTH_BLUE};
-    border-radius: 10px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {KYTH_SURFACE}, stop:1 {KYTH_SURFACE_RAISED});
+    border: 1px solid {KYTH_HAIRLINE};
+    border-left: 3px solid {KYTH_BLUE};
+    border-radius: {KYTH_RADIUS}px;
 }}
 
 QLabel#home-kicker {{
     color: {KYTH_BLUE_LIGHT};
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: 1.5px;
+    letter-spacing: 0.9px;
 }}
 
 QFrame#home-section {{
@@ -85,33 +151,16 @@ QLabel#home-section-title {{
     color: {KYTH_TEXT};
     font-size: 15px;
     font-weight: 700;
+    letter-spacing: -0.2px;
 }}
 
 QLabel#home-section-copy {{
-    color: {KYTH_TEXT_FAINT};
+    color: {KYTH_TEXT_MUTED};
     font-size: 12px;
 }}
 
-QFrame#card-accent-ok {{
-    background: rgba(16, 185, 129, 20);
-    border: 1px solid {STATUS_OK};
-    border-radius: 10px;
-}}
-
-QFrame#card-accent-warn {{
-    background: rgba(245, 158, 11, 20);
-    border: 1px solid {STATUS_WARN};
-    border-radius: 10px;
-}}
-
-QFrame#card-accent-err {{
-    background: rgba(247, 118, 142, 20);
-    border: 1px solid {STATUS_ERROR};
-    border-radius: 10px;
-}}
-
 QLabel#home-action-icon {{
-    font-size: 13px;
+    font-size: 22px;
     font-weight: 600;
     color: {KYTH_BLUE_LIGHT};
 }}
@@ -128,7 +177,8 @@ QLabel#home-action-copy {{
 
 QLabel#home-next-title {{
     font-size: 24px;
-    font-weight: 750;
+    font-weight: 800;
+    letter-spacing: -0.5px;
     color: {KYTH_TEXT};
 }}
 
@@ -165,48 +215,51 @@ QWidget#starter-pack-details {{
 }}
 
 QFrame#store-hero {{
-    background: {KYTH_SURFACE};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 {KYTH_SURFACE}, stop:1 {KYTH_SURFACE_RAISED});
     border: 1px solid {KYTH_HAIRLINE};
-    border-radius: 6px;
+    border-radius: {KYTH_RADIUS}px;
 }}
 
 QLabel#store-hero-title {{
     font-size: 20px;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: -0.3px;
     color: {KYTH_TEXT};
 }}
 
 QLabel#store-kicker {{
     color: {KYTH_BLUE_LIGHT};
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 1px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.9px;
 }}
 
 QFrame#drop-card {{
     background: {KYTH_SURFACE};
     border: 1px dashed {KYTH_HAIRLINE};
-    border-radius: 10px;
+    border-radius: {KYTH_RADIUS}px;
 }}
 
 QFrame#drop-card-active {{
     background: {KYTH_SURFACE_RAISED};
     border: 2px dashed {KYTH_BLUE_LIGHT};
-    border-radius: 10px;
+    border-radius: {KYTH_RADIUS}px;
 }}
 
 QLabel#drop-glyph {{
     background: {KYTH_SURFACE_RAISED};
     color: {KYTH_BLUE_LIGHT};
     border: 1px solid {KYTH_HAIRLINE};
-    border-radius: 8px;
+    border-radius: {KYTH_RADIUS_SM}px;
     font-size: 12px;
     font-weight: 600;
 }}
 
 QLabel#drop-title {{
     font-size: 18px;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: -0.2px;
     color: {KYTH_TEXT};
 }}
 """

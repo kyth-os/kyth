@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 
+from kyth_shared.commands import APPLICATION_RUNNER, command_spec
+
 from ...qt import Signal
 from ..gaming import _probe_windows_partitions
 from ..runtime import TrackedThread
@@ -73,7 +75,11 @@ class UserFilesCopyWorker(TrackedThread):
             src.rstrip("/") + "/", dst.rstrip("/") + "/",
         ]
         try:
-            self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self._proc = APPLICATION_RUNNER.spawn(
+                command_spec(cmd, name="windows-files-copy", timeout=None),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
         except OSError:
             return 1
         # progress2 updates end with \r, not \n, so read raw chunks, not lines.

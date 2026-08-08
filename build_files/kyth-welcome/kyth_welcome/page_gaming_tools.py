@@ -8,6 +8,8 @@ from .page_gaming_tools_perf import _PerfTuningMixin
 from .page_gaming_tools_proton import _ProtonToolsMixin
 
 
+from .widgets import _make_section_header
+
 class _ToolsMixin(
     _ToolsGridMixin, _CaptureToolsMixin, _LauncherToolsMixin, _PerfTuningMixin, _ProtonToolsMixin,
 ):
@@ -23,18 +25,8 @@ class _ToolsMixin(
 
     def _build_gaming_tools_section(self):
         # ── Gaming Tools ──────────────────────────────────────────────────────
-        tools_head = QLabel("Gaming Tools")
-        tools_head.setObjectName("heading")
-        tools_head.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
-        self._add(tools_head)
-        tools_sub = QLabel(
-            "Install the launchers and tools you want. "
-            "Bottles is the easiest option for standalone `.exe` and `.msi` installers. "
-            "Additional launchers and device tools are available here or via the corresponding ujust recipe."
-        )
-        tools_sub.setObjectName("card-copy")
-        tools_sub.setWordWrap(True)
-        self._add(tools_sub)
+        hdr, _ = _make_section_header("Gaming Tools", "Install launchers and tools — Bottles is easiest for .exe/.msi")
+        self._add(hdr)
 
         self._TOOLS = GAMING_TOOLS
 
@@ -46,7 +38,12 @@ class _ToolsMixin(
         # fix targets — preserves the original layout.
         self._build_discord_fix_card()
         self._build_streaming_readiness_card()
+        t_hdr, _ = _make_section_header("Launchers", "Heroic and Lutris for Epic/GOG")
+        self._add(t_hdr)
         self._build_launcher_setup_card()
+        hdr2, _ = _make_section_header("Performance", "Overlays, compositor and scheduler")
+        self._add(hdr2)
+        self._build_overlays_bulk_card()
         self._build_mangohud_card()
         if not self._wizard_mode:
             self._build_gamescope_card()

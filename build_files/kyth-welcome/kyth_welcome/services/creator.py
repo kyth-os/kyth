@@ -6,7 +6,7 @@ import glob
 import os
 
 from .flatpak import is_installed
-from .process import _command_stdout
+from .process import command_stdout
 
 DAVINCI_APP_IDS = (
     "com.blackmagic.Resolve",
@@ -22,7 +22,7 @@ def davinci_flatpak_app_id() -> str | None:
 
 def davinci_download_dir() -> str:
     """Return the user's existing XDG download directory."""
-    candidate = _command_stdout(["xdg-user-dir", "DOWNLOAD"])
+    candidate = command_stdout(["xdg-user-dir", "DOWNLOAD"])
     if candidate:
         candidate = os.path.expanduser(candidate)
         if os.path.isdir(candidate):

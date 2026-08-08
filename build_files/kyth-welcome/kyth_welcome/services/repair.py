@@ -6,10 +6,31 @@ from __future__ import annotations
 
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
-from .process import _command_stdout, _with_idle_inhibit
+from .desktop import REFRESH_DESKTOP_DATABASE_SH
+from .process import command_stdout, with_idle_inhibit
 from .privileged import bootc_action, helper_action, systemctl_action
+
+
+@dataclass(frozen=True)
+class QuickFix:
+    label: str
+    tooltip: str
+    command: tuple[str, ...]
+
+
+def quick_fixes() -> tuple[QuickFix, ...]:
+    """Declarative bounded repair actions used by the Qt page."""
+    return (
+        QuickFix("Refresh App Menu", "Rebuild the application menu database. Fixes missing app icons and entries after installs.", ("bash", "-c", REFRESH_DESKTOP_DATABASE_SH)),
+        QuickFix("Apply User Polish", "Re-apply KythOS default theme, fonts, and KDE settings to your user profile.", ("/usr/bin/kyth-user-polish",)),
+        QuickFix("Retry Game Apps", "Restart the Flatpak install service to retry installing Steam, Lutris, and other game apps.", tuple(systemctl_action("restart", "kyth-default-flatpaks.service").command())),
+        QuickFix("Fix Flatpak Apps", "Repair the Flatpak user installation. Fixes corrupted or missing app runtimes.", ("flatpak", "repair", "--user")),
+        QuickFix("Restart Audio", "Restart PipeWire, PipeWire-Pulse, and WirePlumber. Fixes audio that has stopped working.", ("systemctl", "--user", "restart", "pipewire", "pipewire-pulse", "wireplumber")),
+        QuickFix("Restart Bluetooth", "Restart the Bluetooth service. Fixes controllers and headsets that won't pair or connect.", tuple(systemctl_action("restart", "bluetooth.service").command())),
+    )
 
 
 def read_sys_text(path: str) -> str:
@@ -69,9 +90,9 @@ def force_deep_sleep_command() -> list[str]:
 
 def force_deep_sleep() -> tuple[bool, str]:
     """Apply deep sleep for this session. Returns (ok, error_text)."""
-    from .process import _run_command
+    from .process import run_command
 
-    result = _run_command(force_deep_sleep_command(), timeout=8)
+    result = run_command(force_deep_sleep_command(), timeout=8)
     if result is None:
         return False, "command failed to start"
     if result.returncode != 0:
@@ -80,41 +101,36 @@ def force_deep_sleep() -> tuple[bool, str]:
 
 
 def set_exe_mime_defaults(bottles_desktop: str = "com.usebottles.bottles.desktop") -> None:
-    from .process import _run_command
+    from .process import run_command
 
     for mime in (
         "application/x-ms-dos-executable",
         "application/x-msdos-program",
         "application/x-msi",
     ):
-        _run_command(["xdg-mime", "default", bottles_desktop, mime], timeout=5)
+        run_command(["xdg-mime", "default", bottles_desktop, mime], timeout=5)
 
 
 def enable_clipboard_history(*, max_items: int = 25) -> None:
-    from .process import _run_command
+    from .plasma import kwriteconfig_command
+    from .process import run_command
 
-    _run_command(
-        [
-            "kwriteconfig6", "--file", "klipperrc",
-            "--group", "General", "--key", "KeepClipboardContents", "true",
-        ],
+    run_command(
+        kwriteconfig_command("klipperrc", ("General",), "KeepClipboardContents", "true"),
         timeout=5,
     )
-    _run_command(
-        [
-            "kwriteconfig6", "--file", "klipperrc",
-            "--group", "General", "--key", "MaxClipItems", str(max_items),
-        ],
+    run_command(
+        kwriteconfig_command("klipperrc", ("General",), "MaxClipItems", str(max_items)),
         timeout=5,
     )
-    _run_command(
+    run_command(
         ["systemctl", "--user", "restart", "plasma-klipper.service"],
         timeout=5,
     )
 
 
 def wakeup_sources_text(timeout: int = 5) -> str:
-    return _command_stdout(
+    return command_stdout(
         [
             "bash",
             "-c",
@@ -128,14 +144,14 @@ def wakeup_sources_text(timeout: int = 5) -> str:
 
 
 def rollback_command() -> list[str]:
-    return _with_idle_inhibit(
+    return with_idle_inhibit(
         bootc_action("rollback").command(),
         "KythOS is staging a rollback",
     )
 
 
 def reset_command() -> list[str]:
-    return _with_idle_inhibit(
+    return with_idle_inhibit(
         bootc_action("reset").command(),
         "KythOS is resetting the system",
     )
@@ -186,3 +202,23 @@ def printer_setup_commands() -> list[list[str]]:
         elif binary == "systemsettings" and shutil.which("systemsettings"):
             cmds.append(["systemsettings"])
     return cmds
+@dataclass(frozen=True)
+class RepairOperationView:
+    state: str
+    message: str
+    style: str
+    expand_log: bool
+
+
+def quick_fix_completion(label: str, code: int) -> RepairOperationView:
+    """Return presentation state for a completed repair operation."""
+    if code == 0:
+        return RepairOperationView(
+            "succeeded", f"{label} complete.", "status-ok", False
+        )
+    return RepairOperationView(
+        "failed",
+        f"{label} failed (exit code {code}).",
+        "status-err",
+        True,
+    )

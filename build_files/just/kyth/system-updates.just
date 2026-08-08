@@ -1,3 +1,7 @@
+# Shared variables (kyth_registry). `just` deduplicates repeated imports,
+# so this stays valid both standalone and when pulled in via kyth.just.
+import 'common.just'
+
 # Upgrade the OS and Flatpak apps.
 # Pulls the latest KythOS image via bootc and updates all Flatpak apps.
 
@@ -45,7 +49,7 @@ kyth-upgrade:
           print(s.get('status',{}).get('booted',{}).get('image',{}) \
                  .get('imageDigest','unknown'))" 2>/dev/null || echo "unknown")
 
-    sudo bootc upgrade
+    sudo kyth-safe-upgrade
 
     staged_digest=$(bootc status --format json 2>/dev/null \
         | python3 -c "import sys,json; s=json.load(sys.stdin); \
@@ -86,6 +90,22 @@ status:
     set -euo pipefail
     bootc status
 
+# Show the digest-aware boot health and quarantined update records.
+[group('KythOS')]
+update-health:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kyth-boot-health status
+
+# Explicitly allow a previously quarantined digest to be tried again.
+# Usage: ujust retry-quarantined-update sha256:...
+[group('KythOS')]
+retry-quarantined-update digest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sudo kyth-boot-health clear-quarantine --digest "{{ digest }}"
+    echo "Cleared quarantine for {{ digest }}. The update watcher may stage it again."
+
 # Rebase to a different KythOS image.
 # Usage:
 #   ujust rebase kyth:stable
@@ -93,7 +113,7 @@ status:
 #   ujust rebase kyth:latest
 #   ujust rebase                   (defaults to kyth:latest)
 #
-# Short form "kyth:<tag>" is expanded to ghcr.io/mrtrick37/kyth:<tag>.
+# Short form "kyth:<tag>" is expanded to {{ kyth_registry }}/kyth:<tag>.
 # A full image reference (containing '/') is used as-is.
 
 [group('KythOS')]
@@ -101,9 +121,9 @@ rebase image_ref="kyth:latest":
     #!/usr/bin/env bash
     set -euo pipefail
     ref="{{ image_ref }}"
-    # Expand short form: "kyth:tag" or "kyth" → "ghcr.io/mrtrick37/kyth:tag"
+    # Expand short form: "kyth:tag" or "kyth" → "{{ kyth_registry }}/kyth:tag"
     if [[ "$ref" != *"/"* ]]; then
-        ref="ghcr.io/mrtrick37/${ref}"
+        ref="{{ kyth_registry }}/${ref}"
     fi
     # Default to :latest if no tag was given
     if [[ "$ref" != *":"* ]]; then
@@ -121,8 +141,42 @@ rebase image_ref="kyth:latest":
 #   ujust switch-channel           (defaults to stable)
 
 # ujust switch-channel testing
+# ujust switch-channel stable --dry-run  (prints perf delta + snapshot cost)
 [group('KythOS')]
-switch-channel channel="stable":
+switch-channel channel="stable" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "{{ args }}" == *--dry-run* ]]; then
+        echo "Dry-run: perf delta + snapshot cost"
+        /usr/bin/kyth-system-audit 2>&1 | head -n 20 || true
+        /usr/bin/kyth-gaming-audit 2>&1 | head -n 20 || true
+        python3 -c "from kyth_shared.perf_gate import check_perf_gate; import json; print(json.dumps(check_perf_gate(current_ms=16.0), indent=2))" 2>&1 | head -n 20 || true
+        echo "Snapshot timeline (last 3):"
+        /usr/bin/btrfs subvolume list / 2>&1 | head -n 20 || /usr/bin/snapper list 2>&1 | head -n 20 || echo "no snapshot tool"
+        exit 0
+    fi
+    case "{{ channel }}" in
+        stable|latest) base_tag="latest" ;;
+        testing)       base_tag="testing" ;;
+        *)
+            echo "Unknown channel: {{ channel }}" >&2
+            echo "Valid channels: stable (default), testing" >&2
+            exit 1
+            ;;
+    esac
+    flavor="$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)"
+    case "${flavor}" in
+        cachy) suffix="-cachy" ;;
+        *) suffix="" ;;
+    esac
+    tag="${base_tag}${suffix}"
+    echo "Switching to KythOS :${tag}..."
+    sudo bootc switch "{{ kyth_registry }}/kyth:${tag}"
+    echo "Channel switch staged. Reboot to activate."
+
+# Compat wrapper for internal tests that call switch-channel-impl
+[group('KythOS')]
+switch-channel-impl channel="stable":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{ channel }}" in
@@ -141,7 +195,7 @@ switch-channel channel="stable":
     esac
     tag="${base_tag}${suffix}"
     echo "Switching to KythOS :${tag}..."
-    sudo bootc switch "ghcr.io/mrtrick37/kyth:${tag}"
+    sudo bootc switch "{{ kyth_registry }}/kyth:${tag}"
     echo "Channel switch staged. Reboot to activate."
 
 # Switch to a kernel-flavored KythOS image.
@@ -169,7 +223,7 @@ switch-kernel flavor="fedora":
     status_text="$(sudo -n bootc status 2>/dev/null || bootc status 2>/dev/null || true)"
     current_ref="$(awk '/Booted image:/ {print $NF; exit}' <<<"${status_text}")"
     current_tag=""
-    if [[ "${current_ref}" == ghcr.io/mrtrick37/kyth:* ]]; then
+    if [[ "${current_ref}" == {{ kyth_registry }}/kyth:* ]]; then
         current_tag="${current_ref##*:}"
         current_tag="${current_tag%%@*}"
     fi
@@ -182,7 +236,7 @@ switch-kernel flavor="fedora":
         channel="testing"
     fi
 
-    target="ghcr.io/mrtrick37/kyth:${channel}${suffix}"
+    target="{{ kyth_registry }}/kyth:${channel}${suffix}"
     echo "Switching to ${label} kernel image: ${target}"
     echo "This stages a new deployment and keeps rollback available from the boot menu."
     if ! output="$(sudo bootc switch "${target}" 2>&1)"; then
@@ -203,3 +257,10 @@ switch-kernel flavor="fedora":
     fi
     printf '%s\n' "${output}"
     echo "Kernel switch staged. Reboot to activate."
+
+# Flatpak trim — weekly unused runtime removal
+[group('KythOS')]
+flatpak-trim mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-flatpak-trim "{{ mode }}"

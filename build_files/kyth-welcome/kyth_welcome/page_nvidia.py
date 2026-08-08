@@ -2,19 +2,19 @@
 # __KYTH_GENERATED_IMPORTS__
 from .services.launch import reboot
 from .core_base import (
-    _restyle, _run_worker, _set_session_inhibit,
+    restyle, run_worker, set_session_inhibit,
 )
 from .services.hardware import (
     _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
-    _nvidia_module_loaded, nvidia_status_view,
+    _nvidia_module_loaded, _secureboot_state, nvidia_status_view,
 )
-from .services.runtime import _finish_worker
+from .services.runtime import DataWorker, finish_worker
 from .services.privileged import helper_action
 from .qt import (
-    QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QTimer,
+    QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer,
 )
 from .widgets import (
-    Page, _make_card, _set_log_panel,
+    CollapsibleLogPanel, Page, _make_card,
 )
 
 # ── Page: NVIDIA Drivers ──────────────────────────────────────────────────────
@@ -22,6 +22,7 @@ class NvidiaPage(Page):
     def __init__(self):
         super().__init__()
         self._worker = None
+        self._status_worker = None
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(8000)
         self._poll_timer.timeout.connect(self._refresh_status)
@@ -64,18 +65,8 @@ class NvidiaPage(Page):
         self._progress.hide()
         self._add(self._progress)
 
-        self._log_toggle = QPushButton("Show details")
-        self._log_toggle.setCheckable(True)
-        self._log_toggle.clicked.connect(lambda checked: _set_log_panel(self._log_toggle, self._log, checked))
-        self._log_toggle.hide()
-        self._add(self._log_toggle)
-
-        self._log = QTextEdit()
-        self._log.document().setMaximumBlockCount(5000)
-        self._log.setReadOnly(True)
-        self._log.setMinimumHeight(200)
-        self._log.hide()
-        self._add(self._log)
+        self._log_panel = CollapsibleLogPanel(min_height=200)
+        self._add(self._log_panel)
 
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
@@ -86,14 +77,49 @@ class NvidiaPage(Page):
 
         self._refresh_status()
 
+    @staticmethod
+    def _fetch_status_facts() -> dict:
+        """Run off the GUI thread by _refresh_status()'s DataWorker.
+        _detect_nvidia (lspci), _nvidia_module_loaded (lsmod),
+        _akmod_nvidia_built (modinfo), _akmod_nvidia_installed (rpm -q), and
+        _hw_setup_service_state (systemctl is-active) are all
+        subprocess-backed — _hw_setup_done() just reads a local JSON file.
+        _secureboot_state (mokutil) is also cached — missing mokutil -> unknown."""
+        return {
+            "has_gpu": _detect_nvidia(),
+            "loaded": _nvidia_module_loaded(),
+            "built": _akmod_nvidia_built(),
+            "installed": _akmod_nvidia_installed(),
+            "hw_setup_done": _hw_setup_done(),
+            "svc_state": _hw_setup_service_state(),
+            "secureboot": _secureboot_state(),
+        }
+
     def _refresh_status(self):
+        # Called from __init__, from the 8s poll timer while an akmod build
+        # runs in the background, and after a manual build finishes — none
+        # of those may block the GUI thread on the subprocess probes above,
+        # so the actual gathering happens on a DataWorker and this just
+        # kicks it off (a call while a previous one is still in flight is a
+        # no-op; the next poll tick retries).
+        if self._status_worker is not None:
+            return
+        worker = DataWorker("nvidia-status-facts", self._fetch_status_facts)
+        self._status_worker = worker
+        worker.result.connect(lambda _key, facts: self._apply_status_facts(facts))
+        worker.failed.connect(lambda _key, _message: None)
+        worker.finished.connect(lambda: setattr(self, "_status_worker", None))
+        worker.start()
+
+    def _apply_status_facts(self, facts: dict) -> None:
         view = nvidia_status_view(
-            has_gpu=_detect_nvidia(),
-            loaded=_nvidia_module_loaded(),
-            built=_akmod_nvidia_built(),
-            installed=_akmod_nvidia_installed(),
-            hw_setup_done=_hw_setup_done(),
-            svc_state=_hw_setup_service_state(),
+            has_gpu=facts["has_gpu"],
+            loaded=facts["loaded"],
+            built=facts["built"],
+            installed=facts["installed"],
+            hw_setup_done=facts["hw_setup_done"],
+            svc_state=facts["svc_state"],
+            secureboot=facts.get("secureboot", "unknown"),
         )
 
         # Keep polling while the background service is compiling.
@@ -116,22 +142,19 @@ class NvidiaPage(Page):
 
         self._reboot_btn.setVisible(view.reboot_visible)
 
-        _restyle(self._sub)
-        _restyle(self._status_lbl)
+        restyle(self._sub)
+        restyle(self._status_lbl)
 
     def _run_install(self):
         self._build_module()
 
     def _build_module(self):
         cmd = helper_action("hardware-setup").command()
-        self._log.clear()
-        self._log.append("→ Building NVIDIA kernel module via akmods…\n")
-        self._log_toggle.show()
-        _set_log_panel(self._log_toggle, self._log, False)
+        self._log_panel.reset("→ Building NVIDIA kernel module via akmods…\n")
         self._progress.show()
         self._install_btn.setEnabled(False)
 
-        _run_worker(
+        run_worker(
             self,
             cmd,
             session_inhibit_reason="KythOS is building NVIDIA kernel module",
@@ -140,18 +163,17 @@ class NvidiaPage(Page):
         )
 
     def _on_line(self, text: str):
-        self._log.append(text)
-        self._log.ensureCursorVisible()
+        self._log_panel.append(text)
 
     def _on_done(self, code: int):
         self._progress.hide()
         self._install_btn.setEnabled(True)
-        _finish_worker(self)
-        _set_session_inhibit(self, None)
+        finish_worker(self)
+        set_session_inhibit(self, None)
 
         if code == 0:
-            self._log.append("\nDone. Reboot to activate NVIDIA drivers.")
+            self._log_panel.append("\nDone. Reboot to activate NVIDIA drivers.")
             self._reboot_btn.show()
         else:
-            self._log.append(f"\nInstallation failed (exit code {code}).")
+            self._log_panel.append(f"\nInstallation failed (exit code {code}).")
         self._refresh_status()

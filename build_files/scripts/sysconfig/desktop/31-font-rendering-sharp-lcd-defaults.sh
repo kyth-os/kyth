@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── Font rendering — sharp LCD defaults ──────────────────────────────────────
 # Linux freetype defaults vary by distro; Fedora's are conservative. hintfull
 # snaps stems to pixel boundaries for maximum on-screen crispness (matches the
@@ -9,7 +11,7 @@ set -euo pipefail
 # FreeType using the font's own hinting tables rather than its generic engine.
 # Users who prefer a different look can drop a file in ~/.config/fontconfig/.
 mkdir -p /etc/fonts/conf.d
-cat >/etc/fonts/local.conf <<'FONTCONFIGEOF'
+write_config /etc/fonts/local.conf <<'FONTCONFIGEOF'
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <fontconfig>

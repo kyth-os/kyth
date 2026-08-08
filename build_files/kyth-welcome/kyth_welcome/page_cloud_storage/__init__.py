@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from ..core_base import _restyle, _run_worker
+from ..core_base import restyle, run_worker
 from .dropbox import _DropboxMixin
 from .gdrive import _GoogleDriveMixin
 from .onedrive import _OneDriveMixin
@@ -12,7 +12,7 @@ from ..services.network import (
     _load_sync_config, _rclone_available, _rclone_list_remotes, _save_sync_config,
 )
 from ..services.flatpak import _is_flatpak_installed
-from ..services.runtime import _finish_worker
+from ..services.runtime import finish_worker
 from ..services.privileged import helper_action
 from ..qt import (
     QDesktopServices, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QUrl,
@@ -27,6 +27,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         self._gd_sync_worker: RcloneSyncWorker | None = None
         self._od_sync_worker: RcloneSyncWorker | None = None
         self._sync_config: dict = _load_sync_config()
+        self._save_cloud_worker = None
 
         self._page_header(
             "Network & Internet",
@@ -37,6 +38,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         self._build_gd_card()
         self._build_od_card()
         self._build_db_card()
+        self._build_save_cloud_card()
 
         self._divider()
 
@@ -96,7 +98,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
             self._gd_install_btn.hide()
             self._gd_wizard_btn.setText("Setup Wizard…")
             self._gd_wizard_btn.show()
-        _restyle(self._gd_status)
+        restyle(self._gd_status)
 
         # Google Drive sync status — show for any configured remote; backfill sync_config if needed
         for n in gd_remotes:
@@ -144,7 +146,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
             self._od_install_btn.hide()
             self._od_wizard_btn.setText("Setup Wizard…")
             self._od_wizard_btn.show()
-        _restyle(self._od_status)
+        restyle(self._od_status)
 
         # OneDrive sync controls — backfill config entries as needed
         for n in od_remotes:
@@ -186,7 +188,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
             self._db_install_btn.setEnabled(True)
             self._db_launch_btn.hide()
             self._db_open_btn.hide()
-        _restyle(self._db_status)
+        restyle(self._db_status)
 
     # ── Wizard launcher ───────────────────────────────────────────────────
 
@@ -225,8 +227,8 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         self._op_status.setText("Installing rclone…")
         self._op_status.setObjectName("subheading")
         self._op_status.show()
-        _restyle(self._op_status)
-        _run_worker(
+        restyle(self._op_status)
+        run_worker(
             self,
             helper_action("rclone-update").command(),
             on_line=self._on_line,
@@ -235,7 +237,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
 
     def _on_rclone_install_done(self, code: int):
         self._progress.hide()
-        _finish_worker(self)
+        finish_worker(self)
         if code == 0:
             self._op_status.setText(
                 "rclone installed to /usr/local/bin/rclone. "
@@ -247,9 +249,26 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
             self._op_status.setText(f"Installation failed (exit code {code}).")
             self._op_status.setObjectName("status-err")
             self._gd_install_btn.setEnabled(True)
-        _restyle(self._op_status)
+        restyle(self._op_status)
         self._refresh_status()
 
     def _on_line(self, text: str):
         self._log.append(text)
         self._log.ensureCursorVisible()
+    def _build_save_cloud_card(self):
+        from ..widgets import _make_card
+        from ..qt import QLabel
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Save Cloud — keep game saves in sync")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Continuous sync for ~/Documents/My Games and Rescued Game Saves via rclone bisync: "
+            "rclone bisync ~/Documents/My\\ Games gdrive:KythSaves --resilient — pairs with Ludusavi. "
+            "OneDrive placeholders from Takeout show as Make Available Offline first."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        self._add(card)
+

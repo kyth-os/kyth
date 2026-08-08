@@ -7,8 +7,8 @@ import re
 import shutil
 
 from .types import HardwareProbe
-from ..bootc import _branch_display_name, _current_branch, _has_staged_update
-from ..process import _command_stdout, _run_command
+from ..bootc import branch_display_name, current_branch, has_staged_update
+from ..process import command_stdout, run_command
 
 
 def _cpu_probe() -> HardwareProbe:
@@ -29,7 +29,7 @@ def _cpu_probe() -> HardwareProbe:
 
     # Physical cores: Core(s) per socket × Socket(s) from lscpu  # noqa: RUF003 — multiplication sign, deliberate typography
     physical: int | None = None
-    lscpu_out = _command_stdout(["lscpu"], timeout=5)
+    lscpu_out = command_stdout(["lscpu"], timeout=5)
     cores_per_sock = sockets = None
     for line in lscpu_out.splitlines():
         if line.startswith("Core(s) per socket:"):
@@ -88,7 +88,7 @@ def _cpu_probe() -> HardwareProbe:
         details.append("Scheduler: sched-ext active")
         scx_blurb = " sched-ext gaming scheduler active."
     elif scx_scheduler:
-        svc = _run_command(["systemctl", "is-active", "scx_loader.service"], timeout=5)
+        svc = run_command(["systemctl", "is-active", "scx_loader.service"], timeout=5)
         if svc and svc.returncode == 0:
             short = scx_scheduler.replace("scx_", "")
             details.append(f"Scheduler: {scx_scheduler} (scx_loader active)")
@@ -140,7 +140,7 @@ def _memory_probe() -> HardwareProbe:
         f"Available: {avail_gb:.1f} GB"
     )
 
-    swap_out = _command_stdout(["swapon", "--show=NAME,SIZE,TYPE", "--noheadings"], timeout=5)
+    swap_out = command_stdout(["swapon", "--show=NAME,SIZE,TYPE", "--noheadings"], timeout=5)
     if swap_out:
         details += "\n\nSwap:\n" + "\n".join(f"  {l}" for l in swap_out.splitlines())
 
@@ -242,7 +242,7 @@ def _thermal_probe() -> HardwareProbe:
 def _storage_probe() -> HardwareProbe:
     usage = shutil.disk_usage("/home")
     free_pct = (usage.free / usage.total) * 100 if usage.total else 0
-    trim = _run_command(["systemctl", "is-enabled", "fstrim.timer"], timeout=5)
+    trim = run_command(["systemctl", "is-enabled", "fstrim.timer"], timeout=5)
     trim_enabled = trim is not None and trim.returncode == 0
 
     summary = f"/home has {free_pct:.1f}% free space."
@@ -258,7 +258,7 @@ def _storage_probe() -> HardwareProbe:
  # _storage_probe
 
 def _platform_probe() -> HardwareProbe:
-    virt = _run_command(["systemd-detect-virt"], timeout=5)
+    virt = run_command(["systemd-detect-virt"], timeout=5)
     is_vm = virt is not None and virt.returncode == 0
     virt_name = (virt.stdout.strip() or "virtual machine") if is_vm else None
 
@@ -273,11 +273,11 @@ def _platform_probe() -> HardwareProbe:
     except OSError:
         pass
 
-    branch  = _branch_display_name(_current_branch())
-    staged  = "yes" if _has_staged_update() else "no"
+    branch  = branch_display_name(current_branch())
+    staged  = "yes" if has_staged_update() else "no"
 
     if is_vm:
-        spice = _run_command(["systemctl", "is-active", "spice-vdagentd.service"], timeout=5)
+        spice = run_command(["systemctl", "is-active", "spice-vdagentd.service"], timeout=5)
         spice_active = spice is not None and spice.returncode == 0
         return HardwareProbe(
             "Platform", "dim",

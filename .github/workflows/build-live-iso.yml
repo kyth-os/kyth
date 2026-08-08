@@ -65,7 +65,7 @@ env:
 jobs:
   build:
     name: Build ISO (${{ inputs.source_tag }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
       actions: read
@@ -93,22 +93,11 @@ jobs:
         env:
           SOURCE_TAG: ${{ inputs.source_tag }}
         run: |
-          exec 3>>"${GITHUB_OUTPUT}"
-          SOURCE_SHA="$(git rev-parse HEAD)"
-          SHORT_SHA="$(git rev-parse --short=8 HEAD)"
-          DATE="$(date -u +%Y%m%d)"
-          RELEASE_ID="${DATE}-${SHORT_SHA}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
-          ISO_BASENAME="kyth-live-${SOURCE_TAG}-${RELEASE_ID}.iso"
-          CHANNEL_BASENAME="kyth-live-${SOURCE_TAG}.iso"
-          IMMUTABLE_TAG="iso-${SOURCE_TAG}-${RELEASE_ID}"
-          ARTIFACT_NAME="kyth-live-iso-${SOURCE_TAG}-${RELEASE_ID}"
-
-          echo "source_sha=${SOURCE_SHA}" >&3
-          echo "release_id=${RELEASE_ID}" >&3
-          echo "iso_basename=${ISO_BASENAME}" >&3
-          echo "channel_basename=${CHANNEL_BASENAME}" >&3
-          echo "immutable_tag=${IMMUTABLE_TAG}" >&3
-          echo "artifact_name=${ARTIFACT_NAME}" >&3
+          python3 build_files/scripts/release_identity.py \
+            --source-tag "${SOURCE_TAG}" \
+            --run-number "${GITHUB_RUN_NUMBER}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --github-output "${GITHUB_OUTPUT}"
 
       - name: Prepare live ISO build space
         # /, /mnt, Docker, and rootful Podman all share /dev/root on GitHub's
@@ -257,7 +246,7 @@ jobs:
   publish:
     name: Publish ISO (${{ inputs.source_tag }})
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     # As a reusable workflow this sees the caller's github context: stable
     # publishes from scheduled rebuilds or the repository owner (push or

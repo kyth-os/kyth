@@ -11,14 +11,119 @@ import signal
 import subprocess
 import threading
 import time
+from dataclasses import dataclass
+from weakref import ref
 
 from ..qt import QThread, Signal
-from kyth_shared import _NetStatsTracker, _get_rx_bytes
-from .process import _invalidate_probe_caches, _parse_size_bytes
+from kyth_shared import NetStatsTracker, get_rx_bytes
+from kyth_shared.commands import (
+    APPLICATION_RUNNER,
+    CommandSpec,
+    EnvironmentPolicy,
+    command_spec,
+)
+from .process import invalidate_probe_caches, parse_size_bytes
 
 _logger = logging.getLogger(__name__)
 
-_ACTIVE_THREADS: set = set()
+@dataclass
+class _TaskRecord:
+    thread: QThread
+    task_id: str
+    owner_ref: object | None = None
+    attr: str | None = None
+
+
+class TaskSupervisor:
+    """Single owner for Hub background-task lifetime and shutdown policy."""
+
+    def __init__(self) -> None:
+        self._records: dict[QThread, _TaskRecord] = {}
+
+    def register(self, thread: QThread, *, task_id: str | None = None) -> None:
+        self._records[thread] = _TaskRecord(thread, task_id or type(thread).__name__)
+        thread.finished.connect(lambda: self._records.pop(thread, None))
+
+    def attach(self, thread: QThread, owner: object, attr: str, *, task_id: str | None = None) -> None:
+        record = self._records.setdefault(thread, _TaskRecord(thread, task_id or attr))
+        record.task_id = task_id or record.task_id
+        try:
+            record.owner_ref = ref(owner)
+        except TypeError:
+            record.owner_ref = lambda: owner
+        record.attr = attr
+
+    def running(self) -> list[QThread]:
+        return [record.thread for record in self._records.values() if record.thread.isRunning()]
+
+    def has_blocking_tasks(self) -> bool:
+        return any(getattr(thread, "BLOCKS_CLOSE", False) for thread in self.running())
+
+    def finish_owner_task(self, owner: object, attr: str) -> None:
+        worker = getattr(owner, attr, None)
+        if worker is None:
+            return
+        # Avoid blocking the GUI thread: if the worker already finished,
+        # clean up synchronously; otherwise defer cleanup to the finished
+        # signal (non-blocking). Called from `done` slots where the worker
+        # has just emitted `done` but may still be unwinding.
+        if worker.isFinished():
+            try:
+                worker.deleteLater()
+            except RuntimeError:
+                pass
+            setattr(owner, attr, None)
+            self._records.pop(worker, None)
+            return
+        # Defer — will re-enter this method when finished
+        def _deferred_finish():
+            try:
+                worker.deleteLater()
+            except RuntimeError:
+                pass
+            if getattr(owner, attr, None) is worker:
+                setattr(owner, attr, None)
+            self._records.pop(worker, None)
+
+        try:
+            worker.finished.connect(_deferred_finish)
+        except RuntimeError:
+            # Worker already deleted — just clear
+            setattr(owner, attr, None)
+            self._records.pop(worker, None)
+
+    def release_when_finished(self, owner: object, attr: str, worker: QThread) -> None:
+        self.attach(worker, owner, attr)
+
+        def _release() -> None:
+            if getattr(owner, attr, None) is worker:
+                setattr(owner, attr, None)
+            worker.deleteLater()
+            self._records.pop(worker, None)
+
+        worker.finished.connect(_release)
+
+    def shutdown(self, timeout_ms: int = 15000) -> None:
+        for thread in list(self._records):
+            stop = getattr(thread, "cancel", None) or getattr(thread, "stop", None)
+            if callable(stop):
+                try:
+                    stop()
+                except Exception:
+                    _logger.debug("TaskSupervisor.shutdown: stop() on %r failed", thread, exc_info=True)
+        deadline = time.monotonic() + timeout_ms / 1000
+        while running := self.running():
+            remaining_ms = int((deadline - time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                break
+            slice_ms = max(1, min(250, remaining_ms))
+            for thread in running:
+                thread.wait(slice_ms)
+                if time.monotonic() >= deadline:
+                    break
+
+
+TASK_SUPERVISOR = TaskSupervisor()
 
 
 class TrackedThread(QThread):
@@ -31,49 +136,34 @@ class TrackedThread(QThread):
 
     Subclasses that run user tasks (installs, copies, updates) set BLOCKS_CLOSE
     so the main window refuses to close mid-task; probes leave it False and are
-    joined at quit by _shutdown_threads.
+    joined at quit by shutdown_threads.
     """
 
     BLOCKS_CLOSE = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        _ACTIVE_THREADS.add(self)
-        self.finished.connect(lambda: _ACTIVE_THREADS.discard(self))
+        TASK_SUPERVISOR.register(self)
 
 
-def _running_threads() -> list[TrackedThread]:
-    return [t for t in _ACTIVE_THREADS if t.isRunning()]
+def running_threads() -> list[TrackedThread]:
+    return TASK_SUPERVISOR.running()
 
 
-def _shutdown_threads(timeout_ms: int = 15000) -> None:
+def has_blocking_tasks() -> bool:
+    return TASK_SUPERVISOR.has_blocking_tasks()
+
+
+def shutdown_threads(timeout_ms: int = 15000) -> None:
     """Cancel and join every tracked thread. Connected to aboutToQuit so the
     interpreter never tears down a still-running QThread."""
-    for t in list(_ACTIVE_THREADS):
-        stop = getattr(t, "cancel", None) or getattr(t, "stop", None)
-        if callable(stop):
-            try:
-                stop()
-            except Exception:
-                _logger.debug("_shutdown_threads: stop() on %r failed", t, exc_info=True)
-    deadline = time.monotonic() + timeout_ms / 1000
-    while running := _running_threads():
-        remaining_ms = int((deadline - time.monotonic()) * 1000)
-        if remaining_ms <= 0:
-            break
-        # Wait in short slices so all workers get a chance to finish rather
-        # than spending the whole shared budget on the first registry entry.
-        slice_ms = max(1, min(250, remaining_ms))
-        for thread in running:
-            thread.wait(slice_ms)
-            if time.monotonic() >= deadline:
-                break
+    TASK_SUPERVISOR.shutdown(timeout_ms)
 
 
 # aboutToQuit only fires when an event loop exits, so also join at interpreter
 # exit — atexit runs before module teardown destroys the QThread wrappers.
 # Covers embedders (tests, screenshot driver) that never call app.exec().
-atexit.register(_shutdown_threads)
+atexit.register(shutdown_threads)
 
 
 class Worker(TrackedThread):
@@ -83,9 +173,24 @@ class Worker(TrackedThread):
     line = Signal(str)
     done = Signal(int)
 
-    def __init__(self, cmd: list[str], *, input_text: str | None = None):
+    def __init__(self, cmd: list[str] | CommandSpec, *, input_text: str | None = None):
         super().__init__()
-        self._cmd = cmd
+        if isinstance(cmd, CommandSpec):
+            self._spec = cmd
+        else:
+            argv = tuple(cmd)
+            invalidates = frozenset(
+                tag for tag, binary in (("flatpak", "flatpak"), ("bootc", "bootc"))
+                if binary in argv[:4]
+            )
+            self._spec = command_spec(
+                cmd,
+                name=argv[0] if argv else "command",
+                timeout=None,
+                environment=EnvironmentPolicy.SANITIZED,
+                invalidates=invalidates,
+            )
+        self._cmd = self._spec.command()
         self._input_text = input_text
         self._proc: subprocess.Popen[str] | None = None
         self._cancel_requested = False
@@ -116,8 +221,8 @@ class Worker(TrackedThread):
             # the process inherited.
             env["LANG"] = "en_US.UTF-8"
             env["LC_ALL"] = "en_US.UTF-8"
-            proc = subprocess.Popen(
-                self._cmd,
+            proc = APPLICATION_RUNNER.spawn(
+                self._spec,
                 stdin=subprocess.PIPE if self._input_text is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -146,20 +251,76 @@ class Worker(TrackedThread):
         finally:
             self._proc = None
             # The command may have installed apps or staged a deployment.
-            _invalidate_probe_caches()
+            invalidate_probe_caches()
             # Targeted disk-section drops for common mutation commands.
             try:
-                cmd0 = " ".join(self._cmd[:4])
                 from .probe import (
                     invalidate_after_bootc_change,
                     invalidate_after_flatpak_change,
                 )
-                if "flatpak" in cmd0:
+                if "flatpak" in self._spec.invalidates:
                     invalidate_after_flatpak_change()
-                if "bootc" in cmd0:
+                if "bootc" in self._spec.invalidates:
                     invalidate_after_bootc_change()
             except Exception:
                 _logger.debug("Worker.run: targeted disk-cache invalidation failed", exc_info=True)
+
+
+class StreamingProcessWorker(TrackedThread):
+    """Runs one subprocess, streaming combined stdout/stderr line-by-line.
+
+    Emits each output line via ``line`` and the process exit code via ``done``;
+    any launch/stream exception is reported as an ``Error: …`` line followed by
+    ``done(1)``. ``stop()`` terminates a running process.
+
+    Subclasses supply the command via ``command()`` and may override
+    ``prepare(cmd)`` for setup (e.g. creating a destination directory or
+    echoing the command) — returning ``False`` aborts the launch after the
+    subclass has emitted its own ``done``.
+    """
+
+    BLOCKS_CLOSE = True
+    line = Signal(str)
+    done = Signal(int)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._proc: subprocess.Popen[str] | None = None
+
+    def command(self) -> list[str]:
+        raise NotImplementedError
+
+    def prepare(self, cmd: list[str]) -> bool:
+        """Hook run after ``command()`` and before launch. Return False to abort."""
+        return True
+
+    def stop(self) -> None:
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+
+    def run(self):
+        try:
+            cmd = self.command()
+        except Exception as exc:
+            self.line.emit(f"Error: {exc}")
+            self.done.emit(1)
+            return
+        if not self.prepare(cmd):
+            return
+        try:
+            self._proc = APPLICATION_RUNNER.spawn(
+                command_spec(cmd, name=cmd[0], timeout=None),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+            assert self._proc.stdout
+            for ln in self._proc.stdout:
+                self.line.emit(ln.rstrip())
+            self._proc.wait()
+            self.done.emit(self._proc.returncode)
+        except Exception as exc:
+            self.line.emit(f"Error: {exc}")
+            self.done.emit(1)
 
 
 class DownloadMonitor(TrackedThread):
@@ -169,7 +330,7 @@ class DownloadMonitor(TrackedThread):
 
     def __init__(self, total_bytes: int, rx_start: int):
         super().__init__()
-        self._tracker = _NetStatsTracker(total_bytes, rx_start)
+        self._tracker = NetStatsTracker(total_bytes, rx_start)
         # threading.Event rather than a bool flag: stop() wakes the loop
         # immediately instead of leaving callers' unbounded .wait() blocking
         # the GUI thread for up to the full 1s poll interval.
@@ -186,11 +347,11 @@ class DownloadMonitor(TrackedThread):
         while not self._stop_event.is_set():
             if self._stop_event.wait(1):
                 break
-            stats = self._tracker.tick(_get_rx_bytes())
+            stats = self._tracker.tick(get_rx_bytes())
             self.stats.emit(stats["downloaded"], stats["total"], stats["speed"], stats["eta_sec"])
 
 
-def _stop_download_monitor(monitor: DownloadMonitor | None) -> None:
+def stop_download_monitor(monitor: DownloadMonitor | None) -> None:
     """Stop and dispose of a running DownloadMonitor thread, if any."""
     if monitor is not None:
         monitor.stop()
@@ -198,7 +359,7 @@ def _stop_download_monitor(monitor: DownloadMonitor | None) -> None:
         monitor.deleteLater()
 
 
-def _start_or_extend_dl_monitor(
+def start_or_extend_dl_monitor(
     text: str, monitor: DownloadMonitor | None, total: int,
 ) -> tuple[DownloadMonitor | None, int, bool, bool]:
     """Parse a bootc "layers needed: ... (SIZE)" line and start a new
@@ -217,14 +378,14 @@ def _start_or_extend_dl_monitor(
     try:
         after = text.split("layers needed:")[1]
         size_str = after.split("(")[1].rstrip(")") if "(" in after else ""
-        new_total = _parse_size_bytes(size_str)
+        new_total = parse_size_bytes(size_str)
     except Exception:
-        _logger.debug("_start_or_extend_dl_monitor: failed to parse download size from %r", text, exc_info=True)
+        _logger.debug("start_or_extend_dl_monitor: failed to parse download size from %r", text, exc_info=True)
         return monitor, total, False, False
     if new_total <= 0:
         return monitor, total, False, False
     if monitor is None:
-        return DownloadMonitor(new_total, _get_rx_bytes()), new_total, True, True
+        return DownloadMonitor(new_total, get_rx_bytes()), new_total, True, True
     if new_total > total:
         monitor.update_total(new_total)
         return monitor, new_total, False, True
@@ -247,19 +408,9 @@ class DataWorker(TrackedThread):
             self.failed.emit(self._key, str(exc))
 
 
-def _finish_worker(owner: object, attr: str = "_worker") -> None:
-    worker = getattr(owner, attr, None)
-    if worker is None:
-        return
-    worker.wait()
-    worker.deleteLater()
-    setattr(owner, attr, None)
+def finish_worker(owner: object, attr: str = "_worker") -> None:
+    TASK_SUPERVISOR.finish_owner_task(owner, attr)
 
 
-def _release_worker_when_finished(owner: object, attr: str, worker: QThread) -> None:
-    def _release() -> None:
-        if getattr(owner, attr, None) is worker:
-            setattr(owner, attr, None)
-        worker.deleteLater()
-
-    worker.finished.connect(_release)
+def release_worker_when_finished(owner: object, attr: str, worker: QThread) -> None:
+    TASK_SUPERVISOR.release_when_finished(owner, attr, worker)

@@ -1,0 +1,11 @@
+{
+  "status": {
+    "booted": {
+      "image": {
+        "reference": "ghcr.io/mrtrick37/kyth:testing",
+        "imageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "staged": null
+  }
+}

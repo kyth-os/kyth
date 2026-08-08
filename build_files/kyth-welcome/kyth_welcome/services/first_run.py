@@ -6,7 +6,7 @@ import os
 import shlex
 
 from .flatpak import is_installed
-from .process import _is_live_session, _run_command
+from .process import is_live_session, run_command
 
 DEFAULT_FIRST_RUN_APPS = (
     ("com.valvesoftware.Steam", "Steam"),
@@ -21,7 +21,7 @@ DEFAULT_FIRST_RUN_APPS = (
 
 
 def app_setup_state() -> tuple[str, str, list[str]]:
-    if _is_live_session():
+    if is_live_session():
         return (
             "live",
             "Live sessions include the KythOS tools and launcher defaults. Install to this PC for persistent app setup.",
@@ -48,7 +48,7 @@ def app_setup_state() -> tuple[str, str, list[str]]:
         except (OSError, ValueError):
             status = {}
 
-    service = _run_command(
+    service = run_command(
         ["systemctl", "is-active", "kyth-default-flatpaks.service"], timeout=3
     )
     service_state = service.stdout.strip() if service and service.stdout.strip() else ""

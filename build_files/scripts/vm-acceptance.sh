@@ -3,6 +3,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 usage() {
 	cat <<'EOF'
 Usage: vm-acceptance.sh --iso PATH [--update-ref IMAGE] [--artifacts DIR]
@@ -221,4 +223,15 @@ fi
 	echo "QEMU exited with ${QEMU_STATUS}" >&2
 	exit 1
 }
+QUALIFICATION_ARGS=(
+	acceptance
+	--log "${SERIAL_LOG}"
+	--output "${ARTIFACTS}/qualification.json"
+	--markdown "${ARTIFACTS}/qualification.md"
+)
+if [[ -n "${UPDATE_REF}" ]]; then
+	QUALIFICATION_ARGS+=(--update-required)
+fi
+PYTHONPATH="${SCRIPT_DIR}/../kyth_shared${PYTHONPATH:+:${PYTHONPATH}}" \
+	python3 -m kyth_shared.qualification "${QUALIFICATION_ARGS[@]}"
 echo "KythOS VM acceptance passed"

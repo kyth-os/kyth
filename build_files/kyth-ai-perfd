@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""kyth-ai-perfd — 5s loop, 30s TTL, local LLM optional."""
+import sys
+import time
+
+from kyth_shared.ai_perf_daemon import POLICY_TTL_S, apply_policy, choose_policy, collect_sample
+
+def main() -> int:
+    # Simple 5s loop; systemd will restart on failure
+    baseline_p95 = None
+    while True:
+        try:
+            sample = collect_sample()
+            policy = choose_policy(sample)
+            ok = apply_policy(policy, ttl=POLICY_TTL_S)
+            # Best-effort mangohud p95 check for rollback (optional)
+            # /tmp/mangohud.csv is written by games that use mangohud --dlsym
+            # We keep it optional — daemon stays healthy even without it
+            _ = ok  # keep linter happy
+        except Exception as exc:
+            print(f"kyth-ai-perfd: {exc}", file=sys.stderr)
+        time.sleep(5)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

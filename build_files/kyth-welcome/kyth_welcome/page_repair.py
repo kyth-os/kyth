@@ -2,22 +2,23 @@ import os
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _has_rollback_deployment
-from .page_repair_components import repair_overview_cards, rollback_card
+from .services.bootc import bootc_image_timestamp, has_rollback_deployment
+from .page_repair_components import repair_overview_cards, rollback_card, system_restore_history_card
 from .services.launch import kcmshell, popen_privileged
 from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
-from .services.hardware import _detect_nvidia
-from .services.repair import _read_sys_text, sleep_mode_label
+from .services.hardware import detect_nvidia_async
+from .services.repair import _read_sys_text, quick_fixes, sleep_mode_label
 from .services.flatpak import _is_flatpak_installed
 from .services.privileged import systemctl_action
+from .services.runtime import DataWorker
 from .page_repair_assist import _AssistMixin
 from .page_repair_quick import _QuickFixMixin
 from .page_repair_reset import _ResetMixin
 from .qt import (
-    QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QTextEdit, QUrl,
+    QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QUrl, single_shot,
 )
 from .widgets import (
-    Page, _make_card, _set_log_panel,
+    CollapsibleLogPanel, FlowLayout, Page, _make_card, _make_tip_card,
 )
 
 
@@ -28,7 +29,15 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._snapshot_worker = None
         self._assist_worker = None
         self._setup_worker = None
-        self._has_rollback = _has_rollback_deployment()
+        # Safe default — has_rollback_deployment() and bootc_image_timestamp()
+        # are subprocess-backed. RepairPage is built lazily (on first visit,
+        # not at app startup like WelcomePage), but it must still not block
+        # on them here; _refresh_rollback_state() below fetches the real
+        # values on a background thread and rebuilds the card in place.
+        self._has_rollback = False
+        self._rollback_timestamp = None
+        self._rollback_state_worker = None
+        self._nvidia_probe_worker = None
         self._setup_operation = ""
         self._navigate = navigate or (lambda _key: None)
 
@@ -40,10 +49,14 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
 
         for card in repair_overview_cards(self._navigate):
             self._add(card)
-        rollback, self._rollback_repair_btn = rollback_card(
-            self._has_rollback, self._run_rollback, self._navigate
+        # Windows-style System Restore timeline (booted / staged / rollback)
+        self._history_card = system_restore_history_card(None, self._run_rollback, self._navigate)
+        self._add(self._history_card)
+        self._rollback_insert_index = self._layout.count()
+        self._rollback_card, self._rollback_repair_btn = rollback_card(
+            self._has_rollback, self._run_rollback, self._navigate, self._rollback_timestamp
         )
-        self._add(rollback)
+        self._add(self._rollback_card)
 
         self._build_quick_fixes_card()
         self._build_assist_card()
@@ -57,6 +70,107 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._build_sleep_diagnostics_card()
 
         self._stretch()
+        single_shot(self, 0, self._refresh_rollback_state)
+        single_shot(self, 0, self._refresh_nvidia_quick_fixes)
+
+    @staticmethod
+    def _fetch_rollback_state() -> tuple[bool, str | None, bool]:
+        """Run off the GUI thread by _refresh_rollback_state()'s DataWorker.
+
+        Returns (has_rollback, timestamp, self_heal_warn). self_heal_warn is
+        True when a staged image has failed >=2 boots and a rollback is
+        available — Hub auto-offers rollback as warn (self-healing, Pillar 2).
+        """
+        has_rollback = has_rollback_deployment()
+        timestamp = bootc_image_timestamp("rollback") if has_rollback else None
+        # Also fetch deployment history for the timeline card
+        history = None
+        try:
+            from kyth_shared.system.deployment_history import deployment_history
+            history = deployment_history()
+        except Exception:
+            history = None
+        self_heal = False
+        try:
+            from kyth_shared.boot_health import read_state as _read_boot_state
+            from kyth_shared.system.bootc import has_staged_update
+
+            if has_rollback and has_staged_update():
+                state = _read_boot_state()
+                if state.failures >= 2 or state.status in ("quarantined", "unhealthy"):
+                    self_heal = True
+        except Exception:
+            pass
+        # Also propagate to HubState so other pages see staged/rollback coherence
+        try:
+            from kyth_welcome.services.hub_state import HUB_STATE
+
+            HUB_STATE.set_rollback_available(bool(has_rollback))
+            if self_heal:
+                HUB_STATE.set("self_heal_warn", True)
+        except Exception:
+            pass
+        return has_rollback, timestamp, self_heal, history
+
+    def _refresh_rollback_state(self):
+        if self._rollback_state_worker is not None:
+            return
+        self._rollback_state_worker = DataWorker("repair-rollback-state", self._fetch_rollback_state)
+        self._rollback_state_worker.result.connect(self._on_rollback_state_ready)
+        self._rollback_state_worker.failed.connect(lambda _key, _message: None)
+        self._rollback_state_worker.finished.connect(lambda: setattr(self, "_rollback_state_worker", None))
+        self._rollback_state_worker.start()
+
+    def _on_rollback_state_ready(self, _key: str, data: object):
+        # Compatibility: old cache may still be 2-tuple; support both.
+        history = None
+        if isinstance(data, tuple) and len(data) == 4:
+            has_rollback, timestamp, self_heal, history = data  # type: ignore[misc]
+        elif isinstance(data, tuple) and len(data) == 3:
+            has_rollback, timestamp, self_heal = data  # type: ignore[misc]
+        else:
+            has_rollback, timestamp = data  # type: ignore[misc]
+            self_heal = False
+        self._has_rollback = has_rollback
+        self._rollback_timestamp = timestamp
+        # Refresh System Restore timeline if available
+        if history is not None and hasattr(self, "_history_card"):
+            try:
+                new_history = system_restore_history_card(history, self._run_rollback, self._navigate)
+                # history card is at index rollback_insert_index -1
+                idx = self._layout.indexOf(self._history_card)
+                if idx >= 0:
+                    self._layout.removeWidget(self._history_card)
+                    self._history_card.deleteLater()
+                    self._layout.insertWidget(idx, new_history)
+                    self._history_card = new_history
+            except Exception:
+                pass
+        # Self-healing: if staged has failed 2 boots, surface rollback as warn with tip.
+        extra_warn = bool(self_heal and has_rollback)
+        new_card, new_btn = rollback_card(has_rollback, self._run_rollback, self._navigate, timestamp, warn=extra_warn)
+        self._layout.removeWidget(self._rollback_card)
+        self._rollback_card.deleteLater()
+        self._layout.insertWidget(self._rollback_insert_index, new_card)
+        self._rollback_card = new_card
+        self._rollback_repair_btn = new_btn
+
+    def _refresh_nvidia_quick_fixes(self):
+        detect_nvidia_async(self, self._on_nvidia_quick_fixes_ready)
+
+    def _on_nvidia_quick_fixes_ready(self, has_nvidia: bool):
+        if not has_nvidia:
+            return
+        nvidia_status_btn = QPushButton("NVIDIA Status")
+        nvidia_status_btn.setToolTip("Show current NVIDIA driver build status and kernel module load state.")
+        nvidia_status_btn.clicked.connect(
+            lambda _=False: self._run_quick_fix("NVIDIA Status", ["/usr/bin/kyth-nvidia-status"])
+        )
+        self._quick_btns.addWidget(nvidia_status_btn)
+        nvidia_fix_btn = QPushButton("Retry NVIDIA Build")
+        nvidia_fix_btn.setToolTip("Open the NVIDIA Drivers page to retry the kernel module build.")
+        nvidia_fix_btn.clicked.connect(lambda _=False: self._navigate("NVIDIA"))
+        self._quick_btns.addWidget(nvidia_fix_btn)
 
     def _build_quick_fixes_card(self) -> None:
         quick, quick_layout = _make_card("card-accent-ok")
@@ -71,8 +185,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         quick_body.setObjectName("card-copy")
         quick_body.setWordWrap(True)
         quick_layout.addWidget(quick_body)
-        quick_btns = QHBoxLayout()
-        quick_btns.setSpacing(8)
+        quick_btns = FlowLayout(spacing=8)
         panic_btn = QPushButton("Panic Button")
         panic_btn.setObjectName("primary")
         panic_btn.setToolTip("Run the safe repair bundle: app menu, user polish, Flatpak repair, audio restart, and snapshot.")
@@ -86,35 +199,20 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             "/usr/bin/kyth-session-snapshot"
         ]))
         quick_btns.addWidget(panic_btn)
-        for label, tip, cmd in (
-            ("Refresh App Menu",  "Rebuild the application menu database. Fixes missing app icons and entries after installs.",
-             ["bash", "-c", REFRESH_DESKTOP_DATABASE_SH]),
-            ("Apply User Polish", "Re-apply KythOS default theme, fonts, and KDE settings to your user profile.",
-             ["/usr/bin/kyth-user-polish"]),
-            ("Retry Game Apps",   "Restart the Flatpak install service to retry installing Steam, Lutris, and other game apps.",
-             systemctl_action("restart", "kyth-default-flatpaks.service").command()),
-            ("Fix Flatpak Apps",  "Repair the Flatpak user installation. Fixes corrupted or missing app runtimes.",
-             ["flatpak", "repair", "--user"]),
-            ("Restart Audio",     "Restart PipeWire, PipeWire-Pulse, and WirePlumber. Fixes audio that has stopped working.",
-             ["systemctl", "--user", "restart", "pipewire", "pipewire-pulse", "wireplumber"]),
-            ("Restart Bluetooth", "Restart the Bluetooth service. Fixes controllers and headsets that won't pair or connect.",
-             systemctl_action("restart", "bluetooth.service").command()),
-        ):
-            btn = QPushButton(label)
-            btn.setToolTip(tip)
-            btn.clicked.connect(lambda _=False, c=cmd, l=label: self._run_quick_fix(l, c))
-            quick_btns.addWidget(btn)
-        if _detect_nvidia():
-            nvidia_status_btn = QPushButton("NVIDIA Status")
-            nvidia_status_btn.setToolTip("Show current NVIDIA driver build status and kernel module load state.")
-            nvidia_status_btn.clicked.connect(
-                lambda _=False: self._run_quick_fix("NVIDIA Status", ["/usr/bin/kyth-nvidia-status"])
+        for fix in quick_fixes():
+            btn = QPushButton(fix.label)
+            btn.setToolTip(fix.tooltip)
+            btn.clicked.connect(
+                lambda _=False, f=fix: self._run_quick_fix(f.label, list(f.command))
             )
-            quick_btns.addWidget(nvidia_status_btn)
-            nvidia_fix_btn = QPushButton("Retry NVIDIA Build")
-            nvidia_fix_btn.setToolTip("Open the NVIDIA Drivers page to retry the kernel module build.")
-            nvidia_fix_btn.clicked.connect(lambda _=False: self._navigate("NVIDIA"))
-            quick_btns.addWidget(nvidia_fix_btn)
+            quick_btns.addWidget(btn)
+        # NVIDIA Status/Retry Build buttons are added later, once
+        # _refresh_nvidia_quick_fixes() confirms a GPU is actually present
+        # (see __init__) — detecting it is an lspci call, so it must not
+        # block this constructor. FlowLayout only supports appending, so
+        # they land at the end of the row instead of here once revealed,
+        # not mid-row like the other quick fixes.
+        self._quick_btns = quick_btns
         task_btn = QPushButton("Open Task Manager")
         task_btn.setObjectName("primary")
         task_btn.setToolTip("Launch the system task manager to inspect running processes and resource usage.")
@@ -156,7 +254,6 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         nightlight_btn.setToolTip("Open KDE Night Light / blue light filter settings to set a schedule.")
         nightlight_btn.clicked.connect(self._open_night_light)
         quick_btns.addWidget(nightlight_btn)
-        quick_btns.addStretch()
         quick_layout.addLayout(quick_btns)
         self._add(quick)
 
@@ -197,36 +294,26 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._add(assist_card)
 
     def _build_printer_card(self) -> None:
-        printer_card, printer_layout = _make_card()
-        printer_title = QLabel("Printer Setup")
-        printer_title.setObjectName("card-title")
-        printer_layout.addWidget(printer_title)
-        printer_body = QLabel(
+        def _open_cups(_=False):
+            popen_privileged(systemctl_action("enable", "cups.service", now=True))
+            QDesktopServices.openUrl(QUrl("http://localhost:631"))
+
+        card, _buttons = _make_tip_card(
+            "Printer Setup",
             "Most USB and network printers work automatically via CUPS. "
             "Click Setup Printer to enable the print service and open KDE Printer Settings. "
             "If your printer is not listed, click Add Printer and enter its IP address or use the USB connection.\n\n"
             "For older or unusual printers, the CUPS web interface at http://localhost:631 "
-            "gives you access to every available driver."
+            "gives you access to every available driver.",
+            buttons=[
+                ("Setup Printer", self._open_printer_setup),
+                (
+                    "Open CUPS Web Interface", _open_cups,
+                    "Advanced printer management at http://localhost:631",
+                ),
+            ],
         )
-        printer_body.setObjectName("card-copy")
-        printer_body.setWordWrap(True)
-        printer_layout.addWidget(printer_body)
-        printer_btns = QHBoxLayout()
-        printer_btns.setSpacing(8)
-        printer_open_btn = QPushButton("Setup Printer")
-        printer_open_btn.setObjectName("primary")
-        printer_open_btn.clicked.connect(self._open_printer_setup)
-        printer_btns.addWidget(printer_open_btn)
-        cups_btn = QPushButton("Open CUPS Web Interface")
-        cups_btn.setToolTip("Advanced printer management at http://localhost:631")
-        cups_btn.clicked.connect(lambda _=False: (
-            popen_privileged(systemctl_action("enable", "cups.service", now=True)),
-            QDesktopServices.openUrl(QUrl("http://localhost:631"))
-        ))
-        printer_btns.addWidget(cups_btn)
-        printer_btns.addStretch()
-        printer_layout.addLayout(printer_btns)
-        self._add(printer_card)
+        self._add(card)
 
     def _build_backup_card(self) -> None:
         # File History — backups (Pika Backup wraps borg snapshots)
@@ -238,11 +325,16 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             "Like File History-style backup: pick a backup drive (or network location), "
             "and Pika Backup keeps scheduled snapshots of your files. Restore any "
             "earlier version of a file from the same app. Snapshots are deduplicated, "
-            "so keeping months of history costs little space."
+            "so keeping months of history costs little space. Shows last backup time without opening terminal."
         )
         backup_body.setObjectName("card-copy")
         backup_body.setWordWrap(True)
         backup_layout.addWidget(backup_body)
+        # Dynamic status line — DataWorker so missing pika/binary does not block GUI
+        self._backup_status_lbl = QLabel("Checking backup status…")
+        self._backup_status_lbl.setObjectName("card-copy")
+        self._backup_status_lbl.setWordWrap(True)
+        backup_layout.addWidget(self._backup_status_lbl)
         backup_btns = QHBoxLayout()
         backup_btns.setSpacing(8)
         pika_installed = _is_flatpak_installed("org.gnome.World.PikaBackup")
@@ -254,6 +346,30 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         backup_btns.addStretch()
         backup_layout.addLayout(backup_btns)
         self._add(backup_card)
+        # Kick off probe off GUI thread
+        try:
+            from .services.backup import _pika_backup_summary
+            w = DataWorker("pika-summary", _pika_backup_summary)
+            w.result.connect(lambda _k, data: self._on_backup_summary_ready(data))
+            w.failed.connect(lambda _k, _m: self._backup_status_lbl.setText("Backup status unavailable."))
+            w.start()
+            self._backup_worker = w
+        except Exception:
+            pass
+
+    def _on_backup_summary_ready(self, data: tuple[str, str, str]) -> None:
+        status, _title, summary = data
+        if hasattr(self, "_backup_status_lbl") and self._backup_status_lbl is not None:
+            self._backup_status_lbl.setText(summary)
+            self._backup_status_lbl.setObjectName({"ok": "status-ok", "warn": "status-warn", "dim": "status-dim"}.get(status, "card-copy"))
+            from .core_base import restyle
+            restyle(self._backup_status_lbl)
+        # Update button label based on summary probe (install vs open)
+        if hasattr(self, "_backup_btn") and self._backup_btn is not None:
+            if status == "dim":
+                self._backup_btn.setText("Set Up File History")
+            else:
+                self._backup_btn.setText("Open Pika Backup")
 
     def _build_restore_setup_card(self) -> None:
         setup_card, setup_layout = _make_card("card-accent-ok")
@@ -311,54 +427,45 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._add(snapshot_card)
 
     def _build_reinstall_card(self) -> None:
-        reinstall_card, reinstall_layout = _make_card()
-        reinstall_title = QLabel("Install KythOS on another disk")
-        reinstall_title.setObjectName("card-title")
-        reinstall_layout.addWidget(reinstall_title)
-        reinstall_body = QLabel(
+        card, _buttons = _make_tip_card(
+            "Install KythOS on another disk",
             "To install KythOS onto a different disk, boot the live ISO — the full graphical "
-            "installer is built in. Back up personal files first; the installer erases the disk you select."
+            "installer is built in. Back up personal files first; the installer erases the disk you select.",
+            primary=None,
+            buttons=[
+                (
+                    "Download Live ISO",
+                    lambda _=False: QDesktopServices.openUrl(QUrl("https://github.com/mrtrick37/kyth/releases")),
+                    "Open the KythOS releases page to download a live ISO for installing on another disk.",
+                ),
+                (
+                    "Open Home Folder",
+                    lambda _=False: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.expanduser("~"))),
+                    "Open your home folder in the file manager to back up personal files before reinstalling.",
+                ),
+            ],
         )
-        reinstall_body.setObjectName("card-copy")
-        reinstall_body.setWordWrap(True)
-        reinstall_layout.addWidget(reinstall_body)
-        reinstall_btns = QHBoxLayout()
-        reinstall_btns.setSpacing(8)
-        iso_btn = QPushButton("Download Live ISO")
-        iso_btn.setToolTip("Open the KythOS releases page to download a live ISO for installing on another disk.")
-        iso_btn.clicked.connect(lambda _=False: QDesktopServices.openUrl(QUrl("https://github.com/mrtrick37/kyth/releases")))
-        reinstall_btns.addWidget(iso_btn)
-        home_btn = QPushButton("Open Home Folder")
-        home_btn.setToolTip("Open your home folder in the file manager to back up personal files before reinstalling.")
-        home_btn.clicked.connect(lambda _=False: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.expanduser("~"))))
-        reinstall_btns.addWidget(home_btn)
-        reinstall_btns.addStretch()
-        reinstall_layout.addLayout(reinstall_btns)
-        self._add(reinstall_card)
+        self._add(card)
 
     def _build_warning_card(self) -> None:
-        warn, warn_layout = _make_card("card-accent-err")
-        warn_title = QLabel("This action cannot be undone")
-        warn_title.setStyleSheet("color: #f7768e; font-size: 14px; font-weight: 700;")
-        warn_layout.addWidget(warn_title)
-        warn_body = QLabel(
+        card, _buttons = _make_tip_card(
+            "This action cannot be undone",
             "Running a repair will:\n"
             "  •  Remove any layered packages and custom OS-level changes\n"
             "  •  Reset system configuration to KythOS defaults\n"
             "  •  Leave everything in /home untouched\n"
             "  •  Reboot automatically after staging\n\n"
-            "If you only need to undo a bad update, use Roll Back in the Update page first."
+            "If you only need to undo a bad update, use Roll Back in the Update page first.",
+            accent="card-accent-err",
+            title_object_name="card-title-err",
         )
-        warn_body.setObjectName("card-copy")
-        warn_body.setWordWrap(True)
-        warn_layout.addWidget(warn_body)
-        self._add(warn)
+        self._add(card)
 
     def _build_reset_controls(self) -> None:
         confirm_row = QHBoxLayout()
         confirm_row.setSpacing(12)
         confirm_lbl = QLabel("Type  RESET  to unlock:")
-        confirm_lbl.setStyleSheet("color: #6c7086;")
+        confirm_lbl.setObjectName("card-copy")
         confirm_row.addWidget(confirm_lbl)
         self._confirm_edit = QLineEdit()
         self._confirm_edit.setFixedWidth(130)
@@ -387,18 +494,8 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._progress.hide()
         self._add(self._progress)
 
-        self._log_toggle = QPushButton("Show details")
-        self._log_toggle.setCheckable(True)
-        self._log_toggle.clicked.connect(lambda checked: _set_log_panel(self._log_toggle, self._log, checked))
-        self._log_toggle.hide()
-        self._add(self._log_toggle)
-
-        self._log = QTextEdit()
-        self._log.document().setMaximumBlockCount(5000)
-        self._log.setReadOnly(True)
-        self._log.setMinimumHeight(120)
-        self._log.hide()
-        self._add(self._log)
+        self._log_panel = CollapsibleLogPanel(min_height=120)
+        self._add(self._log_panel)
 
     def _build_sleep_diagnostics_card(self) -> None:
         sleep_card, sleep_layout = _make_card()

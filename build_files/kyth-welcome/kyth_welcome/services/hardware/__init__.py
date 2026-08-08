@@ -9,6 +9,8 @@ from .nvidia import (
     _hw_setup_done,
     _hw_setup_service_state,
     _nvidia_module_loaded,
+    _secureboot_state,
+    detect_nvidia_async,
     nvidia_status_view,
 )
 from .io import (
@@ -23,7 +25,7 @@ from .display import (
     _display_probe,
     _format_display_mode,
     _parse_kscreen_output,
-    _strip_ansi,
+    strip_ansi,
     hdr_vrr_status_text,
 )
 from .system import (
@@ -75,6 +77,7 @@ __all__ = [
     "_cpu_probe",
     "_detect_controllers",
     "_detect_nvidia",
+    "detect_nvidia_async",
     "bt_audio_device_summary",
     "force_ldac_reconnect",
     "switch_to_bt_audio_output",
@@ -95,7 +98,7 @@ __all__ = [
     "_platform_probe",
     "_status_palette",
     "_storage_probe",
-    "_strip_ansi",
+    "strip_ansi",
     "_successful_vaapi_probe",
     "_thermal_probe",
     "_vaapi_failure_summary",

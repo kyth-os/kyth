@@ -1,6 +1,7 @@
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
+from .core_base import restyle
 from .services.workers import CompatRefreshWorker
 from .services.gaming import compat_data
 from .services.gaming.compat_data import (
@@ -15,7 +16,7 @@ from .qt import (
     QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
 )
 from .widgets import (
-    Page, _make_card,
+    Page, SegmentedTabBar, _make_card,
 )
 
 
@@ -51,16 +52,12 @@ _COMPAT_AC_EXPLAINERS: list[tuple[str, str, str]] = [
 class CompatibilityPage(Page):
 
     _STATUS_STYLE: ClassVar[dict[str, tuple[str, str, str]]] = {
-        # status → (badge_text, badge_css, row_left_border_color)
-        "native":  ("Native",       "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
-        "proton":  ("Works",        "background:#121e2d; color:#4fc1ff; border:1px solid #1c3d60;",  "#4fc1ff"),
-        "tweaks":  ("Tweaks",       "background:#241808; color:#fbbf24; border:1px solid #f59e0b;",  "#f59e0b"),
-        "blocked": ("Blocked",      "background:#3a1010; color:#f48771; border:1px solid #5a1a1a;",  "#f48771"),
+        # status → (badge_text, hw-card objectName, status-badge objectName)
+        "native":  ("Native",  "hw-card-ok",   "status-ok"),
+        "proton":  ("Works",   "hw-card-ok",   "status-ok"),
+        "tweaks":  ("Tweaks",  "hw-card-warn", "status-warn"),
+        "blocked": ("Blocked", "hw-card-err",  "status-err"),
     }
-    _AC_BADGE_CSS = (
-        "font-size:10px; font-weight:600; border-radius:3px; padding:1px 6px; "
-        "background:#252526; color:#a6a6a6; border:1px solid #3c3c3c;"
-    )
 
     def __init__(self):
         super().__init__()
@@ -90,8 +87,7 @@ class CompatibilityPage(Page):
         # ── Anti-cheat explainers ─────────────────────────────────────────────
         self._divider()
         ac_head = QLabel("How anti-cheat works on Linux")
-        ac_head.setObjectName("heading")
-        ac_head.setStyleSheet("font-size:17px; font-weight:700; color:#ffffff;")
+        ac_head.setObjectName("section-heading")
         self._add(ac_head)
 
         for ac_name, ac_status, ac_text in _COMPAT_AC_EXPLAINERS:
@@ -102,18 +98,14 @@ class CompatibilityPage(Page):
             cl.setContentsMargins(16, 12, 16, 12)
             cl.setSpacing(14)
             dot = QLabel("✓" if ac_status == "ok" else "✗")
-            dot.setStyleSheet(
-                f"font-size:18px; font-weight:700; color:{'#4fc1ff' if ac_status == 'ok' else '#f48771'};"
-                " background:transparent; border:none;"
-            )
+            dot.setObjectName("glyph-ok" if ac_status == "ok" else "glyph-err")
             dot.setFixedWidth(20)
             dot.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
             cl.addWidget(dot)
             text_col = QVBoxLayout()
             text_col.setSpacing(3)
             name_lbl = QLabel(ac_name)
-            name_lbl.setObjectName("card-title")
-            name_lbl.setStyleSheet("font-size:13px;")
+            name_lbl.setObjectName("card-subtitle")
             desc_lbl = QLabel(ac_text)
             desc_lbl.setObjectName("card-copy")
             desc_lbl.setWordWrap(True)
@@ -125,20 +117,20 @@ class CompatibilityPage(Page):
         # ── Game list ─────────────────────────────────────────────────────────
         self._divider()
         games_head = QLabel("Notable games")
-        games_head.setObjectName("heading")
-        games_head.setStyleSheet("font-size:17px; font-weight:700; color:#ffffff;")
+        games_head.setObjectName("section-heading")
         self._add(games_head)
 
-        filter_row = QHBoxLayout()
-        filter_row.setSpacing(8)
-        self._filter_all  = self._make_filter_btn("All",     None,        True)
-        self._filter_works = self._make_filter_btn("Works",  ("native", "proton"), False)
-        self._filter_tweaks = self._make_filter_btn("Tweaks", ("tweaks",), False)
-        self._filter_blocked = self._make_filter_btn("Blocked", ("blocked",), False)
-        for btn in (self._filter_all, self._filter_works, self._filter_tweaks, self._filter_blocked):
-            filter_row.addWidget(btn)
-        filter_row.addStretch()
-        self._add_layout(filter_row)
+        self._filter_bar = SegmentedTabBar(
+            [
+                (None, "All"),
+                (("native", "proton"), "Works"),
+                (("tweaks",), "Tweaks"),
+                (("blocked",), "Blocked"),
+            ],
+            active=None,
+        )
+        self._filter_bar.activated.connect(self._apply_filter)
+        self._add(self._filter_bar)
 
         self._game_rows: list[tuple[QFrame, str]] = []  # (widget, status)
         self._active_filter: tuple | None = None
@@ -150,8 +142,7 @@ class CompatibilityPage(Page):
         # ── compatibility apps via Bottles / Lutris ─────────────────────────────────
         self._divider()
         winapps_head = QLabel("Known-working compatibility apps")
-        winapps_head.setObjectName("heading")
-        winapps_head.setStyleSheet("font-size:17px; font-weight:700; color:#ffffff;")
+        winapps_head.setObjectName("section-heading")
         self._add(winapps_head)
 
         winapps_intro = QLabel(
@@ -175,29 +166,22 @@ class CompatibilityPage(Page):
             ("Xbox App",          "blocked", "—",        "No Linux client. Use Xbox Cloud Gaming (above) for Game Pass streaming."),
         ]
         for name, status, tool, note in _WINAPPS:
-            badge_text, badge_css, border_color = CompatibilityPage._STATUS_STYLE.get(
+            badge_text, card_name, badge_name = CompatibilityPage._STATUS_STYLE.get(
                 status, CompatibilityPage._STATUS_STYLE["tweaks"]
             )
             wa_row = QFrame()
-            wa_row.setObjectName("hw-card-dim")
-            wa_row.setStyleSheet(
-                f"QFrame#hw-card-dim {{ border-left: 3px solid {border_color}; border-radius:4px; }}"
-            )
+            wa_row.setObjectName(card_name)
             wa_rl = QHBoxLayout(wa_row)
             wa_rl.setContentsMargins(14, 8, 14, 8)
             wa_rl.setSpacing(10)
             wa_name = QLabel(name)
-            wa_name.setObjectName("card-summary")
-            wa_name.setStyleSheet("font-size:13px; font-weight:600;")
+            wa_name.setObjectName("card-subtitle")
             wa_rl.addWidget(wa_name, 1)
-            wa_tool_lbl = QLabel(f"  {tool}  ")
-            wa_tool_lbl.setStyleSheet(
-                "font-size:10px; font-weight:600; border-radius:3px; padding:1px 6px; "
-                "background:#252526; color:#cccccc; border:1px solid #3c3c3c;"
-            )
+            wa_tool_lbl = QLabel(tool)
+            wa_tool_lbl.setObjectName("status-dim")
             wa_rl.addWidget(wa_tool_lbl)
-            wa_badge = QLabel(f"  {badge_text}  ")
-            wa_badge.setStyleSheet(badge_css + " border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;")
+            wa_badge = QLabel(badge_text)
+            wa_badge.setObjectName(badge_name)
             wa_badge.setToolTip(note)
             wa_rl.addWidget(wa_badge)
             note_lbl = QLabel(note)
@@ -236,8 +220,7 @@ class CompatibilityPage(Page):
         # ── Cloud Gaming — Xbox Game Pass workaround ──────────────────────────
         self._divider()
         cloud_head = QLabel("Cloud gaming (Xbox Game Pass workaround)")
-        cloud_head.setObjectName("heading")
-        cloud_head.setStyleSheet("font-size:17px; font-weight:700; color:#ffffff;")
+        cloud_head.setObjectName("section-heading")
         self._add(cloud_head)
 
         cloud_card, cloud_layout = _make_card("card-accent-warn")
@@ -291,6 +274,9 @@ class CompatibilityPage(Page):
         alt_layout.addLayout(alt_btns)
         self._add(alt_card)
 
+        # ── Will My Games Run? — personal library scanner (Truth Engine) ──
+        self._add(self._make_truth_engine_card())
+
         self._stretch()
 
         # Refresh the compatibility data in the background so blocked/working
@@ -315,17 +301,18 @@ class CompatibilityPage(Page):
         )
         age = calculate_data_age_days(compat_data._COMPAT_DATA_UPDATED)
         if age is not None and age > _COMPAT_STALE_DAYS:
-            self._freshness_lbl.setStyleSheet("font-size:11px; color:#d4a843;")
+            self._freshness_lbl.setObjectName("prop-val-orange")
             note = (
                 f"⚠ Compatibility data is {age} days old (updated {compat_data._COMPAT_DATA_UPDATED}). "
                 "Double-check ProtonDB before relying on a specific title."
             )
         else:
-            self._freshness_lbl.setStyleSheet("font-size:11px; color:#858585;")
+            self._freshness_lbl.setObjectName("caption-text")
             note = f"Compatibility data updated {compat_data._COMPAT_DATA_UPDATED or 'unknown'}."
         if refresh_note:
             note += f"  {refresh_note}"
         self._freshness_lbl.setText(note)
+        restyle(self._freshness_lbl)
 
     def _rebuild_game_rows(self):
         while self._games_rows_layout.count():
@@ -349,51 +336,133 @@ class CompatibilityPage(Page):
     def _on_compat_unchanged(self):
         self._update_summary()
 
-    def _make_filter_btn(self, label: str, statuses: tuple | None, active: bool) -> QPushButton:
-        btn = QPushButton(label)
-        btn.setCheckable(True)
-        btn.setChecked(active)
-        btn.setFixedHeight(28)
-        btn.setStyleSheet(
-            "QPushButton { border-radius:4px; padding:2px 14px; font-size:12px; "
-            "background:#252526; color:#cccccc; border:1px solid #3c3c3c; }"
-            "QPushButton:checked { background:#3a2d3a; color:#4fc1ff; border-color:#4fc1ff; }"
-        )
-        btn.clicked.connect(lambda _=False, s=statuses: self._apply_filter(s))
-        return btn
-
     def _apply_filter(self, statuses: tuple | None):
         self._active_filter = statuses
-        for btn in (self._filter_all, self._filter_works, self._filter_tweaks, self._filter_blocked):
-            btn.setChecked(False)
-        if statuses is None:
-            self._filter_all.setChecked(True)
-        elif "blocked" in statuses:
-            self._filter_blocked.setChecked(True)
-        elif "tweaks" in statuses:
-            self._filter_tweaks.setChecked(True)
-        else:
-            self._filter_works.setChecked(True)
-
         for row, status in self._game_rows:
             row.setVisible(statuses is None or status in statuses)
 
+    def _make_truth_engine_card(self):
+        from .widgets import _make_card
+        from .qt import QPushButton, QVBoxLayout
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Will My Games Run? — scan your library")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Scans installed Steam manifests on this PC (no cloud login needed) and maps each title to KythOS compat data: "
+            "Native/Works/Tweaks/Blocked with the vendor anti-cheat reason. Unknown titles suggest a ProtonDB check. "
+            "Also scans a mounted Windows drive's Steam libraries when available."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        self._truth_status = QLabel("Click Scan to check the games installed here.")
+        self._truth_status.setObjectName("card-copy")
+        self._truth_status.setWordWrap(True)
+        layout.addWidget(self._truth_status)
+        self._truth_rows = QVBoxLayout()
+        self._truth_rows.setSpacing(6)
+        layout.addLayout(self._truth_rows)
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        scan_btn = QPushButton("Scan Installed Games")
+        scan_btn.setObjectName("primary")
+        scan_btn.clicked.connect(self._run_truth_scan)
+        btns.addWidget(scan_btn)
+        btns.addStretch()
+        layout.addLayout(btns)
+        return card
+
+    def _run_truth_scan(self):
+        from .services.runtime import DataWorker, release_worker_when_finished
+        self._truth_status.setText("Scanning Steam libraries…")
+        restyle(self._truth_status)
+        while self._truth_rows.count():
+            it = self._truth_rows.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+
+        def _scan():
+            try:
+                from kyth_shared.gaming.truth_engine import classify_library, scan_steam_manifests
+                from kyth_shared.gaming.compat_data import _COMPAT_GAMES as _G
+                # Also include Windows-mounted libraries if probed
+                extra_paths: list[str] = []
+                try:
+                    from kyth_welcome.services.gaming import _find_steam_libraries
+                    for lib in (_find_steam_libraries() or []):
+                        p = lib.get("path") if isinstance(lib, dict) else None
+                        if p:
+                            extra_paths.append(p)
+                except Exception:
+                    pass
+                names = scan_steam_manifests(extra_paths if extra_paths else None)
+                if not names:
+                    # Fallback: scan default local paths too
+                    names = scan_steam_manifests()
+                result = classify_library(names, list(_G))
+                result["names"] = names
+                return result
+            except Exception as exc:
+                return {"error": str(exc), "total": 0, "buckets": {}}
+
+        worker = DataWorker("truth-engine", _scan)
+        worker.result.connect(self._on_truth_result)
+        worker.failed.connect(lambda _k, msg: self._truth_status.setText(f"Scan failed: {msg}"))
+        self._truth_worker = worker
+        release_worker_when_finished(self, "_truth_worker", worker)
+        worker.start()
+
+    def _on_truth_result(self, _key: str, data: dict):
+        if data.get("error"):
+            self._truth_status.setText(f"Scan failed: {data['error']}")
+            restyle(self._truth_status)
+            return
+        total = data.get("total", 0)
+        if total == 0:
+            self._truth_status.setText("No installed Steam games found here. Install Steam, launch it once, or mount your Windows Steam drive and rescan.")
+            restyle(self._truth_status)
+            return
+        self._truth_status.setText(f"{data.get('summary','')}  (checked {total} titles)")
+        self._truth_status.setObjectName("status-ok" if data.get("blocked", 0) == 0 else "status-warn")
+        restyle(self._truth_status)
+        # Show up to 8 per bucket
+        for bucket in ("blocked", "tweaks", "unknown", "proton", "native"):
+            items = (data.get("buckets") or {}).get(bucket) or []
+            for item in items[:4]:
+                name = item.get("name", "")
+                note = item.get("note", "")[:90]
+                status = item.get("status", bucket)
+                badge, card_name, _ = self._STATUS_STYLE.get(status, self._STATUS_STYLE["tweaks"])
+                if bucket == "unknown":
+                    card_name = "hw-card-dim"
+                    badge = "Unknown"
+                row = QFrame()
+                row.setObjectName(card_name)
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(12, 6, 12, 6)
+                rl.setSpacing(10)
+                lbl = QLabel(name)
+                lbl.setObjectName("card-subtitle")
+                lbl.setToolTip(note)
+                rl.addWidget(lbl, 1)
+                b = QLabel(badge)
+                b.setObjectName("status-err" if bucket == "blocked" else ("status-warn" if bucket in ("tweaks","unknown") else "status-ok"))
+                rl.addWidget(b)
+                self._truth_rows.addWidget(row)
+
     def _make_game_row(self, game: CompatGame) -> QFrame:
-        badge_text, badge_css, border_color = self._STATUS_STYLE.get(
+        badge_text, card_name, badge_name = self._STATUS_STYLE.get(
             game.status, self._STATUS_STYLE["tweaks"]
         )
         row = QFrame()
-        row.setObjectName("hw-card-dim")
-        row.setStyleSheet(
-            f"QFrame#hw-card-dim {{ border-left: 3px solid {border_color}; border-radius:4px; }}"
-        )
+        row.setObjectName(card_name)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(14, 8, 14, 8)
         rl.setSpacing(10)
 
         name_lbl = QLabel(game.name)
-        name_lbl.setObjectName("card-summary")
-        name_lbl.setStyleSheet("font-size:13px; font-weight:600;")
+        name_lbl.setObjectName("card-subtitle")
         rl.addWidget(name_lbl, 1)
 
         tooltip = (
@@ -405,20 +474,17 @@ class CompatibilityPage(Page):
         row.setToolTip(tooltip)
 
         ac_lbl = QLabel(game.anticheat)
-        ac_lbl.setStyleSheet(self._AC_BADGE_CSS)
+        ac_lbl.setObjectName("status-dim")
         ac_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ac_lbl.setFixedHeight(20)
         rl.addWidget(ac_lbl)
 
         checked_lbl = QLabel(game.checked)
-        checked_lbl.setStyleSheet("font-size:10px; color:#858585;")
+        checked_lbl.setObjectName("prop-val-dim")
         checked_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rl.addWidget(checked_lbl)
 
-        badge = QLabel(f"  {badge_text}  ")
-        badge.setStyleSheet(
-            badge_css + " border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-        )
+        badge = QLabel(badge_text)
+        badge.setObjectName(badge_name)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rl.addWidget(badge)
 

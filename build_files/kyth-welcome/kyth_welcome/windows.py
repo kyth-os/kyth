@@ -1,20 +1,16 @@
-import subprocess  # nosec B404 # nosemgrep
-
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import (
-    _IS_LIVE, _load_profile, _restyle,
-    _running_threads,
-)
-from .core_base import _current_branch
-from .page_registry import (
-    PROBLEM_ROUTES, SEARCH_ALIASES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups,
-)
+from .core_base import IS_LIVE, load_profile, restyle
+from .services.bootc import current_branch
+from .services.hardware import detect_nvidia_async
+from .services.runtime import has_blocking_tasks
+from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups
 from .qt import (
-    QCompleter, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
+    QCompleter, QDialog, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .widgets import (
     _divider, _theme_icon,
 )
+from .services.launch import popen
 
 # ── Sidebar nav button ─────────────────────────────────────────────────────────
 def _nav_section_label(text: str) -> QLabel:
@@ -34,18 +30,18 @@ class NavButton(QPushButton):
         else:
             super().__init__(f"  {label}")
             self.setIcon(icon)
-            self.setIconSize(QSize(16, 16))
+            self.setIconSize(QSize(18, 18))
         self.setObjectName("nav-item")
         self.setCheckable(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         sp = self.sizePolicy()
         sp.setHorizontalPolicy(QSizePolicy.Policy.Expanding)
         self.setSizePolicy(sp)
-        self.setMinimumHeight(36)
+        self.setMinimumHeight(32)
 
     def set_active(self, active: bool):
         self.setObjectName("nav-item-active" if active else "nav-item")
-        _restyle(self)
+        restyle(self)
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
@@ -64,7 +60,7 @@ class MainWindow(QMainWindow):
         central_layout.setSpacing(0)
         self.setCentralWidget(central)
 
-        if _IS_LIVE:
+        if IS_LIVE:
             banner = QWidget()
             banner.setObjectName("live-banner")
             banner_layout = QHBoxLayout(banner)
@@ -87,12 +83,42 @@ class MainWindow(QMainWindow):
             install_btn.setObjectName("primary")
             install_btn.setFixedWidth(148)
             install_btn.clicked.connect(
-                lambda: subprocess.Popen(["/usr/bin/kyth-launch-installer"])
+                lambda: popen(["/usr/bin/kyth-launch-installer"])
             )
             banner_layout.addWidget(install_btn)
             central_layout.addWidget(banner)
 
-        # ── Top command bar: back/forward, breadcrumb, search ────────────────
+        self._build_topbar(central_layout)
+        self._build_mission_bar(central_layout)
+        self._build_search_panel(central_layout)
+
+        root = self._create_main_content_root()
+        central_layout.addWidget(root, 1)
+
+        self._build_sidebar(root.layout())
+        self._build_page_stack(root.layout())
+
+        # Build Welcome page eagerly so its profile_changed signal is available.
+        welcome_idx = self._page_index_by_key["Welcome"]
+        welcome_page = self._ensure_page(welcome_idx)
+        welcome_page.profile_changed.connect(self._apply_profile_visibility)
+        self._apply_profile_visibility(load_profile())
+
+        self._history: list[int] = []
+        self._history_pos: int = -1
+        self._setup_search()
+        self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self._search_shortcut.activated.connect(self._focus_search)
+        self._palette_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._palette_shortcut.activated.connect(self._show_palette)
+        self._mission_worker = None
+        single_shot(self, 150, self._refresh_mission_bar)
+        self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
+        self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
+        self._switch_page(0)
+        single_shot(self, 0, self._refresh_nvidia_nav_visibility)
+
+    def _build_topbar(self, central_layout):
         topbar = QWidget()
         topbar.setObjectName("topbar")
         topbar.setFixedHeight(46)
@@ -131,13 +157,179 @@ class MainWindow(QMainWindow):
 
         self._search_box = QLineEdit()
         self._search_box.setObjectName("search-box")
-        self._search_box.setPlaceholderText("Find a setting")
-        self._search_box.setFixedWidth(280)
+        self._search_box.setPlaceholderText("Search settings, apps, or Windows name (Ctrl+K) — try hdr, clipboard, fancyzones")
+        self._search_box.setFixedWidth(320)
         self._search_box.setClearButtonEnabled(True)
         topbar_layout.addWidget(self._search_box)
 
         central_layout.addWidget(topbar)
 
+    def _build_mission_bar(self, central_layout):
+        bar = QWidget()
+        bar.setObjectName("mission-bar")
+        bar.setFixedHeight(30)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(14, 4, 14, 4)
+        layout.setSpacing(8)
+
+        kicker = QLabel("System")
+        kicker.setObjectName("mission-kicker")
+        layout.addWidget(kicker)
+
+        sep = QLabel("·")
+        sep.setObjectName("mission-sep")
+        layout.addWidget(sep)
+
+        self._mission_pills: list[QLabel] = []
+        for _ in range(4):
+            pill = QLabel("")
+            pill.setObjectName("mission-pill-dim")
+            pill.hide()
+            layout.addWidget(pill)
+            self._mission_pills.append(pill)
+
+        layout.addStretch()
+
+        # AI/repair hint — single muted label, no glow
+        self._mission_ai_hint = QLabel("")
+        self._mission_ai_hint.setObjectName("mission-kicker")
+        self._mission_ai_hint.hide()
+        layout.addWidget(self._mission_ai_hint)
+
+        central_layout.addWidget(bar)
+        self._mission_bar = bar
+
+    def _refresh_mission_bar(self):
+        if self._mission_worker is not None:
+            return
+        from .services.runtime import DataWorker
+
+        def _gather():
+            from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
+            from .services.process import command_stdout
+
+            try:
+                branch = branch_display_name(current_branch())
+            except Exception:
+                branch = "System Hub"
+            try:
+                staged = has_staged_update()
+            except Exception:
+                staged = False
+            try:
+                rollback = has_rollback_deployment()
+            except Exception:
+                rollback = False
+            try:
+                portal = command_stdout(["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"], timeout=2) or ""
+                portal = portal.strip()
+            except Exception:
+                portal = ""
+            return {"branch": branch, "staged": staged, "rollback": rollback, "portal": portal}
+
+        self._mission_worker = DataWorker("mission-bar", _gather)
+        self._mission_worker.result.connect(self._on_mission_bar_ready)
+        self._mission_worker.failed.connect(lambda _k, _m: None)
+        self._mission_worker.finished.connect(lambda: setattr(self, "_mission_worker", None))
+        self._mission_worker.start()
+
+    def _on_mission_bar_ready(self, _key: str, facts: object):
+        if not isinstance(facts, dict):
+            return
+        pills = []
+        branch = str(facts.get("branch") or "")
+        if branch:
+            pills.append(branch)
+        if facts.get("staged"):
+            pills.append("Update staged — reboot to apply")
+        elif facts.get("rollback"):
+            pills.append("Rollback available")
+        else:
+            pills.append("System current")
+        portal = str(facts.get("portal") or "")
+        if portal == "active":
+            pills.append("Portal active")
+        elif portal:
+            pills.append(f"Portal {portal}")
+
+        for i, pill in enumerate(self._mission_pills):
+            if i < len(pills):
+                pill.setText(pills[i])
+                pill.show()
+            else:
+                pill.hide()
+            restyle(pill)
+
+        # AI hint: surface repair plan summary if available (non-blocking, no glow)
+        try:
+            from kyth_shared.ai_assist import build_repair_plan
+
+            plan = build_repair_plan()
+            summary = str(plan.get("summary", ""))[:80]
+            if summary and "healthy" not in summary.lower():
+                self._mission_ai_hint.setText(summary)
+                self._mission_ai_hint.show()
+            else:
+                self._mission_ai_hint.hide()
+        except Exception:
+            self._mission_ai_hint.hide()
+
+    def _show_palette(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Command palette")
+        dlg.setModal(True)
+        dlg.resize(560, 380)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(10)
+
+        hint = QLabel("Type to filter — Enter to open, Esc to close")
+        hint.setObjectName("mission-kicker")
+        lay.addWidget(hint)
+
+        edit = QLineEdit(dlg)
+        edit.setPlaceholderText("Search settings, apps, or Windows name — try hdr, clipboard, fancyzones")
+        edit.setObjectName("search-box")
+        lay.addWidget(edit)
+
+        lst = QListWidget(dlg)
+        lay.addWidget(lst, 1)
+
+        def _refill(text: str):
+            lst.clear()
+            for key, _score in self._rank_search_results(text or " "):
+                desc = self._descriptor_by_key.get(key)
+                if not desc:
+                    continue
+                item = QListWidgetItem(f"{desc.title} — {desc.search_description}")
+                item.setData(Qt.ItemDataRole.UserRole, key)
+                lst.addItem(item)
+            if lst.count():
+                lst.setCurrentRow(0)
+
+        def _accept():
+            it = lst.currentItem()
+            key = it.data(Qt.ItemDataRole.UserRole) if it else None
+            if key:
+                dlg.accept()
+                self._navigate_to(key)
+            else:
+                txt = edit.text().strip()
+                matches = self._rank_search_results(txt)
+                if matches:
+                    dlg.accept()
+                    self._navigate_to(matches[0][0])
+
+        edit.textChanged.connect(_refill)
+        edit.returnPressed.connect(_accept)
+        lst.itemActivated.connect(lambda it: (dlg.accept(), self._navigate_to(it.data(Qt.ItemDataRole.UserRole))))
+        lst.itemClicked.connect(lambda it: (dlg.accept(), self._navigate_to(it.data(Qt.ItemDataRole.UserRole))))
+
+        _refill("")
+        edit.setFocus()
+        dlg.exec()
+
+    def _build_search_panel(self, central_layout):
         self._search_panel = QFrame()
         self._search_panel.setObjectName("search-results-panel")
         self._search_panel.hide()
@@ -159,22 +351,22 @@ class MainWindow(QMainWindow):
         self._search_panel_layout.addWidget(self._search_results_hint)
         central_layout.addWidget(self._search_panel)
 
+    def _create_main_content_root(self) -> QWidget:
         root = QWidget()
         root.setObjectName("content-area")
         root_layout = QHBoxLayout(root)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
-        central_layout.addWidget(root, 1)
+        return root
 
-        # ── Sidebar ──────────────────────────────────────────────────────────
+    def _build_sidebar(self, parent_layout):
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(244)
+        sidebar.setFixedWidth(240)
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
 
-        # Header / branding
         logo_area = QWidget()
         logo_area.setObjectName("sidebar-header")
         logo_layout = QVBoxLayout(logo_area)
@@ -192,17 +384,34 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(logo_area)
         sidebar_layout.addWidget(_divider())
 
-        # Nav groups: (section_label, [(icon_names, glyph, label, key, factory), ...])
-        # section_label=None omits the header row (used for Home).
-        page_specs: list[tuple[str, object]] = []
+        self._page_specs: list[tuple[str, object]] = []
+        self._nav_buttons = []
+        self._nav_button_by_key = {}
+        self._nav_section_labels = {}
+        self._page_crumbs = []
 
         nav_groups = get_nav_groups(self._navigate_to)
+        self._initialize_page_specs(nav_groups, sidebar_layout)
+
         self._page_descriptors = descriptors_from_nav_groups(nav_groups, self._SEARCH_ITEMS)
         self._descriptor_by_key = {descriptor.key: descriptor for descriptor in self._page_descriptors}
-        self._nav_buttons: list[NavButton] = []
-        self._nav_button_by_key: dict[str, NavButton] = {}
-        self._nav_section_labels: dict[str, QLabel] = {}
-        self._page_crumbs: list[tuple[str | None, str]] = []
+        self._page_index_by_key = {key: idx for idx, (key, _) in enumerate(self._page_specs)}
+
+        self._nvidia_nav_worker = None
+        nvidia_btn = self._nav_button_by_key.get("NVIDIA")
+        if nvidia_btn is not None:
+            nvidia_btn.setVisible(False)
+
+        sidebar_layout.addStretch()
+        sidebar_layout.addWidget(_divider())
+        ver_hint = QLabel("KythOS System Hub")
+        ver_hint.setObjectName("nav-section")
+        ver_hint.setContentsMargins(20, 10, 16, 12)
+        sidebar_layout.addWidget(ver_hint)
+
+        parent_layout.addWidget(sidebar)
+
+    def _initialize_page_specs(self, nav_groups, sidebar_layout):
         global_idx = 0
         for section_title, items in nav_groups:
             sidebar_layout.addSpacing(4)
@@ -211,7 +420,7 @@ class MainWindow(QMainWindow):
                 self._nav_section_labels[section_title] = section_lbl
                 sidebar_layout.addWidget(section_lbl)
             for icon_names, glyph, label, key, factory in items:
-                page_specs.append((key, factory))
+                self._page_specs.append((key, factory))
                 self._page_crumbs.append((section_title, label))
                 btn = NavButton(icon_names, glyph, label)
                 btn.clicked.connect(self._make_nav_handler(global_idx))
@@ -221,60 +430,26 @@ class MainWindow(QMainWindow):
                 global_idx += 1
             sidebar_layout.addSpacing(2)
 
-        self._page_index_by_key = {
-            key: idx for idx, (key, _) in enumerate(page_specs)
-        }
-
-        sidebar_layout.addStretch()
-
-        # Bottom version hint
-        sidebar_layout.addWidget(_divider())
-        ver_hint = QLabel("KythOS System Hub")
-        ver_hint.setObjectName("nav-section")
-        ver_hint.setContentsMargins(20, 10, 16, 12)
-        sidebar_layout.addWidget(ver_hint)
-
-        root_layout.addWidget(sidebar)
-
-        # ── Page stack ───────────────────────────────────────────────────────
+    def _build_page_stack(self, parent_layout):
         self._stack = QStackedWidget()
         self._stack.setObjectName("content-area")
-        self._page_factories = [factory for _, factory in page_specs]
-        self._pages: list[QWidget | None] = [None] * len(page_specs)
-        for _ in page_specs:
-            self._stack.addWidget(QWidget())  # cheap placeholder; replaced on first visit
-        root_layout.addWidget(self._stack)
-
-        # Build Welcome page eagerly so its profile_changed signal is available.
-        welcome_idx = self._page_index_by_key["Welcome"]
-        welcome_page = self._ensure_page(welcome_idx)
-        welcome_page.profile_changed.connect(self._apply_profile_visibility)
-        self._apply_profile_visibility(_load_profile())
-
-        self._history: list[int] = []
-        self._history_pos: int = -1
-        self._setup_search()
-        self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
-        self._search_shortcut.activated.connect(self._focus_search)
-        self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
-        self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
-        self._switch_page(0)
-
-    # ── Search ("Find a setting") ─────────────────────────────────────────────
+        self._page_factories = [factory for _, factory in self._page_specs]
+        self._pages = [None] * len(self._page_factories)
+        for _ in self._page_factories:
+            self._stack.addWidget(QWidget())
+        parent_layout.addWidget(self._stack)
 
     # Familiar phrasings mapped to page keys, including migration/search terms
     # people bring with them from another desktop.
     _SEARCH_ITEMS = SEARCH_ITEMS
-    _SEARCH_ALIASES = SEARCH_ALIASES
     _PROBLEM_ROUTES = PROBLEM_ROUTES
 
     def _setup_search(self):
         self._search_key_by_entry: dict[str, str] = {}
-        for key, aliases in self._SEARCH_ALIASES.items():
+        for key, (title, _description, terms) in self._SEARCH_ITEMS.items():
             if key not in self._page_index_by_key:
                 continue
-            title, _description, extra_terms = self._SEARCH_ITEMS.get(key, (key, "", []))
-            for alias in [title, key, *aliases, *extra_terms]:
+            for alias in [title, key, *terms]:
                 self._search_key_by_entry.setdefault(alias, key)
 
         entries = sorted(self._search_key_by_entry)
@@ -323,12 +498,10 @@ class MainWindow(QMainWindow):
             key = descriptor.key
             if key not in self._page_index_by_key:
                 continue
-            aliases = self._SEARCH_ALIASES.get(key, [])
             terms = [
                 descriptor.key,
                 descriptor.title,
                 descriptor.search_description,
-                *aliases,
                 *descriptor.search_terms,
             ]
             score = 0
@@ -406,9 +579,21 @@ class MainWindow(QMainWindow):
     # ── Navigation ────────────────────────────────────────────────────────────
 
     def _refresh_sidebar_channel(self):
-        branch = _current_branch()
+        branch = current_branch()
         text = {"latest": "Stable Channel", "testing": "Testing Channel"}.get(branch or "", "System Hub")
         self._sidebar_ver_lbl.setText(text)
+
+    def _refresh_nvidia_nav_visibility(self):
+        """The NVIDIA nav button starts hidden (see __init__) since
+        detecting a GPU means an lspci call. Run it on a background thread
+        and reveal the button afterward instead of blocking startup."""
+        if "NVIDIA" not in self._nav_button_by_key:
+            return
+        detect_nvidia_async(self, self._on_nvidia_nav_detected, attr="_nvidia_nav_worker")
+
+    def _on_nvidia_nav_detected(self, has_nvidia: bool):
+        if has_nvidia:
+            self._nav_button_by_key["NVIDIA"].setVisible(True)
 
     def _ensure_page(self, index: int) -> QWidget:
         if self._pages[index] is None:
@@ -465,13 +650,7 @@ class MainWindow(QMainWindow):
             self._crumb_lbl.setText(f"›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
 
     def closeEvent(self, event):
-        # Registry catches workers regardless of which attribute a page keeps
-        # them in; the findChildren scan keeps covering page-local QThreads
-        # that follow the `_worker` convention without subclassing Worker.
-        busy = any(t.BLOCKS_CLOSE for t in _running_threads()) or any(
-            (w := getattr(child, "_worker", None)) is not None and w.isRunning()
-            for child in self.findChildren(QWidget)
-        )
+        busy = has_blocking_tasks()
         if busy:
             QMessageBox.warning(
                 self,

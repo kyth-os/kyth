@@ -2,8 +2,7 @@
 # ── Fish shell default config ──────────────────────────────────────────────────
 # Fish has out-of-box syntax highlighting and autosuggestions — no plugins needed.
 # New users who choose fish (chsh -s /usr/bin/fish) get a polished experience.
-mkdir -p /etc/skel/.config/fish
-cat >/etc/skel/.config/fish/config.fish <<'FISHCONFIGEOF'
+write_config /etc/skel/.config/fish/config.fish <<'FISHCONFIGEOF'
 # KythOS fish config — edit freely, it's yours.
 
 # Starship cross-shell prompt

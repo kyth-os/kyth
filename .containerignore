@@ -1,8 +1,9 @@
 # Keep Podman/Buildah contexts aligned with Docker contexts.
 .git/
 .agents/
-.claude/
-.codex/
+**/.claude/
+**/.codex/
+.codex
 output/
 tmp/
 __pycache__/

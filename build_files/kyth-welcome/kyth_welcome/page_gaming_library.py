@@ -1,7 +1,7 @@
 from urllib.parse import urlencode
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _release_worker_when_finished
+from .services.runtime import release_worker_when_finished
 from .services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _detect_installed_games, _load_protondb_cache,
     _save_protondb_cache, find_compat_game, game_row_status_view, library_summary_text,
@@ -101,41 +101,29 @@ class _LibraryMixin:
         top = QHBoxLayout()
         top.setSpacing(8)
         name_lbl = QLabel(game_info.get("name", "Unknown game"))
-        name_lbl.setObjectName("card-summary")
-        name_lbl.setStyleSheet("font-size:13px; font-weight:700;")
+        name_lbl.setObjectName("card-subtitle")
         top.addWidget(name_lbl, 1)
-        launcher_lbl = QLabel(f"  {game_info.get('launcher', 'Unknown')}  ")
-        launcher_lbl.setStyleSheet("font-size:10px; font-weight:600; border-radius:3px; padding:1px 6px; background:#252526; color:#cccccc; border:1px solid #3c3c3c;")
+        launcher_lbl = QLabel(game_info.get("launcher", "Unknown"))
+        launcher_lbl.setObjectName("status-dim")
         top.addWidget(launcher_lbl)
-        badge = QLabel(f"  {status_text}  ")
-        badge_bg, badge_fg = {
-            "ok": ("#121e2d", "#4fc1ff"),
-            "warn": ("#241808", "#fbbf24"),
-            "err": ("#3a1010", "#f48771"),
-            "dim": ("#252526", "#858585"),
-        }.get(status, ("#252526", "#858585"))
-        badge.setStyleSheet(f"background:{badge_bg}; color:{badge_fg}; border:1px solid {badge_fg}; border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;")
+        badge = QLabel(status_text)
+        badge.setObjectName(
+            {"ok": "status-ok", "warn": "status-warn", "err": "status-err"}.get(status, "status-dim")
+        )
         top.addWidget(badge)
         if compat is not None and compat.status == "blocked" and compat.anticheat and compat.anticheat.lower() not in ("none", ""):
-            ac_badge = QLabel(f"  ⛔ {compat.anticheat}  ")
+            ac_badge = QLabel(f"⛔ {compat.anticheat}")
             ac_badge.setToolTip(
                 f"Blocked by {compat.anticheat} anti-cheat — not supported on Linux. "
-                "No workaround exists; this game requires other system."
+                "No workaround exists; this game requires Windows."
             )
-            ac_badge.setStyleSheet(
-                "background:#3a1010; color:#f48771; border:1px solid #f48771;"
-                " border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-            )
+            ac_badge.setObjectName("status-err")
             top.addWidget(ac_badge)
         tier = protondb_tier.lower().strip()
         if tier and game_info.get("launcher") == "Steam":
-            tier_bg, tier_fg = _PROTONDB_TIER_STYLE.get(tier, ("#252526", "#858585"))
-            pdb_badge = QLabel(f"  PDB: {tier.capitalize()}  ")
+            pdb_badge = QLabel(f"PDB: {tier.capitalize()}")
             pdb_badge.setToolTip(f"ProtonDB community rating: {tier.capitalize()}")
-            pdb_badge.setStyleSheet(
-                f"background:{tier_bg}; color:{tier_fg}; border:1px solid {tier_fg};"
-                " border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-            )
+            pdb_badge.setObjectName(_PROTONDB_TIER_STYLE.get(tier, "status-dim"))
             top.addWidget(pdb_badge)
         layout.addLayout(top)
 
@@ -203,7 +191,7 @@ class _LibraryMixin:
         if uncached and (self._protondb_worker is None or not self._protondb_worker.isRunning()):
             self._protondb_worker = _ProtonDbBatchWorker(uncached, cache)
             self._protondb_worker.finished_all.connect(self._on_protondb_done)
-            _release_worker_when_finished(self, "_protondb_worker", self._protondb_worker)
+            release_worker_when_finished(self, "_protondb_worker", self._protondb_worker)
             self._protondb_worker.start()
 
     def _on_protondb_done(self, full_cache: dict):

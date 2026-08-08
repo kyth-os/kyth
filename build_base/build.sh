@@ -150,94 +150,25 @@ rm -rf /usr/share/plymouth/themes/bgrt
 
 dnf5 remove -y librsvg2-tools || true
 
-# CachyOS rebuilds its initramfs in this base layer, before the main image layer
-# installs the reusable KythOS Plymouth guard. Provide the same dracut module
-# locally so dracut can resolve kyth-plymouth here too.
-rm -rf /usr/lib/dracut/modules.d/46kyth-plymouth
-KYTH_PLYMOUTH_DRACUT_DIR=/usr/lib/dracut/modules.d/99kyth-plymouth
-mkdir -p "${KYTH_PLYMOUTH_DRACUT_DIR}"
-cat >"${KYTH_PLYMOUTH_DRACUT_DIR}/module-setup.sh" <<'KYTHPLYMOUTHEOF'
-#!/usr/bin/bash
+# One canonical script owns host defaults, dracut policy, and the late module
+# for both kernel flavors and every later repair path.
+/run/plymouth/kyth-plymouth-configure
 
-check() {
-    return 0
-}
-
-depends() {
-    echo plymouth
-    return 0
-}
-
-install() {
-    mkdir -p \
-        "${initdir}/etc/plymouth" \
-        "${initdir}/usr/share/plymouth" \
-        "${initdir}/usr/share/pixmaps" \
-        "${initdir}/usr/share/plymouth/themes"
-    cat > "${initdir}/etc/plymouth/plymouthd.conf" <<'PLYMOUTHCONF'
-[Daemon]
-Theme=kyth
-ShowDelay=0
-DeviceTimeout=8
-UseFirmwareBackground=false
-PLYMOUTHCONF
-    cat > "${initdir}/usr/share/plymouth/plymouthd.defaults" <<'PLYMOUTHDEFAULTS'
-[Daemon]
-Theme=kyth
-ShowDelay=0
-DeviceTimeout=8
-UseFirmwareBackground=false
-PLYMOUTHDEFAULTS
-    rm -rf \
-        "${initdir}/usr/share/plymouth/themes/default.plymouth" \
-        "${initdir}/usr/share/plymouth/themes/bgrt-fedora" \
-        "${initdir}/usr/share/plymouth/themes/bgrt" \
-        "${initdir}/usr/share/plymouth/themes/spinner"
-    ln -sfn kyth/kyth.plymouth \
-        "${initdir}/usr/share/plymouth/themes/default.plymouth"
-    inst_libdir_file "plymouth/script.so"
-    inst_multiple \
-        /usr/share/plymouth/themes/kyth/kyth.plymouth \
-        /usr/share/plymouth/themes/kyth/kyth.script \
-        /usr/share/plymouth/themes/kyth/kyth-logo.png
-    inst_multiple -o \
-        /etc/os-release \
-        /usr/lib/os-release \
-        /usr/share/kyth/branding/transparent-watermark.svg \
-        /usr/share/kyth/branding/transparent-watermark.png
-    rm -f "${initdir}/usr/share/pixmaps/system-logo-white.png"
-    inst_simple \
-        /usr/share/kyth/branding/transparent-watermark.png \
-        /usr/share/pixmaps/system-logo-white.png
-    rm -rf \
-        "${initdir}/usr/share/plymouth/themes/bgrt-fedora" \
-        "${initdir}/usr/share/plymouth/themes/bgrt" \
-        "${initdir}/usr/share/plymouth/themes/spinner"
-}
-KYTHPLYMOUTHEOF
-chmod 0755 "${KYTH_PLYMOUTH_DRACUT_DIR}/module-setup.sh"
-unset KYTH_PLYMOUTH_DRACUT_DIR
-
-# Write dracut config — applies on next initramfs regeneration (bootc deploy,
-# or dracut run in the cachy path below).
-mkdir -p /etc/dracut.conf.d
-cat >/etc/dracut.conf.d/99-kyth.conf <<'DRACUTEOF'
-add_dracutmodules+=" ostree drm plymouth kyth-plymouth "
-force_add_dracutmodules+=" kyth-plymouth "
-add_drivers+=" virtio_blk virtio_scsi virtio_pci nvme ahci virtio_gpu qxl bochs overlay "
+# Boot-leanness: drop initramfs modules for network/SAN root scenarios that a
+# gaming/desktop workstation never boots from. Root is local (btrfs on
+# SATA/NVMe/virtio), so none of these are on any boot path — omitting them
+# shrinks the initramfs and shaves a little udev settle time at boot. This is
+# purely about the *early-boot* dracut modules: post-boot NFS/SMB/iSCSI mounts
+# use their normal kernel modules + userspace and are unaffected.
+#
+# Kept in a dedicated file (not 99-kyth.conf) because the Plymouth setup,
+# branding-guard, and runtime repair paths rewrite 99-kyth.conf; a separate
+# file survives every one of those regenerations. Both the CachyOS build-time
+# initramfs rebuild and the Fedora bootc first-deploy regeneration read all of
+# /etc/dracut.conf.d, so the omission applies to both kernel flavors.
+cat >/etc/dracut.conf.d/90-kyth-lean.conf <<'DRACUTEOF'
+omit_dracutmodules+=" nfs cifs iscsi fcoe fcoe-uefi nbd multipath "
 DRACUTEOF
-
-# Write Plymouth defaults unconditionally so both Fedora and CachyOS images ship
-# a host config that agrees with the late kyth-plymouth dracut module.
-mkdir -p /etc/plymouth /usr/share/plymouth
-cat >/etc/plymouth/plymouthd.conf <<'PLYMOUTHCONF'
-[Daemon]
-Theme=kyth
-ShowDelay=0
-DeviceTimeout=8
-UseFirmwareBackground=false
-PLYMOUTHCONF
-install -m 0644 /etc/plymouth/plymouthd.conf /usr/share/plymouth/plymouthd.defaults
 
 # For the CachyOS kernel we must rebuild the initramfs at image-build time
 # because the kernel itself was just replaced.  For the stock Fedora kernel
@@ -255,15 +186,56 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 		"${_kyth_plymouth_include_root}/usr/share/plymouth/plymouthd.defaults"
 	install -m 0644 /usr/share/kyth/branding/transparent-watermark.png \
 		"${_kyth_plymouth_include_root}/usr/share/pixmaps/system-logo-white.png"
-	TMPDIR=/var/tmp dracut \
-		--no-hostonly \
-		--compress "zstd -1" \
-		--kver "${KVER}" \
-		--force \
-		--add kyth-plymouth \
-		--include "${_kyth_plymouth_include_root}" / \
-		"/usr/lib/modules/${KVER}/initramfs" \
-		2> >(grep -Ev 'xattr|fail to copy' >&2)
+	_kyth_initramfs="/usr/lib/modules/${KVER}/initramfs"
+	# kinoite-main ships /root as a symlink to var/roothome, but
+	# /var/roothome doesn't exist in the container image. dracut's core
+	# skeleton setup unconditionally calls `inst_symlink /root` for every
+	# build (see /usr/bin/dracut's `for d in dev proc sys sysroot root run`
+	# loop), which fails with "dracut-install: ERROR: installing '/root'"
+	# against the dangling symlink. Creating the target first makes that
+	# install succeed. --nohardlink additionally skips dracut's post-build
+	# hardlink dedup pass, whose util-linux AF_ALG file-comparison path is a
+	# known SIGSEGV risk on some containerized builders
+	# (util-linux/util-linux#4334) — unrelated to the /root issue above,
+	# kept as a separate precaution.
+	install -d -m 0700 /var/roothome
+	_kyth_dracut_stderr="$(mktemp)"
+	_kyth_dracut_status=1
+	for _kyth_dracut_attempt in 1 2; do
+		rm -f "${_kyth_initramfs}"
+		if TMPDIR=/var/tmp dracut \
+			--no-hostonly \
+			--compress "zstd -1" \
+			--kver "${KVER}" \
+			--force \
+			--nohardlink \
+			--add kyth-plymouth \
+			--include "${_kyth_plymouth_include_root}" / \
+			"${_kyth_initramfs}" \
+			2>"${_kyth_dracut_stderr}"; then
+			grep -Ev 'xattr|fail to copy' "${_kyth_dracut_stderr}" >&2
+			if lsinitrd "${_kyth_initramfs}" >/dev/null; then
+				_kyth_dracut_status=0
+				break
+			fi
+			_kyth_dracut_status=1
+			echo "WARNING: dracut produced an unreadable initramfs (attempt ${_kyth_dracut_attempt}/2)" >&2
+		else
+			_kyth_dracut_status=$?
+			grep -Ev 'xattr|fail to copy' "${_kyth_dracut_stderr}" >&2
+			echo "WARNING: dracut failed with status ${_kyth_dracut_status} (attempt ${_kyth_dracut_attempt}/2)" >&2
+		fi
+		if ((_kyth_dracut_attempt < 2)); then
+			echo "Retrying initramfs generation from a clean output..." >&2
+		fi
+	done
+	rm -f "${_kyth_dracut_stderr}"
+	unset _kyth_dracut_stderr
+	if ((_kyth_dracut_status != 0)); then
+		rm -f "${_kyth_initramfs}"
+		exit "${_kyth_dracut_status}"
+	fi
+	unset _kyth_dracut_attempt _kyth_dracut_status _kyth_initramfs
 	rm -rf "${_kyth_plymouth_include_root}"
 	if command -v lsinitrd >/dev/null 2>&1; then
 		_initrd_listing="$(mktemp)"

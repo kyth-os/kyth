@@ -22,8 +22,8 @@ class SoftwareServiceTests(unittest.TestCase):
         stdout = "com.valvesoftware.Steam\nnet.lutris.Lutris\n"
         cmd_result = MagicMock(returncode=0, stdout=stdout)
         with (
-            patch("kyth_welcome.services.flatpak._probe_cached", side_effect=lambda _key, _ttl, fetch: fetch()),
-            patch("kyth_welcome.services.flatpak._run_command", return_value=cmd_result),
+            patch("kyth_welcome.services.flatpak.probe_cached", side_effect=lambda _key, _ttl, fetch: fetch()),
+            patch("kyth_welcome.services.flatpak.run_command", return_value=cmd_result),
         ):
             ids = flatpak.installed_app_ids()
 
@@ -68,7 +68,7 @@ class SoftwareServiceTests(unittest.TestCase):
 
     def test_first_run_app_setup_state_ready_when_no_missing(self):
         with (
-            patch("kyth_welcome.services.first_run._is_live_session", return_value=False),
+            patch("kyth_welcome.services.first_run.is_live_session", return_value=False),
             patch("kyth_welcome.services.first_run.is_installed", return_value=True),
         ):
             state, _msg, missing = first_run.app_setup_state()
@@ -81,11 +81,11 @@ class SoftwareServiceTests(unittest.TestCase):
             status_path = Path(tmp) / "first-run-apps.status"
             status_path.write_text("state='unterminated\n", encoding="utf-8")
             with (
-                patch("kyth_welcome.services.first_run._is_live_session", return_value=False),
+                patch("kyth_welcome.services.first_run.is_live_session", return_value=False),
                 patch("kyth_welcome.services.first_run.is_installed", return_value=False),
                 patch("kyth_welcome.services.first_run.os.path.expanduser", return_value=str(status_path)),
                 patch(
-                    "kyth_welcome.services.first_run._run_command",
+                    "kyth_welcome.services.first_run.run_command",
                     return_value=MagicMock(stdout="inactive"),
                 ),
             ):

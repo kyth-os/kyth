@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-swappiness — 10 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-swappiness "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.swappiness import load_swappiness, swappiness_status; c=load_swappiness(); print(f\"profile={c['profile']} active={swappiness_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.swappiness import load_swappiness,save_swappiness,generate_swappiness; c=load_swappiness(); c['profile']='gaming'; save_swappiness(c); generate_swappiness(c)"; sysctl --system >/dev/null 2>&1 || true; echo "swappiness gaming 10" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.swappiness import load_swappiness,save_swappiness,generate_swappiness; c=load_swappiness(); c['profile']='balanced'; save_swappiness(c); generate_swappiness(c)"; echo "swappiness balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.swappiness import load_swappiness,generate_swappiness; generate_swappiness(load_swappiness())" ;;
+    *) echo "Usage: kyth-swappiness [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

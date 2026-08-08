@@ -4,15 +4,17 @@ import json
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from . import config
-from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, _IS_LIVE_SESSION
+from .config import LOG_FILE, PORT, SESSION_TOKEN, SOURCE_IMAGE, TRANSACTION_FILE, _IS_LIVE_SESSION
 from .context import InstallerContext
 from .disk import list_disks, list_partitions, list_free_space
 from .partition_ops import FILESYSTEM_OPTIONS, get_journal
 from .post_routes import PostRouteService
-from .system import list_timezones
+from .imagesrc import source_status
+from .recovery import read_transaction_state
+from .system import list_keymaps, list_locales, list_timezones
 
 _WEBUI_DIR = Path(__file__).parent / "webui"
 
@@ -33,12 +35,17 @@ ROUTES = {
     "free_space": RouteSpec("GET", "/api/free-space"),
     "stream": RouteSpec("GET", "/api/stream"),
     "log": RouteSpec("GET", "/api/log"),
+    "report": RouteSpec("GET", "/api/report"),
     "timezones": RouteSpec("GET", "/api/timezones"),
+    "locales": RouteSpec("GET", "/api/locales"),
+    "keymaps": RouteSpec("GET", "/api/keymaps"),
     "start": RouteSpec("POST", "/api/start", requires_same_origin=True),
+    "cancel": RouteSpec("POST", "/api/cancel", requires_same_origin=True),
     "reboot": RouteSpec("POST", "/api/reboot", requires_same_origin=True),
     # Manual partition management
     "partition_pending": RouteSpec("GET", "/api/disk/pending"),
     "filesystems": RouteSpec("GET", "/api/disk/filesystems"),
+    "remove_pending": RouteSpec("POST", "/api/disk/pending/remove", requires_same_origin=True),
     "new_table": RouteSpec("POST", "/api/disk/new-table", requires_same_origin=True),
     "create_partition": RouteSpec("POST", "/api/disk/create", requires_same_origin=True),
     "delete_partition": RouteSpec("POST", "/api/disk/delete", requires_same_origin=True),
@@ -47,6 +54,16 @@ ROUTES = {
     "set_mountpoint": RouteSpec("POST", "/api/disk/set-mountpoint", requires_same_origin=True),
     "commit_partitions": RouteSpec("POST", "/api/disk/commit", requires_same_origin=True),
     "rollback_partitions": RouteSpec("POST", "/api/disk/rollback", requires_same_origin=True),
+}
+
+
+# path -> (webui filename, content-type, whether to inject the session token)
+_STATIC_TEXT_ASSETS: dict[str, tuple[str, str, bool]] = {
+    "/style.css": ("style.css", "text/css; charset=utf-8", False),
+    "/app.js": ("app.js", "application/javascript; charset=utf-8", False),
+    "/api.js": ("api.js", "application/javascript; charset=utf-8", True),
+    "/install-ui.js": ("install-ui.js", "application/javascript; charset=utf-8", False),
+    "/state.js": ("state.js", "application/javascript; charset=utf-8", False),
 }
 
 
@@ -119,70 +136,70 @@ class Handler(BaseHTTPRequestHandler):
         if (route is None or route.requires_same_origin) and not self._require_same_origin_context():
             return
 
-        query = urlparse(self.path).query
-        from urllib.parse import parse_qs
-        qs = parse_qs(query)
-
-        cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
-
-        is_authenticated = False
-
-        if cookies.get("bootstrap_auth") == SESSION_TOKEN:
-            is_authenticated = True
-        elif qs.get("bootstrap_token") and config._bootstrap_token is not None:
-            with config._bootstrap_lock:
-                if config._bootstrap_token is not None and qs.get("bootstrap_token") == [config._bootstrap_token]:
-                    is_authenticated = True
-                    config._bootstrap_token = None
+        qs = parse_qs(urlparse(self.path).query)
 
         if path == "/":
-            if not is_authenticated:
-                self.send_error(403, "Forbidden")
-                return
-
-            injected_html = _read_webui("index.html")
-            body = injected_html.encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.send_header("Set-Cookie", f"bootstrap_auth={SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Strict")
-            self.end_headers()
-            self.wfile.write(body)
+            self._serve_index(qs)
             return
 
-        if path == "/style.css":
-            if not self._require_auth():
-                return
-            body = _read_webui("style.css").encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/css; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+        if path in _STATIC_TEXT_ASSETS:
+            self._serve_static_asset(path)
             return
 
-        if path in ("/app.js", "/state.js"):
-            if not self._require_auth():
-                return
-            asset_name = path.removeprefix("/")
-            body = _read_webui(asset_name).replace("SESSION_TOKEN_PLACEHOLDER", SESSION_TOKEN).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/javascript; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-
-        # Authenticate all other API endpoints
         if not self._require_auth():
             return
 
+        self._dispatch_api_get(route, qs)
+
+    def _bootstrap_authenticated(self, qs: dict[str, list[str]]) -> bool:
+        cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
+        if cookies.get("bootstrap_auth") == SESSION_TOKEN:
+            return True
+        if qs.get("bootstrap_token") and config._bootstrap_token is not None:
+            with config._bootstrap_lock:
+                if config._bootstrap_token is not None and qs.get("bootstrap_token") == [config._bootstrap_token]:
+                    config._bootstrap_token = None
+                    return True
+        return False
+
+    def _serve_index(self, qs: dict[str, list[str]]) -> None:
+        if not self._bootstrap_authenticated(qs):
+            self.send_error(403, "Forbidden")
+            return
+        body = _read_webui("index.html").encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", len(body))
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+        self.send_header("Set-Cookie", f"bootstrap_auth={SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Strict")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_static_asset(self, path: str) -> None:
+        if not self._require_auth():
+            return
+        filename, content_type, inject_token = _STATIC_TEXT_ASSETS[path]
+        text = _read_webui(filename)
+        if inject_token:
+            text = text.replace("SESSION_TOKEN_PLACEHOLDER", SESSION_TOKEN)
+        self._send_text(text, content_type)
+
+    def _dispatch_api_get(self, route: RouteSpec | None, qs: dict[str, list[str]]) -> None:
         if route == ROUTES["config"]:
-            self._json({"source_image": SOURCE_IMAGE, "is_live": _IS_LIVE_SESSION})
+            self._json({
+                "source_image": SOURCE_IMAGE,
+                "is_live": _IS_LIVE_SESSION,
+                "source": source_status(),
+            })
         elif route == ROUTES["disks"]:
             self._json(list_disks())
         elif route == ROUTES["timezones"]:
             self._json(list_timezones())
+        elif route == ROUTES["locales"]:
+            self._json(list_locales())
+        elif route == ROUTES["keymaps"]:
+            self._json(list_keymaps())
         elif route == ROUTES["partitions"]:
             disk = (qs.get("disk") or [""])[0]
             self._json(list_partitions(disk) if disk else [])
@@ -197,18 +214,42 @@ class Handler(BaseHTTPRequestHandler):
         elif route == ROUTES["stream"]:
             self._sse()
         elif route == ROUTES["log"]:
-            try:
-                text = LOG_FILE.read_text(errors="replace")
-            except Exception as exc:
-                text = f"Could not read installer log: {exc}\n"
-            body = text.encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+            self._serve_log()
+        elif route == ROUTES["report"]:
+            self._json(read_transaction_state(TRANSACTION_FILE))
         else:
             self.send_error(404)
+
+    def _serve_log(self) -> None:
+        # Stream log to avoid OOM on large logs (>100 MiB)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        try:
+            with LOG_FILE.open("r", errors="replace") as f:
+                while True:
+                    chunk = f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    try:
+                        self.wfile.write(chunk.encode())
+                    except Exception:
+                        break
+        except Exception as exc:
+            try:
+                self.wfile.write(f"Could not read installer log: {exc}\n".encode())
+            except Exception:
+                pass
+
+    def _send_text(self, text: str, content_type: str) -> None:
+        body = text.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", len(body))
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         path = urlparse(self.path).path
@@ -234,6 +275,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(body))
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
         self.end_headers()
         self.wfile.write(body)
 
@@ -243,7 +286,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
-        sent = 0
+        try:
+            sent = int(self.headers.get("Last-Event-ID", "-1")) + 1
+        except ValueError:
+            sent = 0
+        sent = max(0, sent)
         while True:
             with self.context.events.condition:
                 while sent >= len(self.context.events.events):
@@ -257,7 +304,9 @@ class Handler(BaseHTTPRequestHandler):
                 batch = self.context.events.events[sent:]
             for event in batch:
                 try:
-                    self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
+                    self.wfile.write(
+                        f"id: {sent}\ndata: {json.dumps(event)}\n\n".encode()
+                    )
                     self.wfile.flush()
                 except Exception:
                     return

@@ -1,69 +1,98 @@
-#!/usr/bin/env bash
-# Read-only suspend/resume confidence check.
+#!/usr/bin/env python3
+"""Read-only suspend/resume confidence check."""
+from __future__ import annotations
 
-set -uo pipefail
+from pathlib import Path
 
-# shellcheck source=kyth-diagnostics-common.sh disable=SC1091
-source /usr/libexec/kyth-diagnostics-common.sh
+from kyth_shared.diagnostics import DiagnosticReporter  # noqa: E402
+from kyth_shared.commands import DEFAULT_RUNNER  # noqa: E402
+from kyth_shared.runtime_diagnostics import (  # noqa: E402
+    check_gpu_detected,
+    check_loginctl,
+    check_services as check_systemd_services,
+    check_vulkan,
+)
 
-print_header "Resume Check"
 
-if have loginctl && loginctl show-session "${XDG_SESSION_ID:-self}" >/dev/null 2>&1; then
-    pass "Login session" "logind can see this session"
-else
-    warn "Login session" "session not visible through loginctl"
-fi
+def check_network(reporter: DiagnosticReporter) -> None:
+    if reporter.have("nmcli"):
+        state = DEFAULT_RUNNER.stdout(["nmcli", "-t", "-f", "STATE", "general"])
+        if state.startswith("connected"):
+            reporter.pass_check("Network", state)
+        else:
+            reporter.warn_check("Network", state or "unknown")
+    else:
+        reporter.warn_check("Network", "nmcli unavailable")
 
-if have nmcli; then
-    state="$(nmcli -t -f STATE general 2>/dev/null || true)"
-    [[ "$state" == connected* ]] && pass "Network" "$state" || warn "Network" "${state:-unknown}"
-else
-    warn "Network" "nmcli unavailable"
-fi
 
-if have systemctl; then
-    systemctl --user is-active --quiet pipewire.service 2>/dev/null \
-        && pass "PipeWire" "active" || warn "PipeWire" "not active"
-    systemctl --user is-active --quiet wireplumber.service 2>/dev/null \
-        && pass "WirePlumber" "active" || warn "WirePlumber" "not active"
-    systemctl is-active --quiet bluetooth.service 2>/dev/null \
-        && pass "Bluetooth service" "active" || warn "Bluetooth service" "not active"
-fi
+def check_services(reporter: DiagnosticReporter) -> None:
+    check_systemd_services(
+        reporter,
+        (
+            ("pipewire.service", True),
+            ("wireplumber.service", True),
+            ("bluetooth.service", False),
+        ),
+    )
 
-if compgen -G "/sys/class/bluetooth/hci*" >/dev/null; then
-    pass "Bluetooth adapter" "controller present"
-else
-    warn "Bluetooth adapter" "no hci controller visible"
-fi
 
-if have lspci && lspci -nn 2>/dev/null | grep -Eiq 'vga|3d|display'; then
-    gpu="$(lspci -nn 2>/dev/null | grep -Ei 'vga|3d|display' | sed -n '1p')"
-    pass "GPU detected" "$gpu"
-else
-    warn "GPU detected" "no GPU found via lspci"
-fi
+def check_bluetooth_adapter(reporter: DiagnosticReporter) -> None:
+    bt_dir = Path("/sys/class/bluetooth")
+    if bt_dir.is_dir() and list(bt_dir.glob("hci*")):
+        reporter.pass_check("Bluetooth adapter", "controller present")
+    else:
+        reporter.warn_check("Bluetooth adapter", "no hci controller visible")
 
-if have vulkaninfo; then
-    timeout 10 vulkaninfo --summary >/dev/null 2>&1 \
-        && pass "Vulkan" "responding" || warn "Vulkan" "failed after resume"
-else
-    warn "Vulkan" "vulkaninfo unavailable"
-fi
 
-if have kscreen-doctor; then
-    connected="$(kscreen-doctor -o 2>/dev/null | grep -c ' connected' || true)"
-    [[ "${connected:-0}" -gt 0 ]] && pass "Displays" "${connected} connected output(s)" || warn "Displays" "no connected output reported"
-else
-    warn "Displays" "kscreen-doctor unavailable"
-fi
+def check_displays(reporter: DiagnosticReporter) -> None:
+    if reporter.have("kscreen-doctor"):
+        output = DEFAULT_RUNNER.stdout(["kscreen-doctor", "-o"])
+        # Count lines containing ' connected'
+        connected_count = sum(1 for line in output.splitlines() if " connected" in line)
+        if connected_count > 0:
+            reporter.pass_check("Displays", f"{connected_count} connected output(s)")
+        else:
+            reporter.warn_check("Displays", "no connected output reported")
+    else:
+        reporter.warn_check("Displays", "kscreen-doctor unavailable")
 
-if journalctl -b --since '-10 minutes' -p err --no-pager >/tmp/kyth-resume-journal.$$ 2>/dev/null; then
-    errs="$(grep -Ec 'amdgpu|nvidia|i915|xe|bluetooth|NetworkManager|pipewire|wireplumber|kwin' /tmp/kyth-resume-journal.$$ || true)"
-    [[ "${errs:-0}" -eq 0 ]] && pass "Recent critical logs" "no matching errors in last 10 minutes" \
-        || warn "Recent critical logs" "${errs} matching error(s) in last 10 minutes"
-else
-    warn "Recent critical logs" "journalctl unavailable"
-fi
-rm -f /tmp/kyth-resume-journal.$$
 
-print_result "resume readiness"
+def check_journal_errors(reporter: DiagnosticReporter) -> None:
+    if reporter.have("journalctl"):
+        res = DEFAULT_RUNNER.text(
+            ["journalctl", "-b", "--since", "-10 minutes", "-p", "err", "--no-pager"],
+        )
+        if res is not None and res.returncode == 0:
+            keywords = ("amdgpu", "nvidia", "i915", "xe", "bluetooth", "networkmanager", "pipewire", "wireplumber", "kwin")
+            err_lines = [
+                line for line in res.stdout.splitlines()
+                if any(kw in line.lower() for kw in keywords)
+            ]
+            if not err_lines:
+                reporter.pass_check("Recent critical logs", "no matching errors in last 10 minutes")
+            else:
+                reporter.warn_check("Recent critical logs", f"{len(err_lines)} matching error(s) in last 10 minutes")
+        else:
+            reporter.warn_check("Recent critical logs", "journalctl query failed")
+    else:
+        reporter.warn_check("Recent critical logs", "journalctl unavailable")
+
+
+def main() -> None:
+    reporter = DiagnosticReporter("Resume Check")
+    reporter.print_header()
+
+    check_loginctl(reporter)
+    check_network(reporter)
+    check_services(reporter)
+    check_bluetooth_adapter(reporter)
+    check_gpu_detected(reporter)
+    check_vulkan(reporter, warning="failed after resume")
+    check_displays(reporter)
+    check_journal_errors(reporter)
+
+    reporter.print_result("resume readiness")
+
+
+if __name__ == "__main__":
+    main()

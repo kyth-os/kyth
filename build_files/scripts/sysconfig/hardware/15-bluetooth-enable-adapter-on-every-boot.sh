@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── Bluetooth — enable adapter on every boot ────────────────────────────────
 # BlueZ ships with AutoEnable commented out (value is 'false' in modern versions).
 # Replace any commented AutoEnable line with the enabled form; append to [Policy]
@@ -14,15 +16,14 @@ sed -i -E 's/^[#[:space:]]*AutoEnable=.*/AutoEnable=true/' /etc/bluetooth/main.c
 grep -q '^AutoEnable=' /etc/bluetooth/main.conf ||
 	printf '\n[Policy]\nAutoEnable=true\n' >>/etc/bluetooth/main.conf
 
-mkdir -p /etc/udev/rules.d
-cat >/etc/udev/rules.d/69-kyth-bluetooth.rules <<'BTUDEVEOF'
+write_config /etc/udev/rules.d/69-kyth-bluetooth.rules <<'BTUDEVEOF'
 ACTION=="add", SUBSYSTEM=="rfkill", ATTR{type}=="bluetooth", RUN+="/usr/sbin/rfkill unblock %s{index}"
 BTUDEVEOF
 
 install -d -m 0755 /usr/libexec
 install -m 0755 /ctx/sysconfig/kyth-enable-bluetooth /usr/libexec/kyth-enable-bluetooth
 
-cat >/usr/lib/systemd/system/kyth-bluetooth-enable.service <<'BTENABLEUNITEOF'
+write_config /usr/lib/systemd/system/kyth-bluetooth-enable.service <<'BTENABLEUNITEOF'
 [Unit]
 Description=Enable Bluetooth adapters at boot
 Documentation=https://github.com/mrtrick37/kyth
@@ -40,5 +41,4 @@ BTENABLEUNITEOF
 
 systemctl enable bluetooth.service 2>/dev/null || true
 systemctl enable kyth-bluetooth-enable.service 2>/dev/null || true
-systemctl enable cups-browsed.service 2>/dev/null || true
 systemctl enable avahi-daemon.service 2>/dev/null || true

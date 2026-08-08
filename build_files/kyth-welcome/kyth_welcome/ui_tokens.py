@@ -1,11 +1,18 @@
-SPACING_TINY = 4
+SPACING_XS = 4
+SPACING_TINY = SPACING_XS  # alias for compat — was duplicate 4
 SPACING_SMALL = 8
 SPACING_MEDIUM = 12
 SPACING_LARGE = 16
 SPACING_XLARGE = 24
+SPACING_2XL = 32
 
-RADIUS_CARD = 8
-ACCENT_BLUE = "#4f8cff"
+RADIUS_SM = 6
+RADIUS_CARD = 12
+RADIUS_PILL = 999
+RADIUS_BUTTON = 8
+RADIUS_HERO = 16
+# Single accent — canonical is KYTH_BLUE (#5b8cff); ACCENT_BLUE is legacy alias
+ACCENT_BLUE = "#5b8cff"
 # Canonical status trio (Phase 3): previously theme_hub_overlay.py carried its
 # own separate ok/warn/err values that didn't match these, and even
 # disagreed with itself between card-accent-err (#e05f67) and status-err
@@ -21,24 +28,41 @@ def accent_line_style(color: str = ACCENT_BLUE) -> str:
     return f"background: {color}; border: none;"
 
 
-# ── Kyth Theme tokens (wizard shell) ───────────────────────────────────────────
-# Grounded in the palette already shipping in theme_hub_overlay.py / theme_genz.py
-# and the brand SVGs (build_files/branding/*.svg) — refined into one named set
-# for the first-boot wizard rather than the ad hoc hex literals it used to carry.
-# STATUS_OK/WARN/ERROR above are intentionally left alone: they're load-bearing
-# for existing Hub pages and are a separate, later migration (see plan Phase 3).
-KYTH_GROUND = "#0a0c13"
-KYTH_SURFACE = "#12141f"
-KYTH_SURFACE_RAISED = "#181b29"
-KYTH_HAIRLINE = "#262b3d"
+# ── Spacing / motion tokens (Phase 1 polish) ─────────────────────────────────
+MOTION_FAST = 120  # ms
+MOTION_NORMAL = 200
+
+# ── Typography (Windows Settings match: 12/13/15/22, not Inter-everywhere) ──
+FONT_SIZE_CAPTION = 11
+FONT_SIZE_COPY = 12
+FONT_SIZE_SUBTITLE = 13
+FONT_SIZE_TITLE = 15
+FONT_SIZE_HERO = 22
+
+# ── Kyth Theme tokens (control center shell) ─────────────────────────────────
+# SteamOS + Windows Settings inspired: layered depth, not flat black.
+# Ground is the window canvas; surface is card/topbar; raised is hover/input.
+# Hairline is now a touch lighter for visible panel separation — the old
+# #262b3d on #12141f was nearly invisible, collapsing the "black and blah"
+# look. Added overlay + highlight tokens for Steam-style hover elevation
+# without resorting to glassmorphism or purple gradients.
+KYTH_GROUND = "#0c0f14"
+KYTH_SURFACE = "#151a24"
+KYTH_SURFACE_RAISED = "#1d2436"
+KYTH_SURFACE_OVERLAY = "#26304a"
+KYTH_HAIRLINE = "#2a344c"
+KYTH_HAIRLINE_LIGHT = "#36435f"
+KYTH_HIGHLIGHT = "rgba(255,255,255,0.06)"
 KYTH_BLUE = "#5b8cff"
-KYTH_BLUE_DIM = "#3a5bb0"
+KYTH_BLUE_DIM = "#3d5eb8"
 KYTH_BLUE_LIGHT = "#8fb8ff"
+KYTH_BLUE_GLOW = "rgba(91, 140, 255, 0.18)"
 KYTH_VIOLET = "#bb9af7"
-KYTH_TEXT = "#f2f4fb"
-KYTH_TEXT_MUTED = "#93a1bd"
-KYTH_TEXT_FAINT = "#5b6580"
+KYTH_TEXT = "#eef2fb"
+KYTH_TEXT_MUTED = "#8ea0c0"
+KYTH_TEXT_FAINT = "#5b6986"
 KYTH_DANGER = "#c42b1c"
 KYTH_DANGER_LIGHT = "#d13438"
-KYTH_RADIUS = 10
-KYTH_RADIUS_SM = 6
+KYTH_RADIUS = 12
+KYTH_RADIUS_SM = 8
+KYTH_RADIUS_XL = 16

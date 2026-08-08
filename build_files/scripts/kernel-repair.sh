@@ -5,8 +5,11 @@
 # from /boot or /usr/lib/kernel, or rebuilding via dracut as a last resort.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/find-kver.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/lib/find-kver.sh"
+source "${SCRIPT_DIR}/lib/find-kver.sh"
+# shellcheck source=lib/dracut-retry.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/dracut-retry.sh"
 
 KVER="$(find_active_kver)"
 if [ -z "${KVER}" ]; then
@@ -48,13 +51,10 @@ if [ ! -s "/usr/lib/modules/${KVER}/initramfs" ]; then
 	if [ -s "/boot/initramfs-${KVER}.img" ]; then
 		cp --no-preserve=all "/boot/initramfs-${KVER}.img" "/usr/lib/modules/${KVER}/initramfs"
 	else
-		TMPDIR=/var/tmp dracut \
+		kyth_build_initramfs "/usr/lib/modules/${KVER}/initramfs" \
 			--no-hostonly \
 			--compress "zstd -3" \
-			--kver "${KVER}" \
-			--force \
-			"/usr/lib/modules/${KVER}/initramfs" \
-			2> >(grep -Ev 'xattr|fail to copy' >&2)
+			--kver "${KVER}"
 	fi
 fi
 

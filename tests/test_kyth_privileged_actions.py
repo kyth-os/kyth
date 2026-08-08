@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,21 +12,27 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 
 from kyth_welcome.services import network_share_helper as shares  # noqa: E402
+from kyth_shared.commands import CommandSpec  # noqa: E402
 from kyth_welcome.services.privileged import (  # noqa: E402
     AuthFrontend,
     PrivilegedActionError,
+    PrivilegedGateway,
     bootc_action,
     helper_action,
     openconnect_action,
     scheduler_action,
     systemctl_action,
+    sanitized_environment,
 )
 
 
 class PrivilegedActionTests(unittest.TestCase):
     def test_bootc_policy_rejects_shell_data(self):
+        action = bootc_action("switch", "ghcr.io/example/kyth:testing")
+        self.assertIsInstance(action, CommandSpec)
+        self.assertEqual(action.invalidates, frozenset({"bootc"}))
         self.assertEqual(
-            bootc_action("switch", "ghcr.io/example/kyth:testing").command(),
+            action.command(),
             ["sudo", "-A", "bootc", "switch", "ghcr.io/example/kyth:testing"],
         )
         with self.assertRaises(PrivilegedActionError):
@@ -44,6 +51,12 @@ class PrivilegedActionTests(unittest.TestCase):
             systemctl_action("restart", "sshd.service")
         with self.assertRaises(PrivilegedActionError):
             systemctl_action("start", "bad;unit.mount")
+
+    def test_manual_upgrade_uses_quarantine_guard(self):
+        self.assertEqual(
+            bootc_action("upgrade").command(),
+            ["sudo", "-A", "kyth-safe-upgrade"],
+        )
 
     def test_fixed_helpers_validate_arguments(self):
         self.assertEqual(helper_action("sleep-mode", "deep").command()[-2:], [
@@ -69,6 +82,50 @@ class PrivilegedActionTests(unittest.TestCase):
             )
         with self.assertRaises(PrivilegedActionError):
             scheduler_action("scx_rusty; reboot")
+
+    def test_gateway_sanitizes_environment_and_disables_shell(self):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return subprocess.CompletedProcess(argv, 0)
+
+        gateway = PrivilegedGateway(run=fake_run)
+        with patch.dict(
+            "os.environ",
+            {"PATH": "/usr/bin", "DISPLAY": ":0", "LD_PRELOAD": "/tmp/inject.so"},
+            clear=True,
+        ):
+            gateway.run(bootc_action("upgrade"))
+
+        _argv, kwargs = calls[0]
+        self.assertEqual(kwargs["env"]["PATH"], "/usr/bin")
+        self.assertNotIn("LD_PRELOAD", kwargs["env"])
+        self.assertFalse(kwargs["shell"])
+        self.assertEqual(kwargs["timeout"], 300)
+
+    def test_gateway_redacts_vpn_cookie_from_audit_log(self):
+        audit = []
+        action = openconnect_action(
+            gateway="vpn.example",
+            protocol="gp",
+            os_emulation="linux",
+            cookie="secret-cookie",
+        )
+        gateway = PrivilegedGateway(
+            popen=lambda argv, **kwargs: object(),
+            audit=audit.append,
+        )
+        gateway.spawn(action)
+
+        self.assertNotIn("secret-cookie", audit[0])
+        self.assertIn("<redacted>", audit[0])
+
+    def test_sanitized_environment_keeps_only_runtime_context(self):
+        self.assertEqual(
+            sanitized_environment({"HOME": "/home/user", "PYTHONPATH": "/tmp", "LANG": "C"}),
+            {"HOME": "/home/user", "LANG": "C"},
+        )
 
 
 class NetworkShareHelperTests(unittest.TestCase):

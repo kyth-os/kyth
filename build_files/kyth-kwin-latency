@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-kwin-latency — kwin-latency.toml → kwinrc drop-in
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-kwin-latency "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.kwin_latency import load_kwin_latency,kwin_latency_status; c=load_kwin_latency(); print(f"profile={c[\"profile\"]} tearing={c[\"tearing\"]} active={kwin_latency_status()}")' ;;
+    gaming) need_root "$@"; python3 -c 'from kyth_shared.kwin_latency import load_kwin_latency,save_kwin_latency,generate_kwin_latency; c=load_kwin_latency(); c["profile"]="gaming"; c["tearing"]=True; save_kwin_latency(c); generate_kwin_latency(c)'; echo "kwin gaming (re-login)" ;;
+    balanced) need_root "$@"; python3 -c 'from kyth_shared.kwin_latency import load_kwin_latency,save_kwin_latency,generate_kwin_latency; c=load_kwin_latency(); c["profile"]="balanced"; c["tearing"]=False; save_kwin_latency(c); generate_kwin_latency(c)'; echo "kwin balanced" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.kwin_latency import load_kwin_latency,generate_kwin_latency; generate_kwin_latency(load_kwin_latency())';;
+    *) echo "Usage: kyth-kwin-latency [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

@@ -132,12 +132,15 @@ QWidget#wiz-profile-card {{
 
 QWidget#wiz-profile-card[checked="true"] {{
     border-color: {KYTH_BLUE};
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(91, 140, 255, 36), stop:1 rgba(91, 140, 255, 10));
+    background: {KYTH_SURFACE};
 }}
 
 QWidget#wiz-profile-card[checked="true"] QLabel#wiz-card-title {{
     color: {KYTH_BLUE};
+}}
+
+QWidget#wiz-profile-card QLabel#wiz-card-title {{
+    font-size: 15px;
 }}
 
 /* ── Wizard cards (decoupled from the Hub's card/card-accent-* rules) ─────── */
@@ -167,9 +170,34 @@ QLabel#wiz-card-title {{
     color: {KYTH_TEXT};
 }}
 
+QLabel#wiz-section-heading {{
+    font-size: 15px;
+    font-weight: 700;
+    color: {KYTH_TEXT};
+}}
+
 QLabel#wiz-card-copy {{
     font-size: 12.5px;
     color: {KYTH_TEXT_MUTED};
+    line-height: 1.5;
+}}
+
+QLabel#wiz-card-copy-strong {{
+    font-size: 12.5px;
+    font-weight: 700;
+    color: {KYTH_TEXT};
+    line-height: 1.5;
+}}
+
+QLabel#wiz-card-copy-ok {{
+    font-size: 12.5px;
+    color: {STATUS_OK};
+    line-height: 1.5;
+}}
+
+QLabel#wiz-card-copy-err {{
+    font-size: 12.5px;
+    color: {STATUS_ERROR};
     line-height: 1.5;
 }}
 

@@ -4,7 +4,7 @@
 # integration is conditional so the file works identically whether the optional
 # packages were installed or not.
 # Also seeds /etc/skel/.bashrc with the same modern tool aliases for bash users.
-cat >/etc/skel/.zshrc <<'ZSHRCEOF'
+write_config /etc/skel/.zshrc <<'ZSHRCEOF'
 # KythOS default zsh config — edit freely, it's yours.
 
 # History: large buffer, no duplicates, shared across sessions
@@ -47,7 +47,7 @@ ZSHRCEOF
 
 # Also seed a .bashrc that picks up the same modern tool aliases so bash
 # users benefit without switching shells.
-cat >/etc/skel/.bashrc <<'BASHRCEOF'
+write_config /etc/skel/.bashrc <<'BASHRCEOF'
 # KythOS default bash config — edit freely, it's yours.
 
 # Source system-wide config (Fedora bash completion, PATH additions, etc.)
@@ -84,7 +84,7 @@ BASHRCEOF
 # System-wide git-delta pager config — makes `git diff`, `git log`, and
 # `git show` output beautiful syntax-highlighted diffs with line numbers.
 # delta is the pager; any user can override in their own ~/.gitconfig.
-cat >/etc/gitconfig <<'GITCONFIGEOF'
+write_config /etc/gitconfig <<'GITCONFIGEOF'
 [core]
     pager = delta
 

@@ -2,11 +2,13 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── gamemode configuration ────────────────────────────────────────────────────
 # Applied when a game calls gamemoderun or uses the gamemode SDL hook.
 # renice/ioprio: game process gets higher CPU + I/O scheduling priority.
 # gpu: switches AMD GPU to high-performance power profile during gameplay.
-cat >/etc/gamemode.ini <<'GAMEMODEEOF'
+write_config /etc/gamemode.ini <<'GAMEMODEEOF'
 [general]
 renice = 10
 ioprio = 0

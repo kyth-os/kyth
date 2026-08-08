@@ -55,21 +55,23 @@ Moving channel releases and immutable archived builds are published on GitHub:
 [stable releases](https://github.com/mrtrick37/kyth/releases/tag/iso-latest) and
 [testing releases](https://github.com/mrtrick37/kyth/releases/tag/iso-testing).
 
-Practical requirements are an x86-64 PC, a USB drive, an internet connection
-during installation, and at least 8 GB of RAM for the live environment. Back up
-important data before changing disk partitions.
+Practical requirements are an x86-64 PC, a USB drive, and at least 8 GB of RAM
+for the live environment. The standard image installs offline; optional image
+variants require a network connection. Back up important data before changing
+disk partitions.
 
 1. Download the ISO for the channel you want.
 2. Write it to a USB drive with Fedora Media Writer, Balena Etcher, Ventoy, or
    another raw-image tool.
 3. Boot the USB drive and open **Install KythOS**.
 4. Choose the target disk and installation layout, then create the local user.
-5. Let the installer pull and deploy the pinned KythOS image.
+5. Let the installer verify and deploy the pinned KythOS image embedded in the ISO.
 6. Reboot, open **KythOS System Hub**, and complete the first-run checklist.
 
 The installer uses `bootc install to-disk` under a local graphical frontend.
-The ISO build pins the source image digest so the installed deployment matches
-the image validated for that release.
+Before changing disk state, it verifies the embedded OCI manifest against the
+digest pinned by the ISO build, checks power safety, and writes a redacted
+transaction report. Final target checks must pass before the UI reports success.
 
 ### Verify an ISO
 
@@ -103,6 +105,7 @@ ujust status                    # booted, staged, and rollback deployments
 ujust kyth-upgrade              # stage OS updates and update Flatpaks
 ujust switch-channel testing   # stage the testing channel
 ujust switch-channel stable    # return to the stable channel
+ujust hardware-policy          # matched profiles, quirks, and applied state
 ```
 
 Channel or kernel switches create a new bootc deployment and take effect after
@@ -225,7 +228,10 @@ Fedora Kinoite / Universal Blue base
 
 See [Architecture](docs/architecture.md) and the
 [security model](docs/security-model.md) for the detailed component and trust
-boundaries.
+boundaries. The [health-aware update lifecycle](docs/update-safety.md) explains
+boot validation, automatic rollback, rollout rings, and digest quarantine.
+The [hardware policy](docs/hardware-policy.md) documents device matching,
+managed quirks, and the generated [support matrix](docs/hardware-support-matrix.md).
 
 ## Security and release integrity
 
@@ -284,7 +290,7 @@ ENABLE_VIRTUALIZATION_HOST=1 just build
 ENABLE_KSM=1 just build
 ```
 
-Install the tracked hooks once per clone to run the same README snapshot and
+Install the tracked hooks once per clone to run staged-file checks and the same
 pre-push validation used by maintainers:
 
 ```bash
@@ -325,9 +331,12 @@ cover the hardware behavior.
 - [Architecture](docs/architecture.md)
 - [Stability principles](docs/stability-principles.md)
 - [Daily-driver validation](docs/daily-driver-validation.md)
+- [Hardware policy](docs/hardware-policy.md)
+- [Hardware support matrix](docs/hardware-support-matrix.md)
 - [Security model](docs/security-model.md)
 - [Release support](docs/release-support.md)
 - [Dependency management](docs/dependency-management.md)
+- [Optimization measurements](docs/optimization-budgets.md)
 - [Gaming validation matrix](docs/gaming-validation-matrix.md)
 - [Modding on KythOS](docs/modding-on-kythos.md)
 - [Game-save migration](docs/game-save-migration.md)
@@ -350,16 +359,3 @@ aggregate.
 The project is licensed under [Apache License 2.0](LICENSE). KythOS is not
 affiliated with Fedora, Universal Blue, KDE, Valve, CachyOS, or any game
 publisher.
-
-<!-- AUTO-README-START -->
-## Auto Project Snapshot
-
-- Last refreshed (UTC): 2026-07-25 02:15:13 UTC
-- Current branch: testing
-- HEAD commit: 3d8468f
-- Last commit title: Fix ISO build failure and app lookup test import path
-- Last commit date: 2026-07-24T22:04:51-04:00
-- CI workflow files: 8
-- Build script files: 21
-
-<!-- AUTO-README-END -->

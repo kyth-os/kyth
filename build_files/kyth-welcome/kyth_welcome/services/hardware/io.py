@@ -6,13 +6,13 @@ import re
 import shutil
 
 from .types import HardwareProbe
-from ..process import _command_stdout, _run_command
+from ..process import command_stdout, run_command
 from ..updates import firmware_check_commands
 from ..privileged import AuthFrontend, helper_action
 
 
 def _firmware_probe() -> HardwareProbe:
-    devices = _run_command(["fwupdmgr", "get-devices"], timeout=15)
+    devices = run_command(["fwupdmgr", "get-devices"], timeout=15)
     if devices is None:
         return HardwareProbe("Firmware", "dim", "fwupd not available.", "Install fwupd to inspect firmware-managed devices.")
     if devices.returncode != 0:
@@ -24,8 +24,8 @@ def _firmware_probe() -> HardwareProbe:
 
     device_count = devices.stdout.count("Device ID:")
     refresh_cmd, updates_cmd = firmware_check_commands(refresh=True)
-    _run_command(refresh_cmd, timeout=60)
-    updates = _run_command(updates_cmd, timeout=20)
+    run_command(refresh_cmd, timeout=60)
+    updates = run_command(updates_cmd, timeout=20)
     if updates is not None and updates.returncode == 0:
         return HardwareProbe(
             "Firmware", "warn",
@@ -49,8 +49,8 @@ def _connectivity_probe(pci_text: str, usb_text: str) -> HardwareProbe:
     combined = "\n".join([pci_text.lower(), usb_text.lower()])
     wifi_present = any(token in combined for token in ("network controller", "wireless", "wi-fi", "802.11", "wlan"))
     bluetooth_present = "bluetooth" in combined
-    rfkill = _command_stdout(["rfkill", "list"], timeout=5)
-    nmcli = _command_stdout(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"], timeout=5)
+    rfkill = command_stdout(["rfkill", "list"], timeout=5)
+    nmcli = command_stdout(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"], timeout=5)
 
     blocked = []
     if rfkill:
@@ -98,10 +98,10 @@ def _connectivity_probe(pci_text: str, usb_text: str) -> HardwareProbe:
  # _connectivity_probe
 
 def _audio_probe() -> HardwareProbe:
-    pipewire = _run_command(["systemctl", "--user", "is-active", "pipewire.service"], timeout=5)
-    wireplumber = _run_command(["systemctl", "--user", "is-active", "wireplumber.service"], timeout=5)
-    pactl_info = _run_command(["pactl", "info"], timeout=5)
-    sinks = _command_stdout(["pactl", "list", "short", "sinks"], timeout=5)
+    pipewire = run_command(["systemctl", "--user", "is-active", "pipewire.service"], timeout=5)
+    wireplumber = run_command(["systemctl", "--user", "is-active", "wireplumber.service"], timeout=5)
+    pactl_info = run_command(["pactl", "info"], timeout=5)
+    sinks = command_stdout(["pactl", "list", "short", "sinks"], timeout=5)
     sink_count = len([l for l in sinks.splitlines() if l.strip()])
 
     if pactl_info is None:
@@ -302,7 +302,7 @@ def _peripheral_probe(usb_text: str) -> HardwareProbe:
     action_cmd: list[str] | None = None
 
     if razer_found:
-        r = _run_command(["systemctl", "--user", "is-active", "openrazer-daemon.service"], timeout=5)
+        r = run_command(["systemctl", "--user", "is-active", "openrazer-daemon.service"], timeout=5)
         daemon_active = r is not None and r.returncode == 0
         if daemon_active:
             details_parts.append("OpenRazer daemon: active — RGB and DPI controls ready.")

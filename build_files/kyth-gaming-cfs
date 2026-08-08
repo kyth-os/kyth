@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-gaming-cfs — gaming-cfs.toml burst
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-gaming-cfs "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.gaming_cfs import load_gaming_cfs,gaming_cfs_status; c=load_gaming_cfs(); print(f"profile={c[\"profile\"]} active={gaming_cfs_status()}")' ;;
+    gaming) need_root "$@"; python3 -c 'from kyth_shared.gaming_cfs import load_gaming_cfs,save_gaming_cfs,generate_gaming_cfs; c=load_gaming_cfs(); c["profile"]="gaming"; save_gaming_cfs(c); generate_gaming_cfs(c)'; systemctl daemon-reload 2>/dev/null || true; echo "gaming CFS 400% weight 800" ;;
+    balanced) need_root "$@"; python3 -c 'from kyth_shared.gaming_cfs import load_gaming_cfs,save_gaming_cfs,generate_gaming_cfs; c=load_gaming_cfs(); c["profile"]="balanced"; save_gaming_cfs(c); generate_gaming_cfs(c)'; systemctl daemon-reload 2>/dev/null || true; echo "gaming CFS balanced" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.gaming_cfs import load_gaming_cfs,generate_gaming_cfs; generate_gaming_cfs(load_gaming_cfs())';;
+    *) echo "Usage: kyth-gaming-cfs [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

@@ -5,7 +5,7 @@ import sys
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER_ROOT = ROOT / "build_files/kyth-installer"
@@ -18,8 +18,6 @@ from kyth_installer import (  # noqa: E402
     install,
     partition_ops,
     plan,
-    post_routes,
-    runner as command_runner,
     server,
     system,
 )
@@ -27,10 +25,32 @@ from kyth_installer.context import InstallerContext  # noqa: E402
 
 
 class InstallerWebuiTests(unittest.TestCase):
+    @staticmethod
+    def _javascript() -> str:
+        return "\n".join(
+            path.read_text()
+            for path in sorted(WEBUI_DIR.glob("*.js"))
+        )
+
+    def test_accessibility_and_region_controls_are_exposed(self):
+        html = (WEBUI_DIR / "index.html").read_text()
+
+        self.assertIn('class="skip-link"', html)
+        self.assertIn('id="toggle-high-contrast"', html)
+        self.assertIn('role="progressbar"', html)
+        self.assertIn('id="sel-locale"', html)
+        self.assertIn('id="sel-keymap"', html)
+
+    def test_ntfs_resize_ui_uses_backend_safety_flag(self):
+        js = self._javascript()
+
+        self.assertIn("p.ntfs_resize_candidate", js)
+        self.assertIn("block.ref.ntfs_resize_candidate", js)
+
     def test_install_log_is_collapsed_until_toggle_opens_it(self):
         html = (WEBUI_DIR / "index.html").read_text()
         css = (WEBUI_DIR / "style.css").read_text()
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
 
         self.assertIn('id="log-toggle"', html)
         self.assertIn('aria-expanded="false"', html)
@@ -41,7 +61,7 @@ class InstallerWebuiTests(unittest.TestCase):
 
     def test_disk_continue_button_id_matches_updater(self):
         html = (WEBUI_DIR / "index.html").read_text()
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
 
         self.assertIn('id="disk-next"', html)
         self.assertIn("document.getElementById('disk-next').disabled", js)
@@ -58,7 +78,7 @@ class InstallerWebuiTests(unittest.TestCase):
         self.assertNotIn("S.target_partition.fstype", js)
 
     def test_back_from_error_routes_to_config_not_configure(self):
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
         self.assertIn("goto(S.password ? 'review' : 'config')", js)
         self.assertNotIn("goto(S.password ? 'review' : 'configure')", js)
 
@@ -76,7 +96,7 @@ class InstallerWebuiTests(unittest.TestCase):
         self.assertTrue(expected.issubset(actual))
 
     def test_webui_and_backend_share_install_mode_names(self):
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
 
         for field in (
             "install_mode",
@@ -92,6 +112,25 @@ class InstallerWebuiTests(unittest.TestCase):
 
 
 class InstallerCommandTests(unittest.TestCase):
+    def test_installed_region_writes_locale_and_keyboard_configuration(self):
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append((command, kwargs))
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        state = {
+            "hostname": "kyth", "timezone": "Europe/Berlin",
+            "locale": "de_DE.UTF-8", "keymap": "de",
+        }
+        with patch.object(install, "run_command", side_effect=fake_run), \
+             patch.object(install, "_as_root", side_effect=lambda command: command):
+            install._configure_hostname_timezone("/target/etc", state, lambda _message: None)
+
+        inputs = [kwargs.get("input", "") for _command, kwargs in calls]
+        self.assertIn("LANG=de_DE.UTF-8\n", inputs)
+        self.assertIn("KEYMAP=de\n", inputs)
+
     def test_streaming_command_handles_carriage_return_progress(self):
         logs = []
         progress = []
@@ -106,14 +145,10 @@ class InstallerCommandTests(unittest.TestCase):
         ]
 
         with patch.object(install, "_as_root", side_effect=lambda cmd: cmd), \
-             patch.object(install, "_get_rx_bytes", return_value=0), \
+             patch.object(install, "get_rx_bytes", return_value=0), \
              patch(
-                 "kyth_installer.runner._ALLOWED_EXECUTABLES",
-                 new={
-                     *command_runner._ALLOWED_EXECUTABLES,
-                     Path(sys.executable).name,
-                     Path(sys.executable).resolve().name,
-                 },
+                 "kyth_installer.runner._validate_executable",
+                 side_effect=lambda executable: executable,
              ):
             install._run_cmd(
                 command, 5, 90, logs.append, progress.append,
@@ -126,8 +161,11 @@ class InstallerCommandTests(unittest.TestCase):
 
     def test_bootc_install_calls_disable_absolute_timeout(self):
         source = (INSTALLER_ROOT / "kyth_installer/install.py").read_text()
+        # Phase 2 verbatim: canonical impl moved to phases/storage.py, install.py re-exports
+        storage = (INSTALLER_ROOT / "kyth_installer/phases/storage.py").read_text()
+        combined = source + "\n" + storage
 
-        self.assertEqual(source.count("stall_timeout=3600, absolute_timeout=None"), 2)
+        self.assertEqual(combined.count("stall_timeout=3600, absolute_timeout=None"), 2)
         self.assertNotIn("absolute_timeout=14400", source)
 
 
@@ -231,6 +269,23 @@ class InstallerStorageTests(unittest.TestCase):
         self.assertFalse(parts["/dev/nvme0n1p4"]["alongside_candidate"])
         self.assertFalse(parts["/dev/nvme0n1p5"]["alongside_candidate"])
         self.assertTrue(parts["/dev/nvme0n1p5"]["in_use"])
+
+    def test_list_partitions_never_offers_read_only_ntfs_for_resize(self):
+        payload = {"blockdevices": [{
+            "name": "/dev/sda", "type": "disk", "children": [{
+                "name": "/dev/sda3", "size": 256 * 1024**3, "type": "part",
+                "fstype": "ntfs", "parttype": "", "label": "Windows",
+                "mountpoints": [], "ro": True,
+            }],
+        }]}
+        with patch.object(self.disk, "run_command", return_value=SimpleNamespace(
+            stdout=json.dumps(payload), returncode=0,
+        )):
+            part = self.disk.list_partitions("/dev/sda")[0]
+
+        self.assertTrue(part["read_only"])
+        self.assertFalse(part["alongside_candidate"])
+        self.assertFalse(part["ntfs_resize_candidate"])
 
     def test_find_efi_partition_reads_efi_key_without_keyerror(self):
         partitions = [
@@ -371,6 +426,41 @@ class InstallerPlanTests(unittest.TestCase):
                     "target_partition": "/dev/nvme0n1p2",
                 })
 
+    def test_validate_alongside_rechecks_explicit_efi_partition(self):
+        target = {
+            "name": "/dev/nvme0n1p3", "fstype": "ext4", "efi": False,
+            "current": False, "size_bytes": 128 * 1024**3,
+        }
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[target]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=False), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+            with self.assertRaisesRegex(RuntimeError, "no longer a valid EFI"):
+                self.plan._validate_install_target({
+                    "install_mode": "alongside", "disk": "/dev/nvme0n1",
+                    "target_partition": "/dev/nvme0n1p3",
+                    "efi_partition": "/dev/nvme0n1p2",
+                })
+
+    def test_validate_alongside_rejects_read_only_efi_partition(self):
+        target = {
+            "name": "/dev/nvme0n1p3", "fstype": "ext4", "efi": False,
+            "current": False, "size_bytes": 128 * 1024**3,
+        }
+        esp = {"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True, "read_only": True}
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[esp, target]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=False), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+            with self.assertRaisesRegex(RuntimeError, "read-only"):
+                self.plan._validate_install_target({
+                    "install_mode": "alongside", "disk": "/dev/nvme0n1",
+                    "target_partition": "/dev/nvme0n1p3",
+                    "efi_partition": "/dev/nvme0n1p1",
+                })
+
     def test_validate_wipe_rejects_disk_missing_from_safe_scan(self):
         with patch.object(self.plan, "list_disks", return_value=[]):
             with self.assertRaisesRegex(RuntimeError, "not a safe install target"):
@@ -435,6 +525,26 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertEqual(target, "/dev/nvme0n1p3")
         self.assertEqual(shrink, 64 * 1024**3)
 
+    def test_validate_resize_ntfs_rejects_bitlocker_with_targeted_message(self):
+        partition = {
+            "name": "/dev/nvme0n1p3",
+            "fstype": "BitLocker",
+            "efi": False,
+            "current": False,
+            "size_bytes": 256 * 1024**3,
+        }
+        with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
+             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=False), \
+             patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
+            with self.assertRaisesRegex(RuntimeError, "BitLocker"):
+                self.plan._validate_resize_ntfs_target({
+                    "disk": "/dev/nvme0n1",
+                    "resize_partition": "/dev/nvme0n1p3",
+                    "resize_gib": 64,
+                })
+
     def test_prepare_ntfs_resize_creates_btrfs_target_after_dry_run(self):
         partition = "/dev/nvme0n1p3"
         commands = []
@@ -463,8 +573,10 @@ class InstallerPlanTests(unittest.TestCase):
 
         with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
              patch.object(self.plan, "unmount_target_disk") as mock_unmount, \
+             patch.object(self.plan, "shrink_filesystem") as mock_shrink, \
+             patch.object(self.plan, "DiskService"), \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
-             patch.object(self.plan, "_partition_size_bytes", return_value=256 * 1024**3), \
+             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 192 * 1024**3]), \
              patch.object(self.plan, "_partition_number", return_value=3), \
              patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
              patch.object(self.plan, "_block_size_bytes", return_value=512), \
@@ -480,8 +592,12 @@ class InstallerPlanTests(unittest.TestCase):
 
         mock_unmount.assert_called_once_with("/dev/nvme0n1", unittest.mock.ANY)
         self.assertEqual(created, ("/dev/nvme0n1", "/dev/nvme0n1p4"))
+        # The NTFS-safe shrink sequence (ntfsresize --check/--info/dry-run/
+        # real shrink) now lives in fsresize.shrink_filesystem, with its own
+        # tests — this test only verifies it's invoked before the partition
+        # boundary moves, and with the right target size.
+        mock_shrink.assert_called_once_with(partition, "ntfs", 192 * 1024**3, unittest.mock.ANY)
         flattened = [" ".join(cmd) for cmd in commands]
-        self.assertTrue(any("ntfsresize --no-action" in cmd for cmd in flattened))
         # parted >= 3.3 exits 1 on a script-mode (-s) shrink because it cannot
         # ask its "can cause data loss" question; the shrink must run with
         # ---pretend-input-tty and "Yes" on stdin instead.
@@ -495,13 +611,83 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertIn("parted ---pretend-input-tty /dev/nvme0n1 unit B resizepart 3", shrink_cmd)
         self.assertNotIn(" -s ", shrink_cmd)
         self.assertEqual(shrink_kwargs.get("input"), "Yes\n")
-        ntfs_shrink = next(
-            kwargs for cmd, kwargs in zip(flattened, run_kwargs, strict=True)
-            if "ntfsresize --size" in cmd and "--no-action" not in cmd
-        )
-        self.assertEqual(ntfs_shrink.get("input"), "y\n")
         self.assertTrue(any("mkpart KythOS btrfs" in cmd and "100%" not in cmd for cmd in flattened))
         self.assertTrue(any("mkfs.btrfs -f -L KythOS /dev/nvme0n1p4" in cmd for cmd in flattened))
+
+    def test_prepare_ntfs_resize_restores_partition_table_on_later_failure(self):
+        # The NTFS filesystem shrink itself is mocked out (its own safety is
+        # fsresize.py's job) — this test is specifically about the partition-
+        # table backup/restore safety net around the parted/mkfs steps that
+        # run *after* a real, successful filesystem shrink.
+        partition = "/dev/nvme0n1p3"
+
+        def fake_run(cmd, **kwargs):
+            if "mkfs.btrfs" in " ".join(cmd):
+                raise RuntimeError("mkfs.btrfs exploded")
+            return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
+
+        existing = [
+            {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
+            {"name": partition},
+        ]
+        list_partitions_mock = MagicMock(side_effect=[
+            existing, existing, existing + [{"name": "/dev/nvme0n1p4"}],
+        ])
+        mock_disk_service_cls = MagicMock()
+        mock_disk_service = mock_disk_service_cls.return_value
+
+        with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
+             patch.object(self.plan, "unmount_target_disk"), \
+             patch.object(self.plan, "shrink_filesystem"), \
+             patch.object(self.plan, "DiskService", mock_disk_service_cls), \
+             patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
+             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 192 * 1024**3]), \
+             patch.object(self.plan, "_partition_number", return_value=3), \
+             patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
+             patch.object(self.plan, "_block_size_bytes", return_value=512), \
+             patch.object(self.plan, "list_partitions", list_partitions_mock), \
+             patch.object(disk, "list_partitions", list_partitions_mock), \
+             patch.object(self.plan, "_settle"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
+             patch.object(self.plan, "run_command", side_effect=fake_run):
+            with self.assertRaisesRegex(RuntimeError, "mkfs.btrfs exploded"):
+                self.plan._prepare_ntfs_resize_target(
+                    {"disk": "/dev/nvme0n1", "resize_partition": partition, "resize_gib": 64},
+                    lambda _msg: None,
+                )
+
+        mock_disk_service.backup_table.assert_called_once()
+        mock_disk_service.restore_table.assert_called_once()
+
+    def test_prepare_free_space_target_restores_partition_table_on_later_failure(self):
+        def fake_run(cmd, **kwargs):
+            if "mkfs.btrfs" in " ".join(cmd):
+                raise RuntimeError("mkfs.btrfs exploded")
+            return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
+
+        mock_disk_service_cls = MagicMock()
+        mock_disk_service = mock_disk_service_cls.return_value
+
+        with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
+             patch.object(self.plan, "unmount_target_disk"), \
+             patch.object(self.plan, "DiskService", mock_disk_service_cls), \
+             patch.object(self.plan, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)), \
+             patch.object(self.plan, "list_partitions", return_value=[
+                 {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
+             ]), \
+             patch.object(self.plan, "_latest_partition_on_disk", return_value="/dev/nvme0n1p2"), \
+             patch.object(self.plan, "_block_size_bytes", return_value=512), \
+             patch.object(self.plan, "_settle"), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
+             patch.object(self.plan, "run_command", side_effect=fake_run):
+            with self.assertRaisesRegex(RuntimeError, "mkfs.btrfs exploded"):
+                self.plan._prepare_free_space_target(
+                    {"disk": "/dev/nvme0n1", "free_region_start": 40 * 1024**3, "free_region_end": 80 * 1024**3},
+                    lambda _msg: None,
+                )
+
+        mock_disk_service.backup_table.assert_called_once()
+        mock_disk_service.restore_table.assert_called_once()
 
     def test_ensure_bios_boot_partition_creates_and_flags_when_missing(self):
         # The OS image ships a bootupd BIOS component and bootc installs every
@@ -552,8 +738,8 @@ class InstallerPlanTests(unittest.TestCase):
         start = 40 * 1024**3
         end = start + 32 * 1024**3
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "_is_gpt_disk", return_value=True), \
-             patch.object(self.plan, "_has_bios_boot_partition", return_value=False):
+             patch.object(self.plan, "list_partitions", return_value=[]), \
+             patch.object(self.plan, "_is_gpt_disk", return_value=True):
             with self.assertRaisesRegex(RuntimeError, "33 GiB"):
                 self.plan._validate_free_space_target({
                     "disk": "/dev/nvme0n1",
@@ -618,6 +804,7 @@ class InstallerPlanTests(unittest.TestCase):
 
         with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
              patch.object(self.plan, "unmount_target_disk") as mock_unmount, \
+             patch.object(self.plan, "DiskService"), \
              patch.object(self.plan, "_validate_free_space_target", return_value=("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3)), \
              patch.object(self.plan, "list_partitions", return_value=[
                  {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
@@ -656,6 +843,16 @@ class JournalValidateTests(unittest.TestCase):
     """Journal.validate() gates real partitioning safety properties (no
     overlaps, exactly one Btrfs root, never touch a mounted/in-use partition)
     but previously had no direct test coverage of its own."""
+
+    def setUp(self):
+        # validate() looks up the disk's current partition_table to gate the
+        # MBR 4-primary-partition limit; default to "no such disk" (empty
+        # table_type, same as the GPT/non-msdos path) so every test not
+        # specifically about msdos doesn't need to mock this itself and
+        # never makes a real lsblk call.
+        patcher = patch.object(partition_ops, "list_disks", return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _journal(self, current_parts=()):
         with patch.object(partition_ops, "list_partitions", return_value=list(current_parts)):
@@ -699,6 +896,77 @@ class JournalValidateTests(unittest.TestCase):
             errors = journal.validate()
         self.assertTrue(any("overlaps with existing region" in e for e in errors))
 
+    def test_create_overlapping_existing_partition_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 5 * 1024**3, "size_bytes": 10 * 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[{
+            "name": "/dev/nvme0n1p1", "start_bytes": 1024**2,
+            "size_bytes": 10 * 1024**3, "fstype": "ntfs",
+        }]):
+            errors = journal.validate()
+        self.assertTrue(any("overlaps with existing region" in error for error in errors))
+
+    def test_cross_disk_partition_operation_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sdb1", "mountpoint": "/"})
+        with patch.object(partition_ops, "list_partitions", return_value=[]), \
+             patch.object(partition_ops, "_parent_disk", return_value="/dev/sdb"):
+            errors = journal.validate()
+        self.assertTrue(any("does not belong" in error for error in errors))
+
+    def test_multiple_root_assignments_are_rejected(self):
+        journal = self._journal()
+        for index in range(2):
+            journal.add_op("create", {
+                "start_bytes": (index * 50 + 1) * 1024**3,
+                "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+            })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("Exactly one root" in error for error in errors))
+
+    def test_created_efi_partition_must_be_fat32(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 1024**2, "size_bytes": 1024**3,
+            "fs_type": "ext4", "mountpoint": "/boot/efi",
+        })
+        journal.add_op("create", {
+            "start_bytes": 2 * 1024**3, "size_bytes": 40 * 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("must use FAT32" in error for error in errors))
+
+    def test_existing_root_partition_must_be_btrfs_after_staged_format(self):
+        journal = self._journal()
+        journal.add_op("format", {"partition": "/dev/nvme0n1p2", "fs_type": "ext4"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p2", "mountpoint": "/"})
+        with patch.object(partition_ops, "list_partitions", return_value=[{
+            "name": "/dev/nvme0n1p2", "fstype": "btrfs",
+        }]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
+            errors = journal.validate()
+        self.assertTrue(any("must use the Btrfs filesystem" in error for error in errors))
+
+    def test_existing_efi_partition_must_be_fat32(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {
+            "partition": "/dev/nvme0n1p1", "mountpoint": "/boot/efi",
+        })
+        journal.add_op("set_mountpoint", {
+            "partition": "/dev/nvme0n1p2", "mountpoint": "/",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1", "fstype": "ext4"},
+            {"name": "/dev/nvme0n1p2", "fstype": "btrfs"},
+        ]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
+            errors = journal.validate()
+        self.assertTrue(any("must use FAT32" in error for error in errors))
+
     def test_valid_single_root_partition_has_no_errors(self):
         journal = self._journal()
         journal.add_op("create", {
@@ -720,6 +988,51 @@ class JournalValidateTests(unittest.TestCase):
         # about a missing root rather than silently accepting the stale one.
         self.assertTrue(any("No root partition" in e for e in errors))
 
+    def test_msdos_table_rejects_a_5th_primary_partition(self):
+        journal = self._journal()
+        journal.add_op("new_table", {"table_type": "msdos"})
+        for i in range(4):
+            journal.add_op("create", {
+                "start_bytes": i * 10 * 1024**3 + 1024**2, "size_bytes": 9 * 1024**3,
+                "fs_type": "btrfs" if i == 0 else "ext4", "mountpoint": "/" if i == 0 else "",
+            })
+        journal.add_op("create", {
+            "start_bytes": 41 * 1024**3, "size_bytes": 9 * 1024**3, "fs_type": "ext4", "mountpoint": "",
+        })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertTrue(any("at most 4 primary partitions" in e for e in errors))
+
+    def test_msdos_table_allows_up_to_4_primary_partitions(self):
+        journal = self._journal()
+        journal.add_op("new_table", {"table_type": "msdos"})
+        for i in range(4):
+            journal.add_op("create", {
+                "start_bytes": i * 10 * 1024**3 + 1024**2, "size_bytes": 9 * 1024**3,
+                "fs_type": "btrfs" if i == 0 else "ext4", "mountpoint": "/" if i == 0 else "",
+            })
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            errors = journal.validate()
+        self.assertEqual(errors, [])
+
+    def test_msdos_limit_counts_preexisting_partitions_without_a_new_table_op(self):
+        journal = self._journal()
+        # No new_table op — this journal partitions onto the disk's existing
+        # (already-msdos) table, so the 3 pre-existing partitions count too.
+        journal.add_op("create", {
+            "start_bytes": 31 * 1024**3, "size_bytes": 9 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+        })
+        journal.add_op("create", {
+            "start_bytes": 41 * 1024**3, "size_bytes": 9 * 1024**3, "fs_type": "ext4", "mountpoint": "",
+        })
+        with patch.object(partition_ops, "list_disks", return_value=[
+            {"name": "/dev/nvme0n1", "partition_table": "msdos"},
+        ]), patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1"}, {"name": "/dev/nvme0n1p2"}, {"name": "/dev/nvme0n1p3"},
+        ]):
+            errors = journal.validate()
+        self.assertTrue(any("at most 4 primary partitions" in e for e in errors))
+
     def test_format_of_mounted_partition_is_rejected(self):
         journal = self._journal()
         journal.add_op("create", {
@@ -740,6 +1053,112 @@ class JournalValidateTests(unittest.TestCase):
         ]):
             errors = journal.validate()
         self.assertTrue(any("Cannot set /dev/nvme0n1p3 as the root partition" in e for e in errors))
+
+    def test_resize_growing_into_neighboring_partition_is_rejected(self):
+        # The Journal is the authoritative safety gate for partition ops
+        # (see partition_ops.py module docstring); it must not rely on the
+        # only current caller (InstallerService.resize_partition) disallowing
+        # growth to keep a growing resize from overlapping its neighbor.
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p1", "mountpoint": "/"})
+        journal.add_op("resize", {"partition": "/dev/nvme0n1p1", "new_size_bytes": 15 * 1024**3})
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fstype": "btrfs"},
+            {"name": "/dev/nvme0n1p2", "start_bytes": 1024**2 + 10 * 1024**3, "size_bytes": 10 * 1024**3, "fstype": "ntfs"},
+        ]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
+            errors = journal.validate()
+        self.assertTrue(any("would overlap with existing region" in e for e in errors))
+
+    def test_resize_growing_past_end_of_disk_is_rejected(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p1", "mountpoint": "/"})
+        journal.add_op("resize", {"partition": "/dev/nvme0n1p1", "new_size_bytes": 25 * 1024**3})
+        with patch.object(partition_ops, "list_disks", return_value=[
+            {"name": "/dev/nvme0n1", "size_bytes": 20 * 1024**3},
+        ]), patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fstype": "btrfs"},
+        ]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
+            errors = journal.validate()
+        self.assertTrue(any("extends past the end of" in e for e in errors))
+
+    def test_resize_shrink_within_bounds_has_no_errors(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/nvme0n1p1", "mountpoint": "/"})
+        journal.add_op("resize", {"partition": "/dev/nvme0n1p1", "new_size_bytes": 5 * 1024**3})
+        with patch.object(partition_ops, "list_partitions", return_value=[
+            {"name": "/dev/nvme0n1p1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3, "fstype": "btrfs"},
+            {"name": "/dev/nvme0n1p2", "start_bytes": 1024**2 + 10 * 1024**3, "size_bytes": 10 * 1024**3, "fstype": "ntfs"},
+        ]), patch.object(partition_ops, "_parent_disk", return_value="/dev/nvme0n1"):
+            errors = journal.validate()
+        self.assertEqual(errors, [])
+
+
+class JournalCommitResizeTests(unittest.TestCase):
+    """Journal._commit_resize must shrink the filesystem before ever moving
+    the partition boundary — parted's resizepart only moves the table entry
+    and never touches filesystem metadata, so skipping the shrink corrupts
+    whatever filesystem already lives on the partition."""
+
+    def _journal(self):
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            return partition_ops.Journal("/dev/nvme0n1")
+
+    def test_shrinks_filesystem_before_moving_partition_boundary(self):
+        journal = self._journal()
+        journal._disk_service = MagicMock(dry_run=False)
+        call_order = []
+        mock_shrink = MagicMock(side_effect=lambda *a, **k: call_order.append("shrink"))
+        journal._disk_service.resize_partition = MagicMock(
+            side_effect=lambda *a, **k: call_order.append("resize_partition")
+        )
+
+        with patch.object(partition_ops, "shrink_filesystem", mock_shrink), \
+             patch.object(partition_ops, "list_partitions", return_value=[
+                 {"name": "/dev/nvme0n1p2", "fstype": "ntfs"},
+             ]), \
+             patch.object(partition_ops, "_partition_number", return_value=2), \
+             patch.object(partition_ops, "_partition_start_bytes", return_value=1024**2):
+            journal._commit_resize(
+                {"partition": "/dev/nvme0n1p2", "new_size_bytes": 20 * 1024**3}, lambda _m: None
+            )
+
+        self.assertEqual(call_order, ["shrink", "resize_partition"])
+        mock_shrink.assert_called_once_with("/dev/nvme0n1p2", "ntfs", 20 * 1024**3, unittest.mock.ANY)
+
+    def test_rejects_a_partition_missing_from_the_current_disk_scan(self):
+        journal = self._journal()
+        journal._disk_service = MagicMock(dry_run=False)
+        with patch.object(partition_ops, "list_partitions", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "was not found"):
+                journal._commit_resize(
+                    {"partition": "/dev/nvme0n1p2", "new_size_bytes": 20 * 1024**3}, lambda _m: None
+                )
+
+    def test_dry_run_skips_the_filesystem_shrink_entirely(self):
+        journal = self._journal()
+        journal._disk_service = MagicMock(dry_run=True)
+        with patch.object(partition_ops, "shrink_filesystem") as mock_shrink, \
+             patch.object(partition_ops, "_partition_number", return_value=99), \
+             patch.object(partition_ops, "_partition_start_bytes", return_value=1024**2):
+            journal._commit_resize(
+                {"partition": "/dev/nvme0n1p2", "new_size_bytes": 20 * 1024**3}, lambda _m: None
+            )
+        mock_shrink.assert_not_called()
+        journal._disk_service.resize_partition.assert_called_once()
+
+    def test_unsupported_filesystem_propagates_and_never_touches_partition_table(self):
+        journal = self._journal()
+        journal._disk_service = MagicMock(dry_run=False)
+        with patch.object(partition_ops, "list_partitions", return_value=[
+                 {"name": "/dev/nvme0n1p2", "fstype": "xfs"},
+             ]), \
+             patch.object(partition_ops, "_partition_number", return_value=2), \
+             patch.object(partition_ops, "_partition_start_bytes", return_value=1024**2):
+            with self.assertRaisesRegex(RuntimeError, "not supported"):
+                journal._commit_resize(
+                    {"partition": "/dev/nvme0n1p2", "new_size_bytes": 20 * 1024**3}, lambda _m: None
+                )
+        journal._disk_service.resize_partition.assert_not_called()
 
 
 class InstallerServerConfirmationTests(unittest.TestCase):
@@ -770,8 +1189,8 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_backup": True,
             "confirm_erase": False,
         })
-        with patch.object(post_routes, "list_disks", return_value=disks), \
-             patch.object(post_routes, "_validate_storage_intent"), \
+        with patch.object(disk, "list_disks", return_value=disks), \
+             patch.object(plan, "_validate_storage_intent"), \
              patch.object(install, "_run_install") as run_install:
             handler.do_POST()
 
@@ -792,9 +1211,9 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_backup": True,
             "confirm_erase": True,
         })
-        with patch.object(post_routes, "list_disks", return_value=disks), \
-             patch.object(post_routes, "_validate_storage_intent"), \
-             patch.object(post_routes, "list_timezones", return_value=["UTC"]), \
+        with patch.object(disk, "list_disks", return_value=disks), \
+             patch.object(plan, "_validate_storage_intent"), \
+             patch.object(system, "list_timezones", return_value=["UTC"]), \
              patch.object(install, "_run_install"):
             handler.do_POST()
 
@@ -819,9 +1238,9 @@ class InstallerServerConfirmationTests(unittest.TestCase):
             "confirm_backup": True,
             "confirm_erase": True,
         })
-        with patch.object(post_routes, "list_disks", return_value=disks), \
-             patch.object(post_routes, "_validate_storage_intent"), \
-             patch.object(post_routes, "list_timezones", return_value=["UTC"]), \
+        with patch.object(disk, "list_disks", return_value=disks), \
+             patch.object(plan, "_validate_storage_intent"), \
+             patch.object(system, "list_timezones", return_value=["UTC"]), \
              patch.object(install, "_run_install"):
             handler.do_POST()
 
@@ -831,6 +1250,15 @@ class InstallerServerConfirmationTests(unittest.TestCase):
 
 
 class InstallerSystemTests(unittest.TestCase):
+    @patch.object(system, "run_command")
+    def test_locales_and_keymaps_are_discovered_with_localectl(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(stdout="de_DE.UTF-8\nen_US.UTF-8\n"),
+            MagicMock(stdout="de\nus\n"),
+        ]
+        self.assertEqual(system.list_locales(), ["de_DE.UTF-8", "en_US.UTF-8"])
+        self.assertEqual(system.list_keymaps(), ["de", "us"])
+
     @patch("kyth_installer.system.subprocess.run")
     def test_hash_password_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="$6$hashedpassword\n")
@@ -898,6 +1326,12 @@ class InstallerSystemTests(unittest.TestCase):
             self.assertTrue(any("tee" in s and "passwd" in s for s in flat), flat)
             self.assertTrue(any("chmod" in s and "644" in s for s in flat), flat)
 
+    @patch.object(system._accounts, "_write_lines")
+    def test_write_lines_wraps_non_os_error_as_runtime_error(self, mock_write):
+        mock_write.side_effect = ValueError("boom")
+        with self.assertRaisesRegex(RuntimeError, r"Could not write .*shadow"):
+            system._write_lines(Path("/target/etc/shadow"), ["root:!:::::::"], 0o000)
+
     def test_require_root_rejects_non_root(self):
         with patch.object(system.os, "geteuid", return_value=1000):
             with self.assertRaisesRegex(RuntimeError, "must run as root"):
@@ -942,6 +1376,269 @@ class InstallerSystemTests(unittest.TestCase):
             system._require_no_symlink(real)  # does not raise
             system._require_no_symlink(os.path.join(tmpdir, "does-not-exist"))  # does not raise
 
+    def test_safe_umount_defaults_to_check_false_and_captures_output(self):
+        mock_run = MagicMock(return_value=MagicMock(returncode=1))
+        result = system._safe_umount(mock_run, "/mnt/target")
+        argv = mock_run.call_args.args[0]
+        self.assertIn("umount", argv)
+        self.assertIn("-l", argv)
+        self.assertIn("/mnt/target", argv)
+        self.assertEqual(mock_run.call_args.kwargs.get("check"), False)
+        self.assertEqual(mock_run.call_args.kwargs.get("capture_output"), True)
+        self.assertIs(result, mock_run.return_value)
+
+    def test_safe_umount_check_true_propagates_to_run(self):
+        mock_run = MagicMock()
+        system._safe_umount(mock_run, "/mnt/target", check=True)
+        self.assertEqual(mock_run.call_args.kwargs.get("check"), True)
+
+    @patch.object(system, "run_command")
+    def test_settle_runs_partprobe_then_udevadm_settle(self, mock_run):
+        system._settle()
+        self.assertEqual(mock_run.call_count, 2)
+        self.assertIn("partprobe", mock_run.call_args_list[0].args[0])
+        self.assertEqual(mock_run.call_args_list[1].args[0], ["udevadm", "settle"])
+
+    @patch.object(system, "run_command")
+    def test_list_timezones_uses_timedatectl_when_available(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="America/New_York\nUTC\n")
+        zones = system.list_timezones()
+        self.assertEqual(zones, ["America/New_York", "UTC"])
+
+    @patch.object(system, "run_command")
+    def test_list_timezones_falls_back_to_zone_tab_when_timedatectl_fails(self, mock_run):
+        mock_run.side_effect = RuntimeError("timedatectl not found")
+        tab_data = "# comment\nUS\t+404251-0740023\tAmerica/New_York\tEastern\n"
+        with patch("builtins.open", mock_open(read_data=tab_data)):
+            zones = system.list_timezones()
+        self.assertIn("America/New_York", zones)
+        self.assertIn("UTC", zones)
+
+    @patch.object(system, "run_command")
+    def test_list_timezones_falls_back_to_utc_when_everything_fails(self, mock_run):
+        mock_run.side_effect = RuntimeError("timedatectl not found")
+        with patch("builtins.open", side_effect=OSError("no such file")):
+            zones = system.list_timezones()
+        self.assertEqual(zones, ["UTC"])
+
+    def test_find_deploy_etc_returns_latest_sorted_candidate(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir) / "ostree/deploy/default/deploy"
+            (base / "abc123.0" / "etc").mkdir(parents=True)
+            (base / "def456.1" / "etc").mkdir(parents=True)
+            result = system.find_deploy_etc(tmpdir)
+            self.assertEqual(result, str(base / "def456.1" / "etc"))
+
+    def test_find_deploy_etc_returns_none_when_missing(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertIsNone(system.find_deploy_etc(tmpdir))
+
+    @patch.object(system._accounts, "_read_lines")
+    def test_read_lines_wraps_os_error_with_path_context(self, mock_read):
+        mock_read.side_effect = OSError(13, "Permission denied")
+        with self.assertRaisesRegex(OSError, "path=/target/etc/passwd"):
+            system._read_lines(Path("/target/etc/passwd"))
+
+    @patch.object(system._accounts, "_chmod_path")
+    def test_chmod_path_wraps_os_error_with_path_context(self, mock_chmod):
+        mock_chmod.side_effect = OSError(13, "Permission denied")
+        with self.assertRaisesRegex(OSError, "path=/target/etc/shadow"):
+            system._chmod_path(Path("/target/etc/shadow"), 0o600)
+
+    @patch.object(system._accounts, "_path_exists", return_value=True)
+    def test_path_exists_delegates_to_accounts_module(self, mock_exists):
+        self.assertTrue(system._path_exists(Path("/target/etc/passwd")))
+        mock_exists.assert_called_once()
+
+    @patch.object(system._accounts, "ensure_system_accounts")
+    def test_ensure_system_accounts_wraps_os_error_with_path_context(self, mock_ensure):
+        mock_ensure.side_effect = OSError(13, "Permission denied")
+        with self.assertRaisesRegex(OSError, "path=/mnt/target"):
+            system.ensure_system_accounts("/mnt/target", lambda _m: None)
+
+    @patch.object(system._accounts, "ensure_system_accounts")
+    def test_ensure_system_accounts_wraps_generic_exception_as_runtime_error(self, mock_ensure):
+        mock_ensure.side_effect = ValueError("boom")
+        with self.assertRaisesRegex(RuntimeError, "Could not repair system accounts under /mnt/target"):
+            system.ensure_system_accounts("/mnt/target", lambda _m: None)
+
+    @patch.object(system, "run_command")
+    def test_lsblk_target_mounts_walks_children_and_sorts_deepest_first(self, mock_run):
+        payload = {
+            "blockdevices": [
+                {
+                    "name": "/dev/sda",
+                    "mountpoints": [None],
+                    "children": [
+                        {"name": "/dev/sda1", "mountpoints": ["/boot/efi"]},
+                        {"name": "/dev/sda2", "mountpoints": ["/mnt/target/home", "/mnt/target"]},
+                    ],
+                }
+            ]
+        }
+        mock_run.return_value = MagicMock(stdout=json.dumps(payload))
+        mounts = system._lsblk_target_mounts("/dev/sda")
+        self.assertEqual(
+            mounts,
+            [
+                ("/dev/sda2", "/mnt/target/home"),
+                ("/dev/sda1", "/boot/efi"),
+                ("/dev/sda2", "/mnt/target"),
+            ],
+        )
+
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_succeeds_with_no_mounts(self, mock_run, mock_lsblk):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_lsblk.side_effect = [[], []]
+        logs = []
+        system.unmount_target_disk("/dev/sda", logs.append)
+        self.assertTrue(any("Unmounting any existing mounts" in m for m in logs))
+
+    @patch.object(system, "_safe_umount")
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_skips_lazy_umount_for_critical_mount(self, mock_run, mock_lsblk, mock_safe_umount):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="target is busy")
+        mock_lsblk.side_effect = [[("/dev/sda2", "/boot")], []]
+        logs = []
+        system.unmount_target_disk("/dev/sda", logs.append)
+        mock_safe_umount.assert_not_called()
+        self.assertTrue(any("Skipping lazy unmount" in m for m in logs))
+
+    @patch.object(system, "_safe_umount")
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_lazy_umounts_non_critical_mount(self, mock_run, mock_lsblk, mock_safe_umount):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="target is busy")
+        mock_lsblk.side_effect = [[("/dev/sda3", "/mnt/target/home")], []]
+        logs = []
+        system.unmount_target_disk("/dev/sda", logs.append)
+        mock_safe_umount.assert_called_once_with(mock_run, "/mnt/target/home")
+
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_refuses_when_initial_scan_fails(self, mock_run, mock_lsblk):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_lsblk.side_effect = [RuntimeError("lsblk not found"), []]
+        with self.assertRaisesRegex(RuntimeError, "Could not inspect mounts"):
+            system.unmount_target_disk("/dev/sda", lambda _m: None)
+
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_refuses_when_final_scan_fails(self, mock_run, mock_lsblk):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_lsblk.side_effect = [[], RuntimeError("lsblk not found")]
+        with self.assertRaisesRegex(RuntimeError, "Could not verify"):
+            system.unmount_target_disk("/dev/sda", lambda _m: None)
+
+    @patch.object(system, "_lsblk_target_mounts")
+    @patch.object(system, "run_command")
+    def test_unmount_target_disk_raises_when_mounts_remain(self, mock_run, mock_lsblk):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_lsblk.side_effect = [[], [("/dev/sda2", "/mnt/target")]]
+        with self.assertRaisesRegex(RuntimeError, "still has mounted partitions"):
+            system.unmount_target_disk("/dev/sda", lambda _m: None)
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    def test_mok_enrollment_skipped_for_non_cachy_kernel(self):
+        logs = []
+        result = system._try_stage_mok_enrollment(logs.append, kernel="fedora")
+        self.assertEqual(result, "skipped")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "Path")
+    def test_mok_enrollment_skipped_when_cert_missing(self, mock_path_cls):
+        mock_path_cls.return_value.exists.return_value = False
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "skipped")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_skipped_when_mokutil_missing(self, mock_path_cls, mock_shutil):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = None
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "skipped")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_skipped_when_secure_boot_disabled(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.return_value = MagicMock(stdout="SecureBoot disabled\n")
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "skipped")
+        mock_run.assert_called_once()
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_reports_already_enrolled(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.side_effect = [
+            MagicMock(stdout="SecureBoot enabled\n"),
+            MagicMock(stdout="KythOS Secure Boot\n"),
+        ]
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "enrolled")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_reports_already_pending(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.side_effect = [
+            MagicMock(stdout="SecureBoot enabled\n"),
+            MagicMock(stdout="no keys enrolled\n"),
+            MagicMock(stdout="KythOS Secure Boot\n"),
+        ]
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "pending")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_stages_successfully(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.side_effect = [
+            MagicMock(stdout="SecureBoot enabled\n"),
+            MagicMock(stdout="no keys enrolled\n"),
+            MagicMock(stdout="no keys pending\n"),
+            MagicMock(returncode=0),
+        ]
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy", mok_password="hunter2")
+        self.assertEqual(result, "staged")
+        self.assertEqual(mock_run.call_args_list[-1].kwargs.get("input"), "hunter2\n")
+
+    @patch.dict(os.environ, {"KYTH_STAGE_MOK": "0"})
+    @patch.object(system, "run_command")
+    @patch.object(system, "shutil")
+    @patch.object(system, "Path")
+    def test_mok_enrollment_reports_failed_import(self, mock_path_cls, mock_shutil, mock_run):
+        mock_path_cls.return_value.exists.return_value = True
+        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_run.side_effect = [
+            MagicMock(stdout="SecureBoot enabled\n"),
+            MagicMock(stdout="no keys enrolled\n"),
+            MagicMock(stdout="no keys pending\n"),
+            MagicMock(returncode=1, stderr="import error"),
+        ]
+        result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
+        self.assertEqual(result, "failed")
+
 
 class InstallerGptDiskTests(unittest.TestCase):
     @patch("kyth_installer.plan.run_command")
@@ -969,6 +1666,20 @@ class InstallerGptDiskTests(unittest.TestCase):
 
 
 class InstallerDiskServiceTests(unittest.TestCase):
+    def test_partition_table_restore_is_checked(self):
+        from kyth_installer.services.disk_service import DiskService
+        svc = DiskService()
+        with patch.object(svc, "execute") as execute, \
+             patch("kyth_installer.services.disk_service.shutil.which", return_value="/usr/bin/sgdisk"), \
+             patch.object(svc, "settle"):
+            svc.restore_table("/dev/sda", "/tmp/table.backup")
+
+        self.assertTrue(execute.call_args.kwargs["check"])
+
+    def test_live_image_installs_partition_backup_tool(self):
+        build_script = (ROOT / "installer/build.sh").read_text()
+        self.assertRegex(build_script, r"dnf5? install -y[^\n]*\bgdisk\b")
+
     def test_disk_service_dry_run_collects_journal(self):
         from kyth_installer.services.disk_service import DiskService
         svc = DiskService(dry_run=True)
@@ -986,6 +1697,12 @@ class InstallerDiskServiceTests(unittest.TestCase):
         self.assertIn("resizepart 2", " ".join(svc.journal[3]))
         self.assertIn("mkfs.ext4", " ".join(svc.journal[4]))
 
+    def test_disk_service_can_mark_an_efi_partition(self):
+        from kyth_installer.services.disk_service import DiskService
+        svc = DiskService(dry_run=True)
+        svc.set_partition_flag("/dev/sda", 1, "esp")
+        self.assertEqual(svc.journal[-1][-7:], ["parted", "-s", "/dev/sda", "set", "1", "esp", "on"])
+
     def test_journal_with_dry_run_disk_service_executes_safely(self):
         from kyth_installer.services.disk_service import DiskService
         svc = DiskService(dry_run=True)
@@ -994,7 +1711,7 @@ class InstallerDiskServiceTests(unittest.TestCase):
             journal = partition_ops.Journal("/dev/sda", disk_service=svc)
             journal.add_op("new_table", {"table_type": "gpt"})
             journal.add_op("create", {
-                "start_bytes": 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
+                "start_bytes": 2 * 1024**2, "size_bytes": 40 * 1024**3, "fs_type": "btrfs", "mountpoint": "/",
             })
             # Verify we can validate and commit without throwing any command execution errors
             errors = journal.validate()

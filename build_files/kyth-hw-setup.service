@@ -1,10 +1,9 @@
 [Unit]
-Description=KythOS hardware auto-setup (SCX scheduler + NVIDIA driver)
+Description=KythOS declarative hardware policy
 Documentation=https://github.com/mrtrick37/kyth
 # Run after filesystems and PCI devices are enumerated, but don't block SDDM —
 # akmods can take 5-15 min and we don't want to stall the first login screen.
 After=sysinit.target local-fs.target
-ConditionPathExists=!/var/lib/kyth/hw-setup-done
 
 [Service]
 Type=oneshot

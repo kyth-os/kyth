@@ -34,3 +34,14 @@ if [[ -z "${iwlwifi_firmware_probe}" ]]; then
 	exit 1
 fi
 echo "Intel iwlwifi firmware present: ${iwlwifi_firmware_probe}"
+
+# Purge unused heavy enterprise / server firmware blobs to keep workstation image lean
+rm -rf \
+	/usr/lib/firmware/mellanox \
+	/usr/lib/firmware/qlogic \
+	/usr/lib/firmware/netronome \
+	/usr/lib/firmware/liquidio \
+	/usr/lib/firmware/cxgb4 \
+	/usr/lib/firmware/brcm/bcm43* \
+	2>/dev/null || true
+

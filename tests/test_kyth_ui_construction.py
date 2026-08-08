@@ -16,7 +16,7 @@ import inspect
 from unittest.mock import patch
 
 from kyth_welcome.qt import QApplication, QPushButton
-from kyth_welcome.services.runtime import _shutdown_threads
+from kyth_welcome.services.runtime import shutdown_threads
 from kyth_welcome.windows import MainWindow
 from kyth_welcome.wizard import WizardWindow
 from kyth_welcome.vpn_app import VpnWindow
@@ -24,7 +24,8 @@ from kyth_welcome.page_vpn import VpnPage
 
 app = QApplication([])
 wizard = WizardWindow()
-assert len(wizard._steps) == 6
+# Wizard is profile-adaptive: gaming step only for "gaming" profile (everyday→4, gaming→5)
+assert len(wizard._steps) in (4, 5)
 assert wizard.windowTitle() == "Welcome to KythOS"
 wizard.close()
 
@@ -34,7 +35,7 @@ pages = {
     for key, index in hub._page_index_by_key.items()
 }
 constructed = {key: type(page).__name__ for key, page in pages.items()}
-assert len(constructed) == 19
+assert len(constructed) == 20
 assert constructed["Welcome"] == "WelcomePage"
 assert constructed["Hardware"] == "HardwarePage"
 
@@ -78,7 +79,7 @@ vpn_window = VpnWindow()
 assert isinstance(vpn_window.centralWidget(), VpnPage)
 assert vpn_window.windowTitle() == "VPN Connect"
 vpn_window.close()
-_shutdown_threads()
+shutdown_threads()
 """
 
 

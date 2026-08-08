@@ -1,19 +1,22 @@
+import shutil
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import (
-    _active_bootc_operation, _bootc_cancel_block_reason, _bootc_image_timestamp,
-    _bootc_proxy_running, _branch_display_name, _format_dl_progress_line, _format_elapsed,
-    _get_disk_write_bytes, _has_rollback_deployment, _has_staged_update, _human_bytes, _parse_update_phase,
-    _restyle, _run_worker, _set_session_inhibit, _start_or_extend_dl_monitor, _stop_download_monitor,
-    _with_idle_inhibit,
+from .core_base import restyle, run_worker, set_session_inhibit
+from .services.process import format_dl_progress_line, format_elapsed, get_disk_write_bytes, human_bytes, with_idle_inhibit
+from .services.bootc import (
+    active_bootc_operation, bootc_image_digest, bootc_image_timestamp, bootc_proxy_running, branch_display_name,
+    bootc_status_data, current_branch, has_rollback_deployment, has_staged_update, nested_get,
 )
 from .services.launch import reboot
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker, start_or_extend_dl_monitor, stop_download_monitor
 from .services.privileged import bootc_action
-from .core_base import _current_branch
-from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
-from .widgets import _make_card, _set_log_panel
+from .services.updates import (
+    UpdateOperationController, full_update_operation,
+    image_update_operation, rollback_operation,
+)
+from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _UpdateOpsMixin:
@@ -83,7 +86,37 @@ class _UpdateOpsMixin:
         action_layout.addLayout(btn_row)
         self._add(action_card)
 
+    def _build_rollback_explainer_card(self) -> None:
+        """Complaint #5: make atomic updates + rollback obvious to Windows switchers."""
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("🛡️  Updates are atomic — rollback is one reboot away")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "KythOS is immutable: updates build a new system image and 'stage' it. "
+            "Nothing changes until you reboot. If the new image breaks anything, reboot, "
+            "hold Shift at the boot menu, and pick the previous deployment — you're back in 30 seconds. "
+            "No reinstall, no lost files."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        how_btn = QPushButton("How staging works")
+        how_btn.setToolTip("Stage → Reboot → Try → Roll back if needed (previous build stays cached)")
+        how_btn.clicked.connect(lambda _=False: self._check_for_update(force_refresh=True))
+        row.addWidget(how_btn)
+        # Roll back button already exists; just explain it here
+        note = QLabel("Previous build is kept automatically — no backup step needed.")
+        note.setObjectName("caption-text")
+        note.setWordWrap(True)
+        row.addWidget(note, 1)
+        layout.addLayout(row)
+        self._add(card)
+
     def _build_progress_section(self):
+        self._operation = UpdateOperationController()
         self._status_lbl = QLabel()
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.hide()
@@ -115,21 +148,12 @@ class _UpdateOpsMixin:
         cancel_row.addStretch()
         self._add_layout(cancel_row)
 
-        self._log_toggle = QPushButton("Show details")
-        self._log_toggle.setCheckable(True)
-        self._log_toggle.setToolTip("Show or hide the update log output")
-        self._log_toggle.clicked.connect(self._set_log_expanded)
-        self._log_toggle.hide()
-        self._add(self._log_toggle)
-
-        self._log = QTextEdit()
-        # A chatty bootc pull can emit tens of thousands of lines; unbounded
-        # QTextEdit appends get slower and eat memory as the document grows.
-        self._log.document().setMaximumBlockCount(5000)
-        self._log.setReadOnly(True)
-        self._log.setMinimumHeight(200)
-        self._log.hide()
-        self._add(self._log)
+        # A chatty bootc pull can emit tens of thousands of lines; CollapsibleLogPanel
+        # caps the document's block count so unbounded appends don't slow down or
+        # balloon memory as the log grows.
+        self._log_panel = CollapsibleLogPanel(min_height=200)
+        self._log_panel.toggle.setToolTip("Show or hide the update log output")
+        self._add(self._log_panel)
 
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
@@ -141,16 +165,14 @@ class _UpdateOpsMixin:
         self._full_update_btn.setEnabled(enabled)
         self._os_btn.setEnabled(enabled)
         self._fw_btn.setEnabled(enabled)
-        rollback_ok = enabled and _has_rollback_deployment()
+        rollback_ok = enabled and has_rollback_deployment()
         self._rollback_btn.setEnabled(rollback_ok)
 
-    def _set_log_expanded(self, expanded: bool):
-        _set_log_panel(self._log_toggle, self._log, expanded)
-
     def _set_phase(self, phase: str):
+        self._operation.set_phase(phase)
         self._current_phase = phase
         self._status_lbl.setText(phase)
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
 
     def _start_operation(self, mode: str, label: str, cmd: list[str], inhibit_reason: str):
         self._stop_dl_monitor()
@@ -162,20 +184,20 @@ class _UpdateOpsMixin:
         self._dl_low_speed_ticks = 0
         self._staging_write_start = 0
         self._mode = mode
-        self._last_output_ts = time.monotonic()
-        self._op_start_ts = time.monotonic()
+        self._operation.start(mode)
+        self._last_output_ts = self._operation.last_output_at
+        self._op_start_ts = self._operation.started_at
         self._current_phase = ""
         self._cancel_blocked = False
         self._cancel_block_reason = ""
-        self._log.clear()
-        self._log_toggle.show()
-        self._set_log_expanded(False)
+        self._log_panel.reset()
+        self._log_panel.toggle.show()
         self._progress.setRange(0, 0)
         self._progress.show()
         self._status_lbl.setText(label)
         self._status_lbl.setObjectName("subheading")
         self._status_lbl.show()
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
         self._reboot_btn.hide()
         self._cancel_btn.setText("Cancel Update")
         self._cancel_btn.setEnabled(True)
@@ -184,9 +206,9 @@ class _UpdateOpsMixin:
         self._cancel_note.show()
         self._set_buttons_enabled(False)
 
-        _run_worker(
+        run_worker(
             self,
-            _with_idle_inhibit(cmd, inhibit_reason),
+            with_idle_inhibit(cmd, inhibit_reason),
             session_inhibit_reason=inhibit_reason,
             on_line=self._on_line,
             on_done=self._on_done,
@@ -196,8 +218,17 @@ class _UpdateOpsMixin:
         if mode != "rollback":
             self._heartbeat.start()
 
+    def _start_operation_spec(self, operation):
+        self._start_operation(
+            operation.mode,
+            operation.label,
+            list(operation.command),
+            operation.inhibit_reason,
+        )
+
     def _phase_blocks_cancel(self, phase: str) -> str:
-        return _bootc_cancel_block_reason(self._mode, phase)
+        self._operation.set_phase(phase)
+        return self._operation.cancel_block_reason
 
     def _update_cancel_state(self):
         if self._worker is None:
@@ -220,8 +251,7 @@ class _UpdateOpsMixin:
             return
         self._update_cancel_state()
         if self._cancel_blocked:
-            self._log.append(f"\nCancel unavailable: {self._cancel_block_reason}")
-            self._log.ensureCursorVisible()
+            self._log_panel.append(f"\nCancel unavailable: {self._cancel_block_reason}")
             return
         reply = QMessageBox.question(
             self,
@@ -238,44 +268,44 @@ class _UpdateOpsMixin:
         self._cancel_btn.setText("Cancelling…")
         self._cancel_note.setText("Cancel requested. Waiting for the update process to stop cleanly…")
         self._status_lbl.setText("Cancelling update…")
-        self._log.append("\nCancel requested by user. Waiting for the update process to stop…")
-        self._log.ensureCursorVisible()
+        self._log_panel.append("\nCancel requested by user. Waiting for the update process to stop…")
         self._worker.cancel()
 
     def _run_full_update(self):
-        self._start_operation(
-            "full-update",
-            "Running KythOS full system update…",
-            ["/usr/bin/kyth-full-update"],
-            "KythOS is running a full system update",
-        )
+        # Storage gate — Windows switcher filled C: then clicks Full Update and gets ENOSPC mid-pull. Block early.
+        try:
+            free = shutil.disk_usage("/").free
+            free_gb = free / (1024**3)
+            if free_gb < 10:
+                QMessageBox.warning(
+                    self, "Low disk space",
+                    f"Only {free_gb:.1f} GB free on /. Full Update needs ~6 GB plus Flatpak/buffer — free 10 GB first (try System → Storage or remove large Flatpaks), then retry.",
+                )
+                return
+        except Exception:
+            pass
+        self._start_operation_spec(full_update_operation())
 
     def _run_bootc_upgrade(self):
-        self._start_operation(
-            "update",
-            "Downloading the next KythOS OS image…",
-            bootc_action("upgrade").command(),
-            "KythOS is downloading a system update",
+        self._start_operation_spec(
+            image_update_operation(lambda: bootc_action("upgrade").command())
         )
 
     def _run_rollback(self):
-        self._start_operation(
-            "rollback",
-            "Staging the previous deployment for next boot…",
-            bootc_action("rollback").command(),
-            "KythOS is staging a system rollback",
+        self._start_operation_spec(
+            rollback_operation(lambda: bootc_action("rollback").command())
         )
 
     def _on_line(self, text: str):
-        self._last_output_ts = time.monotonic()
-        phase = _parse_update_phase(text.strip(), self._mode)
+        phase = self._operation.receive_line(text)
+        self._last_output_ts = self._operation.last_output_at
         if phase:
             self._set_phase(phase)
             self._update_cancel_state()
             if phase != "Downloading image layers…" and self._dl_downloaded >= self._dl_total > 0:
                 self._progress.setRange(0, 0)
         # Start or update network monitor when bootc tells us how much to download
-        self._dl_monitor, self._dl_total, started, progress_ready = _start_or_extend_dl_monitor(
+        self._dl_monitor, self._dl_total, started, progress_ready = start_or_extend_dl_monitor(
             text, self._dl_monitor, self._dl_total,
         )
         if progress_ready:
@@ -283,11 +313,10 @@ class _UpdateOpsMixin:
         if started:
             self._dl_monitor.stats.connect(self._on_dl_stats)
             self._dl_monitor.start()
-        self._log.append(text)
-        self._log.ensureCursorVisible()
+        self._log_panel.append(text)
 
     def _stop_dl_monitor(self):
-        _stop_download_monitor(self._dl_monitor)
+        stop_download_monitor(self._dl_monitor)
         self._dl_monitor = None
 
     def _on_dl_stats(self, downloaded: int, total: int, speed_bps: int, eta_sec: int):
@@ -305,6 +334,15 @@ class _UpdateOpsMixin:
             self._update_activity()
             self._stop_dl_monitor()
 
+        download_state = self._operation.update_download(
+            downloaded,
+            total,
+            speed_bps,
+            eta_sec,
+            proxy_running=bootc_proxy_running(),
+        )
+        self._dl_low_speed_ticks = self._operation.low_speed_ticks
+
         # Track consecutive near-zero-speed ticks.
         # Only declare the download done when speed has been near-zero for at
         # least 10 seconds AND the skopeo image-proxy process has exited —
@@ -313,12 +351,7 @@ class _UpdateOpsMixin:
         # network byte counter says.  The byte-count 99.5% heuristic is removed
         # entirely: /proc/net/dev counts all interface traffic (not just bootc)
         # and the total is an estimate, making it too unreliable to use alone.
-        if speed_bps <= 100_000:
-            self._dl_low_speed_ticks += 1
-        else:
-            self._dl_low_speed_ticks = 0
-
-        if self._dl_low_speed_ticks >= 10 and downloaded > 0 and not _bootc_proxy_running():
+        if download_state == "complete":
             _finish_download("Download complete — processing image layers…")
             return
 
@@ -326,21 +359,21 @@ class _UpdateOpsMixin:
         if speed_bps > 100_000 and downloaded < total:
             self._set_phase("Downloading image layers…")
         if speed_bps > 100_000:
-            self._activity_lbl.setText(_format_dl_progress_line(downloaded, total, speed_bps, eta_sec))
+            self._activity_lbl.setText(format_dl_progress_line(downloaded, total, speed_bps, eta_sec))
             self._activity_lbl.show()
 
     def _update_activity(self):
-        if not _active_bootc_operation() and self._worker is None:
+        if not active_bootc_operation() and self._worker is None:
             self._activity_lbl.hide()
             return
         # Don't clobber live download stats the dl monitor just wrote
         if self._dl_monitor is not None and self._dl_speed > 100_000:
             return
-        elapsed = int(time.monotonic() - self._op_start_ts) if self._op_start_ts else 0
+        elapsed = self._operation.elapsed()
         parts: list[str] = []
         if self._dl_final_bytes > 0:
-            parts.append(f"{_human_bytes(self._dl_final_bytes)} downloaded")
-        parts.append(f"{_format_elapsed(elapsed)} elapsed")
+            parts.append(f"{human_bytes(self._dl_final_bytes)} downloaded")
+        parts.append(f"{format_elapsed(elapsed)} elapsed")
         self._activity_lbl.setText("  ·  ".join(parts))
         self._activity_lbl.show()
 
@@ -352,11 +385,12 @@ class _UpdateOpsMixin:
         # Fallback: if output has been silent for 10+ seconds and we're still
         # showing the download phase, the download finished without triggering
         # the dl monitor's low-speed transition (e.g. no "layers needed:" line).
-        if (self._current_phase == "Downloading image layers…"
+        previous_phase = self._operation.phase
+        current_phase = self._operation.heartbeat_phase()
+        if (previous_phase != current_phase
                 and self._dl_monitor is None
-                and self._last_output_ts
-                and time.monotonic() - self._last_output_ts > 10):
-            self._set_phase("Processing image layers…")
+                and current_phase == "Processing image layers…"):
+            self._set_phase(current_phase)
         # During the post-download staging phase, bootc/ostree commit layers to
         # disk without emitting any output. Inject a heartbeat line every tick so
         # the log doesn't look frozen while ostree is writing gigabytes to disk.
@@ -366,16 +400,15 @@ class _UpdateOpsMixin:
                 and silent_secs >= 5
                 and self._worker is not None):
             if self._staging_write_start == 0:
-                self._staging_write_start = _get_disk_write_bytes()
-            written = max(0, _get_disk_write_bytes() - self._staging_write_start)
-            elapsed = int(time.monotonic() - self._op_start_ts) if self._op_start_ts else 0
-            elapsed_str = _format_elapsed(elapsed)
+                self._staging_write_start = get_disk_write_bytes()
+            written = max(0, get_disk_write_bytes() - self._staging_write_start)
+            elapsed = self._operation.elapsed()
+            elapsed_str = format_elapsed(elapsed)
             if written >= 1024 * 1024:
-                msg = f"  [staging] writing image to disk… {_human_bytes(written)} written · {elapsed_str} elapsed"
+                msg = f"  [staging] writing image to disk… {human_bytes(written)} written · {elapsed_str} elapsed"
             else:
                 msg = f"  [staging] committing image to repository… {elapsed_str} elapsed"
-            self._log.append(msg)
-            self._log.ensureCursorVisible()
+            self._log_panel.append(msg)
         self._update_activity()
 
     def _on_done(self, code: int):
@@ -384,71 +417,71 @@ class _UpdateOpsMixin:
         self._progress.hide()
         self._cancel_btn.hide()
         self._cancel_note.hide()
-        _finish_worker(self)
-        _set_session_inhibit(self, None)
+        finish_worker(self)
+        set_session_inhibit(self, None)
         self._update_activity()
         self._set_buttons_enabled(True)
+        completion = self._operation.completion(
+            code,
+            staged=code == 0 and has_staged_update(),
+        )
 
         if code == Worker.CANCELLED:
-            self._status_lbl.setText("Update cancelled. The running operation was stopped.")
-            self._status_lbl.setObjectName("status-warn")
-            self._log.append("\nCancelled. You can start the update again when ready.")
-            self._check_for_update()
+            self._status_lbl.setText(completion.message)
+            self._status_lbl.setObjectName(completion.style)
+            self._log_panel.append("\nCancelled. You can start the update again when ready.")
+            self._check_for_update(force_refresh=True)
         elif code == 0:
             if self._mode == "firmware":
                 self._status_lbl.setText("Firmware updates queued — reboot to flash.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nDone. Firmware will be applied during the next reboot (EFI capsule).")
+                self._log_panel.append("\nDone. Firmware will be applied during the next reboot (EFI capsule).")
                 self._reboot_btn.show()
                 self._fw_btn.hide()
                 self._fw_status_lbl.setText("Firmware update queued — reboot to apply.")
                 self._fw_icon.setText("✓")
-                self._fw_icon.setStyleSheet("font-size: 22px; color: #4fc1ff;")
+                self._fw_icon.setObjectName("fw-icon-blue")
+                restyle(self._fw_icon)
                 return
             if self._mode == "rollback":
                 self._status_lbl.setText("Rollback staged — restart to return to the previous system.")
                 self._status_lbl.setObjectName("status-warn")
-                self._log.append("\nDone. Restart to switch to the previous deployment.")
+                self._log_panel.append("\nDone. Restart to switch to the previous deployment.")
                 self._reboot_btn.show()
-                self._check_for_update()
+                self._check_for_update(force_refresh=True)
             elif self._mode == "switch":
                 self._status_lbl.setText("Branch staged — restart to apply the new channel.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nDone. Restart to boot into the new branch.")
+                self._log_panel.append("\nDone. Restart to boot into the new branch.")
                 self._reboot_btn.show()
-                self._check_for_update()
-            elif _has_staged_update():
+                self._check_for_update(force_refresh=True)
+            elif has_staged_update():
                 self._status_lbl.setText("Update staged — restart when you're ready to apply it.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nDone. Your next system image is staged and waiting for restart.")
+                self._log_panel.append("\nDone. Your next system image is staged and waiting for restart.")
                 self._reboot_btn.show()
-                self._check_for_update()
+                self._check_for_update(force_refresh=True)
             elif self._mode == "full-update":
                 self._status_lbl.setText("Update complete — everything is up to date.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nDone. All managed tools and apps are up to date.")
-                self._check_for_update()
+                self._log_panel.append("\nDone. All managed tools and apps are up to date.")
+                self._check_for_update(force_refresh=True)
             else:
                 self._status_lbl.setText("Already on the latest deployment — no image update was staged.")
                 self._status_lbl.setObjectName("status-ok")
-                self._log.append("\nNo OS image update was staged. System is current.")
-                self._check_for_update()
+                self._log_panel.append("\nNo OS image update was staged. System is current.")
+                self._check_for_update(force_refresh=True)
         else:
-            label = {
-                "full-update": "full update", "update": "bootc upgrade",
-                "rollback": "bootc rollback", "switch": "bootc switch",
-                "firmware": "fwupdmgr upgrade",
-            }.get(self._mode, "operation")
-            self._status_lbl.setText(f"{label} failed (exit code {code}).")
-            self._status_lbl.setObjectName("status-err")
+            self._status_lbl.setText(completion.message)
+            self._status_lbl.setObjectName(completion.style)
 
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)
         self._refresh_summary()
 
     def _refresh_summary(self):
-        tag = _current_branch()
-        branch = _branch_display_name(tag)
-        booted_ts = _bootc_image_timestamp("booted")
+        tag = current_branch()
+        branch = branch_display_name(tag)
+        booted_ts = bootc_image_timestamp("booted")
 
         # Running row
         running_text = branch
@@ -458,39 +491,81 @@ class _UpdateOpsMixin:
 
         if self._worker is not None:
             self._staged_val.setText("Update in progress…")
-            self._staged_val.setStyleSheet("")
+            self._staged_val.setObjectName("prop-val")
+            restyle(self._staged_val)
             self._rollback_val.setText("—")
             self._rollback_btn.setEnabled(False)
             self._rollback_btn.setText("Roll Back")
             self._reboot_btn.hide()
             return
 
-        staged = _has_staged_update()
-        rollback = _has_rollback_deployment()
-        staged_ts = _bootc_image_timestamp("staged") if staged else None
-        rollback_ts = _bootc_image_timestamp("rollback") if rollback else None
+        staged = has_staged_update()
+        rollback = has_rollback_deployment()
+        staged_ts = bootc_image_timestamp("staged") if staged else None
+        rollback_ts = bootc_image_timestamp("rollback") if rollback else None
+        # Low-disk hint in summary (also enforced in _run_full_update) — Slice 2/5 storage gate
+        try:
+            free_gb = shutil.disk_usage("/").free / (1024**3)
+            if free_gb < 10 and not staged:
+                self._staged_val.setText(f"Low disk: {free_gb:.1f} GB free — free 10 GB before Full Update")
+                self._staged_val.setObjectName("prop-val-warn")
+                restyle(self._staged_val)
+                # keep warning visible even though staged is None
+                self._staged_val.setToolTip(f"Only {free_gb:.1f} GB free on /. Full Update needs ~6 GB + buffer.")
+        except Exception:
+            free_gb = 999.0
 
-        # Staged row
+        # Staged row — include pending image ref + short digest when present (5/5 visibility)
         if staged:
-            staged_text = f"built {staged_ts}  —  reboot to apply" if staged_ts else "Ready — reboot to apply"
+            data = bootc_status_data() or {}
+            staged_ref = nested_get(data, ("status", "staged", "image", "image")) or nested_get(data, ("status", "staged", "image", "transport_image")) or ""
+            staged_digest = bootc_image_digest("staged")
+            short = f"  ·  {staged_digest[0]}" if staged_digest else ""
+            ref_part = f"{staged_ref.split('@')[0]}" if staged_ref else ""
+            # Keep readable: tag or repo, not full digest
+            label = ref_part.split("/")[-1] if "/" in ref_part else ref_part
+            if staged_ts:
+                staged_text = f"{label}{short}  ·  built {staged_ts}  —  reboot to apply" if label else f"built {staged_ts}  —  reboot to apply"
+            else:
+                staged_text = f"{label}{short}  —  reboot to apply" if label else "Ready — reboot to apply"
             self._staged_val.setText(staged_text)
-            self._staged_val.setStyleSheet("color: #5b9cf6;")
+            self._staged_val.setObjectName("prop-val-blue")
         else:
             self._staged_val.setText("None")
-            self._staged_val.setStyleSheet("color: #888888;")
+            self._staged_val.setObjectName("prop-val-dim")
+        restyle(self._staged_val)
 
-        # Rollback row + button label
+        # Rollback row + button label — also show rollback tag
         if rollback:
-            rb_text = f"Available  ·  built {rollback_ts}" if rollback_ts else "Available"
+            data = bootc_status_data() or {}
+            rb_ref = nested_get(data, ("status", "rollback", "image", "image")) or ""
+            if isinstance(rb_ref, dict):
+                rb_ref = rb_ref.get("image", "") or rb_ref.get("imageref", "") or ""
+            rb_label = (rb_ref.split("@")[0].split("/")[-1] if isinstance(rb_ref, str) and rb_ref and "/" in rb_ref else rb_ref.split("@")[0] if isinstance(rb_ref, str) and rb_ref else "")
+            rb_text = f"Available ({rb_label})  ·  built {rollback_ts}" if rollback_ts and rb_label else (f"Available ({rb_label})" if rb_label else (f"Available  ·  built {rollback_ts}" if rollback_ts else "Available"))
             self._rollback_val.setText(rb_text)
-            self._rollback_val.setStyleSheet("")
+            self._rollback_val.setObjectName("prop-val")
             self._rollback_btn.setText(f"Roll Back  ({rollback_ts})" if rollback_ts else "Roll Back")
         else:
             self._rollback_val.setText("None")
-            self._rollback_val.setStyleSheet("color: #888888;")
+            self._rollback_val.setObjectName("prop-val-dim")
             self._rollback_btn.setText("Roll Back")
+        restyle(self._rollback_val)
 
         self._rollback_btn.setEnabled(rollback and self._worker is None)
+
+        # Low-disk gate: disable Full/OS buttons when <10 GB free (also checked at click time)
+        low_disk = free_gb < 10
+        if low_disk and self._worker is None:
+            self._full_update_btn.setEnabled(False)
+            self._full_update_btn.setToolTip(f"Low disk: {free_gb:.1f} GB free — free 10 GB before updating")
+            self._os_btn.setEnabled(False)
+            self._os_btn.setToolTip(f"Low disk: {free_gb:.1f} GB free")
+        else:
+            self._full_update_btn.setEnabled(self._worker is None)
+            self._full_update_btn.setToolTip("Updates the OS image, Flatpaks, firmware, and KythOS-managed tools")
+            self._os_btn.setEnabled(self._worker is None)
+            self._os_btn.setToolTip("Downloads the next KythOS system image only (bootc upgrade)")
 
         if staged:
             self._reboot_btn.show()

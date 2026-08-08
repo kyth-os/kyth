@@ -49,7 +49,9 @@
         "/usr/share/plymouth/themes/kyth*",
         "/usr/share/polkit-1/rules.d/*kyth*",
         "/usr/share/ublue-os/just/75-kyth.just",
-        "/usr/share/wallpapers/kyth*"
+        "/usr/share/wallpapers/kyth*",
+        "/usr/lib/python3*/site-packages/kyth_*",
+        "/usr/lib64/python3*/site-packages/kyth_*"
       ],
       "dedicated": false
     },
@@ -83,6 +85,12 @@
       "files": [
         "/usr/share/gamescope-session-plus/bootstrap_steam.tar.gz"
       ]
+    },
+    "proton-cachyos": {
+      "files": [
+        "/usr/share/steam/compatibilitytools.d/*"
+      ],
+      "dedicated": true
     },
     "steam": {
       "packages": [
@@ -334,6 +342,19 @@
         "gnome-tweaks"
       ]
     },
+    "gnome-session": {
+      "packages": [
+        "gsettings-desktop-schemas",
+        "gnome-settings-daemon",
+        "gnome-session",
+        "gnome-session-wayland-session",
+        "gnome-session-xsession",
+        "gnome-shell-extension-background-logo",
+        "gnome-system-monitor",
+        "gnome-disk-utility",
+        "gnome-backgrounds"
+      ]
+    },
     "gnome-shell": {
       "packages": [
         "gnome-control-center-filesystem",
@@ -351,19 +372,6 @@
       "packages": [
         "gtk3",
         "gtk-update-icon-cache"
-      ]
-    },
-    "gnome-session": {
-      "packages": [
-        "gsettings-desktop-schemas",
-        "gnome-settings-daemon",
-        "gnome-session",
-        "gnome-session-wayland-session",
-        "gnome-session-xsession",
-        "gnome-shell-extension-background-logo",
-        "gnome-system-monitor",
-        "gnome-disk-utility",
-        "gnome-backgrounds"
       ]
     },
     "gutenprint": {
@@ -442,6 +450,13 @@
       ],
       "dedicated": false
     },
+    "mingw-libjpeg": {
+      "packages": [
+        "mingw*-libjpeg-turbo",
+        "libjpeg-turbo"
+      ],
+      "dedicated": false
+    },
     "mingw-libgcc": {
       "packages": [
         "mingw*-lib*"
@@ -456,13 +471,6 @@
     "mingw-vkd3d": {
       "packages": [
         "mingw*-vkd3d*"
-      ],
-      "dedicated": false
-    },
-    "mingw-libjpeg": {
-      "packages": [
-        "mingw*-libjpeg-turbo",
-        "libjpeg-turbo"
       ],
       "dedicated": false
     },

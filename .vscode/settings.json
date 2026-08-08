@@ -10,5 +10,9 @@
     ],
     "python.testing.pytestEnabled": false,
     "python.testing.unittestEnabled": true,
-    "claudeCodeChat.permissions.yoloMode": true
+    "claudeCodeChat.permissions.yoloMode": true,
+    "git.environment": {
+        "GIT_DIR": "/tmp/kyth-git-writable",
+        "GIT_WORK_TREE": "/var/home/mrtrick/git/kyth"
+    }
 }

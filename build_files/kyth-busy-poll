@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-busy-poll — 50 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-busy-poll "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.busy_poll import load_busy_poll, busy_poll_status; c=load_busy_poll(); print(f\"profile={c['profile']} active={busy_poll_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.busy_poll import load_busy_poll,save_busy_poll,generate_busy_poll; c=load_busy_poll(); c['profile']='gaming'; save_busy_poll(c); generate_busy_poll(c)"; sysctl --system >/dev/null 2>&1 || true; echo "busy poll gaming 50" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.busy_poll import load_busy_poll,save_busy_poll,generate_busy_poll; c=load_busy_poll(); c['profile']='balanced'; save_busy_poll(c); generate_busy_poll(c)"; echo "busy poll balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.busy_poll import load_busy_poll,generate_busy_poll; generate_busy_poll(load_busy_poll())" ;;
+    *) echo "Usage: kyth-busy-poll [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

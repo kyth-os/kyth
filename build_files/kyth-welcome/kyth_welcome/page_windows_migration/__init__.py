@@ -20,21 +20,31 @@ from ..widgets import (
 )
 
 from .shortcuts_phone import _ShortcutsPhoneMixin
-from .localsend_misc import _LocalSendMiscMixin
+from .nearby_sharing import _NearbySharingMixin
+from .powertoys import _PowerToysMixin
+from .hw_sanity import _HwSanityMixin
 from .files_copy import _FilesCopyMixin
-from .bookmarks_extras import _BookmarksExtrasMixin
-from .transfer_extras import _TransferExtrasMixin
+from .bookmarks import _BookmarksMixin
+from .pc_drive_extras import _PcDriveExtrasMixin
+from .takeout import _TakeoutMixin
+from .wsl import _WslMixin
 from .drives import _DrivesMixin
+from .family_hub import _FamilyHubMixin
 
 
 # ── Page: Move Files ──────────────────────────────────────────────────
 class WindowsMigrationPage(
     Page,
     _ShortcutsPhoneMixin,
-    _LocalSendMiscMixin,
+    _NearbySharingMixin,
+    _PowerToysMixin,
+    _HwSanityMixin,
     _FilesCopyMixin,
-    _BookmarksExtrasMixin,
-    _TransferExtrasMixin,
+    _BookmarksMixin,
+    _PcDriveExtrasMixin,
+    _TakeoutMixin,
+    _FamilyHubMixin,
+    _WslMixin,
     _DrivesMixin,
 ):
 
@@ -69,6 +79,7 @@ class WindowsMigrationPage(
 
         self._build_intro_card()
         self._build_flow_card()
+        self._build_takeout_card()
         self._build_checklist_card()
         self._build_hw_card()
         self._build_clock_card()
@@ -80,6 +91,7 @@ class WindowsMigrationPage(
         self._build_phone_card()
         self._build_score_card()
         self._build_drives_card()
+        self._build_family_hub_card()
         self._build_files_card()
         self._build_bookmarks_card()
         self._build_wallpaper_card()
@@ -155,7 +167,34 @@ class WindowsMigrationPage(
             ("dim", "Updates", "KythOS updates stage a new OS image. Reboot when ready; rollbacks stay available."),
         ):
             checklist_layout.addWidget(self._make_migration_row(status, title, text))
+        # verify parity 80
+        verify_row = QHBoxLayout()
+        verify_row.setSpacing(8)
+        self._verify_status = QLabel("Verify: pending")
+        self._verify_status.setObjectName("status-muted")
+        verify_row.addWidget(self._verify_status, 1)
+        btn_verify = QPushButton("Verify Migration")
+        btn_verify.setToolTip("Check bookmarks/drives/files/onedrive/PWA parity")
+        btn_verify.clicked.connect(self._run_verify)
+        verify_row.addWidget(btn_verify)
+        checklist_layout.addLayout(verify_row)
         self._add(checklist)
+
+    def _run_verify(self):
+        try:
+            from kyth_shared.windows_verify import windows_verify
+
+            r = windows_verify()
+            self._verify_status.setText(f"parity {r.get('parity')} — {r}")
+            self._verify_status.setObjectName("status-ok" if r.get("parity") == "ok" else "status-warn")
+            try:
+                from ..core_base import restyle
+
+                restyle(self._verify_status)
+            except Exception:
+                pass
+        except Exception as exc:
+            self._verify_status.setText(f"verify failed — {exc}")
 
 
 

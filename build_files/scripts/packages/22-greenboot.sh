@@ -5,8 +5,9 @@ set -euo pipefail
 # ── greenboot boot-time health checks ────────────────────────────────────────
 # greenboot marks each boot good/bad and triggers automatic rollback to the
 # previous bootc deployment if health checks fail across three consecutive boots.
-# greenboot-default-health-checks adds basic required/wanted service checks out
-# of the box. Installed last so a transient package issue here cannot gate the
-# full image build — the core gaming stack lands regardless.
-dnf5 install -y greenboot greenboot-default-health-checks
+# KythOS deliberately does not install greenboot-default-health-checks: its
+# required repository-DNS probe can reboot an otherwise healthy offline desktop
+# and cannot be repaired by rolling back the OS. KythOS installs immutable,
+# rollback-actionable checks during the branding phase instead.
+dnf5 install -y greenboot
 systemctl enable greenboot-healthcheck.service greenboot-set-rollback-trigger.service

@@ -11,9 +11,11 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
-from kyth_welcome.services import probe as probe_mod  # noqa: E402
-from kyth_welcome.services import process as process_mod  # noqa: E402
+from kyth_shared.system import probe as probe_mod  # noqa: E402
+from kyth_shared.system import process as process_mod  # noqa: E402
+from kyth_shared.system import controllers as controller_mod  # noqa: E402
 
 
 class ProbeCacheFileTests(unittest.TestCase):
@@ -83,10 +85,10 @@ class ProbeCachedIntegrationTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.path = pathlib.Path(self._tmp.name) / "probe-cache.json"
-        process_mod._PROBE_CACHE.clear()
+        process_mod.PROBE_CACHE.clear()
 
     def tearDown(self):
-        process_mod._PROBE_CACHE.clear()
+        process_mod.PROBE_CACHE.clear()
         self._tmp.cleanup()
 
     def test_memory_hit_skips_fetch(self):
@@ -97,8 +99,8 @@ class ProbeCachedIntegrationTests(unittest.TestCase):
             return "live"
 
         # Seed memory
-        process_mod._PROBE_CACHE["bootc-status-text"] = (time.monotonic(), "cached")
-        val = process_mod._probe_cached("bootc-status-text", 5.0, fetch)
+        process_mod.PROBE_CACHE["bootc-status-text"] = (time.monotonic(), "cached")
+        val = process_mod.probe_cached("bootc-status-text", 5.0, fetch)
         self.assertEqual(val, "cached")
         self.assertEqual(calls["n"], 0)
 
@@ -117,39 +119,74 @@ class ProbeCachedIntegrationTests(unittest.TestCase):
             probe_mod, "cache_read_paths", return_value=[self.path]
         ):
             # Clear memory so disk path is used
-            process_mod._PROBE_CACHE.clear()
-            val = process_mod._probe_cached("bootc-status-text", 5.0, fetch)
+            process_mod.PROBE_CACHE.clear()
+            val = process_mod.probe_cached("bootc-status-text", 5.0, fetch)
         self.assertEqual(val, "from-disk")
         self.assertEqual(calls["n"], 0)
 
     def test_invalidate_clears_memory_and_disk(self):
         probe_mod.update_sections({"nvidia-detect": True}, path=self.path)
-        process_mod._PROBE_CACHE["nvidia-detect"] = (time.monotonic(), True)
+        process_mod.PROBE_CACHE["nvidia-detect"] = (time.monotonic(), True)
         with mock.patch.object(
             probe_mod, "cache_read_paths", return_value=[self.path]
         ):
-            process_mod._invalidate_probe_caches()
-        self.assertNotIn("nvidia-detect", process_mod._PROBE_CACHE)
+            process_mod.invalidate_probe_caches()
+        self.assertNotIn("nvidia-detect", process_mod.PROBE_CACHE)
         doc = json.loads(self.path.read_text())
         self.assertNotIn("nvidia-detect", doc.get("sections", {}))
 
     def test_disk_section_usable_helpers(self):
-        self.assertFalse(process_mod._disk_section_usable("flatpak-apps", None))
-        self.assertTrue(process_mod._disk_section_usable("nvidia-detect", False))
-        self.assertTrue(process_mod._disk_section_usable("flatpak-apps", []))
-        self.assertFalse(process_mod._disk_section_usable("bootc-status-text", ""))
+        self.assertFalse(process_mod.disk_section_usable("flatpak-apps", None))
+        self.assertTrue(process_mod.disk_section_usable("nvidia-detect", False))
+        self.assertTrue(process_mod.disk_section_usable("flatpak-apps", []))
+        self.assertFalse(process_mod.disk_section_usable("bootc-status-text", ""))
 
 
 class CollectSnapshotTests(unittest.TestCase):
+    def test_shared_controller_detector_parses_known_usb_device(self):
+        def output(command, timeout=5):
+            if command[0] == "lsusb":
+                return "Bus 001 Device 005: ID 045e:02e6 Xbox Wireless Adapter\n"
+            if command[0] == "lsmod":
+                return "xone_hid 40960 0\n"
+            return ""
+
+        with mock.patch.object(controller_mod, "command_stdout", side_effect=output), \
+             mock.patch.object(controller_mod.os, "listdir", return_value=[]), \
+             mock.patch.object(controller_mod.shutil, "which", return_value=None):
+            result = controller_mod.detect_controllers()
+
+        self.assertTrue(result["xone_dongle"])
+        self.assertTrue(result["xone_loaded"])
+
+    def test_typed_collectors_preserve_unavailable_and_failure_states(self):
+        collectors = (
+            probe_mod.ProbeCollector("ok", ("available", "missing"), lambda: {
+                "available": {"value": 1}, "missing": None,
+            }),
+            probe_mod.ProbeCollector("bad", ("failed",), lambda: (_ for _ in ()).throw(RuntimeError("boom"))),
+        )
+
+        results = probe_mod.collect_probe_results(collectors)
+
+        self.assertEqual(results["available"].status, probe_mod.ProbeStatus.AVAILABLE)
+        self.assertEqual(results["missing"].status, probe_mod.ProbeStatus.UNAVAILABLE)
+        self.assertEqual(results["failed"].status, probe_mod.ProbeStatus.FAILED)
+        self.assertIn("boom", results["failed"].error)
+
+    def test_shared_probe_has_no_welcome_dependency(self):
+        source = pathlib.Path(probe_mod.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("kyth_welcome", source)
+
     def test_collect_snapshot_keys(self):
         with mock.patch(
-            "kyth_welcome.services.bootc._fetch_bootc_status_data",
+            "kyth_shared.system.bootc.fetch_bootc_status_data",
             return_value={"ok": True},
         ), mock.patch(
-            "kyth_welcome.services.bootc._fetch_bootc_status_text",
+            "kyth_shared.system.bootc.fetch_bootc_status_text",
             return_value="text",
         ), mock.patch(
-            "kyth_welcome.services.process._run_command",
+            "kyth_shared.system.process.run_command",
         ) as run:
             # flatpak list
             flatpak = mock.Mock(returncode=0, stdout="com.a.B\ncom.c.D\n")

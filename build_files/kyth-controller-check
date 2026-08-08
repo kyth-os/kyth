@@ -1,74 +1,77 @@
-#!/usr/bin/env bash
-# Read-only controller readiness check for KythOS gaming validation.
+#!/usr/bin/env python3
+"""Read-only controller readiness check for KythOS gaming validation."""
+from __future__ import annotations
 
-set -uo pipefail
+import re
+import subprocess
+from pathlib import Path
 
-# shellcheck source=kyth-diagnostics-common.sh disable=SC1091
-source /usr/libexec/kyth-diagnostics-common.sh
 
-print_header "Controller Check"
 
-if [[ -d /dev/input ]]; then
-    pass "Input subsystem" "/dev/input present"
-else
-    fail "Input subsystem" "/dev/input missing"
-fi
+from kyth_shared.diagnostics import DiagnosticReporter
+from kyth_shared.gaming import find_controllers
 
-controllers=()
-if have udevadm; then
-    while IFS= read -r line; do
-        controllers+=("$line")
-    done < <(
-        for dev in /dev/input/event*; do
-            [[ -e "$dev" ]] || continue
-            name="$(udevadm info --query=property --name="$dev" 2>/dev/null \
-                | awk -F= '/^ID_MODEL_FROM_DATABASE=|^ID_MODEL=|^NAME=/{print $2; exit}')"
-            props="$(udevadm info --query=property --name="$dev" 2>/dev/null)"
-            if grep -Eiq 'joystick|gamepad|xbox|dualsense|dualshock|playstation|controller' <<<"${name} ${props}"; then
-                printf '%s %s\n' "$dev" "${name:-controller}"
-            fi
-        done
-    )
-fi
 
-if [[ "${#controllers[@]}" -gt 0 ]]; then
-    pass "Controller detected" "${controllers[0]}"
-    if [[ "${#controllers[@]}" -gt 1 ]]; then
-        printf '%s\n' "${controllers[@]:1}" | sed 's/^/      /'
-    fi
-else
-    warn "Controller detected" "none found; plug in or pair a controller and rerun"
-fi
 
-if have bluetoothctl; then
-    bt_devices="$(bluetoothctl devices 2>/dev/null || true)"
-    if grep -Eiq 'Xbox|DualSense|DualShock|Wireless Controller|8BitDo|Controller' <<<"${bt_devices}"; then
-        pass "Bluetooth controller" "$(grep -Ei 'Xbox|DualSense|DualShock|Wireless Controller|8BitDo|Controller' <<<"${bt_devices}" | sed -n '1p')"
-    else
-        warn "Bluetooth controller" "no paired controller-like Bluetooth device found"
-    fi
-else
-    warn "Bluetooth controller" "bluetoothctl unavailable"
-fi
+def main() -> None:
+    reporter = DiagnosticReporter("Controller Check")
+    reporter.print_header()
 
-if have steam-devices; then
-    pass "Steam devices rules" "steam-devices command present"
-elif rpm -q steam-devices >/dev/null 2>&1; then
-    pass "Steam devices rules" "steam-devices package installed"
-else
-    warn "Steam devices rules" "steam-devices package not detected"
-fi
+    if Path("/dev/input").is_dir():
+        reporter.pass_check("Input subsystem", "/dev/input present")
+    else:
+        reporter.fail_check("Input subsystem", "/dev/input missing")
 
-if [[ -e /dev/uinput ]]; then
-    pass "uinput" "/dev/uinput present"
-else
-    warn "uinput" "/dev/uinput missing; some remappers may not work"
-fi
+    controllers = []
+    if reporter.have("udevadm"):
+        controllers = find_controllers()
 
-if have flatpak && flatpak info com.valvesoftware.Steam >/dev/null 2>&1; then
-    pass "Steam" "installed"
-else
-    warn "Steam" "not installed"
-fi
+    if controllers:
+        reporter.pass_check("Controller detected", controllers[0])
+        for extra in controllers[1:]:
+            print(f"      {extra}")
+    else:
+        reporter.warn_check("Controller detected", "none found; plug in or pair a controller and rerun")
 
-print_result "controller readiness"
+    if reporter.have("bluetoothctl"):
+        bt_res = subprocess.run(["bluetoothctl", "devices"], capture_output=True, text=True, check=False)
+        bt_devices = bt_res.stdout
+        matches = [
+            line for line in bt_devices.splitlines()
+            if any(kw in line.lower() for kw in ("xbox", "dualsense", "dualshock", "wireless controller", "8bitdo", "controller"))
+        ]
+        if matches:
+            reporter.pass_check("Bluetooth controller", matches[0].strip())
+        else:
+            reporter.warn_check("Bluetooth controller", "no paired controller-like Bluetooth device found")
+    else:
+        reporter.warn_check("Bluetooth controller", "bluetoothctl unavailable")
+
+    if reporter.have("steam-devices"):
+        reporter.pass_check("Steam devices rules", "steam-devices command present")
+    else:
+        rpm_res = subprocess.run(["rpm", "-q", "steam-devices"], capture_output=True, check=False)
+        if rpm_res.returncode == 0:
+            reporter.pass_check("Steam devices rules", "steam-devices package installed")
+        else:
+            reporter.warn_check("Steam devices rules", "steam-devices package not detected")
+
+    if Path("/dev/uinput").exists():
+        reporter.pass_check("uinput", "/dev/uinput present")
+    else:
+        reporter.warn_check("uinput", "/dev/uinput missing; some remappers may not work")
+
+    if reporter.have("flatpak"):
+        fp_res = subprocess.run(["flatpak", "info", "com.valvesoftware.Steam"], capture_output=True, check=False)
+        if fp_res.returncode == 0:
+            reporter.pass_check("Steam", "installed")
+        else:
+            reporter.warn_check("Steam", "not installed")
+    else:
+        reporter.warn_check("Steam", "flatpak command not found")
+
+    reporter.print_result("controller readiness")
+
+
+if __name__ == "__main__":
+    main()

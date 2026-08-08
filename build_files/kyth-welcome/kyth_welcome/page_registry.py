@@ -89,51 +89,33 @@ NavItem = tuple[tuple[str, ...], str, str, str, PageFactory]
 
 
 SEARCH_ITEMS: dict[str, tuple[str, str, list[str]]] = {
-    "Welcome": ("Home", "Review this PC, pick a preset, and jump into common setup tasks.", ["Control Panel", "PC focus", "Switch focus", "Everyday preset", "Gaming preset"]),
-    "Gaming": ("Gaming", "Install launchers, scan game libraries, set up capture, saves, and migration helpers.", ["Steam", "Epic Games", "GOG", "Game Pass", "Xbox app", "Xbox Game Bar", "Game capture", "Instant replay", "Battle.net", "screen record", "record gameplay"]),
-    "Performance": ("Performance", "Tune power, scheduler, and desktop performance behavior.", ["Task Manager", "Mission Center", "Performance mode", "slow game", "low FPS", "stutter", "lag", "fan noise", "battery life"]),
-    "Compatibility": ("Compatibility", "Check known game support, ProtonDB context, and blocked anti-cheat titles.", ["Will my games work", "ProtonDB", "Anti-cheat", "game crashes", "game won't launch", "blocked game"]),
-    "Controllers": ("Controllers", "Pair, test, and troubleshoot game controllers.", ["Xbox controller", "PlayStation controller", "Game controllers", "controller not working", "gamepad not detected"]),
+    "Welcome": ("Home", "Review this PC, pick a preset, and jump into common setup tasks.", ["Control Panel", "PC focus", "Everyday preset", "Gaming preset", "Switch focus"]),
+    "Gaming": ("Gaming", "Install launchers, scan game libraries, set up capture, saves, and migration helpers.", ["Game launchers", "Steam", "Epic Games", "GOG", "Game Pass", "Xbox app", "Xbox Game Bar", "Game Bar", "Game capture", "Instant replay", "Battle.net", "Screen record", "Record gameplay"]),
+    "Performance": ("Performance", "Tune power, scheduler, and desktop performance behavior.", ["Task Manager", "Mission Center", "Performance mode", "Slow game", "Low FPS", "Stutter", "Lag", "Fan noise", "Battery life"]),
+    "Compatibility": ("Compatibility", "Check known game support, ProtonDB context, and blocked anti-cheat titles.", ["Game compatibility", "Will my games work", "ProtonDB", "Anti-cheat", "Game crashes", "Game won't launch", "Blocked game"]),
+    "Controllers": ("Controllers", "Pair, test, and troubleshoot game controllers.", ["Game controllers", "Xbox controller", "PlayStation controller", "Controller not working", "Gamepad not detected"]),
     "App Store": ("App Store", "Install trusted Flatpaks, find familiar app alternatives, and manage AppImages.", ["Add or remove programs", "Apps & features", "Install apps", "Uninstall a program", "dnf install", "rpm", "exe installer", "downloaded installer", "Flathub"]),
-    "Work Setup": ("Work Setup", "Set up office, mail, focus sessions, and workday conveniences.", ["Microsoft 365", "Office", "Outlook", "Focus Assist", "Pomodoro"]),
-    "Move Files": ("Move Files", "Copy files, saves, libraries, bookmarks, fonts, and familiar workflows.", ["Transfer my files", "Copy game saves", "Snipping Tool", "PowerToys", "Phone Link", "Nearby Sharing", "LocalSend", "Remote Desktop", "WSL"]),
-    "Update": ("Updates", "Check OS updates, staged images, rollback status, and auto-update settings.", ["System Update", "Check for updates", "Restart pending", "rollback", "undo update", "bad update"]),
-    "Hardware": ("Hardware", "Inspect graphics, displays, audio, Bluetooth, storage, and device health.", ["Device Manager", "Display", "Sound", "Bluetooth", "no audio", "no sound", "speaker", "microphone", "wifi", "wi-fi", "printer", "monitor", "black screen"]),
-    "Plasma Wayland": ("Plasma & Wayland", "Check portals, PipeWire capture, display settings, shortcuts, and Plasma session repair.", ["Wayland", "Plasma", "KDE", "Screen sharing", "PipeWire", "Portal", "Display settings", "Window rules", "Shortcuts", "screenshot", "screen shot", "screen capture", "blank screen share", "black screen", "display scale"]),
-    "Diagnostics": ("Health Report", "Run system checks and gather useful troubleshooting information.", ["System information", "Diagnostics", "Security", "Sign-in options", "Fingerprint"]),
-    "Repair": ("Repair", "Rollback, restore, collect logs, and open recovery tools when something feels off.", ["Troubleshoot", "Recovery", "Reset this PC", "terminal", "PowerShell", "Quick Assist", "Remote Assistance", "broken", "restore layout", "missing apps", "remote help"]),
+    "Work Setup": ("Work Setup", "Set up office, mail, focus sessions, and workday conveniences.", ["Microsoft 365", "Office", "Outlook", "PST import", "Focus Assist", "Focus Sessions", "Do Not Disturb", "Pomodoro"]),
+    "Move Files": ("Move Files", "Copy files, saves, libraries, bookmarks, fonts, and familiar workflows.", ["Transfer my files", "PC migration", "Copy game saves", "Keyboard shortcuts", "Snipping Tool", "familiar shortcuts", "PowerToys", "PowerToys Run", "FancyZones", "PowerRename", "Always on Top", "Keyboard Manager", "Awake", "Color Picker", "Copy my files", "Import bookmarks", "Bookmarks", "Phone Link", "Connected Devices", "KDE Connect", "Dynamic Lock", "trusted phone", "cross-device clipboard", "ring phone", "SMS", "send text", "text messages", "Nearby Sharing", "Nearby Share", "Quick Share", "LocalSend", "Send to device", "Wallpaper", "Desktop background", "system fonts", "Segoe UI", "Calibri", "Rescue game saves", "Sticky Notes", "Remote Desktop connections", "RDP", "mstsc", "KRDC", "WSL", "Linux subsystem", "Ubuntu", "Distrobox"]),
+    
+    "Display": ("Display", "HDR, VRR, night light, and monitor layout.", ["HDR", "VRR", "Night Light", "Display Settings", "Monitor layout", "Refresh rate"]),
+    "Clipboard": ("Clipboard", "Clipboard history and PowerToys Run palette.", ["Clipboard history", "Win+V", "PowerToys Run", "Ctrl+K", "Command palette", "FancyZones", "PowerRename"]),
+    "Bluetooth Audio": ("Bluetooth Audio", "LDAC, headset mic, and per-app audio routing.", ["Bluetooth headset", "LDAC", "Microphone", "Audio switch", "PipeWire"]),
+    "Printer": ("Printer", "Add printers and scanners with one click.", ["Add printer", "Scanner", "CUPS", "Skanlite"]),
+    "Battery": ("Battery", "Fan curves, power caps, and sleep drain.", ["Battery", "Fan noise", "Sleep", "Suspend", "Power cap"]),
+    "Game Boost": ("Game Boost", "Latency, scheduler, and MangoHud overlay.", ["Game Boost", "Latency", "scx", "MangoHud", "Stutter"]),
+    "Update": ("Updates", "Check OS updates, staged images, rollback status, and auto-update settings.", ["Check for updates", "System Update", "Restart pending", "Rollback", "Undo update", "Bad update"]),
+    "Hardware": ("Hardware", "Inspect graphics, displays, audio, Bluetooth, storage, and device health.", ["Device Manager", "Display", "Sound", "Bluetooth", "No audio", "No sound", "Speaker", "Microphone", "Wi-Fi", "Wifi", "Printer", "Monitor", "Black screen"]),
+    "Plasma Wayland": ("Plasma & Wayland", "Check portals, PipeWire capture, display settings, shortcuts, and Plasma session repair.", ["Plasma", "Wayland", "KDE", "Screen sharing", "PipeWire", "Portal", "xdg desktop portal", "Display settings", "VRR", "HDR", "Scale", "Shortcuts", "Window rules", "Restart Plasma", "Screenshot", "Screen shot", "Screen capture", "Blank screen share", "Black screen", "Display scale"]),
+    "Diagnostics": ("Health Report", "Run system checks and gather useful troubleshooting information.", ["System information", "Diagnostics", "Sign-in options", "Fingerprint", "Passkeys", "Security"]),
+    "Repair": ("Repair", "Rollback, restore, collect logs, and open recovery tools when something feels off.", ["Troubleshoot", "Recovery", "Reset this PC", "Rollback", "terminal", "command prompt", "PowerShell", "Quick Assist", "Remote Assistance", "RustDesk", "Remote Desktop", "Restore my apps", "Restore my setup", "PC backup", "Restore layout", "Missing apps", "Remote help", "broken"]),
     "VPN": ("VPN", "Connect to VPN profiles, including GlobalProtect-style work VPNs.", ["VPN settings", "GlobalProtect"]),
     "Network Shares": ("Network Shares", "Map SMB/CIFS shares and configure mount behavior.", ["Map network drive", "Shared folders"]),
     "Cloud Storage": ("Cloud Storage", "Set up cloud sync and copy workflows for common providers.", ["OneDrive", "Google Drive", "Dropbox"]),
     "NVIDIA": ("NVIDIA Drivers", "Check NVIDIA driver state and open driver actions.", ["Graphics drivers", "GeForce"]),
     "Kernel": ("Kernel", "Choose installed kernels and understand advanced boot options.", ["Advanced system settings"]),
     "Channels": ("Channels", "Choose stable or testing update channels.", ["Update channel", "Insider program"]),
-    "Feedback": ("Feedback", "Send feedback or report a problem with optional system details.", ["Feedback Hub", "Send feedback"]),
-}
-
-
-
-SEARCH_ALIASES: dict[str, list[str]] = {
-    "Welcome": ["Home", "Control Panel", "PC focus", "Everyday preset", "Gaming preset", "Switch focus"],
-    "Gaming": ["Gaming", "Game launchers", "Steam", "Epic Games", "GOG", "Game Pass", "Xbox app", "Xbox Game Bar", "Game Bar", "Game capture", "Instant replay", "Battle.net", "Screen record", "Record gameplay"],
-    "Performance": ["Performance", "Task Manager", "Mission Center", "Slow game", "Low FPS", "Stutter", "Lag", "Fan noise", "Battery life"],
-    "Compatibility": ["Game compatibility", "Will my games work", "ProtonDB", "Game crashes", "Game won't launch", "Blocked game"],
-    "Controllers": ["Controllers", "Game controllers", "Xbox controller", "PlayStation controller", "Controller not working", "Gamepad not detected"],
-    "App Store": ["Add or remove programs", "Apps & features", "Install apps", "App store", "Uninstall a program", "dnf install", "rpm", "exe installer", "downloaded installer", "Flathub"],
-    "Work Setup": ["Work setup", "Microsoft 365", "Office", "Outlook", "PST import", "Focus Assist", "Focus Sessions", "Do Not Disturb", "Pomodoro"],
-    "Move Files": ["Move files", "Transfer my files", "PC migration", "Copy game saves", "Keyboard shortcuts", "Snipping Tool", "familiar shortcuts", "PowerToys", "PowerToys Run", "FancyZones", "PowerRename", "Always on Top", "Keyboard Manager", "Awake", "Color Picker", "Copy my files", "Import bookmarks", "Bookmarks", "Phone Link", "Connected Devices", "KDE Connect", "Dynamic Lock", "trusted phone", "cross-device clipboard", "ring phone", "SMS", "send text", "text messages", "Nearby Sharing", "Nearby Share", "Quick Share", "LocalSend", "Send to device", "Wallpaper", "Desktop background", "system fonts", "Segoe UI", "Calibri", "Rescue game saves", "Sticky Notes", "Remote Desktop connections", "RDP", "mstsc", "KRDC", "WSL", "Linux subsystem", "Ubuntu", "Distrobox"],
-    "Update": ["Check for updates", "System Update", "Updates", "Rollback", "Undo update", "Bad update"],
-    "Hardware": ["Hardware", "Device Manager", "Display", "Sound", "Bluetooth", "No audio", "No sound", "Speaker", "Microphone", "Wi-Fi", "Wifi", "Printer", "Monitor", "Black screen"],
-    "Plasma Wayland": ["Plasma", "Wayland", "KDE", "Screen sharing", "PipeWire", "Portal", "xdg desktop portal", "Display settings", "VRR", "HDR", "Scale", "Shortcuts", "Window rules", "Restart Plasma", "Screenshot", "Screen shot", "Screen capture", "Blank screen share", "Display scale"],
-    "Diagnostics": ["Health report", "System information", "Diagnostics", "Sign-in options", "Fingerprint", "Passkeys", "Security"],
-    "Repair": ["Repair", "Troubleshoot", "Recovery", "Reset this PC", "Rollback", "terminal", "command prompt", "PowerShell", "Quick Assist", "Remote Assistance", "RustDesk", "Remote Desktop", "Restore my apps", "Restore my setup", "PC backup", "Restore layout", "Missing apps", "Remote help"],
-    "VPN": ["VPN", "VPN settings"],
-    "Network Shares": ["Network shares", "Map network drive", "Shared folders"],
-    "Cloud Storage": ["Cloud storage", "OneDrive", "Google Drive", "Dropbox"],
-    "NVIDIA": ["NVIDIA drivers", "Graphics drivers", "GeForce"],
-    "Kernel": ["Kernel", "Advanced system settings"],
-    "Channels": ["Update channel", "Channels", "Insider program"],
-    "Feedback": ["Feedback", "Send feedback", "Feedback Hub"],
+    "Feedback": ("Feedback", "Send feedback or report a problem with optional system details.", ["Send feedback", "Feedback Hub"]),
 }
 
 
@@ -162,8 +144,12 @@ PROBLEM_ROUTES: dict[str, str] = {
 
 
 def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
-    from .services.hardware import _detect_nvidia
-
+    # No _detect_nvidia() call here — this used to gate the "NVIDIA Drivers"
+    # nav item, but get_nav_groups() runs synchronously in MainWindow.__init__
+    # before any window is shown, so an lspci call here blocked the whole
+    # app's startup. The NVIDIA item is always included now; MainWindow
+    # hides it by default and reveals it via a background probe (see
+    # windows.py's _refresh_nvidia_nav_visibility).
     nav_groups: list[tuple[str | None, list[NavItem]]] = [
         (None, [
             (("go-home",), "⌂", "Home", "Welcome", _page_factory("page_welcome", "WelcomePage", navigate=navigate)),
@@ -193,9 +179,9 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
         ]),
     ]
 
-    advanced_items: list[NavItem] = []
-    if _detect_nvidia():
-        advanced_items.append((("video-display", "preferences-desktop-display"), "▣", "NVIDIA Drivers", "NVIDIA", _page_factory("page_nvidia", "NvidiaPage")))
+    advanced_items: list[NavItem] = [
+        (("video-display", "preferences-desktop-display"), "▣", "NVIDIA Drivers", "NVIDIA", _page_factory("page_nvidia", "NvidiaPage")),
+    ]
     advanced_items.append((("cpu", "applications-system"), "◌", "Kernel", "Kernel", _page_factory("page_kernel", "KernelPage")))
     advanced_items.append((("vcs-branch", "system-switch-user"), "⎇", "Channels", "Channels", _page_factory("page_branches", "BranchesPage")))
     advanced_items.append((("mail-send", "mail-message"), "✉", "Feedback", "Feedback", _page_factory("page_feedback", "FeedbackPage")))

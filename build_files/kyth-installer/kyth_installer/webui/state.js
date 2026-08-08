@@ -9,6 +9,8 @@ globalThis.KythInstallerState = {
   free_region_end: 0,
   hostname: 'kyth',
   timezone: 'UTC',
+  locale: 'en_US.UTF-8',
+  keymap: 'us',
   username: '',
   password: '',
   kernel: 'fedora',
@@ -23,4 +25,5 @@ globalThis.KythInstallerState = {
   manualCommitted: false,
   startTime: 0,
   elapsedTimer: null,
+  source: null,
 };

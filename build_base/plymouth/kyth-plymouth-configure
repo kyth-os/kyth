@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Canonical owner of KythOS host Plymouth defaults, dracut policy, and the
+# late dracut module. Safe to run during base build, final image assembly,
+# package-upgrade repair, or repeatedly on an installed system.
+
+set -euo pipefail
+
+daemon_config='[Daemon]
+Theme=kyth
+ShowDelay=0
+DeviceTimeout=8
+UseFirmwareBackground=false'
+
+if [[ "${1:-}" == "--print-daemon-config" ]]; then
+	printf '%s\n' "${daemon_config}"
+	exit 0
+fi
+
+root="${KYTH_PLYMOUTH_ROOT:-}"
+host_path() {
+	printf '%s%s' "${root}" "$1"
+}
+
+plymouth_etc="$(host_path /etc/plymouth)"
+plymouth_share="$(host_path /usr/share/plymouth)"
+dracut_conf_dir="$(host_path /etc/dracut.conf.d)"
+dracut_modules_dir="$(host_path /usr/lib/dracut/modules.d)"
+
+mkdir -p "${plymouth_etc}" "${plymouth_share}" "${dracut_conf_dir}"
+printf '%s\n' "${daemon_config}" >"${plymouth_etc}/plymouthd.conf"
+install -m 0644 "${plymouth_etc}/plymouthd.conf" \
+	"${plymouth_share}/plymouthd.defaults"
+
+# This file is KythOS-owned. Writing it deterministically prevents append-order
+# drift between base builds, final builds, and runtime repair.
+cat >"${dracut_conf_dir}/99-kyth.conf" <<'DRACUTEOF'
+add_dracutmodules+=" ostree drm plymouth kyth-plymouth "
+force_add_dracutmodules+=" kyth-plymouth "
+add_drivers+=" virtio_blk virtio_scsi virtio_pci nvme ahci virtio_gpu qxl bochs overlay "
+install_items+=" /etc/passwd /etc/group "
+do_hardlink="no"
+DRACUTEOF
+
+rm -rf "${dracut_modules_dir}/46kyth-plymouth"
+module_dir="${dracut_modules_dir}/99kyth-plymouth"
+mkdir -p "${module_dir}"
+cat >"${module_dir}/module-setup.sh" <<'KYTHPLYMOUTHEOF'
+#!/usr/bin/bash
+
+check() {
+    return 0
+}
+
+depends() {
+    echo plymouth
+    return 0
+}
+
+install() {
+    mkdir -p \
+        "${initdir}/etc/plymouth" \
+        "${initdir}/usr/share/plymouth" \
+        "${initdir}/usr/share/pixmaps" \
+        "${initdir}/usr/share/plymouth/themes"
+    inst_simple /etc/plymouth/plymouthd.conf /etc/plymouth/plymouthd.conf
+    inst_simple /usr/share/plymouth/plymouthd.defaults \
+        /usr/share/plymouth/plymouthd.defaults
+    rm -rf \
+        "${initdir}/usr/share/plymouth/themes/default.plymouth" \
+        "${initdir}/usr/share/plymouth/themes/bgrt-fedora" \
+        "${initdir}/usr/share/plymouth/themes/bgrt" \
+        "${initdir}/usr/share/plymouth/themes/spinner"
+    ln -sfn kyth/kyth.plymouth \
+        "${initdir}/usr/share/plymouth/themes/default.plymouth"
+    inst_libdir_file "plymouth/script.so"
+    inst_multiple -o \
+        /usr/libexec/kyth-plymouth-branding-guard \
+        /usr/libexec/kyth-plymouth-configure
+    inst_multiple \
+        /usr/share/plymouth/themes/kyth/kyth.plymouth \
+        /usr/share/plymouth/themes/kyth/kyth.script \
+        /usr/share/plymouth/themes/kyth/kyth-logo.png
+    inst_multiple -o \
+        /etc/os-release \
+        /usr/lib/os-release \
+        /usr/share/kyth/branding/transparent-watermark.svg \
+        /usr/share/kyth/branding/transparent-watermark.png
+    rm -f "${initdir}/usr/share/pixmaps/system-logo-white.png"
+    inst_simple \
+        /usr/share/kyth/branding/transparent-watermark.png \
+        /usr/share/pixmaps/system-logo-white.png
+    rm -rf \
+        "${initdir}/usr/share/plymouth/themes/bgrt-fedora" \
+        "${initdir}/usr/share/plymouth/themes/bgrt" \
+        "${initdir}/usr/share/plymouth/themes/spinner"
+}
+KYTHPLYMOUTHEOF
+chmod 0755 "${module_dir}/module-setup.sh"

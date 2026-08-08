@@ -14,9 +14,9 @@ class _SavesMixin:
         saves_title.setObjectName("card-title")
         saves_layout.addWidget(saves_title)
         saves_desc = QLabel(
-            "KythOS recommends Ludusavi for game save backup and restore. Run it "
-            "before a other system migration, after importing a library, and before "
-            "large modding sessions."
+            "Switching from Windows? Ludusavi backs up saves from 4,700+ games "
+            "so you can restore them on KythOS. Run it on Windows first, then "
+            "again here after importing your Steam library."
         )
         saves_desc.setObjectName("card-copy")
         saves_desc.setWordWrap(True)

@@ -4,18 +4,20 @@
 # beside a local project, so stage the package in the writable build tmpfs.
 welcome_package_dir="$(mktemp -d /tmp/kyth-welcome-package.XXXXXX)"
 cp -a /ctx/kyth-welcome/. "${welcome_package_dir}/"
+cp -a /ctx/kyth-installer "${welcome_package_dir}/kyth-installer"
 python3 -m pip install \
 	--no-cache-dir \
 	--no-deps \
 	--no-build-isolation \
 	--prefix=/usr \
-	"${welcome_package_dir}"
+	"${welcome_package_dir}" \
+	"${welcome_package_dir}/kyth-installer"
 rm -rf "${welcome_package_dir}"
 unset welcome_package_dir
 install -m 0755 /ctx/kyth-welcome/kyth-welcome-launch /usr/bin/kyth-welcome-launch
 install -m 0644 /ctx/kyth-welcome/kyth-welcome.desktop \
 	/usr/share/applications/kyth-welcome.desktop
-cat >/usr/share/applications/kyth-app-store.desktop <<'APPSTOREEOF'
+write_config /usr/share/applications/kyth-app-store.desktop <<'APPSTOREEOF'
 [Desktop Entry]
 Type=Application
 Name=KythOS App Store
@@ -29,7 +31,6 @@ Keywords=apps;store;software;flatpak;install;remove;
 StartupNotify=true
 StartupWMClass=kyth-welcome
 APPSTOREEOF
-install -m 0755 /ctx/kyth-partition-install.sh /usr/bin/kyth-partition-install
 install -m 0755 /ctx/kyth-network-share /usr/libexec/kyth-network-share
 install -m 0755 /ctx/kyth-set-sleep-mode /usr/libexec/kyth-set-sleep-mode
 install -m 0755 /ctx/kyth-retry-hardware-setup /usr/libexec/kyth-retry-hardware-setup
@@ -43,8 +44,7 @@ install -m 0755 /ctx/kyth-welcome/kyth-welcome.desktop \
 # Recycle Bin on the desktop keeps deletion recovery visible. Type=Link entries
 # open in Dolphin and need no executable/trust bit. Kept in /usr/share/kyth so
 # the user-polish pass can seed existing accounts too.
-mkdir -p /usr/share/kyth
-cat >/usr/share/kyth/kyth-recycle-bin.desktop <<'TRASHEOF'
+write_config /usr/share/kyth/kyth-recycle-bin.desktop <<'TRASHEOF'
 [Desktop Entry]
 Type=Link
 URL=trash:/

@@ -45,7 +45,7 @@ env:
 jobs:
   prepare:
     name: Prepare metadata (${{ inputs.source_tag }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
       contents: read
@@ -220,6 +220,20 @@ jobs:
             --output "${OUT_FILE}"
           echo "path=${OUT_FILE}" >> "$GITHUB_OUTPUT"
 
+      - name: Capture optimization measurements
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.current_digest }}
+          RPM_MANIFEST: ${{ steps.rpm_manifest.outputs.path }}
+        run: |
+          mkdir -p output/supply-chain
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --raw > "${RUNNER_TEMP}/kyth-oci-manifest.json"
+          python3 build_files/scripts/optimization-report.py \
+            --check \
+            --oci-manifest "${RUNNER_TEMP}/kyth-oci-manifest.json" \
+            --rpm-manifest "${RPM_MANIFEST}" \
+            --output output/supply-chain/optimization.json
+
       - name: Setup Grype
         id: setup_grype
         uses: ./.github/actions/setup-anchore-tool
@@ -349,7 +363,7 @@ jobs:
   publish:
     name: Publish metadata (${{ inputs.source_tag }})
     needs: prepare
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     # Stable publishes from scheduled rebuilds or the repository owner (push
     # or manual dispatch) go through the reviewer-free stable-release-auto
@@ -403,7 +417,7 @@ jobs:
           [[ "${TAG}" == "${MATRIX_SOURCE_TAG}" ]]
           [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${GITHUB_SHA_META}" =~ ^[0-9a-f]{40}$ ]]
-          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${DIGEST}"
           [[ "${VERSION}" =~ ^[a-z0-9._-]+$ ]]
           [[ "${BUILD_BASE}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+@sha256:[0-9a-f]{64}$ ]]
           [[ "${UPSTREAM_BASE}" =~ ^ghcr\.io/ublue-os/kinoite-main:44@sha256:[0-9a-f]{64}$ ]]
@@ -454,7 +468,7 @@ jobs:
             "${IMAGE}@${DIGEST}" \
             "${SBOM}")"
           SBOM_DIGEST="$(jq -r '.digest' <<< "${ATTACH_OUTPUT}")"
-          [[ "${SBOM_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          build_files/scripts/validate-digest.sh "${SBOM_DIGEST}"
           echo "digest=${SBOM_DIGEST}" >> "$GITHUB_OUTPUT"
           cosign sign -y "${IMAGE}@${SBOM_DIGEST}"
 

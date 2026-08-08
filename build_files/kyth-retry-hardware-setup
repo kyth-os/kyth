@@ -1,5 +1,4 @@
 #!/usr/bin/bash
 set -euo pipefail
 
-rm -f /var/lib/kyth/hw-setup-done
-exec /usr/bin/kyth-hw-setup
+exec /usr/bin/kyth-hardware-policy apply --force

@@ -23,13 +23,15 @@ env:
   ACTIONLINT_VERSION: 1.7.7
   HADOLINT_VERSION: 2.14.0
   JUST_VERSION: 1.52.0
+  SHELLCHECK_VERSION: 0.10.0
+  SHELLCHECK_SHA256: 6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
   ZIZMOR_VERSION: 1.25.2
   ZIZMOR_SHA256: aa1facd105f0d83fe5c55b1adcd9d7417de5d83aa27471f91dc0b66cf3803577
 
 jobs:
   validation:
     name: validation
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -42,10 +44,52 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/kyth-ci-tools
-          key: validation-tools-${{ runner.os }}-${{ env.ACTIONLINT_VERSION }}-${{ env.HADOLINT_VERSION }}-${{ env.JUST_VERSION }}-${{ env.ZIZMOR_VERSION }}
+          key: validation-tools-${{ runner.os }}-${{ env.ACTIONLINT_VERSION }}-${{ env.HADOLINT_VERSION }}-${{ env.JUST_VERSION }}-${{ env.SHELLCHECK_VERSION }}-${{ env.ZIZMOR_VERSION }}
 
       - name: Install pinned validators
         run: ./build_files/scripts/install-validation-tools.sh
 
+      - name: Install system dependencies for validation
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file systemd
+
+      - name: Check Dockerfile build rules
+        run: |
+          if command -v docker >/dev/null 2>&1; then
+            just check-dockerfile
+          else
+            echo "::notice::Docker not available, skipping Dockerfile build check"
+          fi
+
       - name: Run repository validation suite
         run: ./build_files/scripts/validate.sh
+
+  quality:
+    name: coverage and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned quality tools
+        run: python3 -m pip install --disable-pip-version-check -r requirements-quality.txt
+
+      - name: Run Python quality gates
+        run: ./build_files/scripts/run-quality.sh
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-coverage
+          path: |
+            coverage.xml
+            coverage.json
+            coverage-html
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# kyth-mok-rotate — SecureBoot MOK rotation offline (sbctl + mokutil)
+set -euo pipefail
+# Check sbctl cert dates, rotate if <30d expiry, re-enroll via kyth-enroll-mok flow
+cert="/etc/pki/kyth/secureboot.crt"
+if [[ ! -f "$cert" ]]; then echo "kyth-mok-rotate: no cert $cert" >&2; exit 0; fi
+if command -v sbctl >/dev/null 2>&1; then
+    if ! sbctl status 2>/dev/null | grep -q "installed"; then
+        echo "kyth-mok-rotate: sbctl not enrolled, skipping" >&2; exit 0
+    fi
+fi
+# Check expiry via openssl
+if command -v openssl >/dev/null 2>&1; then
+    exp=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2 || true)
+    if [[ -n "$exp" ]]; then
+        # if expires within 30d, trigger rotation (best-effort)
+        if ! openssl x509 -checkend 2592000 -noout -in "$cert" 2>/dev/null; then
+            echo "kyth-mok-rotate: cert expires within 30d — rotate needed" >&2
+            # call sbctl create-keys --enroll if available (offline, no network)
+            if command -v sbctl >/dev/null 2>&1; then
+                sbctl create-keys --enroll 2>/dev/null || true
+            fi
+        fi
+    fi
+fi
+# TPM PCR7 re-seal best-effort
+if command -v tpm2_pcrread >/dev/null 2>&1; then
+    tpm2_pcrread sha256:7 >/dev/null 2>&1 || true
+fi
+echo "kyth-mok-rotate: ok"

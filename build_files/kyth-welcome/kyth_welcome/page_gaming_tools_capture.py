@@ -2,47 +2,39 @@ import shutil
 from pathlib import Path
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.gaming import opticscaler_deploy_command
 from .services.launch import popen
 from .actions import _install_flatpak_inline
-from .services.runtime import Worker, _finish_worker
+from .services.runtime import Worker, finish_worker
 from .qt import (
     QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, Qt, single_shot,
 )
-from .widgets import ActionRow, CommandResultPanel, _copy_text, _make_card
+from .widgets import ActionRow, CommandResultPanel, _copy_text, _make_card, _make_tip_card
 
 
 class _CaptureToolsMixin:
     """GPU/capture tuning helpers: LACT/CoreCtrl/OBS, OptiScaler, and streaming/Discord readiness."""
 
     def _build_capture_tools_card(self):
-        tuning_card, tuning_layout = _make_card()
-        tuning_title = QLabel("Advanced GPU and Capture Tools")
-        tuning_title.setObjectName("card-title")
-        tuning_layout.addWidget(tuning_title)
-        tuning_desc = QLabel(
+        # LACT and OBS install inline: their buttons disable/relabel
+        # themselves while running, so they need a live reference to
+        # themselves — connected below instead of passed as callbacks.
+        card, (lact_btn, _corectrl_btn, obs_btn) = _make_tip_card(
+            "Advanced GPU and Capture Tools",
             "LACT and CoreCtrl cover AMD GPU tuning, while OBS uses the built-in "
-            "obs-vkcapture and v4l2loopback support for game capture and virtual camera workflows."
+            "obs-vkcapture and v4l2loopback support for game capture and virtual camera workflows.",
+            primary=None,
+            buttons=[
+                ("Install LACT", None),
+                ("Open CoreCtrl", lambda _=False: self._open_corectrl()),
+                ("Install OBS", None),
+            ],
         )
-        tuning_desc.setObjectName("card-copy")
-        tuning_desc.setWordWrap(True)
-        tuning_layout.addWidget(tuning_desc)
-        tuning_btns = QHBoxLayout()
-        tuning_btns.setSpacing(8)
-        lact_btn = QPushButton("Install LACT")
         lact_btn.clicked.connect(lambda _=False, b=lact_btn: _install_flatpak_inline(
             self, b, "io.github.ilya_zlobintsev.LACT", "LACT"))
-        tuning_btns.addWidget(lact_btn)
-        corectrl_btn = QPushButton("Open CoreCtrl")
-        corectrl_btn.clicked.connect(lambda _=False: self._open_corectrl())
-        tuning_btns.addWidget(corectrl_btn)
-        obs_btn = QPushButton("Install OBS")
         obs_btn.clicked.connect(lambda _=False, b=obs_btn: self._install_obs_inline(b))
-        tuning_btns.addWidget(obs_btn)
-        tuning_btns.addStretch()
-        tuning_layout.addLayout(tuning_btns)
-        self._add(tuning_card)
+        self._add(card)
 
     def _build_opticscaler_card(self):
         opti_card, opti_layout = _make_card()
@@ -150,7 +142,7 @@ class _CaptureToolsMixin:
         # OBS PipeWire setup
         obs_fix_note = QLabel("Fix OBS audio capture (apply PipeWire/Wayland Flatpak permissions)")
         obs_fix_note.setObjectName("card-title")
-        obs_fix_note.setStyleSheet("margin-top:8px;")
+        discord_fix_layout.addSpacing(8)
         discord_fix_layout.addWidget(obs_fix_note)
         obs_fix_body = QLabel(
             "OBS installed from Flathub may not capture audio or display correctly under Wayland. "
@@ -202,7 +194,7 @@ class _CaptureToolsMixin:
         self._opti_status_lbl.setText("Deploying OptiScaler…")
         self._opti_status_lbl.setObjectName("subheading")
         self._opti_status_lbl.show()
-        _restyle(self._opti_status_lbl)
+        restyle(self._opti_status_lbl)
         cmd = opticscaler_deploy_command(game_dir)
         self._opticscaler_worker = Worker(cmd)
         self._opticscaler_worker.line.connect(lambda ln: (
@@ -214,7 +206,7 @@ class _CaptureToolsMixin:
 
     def _on_opticscaler_done(self, code: int, btn: QPushButton):
         btn.setEnabled(True)
-        _finish_worker(self, attr="_opticscaler_worker")
+        finish_worker(self, attr="_opticscaler_worker")
         if code == 0:
             self._opti_status_lbl.setText(
                 "Deployed. Set Steam launch option: WINEDLLOVERRIDES=\"nvngx=n,b\" %command%"
@@ -223,4 +215,4 @@ class _CaptureToolsMixin:
         else:
             self._opti_status_lbl.setText(f"Deploy failed (exit {code}). See output above.")
             self._opti_status_lbl.setObjectName("status-err")
-        _restyle(self._opti_status_lbl)
+        restyle(self._opti_status_lbl)

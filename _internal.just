@@ -154,3 +154,39 @@ _build-bib $target_image $tag $type $config: (_rootful_load_image target_image t
         ISO_PATH=$(readlink -f output/bootiso/kyth-installer.iso)
         echo "Produced ISO: ${ISO_PATH}"
     fi
+
+# ── Cleanup primitives (composed by clean-* / prune-* / purge / disk-usage) ──
+# Each does one operation with no section header, so callers control framing.
+
+# Remove stale output artefacts (previous ISO, archive, manifest backups) and
+# restore output/ ownership to the invoking user.
+[private]
+_clean-output-artefacts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sudo rm -rf output/previous-built-iso output/archive 2>/dev/null || true
+    sudo rm -f  output/manifest-iso.json.bak 2>/dev/null || true
+    sudo chown -R "$(id -u):$(id -g)" output/ 2>/dev/null || true
+
+# List built images (ISO/qcow2/raw) under output/ with human-readable sizes.
+[private]
+_list-output-images:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    find output -name "*.iso" -o -name "*.qcow2" -o -name "*.raw" 2>/dev/null \
+        | sort | xargs -r du -sh 2>/dev/null || echo "(none)"
+
+# Remove kyth-live.* / kyth-titanoboa.* live-ISO build dirs from /var/tmp.
+[private]
+_clean-vartmp-builddirs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sudo find /var/tmp -maxdepth 1 \( -name "kyth-live.*" -o -name "kyth-titanoboa.*" \) -exec rm -rf {} + 2>/dev/null || true
+
+# Prune Docker build cache and dangling (unreferenced) image layers.
+[private]
+_prune-docker-cache:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker builder prune -f
+    docker image prune -f

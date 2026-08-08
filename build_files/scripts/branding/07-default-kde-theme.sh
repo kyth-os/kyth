@@ -14,7 +14,7 @@ render_window_control() {
 	local size=$3
 	local background=$4
 	local foreground=$5
-	cat >"${window_control_css}" <<EOF
+	write_config "${window_control_css}" <<EOF
 .background { fill: ${background}; }
 .glyph { fill: ${foreground}; }
 EOF

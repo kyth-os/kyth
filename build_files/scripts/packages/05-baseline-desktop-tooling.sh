@@ -14,19 +14,15 @@ dnf5 install -y --skip-unavailable \
 	opensc \
 	krdc \
 	bubblewrap \
-	skopeo \
 	plasma-workspace-x11 \
 	xorg-x11-server-Xorg \
 	xorg-x11-xinit \
 	xorg-x11-drv-libinput \
 	irqbalance \
-	p7zip \
-	p7zip-plugins \
 	plocate \
-	cabextract \
 	ntfs-3g \
 	ntfsprogs \
-	libpst \
+	os-prober \
 	rsync \
 	fuse \
 	fuse-libs \
@@ -35,7 +31,6 @@ dnf5 install -y --skip-unavailable \
 	dosfstools \
 	sbsigntools \
 	util-linux-script \
-	tmux \
 	openssl \
-	fwupd \
-	hyperfine
+	fwupd
+

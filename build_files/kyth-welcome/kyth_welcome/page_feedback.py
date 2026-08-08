@@ -1,10 +1,11 @@
+from kyth_shared.system.gpu import lspci_gpu_lines
+
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import (
-    _IS_LIVE, _release_worker_when_finished, _restyle,
-)
-from .services.diagnostics import _command_stdout
+from .core_base import IS_LIVE, restyle
+from .services.bootc import bootc_image_digest, current_branch
+from .services.runtime import release_worker_when_finished
+from .services.diagnostics import command_stdout
 from .services.workers import GitHubIssueWorker
-from .core_base import _bootc_image_digest, _current_branch
 from .qt import (
     QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl,
 )
@@ -19,24 +20,21 @@ _GITHUB_REPO = "mrtrick37/kyth"
 
 def _collect_system_info() -> str:
     lines = []
-    kernel = _command_stdout(["uname", "-r"], timeout=5) or "unknown"
+    kernel = command_stdout(["uname", "-r"], timeout=5) or "unknown"
     lines.append(f"**Kernel:** {kernel}")
-    branch = _current_branch() or "unknown"
+    branch = current_branch() or "unknown"
     lines.append(f"**Channel:** {branch}")
-    digest_info = _bootc_image_digest("booted")
+    digest_info = bootc_image_digest("booted")
     if digest_info:
         lines.append(f"**Image digest:** `{digest_info[1][:16]}`")
-    gpu = _command_stdout(
-        ["bash", "-c", "lspci -mm 2>/dev/null | grep -iE 'vga|3d|display' | head -3"],
-        timeout=5,
-    ).strip() or "unknown"
+    gpu = "\n".join(lspci_gpu_lines()[:3]) or "unknown"
     lines.append(f"**GPU:**\n```\n{gpu}\n```")
-    cpu = _command_stdout(
+    cpu = command_stdout(
         ["bash", "-c", "grep -m1 'model name' /proc/cpuinfo | cut -d: -f2"],
         timeout=5,
     ).strip() or "unknown"
     lines.append(f"**CPU:** {cpu}")
-    if _IS_LIVE:
+    if IS_LIVE:
         lines.append("**Session:** Live ISO")
     return "\n".join(lines)
 
@@ -116,7 +114,6 @@ class FeedbackPage(Page):
         )
         note.setObjectName("card-copy")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #888888;")
         action_layout.addWidget(note)
         self._add(action_card)
 
@@ -165,7 +162,7 @@ class FeedbackPage(Page):
             self._worker = GitHubIssueWorker(title, body, labels, token)
             self._worker.success.connect(self._on_success)
             self._worker.failed.connect(self._on_fail)
-            _release_worker_when_finished(self, "_worker", self._worker)
+            release_worker_when_finished(self, "_worker", self._worker)
             self._worker.start()
         else:
             from urllib.parse import quote as _quote
@@ -194,4 +191,4 @@ class FeedbackPage(Page):
     def _set_status(self, msg: str, *, error: bool = False):
         self._status_lbl.setText(msg)
         self._status_lbl.setObjectName("status-err" if error else "card-copy")
-        _restyle(self._status_lbl)
+        restyle(self._status_lbl)

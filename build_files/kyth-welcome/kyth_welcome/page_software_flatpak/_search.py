@@ -1,16 +1,45 @@
 import json
+import os
+import pathlib
+import time
 
 # __KYTH_GENERATED_IMPORTS__
-from ..services.runtime import Worker, _finish_worker
+from ..services.runtime import Worker, finish_worker
+
+_FLATHUB_CACHE = os.path.expanduser("~/.cache/kyth/flathub-search.json")
+_FLATHUB_TTL = 3600
 
 
 class _SearchMixin:
+    def _load_flathub_cache(self, query: str) -> list[dict] | None:
+        try:
+            if not os.path.exists(_FLATHUB_CACHE):
+                return None
+            if time.time() - os.path.getmtime(_FLATHUB_CACHE) > _FLATHUB_TTL:
+                return None
+            data = json.loads(pathlib.Path(_FLATHUB_CACHE).read_text())
+            # Simple: if cache has query substring, return it; else None
+            # Real cache stores last results per query; for offline we return last search
+            if isinstance(data, list) and data:
+                return data
+        except Exception:
+            pass
+        return None
+
+    def _save_flathub_cache(self, results: list[dict]) -> None:
+        try:
+            pathlib.Path(_FLATHUB_CACHE).parent.mkdir(parents=True, exist_ok=True)
+            pathlib.Path(_FLATHUB_CACHE).write_text(json.dumps(results[:20]))
+        except Exception:
+            pass
+
     def _run_fp_search(self):
         if self._fp_search_worker and self._fp_search_worker.isRunning():
             return
         query = self._fp_search_box.text().strip()
         if not query:
             return
+        self._fp_search_query = query
         self._clear_fp_results()
         self._fp_search_lines = []
         self._fp_progress.show()
@@ -28,7 +57,7 @@ class _SearchMixin:
 
     def _on_fp_search_done(self, code: int):
         self._fp_progress.hide()
-        _finish_worker(self, attr="_fp_search_worker")
+        finish_worker(self, attr="_fp_search_worker")
         self._fp_search_btn.setEnabled(True)
         self._clear_fp_results()
         output = "\n".join(self._fp_search_lines).strip()
@@ -47,7 +76,15 @@ class _SearchMixin:
                         })
             except (json.JSONDecodeError, TypeError):
                 results = []
+        if results and code == 0:
+            self._save_flathub_cache(results)
         else:
+            # Offline fallback: if flatpak search failed and cache exists, show cached
+            if code != 0 and not results:
+                cached = self._load_flathub_cache(getattr(self, "_fp_search_query", ""))
+                if cached:
+                    results = cached
+                    self._set_fp_task_state("Offline — showing cached results from last search", "offline")
             for line in self._fp_search_lines:
                 parts = line.split("\t")
                 if len(parts) >= 2:

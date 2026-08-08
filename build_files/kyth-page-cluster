@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-page-cluster — vm.page-cluster 0 gaming
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-page-cluster "$@"; }
+case "${1:-status}" in
+    status) python3 -c "from kyth_shared.page_cluster import load_page_cluster, page_cluster_status; c=load_page_cluster(); print(f\"profile={c['profile']} active={page_cluster_status()}\")" ;;
+    gaming) need_root "$@"; python3 -c "from kyth_shared.page_cluster import load_page_cluster,save_page_cluster,generate_page_cluster; c=load_page_cluster(); c['profile']='gaming'; save_page_cluster(c); generate_page_cluster(c)"; sysctl --system >/dev/null 2>&1 || true; echo "page cluster gaming 0" ;;
+    balanced) need_root "$@"; python3 -c "from kyth_shared.page_cluster import load_page_cluster,save_page_cluster,generate_page_cluster; c=load_page_cluster(); c['profile']='balanced'; save_page_cluster(c); generate_page_cluster(c)"; echo "page cluster balanced" ;;
+    apply) need_root "$@"; python3 -c "from kyth_shared.page_cluster import load_page_cluster,generate_page_cluster; generate_page_cluster(load_page_cluster())" ;;
+    *) echo "Usage: kyth-page-cluster [status|gaming|balanced|apply]" >&2; exit 1 ;;
+esac

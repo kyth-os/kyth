@@ -9,6 +9,8 @@
 </head>
 <body>
 
+<button class="skip-link" type="button" onclick="document.getElementById('main').focus()">Skip to installer content</button>
+
 <nav id="sidebar">
   <div class="logo">
     <div class="logo-mark">K</div>
@@ -28,24 +30,29 @@
   <div class="sidebar-footer">kyth installer</div>
 </nav>
 
-<div id="main">
+<div id="main" tabindex="-1">
 
   <!-- Welcome -->
   <div class="page active" id="page-welcome">
     <div class="card">
       <div class="card-title">Welcome to KythOS</div>
       <div class="card-sub">Immutable gaming &amp; development desktop — KythOS</div>
+      <div class="accessibility-tools" aria-label="Accessibility controls">
+        <button type="button" id="toggle-large-text" aria-pressed="false" onclick="toggleAccessibility('large-text')">Large text</button>
+        <button type="button" id="toggle-high-contrast" aria-pressed="false" onclick="toggleAccessibility('high-contrast')">High contrast</button>
+        <button type="button" id="toggle-reduced-motion" aria-pressed="false" onclick="toggleAccessibility('reduced-motion')">Reduce motion</button>
+      </div>
       <hr class="divider">
       <p style="color:var(--muted);line-height:1.8">
         This installer will guide you through installing KythOS on your computer.<br><br>
-        <span style="color:var(--amber)">A network connection is required to install KythOS.</span><br>
-        Connect using the network icon in the bottom-right panel before clicking Start Install. Your disk, account, timezone, and kernel selections will remain if you need to reconnect.<br><br>
+        <span id="welcome-source" style="color:var(--green)">The standard KythOS image is included on this ISO, so it installs offline.</span><br>
+        A network connection is only required when selecting an optional image that is not included on the ISO.<br><br>
         <span style="color:var(--text)">What happens:</span><br>
         &nbsp; 1. Select a target disk<br>
         &nbsp; 2. Choose install mode — erase full disk or install alongside existing OS<br>
         &nbsp; 3. Choose your kernel<br>
         &nbsp; 4. Set hostname, timezone, and user account<br>
-        &nbsp; 5. Download and write KythOS to disk<br><br>
+        &nbsp; 5. Verify and write KythOS to disk<br><br>
         <span style="color:var(--amber)">⚠ The selected disk or partition will be erased.</span><br>
         Back up any data you need before continuing.
       </p>
@@ -82,10 +89,10 @@
             </div>
           </div>
           <div class="mode-card" id="mcard-resize_ntfs" onclick="selectMode('resize_ntfs')">
-            <div class="mode-icon">🔀</div>
+            <div class="mode-icon">🪟</div>
             <div>
-              <div class="mode-name">Install Alongside</div>
-              <div class="mode-desc">Shrink an existing Windows/NTFS partition to make room for KythOS. Keep your existing operating system.</div>
+              <div class="mode-name">Keep Windows &amp; Install KythOS <span style="background:var(--green);color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px">Recommended</span></div>
+              <div class="mode-desc">Shrink your Windows partition to make room — all Windows files stay, and you choose at boot. Preview validates before any disk write.</div>
             </div>
           </div>
           <div class="mode-card" id="mcard-alongside" onclick="selectMode('alongside')">
@@ -213,17 +220,21 @@
       <div class="card-title">System Configuration</div>
       <div class="card-sub">Set hostname, timezone, and your user account</div>
       <hr class="divider">
-      <div class="field-label">Hostname</div>
+      <label class="field-label" for="inp-hostname">Hostname</label>
       <input type="text" id="inp-hostname" value="kyth" maxlength="63" spellcheck="false">
-      <div class="field-label">Timezone</div>
+      <label class="field-label" for="sel-tz">Timezone</label>
       <select id="sel-tz"></select>
-      <div class="field-label" style="margin-top:20px">Username</div>
+      <label class="field-label" for="sel-locale">System language and locale</label>
+      <select id="sel-locale"></select>
+      <label class="field-label" for="sel-keymap">Keyboard layout</label>
+      <select id="sel-keymap"></select>
+      <label class="field-label" for="inp-username" style="margin-top:20px">Username</label>
       <input type="text" id="inp-username" maxlength="32" spellcheck="false" autocomplete="off" placeholder="e.g. alice">
-      <div class="field-label">Password</div>
+      <label class="field-label" for="inp-password">Password</label>
       <input type="password" id="inp-password" autocomplete="new-password">
-      <div class="field-label">Confirm Password</div>
+      <label class="field-label" for="inp-password2">Confirm Password</label>
       <input type="password" id="inp-password2" autocomplete="new-password">
-      <div id="user-error" style="color:var(--red);font-size:13px;margin-top:8px;min-height:1.2em"></div>
+      <div id="user-error" role="alert" aria-live="assertive" style="color:var(--red);font-size:13px;margin-top:8px;min-height:1.2em"></div>
       <div class="btn-row">
         <button onclick="goto('kernel')">← Back</button>
         <button class="primary" onclick="saveConfig()">Continue →</button>
@@ -238,7 +249,7 @@
       <div class="card-sub">Confirm settings — installation begins immediately after you click Install</div>
       <hr class="divider">
       <div class="confidence-grid">
-        <div class="confidence-chip ok"><strong>Image Source</strong><span>Reachability checked before install</span></div>
+        <div class="confidence-chip ok" id="source-confidence"><strong>Image Source</strong><span id="source-confidence-text">Checking embedded image…</span></div>
         <div class="confidence-chip ok"><strong>Boot Target</strong><span>EFI path verified when needed</span></div>
         <div class="confidence-chip ok"><strong>Disk Safety</strong><span>Unmounted targets are enforced</span></div>
         <div class="confidence-chip warn"><strong>Rollback</strong><span>bootc history remains available after first boot</span></div>
@@ -288,7 +299,7 @@
         <div class="phase-pill">Apply Region</div>
         <div class="phase-pill">Final Checks</div>
       </div>
-      <div class="progress-bar"><div class="progress-fill pulsing" id="progress-fill" style="width:0%"></div></div>
+      <div class="progress-bar" role="progressbar" aria-label="Installation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill pulsing" id="progress-fill" style="width:0%"></div></div>
         <div class="stats-row" id="stats-row"></div>
       </div>
       <button class="log-toggle" id="log-toggle" type="button"
@@ -337,6 +348,7 @@
         </div>
       </div>
       <div class="btn-row" style="justify-content:center;margin-top:32px">
+        <button onclick="copyInstallReport()">Copy Install Report</button>
         <button class="primary" onclick="reboot()" style="padding:11px 32px;font-size:15px">Reboot Now</button>
       </div>
     </div>
@@ -352,6 +364,7 @@
       <div class="btn-row">
         <button class="primary" onclick="backFromError()">← Back to Installer</button>
         <button onclick="copyFullLog()">Copy Full Log</button>
+        <button onclick="copyInstallReport()">Copy Install Report</button>
       </div>
     </div>
   </div>
@@ -364,6 +377,8 @@
 </div>
 
 <script src="state.js"></script>
+<script src="api.js"></script>
 <script src="app.js"></script>
+<script src="install-ui.js"></script>
 </body>
 </html>

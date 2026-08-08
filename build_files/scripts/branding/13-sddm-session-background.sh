@@ -5,8 +5,7 @@
 # without 3D acceleration, which drops the SPICE
 # connection and makes the VM appear to close. X11 is stable on all hardware
 # and VM GPU drivers; users can switch to Wayland from the session picker.
-mkdir -p /etc/sddm.conf.d
-cat >/etc/sddm.conf.d/10-kyth.conf <<'SDDMCONFEOF'
+write_config /etc/sddm.conf.d/10-kyth.conf <<'SDDMCONFEOF'
 [General]
 DisplayServer=x11
 DefaultSession=plasmax11.desktop
@@ -22,8 +21,7 @@ SDDMCONFEOF
 # usable when the VM display has no virgl/3D acceleration. Skipped on bare metal
 # (systemd-detect-virt returns non-zero when not in a VM/container) and when
 # kyth.hwgl=1 is in the cmdline to force hardware GL inside a VM.
-mkdir -p /etc/skel/.config/plasma-workspace/env
-cat >/etc/skel/.config/plasma-workspace/env/10-kyth-qemu-safe.sh <<'QEMUSAFEEOF'
+write_config /etc/skel/.config/plasma-workspace/env/10-kyth-qemu-safe.sh 0755 <<'QEMUSAFEEOF'
 #!/bin/sh
 if systemd-detect-virt -q 2>/dev/null && ! grep -qw 'kyth.hwgl=1' /proc/cmdline 2>/dev/null; then
     export LIBGL_ALWAYS_SOFTWARE=1
@@ -32,12 +30,10 @@ if systemd-detect-virt -q 2>/dev/null && ! grep -qw 'kyth.hwgl=1' /proc/cmdline 
     export QT_QUICK_BACKEND=software
 fi
 QEMUSAFEEOF
-chmod +x /etc/skel/.config/plasma-workspace/env/10-kyth-qemu-safe.sh
 
 # theme.conf.user overrides the breeze SDDM theme defaults without modifying
 # the upstream theme files. The wallpaper is already installed above.
-mkdir -p /usr/share/sddm/themes/breeze
-cat >/usr/share/sddm/themes/breeze/theme.conf.user <<'SDDMEOF'
+write_config /usr/share/sddm/themes/breeze/theme.conf.user <<'SDDMEOF'
 [General]
 type=image
 background=/usr/share/wallpapers/kyth/contents/images/1920x1080.svg

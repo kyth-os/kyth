@@ -3,7 +3,7 @@ from ._security import _SecurityMixin
 from ._signin import _SigninMixin
 from ._storage_sense import _StorageSenseMixin
 from ._health import _HealthMixin
-from ..qt import QLabel, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget, single_shot
+from ..qt import QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget, single_shot
 from ..widgets import ActionRow, EmptyState, Page, _make_card, _make_flow_step
 
 
@@ -63,6 +63,19 @@ class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _H
         self._banner_card.hide()
         self._add(self._banner_card)
 
+        # R6: AI control plane — same repair plan that Welcome/ Repair use,
+        # shown here as a compact summary above hardware cards (no new probe).
+        self._ai_card, self._ai_layout = _make_card("card-accent-ok")
+        self._ai_title = QLabel("AI Control Plane — offline")
+        self._ai_title.setObjectName("card-title")
+        self._ai_layout.addWidget(self._ai_title)
+        self._ai_body = QLabel("AI check will run with the hardware probe.")
+        self._ai_body.setObjectName("card-copy")
+        self._ai_body.setWordWrap(True)
+        self._ai_layout.addWidget(self._ai_body)
+        self._ai_card.hide()
+        self._add(self._ai_card)
+
         self._cards_widget = QWidget()
         self._cards_layout = QVBoxLayout(self._cards_widget)
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
@@ -95,7 +108,64 @@ class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _H
         self._add(self._make_signin_card())
         self._add(self._make_storage_sense_card())
 
+        # ── Telemetry privacy 78 + perf gate 76 — offline opt-out ─────────────
+        priv_card, priv_layout = _make_card()
+        priv_title = QLabel("Telemetry & Perf Gate — offline")
+        priv_title.setObjectName("card-title")
+        priv_layout.addWidget(priv_title)
+        priv_desc = QLabel("Telemetry is local-only (no cloud). Check collectors or purge. Perf gate fails CI if p95 regresses >5% vs ledger.")
+        priv_desc.setWordWrap(True)
+        priv_layout.addWidget(priv_desc)
+        priv_row = QHBoxLayout()
+        priv_row.setSpacing(8)
+        self._priv_status = QLabel("Privacy: checking…")
+        self._priv_status.setObjectName("status-muted")
+        priv_row.addWidget(self._priv_status, 1)
+        btn_purge = QPushButton("Purge")
+        btn_purge.setToolTip("Remove /var/cache/kyth/telem and ledger")
+        btn_purge.clicked.connect(lambda: self._run_priv("purge"))
+        priv_row.addWidget(btn_purge)
+        btn_gate = QPushButton("Gate")
+        btn_gate.clicked.connect(lambda: self._run_priv("gate"))
+        priv_row.addWidget(btn_gate)
+        btn_priv = QPushButton("Status")
+        btn_priv.clicked.connect(lambda: self._run_priv("status"))
+        priv_row.addWidget(btn_priv)
+        priv_layout.addLayout(priv_row)
+        self._add(priv_card)
+
         self._stretch()
+
+    def _run_priv(self, which: str):
+        try:
+            if which == "status":
+                from kyth_shared.telemetry_opt import load_telemetry_opt, telemetry_collectors_status
+                from kyth_shared.perf_gate import load_perf_gate, check_perf_gate
+
+                t = load_telemetry_opt()
+                g = load_perf_gate()
+                self._priv_status.setText(f"telemetry {t['enabled']} collectors={len(telemetry_collectors_status())} gate thr={g['threshold']}%")
+            elif which == "gate":
+                from kyth_shared.perf_gate import check_perf_gate
+
+                r = check_perf_gate(current_ms=16.0)
+                self._priv_status.setText(f"gate pass={r.get('pass')} delta={r.get('delta', 'n/a')}")
+            elif which == "purge":
+                from kyth_shared.telemetry_opt import load_telemetry_opt
+
+                # purge via helper
+                from kyth_shared.commands import run
+
+                run(["/usr/bin/kyth-telemetry-opt", "purge"])
+                self._priv_status.setText("purged telemetry cache")
+            from .core_base import restyle
+
+            restyle(self._priv_status)
+        except Exception as exc:
+            self._priv_status.setText(f"{which} failed — {exc}")
+            from .core_base import restyle
+
+            restyle(self._priv_status)
 
     def showEvent(self, event):
         super().showEvent(event)

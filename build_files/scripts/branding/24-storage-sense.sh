@@ -5,7 +5,7 @@
 # System Hub -> Health Report has the on/off switch.
 install -m 0755 /ctx/kyth-storage-sense /usr/bin/kyth-storage-sense
 
-cat >/usr/lib/systemd/user/kyth-storage-sense.service <<'STORAGESENSESVCEOF'
+write_config /usr/lib/systemd/user/kyth-storage-sense.service <<'STORAGESENSESVCEOF'
 [Unit]
 Description=KythOS Storage Sense cleanup
 
@@ -14,7 +14,7 @@ Type=oneshot
 ExecStart=/usr/bin/kyth-storage-sense
 STORAGESENSESVCEOF
 
-cat >/usr/lib/systemd/user/kyth-storage-sense.timer <<'STORAGESENSETIMEREOF'
+write_config /usr/lib/systemd/user/kyth-storage-sense.timer <<'STORAGESENSETIMEREOF'
 [Unit]
 Description=Weekly KythOS Storage Sense cleanup
 

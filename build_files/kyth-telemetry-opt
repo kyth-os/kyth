@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-telemetry-opt — telemetry-opt.toml privacy dash
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-telemetry-opt "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.telemetry_opt import load_telemetry_opt,telemetry_collectors_status; c=load_telemetry_opt(); print(f"enabled={c[\"enabled\"]} collectors={telemetry_collectors_status()}")' ;;
+    on) need_root "$@"; python3 -c 'from kyth_shared.telemetry_opt import load_telemetry_opt,save_telemetry_opt; c=load_telemetry_opt(); c["enabled"]=True; save_telemetry_opt(c)'; echo "telemetry on" ;;
+    off) need_root "$@"; python3 -c 'from kyth_shared.telemetry_opt import load_telemetry_opt,save_telemetry_opt; c=load_telemetry_opt(); c["enabled"]=False; save_telemetry_opt(c); rm -f /var/cache/kyth/telem/* 2>/dev/null; echo "telemetry off + purged"' ;;
+    purge) need_root "$@"; rm -rf /var/cache/kyth/telem /var/cache/kyth/perf-ledger.jsonl 2>/dev/null; echo "purged" ;;
+    *) echo "Usage: kyth-telemetry-opt [status|on|off|purge]" >&2; exit 1 ;;
+esac

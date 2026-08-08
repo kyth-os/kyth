@@ -8,6 +8,11 @@ import re
 
 from .constants import _PROC_MOUNT_ESCAPE_RE, _STEAM_NON_GAME_PATTERNS
 
+try:
+    from ..hardware.drives import _find_ntfs_drives as _ntfs_drives_provider
+except Exception:
+    _ntfs_drives_provider = None  # type: ignore[assignment]
+
 
 def _parse_steam_acf(path: str) -> dict:
     try:
@@ -228,9 +233,45 @@ def _detect_bottles_apps() -> list[dict]:
     return games
  # _detect_bottles_apps
 
+def _detect_ntfs_steam_games() -> list[dict]:
+    """Read-only scan of mounted Windows NTFS partitions for Steam libraries.
+
+    Uses _find_ntfs_drives (lsblk, probe_cached 30s) so we do not re-scan
+    /proc/mounts ourselves and we tolerate BitLocker-locked partitions (no
+    mount). Never writes — missed mount or permission error -> empty list."""
+    if _ntfs_drives_provider is None:
+        return []
+    try:
+        drives = _ntfs_drives_provider()
+    except Exception:
+        return []
+    seen: set[str] = set()
+    games: list[dict] = []
+    for drive in drives:
+        mount = (drive.get("mount") or "").strip() if isinstance(drive, dict) else ""
+        if not mount or not os.path.isdir(mount):
+            continue
+        for steamapps in _find_steam_libraries(mount):
+            for item in _scan_steamapps_manifests(steamapps):
+                key = item.get("appid") or item.get("name", "").lower()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                games.append({
+                    "name": item.get("name", ""),
+                    "launcher": "Steam (Windows NTFS)",
+                    "path": os.path.join(steamapps, "common", item.get("name", "")),
+                    "appid": item.get("appid", ""),
+                    "ntfs": True,
+                    "steamapps": steamapps,
+                })
+    return games
+ # _detect_ntfs_steam_games
+
 def _detect_installed_games() -> list[dict]:
     games = []
     games.extend(_detect_steam_games())
+    games.extend(_detect_ntfs_steam_games())
     games.extend(_detect_heroic_games())
     games.extend(_detect_lutris_games())
     games.extend(_detect_bottles_apps())

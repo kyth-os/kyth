@@ -1,4 +1,5 @@
-# Allow wheel-group users to run bootc and reboot without a password prompt.
+# Allow wheel-group users to run the guarded updater, limited bootc actions,
+# and reboot without a password prompt.
 # Required by the kyth-welcome GUI helper which calls these commands from a
 # non-interactive context (no terminal, so sudo cannot prompt for a password).
 #
@@ -6,4 +7,4 @@
 # switching within this registry is passwordless.  Rebasing to an arbitrary
 # third-party image (ujust rebase <ref>) will prompt for a password, which is
 # intentional: it is an advanced, high-impact operation.
-%wheel ALL=(root) NOPASSWD: /usr/bin/bootc switch ghcr.io/mrtrick37/kyth\:*, /usr/bin/bootc upgrade, /usr/bin/bootc status, /usr/bin/bootc status *, /usr/bin/systemctl reboot, /usr/sbin/bootc switch ghcr.io/mrtrick37/kyth\:*, /usr/sbin/bootc upgrade, /usr/sbin/bootc status, /usr/sbin/bootc status *
+%wheel ALL=(root) NOPASSWD: /usr/bin/kyth-safe-upgrade, /usr/bin/bootc switch ghcr.io/mrtrick37/kyth\:*, /usr/bin/bootc status, /usr/bin/bootc status *, /usr/bin/systemctl reboot, /usr/sbin/bootc switch ghcr.io/mrtrick37/kyth\:*, /usr/sbin/bootc status, /usr/sbin/bootc status *

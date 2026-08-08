@@ -30,6 +30,25 @@ install-vscode:
 # Usage:
 #   ujust setup-waydroid            # vanilla AOSP (no Google Play)
 
+# Dev cache perf 72-75 — sccache/flatpak/work
+[group('KythOS')]
+sccache mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-sccache "{{ mode }}"
+
+[group('KythOS')]
+flatpak-prefetch mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-flatpak-prefetch "{{ mode }}"
+
+[group('KythOS')]
+work-cache mode="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-work-cache "{{ mode }}"
+
 # Install JetBrains Toolbox — manages all JetBrains IDEs (IntelliJ, PyCharm,
 # CLion, Rider, etc.) with one-click install, update, and rollback.
 [group('KythOS')]

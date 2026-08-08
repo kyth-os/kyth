@@ -14,8 +14,9 @@ __all__ = [
     "QPushButton", "QLabel", "QTextEdit", "QStackedWidget", "QProgressBar",
     "QFrame", "QScrollArea", "QFileDialog", "QMessageBox", "QLineEdit",
     "QSizePolicy", "QDialog", "QCheckBox", "QComboBox", "QRadioButton", "QButtonGroup",
-    "QDialogButtonBox", "QGridLayout", "QCompleter", "QInputDialog",
-    "Qt", "QThread", "Signal", "QTimer", "QUrl", "QLibraryInfo", "QSize", "QStringListModel",
+    "QDialogButtonBox", "QGridLayout", "QCompleter", "QInputDialog", "QLayout",
+    "QListWidget", "QListWidgetItem",
+    "Qt", "QThread", "Signal", "QTimer", "QUrl", "QLibraryInfo", "QSize", "QRect", "QStringListModel",
     "QDesktopServices", "QIcon", "QKeySequence", "QShortcut", "QAction",
     "QDBusConnection", "QDBusInterface",
     "QLocalServer", "QLocalSocket",
@@ -35,10 +36,11 @@ try:
         QPushButton, QLabel, QTextEdit, QStackedWidget, QProgressBar,
         QFrame, QScrollArea, QFileDialog, QMessageBox, QLineEdit,
         QSizePolicy, QDialog, QCheckBox, QComboBox, QRadioButton, QButtonGroup,
-        QDialogButtonBox, QGridLayout, QCompleter, QInputDialog,
+        QDialogButtonBox, QGridLayout, QCompleter, QInputDialog, QLayout,
+        QListWidget, QListWidgetItem,
     )
     from PySide6.QtCore import (
-        Qt, QThread, Signal, QTimer, QUrl, QLibraryInfo, QSize, QStringListModel,
+        Qt, QThread, Signal, QTimer, QUrl, QLibraryInfo, QSize, QRect, QStringListModel,
     )
     from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction
     from PySide6.QtDBus import QDBusConnection, QDBusInterface
@@ -51,10 +53,11 @@ except ImportError:
         QPushButton, QLabel, QTextEdit, QStackedWidget, QProgressBar,
         QFrame, QScrollArea, QFileDialog, QMessageBox, QLineEdit,
         QSizePolicy, QDialog, QCheckBox, QComboBox, QRadioButton, QButtonGroup,
-        QDialogButtonBox, QGridLayout, QCompleter, QInputDialog,
+        QDialogButtonBox, QGridLayout, QCompleter, QInputDialog, QLayout,
+        QListWidget, QListWidgetItem,
     )
     from PyQt6.QtCore import (
-        Qt, QThread, QTimer, QUrl, QLibraryInfo, QSize, QStringListModel,
+        Qt, QThread, QTimer, QUrl, QLibraryInfo, QSize, QRect, QStringListModel,
     )
     from PyQt6.QtCore import pyqtSignal as Signal
     from PyQt6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction

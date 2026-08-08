@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck source=../lib/packages-helpers.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/packages-helpers.sh"
+source "../lib/packages-helpers.sh"
 
 # ── Desktop helper, Plymouth, mutable-workspace, and creator tooling ─────────
 # Keep required desktop helper packages in one transaction. Optional niceties
@@ -31,8 +31,7 @@ dnf5 install -y --skip-unavailable \
 	openconnect \
 	vpnc \
 	kde-connect \
-	plasma-browser-integration \
-	cups-browsed
+	plasma-browser-integration
 
 # Generic Distrobox wrapper — delegates to kyth-ai-dev container dynamically
 install -Dm 0755 /dev/stdin /usr/libexec/kyth-distrobox-wrapper <<'WRAPPEREOF'
@@ -47,6 +46,32 @@ declare -A descriptions=(
 	[gh]="GitHub CLI"
 	[hx]="Helix editor"
 	[zellij]="Zellij"
+	[bat]="bat syntax highlighter"
+	[eza]="eza ls replacement"
+	[fastfetch]="fastfetch system summary"
+	[zoxide]="zoxide directory navigator"
+	[evtest]="evtest input event monitor"
+	[sensors]="lm_sensors hardware monitor"
+	[i2cget]="i2cget I2C utility"
+	[i2cset]="i2cset I2C utility"
+	[i2cdetect]="i2cdetect I2C utility"
+	[v4l2-ctl]="v4l2-ctl Video4Linux utility"
+	[jq]="jq JSON processor"
+	[yq]="yq YAML processor"
+	[hyperfine]="hyperfine benchmarking tool"
+	[tmux]="tmux terminal multiplexer"
+	[rclone]="rclone cloud storage sync"
+	[flatpak-builder]="flatpak-builder package creator"
+	[pipx]="pipx Python application runner"
+	[uv]="uv fast Python package installer"
+	[starship]="starship prompt engine"
+	[direnv]="direnv environment loader"
+	[delta]="git-delta diff pager"
+	[gum]="gum TUI menu builder"
+	[7z]="7z archive extractor"
+	[7za]="7za archive extractor"
+	[cabextract]="cabextract archive utility"
+	[readpst]="readpst PST converter"
 )
 desc="${descriptions[$tool]:-$tool}"
 
@@ -66,7 +91,7 @@ exec distrobox enter "${box}" -- "${tool}" "$@"
 WRAPPEREOF
 
 # Create host symlinks to the generic distrobox wrapper
-for tool in shellcheck shfmt gh hx zellij; do
+for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux rclone flatpak-builder pipx uv starship direnv delta gum 7z 7za cabextract readpst; do
 	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
 done
 
@@ -94,47 +119,22 @@ pip --version
 
 optional_desktop_packages=(
 	jetbrains-mono-fonts
-	cascadia-code-nf-fonts
 	liberation-fonts-all
 	inter-fonts
 	papirus-icon-theme
-	# Calibri/Cambria-compatible fonts: fix Office document rendering for Windows migrants.
-	# Arial/Times are covered by liberation-fonts; Calibri (default since Office 2007)
-	# needs Carlito, and Cambria needs Caladea, for correct line-break and pagination matching.
-	google-carlito-fonts
-	google-caladea-fonts
 	# Emoji rendering — without this, emoji in browsers and terminals render as
 	# empty boxes on systems that only have the liberation/inter font set.
 	google-noto-emoji-fonts
-	# Modern CLI tools loved by Linux veterans (all gracefully absent if unavailable).
-	bat
-	eza
+	# Modern CLI tools (heavy ones like fish, btop, ddcutil are provided via
+	# kyth-ai-dev container or Flatpaks to keep base OS lean).
 	fd-find
 	ripgrep
 	fzf
-	zoxide
-	git-delta
-	starship
-	direnv
-	jq
-	yq
 	# zsh enhancements — sourced automatically by the /etc/skel/.zshrc below.
 	zsh-autosuggestions
 	zsh-syntax-highlighting
-	# fish shell — out-of-box syntax highlighting and autosuggestions with no config.
-	# Good first shell for Windows migrants; veterans can chsh -s /usr/bin/fish.
-	fish
-	# btop — interactive resource/process monitor (better htop).
-	btop
-	# fastfetch — system info display (neofetch replacement, actively maintained).
-	fastfetch
-	# gum — Charm CLI beautification library; used by ujust scripts for interactive menus.
-	gum
 	# ydotool — Wayland-compatible xdotool; required for Wayland automation scripts.
 	ydotool
-	# ddcutil — DDC/CI monitor brightness/contrast control via I²C.
-	ddcutil
-	ddcutil-service
 	# iio-sensor-proxy — exposes orientation sensors (accelerometer) over D-Bus
 	# for auto-rotation on convertibles and handhelds.
 	iio-sensor-proxy
@@ -145,7 +145,10 @@ install_available_optional_packages desktop "${optional_desktop_packages[@]}"
 # kde-connect: Phone Link equivalent for Android — pairs over LAN/Bluetooth.
 # plasma-browser-integration: native host for browser media controls, download
 #   progress, and desktop integration once the browser extension is enabled.
-# cups-browsed: auto-discovers printers on the LAN without manual config.
+# cups-browsed is intentionally NOT installed: it is the legacy LAN printer
+#   auto-discovery daemon (2024 CUPS RCE vector on UDP 631) and is purged in
+#   packages/17-desktop-package-cleanup.sh. Driverless printing still works via
+#   cups + Avahi/mDNS (IPP Everywhere), which remain installed and enabled.
 # liberation-fonts-all: metric-compatible substitutes for Arial/Times/Courier.
 #   mscore-fonts-all (RPM Fusion) was removed — its %post downloads from
 #   SourceForge at install time, which is unreliable in CI builds.

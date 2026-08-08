@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import re
 
-from .process import _run_command
-
-DEFAULT_KALI_BOX = "kali"
-DEFAULT_KALI_IMAGE = "docker.io/kalilinux/kali-rolling"
+# pylint: disable=unused-import
+from .security_container import (  # noqa: F401 — DEFAULT_KALI_IMAGE re-exported; see page_software_security.py
+    DEFAULT_KALI_BOX,
+    DEFAULT_KALI_IMAGE,
+)
+from .process import run_command
 
 SEC_HOST_TOOLS = [
     {
@@ -27,26 +29,27 @@ SEC_HOST_TOOLS = [
 ]
 
 
-def is_socket_capable_kali_box(name: str = DEFAULT_KALI_BOX) -> bool:
-    """True when Kali is rootful, privileged, and outside SELinux container_t."""
-    result = _run_command(
+def _is_socket_capable_kali_box(name: str = DEFAULT_KALI_BOX) -> bool:
+    """Legacy patchable seam; new code should use ``security_container``."""
+    result = run_command(
         [
-            "sudo", "-n", "podman", "inspect", name,
-            "--format",
-            "{{.ImageName}}\n{{.HostConfig.Privileged}}\n{{range .HostConfig.SecurityOpt}}{{.}} {{end}}",
+            "sudo", "-n", "podman", "inspect", name, "--format",
+            "{{.ImageName}}\n{{.HostConfig.Privileged}}\n"
+            "{{range .HostConfig.SecurityOpt}}{{.}} {{end}}",
         ],
         timeout=10,
     )
     if result is None or result.returncode != 0:
         return False
     lines = result.stdout.splitlines()
-    image = lines[0] if len(lines) > 0 else ""
-    privileged = lines[1] if len(lines) > 1 else ""
-    security_opts = lines[2] if len(lines) > 2 else ""
-    return "kali" in image and privileged == "true" and "label=disable" in security_opts
+    return (
+        len(lines) >= 3 and "kali" in lines[0]
+        and lines[1] == "true" and "label=disable" in lines[2]
+    )
 
 
-_is_socket_capable_kali_box = is_socket_capable_kali_box
+def is_socket_capable_kali_box(name: str = DEFAULT_KALI_BOX) -> bool:
+    return _is_socket_capable_kali_box(name)
 
 
 # Run once after any bulk `distrobox-export --app ...`: tags Kali-exported

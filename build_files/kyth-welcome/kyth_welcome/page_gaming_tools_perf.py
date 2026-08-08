@@ -1,13 +1,61 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _restyle
+from .core_base import restyle
 from .services.gaming import scx_scheduler_command
-from .services.runtime import Worker, _finish_worker
-from .qt import QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, Qt
-from .widgets import _copy_text, _launch_opt_label, _launch_opt_value, _make_card, _set_log_panel
+from .services.runtime import Worker, finish_worker
+from .qt import QHBoxLayout, QLabel, QComboBox, QProgressBar, QPushButton, Qt
+from .widgets import CollapsibleLogPanel, _copy_text, _launch_opt_label, _launch_opt_value, _make_card
 
 
 class _PerfTuningMixin:
     """MangoHud, Gamescope, sched-ext, and the per-game launch-option profile builder."""
+
+    def _build_overlays_bulk_card(self):
+        """One-tap MangoHud + Gamescope + vkBasalt — what Windows switcher expects as 'overlays'."""
+        card, layout = _make_card()
+        top = QHBoxLayout()
+        title = QLabel("Overlays — MangoHud + Gamescope + vkBasalt")
+        title.setObjectName("card-title")
+        top.addWidget(title)
+        top.addStretch()
+        # Per-tool badges updated by page_gaming._refresh_status via apply_install_badge
+        from .qt import QLabel as _QLabel  # local to keep import order stable
+        self._bulk_mh_badge = _QLabel()
+        self._bulk_mh_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self._bulk_mh_badge)
+        self._bulk_gs_badge = _QLabel()
+        self._bulk_gs_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self._bulk_gs_badge)
+        self._bulk_vk_badge = _QLabel()
+        self._bulk_vk_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self._bulk_vk_badge)
+        layout.addLayout(top)
+        desc = QLabel(
+            "One-tap performance overlays: MangoHud (FPS/OSD), Gamescope (compositor + FSR), "
+            "and vkBasalt (contrast/sharpen). Toggle MangoHud in-game with Right Shift + F12."
+        )
+        desc.setObjectName("card-copy")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+        # Combined launch options — copy as a single line (Windows muscle memory: one checkbox)
+        for label, opt in (
+            ("MangoHud + vkBasalt:", "MANGOHUD=1 ENABLE_VKBASALT=1 %command%"),
+            ("All three via Gamescope:", "MANGOHUD=1 ENABLE_VKBASALT=1 kyth-gamescope quality -- %command%"),
+        ):
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            row.addWidget(_launch_opt_label(label))
+            row.addWidget(_launch_opt_value(opt))
+            cp = QPushButton("Copy")
+            captured = opt
+            cp.clicked.connect(lambda _=False, t=captured: _copy_text(t))
+            row.addWidget(cp)
+            row.addStretch()
+            layout.addLayout(row)
+        hint = QLabel("Installed badges reflect /usr/bin/mangohud, /usr/bin/gamescope, and libvkbasalt.so — no background scan.")
+        hint.setObjectName("card-copy")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self._add(card)
 
     def _build_mangohud_card(self):
         self._divider()
@@ -90,8 +138,9 @@ class _PerfTuningMixin:
         profile_title.setObjectName("card-title")
         profile_layout.addWidget(profile_title)
         profile_desc = QLabel(
-            "Pick a common goal and copy the Steam launch option. Use this before "
-            "manual tuning so players get a known-good KythOS baseline first."
+            "Pick a common goal and copy the Steam launch option. Per-game HDR "
+            "and latency are saved to ~/.config/kyth/gaming-per-game.toml so "
+            "launches stay lean (no global LD_PRELOAD) and survive reboots."
         )
         profile_desc.setObjectName("card-copy")
         profile_desc.setWordWrap(True)
@@ -123,8 +172,31 @@ class _PerfTuningMixin:
         profile_opt_row.addWidget(profile_copy)
         profile_layout.addLayout(profile_opt_row)
 
+        # R4: per-game persistence — save HDR + latency choice to gaming-per-game.toml
+        per_game_row = QHBoxLayout()
+        per_game_row.setSpacing(8)
+        from .qt import QCheckBox
+
+        self._per_game_hdr_check = QCheckBox("HDR per game (KYTH_HDR=1)")
+        self._per_game_hdr_check.setToolTip("Save HDR=1 for this app so kyth-gamescope adds --hdr-enabled on next launch")
+        per_game_row.addWidget(self._per_game_hdr_check)
+        self._per_game_save_btn = QPushButton("Save per-game")
+        self._per_game_save_btn.setToolTip("Save profile + HDR to ~/.config/kyth/gaming-per-game.toml")
+        self._per_game_save_btn.clicked.connect(self._save_per_game_profile)
+        per_game_row.addWidget(self._per_game_save_btn)
+        self._per_game_status = QLabel("")
+        self._per_game_status.setObjectName("card-copy")
+        per_game_row.addWidget(self._per_game_status, 1)
+        per_game_row.addStretch()
+        profile_layout.addLayout(per_game_row)
+        hint = QLabel("Saved per-game — launch env is KYTH_HDR + LOW_LATENCY_LAYER/MANGOHUD, no global layer.")
+        hint.setObjectName("card-copy")
+        hint.setWordWrap(True)
+        profile_layout.addWidget(hint)
+
         self._profile_goal_combo.currentIndexChanged.connect(self._update_profile_builder)
         self._profile_fps_combo.currentIndexChanged.connect(self._update_profile_builder)
+        self._per_game_hdr_check.toggled.connect(self._update_profile_builder)
         self._add(profile_card)
 
     def _build_scx_card(self):
@@ -163,17 +235,8 @@ class _PerfTuningMixin:
         self._scx_progress.setRange(0, 0)
         self._scx_progress.hide()
         scx_layout.addWidget(self._scx_progress)
-        self._scx_log_toggle = QPushButton("Show details")
-        self._scx_log_toggle.setCheckable(True)
-        self._scx_log_toggle.clicked.connect(lambda checked: _set_log_panel(self._scx_log_toggle, self._scx_log, checked))
-        self._scx_log_toggle.hide()
-        scx_layout.addWidget(self._scx_log_toggle)
-        self._scx_log = QTextEdit()
-        self._scx_log.document().setMaximumBlockCount(5000)
-        self._scx_log.setReadOnly(True)
-        self._scx_log.setMaximumHeight(100)
-        self._scx_log.hide()
-        scx_layout.addWidget(self._scx_log)
+        self._scx_log_panel = CollapsibleLogPanel(max_height=100)
+        scx_layout.addWidget(self._scx_log_panel)
         self._scx_worker = None
         self._add(scx_card)
 
@@ -182,15 +245,35 @@ class _PerfTuningMixin:
             return
         goal = self._profile_goal_combo.currentData() or "quality"
         fps = self._profile_fps_combo.currentData() or ""
+        hdr = bool(getattr(self, "_per_game_hdr_check", None) and self._per_game_hdr_check.isChecked())
+        hdr_prefix = "KYTH_HDR=1 " if hdr else ""
         fps_arg = f" --fps {fps}" if fps else ""
         launch_options = {
-            "quality": f"kyth-gamescope quality{fps_arg} -- %command%",
-            "hdr": f"kyth-gamescope hdr{fps_arg} -- %command%",
-            "sharp": f"kyth-gamescope sharp --fsr{fps_arg} -- %command%",
-            "latency": f"game-performance --profile gaming -- kyth-gamescope latency{fps_arg} -- %command%",
+            "quality": f"{hdr_prefix}kyth-gamescope quality{fps_arg} -- %command%",
+            "hdr": f"KYTH_HDR=1 kyth-gamescope hdr{fps_arg} -- %command%",
+            "sharp": f"{hdr_prefix}kyth-gamescope sharp --fsr{fps_arg} -- %command%",
+            "latency": f"{hdr_prefix}game-performance --profile gaming -- kyth-gamescope latency{fps_arg} -- %command%",
             "troubleshoot": "PROTON_LOG=1 PROTON_NO_NTSYNC=1 %command%",
         }
         self._profile_launch_value.setText(launch_options.get(goal, launch_options["quality"]))
+
+    def _save_per_game_profile(self):
+        try:
+            from kyth_shared.gaming_per_game import set_profile_for_appid
+
+            goal = self._profile_goal_combo.currentData() or "quality"
+            hdr = bool(self._per_game_hdr_check.isChecked())
+            # Use a placeholder appid for the builder; per-game page will call with real appid
+            appid = getattr(self, "_current_per_game_appid", "builder-default")
+            set_profile_for_appid(appid, profile=goal, hdr=hdr)
+            self._per_game_status.setText(f"Saved {goal} hdr={hdr} for {appid}")
+            self._per_game_status.setObjectName("status-ok")
+        except Exception as exc:
+            self._per_game_status.setText(f"Save failed: {exc}")
+            self._per_game_status.setObjectName("status-err")
+        from .core_base import restyle
+
+        restyle(self._per_game_status)
 
     def _set_scx_scheduler(self, scheduler: str):
         if self._scx_worker and self._scx_worker.isRunning():
@@ -198,32 +281,26 @@ class _PerfTuningMixin:
 
         cmd = scx_scheduler_command(scheduler)
 
-        self._scx_log.clear()
-        self._scx_log.append(f"→ {' '.join(cmd)}\n")
-        self._scx_log_toggle.show()
-        _set_log_panel(self._scx_log_toggle, self._scx_log, False)
+        self._scx_log_panel.reset(f"→ {' '.join(cmd)}\n")
         self._scx_progress.show()
         self._scx_status_lbl.setText(f"Setting scheduler: {scheduler}…")
         self._scx_status_lbl.setObjectName("subheading")
-        _restyle(self._scx_status_lbl)
+        restyle(self._scx_status_lbl)
 
         self._scx_worker = Worker(cmd)
-        self._scx_worker.line.connect(lambda ln: (
-            self._scx_log.append(ln),
-            self._scx_log.ensureCursorVisible(),
-        ))
+        self._scx_worker.line.connect(self._scx_log_panel.append)
         self._scx_worker.done.connect(self._on_scx_done)
         self._scx_worker.start()
 
     def _on_scx_done(self, code: int):
         self._scx_progress.hide()
-        _finish_worker(self, attr="_scx_worker")
+        finish_worker(self, attr="_scx_worker")
         if code == 0:
             self._scx_status_lbl.setText("sched-ext updated.")
             self._scx_status_lbl.setObjectName("status-ok")
-            self._scx_log.append("\nDone.")
+            self._scx_log_panel.append("\nDone.")
         else:
             self._scx_status_lbl.setText(f"sched-ext update failed (exit {code}).")
             self._scx_status_lbl.setObjectName("status-err")
-        _restyle(self._scx_status_lbl)
+        restyle(self._scx_status_lbl)
         self._refresh_status()

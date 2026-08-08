@@ -1,112 +1,131 @@
-#!/usr/bin/env bash
-# ── KythOS Adaptive Game & Performance Governor ──────────────────────────────
-# Dynamically optimizes CPU topology, sched-ext scheduler profiles, and memory
-# page caches before launching games or high-performance workloads.
-# Usage in Steam Launch Options: kyth-game-boost %command%
-set -euo pipefail
+#!/usr/bin/env python3
+"""KythOS Adaptive Game & Performance Governor."""
+from __future__ import annotations
 
-log() {
-	echo "[kyth-game-boost] $1"
-}
+import os
+import shutil
+import sys
+from pathlib import Path
 
-status_only() {
-	log "KythOS Performance Governor Status"
-	log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	
-	# CPU Topology Detection
-	local vendor
-	vendor=$(grep -m1 'vendor_id' /proc/cpuinfo | awk '{print $3}' || echo "Unknown")
-	local model
-	model=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs || echo "Generic CPU")
-	log "CPU Vendor / Model: ${vendor} (${model})"
 
-	# AMD 3D V-Cache / Dual CCD Check
-	if [[ "${vendor}" == "AuthenticAMD" ]]; then
-		if grep -qi "3D" /proc/cpuinfo 2>/dev/null || lscpu 2>/dev/null | grep -qi "3D"; then
-			log "AMD 3D V-Cache Detected: Cache CCD affinity optimization active"
-		elif [[ -d /sys/devices/system/cpu/cpu0/topology ]]; then
-			local num_nodes
-			num_nodes=$(ls -d /sys/devices/system/node/node* 2>/dev/null | wc -l || echo "1")
-			log "AMD Multi-CCD Topology: ${num_nodes} NUMA node(s) / CCD(s)"
-		fi
-	elif [[ "${vendor}" == "GenuineIntel" ]]; then
-		log "Intel Processor Topology: Hybrid P/E core auto-scheduling supported"
-	fi
 
-	# Sched-Ext (scx) Status
-	if command -v scx_rusty >/dev/null 2>&1; then
-		log "Sched-Ext (scx_rusty): Fedora-packaged gaming scheduler available"
-	elif systemctl is-active --quiet scx_loader.service 2>/dev/null; then
-		log "Sched-Ext (scx_loader): Service active"
-	else
-		log "Sched-Ext (scx): Default kernel scheduler fallback"
-	fi
+from kyth_shared.performance import (  # noqa: E402
+    flush_page_caches,
+    get_amd_ccd0_cpus,
+    get_cpu_topology,
+    get_intel_pcores,
+    has_3d_vcache,
+    set_transparent_hugepages,
+    switch_sched_ext_profile,
+)
 
-	echo
-	log "To use in Steam: Set launch options to: kyth-game-boost %command%"
-}
 
-if [[ $# -eq 0 ]]; then
-	status_only
-	exit 0
-fi
+def log(msg: str) -> None:
+    print(f"[kyth-game-boost] {msg}")
 
-# ── 1. CPU Core Affinity Optimization ───────────────────────────────────────
-AFFINITY_CMD=()
-local_vendor=$(grep -m1 'vendor_id' /proc/cpuinfo | awk '{print $3}' || echo "")
 
-if [[ "${local_vendor}" == "AuthenticAMD" ]]; then
-	# If AMD 3D V-Cache or dual-CCD CPU, attempt to isolate CCD0 (first 8 cores / 16 threads)
-	if grep -qi "3D" /proc/cpuinfo 2>/dev/null || lscpu 2>/dev/null | grep -qi "3D"; then
-		if [[ -f /sys/devices/system/cpu/cpu0/topology/core_siblings_list ]]; then
-			ccd0_cpus=$(cat /sys/devices/system/cpu/cpu0/topology/core_siblings_list 2>/dev/null || echo "")
-			if [[ -n "${ccd0_cpus}" ]]; then
-				log "Pinning game to 3D V-Cache CCD0 (CPUs: ${ccd0_cpus})"
-				AFFINITY_CMD=(taskset -c "${ccd0_cpus}")
-			fi
-		fi
-	fi
-elif [[ "${local_vendor}" == "GenuineIntel" ]]; then
-	# For Intel 12th+ Gen Hybrid, if P-cores are identifiable via max frequency, target them
-	if [[ -d /sys/devices/system/cpu/cpu0/cpufreq ]]; then
-		max_freq_cpu0=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null || echo "0")
-		pcore_list=""
-		for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*; do
-			cpu_id=$(basename "${cpu_dir}" | tr -dc '0-9')
-			freq=$(cat "${cpu_dir}/cpufreq/cpuinfo_max_freq" 2>/dev/null || echo "0")
-			if [[ "${freq}" -eq "${max_freq_cpu0}" && "${max_freq_cpu0}" -gt 0 ]]; then
-				pcore_list="${pcore_list},${cpu_id}"
-			fi
-		done
-		pcore_list="${pcore_list#,}"
-		if [[ -n "${pcore_list}" && "${pcore_list}" != *"*"* ]]; then
-			log "Pinning game to Intel Performance Cores (CPUs: ${pcore_list})"
-			AFFINITY_CMD=(taskset -c "${pcore_list}")
-		fi
-	fi
-fi
+def parse_cpu_list(cpu_str: str) -> set[int]:
+    """Parse comma-separated or hyphenated CPU string into set of ints (e.g. '0-7,16-23')."""
+    cpus = set()
+    for part in cpu_str.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                start, end = part.split("-", 1)
+                cpus.update(range(int(start), int(end) + 1))
+            except ValueError:
+                pass
+        else:
+            try:
+                cpus.add(int(part))
+            except ValueError:
+                pass
+    return cpus
 
-# ── 2. Memory Cache & Transparent Hugepages Optimization ────────────────────
-if [[ -w /proc/sys/vm/drop_caches ]]; then
-	log "Flushing fragmented memory page cache..."
-	sync
-	echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
-fi
 
-if [[ -w /sys/kernel/mm/transparent_hugepage/enabled ]]; then
-	echo madvise > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true
-fi
+def status_only() -> None:
+    log("KythOS Performance Governor Status")
+    log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-# ── 3. Sched-Ext (scx) Low-Latency Profile Switcher ─────────────────────────
-if command -v scx_rusty >/dev/null 2>&1; then
-	log "Switching sched-ext to the scx_rusty gaming scheduler..."
-	sudo -n /usr/bin/kyth-scx set rusty 2>/dev/null || true
-fi
+    vendor, model = get_cpu_topology()
+    log(f"CPU Vendor / Model: {vendor} ({model})")
 
-# ── 4. Launch Target Application ────────────────────────────────────────────
-log "Launching game workload: $*"
-if [[ ${#AFFINITY_CMD[@]} -gt 0 ]]; then
-	exec "${AFFINITY_CMD[@]}" "$@"
-else
-	exec "$@"
-fi
+    if vendor == "AuthenticAMD":
+        if has_3d_vcache():
+            log("AMD 3D V-Cache Detected: Cache CCD affinity optimization active")
+        elif Path("/sys/devices/system/cpu/cpu0/topology").is_dir():
+            num_nodes = len(list(Path("/sys/devices/system/node").glob("node*"))) or 1
+            log(f"AMD Multi-CCD Topology: {num_nodes} NUMA node(s) / CCD(s)")
+    elif vendor == "GenuineIntel":
+        log("Intel Processor Topology: Hybrid P/E core auto-scheduling supported")
+
+    if shutil.which("scx_rusty"):
+        log("Sched-Ext (scx_rusty): Fedora-packaged gaming scheduler available")
+    elif shutil.which("systemctl"):
+        import subprocess
+        res = subprocess.run(["systemctl", "is-active", "--quiet", "scx_loader.service"], check=False)
+        if res.returncode == 0:
+            log("Sched-Ext (scx_loader): Service active")
+        else:
+            log("Sched-Ext (scx): Default kernel scheduler fallback")
+    else:
+        log("Sched-Ext (scx): Default kernel scheduler fallback")
+
+    print()
+    log("To use in Steam: Set launch options to: kyth-game-boost %command%")
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    if not args:
+        status_only()
+        sys.exit(0)
+
+    # 1. CPU Core Affinity Optimization
+    affinity_cpus = None
+    vendor, _ = get_cpu_topology()
+
+    if vendor == "AuthenticAMD":
+        # If AMD 3D V-Cache, attempt to isolate CCD0
+        if has_3d_vcache():
+            ccd0 = get_amd_ccd0_cpus()
+            if ccd0:
+                log(f"Pinning game to 3D V-Cache CCD0 (CPUs: {ccd0})")
+                affinity_cpus = ccd0
+    elif vendor == "GenuineIntel":
+        pcores = get_intel_pcores()
+        if pcores:
+            log(f"Pinning game to Intel Performance Cores (CPUs: {pcores})")
+            affinity_cpus = pcores
+
+    # Apply affinity to current process if supported
+    if affinity_cpus and hasattr(os, "sched_setaffinity"):
+        try:
+            cpu_set = parse_cpu_list(affinity_cpus)
+            if cpu_set:
+                os.sched_setaffinity(0, cpu_set)
+        except Exception as e:
+            log(f"Warning: failed to set CPU affinity: {e}")
+
+    # 2. Memory Cache & Transparent Hugepages Optimization
+    flush_page_caches()
+    set_transparent_hugepages("madvise")
+
+    # 3. Sched-Ext switcher
+    if shutil.which("scx_rusty"):
+        log("Switching sched-ext to the scx_rusty gaming scheduler...")
+        switch_sched_ext_profile("rusty")
+
+    # 4. Launch Target Application
+    log(f"Launching game workload: {' '.join(args)}")
+    try:
+        os.execvp(args[0], args)
+    except Exception as e:
+        print(f"[kyth-game-boost] Exec failed: {e}", file=sys.stderr)
+        sys.exit(127)
+
+
+if __name__ == "__main__":
+    main()

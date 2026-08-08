@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kyth-thp-tune — thp.toml → 99-kyth-thp.conf + sysfs
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-thp-tune "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.thp_tune import load_thp,thp_status; c=load_thp(); print(f"profile={c[\"profile\"]} scan_sleep_ms={c[\"scan_sleep_ms\"]} active={thp_status()}"); p="/sys/kernel/mm/transparent_hugepage/enabled"; print(open(p).read().strip() if __import__("pathlib").Path(p).exists() else "no sysfs")' ;;
+    kyth) need_root "$@"; python3 -c 'from kyth_shared.thp_tune import load_thp,save_thp,generate_thp_conf; c=load_thp(); c["profile"]="kyth"; save_thp(c); generate_thp_conf(c)'; for f in /sys/kernel/mm/transparent_hugepage/enabled /sys/kernel/mm/transparent_hugepage/defrag; do [[ -w "$f" ]] && echo madvise > "$f" 2>/dev/null || true; done; sysctl --system >/dev/null 2>&1 || true; echo "THP kyth enabled" ;;
+    balanced|default) need_root "$@"; python3 -c 'from kyth_shared.thp_tune import load_thp,save_thp,generate_thp_conf; c=load_thp(); c["profile"]="balanced"; save_thp(c); generate_thp_conf(c)'; echo "THP balanced (kernel defaults), reboot to revert sysfs" ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.thp_tune import load_thp,generate_thp_conf; generate_thp_conf(load_thp())';;
+    *) echo "Usage: kyth-thp-tune [status|kyth|balanced|apply]" >&2; exit 1 ;;
+esac

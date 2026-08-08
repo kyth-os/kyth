@@ -1,8 +1,8 @@
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _apply_install_badge, _restyle
-from .services.diagnostics import _command_stdout
+from .core_base import apply_install_badge
+from .services.diagnostics import command_stdout
 from .services.gaming import (
     DataWorker, GameNightManager, _ProtonDbBatchWorker, _collect_gaming_dashboard, _compat_tool_version,
     _gamescope_installed, _gaming_health_items, _gaming_migration_checklist_items,
@@ -11,10 +11,10 @@ from .services.gaming import (
 from .services.flatpak import _is_flatpak_installed
 from .services.workers.windows_migration import WindowsLibraryWorker
 from .qt import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt, single_shot
+    QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget, Qt, single_shot
 )
 from .lazy_page import compose_on_first_init
-from .widgets import Page, StatusBadge
+from .widgets import Page, SegmentedTabBar, StatusBadge
 
 
 def _load_gaming_mixins() -> tuple[type, ...]:
@@ -57,17 +57,7 @@ class GamingPage(Page):
         wrapper.setLayout(layout)
         self._add(wrapper)
 
-    def _make_section_switcher(self) -> QFrame:
-        bar = QFrame()
-        bar.setObjectName("genz-focus-row")
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(16, 10, 16, 10)
-        layout.setSpacing(12)
-
-        lbl = QLabel("GAMING HUB:")
-        lbl.setObjectName("home-kicker")
-        layout.addWidget(lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-
+    def _make_section_switcher(self) -> SegmentedTabBar:
         display_labels = {
             "all": "🎮 Dashboard",
             "setup": "⚙️ Setup",
@@ -76,18 +66,9 @@ class GamingPage(Page):
             "tuning": "⚡ Performance & Tuning",
             "fixes": "🛠️ Fixes",
         }
-
-        for key, label in self._SECTION_LABELS.items():
-            display_label = display_labels.get(key, label)
-            btn = QPushButton(display_label)
-            btn.setObjectName("genz-mode-btn")
-            btn.setCheckable(True)
-            btn.setChecked(key == self._current_gaming_section)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda _=False, k=key: self._switch_gaming_section(k))
-            self._gaming_section_buttons[key] = btn
-            layout.addWidget(btn)
-        layout.addStretch()
+        items = [(key, display_labels.get(key, label)) for key, label in self._SECTION_LABELS.items()]
+        bar = SegmentedTabBar(items, active=self._current_gaming_section, kicker="GAMING HUB:")
+        bar.activated.connect(self._switch_gaming_section)
         return bar
 
     def _switch_gaming_section(self, active: str) -> None:
@@ -99,11 +80,8 @@ class GamingPage(Page):
             self._ensure_gaming_section(active)
             self._kick_section_refresh(active)
 
-        for key, btn in self._gaming_section_buttons.items():
-            selected = key == active
-            btn.setChecked(selected)
-            btn.setObjectName("genz-mode-btn")
-            _restyle(btn)
+        if self._tab_bar is not None:
+            self._tab_bar.set_active(active)
 
         dashboard_visible = (active == "all")
         for widget in self._dashboard_widgets:
@@ -130,9 +108,10 @@ class GamingPage(Page):
         self._protondb_worker: _ProtonDbBatchWorker | None = None
         self._last_detected_games: list[dict] = []
         self._gaming_section_widgets: dict[str, list[QWidget]] = {}
-        self._gaming_section_buttons: dict[str, QPushButton] = {}
+        self._tab_bar: SegmentedTabBar | None = None
         self._current_gaming_section = "setup" if wizard_mode else "all"
         self._active_gaming_section = None
+        self._scx_status_worker: DataWorker | None = None
 
         self._page_header(
             "Gaming",
@@ -142,7 +121,8 @@ class GamingPage(Page):
         )
 
         if not wizard_mode:
-            self._add(self._make_section_switcher())
+            self._tab_bar = self._make_section_switcher()
+            self._add(self._tab_bar)
             self._hero_card = self._make_gaming_hero_banner()
             self._hud_grid_widget = self._make_gaming_hud_grid()
             self._dashboard_widgets = [self._hero_card, self._hud_grid_widget]
@@ -228,27 +208,21 @@ class GamingPage(Page):
             self._update_profile_builder()
 
     def _make_health_row(self, status: str, title: str, summary: str) -> QFrame:
-        bg, fg, label = {
-            "ok": ("#121e2d", "#4fc1ff", "Ready"),
-            "warn": ("#1e1a06", "#d4a843", "Needs setup"),
-            "err": ("#3a1010", "#f48771", "Needs fix"),
-            "dim": ("#252526", "#858585", "Optional"),
-        }.get(status, ("#252526", "#858585", "Optional"))
+        card_name, badge_name, label = {
+            "ok":   ("hw-card-ok",   "status-ok",   "Ready"),
+            "warn": ("hw-card-warn", "status-warn", "Needs setup"),
+            "err":  ("hw-card-err",  "status-err",  "Needs fix"),
+            "dim":  ("hw-card-dim",  "status-dim",  "Optional"),
+        }.get(status, ("hw-card-dim", "status-dim", "Optional"))
 
         row = QFrame()
-        row.setObjectName({
-            "ok": "hw-card-ok",
-            "warn": "hw-card-warn",
-            "err": "hw-card-err",
-            "dim": "hw-card-dim",
-        }.get(status, "hw-card-dim"))
+        row.setObjectName(card_name)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(10)
 
         title_lbl = QLabel(title)
-        title_lbl.setObjectName("card-summary")
-        title_lbl.setStyleSheet("font-size:13px; font-weight:700;")
+        title_lbl.setObjectName("card-subtitle")
         layout.addWidget(title_lbl)
 
         summary_lbl = QLabel(summary)
@@ -256,12 +230,9 @@ class GamingPage(Page):
         summary_lbl.setWordWrap(True)
         layout.addWidget(summary_lbl, 1)
 
-        badge = QLabel(f"  {label}  ")
+        badge = QLabel(label)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setStyleSheet(
-            f"background:{bg}; color:{fg}; border:1px solid {fg}; "
-            "border-radius:3px; padding:2px 8px; font-size:11px; font-weight:700;"
-        )
+        badge.setObjectName(badge_name)
         layout.addWidget(badge)
         return row
 
@@ -355,28 +326,23 @@ class GamingPage(Page):
 
     def _refresh_status(self):
         if hasattr(self, "_mh_badge"):
-            _apply_install_badge(self._mh_badge, _mangohud_installed())
+            apply_install_badge(self._mh_badge, _mangohud_installed())
         if hasattr(self, "_gs_badge"):
-            _apply_install_badge(self._gs_badge, _gamescope_installed())
+            apply_install_badge(self._gs_badge, _gamescope_installed())
         if hasattr(self, "_vk_badge"):
-            _apply_install_badge(self._vk_badge, _vkbasalt_installed())
+            apply_install_badge(self._vk_badge, _vkbasalt_installed())
+        if hasattr(self, "_bulk_mh_badge"):
+            apply_install_badge(self._bulk_mh_badge, _mangohud_installed())
+        if hasattr(self, "_bulk_gs_badge"):
+            apply_install_badge(self._bulk_gs_badge, _gamescope_installed())
+        if hasattr(self, "_bulk_vk_badge"):
+            apply_install_badge(self._bulk_vk_badge, _vkbasalt_installed())
         if hasattr(self, "_scx_badge"):
-            scx_status = _command_stdout(["kyth-scx", "status"], timeout=5)
-            scx_active = "Service: active" in scx_status
-            _apply_install_badge(self._scx_badge, scx_active, ok_text="Active", warn_text="Inactive")
-            if scx_status:
-                configured = "unknown"
-                for line in scx_status.splitlines():
-                    if line.startswith("Configured scheduler:"):
-                        configured = line.split(":", 1)[1].strip() or "unknown"
-                        break
-                self._scx_status_lbl.setText(f"Configured: {configured}")
-            else:
-                self._scx_status_lbl.setText("sched-ext status unavailable.")
+            self._refresh_scx_status()
 
         if hasattr(self, "_pc_badge"):
             pc_ver = _proton_cachyos_version()
-            _apply_install_badge(self._pc_badge, bool(pc_ver), ok_text=pc_ver or "Installed")
+            apply_install_badge(self._pc_badge, bool(pc_ver), ok_text=pc_ver or "Installed")
             self._pc_version_lbl.setText(
                 f"Installed: {pc_ver}" if pc_ver
                 else "Proton-CachyOS not found in compatibilitytools.d"
@@ -384,7 +350,7 @@ class GamingPage(Page):
 
         if hasattr(self, "_ge_badge"):
             ge_ver = _compat_tool_version("GE-Proton")
-            _apply_install_badge(self._ge_badge, bool(ge_ver), ok_text=ge_ver or "Installed", warn_text="Optional")
+            apply_install_badge(self._ge_badge, bool(ge_ver), ok_text=ge_ver or "Installed", warn_text="Optional")
             self._ge_version_lbl.setText(
                 f"Installed: {ge_ver}" if ge_ver
                 else "Not installed. Optional fallback runner; Proton-CachyOS remains the recommended default."
@@ -428,3 +394,32 @@ class GamingPage(Page):
                     "idle",
                     "Ready.",
                 )
+
+    def _refresh_scx_status(self) -> None:
+        # `kyth-scx status` shells out — page_performance.py's sibling
+        # `kyth-scx list` call had the same construction-time-blocking bug,
+        # fixed earlier; this is the matching fix for GamingPage's own
+        # call, which fires 80ms after __init__ and again after any tool
+        # install/uninstall (see page_gaming_tools_*.py's _refresh_status
+        # callers).
+        if self._scx_status_worker is not None:
+            return
+        worker = DataWorker("gaming-scx-status", lambda: command_stdout(["kyth-scx", "status"], timeout=5))
+        self._scx_status_worker = worker
+        worker.result.connect(lambda _key, scx_status: self._apply_scx_status(scx_status))
+        worker.failed.connect(lambda _key, _message: self._apply_scx_status(""))
+        worker.finished.connect(lambda: setattr(self, "_scx_status_worker", None))
+        worker.start()
+
+    def _apply_scx_status(self, scx_status: str) -> None:
+        scx_active = "Service: active" in scx_status
+        apply_install_badge(self._scx_badge, scx_active, ok_text="Active", warn_text="Inactive")
+        if scx_status:
+            configured = "unknown"
+            for line in scx_status.splitlines():
+                if line.startswith("Configured scheduler:"):
+                    configured = line.split(":", 1)[1].strip() or "unknown"
+                    break
+            self._scx_status_lbl.setText(f"Configured: {configured}")
+        else:
+            self._scx_status_lbl.setText("sched-ext status unavailable.")

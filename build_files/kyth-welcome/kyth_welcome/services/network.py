@@ -2,13 +2,13 @@ import logging
 import os
 import re
 import shutil
-import subprocess
+from kyth_welcome.services.command import run_sync
 from dataclasses import dataclass
 
-from ..core_base import _CLOUD_SYNC_CONFIG, _SMB_CONFIG
+from ..core_base import CLOUD_SYNC_CONFIG, SMB_CONFIG
 from .config import load_json_config, save_json_config
 from .network_share_helper import _mount_point
-from .process import _run_command
+from .process import run_command
 
 _logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def _rclone_available() -> bool:
 
 def _rclone_list_remotes() -> list[tuple[str, str]]:
     """Return [(name, type), …] for every configured rclone remote."""
-    result = _run_command(["rclone", "listremotes", "--long"], timeout=5)
+    result = run_command(["rclone", "listremotes", "--long"], timeout=5)
     if result is None or result.returncode != 0:
         return []
     remotes: list[tuple[str, str]] = []
@@ -36,25 +36,25 @@ def _rclone_has_remote_type(remote_type: str) -> bool:
 
 def _load_sync_config() -> dict:
     """Load {remote_name: {folder, last_sync, last_ok}} from disk."""
-    return load_json_config(_CLOUD_SYNC_CONFIG, default={})
+    return load_json_config(CLOUD_SYNC_CONFIG, default={})
  # _load_sync_config
 
 def _save_sync_config(cfg: dict) -> None:
-    save_json_config(_CLOUD_SYNC_CONFIG, cfg)
+    save_json_config(CLOUD_SYNC_CONFIG, cfg)
  # _save_sync_config
 
 def _load_smb_config() -> list[dict]:
-    return load_json_config(_SMB_CONFIG, default=[])
+    return load_json_config(SMB_CONFIG, default=[])
  # _load_smb_config
 
 def _save_smb_config(shares: list[dict]) -> None:
-    save_json_config(_SMB_CONFIG, shares, mode=0o600)
+    save_json_config(SMB_CONFIG, shares, mode=0o600)
  # _save_smb_config
 
 def _systemd_escape_mount_path(path: str) -> str:
     """Return the systemd .mount unit filename for a given absolute mount path."""
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["systemd-escape", "--path", "--suffix=mount", path],
             capture_output=True, text=True, timeout=5, check=False,
         )
@@ -72,7 +72,7 @@ def _is_cifs_available() -> bool:
 
 def _is_mounted(path: str) -> bool:
     try:
-        r = subprocess.run(
+        r = run_sync(
             ["findmnt", "--noheadings", "--target", path],
             capture_output=True, text=True, timeout=5, check=False,
         )

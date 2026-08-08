@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── User Limits for Gaming (Fsync/ESync) ──────────────────────────────────────
 # Raises NOFILE (open files) for Wine/Proton fast synchronization, and MEMLOCK
 # (locked, non-swappable memory) for GPU driver features that pin buffers.
@@ -13,14 +15,12 @@ set -euo pipefail
 # sudden low-memory OOM kills — raising it for every root-level system
 # service too (which never needs it) would widen that risk for no gaming
 # benefit, so system.conf.d only gets the NOFILE bump.
-mkdir -p /etc/systemd/system.conf.d /etc/systemd/user.conf.d
-
-cat >/etc/systemd/system.conf.d/99-game-limits.conf <<'EOF'
+write_config /etc/systemd/system.conf.d/99-game-limits.conf <<'EOF'
 [Manager]
 DefaultLimitNOFILE=1048576
 EOF
 
-cat >/etc/systemd/user.conf.d/99-game-limits.conf <<'EOF'
+write_config /etc/systemd/user.conf.d/99-game-limits.conf <<'EOF'
 [Manager]
 DefaultLimitNOFILE=1048576
 DefaultLimitMEMLOCK=infinity

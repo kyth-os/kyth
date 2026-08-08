@@ -3,13 +3,13 @@ import shutil
 from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import _cancel_worker, _restyle
+from .core_base import cancel_worker, restyle
 from .services.gaming import heroic_epic_launcher_command, lutris_installer_command
 from .services.launch import popen
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, _finish_worker
-from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTextEdit
-from .widgets import _make_card, _set_log_panel
+from .services.runtime import Worker, finish_worker
+from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton
+from .widgets import CollapsibleLogPanel, _make_card
 
 
 class _LauncherToolsMixin:
@@ -77,42 +77,30 @@ class _LauncherToolsMixin:
         self._tool_cancel_btn.clicked.connect(self._cancel_launcher_tool_operation)
         self._tool_cancel_btn.hide()
         launcher_layout.addWidget(self._tool_cancel_btn)
-        self._tool_log_toggle = QPushButton("Show details")
-        self._tool_log_toggle.setCheckable(True)
-        self._tool_log_toggle.clicked.connect(lambda checked: _set_log_panel(self._tool_log_toggle, self._tool_log, checked))
-        self._tool_log_toggle.hide()
-        launcher_layout.addWidget(self._tool_log_toggle)
-        self._tool_log = QTextEdit()
-        self._tool_log.document().setMaximumBlockCount(5000)
-        self._tool_log.setReadOnly(True)
-        self._tool_log.setMaximumHeight(120)
-        self._tool_log.hide()
-        launcher_layout.addWidget(self._tool_log)
+        self._tool_log_panel = CollapsibleLogPanel(max_height=120)
+        launcher_layout.addWidget(self._tool_log_panel)
         self._add(launcher_card)
 
     def _open_heroic_for_epic(self):
         cmd = heroic_epic_launcher_command()
-        self._tool_log.clear()
-        self._tool_log.append(f"→ {' '.join(cmd)}\n")
-        self._tool_log.append("Heroic should open. Sign in to Epic Games there to install your library.")
-        self._tool_log_toggle.show()
-        _set_log_panel(self._tool_log_toggle, self._tool_log, False)
+        self._tool_log_panel.reset(f"→ {' '.join(cmd)}\n")
+        self._tool_log_panel.append("Heroic should open. Sign in to Epic Games there to install your library.")
         self._tool_progress.hide()
         self._tool_op_status.setText("Opening Heroic Games Launcher…")
         self._tool_op_status.setObjectName("subheading")
         self._tool_op_status.show()
-        _restyle(self._tool_op_status)
+        restyle(self._tool_op_status)
 
         try:
             popen(cmd)
             self._tool_op_status.setText("Heroic opened for Epic sign-in.")
             self._tool_op_status.setObjectName("status-ok")
-            _restyle(self._tool_op_status)
+            restyle(self._tool_op_status)
         except Exception as exc:
-            self._tool_log.append(f"\nFailed to start Heroic: {exc}")
+            self._tool_log_panel.append(f"\nFailed to start Heroic: {exc}")
             self._tool_op_status.setText("Failed to open Heroic.")
             self._tool_op_status.setObjectName("status-err")
-            _restyle(self._tool_op_status)
+            restyle(self._tool_op_status)
             QMessageBox.warning(self, "Heroic Games Launcher", str(exc))
 
     def _prepare_epic_lutris_install(self) -> bool:
@@ -155,29 +143,24 @@ class _LauncherToolsMixin:
             self._tool_op_status.setText("Epic installer launch cancelled.")
             self._tool_op_status.setObjectName("subheading")
             self._tool_op_status.show()
-            _restyle(self._tool_op_status)
+            restyle(self._tool_op_status)
             return False
         if clicked == open_btn:
             return True
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._tool_log.clear()
-        self._tool_log.append("Preparing a clean Epic installer retry…\n")
-        self._tool_log_toggle.show()
-        _set_log_panel(self._tool_log_toggle, self._tool_log, False)
+        self._tool_log_panel.reset("Preparing a clean Epic installer retry…\n")
         for path in found_paths:
             backup = f"{path}.bak-{timestamp}"
             try:
                 shutil.move(path, backup)
-                self._tool_log.append(f"Moved {path} → {backup}")
+                self._tool_log_panel.append(f"Moved {path} → {backup}")
             except Exception as exc:
-                self._tool_log.append(f"Failed to move {path}: {exc}")
-                self._tool_log_toggle.show()
-                _set_log_panel(self._tool_log_toggle, self._tool_log, False)
+                self._tool_log_panel.append(f"Failed to move {path}: {exc}")
                 self._tool_op_status.setText("Epic installer reset failed.")
                 self._tool_op_status.setObjectName("status-err")
                 self._tool_op_status.show()
-                _restyle(self._tool_op_status)
+                restyle(self._tool_op_status)
                 QMessageBox.warning(
                     self,
                     "Epic installer reset",
@@ -185,13 +168,11 @@ class _LauncherToolsMixin:
                 )
                 return False
 
-        self._tool_log.append("\nOld installer state was backed up. Relaunching Lutris…")
-        self._tool_log_toggle.show()
-        _set_log_panel(self._tool_log_toggle, self._tool_log, False)
+        self._tool_log_panel.append("\nOld installer state was backed up. Relaunching Lutris…")
         self._tool_op_status.setText("Old Epic installer state was backed up. Retrying…")
         self._tool_op_status.setObjectName("subheading")
         self._tool_op_status.show()
-        _restyle(self._tool_op_status)
+        restyle(self._tool_op_status)
         return True
 
     def _launch_lutris_installer(self, target: str, name: str):
@@ -199,7 +180,7 @@ class _LauncherToolsMixin:
             self._tool_op_status.setText("Lutris is not installed.")
             self._tool_op_status.setObjectName("status-err")
             self._tool_op_status.show()
-            _restyle(self._tool_op_status)
+            restyle(self._tool_op_status)
             QMessageBox.warning(
                 self,
                 "Lutris not found",
@@ -210,71 +191,63 @@ class _LauncherToolsMixin:
         if not shutil.which("umu-run"):
             if self._tool_worker and self._tool_worker.isRunning():
                 return
-            self._tool_log.clear()
-            self._tool_log.append("→ ujust install-umu\n")
-            self._tool_log_toggle.show()
-            _set_log_panel(self._tool_log_toggle, self._tool_log, False)
+            self._tool_log_panel.reset("→ ujust install-umu\n")
             self._tool_progress.show()
             self._tool_cancel_btn.setEnabled(True)
             self._tool_cancel_btn.show()
             self._tool_op_status.setText("umu-launcher not found — installing automatically…")
             self._tool_op_status.setObjectName("subheading")
             self._tool_op_status.show()
-            _restyle(self._tool_op_status)
+            restyle(self._tool_op_status)
             self._tool_worker = Worker(["ujust", "install-umu"])
-            self._tool_worker.line.connect(lambda ln: (
-                self._tool_log.append(ln),
-                self._tool_log.ensureCursorVisible(),
-            ))
+            self._tool_worker.line.connect(self._tool_log_panel.append)
             self._tool_worker.done.connect(
                 lambda code, t=target, n=name: self._on_umu_install_done(code, t, n)
             )
             self._tool_worker.start()
             return
 
-        self._tool_log.clear()
+        self._tool_log_panel.reset()
         if target == "epic-games-store" and not self._prepare_epic_lutris_install():
             return
 
         lutris_target = target if target.startswith("lutris:") else f"lutris:install/{target}"
         cmd = lutris_installer_command(lutris_target)
-        self._tool_log.append(f"→ {' '.join(cmd)}\n")
-        self._tool_log.append("Lutris should open the installer dialog.")
-        self._tool_log_toggle.show()
-        _set_log_panel(self._tool_log_toggle, self._tool_log, False)
+        self._tool_log_panel.reset(f"→ {' '.join(cmd)}\n")
+        self._tool_log_panel.append("Lutris should open the installer dialog.")
         self._tool_progress.hide()
         self._tool_op_status.setText(f"Opening {name} installer in Lutris…")
         self._tool_op_status.setObjectName("subheading")
         self._tool_op_status.show()
-        _restyle(self._tool_op_status)
+        restyle(self._tool_op_status)
 
         try:
             popen(cmd)
             self._tool_op_status.setText(f"{name} installer opened in Lutris.")
             self._tool_op_status.setObjectName("status-ok")
-            _restyle(self._tool_op_status)
+            restyle(self._tool_op_status)
         except Exception as exc:
-            self._tool_log.append(f"\nFailed to start Lutris: {exc}")
+            self._tool_log_panel.append(f"\nFailed to start Lutris: {exc}")
             self._tool_op_status.setText(f"Failed to open {name} installer.")
             self._tool_op_status.setObjectName("status-err")
-            _restyle(self._tool_op_status)
+            restyle(self._tool_op_status)
             QMessageBox.warning(self, f"{name} installer", str(exc))
 
     def _on_umu_install_done(self, code: int, target: str, name: str):
         self._tool_progress.hide()
         self._tool_cancel_btn.hide()
-        _finish_worker(self, attr="_tool_worker")
+        finish_worker(self, attr="_tool_worker")
         if code == Worker.CANCELLED:
             self._tool_op_status.setText("umu-launcher installation cancelled.")
             self._tool_op_status.setObjectName("status-warn")
-            _restyle(self._tool_op_status)
+            restyle(self._tool_op_status)
             return
         if code != 0:
             self._tool_op_status.setText("umu-launcher installation failed.")
             self._tool_op_status.setObjectName("status-err")
-            _restyle(self._tool_op_status)
+            restyle(self._tool_op_status)
             return
-        self._tool_log.append("\numu-launcher installed. Proceeding with installer…")
+        self._tool_log_panel.append("\numu-launcher installed. Proceeding with installer…")
         self._launch_lutris_installer(target, name)
 
     def _cancel_launcher_tool_operation(self):
@@ -287,11 +260,11 @@ class _LauncherToolsMixin:
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        _cancel_worker(
+        cancel_worker(
             self,
             attr="_tool_worker",
             status_lbl=self._tool_op_status,
-            log=self._tool_log,
+            log=self._tool_log_panel.log,
             cancel_btn=self._tool_cancel_btn,
             message="Cancelling tool install…",
         )

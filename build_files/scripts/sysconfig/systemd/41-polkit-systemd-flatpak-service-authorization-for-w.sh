@@ -2,9 +2,10 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── Polkit: systemd flatpak service authorization for wheel group ──────────────
-mkdir -p /usr/share/polkit-1/rules.d
-cat >/usr/share/polkit-1/rules.d/99-kyth-systemd.rules <<'POLKITEOF'
+write_config /usr/share/polkit-1/rules.d/99-kyth-systemd.rules <<'POLKITEOF'
 /* Allow users in the wheel group to manage specific KythOS systemd services without password authentication */
 polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
@@ -20,4 +21,3 @@ polkit.addRule(function(action, subject) {
     }
 });
 POLKITEOF
-chmod 0644 /usr/share/polkit-1/rules.d/99-kyth-systemd.rules

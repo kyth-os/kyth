@@ -7,8 +7,7 @@ mkdir -p /etc/skel/.config/autostart
 install -m 0644 /ctx/kyth-welcome/kyth-update-notifier.desktop \
 	/etc/skel/.config/autostart/kyth-update-notifier.desktop
 
-mkdir -p /etc/xdg/autostart
-cat >/etc/xdg/autostart/kyth-post-update-check.desktop <<'POSTUPDATEAUTOSTARTEOF'
+write_config /etc/xdg/autostart/kyth-post-update-check.desktop <<'POSTUPDATEAUTOSTARTEOF'
 [Desktop Entry]
 Type=Application
 Name=KythOS Post-Update Check
@@ -17,7 +16,7 @@ NoDisplay=true
 X-KDE-autostart-after=panel
 POSTUPDATEAUTOSTARTEOF
 
-cat >/etc/xdg/autostart/kyth-firstboot-app-status.desktop <<'APPSTATUSAUTOSTARTEOF'
+write_config /etc/xdg/autostart/kyth-firstboot-app-status.desktop <<'APPSTATUSAUTOSTARTEOF'
 [Desktop Entry]
 Type=Application
 Name=KythOS App Setup Status
@@ -26,8 +25,7 @@ NoDisplay=true
 X-KDE-autostart-after=panel
 APPSTATUSAUTOSTARTEOF
 
-mkdir -p /etc/xdg/autostart
-cat >/etc/xdg/autostart/kyth-steam-game-export.desktop <<'STEAMEXPORTAUTOSTARTEOF'
+write_config /etc/xdg/autostart/kyth-steam-game-export.desktop <<'STEAMEXPORTAUTOSTARTEOF'
 [Desktop Entry]
 Type=Application
 Name=KythOS Steam Game Menu Export

@@ -1,7 +1,10 @@
 """Smoke tests for hardware/ and gaming/ service packages."""
+import json
 import pathlib
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
@@ -9,7 +12,8 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 try:
     from kyth_welcome.services import gaming, hardware
     from kyth_welcome.services.gaming.steam import _parse_steam_acf_text
-    from kyth_welcome.services.hardware.display import _format_display_mode, _strip_ansi
+    from kyth_welcome.services.hardware import drives as hardware_drives
+    from kyth_welcome.services.hardware.display import _format_display_mode, strip_ansi
     from kyth_welcome.services.hardware.types import HardwareProbe
 except ImportError:
     raise unittest.SkipTest("PyQt6/PySide6 required by kyth_welcome.core_base → qt imports") from None
@@ -23,7 +27,7 @@ class HardwarePackageTests(unittest.TestCase):
         self.assertIs(hardware.HardwareProbe, HardwareProbe)
 
     def test_display_helpers(self):
-        self.assertEqual(_strip_ansi("\x1b[32mOK\x1b[0m"), "OK")
+        self.assertEqual(strip_ansi("\x1b[32mOK\x1b[0m"), "OK")
         self.assertEqual(_format_display_mode("2560x1440@165.00"), "2560×1440 @ 165Hz")  # noqa: RUF001 — multiplication sign, matches display.py's output
 
     def test_hardware_probe_dataclass(self):
@@ -150,9 +154,8 @@ class NvidiaStatusViewTests(unittest.TestCase):
         self.assertFalse(view.install_visible)
 
     def test_failed_state_without_hw_setup_done_falls_through_to_installed(self):
-        # svc_state == "failed" alone isn't enough to offer a retry — the
-        # hw-setup-done marker must also be present, otherwise this looks
-        # like the ordinary "not built yet" case.
+        # svc_state == "failed" alone isn't enough to offer a retry — a policy
+        # result must also exist, otherwise this looks like ordinary pre-setup.
         view = self._view(installed=True, svc_state="failed", hw_setup_done=False)
         self.assertEqual(view.install_text, "Build Driver Now")
 
@@ -226,6 +229,46 @@ class ControllerStatusViewTests(unittest.TestCase):
     def test_secure_boot_off_never_warns(self):
         view = self._view(secure_boot=False, xone_dongle=True, xpadneo_loaded=False)
         self.assertFalse(view.secure_boot_warning_visible)
+
+
+class HardwareDrivesTests(unittest.TestCase):
+    """_find_ntfs_drives() now parses lsblk output through the shared
+    kyth_shared.runtime_output.parse_lsblk_devices() instead of hand-rolling
+    json.loads(...)['blockdevices'] — same behavior, one fewer duplicate
+    lsblk-JSON-tree implementation across installer/hub/kyth-ntfs-repair.
+
+    _find_ntfs_drives() is also probe_cached (10s TTL, matching
+    _detect_nvidia()'s pattern) so repeat callers across a Gaming Hub visit
+    share one lsblk spawn — clear the process-wide cache before each test
+    here so one test's mocked result can't leak into the next."""
+
+    def setUp(self):
+        from kyth_shared.system.process import invalidate_probe_caches
+        invalidate_probe_caches()
+
+    def _lsblk_payload(self, blockdevices):
+        return SimpleNamespace(stdout=json.dumps({"blockdevices": blockdevices}), returncode=0)
+
+    def test_finds_ntfs_and_bitlocker_partitions(self):
+        payload = self._lsblk_payload([
+            {"name": "nvme0n1", "fstype": None, "size": "1T", "label": None, "mountpoint": None, "path": "/dev/nvme0n1", "children": [
+                {"name": "nvme0n1p1", "fstype": "ntfs", "size": "500G", "label": "Windows", "mountpoint": None, "path": "/dev/nvme0n1p1"},
+                {"name": "nvme0n1p2", "fstype": "bitlocker", "size": "200G", "label": None, "mountpoint": None, "path": "/dev/nvme0n1p2"},
+                {"name": "nvme0n1p3", "fstype": "ext4", "size": "300G", "label": "Linux", "mountpoint": "/", "path": "/dev/nvme0n1p3"},
+            ]},
+        ])
+        with patch.object(hardware_drives, "run_sync", return_value=payload):
+            drives = hardware_drives._find_ntfs_drives()
+
+        by_dev = {d["dev"]: d for d in drives}
+        self.assertEqual(set(by_dev), {"/dev/nvme0n1p1", "/dev/nvme0n1p2"})
+        self.assertFalse(by_dev["/dev/nvme0n1p1"]["is_bitlocker"])
+        self.assertTrue(by_dev["/dev/nvme0n1p2"]["is_bitlocker"])
+        self.assertEqual(by_dev["/dev/nvme0n1p1"]["label"], "Windows")
+
+    def test_swallows_lsblk_failure(self):
+        with patch.object(hardware_drives, "run_sync", side_effect=RuntimeError("no lsblk")):
+            self.assertEqual(hardware_drives._find_ntfs_drives(), [])
 
 
 class GamingPackageTests(unittest.TestCase):

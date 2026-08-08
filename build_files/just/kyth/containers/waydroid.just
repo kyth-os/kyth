@@ -25,6 +25,17 @@ remove-waydroid:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "━━━ Removing Waydroid ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "This permanently deletes all Waydroid data — installed Android apps,"
+    echo "their storage, and settings:"
+    echo "  /var/lib/waydroid"
+    echo "  ${HOME}/.local/share/waydroid"
+    echo "  ${HOME}/.waydroid"
+    echo
+    read -rp "Continue? [y/N] " reply
+    if [[ ! "${reply}" =~ ^[Yy]$ ]]; then
+        echo "Aborted. No changes made."
+        exit 0
+    fi
     systemctl --user stop waydroid-container.service 2>/dev/null || true
     systemctl --user disable waydroid-container.service 2>/dev/null || true
     sudo waydroid container stop 2>/dev/null || true

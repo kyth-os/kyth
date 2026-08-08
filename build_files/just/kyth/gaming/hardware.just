@@ -1,5 +1,26 @@
 import '../common.just'
 
+# Show matched hardware profiles, capabilities, quirks, and applied state.
+[group('KythOS')]
+hardware-policy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-hardware-policy status
+
+# Export stable device identifiers used by the policy matcher.
+[group('KythOS')]
+hardware-inventory:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    /usr/bin/kyth-hardware-policy inventory
+
+# Re-evaluate and reapply device-specific policy after hardware changes.
+[group('KythOS')]
+hardware-policy-apply:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sudo /usr/bin/kyth-hardware-policy apply --force
+
 # Export Steam Flatpak game shortcuts into the host application menu.
 [group('KythOS')]
 export-steam-games:
@@ -74,5 +95,4 @@ fix-ntfs-drives:
     #!/usr/bin/env bash
     set -euo pipefail
     /usr/bin/kyth-ntfs-repair
-
 

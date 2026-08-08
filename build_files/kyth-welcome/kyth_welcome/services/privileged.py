@@ -7,8 +7,15 @@ is cheap to test and usable by non-UI callers.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+import subprocess
 from enum import StrEnum
+from typing import Any, Callable, Mapping
+
+from kyth_shared.commands import (
+    CommandSpec,
+    EnvironmentPolicy,
+    desktop_environment,
+)
 
 
 class PrivilegedActionError(ValueError):
@@ -20,13 +27,50 @@ class AuthFrontend(StrEnum):
     PKEXEC = "pkexec"
 
 
-@dataclass(frozen=True)
-class PrivilegedAction:
-    name: str
-    argv: tuple[str, ...]
+class PrivilegedAction(CommandSpec):
+    """CommandSpec that has passed a System Hub privilege allowlist."""
 
-    def command(self) -> list[str]:
-        return list(self.argv)
+
+def sanitized_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Compatibility alias for the shared desktop environment policy."""
+    return desktop_environment(source)
+
+
+class PrivilegedGateway:
+    """The sole execution boundary for validated privileged actions."""
+
+    def __init__(
+        self,
+        *,
+        run: Callable[..., Any] = subprocess.run,
+        popen: Callable[..., subprocess.Popen] = subprocess.Popen,
+        audit: Callable[[str], None] | None = None,
+    ) -> None:
+        self._run = run
+        self._popen = popen
+        self._audit = audit or (lambda _message: None)
+
+    def run(self, action: PrivilegedAction, **kwargs: Any):
+        kwargs.setdefault("check", False)
+        kwargs.setdefault("timeout", action.timeout)
+        kwargs.setdefault("env", sanitized_environment())
+        kwargs["shell"] = False
+        self._audit(f"privileged action {action.name}: {' '.join(action.display_command())}")
+        try:
+            return self._run(action.command(), **kwargs)
+        except FileNotFoundError as exc:
+            # Surface missing binary (e.g. bootc on non-immutable host) as a
+            # structured error instead of a traceback in the UI job log.
+            raise PrivilegedActionError(f"{exc.filename or action.command()[0]} not available on this system") from exc
+
+    def spawn(self, action: PrivilegedAction, **kwargs: Any) -> subprocess.Popen:
+        kwargs.setdefault("env", sanitized_environment())
+        kwargs["shell"] = False
+        self._audit(f"privileged action {action.name}: {' '.join(action.display_command())}")
+        try:
+            return self._popen(action.command(), **kwargs)
+        except FileNotFoundError as exc:
+            raise PrivilegedActionError(f"{exc.filename or action.command()[0]} not available on this system") from exc
 
 
 _SAFE_IMAGE_REF_RE = re.compile(r"^[A-Za-z0-9._/@:+-]+$")
@@ -63,6 +107,8 @@ def bootc_action(action: str, image_ref: str | None = None) -> PrivilegedAction:
     if action not in {"upgrade", "rollback", "reset", "switch"}:
         raise PrivilegedActionError(f"Unsupported bootc action: {action}")
     args = ["bootc", action]
+    if action == "upgrade":
+        args = ["kyth-safe-upgrade"]
     if action == "switch":
         if not image_ref or not _SAFE_IMAGE_REF_RE.fullmatch(image_ref):
             raise PrivilegedActionError("bootc switch requires a safe image reference")
@@ -72,6 +118,9 @@ def bootc_action(action: str, image_ref: str | None = None) -> PrivilegedAction:
     return PrivilegedAction(
         name=f"bootc-{action}",
         argv=(*_prefix(AuthFrontend.SUDO_ASKPASS), *args),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
+        invalidates=frozenset({"bootc"}),
     )
 
 
@@ -97,6 +146,8 @@ def systemctl_action(
     return PrivilegedAction(
         name=f"systemctl-{action}",
         argv=(*_prefix(frontend), *args),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
     )
 
 
@@ -125,6 +176,8 @@ def helper_action(
     return PrivilegedAction(
         name=helper,
         argv=(*_prefix(frontend), executable, *args),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
     )
 
 
@@ -165,7 +218,13 @@ def openconnect_action(
     if username:
         args += ["--user", username]
     args.append(gateway)
-    return PrivilegedAction(name="openconnect", argv=tuple(args))
+    return PrivilegedAction(
+        name="openconnect",
+        argv=tuple(args),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
+        sensitive_options=("--cookie",),
+    )
 
 
 def scheduler_action(name: str) -> PrivilegedAction:
@@ -174,4 +233,6 @@ def scheduler_action(name: str) -> PrivilegedAction:
     return PrivilegedAction(
         name="scheduler-set",
         argv=("sudo", "-n", "/usr/bin/kyth-scx", "set", name),
+        timeout=300,
+        environment=EnvironmentPolicy.DESKTOP,
     )

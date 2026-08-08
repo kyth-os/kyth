@@ -2,13 +2,14 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../../lib/config-helpers.sh"
+
 # ── PipeWire low-latency audio ─────────────────────────────────────────────────
 # 128 samples at 48 kHz = ~2.7 ms latency — low enough to eliminate perceptible
 # audio lag in games while staying stable on typical hardware.
 # min-quantum=32 lets pro-audio apps request sub-1 ms when needed.
 # Apps that need higher buffering (e.g. Bluetooth) negotiate up automatically.
-mkdir -p /etc/pipewire/pipewire.conf.d
-cat >/etc/pipewire/pipewire.conf.d/99-kyth.conf <<'PWEOF'
+write_config /etc/pipewire/pipewire.conf.d/99-kyth.conf <<'PWEOF'
 context.properties = {
     default.clock.rate          = 48000
     default.clock.quantum       = 128

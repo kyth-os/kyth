@@ -34,8 +34,8 @@ class HardwareProbeTests(unittest.TestCase):
         lscpu_out = "Core(s) per socket: 8\nSocket(s): 1\n"
         with (
             patch("builtins.open", unittest.mock.mock_open(read_data=cpuinfo)),
-            patch("kyth_welcome.services.hardware.system._command_stdout", return_value=lscpu_out),
-            patch("kyth_welcome.services.hardware.system._run_command", return_value=None),
+            patch("kyth_welcome.services.hardware.system.command_stdout", return_value=lscpu_out),
+            patch("kyth_welcome.services.hardware.system.run_command", return_value=None),
         ):
             probe = _cpu_probe()
 
@@ -58,7 +58,7 @@ class HardwareProbeTests(unittest.TestCase):
         )
         with (
             patch("builtins.open", unittest.mock.mock_open(read_data=meminfo)),
-            patch("kyth_welcome.services.hardware.system._command_stdout", return_value="/dev/zram0 4G zram\n"),
+            patch("kyth_welcome.services.hardware.system.command_stdout", return_value="/dev/zram0 4G zram\n"),
         ):
             probe = _memory_probe()
 
@@ -78,7 +78,7 @@ class HardwareProbeTests(unittest.TestCase):
         usage = MagicMock(total=100 * (1024**3), free=10 * (1024**3))
         with (
             patch("shutil.disk_usage", return_value=usage),
-            patch("kyth_welcome.services.hardware.system._run_command", return_value=None),
+            patch("kyth_welcome.services.hardware.system.run_command", return_value=None),
         ):
             probe = _storage_probe()
 
@@ -89,7 +89,7 @@ class HardwareProbeTests(unittest.TestCase):
     def test_platform_probe_detects_vm(self):
         virt = MagicMock(returncode=0, stdout="qemu\n")
         spice = MagicMock(returncode=0)
-        with patch("kyth_welcome.services.hardware.system._run_command", side_effect=[virt, spice]):
+        with patch("kyth_welcome.services.hardware.system.run_command", side_effect=[virt, spice]):
             probe = _platform_probe()
 
         self.assertEqual(probe.title, "Platform")
@@ -97,7 +97,7 @@ class HardwareProbeTests(unittest.TestCase):
         self.assertIn("inside qemu", probe.summary)
 
     def test_firmware_probe_no_fwupd(self):
-        with patch("kyth_welcome.services.hardware.io._run_command", return_value=None):
+        with patch("kyth_welcome.services.hardware.io.run_command", return_value=None):
             probe = _firmware_probe()
 
         self.assertEqual(probe.title, "Firmware")
@@ -107,7 +107,7 @@ class HardwareProbeTests(unittest.TestCase):
         pci = "02:00.0 Network controller: Intel Corporation Wi-Fi 6 AX200"
         usb = "Bus 001 Device 002: ID 8087:0029 Intel Corp. AX200 Bluetooth"
         with (
-            patch("kyth_welcome.services.hardware.io._command_stdout", side_effect=["", "wlan0:wifi:connected\n"]),
+            patch("kyth_welcome.services.hardware.io.command_stdout", side_effect=["", "wlan0:wifi:connected\n"]),
         ):
             probe = _connectivity_probe(pci, usb)
 
@@ -120,8 +120,8 @@ class HardwareProbeTests(unittest.TestCase):
         pipewire = MagicMock(returncode=0)
         wireplumber = MagicMock(returncode=0)
         with (
-            patch("kyth_welcome.services.hardware.io._run_command", side_effect=[pipewire, wireplumber, pactl]),
-            patch("kyth_welcome.services.hardware.io._command_stdout", return_value="1 alsa_output.pci 16bit 2ch 44100Hz\n"),
+            patch("kyth_welcome.services.hardware.io.run_command", side_effect=[pipewire, wireplumber, pactl]),
+            patch("kyth_welcome.services.hardware.io.command_stdout", return_value="1 alsa_output.pci 16bit 2ch 44100Hz\n"),
         ):
             probe = _audio_probe()
 
@@ -145,7 +145,7 @@ class HardwareProbeTests(unittest.TestCase):
     def test_peripheral_probe_detects_razer_and_openrazer(self):
         usb = "Bus 001 Device 003: ID 1532:007a Razer USA, Ltd Razer DeathAdder V2"
         daemon = MagicMock(returncode=0)
-        with patch("kyth_welcome.services.hardware.io._run_command", return_value=daemon):
+        with patch("kyth_welcome.services.hardware.io.run_command", return_value=daemon):
             probe = _peripheral_probe(usb)
 
         self.assertEqual(probe.title, "Peripherals")
@@ -177,7 +177,7 @@ class HardwareProbeTests(unittest.TestCase):
         proc = MagicMock(returncode=0, stdout=vainfo_out, stderr="")
         with (
             patch("shutil.which", return_value="/usr/bin/vainfo"),
-            patch("kyth_welcome.services.hardware.codec._run_command", return_value=proc),
+            patch("kyth_welcome.services.hardware.codec.run_command", return_value=proc),
         ):
             probe = _codec_probe()
 

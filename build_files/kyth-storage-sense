@@ -1,23 +1,21 @@
-#!/usr/bin/env bash
-set -uo pipefail
+#!/usr/bin/env python3
+"""KythOS Storage Sense - automatically prune trash, unused flatpaks, and journals."""
+from __future__ import annotations
 
-days=30
-info_dir="${HOME}/.local/share/Trash/info"
-files_dir="${HOME}/.local/share/Trash/files"
-now=$(date +%s)
 
-if [[ -d "${info_dir}" ]]; then
-    for info in "${info_dir}"/*.trashinfo; do
-        [[ -e "${info}" ]] || continue
-        deleted=$(sed -n 's/^DeletionDate=//p' "${info}" | head -1)
-        [[ -n "${deleted}" ]] || continue
-        ts=$(date -d "${deleted}" +%s 2>/dev/null) || continue
-        if (( now - ts > days * 86400 )); then
-            name=$(basename "${info}" .trashinfo)
-            rm -rf -- "${files_dir:?}/${name}" "${info}" 2>/dev/null || true
-        fi
-    done
-fi
 
-flatpak uninstall --unused -y --noninteractive >/dev/null 2>&1 || true
-journalctl --user --vacuum-time=30d >/dev/null 2>&1 || true
+
+from kyth_shared.maintenance import cleanup_flatpaks, prune_trash, vacuum_user_journals  # noqa: E402
+
+
+def main() -> None:
+    # Prune trash older than 30 days
+    prune_trash(days=30)
+    # Remove unused flatpaks
+    cleanup_flatpaks()
+    # Vacuum user journalctl files
+    vacuum_user_journals(days=30)
+
+
+if __name__ == "__main__":
+    main()
