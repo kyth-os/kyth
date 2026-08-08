@@ -77,7 +77,19 @@ def upgrade(
     if remote_digest in {staged, booted}:
         print("KythOS is already running or has staged the latest allowed digest")
         return 0
-    result = run(["bootc", "upgrade"], check=False)
+    try:
+        result = run(["bootc", "upgrade"], check=False)
+    except (FileNotFoundError, OSError) as exc:
+        # `run` wraps subprocess.run — on hosts without bootc (e.g. testbeds,
+        # wazuh nodes, or non-immutable dev VMs) the binary is missing and
+        # would previously surface as a traceback / exit 1. Surface a clear
+        # message and the conventional 127 (command not found) instead.
+        if isinstance(exc, FileNotFoundError) or "No such file" in str(exc):
+            print("bootc is not installed — cannot stage an update on this system", file=sys.stderr)
+            print("On KythOS this is /usr/bin/bootc (from the bootc package). On a non-immutable host, install bootc first.", file=sys.stderr)
+        else:
+            print(f"Could not execute bootc: {exc}", file=sys.stderr)
+        return 127
     if result.returncode:
         return result.returncode
     new_state = record_staged(

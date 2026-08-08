@@ -56,13 +56,21 @@ class PrivilegedGateway:
         kwargs.setdefault("env", sanitized_environment())
         kwargs["shell"] = False
         self._audit(f"privileged action {action.name}: {' '.join(action.display_command())}")
-        return self._run(action.command(), **kwargs)
+        try:
+            return self._run(action.command(), **kwargs)
+        except FileNotFoundError as exc:
+            # Surface missing binary (e.g. bootc on non-immutable host) as a
+            # structured error instead of a traceback in the UI job log.
+            raise PrivilegedActionError(f"{exc.filename or action.command()[0]} not available on this system") from exc
 
     def spawn(self, action: PrivilegedAction, **kwargs: Any) -> subprocess.Popen:
         kwargs.setdefault("env", sanitized_environment())
         kwargs["shell"] = False
         self._audit(f"privileged action {action.name}: {' '.join(action.display_command())}")
-        return self._popen(action.command(), **kwargs)
+        try:
+            return self._popen(action.command(), **kwargs)
+        except FileNotFoundError as exc:
+            raise PrivilegedActionError(f"{exc.filename or action.command()[0]} not available on this system") from exc
 
 
 _SAFE_IMAGE_REF_RE = re.compile(r"^[A-Za-z0-9._/@:+-]+$")
