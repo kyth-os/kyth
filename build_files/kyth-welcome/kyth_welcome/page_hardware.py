@@ -115,6 +115,7 @@ class HardwarePage(Page):
         self._add(hdr)
 
         self._add(self._make_peripherals_hub_card())
+        self._add(self._make_cooling_card())
         self._add(self._make_bt_audio_card())
         self._add(self._make_display_card())
 
@@ -477,6 +478,54 @@ class HardwarePage(Page):
         self._peri_status.setText("Scan complete — see details below. Use the buttons above for deeper settings.")
         self._peri_status.setObjectName("status-ok")
         restyle(self._peri_status)
+
+    def _make_cooling_card(self):
+        from ..widgets import _make_card
+        from ..qt import QLabel, QPushButton, QHBoxLayout, QVBoxLayout
+        card, layout = _make_card()
+        title = QLabel("Cooling — fan curve, power cap, sleep drain")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Fan curve from /etc/kyth/fan-curve.toml (hwmon) + power cap via fan_curve.py, and deep sleep drain check via resume-check. "
+            "Windows users judge a laptop in 3 days on fan noise and sleep drain — this surfaces both."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        self._cool_status = QLabel("Checking fan curve…")
+        self._cool_status.setObjectName("card-copy")
+        self._cool_status.setWordWrap(True)
+        layout.addWidget(self._cool_status)
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        show_btn = QPushButton("Show Fan Curve")
+        show_btn.clicked.connect(lambda _=False: self._show_fan_curve())
+        btns.addWidget(show_btn)
+        sleep_btn = QPushButton("Test Sleep (resume-check)")
+        sleep_btn.setToolTip("Run ujust resume-check in background")
+        sleep_btn.clicked.connect(lambda _=False: __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["/usr/bin/kyth-resume-check"]) if pathlib.Path("/usr/bin/kyth-resume-check").exists() else __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["systemctl","status","sleep.target"]))
+        btns.addWidget(sleep_btn)
+        btns.addStretch()
+        layout.addLayout(btns)
+        # initial fan curve display
+        try:
+            from kyth_shared.fan_curve import load_fan_curve
+            cfg = load_fan_curve()
+            self._cool_status.setText(f"Fan points {cfg.get('points')} power_cap {cfg.get('power_cap_w')}W")
+        except Exception:
+            self._cool_status.setText("Fan curve unavailable")
+        return card
+
+    def _show_fan_curve(self):
+        try:
+            from kyth_shared.fan_curve import load_fan_curve
+            cfg = load_fan_curve()
+            self._cool_status.setText(f"Fan points {cfg.get('points')} power_cap {cfg.get('power_cap_w')}W — edit /etc/kyth/fan-curve.toml")
+            from ..core_base import restyle
+            restyle(self._cool_status)
+        except Exception as exc:
+            self._cool_status.setText(f"Fan curve read failed: {exc}")
 
     def _on_failed(self, message: str):
         self._progress.hide()
