@@ -1,8 +1,7 @@
 """Welcome HUD — HUD grid, split from page_welcome.py 745 (R7)."""
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QPushButton, QVBoxLayout
-from PySide6.QtCore import Qt
+from .qt import QFrame, QGridLayout, QLabel, QPushButton, QVBoxLayout, Qt
 
 
 class _WelcomeHudMixin:

@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
-from PySide6.QtCore import QSize, Qt
+from .qt import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, Qt
 
 from .widgets import _theme_icon
 
