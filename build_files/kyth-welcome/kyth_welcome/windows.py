@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
 
         self._search_box = QLineEdit()
         self._search_box.setObjectName("search-box")
-        self._search_box.setPlaceholderText("Search settings (Ctrl+K)")
+        self._search_box.setPlaceholderText("Search settings, apps, or Windows name (Ctrl+K) — try hdr, clipboard, fancyzones")
         self._search_box.setFixedWidth(280)
         self._search_box.setClearButtonEnabled(True)
         topbar_layout.addWidget(self._search_box)

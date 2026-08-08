@@ -27,6 +27,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         self._gd_sync_worker: RcloneSyncWorker | None = None
         self._od_sync_worker: RcloneSyncWorker | None = None
         self._sync_config: dict = _load_sync_config()
+        self._save_cloud_worker = None
 
         self._page_header(
             "Network & Internet",
@@ -37,6 +38,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         self._build_gd_card()
         self._build_od_card()
         self._build_db_card()
+        self._build_save_cloud_card()
 
         self._divider()
 
@@ -253,3 +255,20 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
     def _on_line(self, text: str):
         self._log.append(text)
         self._log.ensureCursorVisible()
+    def _build_save_cloud_card(self):
+        from ..widgets import _make_card
+        from ..qt import QLabel
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Save Cloud — keep game saves in sync")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Continuous sync for ~/Documents/My Games and Rescued Game Saves via rclone bisync: "
+            "rclone bisync ~/Documents/My\\ Games gdrive:KythSaves --resilient — pairs with Ludusavi. "
+            "OneDrive placeholders from Takeout show as Make Available Offline first."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        self._add(card)
+

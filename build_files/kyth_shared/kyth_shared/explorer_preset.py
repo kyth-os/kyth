@@ -23,7 +23,7 @@ def load_explorer(path: Path | None = None) -> dict[str, Any]:
     except (OSError, tomllib.TOMLDecodeError):
         return {"click": "double", "preview": True, "drives_on_desktop": True}
     click=str(data.get("click","double")) if str(data.get("click","double")) in ("single","double") else "double"
-    return {"click": click, "preview": bool(data.get("preview", True)), "drives_on_desktop": bool(data.get("drives_on_desktop", True))}
+    return {"click": click, "preview": bool(data.get("preview", True)), "preview_pane": bool(data.get("preview_pane", True)), "drives_on_desktop": bool(data.get("drives_on_desktop", True))}
 
 def save_explorer(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p=explorer_path(path)
@@ -31,6 +31,7 @@ def save_explorer(cfg: dict[str, Any], path: Path | None = None) -> Path:
     lines=["# Kyth Explorer parity — Windows double-click + preview + drives\n"]
     lines.append(f'click = "{cfg.get("click","double")}"')
     lines.append(f'preview = {str(bool(cfg.get("preview",True))).lower()}')
+    lines.append(f'preview_pane = {str(bool(cfg.get("preview_pane",True))).lower()}')
     lines.append(f'drives_on_desktop = {str(bool(cfg.get("drives_on_desktop",True))).lower()}')
     p.write_text("\n".join(lines)+"\n", encoding="utf-8")
     return p
