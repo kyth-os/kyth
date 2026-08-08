@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from .bootc_query import image_digest_from_status, image_timestamp, nested_get, status_data
 from .bootc_policy import branch_from_ref
@@ -27,7 +28,7 @@ def _deployment_info(data: dict, section: str, label: str, status_text: str) -> 
     if not ref:
         # Fallback walk strings
         for s in _walk_strings(dep):
-            if "ghcr.io" in s:
+            if _is_ghcr_reference(s):
                 ref = s
                 break
     branch = branch_from_ref(ref) if ref else None
@@ -45,6 +46,19 @@ def _deployment_info(data: dict, section: str, label: str, status_text: str) -> 
         "short_digest": short,
         "status_text": status_text,
     }
+
+
+def _is_ghcr_reference(value: str) -> bool:
+    s = value.strip()
+    if not s:
+        return False
+
+    parsed = urlparse(s)
+    if parsed.hostname:
+        return parsed.hostname.lower() == "ghcr.io"
+
+    first_segment = s.split("/", 1)[0]
+    return first_segment.lower() == "ghcr.io"
 
 
 def _walk_strings(data: object):
