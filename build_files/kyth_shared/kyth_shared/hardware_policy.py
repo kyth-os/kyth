@@ -456,7 +456,7 @@ def _should_skip_apply(
 
 def _write_state_report(path: Path, evaluation: Evaluation, state: dict[str, Any]) -> None:
     report = {"evaluation": evaluation.as_dict(), "applied": state}
-    _atomic_write(path, json.dumps(report, indent=2, sort_keys=True) + "\n")
+    _atomic_write(path, json.dumps(report, indent=2, sort_keys=True) + "\n", mode=0o600)
 
 
 def _apply_policy_config(policy: dict[str, Any]) -> dict[str, Any]:
@@ -465,14 +465,12 @@ def _apply_policy_config(policy: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def _atomic_write(path: Path, content: str, mode: int = 0o644) -> None:
+def _atomic_write(path: Path, content: str, mode: int = 0o600) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         temporary.write_text(content, encoding="utf-8")
-        # Callers write /etc config (modprobe.d, scx) and state/report files that
-        # must stay world-readable by convention; content carries no secrets.
-        os.chmod(temporary, mode)  # lgtm[py/overly-permissive-file]
+        os.chmod(temporary, mode)
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
