@@ -15,22 +15,23 @@ QWidget#segmented-tab-row {{
 }}
 
 QPushButton#segmented-tab {{
-    background-color: {KYTH_SURFACE};
-    border: 1px solid {KYTH_HAIRLINE};
+    background-color: transparent;
+    border: 1px solid transparent;
     border-radius: 8px;
     color: {KYTH_TEXT_MUTED};
-    font-weight: 650;
-    padding: 8px 16px;
+    font-weight: 600;
+    padding: 7px 14px;
 }}
 
 QPushButton#segmented-tab:hover {{
-    border-color: {KYTH_BLUE};
+    background-color: {KYTH_SURFACE};
+    border-color: {KYTH_HAIRLINE};
     color: {KYTH_TEXT};
 }}
 
 QPushButton#segmented-tab:checked {{
     background-color: {KYTH_BLUE};
-    border-color: {KYTH_BLUE_LIGHT};
-    color: {KYTH_TEXT};
+    border-color: {KYTH_BLUE};
+    color: #ffffff;
 }}
 """

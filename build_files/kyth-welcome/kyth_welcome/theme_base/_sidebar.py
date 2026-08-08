@@ -11,7 +11,7 @@ from ..ui_tokens import (
 )
 
 SIDEBAR_QSS = f"""
-/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+/* ── Sidebar — Windows Settings density ────────────────────────────────── */
 QWidget#sidebar {{
     background: {KYTH_GROUND};
     border-right: 1px solid {KYTH_HAIRLINE};
@@ -23,8 +23,9 @@ QWidget#sidebar-header {{
 }}
 
 QLabel#sidebar-logo {{
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 800;
+    letter-spacing: 0.2px;
     color: {KYTH_TEXT};
     padding: 0;
 }}
@@ -39,7 +40,7 @@ QLabel#sidebar-ver {{
 QLabel#nav-section {{
     font-size: 10.5px;
     font-weight: 700;
-    letter-spacing: 0.6px;
+    letter-spacing: 0.7px;
     color: {KYTH_TEXT_FAINT};
     padding: 0 0 2px 0;
 }}
@@ -50,7 +51,7 @@ QPushButton#nav-item-active {{
     border: none;
     border-radius: 6px;
     margin: 1px 8px;
-    padding: 8px 10px;
+    padding: 7px 10px;
     text-align: left;
     font-size: 13px;
 }}
@@ -69,11 +70,15 @@ QPushButton#nav-item:pressed {{
     background: {KYTH_HAIRLINE};
 }}
 
+QPushButton#nav-item:focus {{
+    border: 1px solid {KYTH_BLUE};
+}}
+
 QPushButton#nav-item-active {{
     background: {KYTH_SURFACE_RAISED};
     color: {KYTH_TEXT};
-    border-left: 3px solid {KYTH_BLUE};
-    padding: 8px 10px 8px 7px;
+    border-left: 2px solid {KYTH_BLUE};
+    padding: 7px 10px 7px 8px;
     font-weight: 700;
 }}
 """

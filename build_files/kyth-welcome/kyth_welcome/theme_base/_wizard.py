@@ -132,8 +132,7 @@ QWidget#wiz-profile-card {{
 
 QWidget#wiz-profile-card[checked="true"] {{
     border-color: {KYTH_BLUE};
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(91, 140, 255, 36), stop:1 rgba(91, 140, 255, 10));
+    background: {KYTH_SURFACE};
 }}
 
 QWidget#wiz-profile-card[checked="true"] QLabel#wiz-card-title {{

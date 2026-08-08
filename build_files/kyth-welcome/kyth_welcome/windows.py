@@ -30,14 +30,14 @@ class NavButton(QPushButton):
         else:
             super().__init__(f"  {label}")
             self.setIcon(icon)
-            self.setIconSize(QSize(16, 16))
+            self.setIconSize(QSize(18, 18))
         self.setObjectName("nav-item")
         self.setCheckable(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         sp = self.sizePolicy()
         sp.setHorizontalPolicy(QSizePolicy.Policy.Expanding)
         self.setSizePolicy(sp)
-        self.setMinimumHeight(36)
+        self.setMinimumHeight(32)
 
     def set_active(self, active: bool):
         self.setObjectName("nav-item-active" if active else "nav-item")
@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
         self._search_box = QLineEdit()
         self._search_box.setObjectName("search-box")
         self._search_box.setPlaceholderText("Search settings, apps, or Windows name (Ctrl+K) — try hdr, clipboard, fancyzones")
-        self._search_box.setFixedWidth(280)
+        self._search_box.setFixedWidth(320)
         self._search_box.setClearButtonEnabled(True)
         topbar_layout.addWidget(self._search_box)
 

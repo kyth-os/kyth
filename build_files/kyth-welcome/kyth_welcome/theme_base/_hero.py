@@ -1,32 +1,32 @@
-"""Hero/HUD/category cards and semantic property-grid labels — the Home
-dashboard's "workstation mode" banner and category tiles.
+"""Hero/HUD/category cards — Home dashboard.
 
-The hero gradient and the five category accent hues are deliberately
-bespoke wayfinding/personality color, not structural — anchored to
-KYTH_VIOLET where it's already the closest match (Gaming's accent).
+Single-accent, layered surfaces: hero is surface+hairline (no purple
+gradient), HUD tiles are surface→raised on hover, category cards get a
+subtle hairline→blue on hover rather than permanent 5-hue stripes.
 """
 from ..ui_tokens import (
     KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_SURFACE,
     KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED,
-    KYTH_VIOLET, STATUS_ERROR, STATUS_OK, STATUS_WARN,
+    RADIUS_HERO, STATUS_ERROR, STATUS_OK, STATUS_WARN,
 )
 
 HERO_QSS = f"""
 /* ── Hero / HUD / category cards ────────────────────────────────────────── */
 QFrame#genz-hero {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a1e29, stop:0.5 #281d3d, stop:1 #1c2b36);
-    border: 1px solid #483d73;
-    border-radius: 16px;
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-radius: {RADIUS_HERO}px;
 }}
 
 QLabel#genz-hero-title {{
-    font-size: 28px;
-    font-weight: 850;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
     color: {KYTH_TEXT};
 }}
 
 QLabel#genz-hero-subtitle {{
-    font-size: 13px;
+    font-size: 12px;
     color: {KYTH_TEXT_MUTED};
 }}
 
@@ -53,12 +53,12 @@ QLabel#glowing-pill-warn {{
 QFrame#genz-hud-card {{
     background-color: {KYTH_SURFACE};
     border: 1px solid {KYTH_HAIRLINE};
-    border-radius: 14px;
+    border-radius: 10px;
 }}
 
 QFrame#genz-hud-card:hover {{
-    border-color: {KYTH_BLUE};
     background-color: {KYTH_SURFACE_RAISED};
+    border-color: {KYTH_HAIRLINE};
 }}
 
 QLabel#hud-title {{
@@ -80,6 +80,7 @@ QFrame#genz-category-network,
 QFrame#genz-category-advanced {{
     background-color: {KYTH_SURFACE};
     border: 1px solid {KYTH_HAIRLINE};
+    border-left: 3px solid transparent;
     border-radius: 14px;
 }}
 
@@ -90,28 +91,7 @@ QFrame#genz-category-system:hover,
 QFrame#genz-category-network:hover,
 QFrame#genz-category-advanced:hover {{
     background-color: {KYTH_SURFACE_RAISED};
-}}
-
-/* Category accents are wayfinding color, not status — five distinct hues on
-   purpose. Gaming reuses KYTH_VIOLET; the rest stay bespoke. */
-QFrame#genz-category-gaming {{
-    border-left: 5px solid {KYTH_VIOLET};
-}}
-
-QFrame#genz-category-apps {{
-    border-left: 5px solid #06b6d4;
-}}
-
-QFrame#genz-category-system {{
-    border-left: 5px solid {STATUS_OK};
-}}
-
-QFrame#genz-category-network {{
-    border-left: 5px solid {STATUS_WARN};
-}}
-
-QFrame#genz-category-advanced {{
-    border-left: 5px solid #ec4899;
+    border-left-color: {KYTH_BLUE};
 }}
 
 QPushButton#genz-category-title {{

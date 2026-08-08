@@ -1,5 +1,5 @@
 SPACING_XS = 4
-SPACING_TINY = 4
+SPACING_TINY = SPACING_XS  # alias for compat — was duplicate 4
 SPACING_SMALL = 8
 SPACING_MEDIUM = 12
 SPACING_LARGE = 16
@@ -10,7 +10,9 @@ RADIUS_SM = 6
 RADIUS_CARD = 10
 RADIUS_PILL = 999
 RADIUS_BUTTON = 6
-ACCENT_BLUE = "#4f8cff"
+RADIUS_HERO = 14
+# Single accent — canonical is KYTH_BLUE (#5b8cff); ACCENT_BLUE is legacy alias
+ACCENT_BLUE = "#5b8cff"
 # Canonical status trio (Phase 3): previously theme_hub_overlay.py carried its
 # own separate ok/warn/err values that didn't match these, and even
 # disagreed with itself between card-accent-err (#e05f67) and status-err

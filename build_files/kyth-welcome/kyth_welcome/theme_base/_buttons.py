@@ -16,15 +16,19 @@ QPushButton {{
     color: {KYTH_TEXT};
     border: 1px solid {KYTH_HAIRLINE};
     border-radius: {KYTH_RADIUS_SM}px;
-    padding: 8px 13px;
+    padding: 7px 14px;
     font-size: 13px;
-    font-weight: 650;
+    font-weight: 600;
 }}
 
 QPushButton:hover {{
     background: {KYTH_HAIRLINE};
     color: {KYTH_TEXT};
-    border-color: {KYTH_TEXT_FAINT};
+    border-color: {KYTH_HAIRLINE};
+}}
+
+QPushButton:focus {{
+    border: 1px solid {KYTH_BLUE};
 }}
 
 QPushButton:pressed {{

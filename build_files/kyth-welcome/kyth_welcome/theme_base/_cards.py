@@ -55,7 +55,7 @@ QFrame#home-action:hover,
 QFrame#store-app-card:hover,
 QFrame#store-category-card:hover {{
     background: {KYTH_SURFACE_RAISED};
-    border-color: {KYTH_TEXT_FAINT};
+    border-color: {KYTH_HAIRLINE};
 }}
 
 QFrame#card-accent-ok {{
@@ -140,9 +140,9 @@ QLabel#status-badge-err {{ background: {STATUS_ERROR}; color: #1a0a0d; }}
 QLabel#status-badge-dim {{ background: {KYTH_SURFACE_RAISED}; color: {KYTH_TEXT_FAINT}; border: 1px solid {KYTH_HAIRLINE}; }}
 
 QFrame#home-recommend-card {{
-    background: {KYTH_SURFACE_RAISED};
-    border: 1px solid {KYTH_BLUE_DIM};
-    border-left: 5px solid {KYTH_BLUE};
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-left: 3px solid {KYTH_BLUE};
     border-radius: {KYTH_RADIUS}px;
 }}
 
@@ -160,12 +160,12 @@ QFrame#home-section {{
 
 QLabel#home-section-title {{
     color: {KYTH_TEXT};
-    font-size: 20px;
+    font-size: 15px;
     font-weight: 700;
 }}
 
 QLabel#home-section-copy {{
-    color: {KYTH_TEXT_FAINT};
+    color: {KYTH_TEXT_MUTED};
     font-size: 12px;
 }}
 

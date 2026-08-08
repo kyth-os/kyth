@@ -539,7 +539,9 @@ class _UpdateOpsMixin:
         if rollback:
             data = bootc_status_data() or {}
             rb_ref = nested_get(data, ("status", "rollback", "image", "image")) or ""
-            rb_label = (rb_ref.split("@")[0].split("/")[-1] if rb_ref and "/" in rb_ref else rb_ref.split("@")[0] if rb_ref else "")
+            if isinstance(rb_ref, dict):
+                rb_ref = rb_ref.get("image", "") or rb_ref.get("imageref", "") or ""
+            rb_label = (rb_ref.split("@")[0].split("/")[-1] if isinstance(rb_ref, str) and rb_ref and "/" in rb_ref else rb_ref.split("@")[0] if isinstance(rb_ref, str) and rb_ref else "")
             rb_text = f"Available ({rb_label})  ·  built {rollback_ts}" if rollback_ts and rb_label else (f"Available ({rb_label})" if rb_label else (f"Available  ·  built {rollback_ts}" if rollback_ts else "Available"))
             self._rollback_val.setText(rb_text)
             self._rollback_val.setObjectName("prop-val")

@@ -65,19 +65,21 @@ QLineEdit#search-box {{
     background: {KYTH_SURFACE_RAISED};
     color: {KYTH_TEXT};
     border: 1px solid {KYTH_HAIRLINE};
-    border-bottom: 1px solid {KYTH_TEXT_FAINT};
-    border-radius: 5px;
-    padding: 6px 12px;
+    border-radius: 6px;
+    padding: 7px 14px;
+    selection-background-color: {KYTH_BLUE};
 }}
 
 QLineEdit#search-box:focus {{
     background: {KYTH_SURFACE_RAISED};
-    border-bottom: 2px solid {KYTH_BLUE};
+    border: 1px solid {KYTH_BLUE};
 }}
 
 QFrame#search-results-panel {{
     background: {KYTH_SURFACE};
     border-bottom: 1px solid {KYTH_HAIRLINE};
+    border-left: 1px solid {KYTH_HAIRLINE};
+    border-right: 1px solid {KYTH_HAIRLINE};
 }}
 
 QLabel#search-results-title {{

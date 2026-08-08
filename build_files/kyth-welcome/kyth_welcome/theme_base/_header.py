@@ -6,7 +6,7 @@ from ..ui_tokens import (
 HEADER_QSS = f"""
 /* ── Page header band ────────────────────────────────────────────────────── */
 QWidget#page-header {{
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {KYTH_HAIRLINE}, stop:1 {KYTH_GROUND});
+    background: {KYTH_GROUND};
     border-bottom: 1px solid {KYTH_HAIRLINE};
 }}
 

@@ -11,8 +11,8 @@ def _make_card(name: str = "card") -> tuple[QFrame, QVBoxLayout]:
     card = QFrame()
     card.setObjectName(name)
     layout = QVBoxLayout(card)
-    layout.setContentsMargins(20, 18, 20, 18)
-    layout.setSpacing(10)
+    layout.setContentsMargins(20, 16, 20, 16)
+    layout.setSpacing(8)
     return card, layout
 
 
