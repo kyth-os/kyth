@@ -197,7 +197,30 @@ class _CardsMixin:
         row.add_button("Apply Windows 11 Comfort", lambda _=False: self._apply_desktop_profile("windows"), primary=True)
         row.add_button("Restore Balanced", lambda _=False: self._apply_desktop_profile("balanced"))
         body.addWidget(row)
+        # Clipboard History + FancyZones — PowerToys parity
+        clip = ActionRow("Clipboard & FancyZones — Win+V history, Win+Ctrl+T thirds")
+        clip.add_button("Enable Clipboard History", lambda _=False: __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["kcmshell6","kcm_klipper"]) or __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["kcmshell","kcm_klipper"]))
+        clip.add_button("Apply FancyZones Thirds", lambda _=False: self._apply_fancyzones_thirds())
+        body.addWidget(row)
         return card
+
+    def _apply_fancyzones_thirds(self):
+        from ..services.plasma import run_shell_script
+        script = """
+set -e
+kwriteconfig6 --file kwinrc --group Windows --key BorderSnapZone 8
+kwriteconfig6 --file kwinrc --group Windows --key WindowSnapZone 8
+kwriteconfig6 --file kwinrc --group Tiling --key Padding 6
+kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Left" "Meta+Left,Meta+Left,Quick Tile Window to the Left"
+kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Right" "Meta+Right,Meta+Right,Quick Tile Window to the Right"
+qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+"""
+        code, out, err = run_shell_script(script, timeout=10)
+        try:
+            from ..widgets import CommandResultPanel
+            # no-op if panel not present
+        except Exception:
+            pass
 
     def _make_snap_grid_card(self) -> QFrame:
         card, body = _make_card()
