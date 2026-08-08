@@ -46,16 +46,19 @@ Use when `git add`/`commit`/`push` fails with `Read-only file system` on `.git` 
    git ls-remote origin testing | head
    ```
 
-5. Clean up and clear the original working tree (manual restore because `git checkout/reset` needs `.git` write):
+5. Always clean up the working tree after push (mandatory — do not leave the original checkout dirty):
    ```bash
-   # for each modified file:
+   # for each modified file (restores to the old HEAD content so the ro checkout appears clean;
+   # the new commit is already on origin/testing and will be visible after the next fetch/pull):
    git show HEAD:"<path>" > "<path>.tmp" && cat "<path>.tmp" > "<path>" && rm "<path>.tmp"
-   # for each untracked file:
+   # for each untracked file that was part of the patch:
    rm <untracked>
+   # remove temporary artifacts:
    rm /tmp/kyth-fix.patch
    rm -rf /tmp/kyth-push
-   git status --porcelain  # should be clean
+   git status --porcelain  # must be clean — if not, repeat for remaining paths
    ```
+   Do not skip this step. A dirty working tree after a successful push confuses the next `git diff` / `git status` and risks re-pushing the same changes or hiding new work. If `git status` still shows modifications, you missed a path — enumerate it with `git status --porcelain` and restore it.
 
 ## Notes
 
