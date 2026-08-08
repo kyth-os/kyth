@@ -57,6 +57,52 @@ def _install_qt_stubs() -> None:
     qt.Signal = _DummySignal
     qt.QLibraryInfo = _DummyLibraryInfo
     qt._WEBENGINE_AVAILABLE = False
+    # Fill any other Qt symbols that kyth_shared.qt exports (e.g. single_shot)
+    # so `from kyth_welcome.qt import single_shot` works without hard-coding
+    # the full __all__ in two places. The _Dummy fallback covers future adds.
+    for _name in (
+        "QT_BINDING",
+        "QApplication",
+        "QMainWindow",
+        "QStackedWidget",
+        "QProgressBar",
+        "QScrollArea",
+        "QFileDialog",
+        "QMessageBox",
+        "QCheckBox",
+        "QRadioButton",
+        "QButtonGroup",
+        "QDialogButtonBox",
+        "QGridLayout",
+        "QCompleter",
+        "QInputDialog",
+        "QLayout",
+        "QListWidget",
+        "QListWidgetItem",
+        "Qt",
+        "QSize",
+        "QRect",
+        "QStringListModel",
+        "QDesktopServices",
+        "QIcon",
+        "QKeySequence",
+        "QShortcut",
+        "QAction",
+        "QDBusConnection",
+        "QDBusInterface",
+        "QLocalServer",
+        "QLocalSocket",
+        "QWebEngineUrlScheme",
+        "QWebEngineScript",
+        "single_shot",
+    ):
+        if not hasattr(qt, _name):
+            setattr(qt, _name, _Dummy if _name != "Signal" else _DummySignal)
+    # PEP 562 fallback for any future import not listed above
+    def _qt_getattr(name: str):  # type: ignore[no-redef]
+        return _Dummy if name != "Signal" else _DummySignal
+
+    qt.__getattr__ = _qt_getattr  # type: ignore[attr-defined]
     sys.modules["kyth_welcome.qt"] = qt
 
     widgets = types.ModuleType("kyth_welcome.widgets")
@@ -68,6 +114,7 @@ def _install_qt_stubs() -> None:
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 _install_qt_stubs()
 
 from kyth_welcome import page_vpn  # noqa: E402
