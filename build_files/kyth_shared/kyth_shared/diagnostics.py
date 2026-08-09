@@ -4,7 +4,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from .commands import run as run_command
+from .commands import run_quiet
 import sys
 from datetime import datetime
 
@@ -49,25 +49,9 @@ class DiagnosticReporter:
     def notify(self, title: str, body: str) -> None:
         """Send a desktop notification using notify-send or kdialog."""
         if self.have("notify-send"):
-            try:
-                run_command(
-                    ["notify-send", "--app-name=KythOS", title, body],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except Exception:
-                pass
+            run_quiet(["notify-send", "--app-name=KythOS", title, body])
         elif self.have("kdialog"):
-            try:
-                run_command(
-                    ["kdialog", "--title", title, "--passivepopup", body, "12"],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except Exception:
-                pass
+            run_quiet(["kdialog", "--title", title, "--passivepopup", body, "12"])
 
     def print_result(self, target_name: str, custom_warn_msg: str | None = None) -> None:
         """Print summary result and exit with matching status code."""
@@ -90,16 +74,8 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     # 1. Kernel Sched-Ext & Low-Latency
     scx_active = False
     if reporter.have("systemctl"):
-        try:
-            res = run_command(
-                ["systemctl", "is-active", "--quiet", "scx_loader.service"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            scx_active = (res.returncode == 0)
-        except Exception:
-            pass
+        res = run_quiet(["systemctl", "is-active", "--quiet", "scx_loader.service"])
+        scx_active = res is not None and res.returncode == 0
     if not scx_active and reporter.have("scx_rusty"):
         scx_active = True
 
@@ -124,11 +100,8 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     # 3. PipeWire Low-Latency Audio
     has_pw = False
     if reporter.have("pgrep"):
-        try:
-            res = run_command(["pgrep", "-x", "pipewire"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            has_pw = (res.returncode == 0)
-        except Exception:
-            pass
+        res = run_quiet(["pgrep", "-x", "pipewire"])
+        has_pw = res is not None and res.returncode == 0
     else:
         # Fallback to scanning /proc for process names
         try:
@@ -151,16 +124,8 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     # 4. GPU & Vulkan Driver Health
     vulkan_ok = False
     if reporter.have("vulkaninfo"):
-        try:
-            res = run_command(
-                ["vulkaninfo", "--summary"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            vulkan_ok = (res.returncode == 0)
-        except Exception:
-            pass
+        res = run_quiet(["vulkaninfo", "--summary"])
+        vulkan_ok = res is not None and res.returncode == 0
 
     if vulkan_ok:
         reporter.pass_check("Vulkan 3D Driver", "Vulkan device initialized and responsive")
@@ -170,16 +135,8 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     # 5. VA-API Hardware Video Acceleration
     vaapi_ok = False
     if reporter.have("vainfo"):
-        try:
-            res = run_command(
-                ["vainfo"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            vaapi_ok = (res.returncode == 0)
-        except Exception:
-            pass
+        res = run_quiet(["vainfo"])
+        vaapi_ok = res is not None and res.returncode == 0
 
     if vaapi_ok:
         reporter.pass_check("Video Codecs", "VA-API hardware video decode/encode active")

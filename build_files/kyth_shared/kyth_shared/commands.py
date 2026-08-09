@@ -256,3 +256,26 @@ def command_stdout(
         env=env,
         strip=strip,
     )
+
+
+def run_quiet(
+    command: Command,
+    *,
+    timeout: float | None = 30,
+) -> subprocess.CompletedProcess[Any] | None:
+    """Run *command* discarding stdout/stderr, returning None on execution failure.
+
+    Centralizes the repeated ``stdout=DEVNULL, stderr=DEVNULL, check=False``
+    pattern used by health checks and notifications so callers do not import
+    ``subprocess`` solely for ``DEVNULL``.
+    """
+    try:
+        return DEFAULT_RUNNER.run(
+            command,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+        )
+    except _EXPECTED_COMMAND_ERRORS:
+        return None
