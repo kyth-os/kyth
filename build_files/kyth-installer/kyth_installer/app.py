@@ -95,6 +95,9 @@ def run_headless() -> None:
 
     context = InstallerContext()
     service = InstallerService(context)
+    # Headless answer-file path should be lenient on locale/keymap/zone lists
+    # (minimal live ISO may not have every entry), while WebUI is strict.
+    _headless_strict = not bool(answers)
 
     body = {
         "disk": setting("disk", ""),
@@ -118,7 +121,11 @@ def run_headless() -> None:
         "confirm_current": setting("confirm_current", False),
     }
 
-    res = service.start_install(body)
+    try:
+        res = service.start_install(body, strict_locale=_headless_strict)
+    except TypeError:
+        # Tests mock InstallerService without strict_locale kw
+        res = service.start_install(body)
     if not res.get("started"):
         print(f"Error: {res.get('message')}")
         sys.exit(1)

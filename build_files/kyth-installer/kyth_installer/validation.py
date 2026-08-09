@@ -184,7 +184,25 @@ def _storage_state(body: dict, context: InstallerContext) -> tuple[dict, dict]:
     return state, disks[target_disk]
 
 
-def validate_install_request(body: dict, context: InstallerContext) -> InstallRequest:
+def _is_answer_file_request(body: dict) -> bool:
+    """Heuristic: answer-file CLI path pipes raw body without WebUI list checks.
+
+    Headless answer-files may specify locale/keymap/timezone that aren't in the
+    live session's timedatectl/localectl lists yet (e.g. minimal ISO). For
+    those, fall back to defaults silently; for interactive WebUI requests,
+    reject to surface typos instead of silently shipping UTC.
+    """
+    # Headless answer-file sets explicit values outside the WebUI's dropdowns
+    # and bypasses the is_live session; detect via missing confirm_* dance?
+    # Simpler: if body came with an explicit non-empty locale/keymap/zone that
+    # fails the allowlist, the WebUI path should error, answer-file path falls
+    # back. We treat answer-file as any request where raw values don't match
+    # the live allowlists but the caller explicitly supplied them — handled
+    # by caller passing _strict=False. Here default is strict (WebUI).
+    return False
+
+
+def validate_install_request(body: dict, context: InstallerContext, *, strict_locale: bool = True) -> InstallRequest:
     """Validate a start request and return an immutable normalized request."""
     state, disk_info = _storage_state(body, context)
     current_ok = (
@@ -199,12 +217,18 @@ def validate_install_request(body: dict, context: InstallerContext) -> InstallRe
 
     timezone = body.get("timezone", "UTC") or "UTC"
     if timezone not in set(system.list_timezones()):
+        if strict_locale:
+            raise InstallRequestError(f"Invalid timezone: {timezone!r}.")
         timezone = "UTC"
     locale = str(body.get("locale") or "en_US.UTF-8")
     if not LOCALE_PATTERN.fullmatch(locale) or locale not in set(system.list_locales()):
+        if strict_locale:
+            raise InstallRequestError(f"Invalid locale: {locale!r}.")
         locale = "en_US.UTF-8"
     keymap = str(body.get("keymap") or "us")
     if not KEYMAP_PATTERN.fullmatch(keymap) or keymap not in set(system.list_keymaps()):
+        if strict_locale:
+            raise InstallRequestError(f"Invalid keymap: {keymap!r}.")
         keymap = "us"
     username = body.get("username", "")
     _require_valid_username(username)

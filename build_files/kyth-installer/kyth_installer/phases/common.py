@@ -44,6 +44,14 @@ def _start_power_watch(log, context, stop_event: threading.Event) -> threading.T
                         context._power_failed = msg  # type: ignore[attr-defined]
                     except Exception:
                         pass
+                    # Also trigger the same abort path as user cancel — streaming loop
+                    # checks a single abort_event (cancel_requested). Unifying keeps
+                    # IMAGE from continuing on battery.
+                    try:
+                        context.cancel_requested.set()
+                        context.events.publish({"type": "log", "text": msg})
+                    except Exception:
+                        pass
                     break
             except Exception:
                 pass

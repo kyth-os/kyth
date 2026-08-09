@@ -230,31 +230,14 @@ def disk_hold(disk: str, log):
     Prevents TOCTOU where a second installer request or udev automount
     reclaims a gap between validate_plan_state and parted mkpart. Best-effort
     on live ISO where the disk may be busy — falls back to advisory warning.
+
+    Delegates to storage_guard.DiskLease so guided and manual paths share one
+    flock primitive.
     """
-    fd = -1
-    try:
-        try:
-            fd = os.open(disk, os.O_RDONLY)
-        except OSError as exc:
-            log(f"Warning: could not open {disk} for exclusive hold: {exc}")
-            yield
-            return
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            log(f"Holding exclusive lock on {disk} for partition commit...")
-        except BlockingIOError:
-            raise RuntimeError(f"Another process is using {disk}; close other installers and retry.")
+    from .storage_guard import DiskLease
+
+    with DiskLease(disk, log, exclusive=True):
         yield
-    finally:
-        if fd != -1:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            except Exception:
-                pass
-            try:
-                os.close(fd)
-            except Exception:
-                pass
 
 def find_bootcurrent_esp() -> str | None:
     """Return ESP device path from BootCurrent via efibootmgr -v, or None."""
@@ -466,9 +449,41 @@ def _shrink_ntfs_filesystem_guarded(
         "at its new smaller size. Windows will see unallocated space after it; "
         "use Windows Disk Management to extend the volume back if you want to undo."
     )
+    # Marker to guard against immediate second shrink without regrow/reboot.
+    # Filesystem shrink is not covered by the sgdisk guard, so a second attempt
+    # in the same live session would shrink an already-small filesystem again.
+    try:
+        marker_dir = Path("/run/kyth-installer")
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = partition.replace("/", "_")
+        marker = marker_dir / f"ntfs-shrunk-{safe_name}"
+        marker.write_text(f"{new_ntfs_size}\n")
+    except Exception:
+        pass
 
 
 def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
+    # Guard against double-shrink in same session after a prior filesystem
+    # shrink succeeded but table restore left FS small. Prevents second shrink
+    # of an already-shrunk FS which would fail confusingly or over-shrink.
+    try:
+        prelim_partition = _normal_device_path(config.get("resize_partition") or config.get("target_partition"))
+        if prelim_partition:
+            safe_name = prelim_partition.replace("/", "_")
+            marker = Path("/run/kyth-installer") / f"ntfs-shrunk-{safe_name}"
+            if marker.is_file():
+                raise RuntimeError(
+                    "This NTFS partition was already shrunk in this installer session "
+                    "but the partition table was restored after a later failure. "
+                    "The filesystem is already at its new smaller size while the "
+                    "partition still describes the old larger size. Reboot, let "
+                    "Windows extend the volume back, or reboot the live ISO before "
+                    "retrying. Marker: " + str(marker)
+                )
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
     disk, partition, shrink_bytes = _validate_resize_ntfs_target(config)
     missing = [cmd for cmd in ("ntfsresize", "parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk") if shutil.which(cmd) is None]
     if missing:

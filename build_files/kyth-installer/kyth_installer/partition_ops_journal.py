@@ -577,25 +577,9 @@ class Journal:
     def commit(self, log) -> str:
         if not self._disk_service.dry_run:
             _require_parted()
-        # Hold exclusive disk lock across validate->backup->commit to close
-        # TOCTOU where udev or a second installer reclaims gaps.
-        import fcntl
-        import os
+        from .storage_guard import DiskLease
 
-        fd = -1
-        try:
-            try:
-                fd = os.open(self.disk, os.O_RDONLY)
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    log(f"Holding exclusive lock on {self.disk} for partition commit...")
-                except BlockingIOError:
-                    raise RuntimeError(
-                        f"Another process is using {self.disk}; close other installers and retry."
-                    )
-            except OSError as exc:
-                log(f"Warning: could not hold exclusive lock on {self.disk}: {exc}")
-                fd = -1
+        with DiskLease(self.disk, log, exclusive=True):
             self._save_snapshot()
 
             for op in self.ops:
@@ -620,16 +604,6 @@ class Journal:
             log("Partition changes committed successfully.")
             root = self._root_partition or ""
             return root
-        finally:
-            if fd != -1:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-                except Exception:
-                    pass
-                try:
-                    os.close(fd)
-                except Exception:
-                    pass
 
     def rollback(self, log) -> None:
         if not self._snapshot_saved:

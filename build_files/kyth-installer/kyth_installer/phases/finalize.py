@@ -252,6 +252,55 @@ def _create_installer_user(config_root, deploy_root, username, password_hash, lo
         log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
 
 
+def _persist_artifacts_to_target(
+    log, context: InstallerContext, dest_name: str = "install-log"
+) -> None:
+    """Best-effort mirror of log/tx into the mounted target for persistence."""
+    candidates: list[str] = []
+    try:
+        candidates.extend(list(getattr(context, "cleanup_mounts", []) or []))
+    except Exception:
+        pass
+    for p in ("/var/tmp/kyth-alongside-target", "/var/tmp/kyth-install-root"):
+        if p not in candidates:
+            candidates.append(p)
+
+    vol_sources = [LOG_FILE, TRANSACTION_FILE]
+    # Only add failure summary if it exists (success path won't have it yet)
+    if FAILURE_SUMMARY_FILE.is_file():
+        vol_sources.append(FAILURE_SUMMARY_FILE)
+
+    for mnt in candidates:
+        try:
+            import os as _os
+
+            if not mnt or not _os.path.isdir(mnt):
+                continue
+            try:
+                result = run_command(["findmnt", "-n", mnt], capture_output=True, timeout=3)
+                if result.returncode != 0:
+                    continue
+            except Exception:
+                pass
+
+            dest_dir = Path(mnt) / "var" / "log" / "kyth-installer"
+            try:
+                run_command(_as_root(["mkdir", "-p", str(dest_dir)]), check=False)
+                for src in vol_sources:
+                    if src.is_file() and not src.is_symlink():
+                        # For success, copy log as 'install.log' alongside existing names
+                        run_command(
+                            _as_root(["cp", "-a", str(src), str(dest_dir / src.name)]),
+                            check=False,
+                        )
+                log(f"Installer artifacts persisted to {dest_dir} on the target disk.")
+                break
+            except Exception as exc:
+                log(f"Warning: could not persist artifacts to {mnt}: {exc}")
+        except Exception:
+            continue
+
+
 def _configure_installed_system(
     root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress,
     context: InstallerContext, request: InstallRequest | None = None,
@@ -295,6 +344,12 @@ def _configure_installed_system(
         context.assurance_checks.extend(check.as_dict() for check in checks)
         for check in checks:
             log(f"Final check [{check.status}]: {check.name} — {check.detail}")
+        # Persist success artifacts too — /run is tmpfs, so without this a
+        # successful install leaves no post-mortem if the next boot fails.
+        try:
+            _persist_artifacts_to_target(log, context)
+        except Exception as exc:
+            log(f"Warning: could not persist success artifacts: {exc}")
     finally:
         progress(99)
         unmount_configuration(config_root, alongside_mount, run=run_command)
@@ -316,22 +371,17 @@ def _persist_failure_to_target_disk(log, context: InstallerContext, message: str
     a reboot or power cycle. Failures before any target mount exist have
     nothing to persist — the volatile /run copy is the only one.
     """
-    import shutil
-
+    # Reuse shared persist, then add the human-readable failure.txt
+    _persist_artifacts_to_target(log, context)
+    # Also write install-failure.txt with the human message for easy cat
     candidates: list[str] = []
-    # mounts registered through InstallerContext (alongside + staging roots)
     try:
         candidates.extend(list(getattr(context, "cleanup_mounts", []) or []))
     except Exception:
         pass
-    # also check the two canonical staging roots directly
     for p in ("/var/tmp/kyth-alongside-target", "/var/tmp/kyth-install-root"):
         if p not in candidates:
             candidates.append(p)
-
-    vol_log = LOG_FILE
-    vol_summary = FAILURE_SUMMARY_FILE
-    vol_tx = TRANSACTION_FILE
 
     for mnt in candidates:
         try:
@@ -339,7 +389,6 @@ def _persist_failure_to_target_disk(log, context: InstallerContext, message: str
 
             if not mnt or not _os.path.isdir(mnt):
                 continue
-            # verify it's actually a mount (best-effort)
             try:
                 result = run_command(["findmnt", "-n", mnt], capture_output=True, timeout=3)
                 if result.returncode != 0:
@@ -349,25 +398,15 @@ def _persist_failure_to_target_disk(log, context: InstallerContext, message: str
 
             dest_dir = Path(mnt) / "var" / "log" / "kyth-installer"
             try:
-                run_command(_as_root(["mkdir", "-p", str(dest_dir)]), check=False)
-                for src in (vol_log, vol_summary, vol_tx):
-                    if src.is_file() and not src.is_symlink():
-                        run_command(
-                            _as_root(["cp", "-a", str(src), str(dest_dir / src.name)]),
-                            check=False,
-                        )
-                # also drop a human-readable copy of the traceback alongside
-                # the json, so a user can `cat` it from a live shell without jq.
                 txt = dest_dir / "install-failure.txt"
                 run_command(
                     _as_root(["/usr/bin/tee", str(txt)]),
                     input=f"{message}\n\nSee also: {dest_dir}/failure.json\n",
                     text=True, stdout=subprocess.DEVNULL, check=False,
                 )
-                log(f"Failure artifacts also persisted to {dest_dir} on the target disk.")
-                break  # one successful persist is enough
-            except Exception as exc:
-                log(f"Warning: could not persist failure to {mnt}: {exc}")
+                break
+            except Exception:
+                pass
         except Exception:
             continue
 

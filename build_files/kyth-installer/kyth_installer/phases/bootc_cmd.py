@@ -48,6 +48,8 @@ def _run_cmd(
     absolute_timeout: int | None = 3600,
     publish=None,
     cancel_event=None,
+    io_stall_timeout: int | None = None,
+    net_stall_timeout: int | None = None,
 ) -> None:
     # Import _as_root lazily so tests that patch `install._as_root` still apply
     try:
@@ -93,4 +95,6 @@ def _run_cmd(
         absolute_timeout=absolute_timeout,
         error_factory=error_factory,
         cancel_event=cancel_event,
+        io_stall_timeout=io_stall_timeout,
+        net_stall_timeout=net_stall_timeout,
     )

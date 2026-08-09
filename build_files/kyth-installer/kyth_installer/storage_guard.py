@@ -3,9 +3,52 @@
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import os
 import tempfile
 from pathlib import Path
+
+
+@contextlib.contextmanager
+def DiskLease(disk: str, log, *, exclusive: bool = True):
+    """Shared flock primitive for both guided and manual partition paths.
+
+    Guided path (plan._commit_new_kythos_partition) and manual
+    Journal.commit both need to serialize against udev/second installer.
+    Using one helper avoids duplicate flock logic and accidental
+    exclusive-vs-shared mismatch. Best-effort on live ISO where disk may be
+    busy — falls back to warning instead of failing.
+    """
+    fd = -1
+    try:
+        try:
+            fd = os.open(disk, os.O_RDONLY)
+            flag = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            try:
+                fcntl.flock(fd, flag | fcntl.LOCK_NB)
+                kind = "exclusive" if exclusive else "shared"
+                log(f"Holding {kind} lock on {disk}...")
+            except BlockingIOError:
+                raise RuntimeError(
+                    f"Another process is using {disk}; close other installers and retry."
+                )
+        except OSError as exc:
+            # Re-raise the BlockingIOError wrapped as RuntimeError, otherwise warn
+            if isinstance(exc, RuntimeError):
+                raise
+            log(f"Warning: could not hold lock on {disk}: {exc}")
+            fd = -1
+        yield
+    finally:
+        if fd != -1:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                os.close(fd)
+            except Exception:
+                pass
 
 
 @contextlib.contextmanager
