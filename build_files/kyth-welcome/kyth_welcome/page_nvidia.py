@@ -171,14 +171,20 @@ class NvidiaPage(Page):
         self._install_btn.setEnabled(True)
         finish_worker(self)
         set_session_inhibit(self, None)
-        if code == 0:
+        # S3: cancelled (Esc on ksshaskpass) must not invalidate 300s cache nor show err
+        from .services.runtime import Worker
+
+        if code == Worker.CANCELLED:
+            self._log_panel.append("\nCancelled — no change.")
+            self._status_lbl.setText("Cancelled — no change.")
+            self._status_lbl.setObjectName("status-warn")
+            restyle(self._status_lbl)
+        elif code == 0:
             try:
                 from kyth_shared.system.probe import invalidate_nvidia
                 invalidate_nvidia()
             except Exception:
                 pass
-
-        if code == 0:
             self._log_panel.append("\nDone. Reboot to activate NVIDIA drivers.")
             self._reboot_btn.show()
         else:

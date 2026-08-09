@@ -41,7 +41,15 @@ class _ResetMixin:
         set_session_inhibit(self, None)
         self._confirm_edit.setEnabled(True)
         self._on_confirm_text(self._confirm_edit.text())
-        if code == 0:
+        # S3: distinguish cancel (ksshaskpass Esc) from real failure
+        from .services.runtime import Worker
+
+        if code == Worker.CANCELLED:
+            self._status_lbl.setText("Cancelled — no change. Rollback not staged.")
+            self._status_lbl.setObjectName("status-warn")
+            self._log_panel.append("\nCancelled. No change was made.")
+            self._rollback_repair_btn.setEnabled(has_rollback_deployment())
+        elif code == 0:
             try:
                 from kyth_shared.system.probe import invalidate_bootc
                 invalidate_bootc()
