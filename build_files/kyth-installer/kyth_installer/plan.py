@@ -311,8 +311,11 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     bios_end = gap_start + BIOS_BOOT_BYTES - sector
     log("Creating BIOS boot partition for GRUB...")
     run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "biosboot", f"{gap_start}B", f"{bios_end}B"]), check=True, timeout=120)
-    _settle()
     created = _latest_partition_on_disk(disk, before)
+    if not created:
+        # R8: settle batch — wait once for udev after mkpart before probing
+        _settle()
+        created = _latest_partition_on_disk(disk, before)
     if not created:
         raise RuntimeError("The installer could not find the new BIOS boot partition after partitioning.")
     run_command(_as_root(["parted", "-s", disk, "set", str(_partition_number(created)), "bios_grub", "on"]), check=True, timeout=120)
@@ -354,22 +357,18 @@ def _commit_new_kythos_partition(
 
             log(f"Creating KythOS Btrfs partition in {_human_size(gap_end - btrfs_start)} of free space...")
             run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{partition_end}B"]), check=True, timeout=120)
-            # Force kernel to re-read partition table before any mkfs — avoids half-table on power loss
-            try:
-                run_command(_as_root(["blockdev", "--rereadpt", disk]), check=False, timeout=15)
-            except Exception:
-                pass
-            try:
-                run_command(_as_root(["partprobe", disk]), check=False, timeout=15)
-            except Exception:
-                pass
+            # R8: batch reread — one settle after both reread attempts
+            for _cmd in [[_as_root(["blockdev", "--rereadpt", disk])], [_as_root(["partprobe", disk])]]:
+                try:
+                    run_command(_cmd[0], check=False, timeout=15)
+                except Exception:
+                    pass
             _settle()
 
             created = _latest_partition_on_disk(disk, before)
             if not created:
                 raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
             run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
-            # Re-read to confirm the new partition is visible to the kernel before returning
             _settle()
             try:
                 _verify = {p["name"] for p in list_partitions(disk) if p.get("name")}
