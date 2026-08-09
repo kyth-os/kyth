@@ -176,13 +176,18 @@ def load_appstream_catalog() -> dict[str, dict]:
     return catalog
 
 
-# S14: register cache_clear so flatpak invalidate clears lru_cache without probe importing welcome
-try:
-    from kyth_shared.system.probe import register_flatpak_invalidate
+# W5: kyth-probe pre-warm hook — if probe wrote JSON, Hub will hit _load_cached_catalog first (see R7)
+def warm_appstream_cache() -> bool:
+    try:
+        from kyth_shared.system.probe import read_section
 
-    register_flatpak_invalidate(load_appstream_catalog.cache_clear)  # type: ignore[attr-defined]
-except Exception:
-    pass
+        data = read_section("flatpak-apps", max_age=3600)
+        if isinstance(data, dict) and data:
+            save_json_config(_APPSTREAM_CACHE_PATH, data)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 _fp_component_url = _component_url
