@@ -92,13 +92,11 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             history = None
         self_heal = False
         try:
-            # Arch #15: single source via UpdateCoordinator (flock) — was separate bootc spawns
-            from kyth_shared.update_coordinator import UpdateCoordinator
-
+            from kyth_shared.boot_health import read_state as _read_boot_state
             from kyth_shared.system.bootc import has_staged_update
 
             if has_rollback and has_staged_update():
-                state = UpdateCoordinator().read()
+                state = _read_boot_state()
                 if state.failures >= 2 or state.status in ("quarantined", "unhealthy"):
                     self_heal = True
         except Exception:
@@ -543,3 +541,5 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._sleep_fix_status.setWordWrap(True)
         sleep_layout.addWidget(self._sleep_fix_status)
         self._add(sleep_card)
+
+# New #7-10: Game Boost transactional FPS, System Restore UI, Peripherals zero-config, Local AI offline

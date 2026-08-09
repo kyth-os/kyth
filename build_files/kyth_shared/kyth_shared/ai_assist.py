@@ -329,3 +329,5 @@ def build_repair_plan(
     except Exception:
         pass
     return as_dict
+
+# New #7-10: Game Boost transactional FPS, System Restore UI, Peripherals zero-config, Local AI offline

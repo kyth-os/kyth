@@ -1,6 +1,5 @@
 import os
 
-# Arch #20: work PST/fonts idempotent — rsync --update + manifest.json skip if newer
 # __KYTH_GENERATED_IMPORTS__
 from ..services.runtime import release_worker_when_finished
 from ..services.gaming import DataWorker
@@ -111,3 +110,5 @@ class _PstMixin:
             )
         else:
             self._set_pst_status(f"\u2717 Conversion failed: {detail}")
+
+# New #7-10: Game Boost transactional FPS, System Restore UI, Peripherals zero-config, Local AI offline
