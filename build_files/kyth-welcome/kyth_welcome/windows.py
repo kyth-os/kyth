@@ -547,7 +547,8 @@ class MainWindow(QMainWindow):
                     score = max(score, 130)
             if score:
                 ranked.append((key, score))
-        return sorted(ranked, key=lambda item: (-item[1], self._descriptor_by_key[item[0]].title))[:5]
+        # W4: stable tie-break — score desc then key asc (not title alpha which drifts with search_terms)
+        return sorted(ranked, key=lambda item: (-item[1], item[0]))[:5]
 
     def _update_search_results(self, text: str):
         self._clear_search_results()
