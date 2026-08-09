@@ -176,4 +176,13 @@ def load_appstream_catalog() -> dict[str, dict]:
     return catalog
 
 
+# S14: register cache_clear so flatpak invalidate clears lru_cache without probe importing welcome
+try:
+    from kyth_shared.system.probe import register_flatpak_invalidate
+
+    register_flatpak_invalidate(load_appstream_catalog.cache_clear)  # type: ignore[attr-defined]
+except Exception:
+    pass
+
+
 _fp_component_url = _component_url

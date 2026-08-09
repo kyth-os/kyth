@@ -356,8 +356,20 @@ def collect_snapshot() -> dict[str, Any]:
     return {key: result.data for key, result in collect_probe_results().items()}
 
 
+_FLATPAK_INVALIDATE_CBS: list[Callable[[], None]] = []  # S14: welcome registers cache_clear
+
+
+def register_flatpak_invalidate(cb: Callable[[], None]) -> None:
+    _FLATPAK_INVALIDATE_CBS.append(cb)
+
+
 def invalidate_after_flatpak_change() -> None:
     invalidate_disk_sections(MUTATION_KEYS_FLATPAK)
+    for cb in list(_FLATPAK_INVALIDATE_CBS):
+        try:
+            cb()
+        except Exception:
+            pass
 
 
 def invalidate_after_bootc_change() -> None:
