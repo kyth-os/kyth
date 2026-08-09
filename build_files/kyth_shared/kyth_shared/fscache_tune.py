@@ -25,7 +25,7 @@ def generate_fscache(cfg: dict[str,Any]|None=None, conf: Path|None=None) -> Path
     conf=conf or DEFAULT_CONF
     if not cfg.get("enabled"):
         try: conf.exists() and conf.unlink()
-        except: pass
+        except OSError: pass
         return None
     conf.parent.mkdir(parents=True, exist_ok=True)
     tmp=conf.with_suffix(".tmp")

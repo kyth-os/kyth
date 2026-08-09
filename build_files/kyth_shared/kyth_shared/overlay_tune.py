@@ -34,7 +34,7 @@ def generate_overlay(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Path
     dest=dest or DEFAULT_CONF
     if v=="off":
         try: dest.exists() and dest.unlink()
-        except: pass
+        except OSError: pass
         return None
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp=dest.with_suffix(".tmp")

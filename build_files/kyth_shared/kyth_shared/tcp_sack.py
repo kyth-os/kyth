@@ -27,7 +27,7 @@ def generate_tcp_sack(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Pat
     dest=dest or DEFAULT_CONF
     if str(cfg.get("profile","balanced"))!="gaming":
         try: dest.exists() and dest.unlink()
-        except: pass
+        except OSError: pass
         return None
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp=dest.with_suffix(".tmp")
