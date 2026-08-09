@@ -307,6 +307,16 @@ class StreamingProcessWorker(TrackedThread):
                 proc.terminate()
             except Exception:
                 return
+        # In bwrap/sandbox the pgid may not match pid — ensure process dies
+        try:
+            time.sleep(0.05)
+            if proc.poll() is None:
+                proc.terminate()
+            time.sleep(0.05)
+            if proc.poll() is None:
+                proc.kill()
+        except Exception:
+            pass
 
     def run(self):
         try:
