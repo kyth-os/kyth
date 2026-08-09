@@ -34,6 +34,7 @@ class _ScanMixin:
         worker.result.connect(lambda _key, drives: self._on_ntfs_drives_ready(drives))
         worker.failed.connect(lambda _key, _message: self._on_ntfs_drives_ready([]))
         worker.finished.connect(lambda: setattr(self, "_ntfs_drives_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_ntfs_drives_ready(self, drives: object):
@@ -70,6 +71,7 @@ class _ScanMixin:
         worker.result.connect(lambda _key, result: self._on_steam_scan_ready(result))
         worker.failed.connect(lambda _key, message: self._on_steam_scan_ready({"error_kind": "worker", "detail": message}))
         worker.finished.connect(lambda: setattr(self, "_steam_scan_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     @staticmethod

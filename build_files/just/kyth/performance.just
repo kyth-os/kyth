@@ -8,25 +8,20 @@ game-performance +args:
 # Set desktop/system performance mode.
 
 # Modes: max, gaming, performance, balanced, powersave, status
+# Fix 10: direct exec avoids extra bash fork (was 3 forks per toggle)
 [group('KythOS')]
 performance-mode mode="status":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    /usr/bin/kyth-performance-mode "{{ mode }}"
+    exec /usr/bin/kyth-performance-mode "{{ mode }}"
 
 # Quick shortcut: switch to gaming mode (EPP=performance, half-speed animations, no blur).
 [group('KythOS')]
 gaming-mode:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    /usr/bin/kyth-performance-mode gaming
+    exec /usr/bin/kyth-performance-mode gaming
 
 # Quick shortcut: restore balanced mode (EPP=balance_performance, full animations).
 [group('KythOS')]
 balanced-mode:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    /usr/bin/kyth-performance-mode balanced
+    exec /usr/bin/kyth-performance-mode balanced
 
 # Run a command with a named temporary profile.
 [group('KythOS')]

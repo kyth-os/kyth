@@ -166,6 +166,7 @@ class _InstalledTabMixin:
         )
         worker.failed.connect(lambda _key, _message: self._on_installed_list_failed())
         worker.finished.connect(lambda: setattr(self, "_installed_list_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_installed_list_ready(

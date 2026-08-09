@@ -23,6 +23,7 @@ class PerformancePage(Page):
         self._telemetry_worker = None
         self._sched_daemon_worker = None
         self._scheduler_list_worker = None
+        self._sched_status_worker = None
         self._page_header(
             "Gaming",
             "Scheduler & Performance",
@@ -316,12 +317,22 @@ class PerformancePage(Page):
         self._refresh_session_history()
 
     def _refresh_sched_status(self) -> None:
-        # H5: read_sched_status shells out to `systemctl` — must not throw in timer slot
-        try:
-            status = read_sched_status()
-        except Exception as exc:
-            self._perf_profile_lbl.setText(f"check failed: {exc}")
+        if self._sched_status_worker is not None and self._sched_status_worker.isRunning():
             return
+        if self._sched_status_worker is not None:
+            try:
+                self._sched_status_worker.deleteLater()
+            except Exception:
+                pass
+        worker = DataWorker("sched-status", read_sched_status)
+        self._sched_status_worker = worker
+        worker.result.connect(lambda _k, status: self._apply_sched_status(status))
+        worker.failed.connect(lambda _k, msg: self._perf_profile_lbl.setText(f"check failed: {msg}"))
+        worker.finished.connect(lambda: setattr(self, "_sched_status_worker", None))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _apply_sched_status(self, status: dict) -> None:
         profile = status.get("profile", "")
         sched = status.get("scheduler", "")
         gaming = status.get("gaming_active", False)

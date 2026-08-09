@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import glob
 import os
+from functools import lru_cache
 
 from .config import load_json_config, save_json_config
 
@@ -83,6 +84,7 @@ def _component_url(component, url_type: str) -> str:
     return ""
 
 
+@lru_cache(maxsize=1)
 def load_appstream_catalog() -> dict[str, dict]:
     try:
         import defusedxml.ElementTree as ET

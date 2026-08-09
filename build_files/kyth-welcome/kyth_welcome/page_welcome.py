@@ -187,27 +187,50 @@ class WelcomePage(Page):
         """Run off the GUI thread by _refresh_system_status()'s DataWorker.
         Everything here is a subprocess/D-Bus call — see the comment at the
         top of __init__ for why none of it may run synchronously there."""
+        from concurrent.futures import ThreadPoolExecutor
+
         from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
         from .services.gaming import _find_ntfs_drives
         from .services.hardware import _detect_nvidia
         from .services.process import command_stdout
 
-        portal = command_stdout(
-            ["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"],
-            timeout=3,
-        ) or "unknown"
-        pipewire = command_stdout(
-            ["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"],
-            timeout=3,
-        ) or "unknown"
+        # Fix 7: run 4 independent probes in parallel — portal/pipewire/nvidia/ntfs
+        # previously ran serially ~9 s worst-case, now ~3 s
+        def _portal():
+            return command_stdout(
+                ["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"],
+                timeout=3,
+            ) or "unknown"
+
+        def _pipewire():
+            return command_stdout(
+                ["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"],
+                timeout=3,
+            ) or "unknown"
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            f_portal = ex.submit(_portal)
+            f_pipewire = ex.submit(_pipewire)
+            f_branch = ex.submit(lambda: branch_display_name(current_branch()))
+            f_staged = ex.submit(has_staged_update)
+            f_rollback = ex.submit(has_rollback_deployment)
+            f_windows = ex.submit(lambda: bool(_find_ntfs_drives()))
+            f_nvidia = ex.submit(_detect_nvidia)
+            portal = f_portal.result()
+            pipewire = f_pipewire.result()
+            branch = f_branch.result()
+            staged = f_staged.result()
+            rollback = f_rollback.result()
+            windows_found = f_windows.result()
+            has_nvidia = f_nvidia.result()
         return {
-            "branch": branch_display_name(current_branch()),
-            "staged": has_staged_update(),
-            "rollback": has_rollback_deployment(),
-            "windows_found": bool(_find_ntfs_drives()),
+            "branch": branch,
+            "staged": staged,
+            "rollback": rollback,
+            "windows_found": windows_found,
             "portal": portal,
             "pipewire": pipewire,
-            "has_nvidia": _detect_nvidia(),
+            "has_nvidia": has_nvidia,
         }
 
     def _refresh_system_status(self):

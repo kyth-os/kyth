@@ -409,6 +409,7 @@ class GamingPage(Page):
         worker.result.connect(lambda _key, scx_status: self._apply_scx_status(scx_status))
         worker.failed.connect(lambda _key, _message: self._apply_scx_status(""))
         worker.finished.connect(lambda: setattr(self, "_scx_status_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_scx_status(self, scx_status: str) -> None:

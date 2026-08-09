@@ -483,6 +483,7 @@ class RcloneSetupWizard(QDialog):
         self._apply_worker.result.connect(self._on_apply_config_ready)
         self._apply_worker.failed.connect(self._on_apply_config_failed)
         self._apply_worker.finished.connect(lambda: setattr(self, "_apply_worker", None))
+        _apply_worker.finished.connect(_apply_worker.deleteLater)
         self._apply_worker.start()
 
     def _on_apply_config_ready(self, _key: str, data: object):

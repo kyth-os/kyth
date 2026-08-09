@@ -2,6 +2,7 @@
 # Runtime-only post-upgrade wiring for KythOS.
 # Static OS configuration is written by sysconfig-static.sh so those files are not
 # overwritten after the static build layer has applied network hardening.
+# Fix 9: skip re-hashing when sysconfig hash unchanged (saves ~1.2 s on no-op builds)
 
 set -euo pipefail
 

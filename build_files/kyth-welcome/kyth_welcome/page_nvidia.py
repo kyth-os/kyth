@@ -109,6 +109,7 @@ class NvidiaPage(Page):
         worker.result.connect(lambda _key, facts: self._apply_status_facts(facts))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_status_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_status_facts(self, facts: dict) -> None:
