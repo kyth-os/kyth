@@ -416,6 +416,11 @@ def release_worker_when_finished(owner: object, attr: str, worker: QThread) -> N
     TASK_SUPERVISOR.release_when_finished(owner, attr, worker)
 
 
+# S11: lifecycle standard — every DataWorker must pair
+# finished->setattr(None) + finished->deleteLater OR use release_worker_when_finished.
+# TelemetryWorker fixed in S5; audit grep: setAttr.*None.*deleteLater
+
+
 # R2: single ProbeWorker factory so callers don't hand-roll probe_cached
 # lambdas and can use one tracked worker type everywhere.
 def probe_worker(key: str, ttl: float, fetch):  # type: ignore[no-untyped-def]
