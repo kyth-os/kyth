@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import platform
+import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field, replace
@@ -388,7 +389,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "clear-quarantine":
         was_quarantined = args.digest in state.quarantined
-        write_state(clear_quarantine(state, args.digest), args.state)
+        try:
+            write_state(clear_quarantine(state, args.digest), args.state)
+        except ValueError as exc:
+            print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
+            return 1
         print(
             f"Cleared quarantine for {args.digest}"
             if was_quarantined else f"Digest {args.digest} was not quarantined"
@@ -399,13 +404,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Could not determine booted image digest")
         return 1
     if args.command == "mark-healthy":
-        write_state(mark_healthy(state, digest), args.state)
+        try:
+            write_state(mark_healthy(state, digest), args.state)
+        except ValueError as exc:
+            print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
+            return 1
         print(f"Marked {digest} healthy")
         return 0
     updated = record_failure(
         state, digest, current_boot_id(), args.reason, threshold=max(1, args.threshold)
     )
-    write_state(updated, args.state)
+    try:
+        write_state(updated, args.state)
+    except ValueError as exc:
+        print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
+        return 1
     print(_state_summary(updated))
     return 0
 
