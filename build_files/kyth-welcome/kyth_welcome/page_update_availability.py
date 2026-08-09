@@ -138,17 +138,22 @@ class _UpdateAvailabilityMixin:
         self._accept_update_probe(result)
 
     def _accept_update_probe(self, result: UpdateProbeResult):
+        completed = self._check_coordinator.accept(result)
+        if completed is None:
+            return
         if getattr(self, "_avail_deadline_timer", None):
             try:
                 self._avail_deadline_timer.stop()
             except Exception:
                 pass
-        completed = self._check_coordinator.accept(result)
-        if completed is None:
-            return
         self._finish_availability_check(completed)
 
     def _finish_availability_check(self, completed: AvailabilityCheckResult):
+        if getattr(self, "_avail_deadline_timer", None):
+            try:
+                self._avail_deadline_timer.stop()
+            except Exception:
+                pass
         # M5: only re-enable when both workers are done or on timeout
         if self._check_worker is not None and self._check_worker.isRunning():
             if completed.system_state != "error" or "timed out" not in completed.system_detail:
