@@ -267,8 +267,8 @@ class _DashboardMixin:
         self._familiar_status.setObjectName("card-copy"); self._familiar_status.setWordWrap(True)
         layout.addWidget(self._familiar_status)
         row = QHBoxLayout(); row.setSpacing(8)
-        apply_btn = QPushButton("Apply Familiar Desktop")
-        apply_btn.setMinimumWidth(180)
+        apply_btn = QPushButton("Apply Preset")
+        apply_btn.setMinimumWidth(120)
         def _apply():
             try:
                 subprocess.run(["dconf","write","/org/gnome/shell/extensions/dash-to-panel/panel-position","'BOTTOM'"], timeout=3)
