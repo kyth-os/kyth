@@ -108,6 +108,10 @@ def read_state(path: str | Path = DEFAULT_STATE_PATH) -> BootHealthState:
 
 
 def write_state(state: BootHealthState, path: str | Path = DEFAULT_STATE_PATH) -> None:
+    # W1: fail-closed — don't persist corrupt state that S16 banner would mis-render
+    errs = state.invariants()
+    if errs:
+        raise ValueError(f"refusing to write BootHealthState with invariant violations: {errs}")
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(
