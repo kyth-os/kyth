@@ -159,6 +159,12 @@ class _DashboardMixin:
         btn_row.addStretch()
         layout5.addLayout(btn_row)
         hud_grid.addWidget(card5, 2, 0, 1, 2)
+        # Familiar Desktop — Windows-like taskbar & shortcuts (#5)
+        try:
+            familiar_card = self._build_familiar_desktop_card()
+            hud_grid.addWidget(familiar_card, 3, 0, 1, 2)
+        except Exception:
+            pass
         return widget
 
     def _update_gaming_hud(self, data: dict) -> None:

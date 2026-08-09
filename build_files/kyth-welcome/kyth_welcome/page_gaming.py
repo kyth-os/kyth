@@ -128,6 +128,7 @@ class GamingPage(Page):
             self._dashboard_widgets = [self._hero_card, self._hud_grid_widget]
             self._add(self._hero_card)
             self._add(self._hud_grid_widget)
+            # Familiar Desktop wired inside _make_gaming_hud_grid (#5)
         else:
             self._dashboard_widgets = []
 
