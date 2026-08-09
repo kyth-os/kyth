@@ -44,6 +44,20 @@ class BootHealthState:
     updated_at: int = 0
     quarantined: Mapping[str, QuarantineRecord] = field(default_factory=dict)
 
+    def invariants(self) -> list[str]:
+        """S7: return list of violated invariants, [] if ok."""
+        errs: list[str] = []
+        if self.failures < 0:
+            errs.append("failures<0")
+        if self.status == "healthy" and not self.last_healthy_digest:
+            errs.append("healthy but last_healthy_digest empty")
+        for d, r in self.quarantined.items():
+            if r.failures < DEFAULT_FAILURE_THRESHOLD:
+                errs.append(f"quarantined {d} failures {r.failures} < threshold")
+            if d != r.digest:
+                errs.append(f"quarantined key {d} != record.digest {r.digest}")
+        return errs
+
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
         value["schema_version"] = SCHEMA_VERSION
