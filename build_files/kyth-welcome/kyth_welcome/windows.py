@@ -178,39 +178,9 @@ class MainWindow(QMainWindow):
         central_layout.addWidget(topbar)
 
     def _build_mission_bar(self, central_layout):
-        bar = QWidget()
-        bar.setObjectName("mission-bar")
-        bar.setFixedHeight(30)
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(254, 4, 14, 4)
-        layout.setSpacing(8)
+        from .windows_panels import build_mission_bar
 
-        kicker = QLabel("System")
-        kicker.setObjectName("mission-kicker")
-        layout.addWidget(kicker)
-
-        sep = QLabel("·")
-        sep.setObjectName("mission-sep")
-        layout.addWidget(sep)
-
-        self._mission_pills: list[QLabel] = []
-        for _ in range(4):
-            pill = QLabel("")
-            pill.setObjectName("mission-pill-dim")
-            pill.hide()
-            layout.addWidget(pill)
-            self._mission_pills.append(pill)
-
-        layout.addStretch()
-
-        # AI/repair hint — single muted label, no glow
-        self._mission_ai_hint = QLabel("")
-        self._mission_ai_hint.setObjectName("mission-kicker")
-        self._mission_ai_hint.hide()
-        layout.addWidget(self._mission_ai_hint)
-
-        central_layout.addWidget(bar)
-        self._mission_bar = bar
+        return build_mission_bar(self, central_layout)
 
     def _refresh_mission_bar(self):
         if self._mission_worker is not None:
@@ -358,26 +328,9 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _build_search_panel(self, central_layout):
-        self._search_panel = QFrame()
-        self._search_panel.setObjectName("search-results-panel")
-        self._search_panel.hide()
-        self._search_panel_layout = QVBoxLayout(self._search_panel)
-        self._search_panel_layout.setContentsMargins(266, 12, 24, 14)
-        self._search_panel_layout.setSpacing(8)
+        from .windows_panels import build_search_panel
 
-        self._search_results_title = QLabel("Search results")
-        self._search_results_title.setObjectName("search-results-title")
-        self._search_panel_layout.addWidget(self._search_results_title)
-
-        self._search_results_body = QVBoxLayout()
-        self._search_results_body.setSpacing(6)
-        self._search_panel_layout.addLayout(self._search_results_body)
-
-        self._search_results_hint = QLabel("")
-        self._search_results_hint.setObjectName("search-results-hint")
-        self._search_results_hint.setWordWrap(True)
-        self._search_panel_layout.addWidget(self._search_results_hint)
-        central_layout.addWidget(self._search_panel)
+        return build_search_panel(self, central_layout)
 
     def _create_main_content_root(self) -> QWidget:
         root = QWidget()
