@@ -43,14 +43,17 @@ QFrame#store-category-card:hover {{
 
 QFrame#card-accent-ok {{
     border-left: 3px solid {STATUS_OK};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(16, 185, 129, 0.08), stop:1 {KYTH_SURFACE});
 }}
 
 QFrame#card-accent-warn {{
     border-left: 3px solid {STATUS_WARN};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(245, 158, 11, 0.08), stop:1 {KYTH_SURFACE});
 }}
 
 QFrame#card-accent-err {{
     border-left: 3px solid {STATUS_ERROR};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(247, 118, 142, 0.08), stop:1 {KYTH_SURFACE});
 }}
 
 QFrame#card-accent-dim,

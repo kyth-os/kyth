@@ -321,6 +321,20 @@ class MainWindow(QMainWindow):
                     dlg.accept()
                     self._navigate_to(matches[0][0])
 
+        def _key_press(event):
+            if event.key() == Qt.Key.Key_Down:
+                row = lst.currentRow()
+                if row < lst.count() - 1:
+                    lst.setCurrentRow(row + 1)
+                return True
+            elif event.key() == Qt.Key.Key_Up:
+                row = lst.currentRow()
+                if row > 0:
+                    lst.setCurrentRow(row - 1)
+                return True
+            return False
+
+        edit.keyPressEvent = lambda ev: (edit.keyPressEvent.__self__.keyPressEvent(ev) if not _key_press(ev) else None)
         edit.textChanged.connect(_refill)
         edit.returnPressed.connect(_accept)
         lst.itemActivated.connect(lambda it: (dlg.accept(), self._navigate_to(it.data(Qt.ItemDataRole.UserRole))))
