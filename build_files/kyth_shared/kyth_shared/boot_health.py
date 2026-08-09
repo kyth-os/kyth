@@ -107,6 +107,15 @@ def write_state(state: BootHealthState, path: str | Path = DEFAULT_STATE_PATH) -
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, destination)
+        # S1: fsync parent dir so quarantine+healthy_digest survive power-loss
+        try:
+            dir_fd = os.open(destination.parent, os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
         if state.quarantined:
             try:
                 from kyth_shared.system.probe import invalidate_bootc
