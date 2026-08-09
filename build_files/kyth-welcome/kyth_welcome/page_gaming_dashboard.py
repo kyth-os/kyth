@@ -268,6 +268,7 @@ class _DashboardMixin:
         layout.addWidget(self._familiar_status)
         row = QHBoxLayout(); row.setSpacing(8)
         apply_btn = QPushButton("Apply Familiar Desktop")
+        apply_btn.setMinimumWidth(180)
         def _apply():
             try:
                 subprocess.run(["dconf","write","/org/gnome/shell/extensions/dash-to-panel/panel-position","'BOTTOM'"], timeout=3)
@@ -278,6 +279,7 @@ class _DashboardMixin:
         apply_btn.clicked.connect(lambda _=False: _apply())
         row.addWidget(apply_btn)
         revert_btn = QPushButton("Revert")
+        revert_btn.setMinimumWidth(80)
         revert_btn.clicked.connect(lambda _=False: (self._familiar_status.setText("Reverted"), self._familiar_status.setObjectName("card-copy"), restyle(self._familiar_status)))
         row.addWidget(revert_btn)
         row.addStretch()
