@@ -414,3 +414,11 @@ def finish_worker(owner: object, attr: str = "_worker") -> None:
 
 def release_worker_when_finished(owner: object, attr: str, worker: QThread) -> None:
     TASK_SUPERVISOR.release_when_finished(owner, attr, worker)
+
+
+# R2: single ProbeWorker factory so callers don't hand-roll probe_cached
+# lambdas and can use one tracked worker type everywhere.
+def probe_worker(key: str, ttl: float, fetch):  # type: ignore[no-untyped-def]
+    from kyth_shared.system.probe import probe_cached as _pc
+
+    return DataWorker(key, lambda: _pc(key, ttl, fetch))
