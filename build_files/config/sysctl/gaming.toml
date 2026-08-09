@@ -1,0 +1,9 @@
+# KythOS consolidated sysctl — tier: gaming (gated, only when gaming_master active)
+# Source of truth for /etc/sysctl.d/99-kyth-gaming.conf (generated only when gaming profile enabled)
+# Initially empty — gaming-gated overrides land here (e.g., watermarks, autogroup 0, latency ns).
+# Keeping the tier explicit prevents base/network churn when gaming toggles.
+
+# Example (inactive):
+# [keys."kernel.sched_autogroup_enabled"]
+# value = "0"
+# comment = "gaming — disable autogroup for direct placement"
