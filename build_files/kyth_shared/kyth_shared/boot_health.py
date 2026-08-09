@@ -107,12 +107,10 @@ def write_state(state: BootHealthState, path: str | Path = DEFAULT_STATE_PATH) -
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, destination)
-        # P1-1: quarantine write hides stale bootc-status-data for 90 s → invalidate
         if state.quarantined:
             try:
-                from kyth_shared.system.probe import invalidate_probe_caches
-
-                invalidate_probe_caches(["bootc-status-data", "bootc-status-text"])
+                from kyth_shared.system.probe import invalidate_bootc
+                invalidate_bootc()
             except Exception:
                 pass
     except Exception:

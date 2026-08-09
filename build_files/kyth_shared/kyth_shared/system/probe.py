@@ -364,6 +364,15 @@ def invalidate_after_bootc_change() -> None:
     invalidate_disk_sections(MUTATION_KEYS_BOOTC)
 
 
+# R6: central helpers so pages don't scatter key lists (led to 3 duplicate blocks)
+def invalidate_bootc() -> None:
+    invalidate_probe_caches(["bootc-status-data", "bootc-status-text", "bootc-branch"])
+
+
+def invalidate_nvidia() -> None:
+    invalidate_probe_caches(["nvidia-detect", "hardware-view"])
+
+
 def refresh_cache(*, system: bool = False, path: Path | None = None) -> tuple[Path, dict[str, Any]]:
     target = path or default_write_path(system=system)
     sections = collect_snapshot()

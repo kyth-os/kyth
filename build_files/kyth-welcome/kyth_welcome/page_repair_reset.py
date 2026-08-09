@@ -42,11 +42,9 @@ class _ResetMixin:
         self._confirm_edit.setEnabled(True)
         self._on_confirm_text(self._confirm_edit.text())
         if code == 0:
-            # P1-2: invalidate 90 s bootc cache so next open shows staged rollback
             try:
-                from kyth_shared.system.probe import invalidate_probe_caches
-
-                invalidate_probe_caches(["bootc-status-data", "bootc-status-text", "bootc-branch"])
+                from kyth_shared.system.probe import invalidate_bootc
+                invalidate_bootc()
             except Exception:
                 pass
             self._status_lbl.setText("Rollback staged — rebooting into the previous system image…")
