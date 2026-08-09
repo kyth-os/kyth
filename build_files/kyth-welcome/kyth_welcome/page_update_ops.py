@@ -421,6 +421,14 @@ class _UpdateOpsMixin:
         set_session_inhibit(self, None)
         self._update_activity()
         self._set_buttons_enabled(True)
+        # P1-2: staged/rollback cache is 90 s — invalidate before has_staged_update()
+        if code == 0:
+            try:
+                from kyth_shared.system.probe import invalidate_probe_caches
+
+                invalidate_probe_caches(["bootc-status-data", "bootc-status-text", "bootc-branch"])
+            except Exception:
+                pass
         completion = self._operation.completion(
             code,
             staged=code == 0 and has_staged_update(),
