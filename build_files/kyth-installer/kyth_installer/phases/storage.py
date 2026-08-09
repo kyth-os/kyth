@@ -302,6 +302,7 @@ def _prepare_partition_target_storage(
         install_cmd, 12, 90, log, progress,
         stall_timeout=3600, absolute_timeout=None,
             publish=lambda event: _push(event, context),
+            cancel_event=context.cancel_requested,
         )
         _warn_if_efi_boot_entries_disappeared(efi_before, _snapshot_efi_boot_entries(log), log)
 
@@ -335,5 +336,6 @@ def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_
             install_cmd, 5, 90, log, progress,
         stall_timeout=3600, absolute_timeout=None,
         publish=lambda event: _push(event, context),
+            cancel_event=context.cancel_requested,
     )
     return "", get_root_partition(disk), alongside_mount

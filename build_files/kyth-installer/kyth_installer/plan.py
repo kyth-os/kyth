@@ -437,6 +437,37 @@ def _validate_resize_ntfs_target(
         raise RuntimeError("Refusing to leave the NTFS partition smaller than 64 GiB.")
     return disk, partition, shrink_bytes
 
+def _shrink_ntfs_filesystem_guarded(
+    partition: str, new_ntfs_size: int, shrink_bytes: int, log
+) -> None:
+    """Shrink the NTFS filesystem in place, with explicit non-atomic warning.
+
+    This step is **not** covered by the partition-table guard that follows.
+    If the filesystem shrink succeeds but the later ``resizepart`` or KythOS
+    partition creation fails, ``sgdisk --load-backup`` will restore the table
+    but the filesystem stays shrunk. That leaves a partition larger than its
+    filesystem — benign and recoverable (Windows Disk Management or
+    ``ntfsresize`` can regrow), but not automatically rolled back. Log that
+    explicitly so the failure path can surface accurate remediation and so
+    tests can assert the boundary between the two durability domains.
+    """
+    log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
+    try:
+        shrink_filesystem(partition, "ntfs", new_ntfs_size, log)
+    except Exception:
+        log(
+            "NTFS filesystem shrink failed — no partition table change was made. "
+            "The NTFS volume is unchanged and the installer made no destructive write."
+        )
+        raise
+    log(
+        "NTFS filesystem shrink complete. If the next partition step fails, "
+        "the partition table will be restored but this filesystem will remain "
+        "at its new smaller size. Windows will see unallocated space after it; "
+        "use Windows Disk Management to extend the volume back if you want to undo."
+    )
+
+
 def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     disk, partition, shrink_bytes = _validate_resize_ntfs_target(config)
     missing = [cmd for cmd in ("ntfsresize", "parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk") if shutil.which(cmd) is None]
@@ -452,8 +483,7 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     old_end = partition_start + current_size - sector
     new_end = partition_start + new_ntfs_size - sector
 
-    log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
-    shrink_filesystem(partition, "ntfs", new_ntfs_size, log)
+    _shrink_ntfs_filesystem_guarded(partition, new_ntfs_size, shrink_bytes, log)
 
     def _shrink_partition_boundary() -> None:
         log("Shrinking partition boundary...")

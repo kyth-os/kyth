@@ -60,7 +60,9 @@ def _storage_state(body: dict, context: InstallerContext) -> tuple[dict, dict]:
 
     mode = body.get("install_mode", "wipe")
     if mode not in INSTALL_MODES:
-        mode = "wipe"
+        raise InstallRequestError(
+            f"Invalid install mode: {mode!r}. Valid modes are: {', '.join(sorted(INSTALL_MODES))}."
+        )
 
     # Capture one StorageSnapshot per request — avoids 3-4 separate
     # list_partitions/list_free_space scans that were previously done

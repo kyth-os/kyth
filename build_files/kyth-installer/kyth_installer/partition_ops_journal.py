@@ -577,30 +577,59 @@ class Journal:
     def commit(self, log) -> str:
         if not self._disk_service.dry_run:
             _require_parted()
-        self._save_snapshot()
+        # Hold exclusive disk lock across validate->backup->commit to close
+        # TOCTOU where udev or a second installer reclaims gaps.
+        import fcntl
+        import os
 
-        for op in self.ops:
-            kind = op["kind"]
-            p = op["params"]
+        fd = -1
+        try:
+            try:
+                fd = os.open(self.disk, os.O_RDONLY)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    log(f"Holding exclusive lock on {self.disk} for partition commit...")
+                except BlockingIOError:
+                    raise RuntimeError(
+                        f"Another process is using {self.disk}; close other installers and retry."
+                    )
+            except OSError as exc:
+                log(f"Warning: could not hold exclusive lock on {self.disk}: {exc}")
+                fd = -1
+            self._save_snapshot()
 
-            if kind == "new_table":
-                self._commit_new_table(p, log)
-            elif kind == "create":
-                self._commit_create(p, log)
-            elif kind == "delete":
-                self._commit_delete(p, log)
-            elif kind == "resize":
-                self._commit_resize(p, log)
-            elif kind == "format":
-                self._commit_format(p, log)
-            # "set_mountpoint" ops are pure journal metadata (consumed by
-            # _find_root_partition() below) — no disk operation of their own.
+            for op in self.ops:
+                kind = op["kind"]
+                p = op["params"]
 
-        self._root_partition = self._find_root_partition()
-        self._committed = True
-        log("Partition changes committed successfully.")
-        root = self._root_partition or ""
-        return root
+                if kind == "new_table":
+                    self._commit_new_table(p, log)
+                elif kind == "create":
+                    self._commit_create(p, log)
+                elif kind == "delete":
+                    self._commit_delete(p, log)
+                elif kind == "resize":
+                    self._commit_resize(p, log)
+                elif kind == "format":
+                    self._commit_format(p, log)
+                # "set_mountpoint" ops are pure journal metadata (consumed by
+                # _find_root_partition() below) — no disk operation of their own.
+
+            self._root_partition = self._find_root_partition()
+            self._committed = True
+            log("Partition changes committed successfully.")
+            root = self._root_partition or ""
+            return root
+        finally:
+            if fd != -1:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except Exception:
+                    pass
+                try:
+                    os.close(fd)
+                except Exception:
+                    pass
 
     def rollback(self, log) -> None:
         if not self._snapshot_saved:

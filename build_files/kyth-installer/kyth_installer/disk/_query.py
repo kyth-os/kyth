@@ -178,12 +178,27 @@ def list_free_space(disk: str) -> list[dict]:
     if cursor < usable_end:
         gaps.append((cursor, usable_end))
 
+    # On GPT without a BIOS boot partition the guided flow needs an extra 1 MiB
+    # for GRUB (MIN+BIOS_BOOT). Filter at that higher threshold so the UI
+    # never offers a gap that would later fail validate_plan_state after the
+    # user confirms destructive work. Probe best-effort — fallback to MIN on
+    # probe failure to avoid hiding usable space.
+    try:
+        from ..config import BIOS_BOOT_BYTES
+        from ..plan import _is_gpt_disk as _check_gpt, _has_bios_boot_partition as _check_bios
+
+        _is_gpt = _check_gpt(disk)
+        _has_bios = _check_bios(disk) if _is_gpt else True
+        required = MIN_KYTHOS_BYTES + (BIOS_BOOT_BYTES if _is_gpt and not _has_bios else 0)
+    except Exception:
+        required = MIN_KYTHOS_BYTES
+
     regions = []
     for start, end in gaps:
         aligned_start = ((start + sector - 1) // sector) * sector
         aligned_end = (end // sector) * sector
         size_bytes = aligned_end - aligned_start
-        if size_bytes >= MIN_KYTHOS_BYTES:
+        if size_bytes >= required:
             regions.append({
                 "start_bytes": aligned_start,
                 "end_bytes": aligned_end,

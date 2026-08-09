@@ -53,6 +53,7 @@ class StreamingCommandRunner:
         absolute_timeout: int | None = 3600,
         error_factory: Callable[[int, list[str], Sequence[str]], Exception] | None = None,
         stdin_data: str | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         argv = list(command)
         log(f"$ {' '.join(argv)}")
@@ -138,6 +139,20 @@ class StreamingCommandRunner:
         try:
             fd = proc.stdout.fileno()
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    log("Cancellation requested — terminating install command...")
+                    if proc.poll() is None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except Exception:
+                            proc.kill()
+                            proc.wait()
+                    from .execution import InstallCancelled
+
+                    raise InstallCancelled(
+                        "Installation cancelled by user."
+                    )
                 ready, _, _ = select.select([fd], [], [], 1)
                 if ready:
                     chunk = os.read(fd, 64 * 1024)
