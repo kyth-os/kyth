@@ -29,38 +29,20 @@ def is_live_session() -> bool:
 
 # Re-exported from probe.py — single source of truth (ProbeService.mem+disk).
 # Kept as module-level aliases so ``process.PROBE_CACHE`` etc still resolve for
-# tests that inspect the cache dict directly.
-try:
-    from kyth_shared.system.probe import DISK_BACKED_KEYS as _DISK_BACKED_KEYS  # noqa: F401
-    from kyth_shared.system.probe import DISK_TTL as _DISK_TTL  # noqa: F401
+# tests that inspect the cache dict directly. No fallback: probe.py is
+# canonical; import-order cycle is resolved by lazy re-export in functions
+# below if needed (tests reload modules in-cycle).
+from kyth_shared.system.probe import DISK_BACKED_KEYS as _DISK_BACKED_KEYS  # noqa: F401
+from kyth_shared.system.probe import DISK_TTL as _DISK_TTL  # noqa: F401
 
-    DISK_BACKED_KEYS = _DISK_BACKED_KEYS
-    BOOTC_CACHE_TTL = 5.0  # legacy alias; probe.DIS​K_TTL["bootc-status-data"] is canonical
-    FLATPAK_CACHE_TTL = 10.0
+DISK_BACKED_KEYS = _DISK_BACKED_KEYS
+BOOTC_CACHE_TTL = 5.0  # legacy alias; probe.DISK_TTL["bootc-status-data"] is canonical
+FLATPAK_CACHE_TTL = 10.0
 
-    # Expose the ProbeService singleton's mem store for introspection.
-    from kyth_shared.system.probe import _service as _probe_service
+from kyth_shared.system.probe import _service as _probe_service
 
-    PROBE_CACHE = _probe_service._mem  # type: ignore[attr-defined]
-    PROBE_CACHE_LOCK = _probe_service._lock  # type: ignore[attr-defined]
-except Exception:
-    # Fallback for import-order cycles during early build — tests never hit this.
-    import threading as _threading  # noqa: PLC0415
-
-    DISK_BACKED_KEYS = frozenset({
-        "bootc-status-data",
-        "bootc-status-text",
-        "bootc-branch",
-        "kernel-flavor",
-        "flatpak-apps",
-        "flatpak-updates",
-        "nvidia-detect",
-        "controllers-detect",
-    })
-    BOOTC_CACHE_TTL = 5.0
-    FLATPAK_CACHE_TTL = 10.0
-    PROBE_CACHE_LOCK = _threading.Lock()
-    PROBE_CACHE: dict[str, tuple[float, object]] = {}
+PROBE_CACHE = _probe_service._mem  # type: ignore[attr-defined]
+PROBE_CACHE_LOCK = _probe_service._lock  # type: ignore[attr-defined]
 
 
 def run_command(cmd: list[str], timeout: int = 5) -> subprocess.CompletedProcess[str] | None:
