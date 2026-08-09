@@ -16,6 +16,19 @@ from .widgets import (
 )
 
 # 111-115 vm/net headless — no new welcome modules; PerformancePage reuses single _make_card rows, keeping 215 headroom
+# Arch #17: transactional profile switch — backup *.conf, dry-run sysctl --system, rollback on done!=0
+def _transactional_profile_backup(paths: list[str]) -> dict[str, bytes | None]:
+    import pathlib
+
+    backups: dict[str, bytes | None] = {}
+    for p in paths:
+        try:
+            backups[p] = pathlib.Path(p).read_bytes()
+        except OSError:
+            backups[p] = None
+    return backups
+
+
 # ── Page: Performance ─────────────────────────────────────────────────────────
 class PerformancePage(Page):
     def __init__(self):

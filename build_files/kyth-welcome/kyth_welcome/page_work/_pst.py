@@ -1,5 +1,6 @@
 import os
 
+# Arch #20: work PST/fonts idempotent — rsync --update + manifest.json skip if newer
 # __KYTH_GENERATED_IMPORTS__
 from ..services.runtime import release_worker_when_finished
 from ..services.gaming import DataWorker
