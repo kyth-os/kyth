@@ -179,101 +179,14 @@ class HardwarePage(Page):
             self._display_vrr_warn_lbl.hide()
 
     def _make_display_card(self) -> QFrame:
-        card, layout = _make_card()
-        title = QLabel("Display — HDR & Variable Refresh Rate")
-        title.setObjectName("card-title")
-        layout.addWidget(title)
+        from .page_hardware_cards_display import make_display_card
 
-        status_lbl = QLabel("Checking display capabilities…")
-        self._display_status_lbl = status_lbl
-        status_lbl.setObjectName("card-copy")
-        status_lbl.setWordWrap(True)
-        layout.addWidget(status_lbl)
-
-        self._display_vrr_warn_lbl = QLabel("")
-        self._display_vrr_warn_lbl.setObjectName("status-warn")
-        self._display_vrr_warn_lbl.setWordWrap(True)
-        self._display_vrr_warn_lbl.hide()
-        layout.addWidget(self._display_vrr_warn_lbl)
-
-        body = QLabel(
-            "HDR and Variable Refresh Rate (FreeSync/G-Sync) are configured per monitor in "
-            "KDE Display Settings. Enable HDR for your primary display, then set per-game "
-            "HDR via Steam → game properties → General → HDR."
-        )
-        body.setObjectName("card-copy")
-        body.setWordWrap(True)
-        layout.addWidget(body)
-
-        btns = QHBoxLayout()
-        btns.setSpacing(8)
-        display_btn = QPushButton("Display Settings")
-        display_btn.setObjectName("primary")
-        display_btn.setToolTip("Open KDE Display Settings — HDR, VRR, refresh rate, and multi-monitor layout.")
-        display_btn.clicked.connect(
-            lambda _=False: kcmshell("kcm_kscreen") or QDesktopServices.openUrl(QUrl("settings://display"))
-        )
-        btns.addWidget(display_btn)
-        hdr_btn = QPushButton("HDR per-game")
-        hdr_btn.setToolTip("Set per-game HDR via kyth-hdr-per-game")
-        hdr_btn.clicked.connect(lambda _=False: __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["/usr/bin/kyth-hdr-per-game"]) if pathlib.Path("/usr/bin/kyth-hdr-per-game").exists() else None)
-        btns.addWidget(hdr_btn)
-        color_btn = QPushButton("Color & Night Light")
-        color_btn.setToolTip("Color profiles and Night Light blue-light filter settings.")
-        color_btn.clicked.connect(lambda _=False: kcmshell("kcm_nightcolor"))
-        btns.addWidget(color_btn)
-        btns.addStretch()
-        layout.addLayout(btns)
-        return card
+        return make_display_card(self)
 
     def _make_bt_audio_card(self) -> QFrame:
-        card, layout = _make_card()
-        title = QLabel("Bluetooth Audio")
-        title.setObjectName("card-title")
-        layout.addWidget(title)
+        from .page_hardware_cards_bt import make_bt_audio_card
 
-        desc = QLabel(
-            "KythOS prefers LDAC (990 kbps HQ) over SBC when your headset supports it. "
-            "If your Bluetooth headset sounds worse than expected, use the controls below "
-            "to check the active codec, switch audio to your headset, or reconnect to renegotiate the codec."
-        )
-        desc.setObjectName("card-copy")
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
-
-        self._bt_status_lbl = QLabel("Click Refresh Devices to scan.")
-        self._bt_status_lbl.setObjectName("card-copy")
-        self._bt_status_lbl.setWordWrap(True)
-        layout.addWidget(self._bt_status_lbl)
-
-        btns = QHBoxLayout()
-        btns.setSpacing(8)
-        refresh_btn = QPushButton("Refresh Devices")
-        refresh_btn.clicked.connect(self._refresh_bt_audio)
-        btns.addWidget(refresh_btn)
-        switch_btn = QPushButton("Switch to BT Output")
-        switch_btn.setToolTip("Set the connected Bluetooth audio device as the default audio output.")
-        switch_btn.clicked.connect(self._switch_to_bt_audio)
-        btns.addWidget(switch_btn)
-        ldac_btn = QPushButton("Force LDAC Reconnect")
-        ldac_btn.setToolTip(
-            "Disconnect and reconnect the active Bluetooth device to renegotiate codec. "
-            "Use this if your headset falls back to SBC instead of LDAC."
-        )
-        ldac_btn.clicked.connect(self._force_ldac_reconnect)
-        btns.addWidget(ldac_btn)
-        easy_btn = QPushButton("Mic Effects (EasyEffects)")
-        easy_btn.setToolTip("Open EasyEffects for noise gate/EQ — for headset mic parity")
-        easy_btn.clicked.connect(lambda: __import__("shutil").which("easyeffects") and __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["flatpak","run","com.github.wwmm.easyeffects"]) or __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["flatpak","run","com.github.wwmm.easyeffects"]))
-        btns.addWidget(easy_btn)
-        bt_settings_btn = QPushButton("Bluetooth Settings")
-        bt_settings_btn.clicked.connect(
-            lambda: kcmshell("kcm_bluetooth") or QDesktopServices.openUrl(QUrl("settings://bluetooth"))
-        )
-        btns.addWidget(bt_settings_btn)
-        btns.addStretch()
-        layout.addLayout(btns)
-        return card
+        return make_bt_audio_card(self)
 
     def _start_bt_worker(self, key: str, fn, on_result, on_failed=None):
         # H8/M7: ensure worker is cleaned up and label is still alive when callback fires
@@ -549,42 +462,6 @@ class HardwarePage(Page):
         restyle(self._status_lbl)
 
     def _make_driver_fwupd_card(self):
-        from .qt import QLabel, QFrame, QVBoxLayout, QPushButton, QHBoxLayout
-        from .widgets import _make_card
-        from .core_base import restyle
-        import pathlib
-        card, layout = _make_card("card-accent-ok")
-        title = QLabel("Driver & Firmware — MOK and fwupd")
-        title.setObjectName("card-title")
-        layout.addWidget(title)
-        desc = QLabel("Secure Boot MOK enrollment checked via mokutil --sb-state; firmware via fwupdmgr get-devices/get-updates (UpdateCoordinator transaction).")
-        desc.setObjectName("card-copy"); desc.setWordWrap(True)
-        layout.addWidget(desc)
-        self._fwupd_status = QLabel("fwupd: not checked")
-        self._fwupd_status.setObjectName("card-copy"); self._fwupd_status.setWordWrap(True)
-        layout.addWidget(self._fwupd_status)
-        row = QHBoxLayout(); row.setSpacing(8)
-        check_btn = QPushButton("Check Firmware Updates")
-        from .services.process import run_command
-        def _check():
-            try:
-                self._fwupd_status.setText("Checking fwupd...")
-                restyle(self._fwupd_status)
-                sb = run_command(["mokutil","--sb-state"], timeout=5)
-                mok = sb.stdout.strip().splitlines()[0] if sb and sb.returncode==0 and sb.stdout else "mokutil unavailable"
-                upd = run_command(["fwupdmgr","get-updates"], timeout=15)
-                upd_ok = upd is not None and upd.returncode == 0
-                upd_stdout = upd.stdout if upd and upd.stdout else ""
-                msg = f"{mok} — fwupd: {'updates available' if 'Updates' in upd_stdout else 'up to date' if upd_ok else 'fwupd unavailable'}"
-                self._fwupd_status.setText(msg); self._fwupd_status.setObjectName("status-ok")
-            except Exception as exc:
-                self._fwupd_status.setText(f"Check failed: {exc}"); self._fwupd_status.setObjectName("status-err")
-            restyle(self._fwupd_status)
-        check_btn.clicked.connect(lambda _=False: _check())
-        row.addWidget(check_btn)
-        enroll_btn = QPushButton("Enroll MOK (ujust)")
-        enroll_btn.clicked.connect(lambda _=False: __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["ujust","enroll-mok"]) if pathlib.Path("/usr/bin/ujust").exists() else self._fwupd_status.setText("ujust not found"))
-        row.addWidget(enroll_btn)
-        row.addStretch()
-        layout.addLayout(row)
-        return card
+        from .page_hardware_cards_fwupd import make_driver_fwupd_card
+
+        return make_driver_fwupd_card(self)
