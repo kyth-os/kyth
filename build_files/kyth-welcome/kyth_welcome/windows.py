@@ -98,11 +98,23 @@ class MainWindow(QMainWindow):
         self._build_sidebar(root.layout())
         self._build_page_stack(root.layout())
 
-        # Build Welcome page eagerly so its profile_changed signal is available.
-        welcome_idx = self._page_index_by_key["Welcome"]
-        welcome_page = self._ensure_page(welcome_idx)
-        welcome_page.profile_changed.connect(self._apply_profile_visibility)
-        self._apply_profile_visibility(load_profile())
+        # Welcome profile wiring was eager — defer to next tick so first
+        # frame paints without blocking on WelcomePage construction (see #1 cold-start).
+        def _wire_welcome_profile():
+            idx = self._page_index_by_key.get("Welcome")
+            if idx is None:
+                return
+            try:
+                page = self._ensure_page(idx)
+                page.profile_changed.connect(self._apply_profile_visibility)
+            except Exception:
+                pass
+            try:
+                self._apply_profile_visibility(load_profile())
+            except Exception:
+                pass
+
+        single_shot(self, 0, _wire_welcome_profile)
 
         self._history: list[int] = []
         self._history_pos: int = -1
