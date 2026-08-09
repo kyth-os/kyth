@@ -6,7 +6,7 @@ Windows Settings search with a blue focus ring and subtle inner depth.
 Breadcrumb and nav arrows use rounded 8px and raised hover so the header
 doesn't read as flat text on flat surface.
 """
-from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_GLOW, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_SURFACE_OVERLAY, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
+from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_GLOW, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_SURFACE_OVERLAY, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
 
 TOPBAR_QSS = f"""
 /* ── Top command bar ─────────────────────────────────────────────────────── */
