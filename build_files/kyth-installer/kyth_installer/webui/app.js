@@ -1288,7 +1288,11 @@ function loadRescue() {
     document.getElementById('rescue-efi').textContent = d.efibootmgr || '(unavailable)';
     document.getElementById('rescue-bootc').textContent = d.bootc_status || '(unavailable)';
     document.getElementById('rescue-tx').textContent = JSON.stringify(d.transaction || {}, null, 2);
-    st.textContent = 'Probe complete — read-only checks finished.';
+    if (d.bootc_status_summary) {
+      const s = d.bootc_status_summary;
+      if (s.booted || s.staged) st.textContent = `Booted: ${s.booted||'—'} → Staged: ${s.staged||'—'}`;
+      else { st.textContent = 'Probe complete — read-only checks finished.'; }
+    } else { st.textContent = 'Probe complete — read-only checks finished.'; }
     st.className = 'status-box status-ok';
   }).catch(e => {
     st.textContent = 'Probe failed: ' + e;

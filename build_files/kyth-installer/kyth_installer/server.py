@@ -264,6 +264,27 @@ class Handler(BaseHTTPRequestHandler):
             r = run_command(_as_root(["bootc", "status", "--json"]), capture_output=True, text=True, timeout=5)
             if r.stdout:
                 probe["bootc_status"] = r.stdout[:8000]
+                # Also surface a one-line booted vs staged summary without
+                # adding a new subprocess — keeps rescue read-only and cheap.
+                try:
+                    import json as _json
+                    data = _json.loads(r.stdout)
+                    # bootc status json shape varies; handle common keys
+                    booted = staged = ""
+                    if isinstance(data, dict):
+                        status = data.get("status") or data
+                        booted = str(status.get("booted") or status.get("bootedImage") or data.get("booted") or "")
+                        staged = str(status.get("staged") or status.get("stagedImage") or data.get("staged") or "")
+                        # Fallback: deployments list with booted flag
+                        if not booted and isinstance(data.get("deployments"), list):
+                            for dep in data["deployments"]:
+                                if dep.get("booted") and not booted:
+                                    booted = str(dep.get("image") or dep.get("id") or "")
+                                if dep.get("staged") and not staged:
+                                    staged = str(dep.get("image") or dep.get("id") or "")
+                    probe["bootc_status_summary"] = {"booted": booted[:256], "staged": staged[:256]}
+                except Exception:
+                    probe["bootc_status_summary"] = {"booted": "", "staged": ""}
         except Exception:
             pass
         return probe
