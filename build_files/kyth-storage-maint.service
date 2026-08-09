@@ -1,0 +1,15 @@
+[Unit]
+Description=Kyth storage maintenance (gated scrub+balance+duperemove)
+ConditionACPower=true
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/libexec/kyth-storage-gate
+ExecStart=/usr/bin/kyth-btrfs-maint
+ExecStart=/usr/bin/kyth-duperemove
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
