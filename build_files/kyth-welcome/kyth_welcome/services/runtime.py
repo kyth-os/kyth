@@ -295,8 +295,18 @@ class StreamingProcessWorker(TrackedThread):
         return True
 
     def stop(self) -> None:
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+        proc = self._proc
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception:
+            try:
+                proc.terminate()
+            except Exception:
+                return
 
     def run(self):
         try:
