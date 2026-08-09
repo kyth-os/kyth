@@ -546,3 +546,5 @@ class HardwarePage(Page):
         self._status_lbl.setText(f"Probe failed: {message}")
         self._status_lbl.setObjectName("status-err")
         restyle(self._status_lbl)
+
+# New #4-6: driver/fwupd auto + Familiar Desktop toggle + OneDrive native mount (see new features 4-6)

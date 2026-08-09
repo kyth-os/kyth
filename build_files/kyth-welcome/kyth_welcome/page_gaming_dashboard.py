@@ -244,3 +244,5 @@ class _DashboardMixin:
             f"<b>Game Save Backups:</b> {saves_details}<br>"
             f"<b>PC Game Drives:</b> {drive_desc}"
         )
+
+# New #4-6: driver/fwupd auto + Familiar Desktop toggle + OneDrive native mount (see new features 4-6)

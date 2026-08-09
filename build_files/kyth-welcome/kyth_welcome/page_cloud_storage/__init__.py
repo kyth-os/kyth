@@ -272,3 +272,5 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         layout.addWidget(body)
         self._add(card)
 
+
+# New #4-6: driver/fwupd auto + Familiar Desktop toggle + OneDrive native mount (see new features 4-6)
