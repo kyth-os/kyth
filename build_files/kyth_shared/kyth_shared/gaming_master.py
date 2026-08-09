@@ -123,6 +123,41 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
         out["btrfs"] = c["profile"]
     except Exception as e:
         out["btrfs"] = f"error {e}"
+    # Folded: pipewire/kwin/autogroup/watermark/oom/cfs — single transaction owner
+    for _mod, _name in [
+        ("pipewire_gaming", "pipewire"),
+        ("kwin_latency", "kwin"),
+        ("sched_autogroup", "autogroup"),
+        ("vm_watermark", "watermark"),
+        ("oom_gaming", "oom"),
+        ("gaming_cfs", "cfs"),
+    ]:
+        try:
+            m = __import__(f"kyth_shared.{_mod}", fromlist=["load", "generate"])
+            # generic: load_* may be load_pipewire_gaming etc — try both
+            lname = f"load_{_name}"
+            gname = f"generate_{_name}" if hasattr(m, f"generate_{_name}") else f"generate_{_mod}"
+            if not hasattr(m, lname):
+                # fallback search for any load_*
+                for attr in dir(m):
+                    if attr.startswith("load_"):
+                        lname = attr
+                        break
+            c = getattr(m, lname)()
+            # map to profile naming per module
+            if "profile" in c:
+                c["profile"] = "kyth" if gaming else "balanced"
+            elif "enabled" in c:
+                c["enabled"] = bool(gaming)
+            if not dry_run:
+                # find generate and call
+                for g in (gname, f"generate_{_mod}", "generate"):
+                    if hasattr(m, g):
+                        getattr(m, g)(c)
+                        break
+            out[_name] = str(c.get("profile", c.get("enabled", gaming)))
+        except Exception as e:
+            out[_name] = f"error {e}"
     try:
         from .trim_preset import load_trim, save_trim, generate_trim_state
 
