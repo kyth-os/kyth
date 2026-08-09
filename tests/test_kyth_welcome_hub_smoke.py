@@ -18,7 +18,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+try:
+    from PySide6.QtWidgets import QApplication  # noqa: E402
+except ImportError:
+    raise unittest.SkipTest("PySide6 required for Hub smoke") from None
 
 
 class TestHubSmoke(unittest.TestCase):
