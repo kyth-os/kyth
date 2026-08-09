@@ -139,6 +139,7 @@ class HardwarePage(Page):
         self._display_worker.result.connect(self._on_display_status_ready)
         self._display_worker.failed.connect(self._on_display_status_failed)
         self._display_worker.finished.connect(lambda: setattr(self, "_display_worker", None))
+        self._display_worker.finished.connect(self._display_worker.deleteLater)
         self._display_worker.start()
 
     def _on_display_status_ready(self, _key: str, raw: object):
@@ -262,7 +263,7 @@ class HardwarePage(Page):
         btns.addWidget(ldac_btn)
         easy_btn = QPushButton("Mic Effects (EasyEffects)")
         easy_btn.setToolTip("Open EasyEffects for noise gate/EQ — for headset mic parity")
-        easy_btn.clicked.connect(lambda: __import__("shutil").which("easyeffects") and __import__("subprocess").Popen(["flatpak","run","com.github.wwmm.easyeffects"]) or __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["flatpak","run","com.github.wwmm.easyeffects"]))
+        easy_btn.clicked.connect(lambda: __import__("shutil").which("easyeffects") and __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["flatpak","run","com.github.wwmm.easyeffects"]) or __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["flatpak","run","com.github.wwmm.easyeffects"]))
         btns.addWidget(easy_btn)
         bt_settings_btn = QPushButton("Bluetooth Settings")
         bt_settings_btn.clicked.connect(
@@ -274,13 +275,24 @@ class HardwarePage(Page):
         return card
 
     def _start_bt_worker(self, key: str, fn, on_result, on_failed=None):
+        # H8/M7: ensure worker is cleaned up and label is still alive when callback fires
         self._bt_worker = DataWorker(key, fn)
         self._bt_worker.result.connect(on_result)
+
+        def _safe_failed(_k, err):
+            try:
+                if self._bt_status_lbl is not None:
+                    # sip: wrapped C++ object may be deleted if page was reparented
+                    self._bt_status_lbl.setText(f"Bluetooth operation failed: {err}")
+            except RuntimeError:
+                pass
+
         if on_failed:
             self._bt_worker.failed.connect(on_failed)
         else:
-            self._bt_worker.failed.connect(lambda _k, err: self._bt_status_lbl.setText(f"Bluetooth operation failed: {err}"))
+            self._bt_worker.failed.connect(_safe_failed)
         self._bt_worker.finished.connect(lambda: setattr(self, "_bt_worker", None))
+        self._bt_worker.finished.connect(self._bt_worker.deleteLater)
         self._bt_worker.start()
 
     def _refresh_bt_audio(self):

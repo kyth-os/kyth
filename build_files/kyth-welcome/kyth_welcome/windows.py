@@ -231,6 +231,7 @@ class MainWindow(QMainWindow):
         self._mission_worker.result.connect(self._on_mission_bar_ready)
         self._mission_worker.failed.connect(lambda _k, _m: None)
         self._mission_worker.finished.connect(lambda: setattr(self, "_mission_worker", None))
+        self._mission_worker.finished.connect(self._mission_worker.deleteLater)
         self._mission_worker.start()
 
     def _on_mission_bar_ready(self, _key: str, facts: object):

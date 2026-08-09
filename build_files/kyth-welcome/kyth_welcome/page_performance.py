@@ -301,6 +301,7 @@ class PerformancePage(Page):
         worker.result.connect(lambda _key, schedulers: self._apply_scheduler_list(schedulers))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_scheduler_list_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_scheduler_list(self, schedulers: list[str]) -> None:
@@ -315,7 +316,12 @@ class PerformancePage(Page):
         self._refresh_session_history()
 
     def _refresh_sched_status(self) -> None:
-        status = read_sched_status()
+        # H5: read_sched_status shells out to `systemctl` — must not throw in timer slot
+        try:
+            status = read_sched_status()
+        except Exception as exc:
+            self._perf_profile_lbl.setText(f"check failed: {exc}")
+            return
         profile = status.get("profile", "")
         sched = status.get("scheduler", "")
         gaming = status.get("gaming_active", False)
@@ -351,6 +357,7 @@ class PerformancePage(Page):
         worker.result.connect(lambda _key, active: self._apply_sched_daemon_state(bool(active)))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_sched_daemon_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_sched_daemon_state(self, active: bool) -> None:
@@ -362,10 +369,16 @@ class PerformancePage(Page):
         if hasattr(self, "_telemetry_worker") and self._telemetry_worker is not None:
             if self._telemetry_worker.isRunning():
                 return
+            # M1: clean up previous finished worker before overwriting (avoid QThread leak)
+            try:
+                self._telemetry_worker.deleteLater()
+            except Exception:
+                pass
 
         from .services.workers import TelemetryWorker
         self._telemetry_worker = TelemetryWorker(limit=15, parent=self)
         self._telemetry_worker.loaded.connect(self._on_sessions_loaded)
+        self._telemetry_worker.finished.connect(self._telemetry_worker.deleteLater)
         self._telemetry_worker.start()
 
     def _on_sessions_loaded(self, rows: list) -> None:
@@ -424,12 +437,25 @@ class PerformancePage(Page):
         set_sched_daemon_enabled(bool(state))
 
     def _toggle_ai_perf(self, state: int) -> None:
-        from kyth_shared.commands import run
+        # Must not block the GUI thread — systemctl --user can stall up to 10 s
+        # under polkit or if the user service manager is busy.
+        from .services.runtime import DataWorker
 
         action = "enable" if state else "disable"
-        run(["systemctl", "--user", action, "--now", "kyth-ai-perfd.service"], capture_output=True, timeout=10)
-        self._ai_status_lbl.setText(f"AI: {'enabled' if state else 'disabled'}")
+        desired = "enabled" if state else "disabled"
+
+        def _run():
+            from kyth_shared.commands import run
+
+            run(["systemctl", "--user", action, "--now", "kyth-ai-perfd.service"], capture_output=True, timeout=10)
+            return desired
+
+        self._ai_status_lbl.setText(f"AI: {desired}…")
         restyle(self._ai_status_lbl)
+        w = DataWorker("ai-perf-toggle", _run)
+        w.result.connect(lambda _k, val: (self._ai_status_lbl.setText(f"AI: {val}"), restyle(self._ai_status_lbl)))
+        w.failed.connect(lambda _k, msg: (self._ai_status_lbl.setText(f"AI: failed — {msg}"), restyle(self._ai_status_lbl)))
+        w.start()
 
     def _apply_ai_now(self) -> None:
         from kyth_shared.ai_perf_daemon import apply_policy, choose_policy, collect_sample

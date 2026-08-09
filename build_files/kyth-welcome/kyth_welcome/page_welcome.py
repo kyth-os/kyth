@@ -170,8 +170,9 @@ class WelcomePage(Page):
 
         self._ntfs_library_worker = DataWorker("ntfs-libraries", _steam_libraries_on_ntfs)
         self._ntfs_library_worker.result.connect(self._on_ntfs_library_warning_ready)
-        self._ntfs_library_worker.failed.connect(lambda _key, _message: None)
+        self._ntfs_library_worker.failed.connect(lambda _k, _m: None)
         self._ntfs_library_worker.finished.connect(lambda: setattr(self, "_ntfs_library_worker", None))
+        self._ntfs_library_worker.finished.connect(self._ntfs_library_worker.deleteLater)
         self._ntfs_library_worker.start()
 
     def _on_ntfs_library_warning_ready(self, _key: str, libs: object):
@@ -216,8 +217,9 @@ class WelcomePage(Page):
 
         self._status_worker = DataWorker("welcome-status", self._gather_status_facts)
         self._status_worker.result.connect(self._on_status_facts_ready)
-        self._status_worker.failed.connect(lambda _key, _message: None)
+        self._status_worker.failed.connect(self._on_status_facts_failed)
         self._status_worker.finished.connect(lambda: setattr(self, "_status_worker", None))
+        self._status_worker.finished.connect(self._status_worker.deleteLater)
         self._status_worker.start()
 
     @staticmethod
@@ -238,6 +240,7 @@ class WelcomePage(Page):
         self._ai_worker.result.connect(self._on_ai_plan_ready)
         self._ai_worker.failed.connect(lambda _k, _m: self._ai_desc.setText("AI check failed"))
         self._ai_worker.finished.connect(lambda: setattr(self, "_ai_worker", None))
+        self._ai_worker.finished.connect(self._ai_worker.deleteLater)
         self._ai_worker.start()
 
     def _on_ai_plan_ready(self, _key: str, plan: object):
@@ -254,6 +257,17 @@ class WelcomePage(Page):
         else:
             self._ai_card.setObjectName("card-accent-ok")
         restyle(self._ai_card)
+
+    def _on_status_facts_failed(self, _key: str, message: str):
+        # H4/M8: surface failure instead of leaving "Checking…" forever
+        self._facts["branch"] = "Unavailable"
+        self._facts["portal"] = f"check failed: {message}"
+        self._facts["pipewire"] = "check failed"
+        try:
+            self._hud1_desc.setText(f"<b>Device:</b> {self._hostname}<br><b>Kernel:</b> {self._kernel}<br><b>Channel:</b> Unavailable")
+            self._hud2_desc.setText(f"<b>Session Type:</b> {self._session}<br><b>Audio Engine:</b> check failed<br><b>Desktop Portal:</b> check failed")
+        except Exception:
+            pass
 
     def _on_status_facts_ready(self, _key: str, facts: object):
         if not isinstance(facts, dict):
@@ -449,6 +463,7 @@ class WelcomePage(Page):
                 w.result.connect(lambda _k, dirs: self._on_win_dirs_ready(dirs))
                 w.failed.connect(lambda _k, _m: None)
                 w.finished.connect(lambda: setattr(self, "_win_dirs_worker", None))
+                w.finished.connect(w.deleteLater)
                 w.start()
         except Exception:
             pass
@@ -520,6 +535,7 @@ class WelcomePage(Page):
         worker.result.connect(lambda _key, result: self._on_role_preset_result(result, profile))
         worker.failed.connect(lambda _key, message: self._on_role_preset_result(None, profile, message))
         worker.finished.connect(lambda: setattr(self, "_apply_preset_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_role_preset_result(self, result, profile: str, error: str | None = None):

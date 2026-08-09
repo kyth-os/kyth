@@ -84,7 +84,10 @@ def _component_url(component, url_type: str) -> str:
 
 
 def load_appstream_catalog() -> dict[str, dict]:
-    import defusedxml.ElementTree as ET
+    try:
+        import defusedxml.ElementTree as ET
+    except ImportError:
+        import xml.etree.ElementTree as ET  # fallback on minimal images / containers
 
     xml_path = "/var/lib/flatpak/appstream/flathub/x86_64/active/appstream.xml"
     if not os.path.exists(xml_path):

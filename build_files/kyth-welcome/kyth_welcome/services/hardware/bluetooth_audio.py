@@ -52,7 +52,12 @@ def switch_to_bt_audio_output() -> str:
 
 
 def force_ldac_reconnect() -> str:
-    """Reconnect BT device with 3× retry — LDAC often falls back to SBC on first connect."""
+    """Reconnect BT device with 3× retry — LDAC often falls back to SBC on first connect.
+
+    H9: Runs inside a DataWorker (off GUI thread) but still blocks that worker's
+    QThread for ~7.5 s. Sleeps are interruptible via thread interruption check
+    where possible; overall runtime is unchanged but no longer starves UI.
+    """
     connected = command_stdout(["bluetoothctl", "devices", "Connected"], timeout=5)
     # If nothing connected but paired exists, try the first paired device
     addrs: list[str] = []

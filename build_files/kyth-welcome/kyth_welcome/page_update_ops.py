@@ -282,7 +282,7 @@ class _UpdateOpsMixin:
                     f"Only {free_gb:.1f} GB free on /. Full Update needs ~6 GB plus Flatpak/buffer — free 10 GB first (try System → Storage or remove large Flatpaks), then retry.",
                 )
                 return
-        except Exception:
+        except OSError:
             pass
         self._start_operation_spec(full_update_operation())
 
@@ -512,7 +512,7 @@ class _UpdateOpsMixin:
                 restyle(self._staged_val)
                 # keep warning visible even though staged is None
                 self._staged_val.setToolTip(f"Only {free_gb:.1f} GB free on /. Full Update needs ~6 GB + buffer.")
-        except Exception:
+        except OSError:
             free_gb = 999.0
 
         # Staged row — include pending image ref + short digest when present (5/5 visibility)

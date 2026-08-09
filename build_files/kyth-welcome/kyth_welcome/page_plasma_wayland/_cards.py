@@ -293,8 +293,9 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
         worker = DataWorker("wayland-readiness", self._fetch_wayland_readiness_facts)
         self._wayland_readiness_worker = worker
         worker.result.connect(lambda _key, facts: self._apply_wayland_readiness_facts(facts))
-        worker.failed.connect(lambda _key, _message: None)
+        worker.failed.connect(lambda _k, msg: self._apply_wayland_readiness_facts({"Status": f"check failed: {msg}"}))
         worker.finished.connect(lambda: setattr(self, "_wayland_readiness_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_wayland_readiness_facts(self, facts: dict[str, str]) -> None:

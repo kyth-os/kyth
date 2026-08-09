@@ -87,9 +87,11 @@ class _UpdateAvailabilityMixin:
         self._remote_manifest = ""
         # Hub-side deadline — issue #164: neither skopeo (45 s) nor flatpak
         # should keep the spinner forever. After 15 s force a terminal state.
-        if getattr(self, "_avail_deadline_timer", None):
+        old_timer = getattr(self, "_avail_deadline_timer", None)
+        if old_timer is not None:
             try:
-                self._avail_deadline_timer.stop()
+                old_timer.stop()
+                old_timer.deleteLater()
             except Exception:
                 pass
         self._avail_deadline_timer = QTimer(self)
@@ -144,6 +146,13 @@ class _UpdateAvailabilityMixin:
         self._finish_availability_check(completed)
 
     def _finish_availability_check(self, completed: AvailabilityCheckResult):
+        # M5: only re-enable when both workers are done or on timeout
+        if self._check_worker is not None and self._check_worker.isRunning():
+            if completed.system_state != "error" or "timed out" not in completed.system_detail:
+                return
+        if self._flatpak_check_worker is not None and self._flatpak_check_worker.isRunning():
+            if completed.system_state != "error" or "timed out" not in completed.system_detail:
+                return
         self._check_state = completed.system_state
         self._check_ts = datetime.now().strftime("%H:%M")
         self._check_ts_details = completed.system_detail

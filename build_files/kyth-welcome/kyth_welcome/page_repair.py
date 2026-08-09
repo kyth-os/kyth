@@ -117,8 +117,9 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             return
         self._rollback_state_worker = DataWorker("repair-rollback-state", self._fetch_rollback_state)
         self._rollback_state_worker.result.connect(self._on_rollback_state_ready)
-        self._rollback_state_worker.failed.connect(lambda _key, _message: None)
+        self._rollback_state_worker.failed.connect(lambda _k, _m: self._rollback_status_lbl.setText(f"Rollback check failed: {_m}") if hasattr(self, "_rollback_status_lbl") and self._rollback_status_lbl else None)
         self._rollback_state_worker.finished.connect(lambda: setattr(self, "_rollback_state_worker", None))
+        self._rollback_state_worker.finished.connect(self._rollback_state_worker.deleteLater)
         self._rollback_state_worker.start()
 
     def _on_rollback_state_ready(self, _key: str, data: object):
@@ -352,6 +353,8 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             w = DataWorker("pika-summary", _pika_backup_summary)
             w.result.connect(lambda _k, data: self._on_backup_summary_ready(data))
             w.failed.connect(lambda _k, _m: self._backup_status_lbl.setText("Backup status unavailable."))
+            w.finished.connect(lambda: setattr(self, "_backup_worker", None))
+            w.finished.connect(w.deleteLater)
             w.start()
             self._backup_worker = w
         except Exception:
