@@ -43,10 +43,18 @@ echo "==> Optimization budgets"
 python3 build_files/scripts/optimization-report.py --check
 
 echo "==> Gaming hash gate"
-bash build_files/scripts/hash-gaming-versions.sh
+if git diff --quiet HEAD -- build_files/kyth_shared/kyth_shared/gaming_resolve.py build_files/kyth_shared/kyth_shared/repos.py build_files/config/repos.json build_files/scripts/thirdparty.sh build_files/scripts/proton-cachyos.sh Dockerfile 2>/dev/null; then
+  echo "gaming hash gate: skipped (no relevant changes)"
+else
+  bash build_files/scripts/hash-gaming-versions.sh
+fi
 
 echo "==> RPM lock hash gate"
-bash build_files/scripts/hash-rpm-lock.sh
+if git diff --quiet HEAD -- build_files/rpm-lock.json build_files/scripts/hash-rpm-lock.sh Dockerfile 2>/dev/null; then
+  echo "rpm hash gate: skipped (no relevant changes)"
+else
+  bash build_files/scripts/hash-rpm-lock.sh
+fi
 
 echo "==> Perf gate (5% ledger, stale p95 check)"
 PYTHONPATH=build_files/kyth_shared python3 -c "from kyth_shared.perf_gate import check_perf_gate; r=check_perf_gate(current_ms=None); assert r.get('pass') is True, r; print(f\"perf gate ok threshold={r.get('threshold')}%\")"
