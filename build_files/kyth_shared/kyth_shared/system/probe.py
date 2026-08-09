@@ -441,6 +441,11 @@ class ProbeService:
                 _logger.debug("ProbeService.cached: disk read for %r failed", key, exc_info=True)
 
         value = fetch()
+        # Do not cache empty bootc results — a transient `sudo -n` failure or
+        # missing digest would otherwise poison the mem+disk cache for 90s and
+        # make the Hub appear "up to date" while bootc is actually unreachable.
+        if key in DISK_BACKED_KEYS and not _disk_section_usable(key, value):
+            return value  # type: ignore[return-value]
         with self._lock:
             hit = self._mem.get(key)
             if hit is not None and time.monotonic() - hit[0] < ttl:
