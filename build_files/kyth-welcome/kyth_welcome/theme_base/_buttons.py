@@ -15,7 +15,7 @@ QPushButton {{
     color: {KYTH_TEXT};
     border: 1px solid {KYTH_HAIRLINE};
     border-radius: {KYTH_RADIUS_SM}px;
-    padding: 7px 14px;
+    padding: 7px 10px;
     font-size: 13px;
     font-weight: 600;
 }}
@@ -48,7 +48,7 @@ QPushButton[primary="true"] {{
     color: {KYTH_TEXT};
     border: 1px solid {KYTH_PRIMARY_BORDER};
     font-weight: 600;
-    padding: 8px 20px;
+    padding: 8px 14px;
     letter-spacing: 0.2px;
 }}
 
