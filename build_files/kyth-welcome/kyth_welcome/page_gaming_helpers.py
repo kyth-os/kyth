@@ -1,4 +1,8 @@
-"""Gaming page helpers — extracted from god-page for R5 split."""
-# Future: move Gaming library scan + launcher install helpers here.
-# This stub establishes the module boundary so page_gaming.py can
-# slim from 426 LOC incrementally without a big-bang move.
+"""Gaming page helpers — extracted from god-page for R5 split (S13)."""
+
+from .services.gaming import DataWorker
+
+
+def gaming_data_worker(key: str, fetch):
+    """S13: thin wrapper so page_gaming.py doesn't inline DataWorker orchestration."""
+    return DataWorker(key, fetch)
