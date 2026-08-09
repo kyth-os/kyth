@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Content-hash for the RPM-set layer — fed to Dockerfile ARG RPM_SET_HASH.
+# P2-7: build hash guard — content hash (sha256 of package fragments) busts
+# the 2-3 GB dnf layer only when package content changes, not on mirror
+# timestamp bumps. Do not add `date` or `dnf makecache` output to inputs.
 # Hashes every file whose content busts the 2–3 GB dnf layer, so a mirror
 # timestamp bump alone does not invalidate the BuildKit cache.
 set -euo pipefail
