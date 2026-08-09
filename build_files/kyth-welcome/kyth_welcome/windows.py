@@ -622,9 +622,23 @@ class MainWindow(QMainWindow):
     def _make_nav_handler(self, index: int):
         return lambda: self._switch_page(index)
 
+    # R3: legacy aliases so old keys (System/Graphics/...) still navigate
+    _LEGACY_ALIASES = {
+        "System": "Hardware",
+        "Graphics": "Performance",
+        "Network": "VPN",
+        "Software": "App Store",
+        "Display": "Plasma Wayland",
+        "About": "Feedback",
+    }
+
     def _navigate_to(self, destination: int | str):
         if isinstance(destination, str):
             index = self._page_index_by_key.get(destination)
+            if index is None:
+                alias = self._LEGACY_ALIASES.get(destination)
+                if alias is not None:
+                    index = self._page_index_by_key.get(alias)
             if index is None:
                 return
             self._switch_page(index)
