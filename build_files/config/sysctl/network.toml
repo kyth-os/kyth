@@ -6,24 +6,24 @@ value = "bbr"
 comment = "BBR when available; fallback if module absent"
 
 [keys."net.core.default_qdisc"]
-value = "cake"
-comment = "CAKE — internal pacing compatible with BBR; single owner (was duplicated)"
+value = "fq_codel"
+comment = "fq_codel — low-latency desktop qdisc; cake is router shaper, no shape on WAN"
 
 [keys."net.core.rmem_max"]
-value = "67108864"
-comment = "64M caps — high-throughput/CDN"
+value = "16777216"
+comment = "16M caps — balanced for gaming + CDN (was 64M bufferbloat)"
 
 [keys."net.core.wmem_max"]
-value = "67108864"
-comment = "64M caps"
+value = "16777216"
+comment = "16M caps"
 
 [keys."net.ipv4.tcp_rmem"]
-value = "4096 87380 67108864"
-comment = "min default max"
+value = "4096 87380 16777216"
+comment = "min default max — 16M cap"
 
 [keys."net.ipv4.tcp_wmem"]
-value = "4096 65536 67108864"
-comment = "min default max"
+value = "4096 65536 16777216"
+comment = "min default max — 16M cap"
 
 [keys."net.ipv4.tcp_fastopen"]
 value = "3"
@@ -41,9 +41,8 @@ comment = "migrated from 51-tcp-bbr — ECN on"
 value = "0"
 comment = "migrated from 51-tcp-bbr — disable slow start after idle"
 
-[keys."net.ipv4.tcp_tw_reuse"]
-value = "1"
-comment = "allow TIME_WAIT reuse for matchmaking/CDN bursts (deprecated but retained)"
+# tcp_tw_reuse=1 removed — deprecated per RFC 6191, breaks NAT; modern
+# ephemeral port range + tcp_fastopen covers matchmaking bursts.
 
 [keys."net.core.netdev_max_backlog"]
 value = "16384"
