@@ -19,8 +19,8 @@ echo "==> Python correctness"
 "${quality_python}" -m ruff check build_files tests .github/scripts
 
 echo "==> Python coverage"
-"${quality_python}" -m coverage erase
-"${quality_python}" -m coverage run -m unittest discover -s tests -b
+PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage erase
+PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage run -m unittest discover -s tests -b
 "${quality_python}" -m coverage report -m
 "${quality_python}" -m coverage json
 "${quality_python}" build_files/scripts/check-critical-coverage.py

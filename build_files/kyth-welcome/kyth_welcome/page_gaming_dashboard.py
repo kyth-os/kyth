@@ -255,7 +255,7 @@ class _DashboardMixin:
         from .qt import QLabel, QPushButton, QHBoxLayout
         from .widgets import _make_card
         from .core_base import restyle
-        import subprocess
+        from .services.process import run_command
         card, layout = _make_card("card-accent-ok")
         title = QLabel("Familiar Desktop — Windows-like taskbar & shortcuts")
         title.setObjectName("card-title")
@@ -270,11 +270,14 @@ class _DashboardMixin:
         apply_btn = QPushButton("Apply Preset")
         apply_btn.setMinimumWidth(120)
         def _apply():
-            try:
-                subprocess.run(["dconf","write","/org/gnome/shell/extensions/dash-to-panel/panel-position","'BOTTOM'"], timeout=3)
-                self._familiar_status.setText("Applied — taskbar bottom"); self._familiar_status.setObjectName("status-ok")
-            except Exception as exc:
-                self._familiar_status.setText(f"Failed: {exc}"); self._familiar_status.setObjectName("status-err")
+            res = run_command(["dconf","write","/org/gnome/shell/extensions/dash-to-panel/panel-position","'BOTTOM'"], timeout=3)
+            if res is not None and res.returncode == 0:
+                self._familiar_status.setText("Applied — taskbar bottom")
+                self._familiar_status.setObjectName("status-ok")
+            else:
+                err = (res.stderr.strip() if res and res.stderr else str(res.returncode) if res else "failed to execute")
+                self._familiar_status.setText(f"Failed: {err}")
+                self._familiar_status.setObjectName("status-err")
             restyle(self._familiar_status)
         apply_btn.clicked.connect(lambda _=False: _apply())
         row.addWidget(apply_btn)

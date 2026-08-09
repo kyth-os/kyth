@@ -565,16 +565,17 @@ class HardwarePage(Page):
         layout.addWidget(self._fwupd_status)
         row = QHBoxLayout(); row.setSpacing(8)
         check_btn = QPushButton("Check Firmware Updates")
+        from .services.process import run_command
         def _check():
             try:
                 self._fwupd_status.setText("Checking fwupd...")
                 restyle(self._fwupd_status)
-                from kyth_welcome.services.launch import popen as _popen
-                import subprocess
-                sb = subprocess.run(["mokutil","--sb-state"], capture_output=True, text=True, timeout=5)
-                mok = sb.stdout.strip().splitlines()[0] if sb.returncode==0 else "mokutil unavailable"
-                upd = subprocess.run(["fwupdmgr","get-updates"], capture_output=True, text=True, timeout=15)
-                msg = f"{mok} — fwupd: {'updates available' if 'Updates' in upd.stdout else 'up to date' if upd.returncode==0 else 'fwupd unavailable'}"
+                sb = run_command(["mokutil","--sb-state"], timeout=5)
+                mok = sb.stdout.strip().splitlines()[0] if sb and sb.returncode==0 and sb.stdout else "mokutil unavailable"
+                upd = run_command(["fwupdmgr","get-updates"], timeout=15)
+                upd_ok = upd is not None and upd.returncode == 0
+                upd_stdout = upd.stdout if upd and upd.stdout else ""
+                msg = f"{mok} — fwupd: {'updates available' if 'Updates' in upd_stdout else 'up to date' if upd_ok else 'fwupd unavailable'}"
                 self._fwupd_status.setText(msg); self._fwupd_status.setObjectName("status-ok")
             except Exception as exc:
                 self._fwupd_status.setText(f"Check failed: {exc}"); self._fwupd_status.setObjectName("status-err")

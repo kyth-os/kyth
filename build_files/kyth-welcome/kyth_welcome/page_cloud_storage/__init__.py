@@ -278,7 +278,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         from ..widgets import _make_card
         from ..qt import QLabel, QPushButton, QHBoxLayout
         from ..core_base import restyle
-        import pathlib, subprocess
+        import pathlib
         card, layout = _make_card("card-accent-ok")
         title = QLabel("OneDrive — native rclone mount")
         title.setObjectName("card-title")
