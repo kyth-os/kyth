@@ -18,6 +18,23 @@ _GITHUB_FEEDBACK_TOKEN_PATH = "/etc/kyth-github-feedback-token"
 _GITHUB_REPO = "mrtrick37/kyth"
 
 
+def _scrub_logs(text: str) -> str:
+    """Arch #16: scrub PII (hostname, serial, SSID) before GitHub upload."""
+    import re
+    import socket
+
+    try:
+        host = socket.gethostname()
+        if host:
+            text = text.replace(host, "[hostname]")
+    except Exception:
+        pass
+    # Serial-like, SSID
+    text = re.sub(r"Serial\s*[:=]\s*\S+", "Serial: [scrubbed]", text, flags=re.I)
+    text = re.sub(r"SSID\s*[:=]\s*\S+", "SSID: [scrubbed]", text, flags=re.I)
+    return text
+
+
 def _collect_system_info() -> str:
     lines = []
     kernel = command_stdout(["uname", "-r"], timeout=5) or "unknown"
@@ -147,7 +164,7 @@ class FeedbackPage(Page):
             return
 
         labels = ["bug"] if self._bug_btn.isChecked() else ["enhancement"]
-        body = self._build_body()
+        body = _scrub_logs(self._build_body())
 
         token = ""
         try:
