@@ -14,6 +14,15 @@ QWidget#sidebar {{
     border-right: 1px solid {KYTH_HAIRLINE};
 }}
 
+QScrollArea#sidebar-scroll {{
+    background: transparent;
+    border: none;
+}}
+
+QWidget#sidebar-scroll-content {{
+    background: transparent;
+}}
+
 QWidget#sidebar-header {{
     background: transparent;
     border-bottom: 1px solid {KYTH_HAIRLINE};

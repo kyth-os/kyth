@@ -5,7 +5,7 @@ from .services.hardware import detect_nvidia_async
 from .services.runtime import has_blocking_tasks
 from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups
 from .qt import (
-    QCompleter, QDialog, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
+    QCompleter, QDialog, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .widgets import (
     _divider, _theme_icon,
@@ -169,8 +169,9 @@ class MainWindow(QMainWindow):
 
         self._search_box = QLineEdit()
         self._search_box.setObjectName("search-box")
-        self._search_box.setPlaceholderText("Search settings, apps, or Windows name (Ctrl+K) — try hdr, clipboard, fancyzones")
-        self._search_box.setFixedWidth(320)
+        self._search_box.setPlaceholderText("Search settings, apps, features (Ctrl+K)...")
+        self._search_box.setToolTip("Search settings, apps, or Windows names (Ctrl+K)")
+        self._search_box.setFixedWidth(340)
         self._search_box.setClearButtonEnabled(True)
         topbar_layout.addWidget(self._search_box)
 
@@ -181,7 +182,7 @@ class MainWindow(QMainWindow):
         bar.setObjectName("mission-bar")
         bar.setFixedHeight(30)
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(14, 4, 14, 4)
+        layout.setContentsMargins(254, 4, 14, 4)
         layout.setSpacing(8)
 
         kicker = QLabel("System")
@@ -417,8 +418,20 @@ class MainWindow(QMainWindow):
         self._nav_section_labels = {}
         self._page_crumbs = []
 
+        scroll = QScrollArea()
+        scroll.setObjectName("sidebar-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("sidebar-scroll-content")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(0)
+
         nav_groups = get_nav_groups(self._navigate_to)
-        self._initialize_page_specs(nav_groups, sidebar_layout)
+        self._initialize_page_specs(nav_groups, scroll_layout)
 
         self._page_descriptors = descriptors_from_nav_groups(nav_groups, self._SEARCH_ITEMS)
         self._descriptor_by_key = {descriptor.key: descriptor for descriptor in self._page_descriptors}
@@ -429,7 +442,10 @@ class MainWindow(QMainWindow):
         if nvidia_btn is not None:
             nvidia_btn.setVisible(False)
 
-        sidebar_layout.addStretch()
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        sidebar_layout.addWidget(scroll, 1)
+
         sidebar_layout.addWidget(_divider())
         ver_hint = QLabel("KythOS System Hub")
         ver_hint.setObjectName("nav-section")
