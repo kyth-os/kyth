@@ -76,10 +76,14 @@ class _DropboxMixin:
         self._refresh_status()
 
     def _launch_dropbox(self):
+        proc = None
         if shutil.which("dropbox"):
-            popen(["dropbox"])
-        else:
-            flatpak_run("com.dropbox.Client")
+            proc = popen(["dropbox"])
+        if proc is None:
+            proc = flatpak_run("com.dropbox.Client")
+        if proc is None:
+            self._op_status.setText("Dropbox is not installed — install it from the App Store.")
+            restyle(self._op_status)
 
     def _open_db_folder(self):
         folder = os.path.expanduser("~/Dropbox")
