@@ -154,13 +154,6 @@ class _UpdateAvailabilityMixin:
                 self._avail_deadline_timer.stop()
             except Exception:
                 pass
-        # M5: only re-enable when both workers are done or on timeout
-        if self._check_worker is not None and self._check_worker.isRunning():
-            if completed.system_state != "error" or "timed out" not in completed.system_detail:
-                return
-        if self._flatpak_check_worker is not None and self._flatpak_check_worker.isRunning():
-            if completed.system_state != "error" or "timed out" not in completed.system_detail:
-                return
         self._check_state = completed.system_state
         self._check_ts = datetime.now().strftime("%H:%M")
         self._check_ts_details = completed.system_detail
