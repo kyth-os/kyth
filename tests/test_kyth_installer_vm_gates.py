@@ -88,8 +88,6 @@ class VmGateHarnessTests(unittest.TestCase):
         self.assertIn("mok_password", _ANSWER_FILE_FIELDS)
 
     def test_find_efi_partition_cross_disk(self):
-        # Target disk has no ESP; other disk does — find_efi_partition must
-        # return the other disk's ESP (fallback scan) while excluding live media.
         other_efi = "/dev/nvme1n1p1"
 
         def fake_list_partitions(disk_name):
@@ -108,8 +106,6 @@ class VmGateHarnessTests(unittest.TestCase):
             self.assertEqual(disk.find_efi_partition("/dev/nvme0n1"), other_efi)
 
     def test_find_efi_partition_excludes_live_media(self):
-        # Live ISO's own ESP on /boot/efi (via findmnt) must not be returned
-        # if it lives on a protected disk.
         live_esp = "/dev/sdb1"
         with patch.object(disk, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "efi": False}]), \
              patch.object(disk, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
@@ -119,14 +115,10 @@ class VmGateHarnessTests(unittest.TestCase):
             self.assertEqual(disk.find_efi_partition("/dev/nvme0n1"), "")
 
     def test_validation_uses_cross_disk_efi_for_alongside(self):
-        # Alongside install on target-disk partition must validate when ESP is
-        # on a different disk (common Windows-on-second-SSD layout).
         from kyth_installer.validation import validate_install_request
-        from kyth_installer.plan import BIOS_BOOT_GUID
         target_disk = "/dev/nvme0n1"
         efi_part = "/dev/nvme1n1p1"
         target_part = "/dev/nvme0n1p2"
-
         fake_disks = [
             {"name": target_disk, "size_bytes": 200 * 1024**3, "current": False},
             {"name": "/dev/nvme1n1", "size_bytes": 500 * 1024**3, "current": False},
@@ -134,26 +126,15 @@ class VmGateHarnessTests(unittest.TestCase):
 
         def fake_list_parts(disk_name):
             if disk_name == target_disk:
-                return [
-                    {"name": target_part, "efi": False, "size_bytes": 80 * 1024**3, "read_only": False},
-                ]
+                return [{"name": target_part, "efi": False, "size_bytes": 80 * 1024**3, "read_only": False}]
             if disk_name == "/dev/nvme1n1":
                 return [{"name": efi_part, "efi": True, "read_only": False}]
             return []
-
-        # Validation's internal snapshot probes list_partitions(target_disk) and
-        # find_efi_partition(target_disk) which internally scans other disks.
-        # Stub the rest to avoid live system calls.
         ctx = InstallerContext()
         body = {
-            "disk": target_disk,
-            "install_mode": "alongside",
-            "target_partition": target_part,
-            "confirm_backup": True,
-            "confirm_erase": True,
-            "password": "Secret123!",
-            "username": "ada",
-            "hostname": "kyth",
+            "disk": target_disk, "install_mode": "alongside", "target_partition": target_part,
+            "confirm_backup": True, "confirm_erase": True,
+            "password": "Secret123!", "username": "ada", "hostname": "kyth",
         }
         with patch.object(disk, "list_disks", return_value=fake_disks), \
              patch.object(disk, "list_partitions", side_effect=fake_list_parts), \
@@ -166,13 +147,46 @@ class VmGateHarnessTests(unittest.TestCase):
              patch("kyth_installer.system.list_locales", return_value=["en_US.UTF-8", "de_DE.UTF-8"]), \
              patch("kyth_installer.system.list_keymaps", return_value=["us", "de"]), \
              patch("kyth_installer.system._hash_password", return_value="$6$hashed"):
-            # Should not raise; and storage intent should receive efi_partition == cross-disk ESP
-            # (or at least not raise alongside ESP missing error)
             try:
                 req = validate_install_request(body, ctx, strict_locale=True)
             except Exception as exc:
                 self.fail(f"cross-disk EFI validation unexpectedly failed: {exc}")
-            # Ensure plan validation was called with the cross-disk ESP
             if mock_validate.called:
-                call_state = mock_validate.call_args[0][0]
-                self.assertEqual(call_state.get("efi_partition"), efi_part)
+                self.assertEqual(mock_validate.call_args[0][0].get("efi_partition"), efi_part)
+
+    def test_headless_locale_fallback_is_auditable(self):
+        from kyth_installer.validation import validate_install_request
+        target_disk = "/dev/nvme0n1"
+        fake_disks = [{"name": target_disk, "size_bytes": 200 * 1024**3, "current": False}]
+        ctx = InstallerContext()
+        # Use typos that would previously silently fallback to UTC/en_US/us
+        body = {
+            "disk": target_disk, "install_mode": "wipe",
+            "confirm_backup": True, "confirm_erase": True,
+            "password": "Secret123!", "username": "ada", "hostname": "kyth",
+            "timezone": "Eurp/Berlin", "locale": "bad_LOC", "keymap": "nope!",
+        }
+        with patch.object(disk, "list_disks", return_value=fake_disks), \
+             patch.object(disk, "list_partitions", return_value=[]), \
+             patch("kyth_installer.validation.plan._validate_storage_intent"), \
+             patch("kyth_installer.system.list_timezones", return_value=["UTC"]), \
+             patch("kyth_installer.system.list_locales", return_value=["en_US.UTF-8"]), \
+             patch("kyth_installer.system.list_keymaps", return_value=["us"]), \
+             patch("kyth_installer.system._hash_password", return_value="$6$hashed"):
+            req = validate_install_request(body, ctx, strict_locale=False)
+            self.assertEqual(req.timezone, "UTC")
+            self.assertEqual(req.locale, "en_US.UTF-8")
+            self.assertEqual(req.keymap, "us")
+            # Must be recorded in context.state for transaction probe
+            self.assertIn("locale_warnings", ctx.state)
+            self.assertTrue(any("Eurp/Berlin" in w for w in ctx.state["locale_warnings"]))
+            # Strict mode must still raise
+        with patch.object(disk, "list_disks", return_value=fake_disks), \
+             patch.object(disk, "list_partitions", return_value=[]), \
+             patch("kyth_installer.validation.plan._validate_storage_intent"), \
+             patch("kyth_installer.system.list_timezones", return_value=["UTC"]), \
+             patch("kyth_installer.system.list_locales", return_value=["en_US.UTF-8"]), \
+             patch("kyth_installer.system.list_keymaps", return_value=["us"]), \
+             patch("kyth_installer.system._hash_password", return_value="$6$hashed"):
+            with self.assertRaises(Exception):
+                validate_install_request(body, ctx, strict_locale=True)

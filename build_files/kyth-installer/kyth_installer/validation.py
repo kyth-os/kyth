@@ -215,21 +215,39 @@ def validate_install_request(body: dict, context: InstallerContext, *, strict_lo
 
     password_hash = _hash_password_for_request(body.get("password", ""))
 
+    _locale_warnings: list[str] = []
     timezone = body.get("timezone", "UTC") or "UTC"
     if timezone not in set(system.list_timezones()):
         if strict_locale:
             raise InstallRequestError(f"Invalid timezone: {timezone!r}.")
+        _locale_warnings.append(f"timezone {timezone!r} -> UTC")
         timezone = "UTC"
     locale = str(body.get("locale") or "en_US.UTF-8")
     if not LOCALE_PATTERN.fullmatch(locale) or locale not in set(system.list_locales()):
         if strict_locale:
             raise InstallRequestError(f"Invalid locale: {locale!r}.")
+        _locale_warnings.append(f"locale {locale!r} -> en_US.UTF-8")
         locale = "en_US.UTF-8"
     keymap = str(body.get("keymap") or "us")
     if not KEYMAP_PATTERN.fullmatch(keymap) or keymap not in set(system.list_keymaps()):
         if strict_locale:
             raise InstallRequestError(f"Invalid keymap: {keymap!r}.")
+        _locale_warnings.append(f"keymap {keymap!r} -> us")
         keymap = "us"
+    if _locale_warnings:
+        # Headless fallback is lenient but must be auditable — surface in
+        # both log and transaction state so answer-file typos don't silently
+        # ship UTC without evidence.
+        try:
+            import logging as _log_mod
+            _log_mod.getLogger("kyth_installer.validation").warning(
+                "Headless locale fallback: %s", "; ".join(_locale_warnings)
+            )
+            # Persist for rescue probe / failure summary — best-effort.
+            if hasattr(context, "state") and isinstance(context.state, dict):
+                context.state["locale_warnings"] = list(_locale_warnings)
+        except Exception:
+            pass
     username = body.get("username", "")
     _require_valid_username(username)
     hostname = body.get("hostname", "kyth")
