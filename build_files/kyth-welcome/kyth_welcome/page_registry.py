@@ -85,7 +85,28 @@ def visible_for_profile(descriptor: PageDescriptor, profile: str) -> bool:
     return True
 
 
+@dataclass(frozen=True, slots=True)
+class SearchItem:
+    """S4: typed search entry — use SearchItem instead of raw tuple."""
+    title: str
+    description: str
+    terms: tuple[str, ...] = ()
+
+
 NavItem = tuple[tuple[str, ...], str, str, str, PageFactory]
+
+
+# Back-compat: SEARCH_ITEMS entries are now SearchItem; helpers below accept both
+def _search_item_title(item) -> str:
+    return item.title if isinstance(item, SearchItem) else item[0]
+
+def _search_item_desc(item) -> str:
+    return item.description if isinstance(item, SearchItem) else item[1]
+
+def _search_item_terms(item) -> tuple[str, ...]:
+    if isinstance(item, SearchItem):
+        return item.terms
+    return tuple(item[2]) if isinstance(item[2], (list, tuple)) else ()
 
 
 SEARCH_ITEMS: dict[str, tuple[str, str, list[str]]] = {
