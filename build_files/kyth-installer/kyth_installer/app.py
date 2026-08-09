@@ -36,6 +36,8 @@ def _load_answer_file(path_value: str) -> dict:
         raise ValueError("Installer answer file must be a regular file, not a symlink.")
     if info.st_mode & 0o077:
         raise ValueError("Installer answer file must not be readable or writable by group/others (use chmod 600).")
+    if info.st_uid != os.geteuid():
+        raise ValueError("Installer answer file must be owned by the invoking user (not group/other or symlink owner).")
     if info.st_size > 64 * 1024:
         raise ValueError("Installer answer file is too large (maximum 64 KiB).")
     with open(path, encoding="utf-8") as handle:

@@ -154,9 +154,21 @@ def list_free_space(disk: str) -> list[dict]:
         if not name or size <= 0:
             return []
         try:
+            # start_bytes from lsblk is already bytes (512*START), but on
+            # 4K-native devices the alignment sector differs. Keep raw byte
+            # value; gap alignment below uses the device's logical sector so
+            # 512 vs 4096 mismatch cannot hide an exact-match free region
+            # from validate_plan_state's contains_free_region check.
             start = _disk._safe_int(part.get("start_bytes"), -1)
             if start < 0:
                 start = _disk._partition_start_bytes(name)
+            # Normalize to sector alignment to avoid 512/4096 drift causing
+            # exact-match failures on 4K-native disks (gate #5).
+            start = (start // sector) * sector
+            # Also quantize size to sector to keep end = start+size aligned
+            size = (size // sector) * sector
+            if size <= 0:
+                return []
         except Exception:
             return []
         if start < 0 or start + size > disk_size:

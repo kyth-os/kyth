@@ -18,6 +18,7 @@ function goto(name) {
   if (name === 'kernel')  initKernel();
   if (name === 'config')  initConfig();
   if (name === 'review')  buildReview();
+  if (name === 'rescue')  loadRescue();
 }
 
 // ── Disk ──────────────────────────────────────────────────────────────────────
@@ -1276,13 +1277,49 @@ function listenSSE() {
   };
 }
 
+// ── Rescue ──────────────────────────────────────────────────────────────────────
+function loadRescue() {
+  const st = document.getElementById('rescue-status');
+  st.textContent = 'Probing…';
+  st.className = 'status-box status-info';
+  apiFetch('/api/rescue/probe').then(r=>r.json()).then(d => {
+    document.getElementById('rescue-log').textContent = d.log_tail || '(no log)';
+    document.getElementById('rescue-verify').textContent = d.sgdisk_verify || '(no output)';
+    document.getElementById('rescue-efi').textContent = d.efibootmgr || '(unavailable)';
+    document.getElementById('rescue-bootc').textContent = d.bootc_status || '(unavailable)';
+    document.getElementById('rescue-tx').textContent = JSON.stringify(d.transaction || {}, null, 2);
+    st.textContent = 'Probe complete — read-only checks finished.';
+    st.className = 'status-box status-ok';
+  }).catch(e => {
+    st.textContent = 'Probe failed: ' + e;
+    st.className = 'status-box status-err';
+  });
+}
+function copyRescueToUsb() {
+  const st = document.getElementById('rescue-status');
+  st.textContent = 'Copying logs to USB…';
+  st.className = 'status-box status-info';
+  postJSON('/api/rescue/logs-to-usb', {}).then(r=>r.json()).then(d => {
+    if (d.ok) {
+      st.textContent = 'Copied ' + (d.copied||[]).join(', ') + ' to ' + d.dest;
+      st.className = 'status-box status-ok';
+    } else {
+      st.textContent = d.message || 'Copy failed';
+      st.className = 'status-box status-err';
+    }
+  }).catch(e => {
+    st.textContent = 'Copy failed: ' + e;
+    st.className = 'status-box status-err';
+  });
+}
+
 // These handlers are referenced by inline event attributes in index.html.
 // Keeping an explicit reference list lets standalone JS analyzers see the
 // cross-file usage without changing the browser-facing API.
 void [
   onSliderMove, showNewTableDialog, showCreateDialog, showDeleteDialog,
   showResizeDialog, showFormatDialog, showMountDialog, commitPartitions,
-  rollbackPartitions, saveConfig, startInstall,
+  rollbackPartitions, saveConfig, startInstall, loadRescue, copyRescueToUsb,
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
