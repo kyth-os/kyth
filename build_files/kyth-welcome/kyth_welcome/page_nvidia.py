@@ -171,6 +171,13 @@ class NvidiaPage(Page):
         self._install_btn.setEnabled(True)
         finish_worker(self)
         set_session_inhibit(self, None)
+        # P1-4: 300 s nvidia-detect would hide new GPU state for 5 min → invalidate
+        if code == 0:
+            try:
+                from kyth_shared.system.probe import invalidate_probe_caches
+                invalidate_probe_caches(["nvidia-detect", "hardware-view"])
+            except Exception:
+                pass
 
         if code == 0:
             self._log_panel.append("\nDone. Reboot to activate NVIDIA drivers.")
