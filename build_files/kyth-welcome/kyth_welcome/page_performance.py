@@ -389,6 +389,7 @@ class PerformancePage(Page):
         from .services.workers import TelemetryWorker
         self._telemetry_worker = TelemetryWorker(limit=15, parent=self)
         self._telemetry_worker.loaded.connect(self._on_sessions_loaded)
+        self._telemetry_worker.finished.connect(lambda: setattr(self, "_telemetry_worker", None))
         self._telemetry_worker.finished.connect(self._telemetry_worker.deleteLater)
         self._telemetry_worker.start()
 
