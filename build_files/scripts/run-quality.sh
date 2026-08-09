@@ -23,7 +23,11 @@ PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-ins
 PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage run -m unittest discover -s tests -b
 "${quality_python}" -m coverage report -m
 "${quality_python}" -m coverage json
-"${quality_python}" build_files/scripts/check-critical-coverage.py
+if [[ "${1:-}" == "--changed-only" ]]; then
+  "${quality_python}" build_files/scripts/check-critical-coverage.py --changed-only
+else
+  "${quality_python}" build_files/scripts/check-critical-coverage.py
+fi
 "${quality_python}" -m coverage xml
 "${quality_python}" -m coverage html
 
