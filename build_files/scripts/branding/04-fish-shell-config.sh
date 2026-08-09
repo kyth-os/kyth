@@ -5,14 +5,14 @@
 write_config /etc/skel/.config/fish/config.fish <<'FISHCONFIGEOF'
 # KythOS fish config — edit freely, it's yours.
 
-# Starship cross-shell prompt
+# Starship cross-shell prompt — wrapper-aware: don't spam crun if container lacks it
 if command -q starship
-    starship init fish | source
+    if starship init fish 2>/dev/null | source; end; or true
 end
 
 # Smarter cd (zoxide) — tracks frecency, `z dir` jumps to most-used match
 if command -q zoxide
-    zoxide init fish | source
+    if zoxide init fish 2>/dev/null | source; end; or true
 end
 
 # fzf key bindings (Ctrl+R history search, Ctrl+T file search, Alt+C cd)
