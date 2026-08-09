@@ -461,11 +461,21 @@ class MainWindow(QMainWindow):
 
     def _setup_search(self):
         self._search_key_by_entry: dict[str, str] = {}
-        for key, (title, _description, terms) in self._SEARCH_ITEMS.items():
+        for key, item in self._SEARCH_ITEMS.items():
             if key not in self._page_index_by_key:
                 continue
+            # S10: use typed SearchItem helpers if available, else tuple
+            if hasattr(item, "title"):
+                title, terms = item.title, tuple(item.terms)
+            else:
+                title, _description, terms = item  # type: ignore[misc]
+                terms = tuple(terms)
             for alias in [title, key, *terms]:
-                self._search_key_by_entry.setdefault(alias, key)
+                # S10: normalize alias lower at insert to make rank stable
+                norm = alias.strip().lower()
+                if norm:
+                    self._search_key_by_entry.setdefault(alias, key)
+                    self._search_key_by_entry.setdefault(norm, key)
 
         entries = sorted(self._search_key_by_entry)
         completer = QCompleter(entries, self._search_box)
