@@ -39,6 +39,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         self._build_od_card()
         self._build_db_card()
         self._build_save_cloud_card()
+        self._add(self._build_onedrive_native_card())
 
         self._divider()
 
@@ -273,4 +274,39 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         self._add(card)
 
 
-# New #4-6: driver/fwupd auto + Familiar Desktop toggle + OneDrive native mount (see new features 4-6)
+    def _build_onedrive_native_card(self):
+        from ..widgets import _make_card
+        from ..qt import QLabel, QPushButton, QHBoxLayout
+        from ..core_base import restyle
+        import pathlib, subprocess
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("OneDrive — native rclone mount")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel("rclone mount ~/OneDrive via systemd --user (rclone mount onedrive: ~/OneDrive --vfs-cache-mode writes). Make Available Offline via bisync.")
+        body.setObjectName("card-copy"); body.setWordWrap(True)
+        layout.addWidget(body)
+        self._onedrive_status = QLabel("OneDrive: not checked")
+        self._onedrive_status.setObjectName("card-copy"); self._onedrive_status.setWordWrap(True)
+        layout.addWidget(self._onedrive_status)
+        row = QHBoxLayout(); row.setSpacing(8)
+        check_btn = QPushButton("Check OneDrive Mount")
+        def _check():
+            try:
+                cfg = pathlib.Path.home() / ".config/rclone/rclone.conf"
+                has = "onedrive" in cfg.read_text() if cfg.exists() else False
+                mnt = pathlib.Path.home() / "OneDrive"
+                mounted = mnt.is_mount() if hasattr(mnt, "is_mount") else mnt.exists()
+                self._onedrive_status.setText(f"{'configured' if has else 'not configured'} — {'mounted' if mounted else 'not mounted'} at ~/OneDrive")
+                self._onedrive_status.setObjectName("status-ok" if has else "status-warn")
+            except Exception as exc:
+                self._onedrive_status.setText(f"Check failed: {exc}"); self._onedrive_status.setObjectName("status-err")
+            restyle(self._onedrive_status)
+        check_btn.clicked.connect(lambda _=False: _check())
+        row.addWidget(check_btn)
+        mount_btn = QPushButton("Mount OneDrive")
+        mount_btn.clicked.connect(lambda _=False: __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["systemctl","--user","start","rclone-onedrive.mount"]) if pathlib.Path("/usr/bin/rclone").exists() else self._onedrive_status.setText("rclone not installed"))
+        row.addWidget(mount_btn)
+        row.addStretch()
+        layout.addLayout(row)
+        return card

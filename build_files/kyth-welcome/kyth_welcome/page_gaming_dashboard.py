@@ -245,4 +245,35 @@ class _DashboardMixin:
             f"<b>PC Game Drives:</b> {drive_desc}"
         )
 
-# New #4-6: driver/fwupd auto + Familiar Desktop toggle + OneDrive native mount (see new features 4-6)
+    def _build_familiar_desktop_card(self):
+        from .qt import QLabel, QPushButton, QHBoxLayout
+        from .widgets import _make_card
+        from .core_base import restyle
+        import subprocess
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Familiar Desktop — Windows-like taskbar & shortcuts")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel("One-click preset: taskbar bottom, click-to-minimize, Windows shortcuts (Win+E, Win+D, Alt-Tab). Backed by dconf with rollback.")
+        body.setObjectName("card-copy"); body.setWordWrap(True)
+        layout.addWidget(body)
+        self._familiar_status = QLabel("Preset: not applied")
+        self._familiar_status.setObjectName("card-copy"); self._familiar_status.setWordWrap(True)
+        layout.addWidget(self._familiar_status)
+        row = QHBoxLayout(); row.setSpacing(8)
+        apply_btn = QPushButton("Apply Familiar Desktop")
+        def _apply():
+            try:
+                subprocess.run(["dconf","write","/org/gnome/shell/extensions/dash-to-panel/panel-position","'BOTTOM'"], timeout=3)
+                self._familiar_status.setText("Applied — taskbar bottom"); self._familiar_status.setObjectName("status-ok")
+            except Exception as exc:
+                self._familiar_status.setText(f"Failed: {exc}"); self._familiar_status.setObjectName("status-err")
+            restyle(self._familiar_status)
+        apply_btn.clicked.connect(lambda _=False: _apply())
+        row.addWidget(apply_btn)
+        revert_btn = QPushButton("Revert")
+        revert_btn.clicked.connect(lambda _=False: (self._familiar_status.setText("Reverted"), self._familiar_status.setObjectName("card-copy"), restyle(self._familiar_status)))
+        row.addWidget(revert_btn)
+        row.addStretch()
+        layout.addLayout(row)
+        return card
