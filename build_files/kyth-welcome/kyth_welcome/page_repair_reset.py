@@ -60,8 +60,9 @@ class _ResetMixin:
             self._log_panel.append("\nDone. Rebooting now.")
             single_shot(self, 2000, reboot)
         else:
-            self._status_lbl.setText(f"Rollback failed (exit code {code}).")
+            self._status_lbl.setText(f"Rollback failed (exit code {code}). See journal: journalctl --user -u kyth-probe")
             self._status_lbl.setObjectName("status-err")
+            self._log_panel.append("\nCheck journal: journalctl --user -u kyth-probe or /var/log/kyth/boot-health.json")
             self._rollback_repair_btn.setEnabled(has_rollback_deployment())
         restyle(self._status_lbl)
 
