@@ -38,7 +38,7 @@ def descriptor_from_nav_item(
     key: str,
     title: str,
     factory: PageFactory,
-    search_metadata: tuple[str, str, list[str]] | None = None,
+    search_metadata: "tuple[str, str, list[str]] | SearchItem | None" = None,
 ) -> PageDescriptor:
     if search_metadata is None:
         return PageDescriptor(
@@ -48,7 +48,10 @@ def descriptor_from_nav_item(
             icon_names=icon_names,
             factory=factory,
         )
-    search_title, description, terms = search_metadata
+    if isinstance(search_metadata, SearchItem):
+        search_title, description, terms = search_metadata.title, search_metadata.description, search_metadata.terms
+    else:
+        search_title, description, terms = search_metadata
     return PageDescriptor(
         key=key,
         title=search_title or title,
