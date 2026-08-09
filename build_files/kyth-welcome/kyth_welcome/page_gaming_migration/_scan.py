@@ -265,6 +265,8 @@ class _ScanMixin:
         self._copy_btn.setEnabled(False)
         self._copy_cancel_btn.show()
         self._migrate_worker = SteamCopyWorker(src, dst)
+        self._migrate_worker.finished.connect(lambda: setattr(self, "_migrate_worker", None))
+        self._migrate_worker.finished.connect(self._migrate_worker.deleteLater)
         self._migrate_worker.line.connect(lambda ln: (
             self._migrate_log.append(ln),
             self._migrate_log.ensureCursorVisible(),

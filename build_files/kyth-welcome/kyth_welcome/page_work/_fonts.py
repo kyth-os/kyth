@@ -47,6 +47,8 @@ class _FontsMixin:
         self._fonts_status.setText("Downloading Microsoft core fonts\u2026")
         self._fonts_status.show()
         self._ms_fonts_worker = Worker(["bash", "-c", "ujust install-ms-fonts"])
+        self._ms_fonts_worker.finished.connect(lambda: setattr(self, "_ms_fonts_worker", None))
+        self._ms_fonts_worker.finished.connect(self._ms_fonts_worker.deleteLater)
         self._ms_fonts_worker.done.connect(self._on_fonts_done)
         self._ms_fonts_worker.start()
 

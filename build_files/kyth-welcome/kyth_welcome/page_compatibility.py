@@ -282,6 +282,8 @@ class CompatibilityPage(Page):
         # Refresh the compatibility data in the background so blocked/working
         # status stays current between OS image updates.
         self._refresh_worker = CompatRefreshWorker()
+        self._refresh_worker.finished.connect(lambda: setattr(self, "_refresh_worker", None))
+        self._refresh_worker.finished.connect(self._refresh_worker.deleteLater)
         self._refresh_worker.refreshed.connect(self._on_compat_refreshed)
         self._refresh_worker.unchanged.connect(self._on_compat_unchanged)
         self._refresh_worker.start()

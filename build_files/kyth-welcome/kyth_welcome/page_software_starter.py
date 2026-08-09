@@ -96,6 +96,8 @@ class _StarterPackTabMixin:
         self._ms_fonts_status.setText("Downloading Microsoft fonts from SourceForge…")
         self._ms_fonts_status.show()
         self._ms_fonts_worker = Worker(["bash", "-c", "ujust install-ms-fonts"])
+        self._ms_fonts_worker.finished.connect(lambda: setattr(self, "_ms_fonts_worker", None))
+        self._ms_fonts_worker.finished.connect(self._ms_fonts_worker.deleteLater)
         self._ms_fonts_worker.done.connect(self._on_ms_fonts_done)
         self._ms_fonts_worker.start()
 

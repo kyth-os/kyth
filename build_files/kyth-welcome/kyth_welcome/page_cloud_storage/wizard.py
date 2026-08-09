@@ -401,6 +401,8 @@ class RcloneSetupWizard(QDialog):
         restyle(self._auth_status_lbl)
 
         self._auth_worker = RcloneAuthorizeWorker(self._selected_service)
+        self._auth_worker.finished.connect(lambda: setattr(self, "_auth_worker", None))
+        self._auth_worker.finished.connect(self._auth_worker.deleteLater)
         self._auth_worker.token_ready.connect(self._on_auth_success)
         self._auth_worker.failed.connect(self._on_auth_failed)
         self._auth_worker.start()

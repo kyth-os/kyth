@@ -268,6 +268,8 @@ class _InstalledTabMixin:
         self._uninstall_status.setObjectName("subheading")
         restyle(self._uninstall_status)
         self._uninstall_worker = Worker(cmd)
+        self._uninstall_worker.finished.connect(lambda: setattr(self, "_uninstall_worker", None))
+        self._uninstall_worker.finished.connect(self._uninstall_worker.deleteLater)
         self._uninstall_worker.line.connect(self._on_uninstall_line)
         self._uninstall_worker.done.connect(
             lambda code, name=app["name"]: self._on_uninstall_done(code, name)

@@ -169,6 +169,8 @@ def run_worker(
     """Construct, wire, and start a Worker stored on owner.<attr>.
 
     Collapses the ubiquitous ``self._worker = Worker(cmd);
+    self._worker.finished.connect(lambda: setattr(self, "_worker", None))
+    self._worker.finished.connect(self._worker.deleteLater)
     self._worker.line.connect(on_line); self._worker.done.connect(on_done);
     self._worker.start()`` sequence — optionally preceded by a session-inhibit
     call, in the same order pages already issue it — repeated across pages.
