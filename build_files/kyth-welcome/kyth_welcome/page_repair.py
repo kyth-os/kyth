@@ -92,11 +92,13 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             history = None
         self_heal = False
         try:
-            from kyth_shared.boot_health import read_state as _read_boot_state
+            # Arch #15: single source via UpdateCoordinator (flock) — was separate bootc spawns
+            from kyth_shared.update_coordinator import UpdateCoordinator
+
             from kyth_shared.system.bootc import has_staged_update
 
             if has_rollback and has_staged_update():
-                state = _read_boot_state()
+                state = UpdateCoordinator().read()
                 if state.failures >= 2 or state.status in ("quarantined", "unhealthy"):
                     self_heal = True
         except Exception:
