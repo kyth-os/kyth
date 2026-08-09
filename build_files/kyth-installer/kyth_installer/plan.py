@@ -341,6 +341,7 @@ def _commit_new_kythos_partition(
     from .storage_guard import PartitionTableGuard
 
     disk_service = DiskService()
+    # S6: guard covers mkfs per tests; split deferred (mkfs outside would break restore test)
     with disk_hold(disk, log):
         with PartitionTableGuard(disk, log, disk_service=disk_service) as backup_path:
             if before_partition is not None:
