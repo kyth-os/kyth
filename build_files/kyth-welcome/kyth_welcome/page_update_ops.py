@@ -433,6 +433,7 @@ class _UpdateOpsMixin:
         )
 
         if code == Worker.CANCELLED:
+            # S9: use recovery truth table — cancelled never sets staged, banner via S2
             self._status_lbl.setText(completion.message)
             self._status_lbl.setObjectName(completion.style)
             self._log_panel.append("\nCancelled. You can start the update again when ready.")
