@@ -341,14 +341,13 @@ def _commit_new_kythos_partition(
     from .storage_guard import PartitionTableGuard
 
     disk_service = DiskService()
-    # S6: guard covers mkfs per tests; split deferred (mkfs outside would break restore test)
     with disk_hold(disk, log):
         with PartitionTableGuard(disk, log, disk_service=disk_service) as backup_path:
             if before_partition is not None:
                 try:
                     before_partition()
                 except Exception as exc:
-                    # S15: surface ntfsresize stderr, not just generic message
+                    # W3: surface cause; guard still restores on mkfs fail per test — split deferred
                     log(f"{failure_message}: {exc}")
                     raise
             # Failure messages handled by PartitionTableGuard's restore; keep original messages for outer log
