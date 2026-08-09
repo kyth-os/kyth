@@ -542,4 +542,4 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         sleep_layout.addWidget(self._sleep_fix_status)
         self._add(sleep_card)
 
-# New #7-10: Game Boost transactional FPS, System Restore UI, Peripherals zero-config, Local AI offline
+    # System Restore UI — #8 lists bootc snapshots with rollback via UpdateCoordinator (repair page already wired via boot Health)

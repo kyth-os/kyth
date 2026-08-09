@@ -330,4 +330,4 @@ def build_repair_plan(
         pass
     return as_dict
 
-# New #7-10: Game Boost transactional FPS, System Restore UI, Peripherals zero-config, Local AI offline
+# Local AI offline — #10 try_ollama_enhance falls back to generate_plan when ollama unavailable (no network exfiltration)

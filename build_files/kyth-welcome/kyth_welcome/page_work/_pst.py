@@ -111,4 +111,4 @@ class _PstMixin:
         else:
             self._set_pst_status(f"\u2717 Conversion failed: {detail}")
 
-# New #7-10: Game Boost transactional FPS, System Restore UI, Peripherals zero-config, Local AI offline
+# Peripherals zero-config — #9 handled in HardwarePage peripherals hub (scan RGB/fans/controllers zero-click)
