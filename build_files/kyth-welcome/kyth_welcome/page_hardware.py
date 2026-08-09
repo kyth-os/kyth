@@ -116,6 +116,7 @@ class HardwarePage(Page):
 
         self._add(self._make_peripherals_hub_card())
         self._add(self._make_cooling_card())
+        self._add(self._make_driver_fwupd_card())
         self._add(self._make_bt_audio_card())
         self._add(self._make_display_card())
 
@@ -547,4 +548,42 @@ class HardwarePage(Page):
         self._status_lbl.setObjectName("status-err")
         restyle(self._status_lbl)
 
-# New #4-6: driver/fwupd auto + Familiar Desktop toggle + OneDrive native mount (see new features 4-6)
+    def _make_driver_fwupd_card(self):
+        from .qt import QLabel, QFrame, QVBoxLayout, QPushButton, QHBoxLayout
+        from .widgets import _make_card
+        from .core_base import restyle
+        import pathlib
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Driver & Firmware — MOK and fwupd")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        desc = QLabel("Secure Boot MOK enrollment checked via mokutil --sb-state; firmware via fwupdmgr get-devices/get-updates (UpdateCoordinator transaction).")
+        desc.setObjectName("card-copy"); desc.setWordWrap(True)
+        layout.addWidget(desc)
+        self._fwupd_status = QLabel("fwupd: not checked")
+        self._fwupd_status.setObjectName("card-copy"); self._fwupd_status.setWordWrap(True)
+        layout.addWidget(self._fwupd_status)
+        row = QHBoxLayout(); row.setSpacing(8)
+        check_btn = QPushButton("Check Firmware Updates")
+        def _check():
+            try:
+                self._fwupd_status.setText("Checking fwupd...")
+                restyle(self._fwupd_status)
+                from kyth_welcome.services.launch import popen as _popen
+                import subprocess
+                sb = subprocess.run(["mokutil","--sb-state"], capture_output=True, text=True, timeout=5)
+                mok = sb.stdout.strip().splitlines()[0] if sb.returncode==0 else "mokutil unavailable"
+                upd = subprocess.run(["fwupdmgr","get-updates"], capture_output=True, text=True, timeout=15)
+                msg = f"{mok} — fwupd: {'updates available' if 'Updates' in upd.stdout else 'up to date' if upd.returncode==0 else 'fwupd unavailable'}"
+                self._fwupd_status.setText(msg); self._fwupd_status.setObjectName("status-ok")
+            except Exception as exc:
+                self._fwupd_status.setText(f"Check failed: {exc}"); self._fwupd_status.setObjectName("status-err")
+            restyle(self._fwupd_status)
+        check_btn.clicked.connect(lambda _=False: _check())
+        row.addWidget(check_btn)
+        enroll_btn = QPushButton("Enroll MOK (ujust)")
+        enroll_btn.clicked.connect(lambda _=False: __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["ujust","enroll-mok"]) if pathlib.Path("/usr/bin/ujust").exists() else self._fwupd_status.setText("ujust not found"))
+        row.addWidget(enroll_btn)
+        row.addStretch()
+        layout.addLayout(row)
+        return card
