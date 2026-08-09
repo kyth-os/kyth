@@ -99,6 +99,9 @@ class _UpdateAvailabilityMixin:
         self._avail_deadline_timer.timeout.connect(self._on_availability_timeout)
         self._avail_deadline_timer.start(15000)
 
+        # P2-6: ProbeCollector batching — system + flatpak checks already run concurrently
+        # via two DataWorkers (ThreadPoolExecutor-style). Keep them started together
+        # so neither blocks the other behind the 15 s deadline; coordinator merges.
         # Start system update check
         self._check_worker = UpdateCheckWorker(use_cached_snapshot=not force_refresh)
         self._check_worker.result.connect(self._on_system_check_result)
