@@ -347,8 +347,9 @@ def _commit_new_kythos_partition(
             if before_partition is not None:
                 try:
                     before_partition()
-                except Exception:
-                    log(failure_message)
+                except Exception as exc:
+                    # S15: surface ntfsresize stderr, not just generic message
+                    log(f"{failure_message}: {exc}")
                     raise
             # Failure messages handled by PartitionTableGuard's restore; keep original messages for outer log
             btrfs_start = _ensure_bios_boot_partition(disk, gap_start, log)
