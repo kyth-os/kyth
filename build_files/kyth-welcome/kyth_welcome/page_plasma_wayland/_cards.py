@@ -299,6 +299,15 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
         worker.start()
 
     def _apply_wayland_readiness_facts(self, facts: dict[str, str]) -> None:
+        # Arch #13: live-apply — verify HDR/VRR persisted via second kscreen-doctor read-back
+        # (kscreen-doctor apply can silently revert; read-back confirms)
+        try:
+            verify_out = kscreen_doctor_output().lower()
+            for key in ("vrr", "hdr"):
+                if key in verify_out and facts.get(key.upper(), "").lower() not in verify_out:
+                    facts[key.upper()] += " (pending — re-apply may be needed)"
+        except Exception:
+            pass
         for name, value in facts.items():
             label = self._wayland_row_labels.get(name)
             if label is not None:
