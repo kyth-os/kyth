@@ -2,5 +2,13 @@ target-version = "py311"
 line-length = 120
 
 [lint]
-# Begin with correctness-only rules; style/format migration is intentionally separate.
-select = ["E9", "F63", "F7", "F82"]
+# Correctness + blind-except (BLE001) — bare `except Exception:` now surfaces.
+# Existing debt is grandfathered via per-file-ignores below; new code must
+# name the exception or use `except Exception as exc:` with handling.
+select = ["E9", "F63", "F7", "F82", "BLE001"]
+
+[lint.per-file-ignores]
+# Grandfathered until S10 cleanup — new files must not add bare broad-except.
+"build_files/**/*.py" = ["BLE001"]
+"tests/**/*.py" = ["BLE001"]
+".github/scripts/**/*.py" = ["BLE001"]

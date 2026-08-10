@@ -1,4 +1,5 @@
 import shlex
+from kyth_shared.commands import ujust_command
 from .core_base import restyle
 from .actions import _install_flatpak_inline, _open_chromium_webapp
 from .services.flatpak import _is_flatpak_installed
@@ -95,7 +96,7 @@ class _StarterPackTabMixin:
         self._ms_fonts_btn.setText("Installing…")
         self._ms_fonts_status.setText("Downloading Microsoft fonts from SourceForge…")
         self._ms_fonts_status.show()
-        self._ms_fonts_worker = Worker(["bash", "-c", "ujust install-ms-fonts"])
+        self._ms_fonts_worker = Worker(ujust_command("install-ms-fonts"))
         self._ms_fonts_worker.done.connect(self._on_ms_fonts_done)
         self._ms_fonts_worker.start()
 

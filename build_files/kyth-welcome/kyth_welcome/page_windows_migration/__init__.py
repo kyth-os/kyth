@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from kyth_shared.commands import ujust_command
 from ..services.runtime import (
     DataWorker,
 )
@@ -311,7 +312,7 @@ class WindowsMigrationPage(
         btn.setEnabled(False)
         orig = btn.text()
         btn.setText("Running…")
-        worker = Worker(["bash", "-c", f"ujust {recipe}"])
+        worker = Worker(ujust_command(recipe))
         def _done(code: int, b=btn, o=orig):
             b.setEnabled(True)
             b.setText("✓ Done" if code == 0 else o)

@@ -107,7 +107,20 @@ def _empty_doc() -> dict[str, Any]:
     return {"version": CACHE_VERSION, "generated_at": 0.0, "sections": {}}
 
 
+_FILE_CACHE: dict[Path, tuple[float, dict[str, Any]]] = {}
+_FILE_CACHE_LOCK = threading.Lock()
+
+
 def load_cache_file(path: Path) -> dict[str, Any] | None:
+    try:
+        st = path.stat()
+        mtime = st.st_mtime
+    except OSError:
+        return None
+    with _FILE_CACHE_LOCK:
+        cached = _FILE_CACHE.get(path)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
     try:
         raw = path.read_text(encoding="utf-8")
         data = json.loads(raw)
@@ -118,6 +131,12 @@ def load_cache_file(path: Path) -> dict[str, Any] | None:
     sections = data.get("sections")
     if not isinstance(sections, dict):
         return None
+    with _FILE_CACHE_LOCK:
+        # LRU cap: keep at most 16 file entries
+        if len(_FILE_CACHE) >= 16 and path not in _FILE_CACHE:
+            oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
+            _FILE_CACHE.pop(oldest, None)
+        _FILE_CACHE[path] = (mtime, data)
     return data
 
 
@@ -131,6 +150,15 @@ def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp_name, path)
+        with _FILE_CACHE_LOCK:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = time.time()
+            if len(_FILE_CACHE) >= 16 and path not in _FILE_CACHE:
+                oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
+                _FILE_CACHE.pop(oldest, None)
+            _FILE_CACHE[path] = (mtime, doc)
     except Exception:
         try:
             os.unlink(tmp_name)
@@ -190,6 +218,13 @@ def update_sections(
 
 
 def invalidate_disk_sections(keys: Iterable[str] | None = None) -> None:
+    # Invalidate file-level mtime cache alongside disk
+    with _FILE_CACHE_LOCK:
+        if keys is None:
+            _FILE_CACHE.clear()
+        else:
+            # Drop any cached file that may contain dropped keys — conservative
+            _FILE_CACHE.clear()
     drop = set(keys) if keys is not None else set(DISK_TTL)
     for path in cache_read_paths():
         doc = load_cache_file(path)
@@ -345,7 +380,9 @@ def collect_probe_results(
     """Run independent probe groups concurrently and retain failure state."""
     selected = tuple(collectors or default_collectors())
     results: dict[str, ProbeResult] = {}
-    with ThreadPoolExecutor(max_workers=len(selected), thread_name_prefix="kyth-probe") as pool:
+    # Cap workers to avoid oversubscription on tiny systems; selected is at most 7
+    workers = min(len(selected), 8) if selected else 1
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="kyth-probe") as pool:
         for group in pool.map(_run_collector, selected):
             results.update(group)
     return results
@@ -421,10 +458,14 @@ class ProbeService:
         self._lock = threading.Lock()
         self._mem: dict[str, tuple[float, object]] = {}
 
+    _MEM_CAP = 64
+
     def cached(self, key: str, ttl: float, fetch: Callable[[], T]) -> T:
         with self._lock:
             hit = self._mem.get(key)
             if hit is not None and time.monotonic() - hit[0] < ttl:
+                # Move to end for LRU
+                self._mem[key] = self._mem.pop(key)
                 return hit[1]  # type: ignore[return-value]
 
         if key in DISK_BACKED_KEYS:
@@ -434,7 +475,11 @@ class ProbeService:
                     with self._lock:
                         mem = self._mem.get(key)
                         if mem is not None and time.monotonic() - mem[0] < ttl:
+                            self._mem[key] = self._mem.pop(key)
                             return mem[1]  # type: ignore[return-value]
+                        if len(self._mem) >= self._MEM_CAP:
+                            oldest = next(iter(self._mem))
+                            self._mem.pop(oldest, None)
                         self._mem[key] = (time.monotonic(), disk_hit)
                     return disk_hit  # type: ignore[return-value]
             except Exception:
@@ -449,7 +494,12 @@ class ProbeService:
         with self._lock:
             hit = self._mem.get(key)
             if hit is not None and time.monotonic() - hit[0] < ttl:
+                self._mem[key] = self._mem.pop(key)
                 return hit[1]  # type: ignore[return-value]
+            if len(self._mem) >= self._MEM_CAP:
+                # Evict oldest
+                oldest = next(iter(self._mem))
+                self._mem.pop(oldest, None)
             self._mem[key] = (time.monotonic(), value)
 
         if key in DISK_BACKED_KEYS:
