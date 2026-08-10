@@ -63,10 +63,18 @@ ROUTES = {
 # path -> (webui filename, content-type, whether to inject the session token)
 _STATIC_TEXT_ASSETS: dict[str, tuple[str, str, bool]] = {
     "/style.css": ("style.css", "text/css; charset=utf-8", False),
-    "/app.js": ("app.js", "application/javascript; charset=utf-8", False),
     "/api.js": ("api.js", "application/javascript; charset=utf-8", True),
+    "/icons.js": ("icons.js", "application/javascript; charset=utf-8", False),
     "/install-ui.js": ("install-ui.js", "application/javascript; charset=utf-8", False),
     "/state.js": ("state.js", "application/javascript; charset=utf-8", False),
+    # Former single app.js, split by wizard step — see index.html load order.
+    "/nav.js": ("nav.js", "application/javascript; charset=utf-8", False),
+    "/disk.js": ("disk.js", "application/javascript; charset=utf-8", False),
+    "/partition-editor.js": ("partition-editor.js", "application/javascript; charset=utf-8", False),
+    "/kernel.js": ("kernel.js", "application/javascript; charset=utf-8", False),
+    "/config.js": ("config.js", "application/javascript; charset=utf-8", False),
+    "/review.js": ("review.js", "application/javascript; charset=utf-8", False),
+    "/install-flow.js": ("install-flow.js", "application/javascript; charset=utf-8", False),
 }
 
 

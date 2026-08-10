@@ -121,5 +121,5 @@ function reboot() {
 // Inline handlers in index.html are part of the installer UI's public surface.
 void [toggleAccessibility, copyFullLog, copyInstallReport, toggleLog, backFromError, reboot];
 
-// setProgress, showStats, appendLog, onDone, showError are called from app.js.
+// setProgress, showStats, appendLog, onDone, showError are called from install-flow.js.
 void [setProgress, showStats, appendLog, onDone, showError];

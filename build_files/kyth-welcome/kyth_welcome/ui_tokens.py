@@ -11,8 +11,6 @@ RADIUS_CARD = 12
 RADIUS_PILL = 999
 RADIUS_BUTTON = 8
 RADIUS_HERO = 16
-# Single accent — canonical is KYTH_BLUE (#5b8cff); ACCENT_BLUE is legacy alias
-ACCENT_BLUE = "#5b8cff"
 # Canonical status trio (Phase 3): previously theme_hub_overlay.py carried its
 # own separate ok/warn/err values that didn't match these, and even
 # disagreed with itself between card-accent-err (#e05f67) and status-err
@@ -22,11 +20,6 @@ STATUS_OK = "#10b981"
 STATUS_WARN = "#f59e0b"
 STATUS_ERROR = "#f7768e"
 TEXT_MUTED = "#8cadcf"
-
-
-def accent_line_style(color: str = ACCENT_BLUE) -> str:
-    return f"background: {color}; border: none;"
-
 
 # ── Spacing / motion tokens (Phase 1 polish) ─────────────────────────────────
 MOTION_FAST = 120  # ms
@@ -56,7 +49,14 @@ KYTH_HIGHLIGHT = "rgba(255, 255, 255, 0.08)"
 KYTH_BLUE = "#38bdf8"
 KYTH_BLUE_DIM = "#0284c7"
 KYTH_BLUE_LIGHT = "#7dd3fc"
-KYTH_BLUE_GLOW = "rgba(56, 189, 248, 0.22)"
+# Qt's QSS rgba() takes an integer 0-255 alpha, not a 0-1 float — this was
+# previously "rgba(56, 189, 248, 0.22)", which Qt's parser rejects, so the
+# glow it was meant to add was silently dropped wherever it was used.
+KYTH_BLUE_GLOW = "rgba(56, 189, 248, 56)"
+# Low-alpha KYTH_BLUE tint for pill/badge fills — same hue as KYTH_BLUE so
+# text/border/background on a single chip never mix two different blues.
+KYTH_BLUE_TINT_BG = "rgba(56, 189, 248, 31)"
+KYTH_BLUE_TINT_BORDER = "rgba(56, 189, 248, 92)"
 KYTH_PRIMARY_BG = "#1e293b"
 KYTH_PRIMARY_BORDER = "#38bdf8"
 KYTH_PRIMARY_HOVER_BG = "#0284c7"

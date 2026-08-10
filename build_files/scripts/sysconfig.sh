@@ -84,5 +84,5 @@ systemctl enable kyth-bluetooth-enable.service 2>/dev/null || true
 # that touches one of these small scripts.
 rm -f /ctx/kyth-vscode-wallet /ctx/kyth-game-boost /ctx/game-performance /ctx/kyth-ntfs-repair \
 	/ctx/kyth-shader-preheat /ctx/kyth-health-check \
-	/ctx/kyth-sched-arbiter /ctx/kyth-power-arbiter /ctx/kyth-power-arbiter.service /ctx/kyth-storage-gate \
+	/ctx/kyth-sched-arbiter /ctx/kyth-power-arbiter /ctx/kyth-storage-gate \
 	/ctx/kyth-readahead-hint /ctx/kyth-game-launch /ctx/kyth-shader-prune

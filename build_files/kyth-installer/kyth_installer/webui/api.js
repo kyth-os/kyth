@@ -48,5 +48,6 @@ function cancelInstall() {
   return postJSON('/api/cancel', {});
 }
 
-// S, el, postJSON are used from app.js and install-ui.js.
+// S, el, postJSON are used from install-ui.js and the step files (disk.js,
+// partition-editor.js, kernel.js, config.js, review.js, install-flow.js).
 void [S, el, postJSON];

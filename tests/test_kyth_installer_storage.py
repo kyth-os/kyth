@@ -72,7 +72,7 @@ class InstallerWebuiTests(unittest.TestCase):
         # S.target_partition is set from p.name (a string), never a partition
         # object — `.name`/`.fstype` accesses on it are always undefined and
         # silently blank the review page's "which partition gets erased" text.
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
 
         self.assertNotIn("S.target_partition.name", js)
         self.assertNotIn("S.target_partition.fstype", js)

@@ -82,35 +82,35 @@
         <div style="font-size:15px;font-weight:700;margin-bottom:12px">Installation Mode</div>
         <div class="mode-grid">
           <div class="mode-card selected" id="mcard-wipe" onclick="selectMode('wipe')">
-            <div class="mode-icon">💥</div>
+            <div class="mode-icon" id="micon-wipe"></div>
             <div>
               <div class="mode-name">Erase Full Disk</div>
               <div class="mode-desc" id="wipe-mode-desc">Install KythOS on the entire disk. All existing data will be erased. Simplest option.</div>
             </div>
           </div>
           <div class="mode-card" id="mcard-resize_ntfs" onclick="selectMode('resize_ntfs')">
-            <div class="mode-icon">🪟</div>
+            <div class="mode-icon" id="micon-resize_ntfs"></div>
             <div>
               <div class="mode-name">Keep Windows &amp; Install KythOS <span style="background:var(--green);color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px">Recommended</span></div>
               <div class="mode-desc">Shrink your Windows partition to make room — all Windows files stay, and you choose at boot. Preview validates before any disk write.</div>
             </div>
           </div>
           <div class="mode-card" id="mcard-alongside" onclick="selectMode('alongside')">
-            <div class="mode-icon">🔄</div>
+            <div class="mode-icon" id="micon-alongside"></div>
             <div>
               <div class="mode-name">Replace a Partition</div>
               <div class="mode-desc">Overwrite an existing partition with KythOS. The selected partition will be erased and formatted.</div>
             </div>
           </div>
           <div class="mode-card" id="mcard-free_space" onclick="selectMode('free_space')">
-            <div class="mode-icon">🆓</div>
+            <div class="mode-icon" id="micon-free_space"></div>
             <div>
               <div class="mode-name">Use Free Space</div>
               <div class="mode-desc">Install KythOS into unallocated free space on the disk. Leaving all existing partitions untouched.</div>
             </div>
           </div>
           <div class="mode-card" id="mcard-manual" onclick="selectMode('manual')">
-            <div class="mode-icon">🔧</div>
+            <div class="mode-icon" id="micon-manual"></div>
             <div>
               <div class="mode-name">Manual Partitioning</div>
               <div class="mode-desc">Create, delete, resize and format partitions manually. Choose filesystem types and mount points.</div>
@@ -399,7 +399,14 @@
 
 <script src="state.js"></script>
 <script src="api.js"></script>
-<script src="app.js"></script>
+<script src="icons.js"></script>
 <script src="install-ui.js"></script>
+<script src="nav.js"></script>
+<script src="disk.js"></script>
+<script src="partition-editor.js"></script>
+<script src="kernel.js"></script>
+<script src="config.js"></script>
+<script src="review.js"></script>
+<script src="install-flow.js"></script>
 </body>
 </html>

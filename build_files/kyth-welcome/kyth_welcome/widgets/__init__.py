@@ -18,6 +18,9 @@ from .layout import FlowLayout, HubPage  # noqa: F401
 # Cards/sections extracted to widgets/cards.py (slice 4) — keep re-export for compat
 from .cards import _divider, _make_card, _make_grid, _make_section_header  # noqa: F401
 
+# Page-transition fade — see widgets/motion.py
+from .motion import fade_in  # noqa: F401
+
 def _theme_icon(*names: str) -> QIcon:
     """Return the first available system theme icon, or a null icon."""
     for name in names:

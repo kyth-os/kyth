@@ -8,7 +8,7 @@ from .qt import (
     QCompleter, QDialog, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .widgets import (
-    _divider, _theme_icon,
+    _divider, _theme_icon, fade_in,
 )
 from .services.launch import popen
 
@@ -652,6 +652,7 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate(self._nav_buttons):
             btn.set_active(i == index)
         self._stack.setCurrentIndex(index)
+        fade_in(self._stack.currentWidget())
         if record:
             del self._history[self._history_pos + 1:]
             if not self._history or self._history[-1] != index:

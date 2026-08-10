@@ -84,7 +84,7 @@ QPushButton#nav-item:focus {{
 
 QPushButton#nav-item-active {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {KYTH_SURFACE_RAISED}, stop:1 {KYTH_SURFACE});
+        stop:0 {KYTH_BLUE_GLOW}, stop:0.35 {KYTH_SURFACE_RAISED}, stop:1 {KYTH_SURFACE});
     color: {KYTH_TEXT};
     border: 1px solid {KYTH_HAIRLINE};
     border-left: 3px solid {KYTH_BLUE};
