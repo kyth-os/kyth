@@ -1,3 +1,4 @@
+import os
 import shutil
 import time
 
@@ -271,18 +272,62 @@ class _UpdateOpsMixin:
         self._log_panel.append("\nCancel requested by user. Waiting for the update process to stop…")
         self._worker.cancel()
 
+    def _free_gb_for_update(self) -> float:
+        """Free space available for an ostree/bootc + flatpak update.
+
+        On bootc/composefs systems '/' is a small read-only deployment mount
+        (often reports ~0 free) while writable layers live under '/var'
+        (ostree repo, flatpak, /var/tmp skopeo). Check both and take the
+        largest value. Use statvfs f_bavail for the unprivileged UI process;
+        fall back to shutil.disk_usage.
+        """
+        best = -1.0
+        for path in ("/var", "/sysroot", "/"):
+            try:
+                if not os.path.exists(path):
+                    continue
+                try:
+                    st = os.statvfs(path)
+                    free_gb = st.f_bavail * st.f_frsize / (1024**3)
+                    if free_gb > best:
+                        best = free_gb
+                except OSError:
+                    pass
+                # shutil as fallback / sanity — take max
+                try:
+                    su_gb = shutil.disk_usage(path).free / (1024**3)
+                    if su_gb > best:
+                        best = su_gb
+                except OSError:
+                    pass
+            except Exception:
+                continue
+        if best < 0:
+            try:
+                best = shutil.disk_usage("/").free / (1024**3)
+            except OSError:
+                return 999.0
+            except Exception:
+                return 999.0
+        return best
+
     def _run_full_update(self):
         # Storage gate — Windows switcher filled C: then clicks Full Update and gets ENOSPC mid-pull. Block early.
+        # Skip gate when an image is already staged — next boot just switches, no pull needed.
+        if has_staged_update():
+            self._start_operation_spec(full_update_operation())
+            return
         try:
-            free = shutil.disk_usage("/").free
-            free_gb = free / (1024**3)
+            free_gb = self._free_gb_for_update()
             if free_gb < 10:
                 QMessageBox.warning(
                     self, "Low disk space",
-                    f"Only {free_gb:.1f} GB free on /. Full Update needs ~6 GB plus Flatpak/buffer — free 10 GB first (try System → Storage or remove large Flatpaks), then retry.",
+                    f"Only {free_gb:.1f} GB free on /var. Full Update needs ~6 GB plus Flatpak/buffer — free 10 GB first (try System → Storage or remove large Flatpaks), then retry.",
                 )
                 return
         except OSError:
+            pass
+        except Exception:
             pass
         self._start_operation_spec(full_update_operation())
 
@@ -510,19 +555,15 @@ class _UpdateOpsMixin:
         rollback = has_rollback_deployment()
         staged_ts = bootc_image_timestamp("staged") if staged else None
         rollback_ts = bootc_image_timestamp("rollback") if rollback else None
-        # Low-disk hint in summary (also enforced in _run_full_update) — Slice 2/5 storage gate
+        # Low-disk measurement — single source, correct mountpoint (also enforced in _run_full_update)
         try:
-            free_gb = shutil.disk_usage("/").free / (1024**3)
-            if free_gb < 10 and not staged:
-                self._staged_val.setText(f"Low disk: {free_gb:.1f} GB free — free 10 GB before Full Update")
-                self._staged_val.setObjectName("prop-val-warn")
-                restyle(self._staged_val)
-                # keep warning visible even though staged is None
-                self._staged_val.setToolTip(f"Only {free_gb:.1f} GB free on /. Full Update needs ~6 GB + buffer.")
-        except OSError:
+            free_gb = self._free_gb_for_update()
+        except Exception:
             free_gb = 999.0
 
         # Staged row — include pending image ref + short digest when present (5/5 visibility)
+        # Low-disk warning must not be clobbered by the "None" branch below.
+        low_disk = free_gb < 10 and not staged
         if staged:
             data = bootc_status_data() or {}
             staged_ref = nested_get(data, ("status", "staged", "image", "image")) or nested_get(data, ("status", "staged", "image", "transport_image")) or ""
@@ -542,9 +583,14 @@ class _UpdateOpsMixin:
                 staged_text = f"{label}{short}  —  reboot to apply" if label else "Ready — reboot to apply"
             self._staged_val.setText(staged_text)
             self._staged_val.setObjectName("prop-val-blue")
+        elif low_disk:
+            self._staged_val.setText(f"Low disk: {free_gb:.1f} GB free — free 10 GB before Full Update")
+            self._staged_val.setObjectName("prop-val-warn")
+            self._staged_val.setToolTip(f"Only {free_gb:.1f} GB free on /var. Full Update needs ~6 GB + buffer.")
         else:
             self._staged_val.setText("None")
             self._staged_val.setObjectName("prop-val-dim")
+            self._staged_val.setToolTip("")
         restyle(self._staged_val)
 
         # Rollback row + button label — also show rollback tag
@@ -567,7 +613,7 @@ class _UpdateOpsMixin:
         self._rollback_btn.setEnabled(rollback and self._worker is None)
 
         # Low-disk gate: disable Full/OS buttons when <10 GB free (also checked at click time)
-        low_disk = free_gb < 10
+        # low_disk already includes `and not staged` — staged image needs no pull
         if low_disk and self._worker is None:
             self._full_update_btn.setEnabled(False)
             self._full_update_btn.setToolTip(f"Low disk: {free_gb:.1f} GB free — free 10 GB before updating")
