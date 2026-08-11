@@ -36,7 +36,7 @@ from kyth_shared.system.probe import DISK_BACKED_KEYS as _DISK_BACKED_KEYS  # no
 from kyth_shared.system.probe import DISK_TTL as _DISK_TTL  # noqa: F401
 
 DISK_BACKED_KEYS = _DISK_BACKED_KEYS
-BOOTC_CACHE_TTL = 5.0  # legacy alias; probe.DISK_TTL["bootc-status-data"] is canonical
+BOOTC_CACHE_TTL = 90.0  # canonical: matches DISK_TTL["bootc-status-data"] (was 5.0)
 # W2: was 10s, now canonical 180s to match DISK_TTL["flatpak-updates"] — use _DISK_TTL
 FLATPAK_CACHE_TTL = _DISK_TTL["flatpak-updates"]  # type: ignore[index]
 

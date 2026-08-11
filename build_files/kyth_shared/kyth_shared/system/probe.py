@@ -52,6 +52,10 @@ DISK_TTL: dict[str, float] = {
     "flatpak-updates": 180.0,
     "nvidia-detect": 300.0,
     "controllers-detect": 120.0,
+    "hardware-probes": 30.0,
+    "ntfs-drives": 30.0,
+    "secureboot-state": 300.0,
+    "hardware-view": 30.0,
 }
 
 COLLECT_SECTIONS: tuple[str, ...] = tuple(DISK_TTL.keys())

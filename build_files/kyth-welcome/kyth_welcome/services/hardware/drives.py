@@ -58,5 +58,5 @@ def _fetch_ntfs_drives() -> list[dict]:
 
 def _detect_controllers() -> dict:
     """Snapshot of all connected controllers and driver state. Thread-safe."""
-    return probe_cached("controllers-detect", 5.0, detect_controllers)
+    return probe_cached("controllers-detect", 120.0, detect_controllers)
  # _detect_controllers

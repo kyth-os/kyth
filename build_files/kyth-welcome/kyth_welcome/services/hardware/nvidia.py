@@ -27,7 +27,7 @@ def _detect_nvidia() -> bool:
             return "nvidia" in r.stdout.lower()
         except Exception:
             return False
-    return probe_cached("nvidia-detect", 10.0, fetch)
+    return probe_cached("nvidia-detect", 300.0, fetch)
  # _detect_nvidia
 
 def detect_nvidia_async(owner, on_result, *, attr: str = "_nvidia_probe_worker") -> None:
@@ -130,7 +130,7 @@ def _secureboot_state() -> str:
             return "enabled:not-enrolled"
         except Exception:
             return "enabled:unknown"
-    return probe_cached("secureboot-state", 30.0, fetch)
+    return probe_cached("secureboot-state", 300.0, fetch)
  # _secureboot_state
 
 
