@@ -82,6 +82,19 @@ class ShippedCommandContracts(unittest.TestCase):
 
 
 class BuildAssemblyContracts(unittest.TestCase):
+    def test_daily_build_refreshes_rpm_layer_without_package_holds(self):
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        rpm_run = dockerfile.index(
+            "RUN --mount=type=bind,source=build_files/kyth_shared"
+        )
+        self.assertLess(dockerfile.index("ARG BUILD_DATE=unset"), rpm_run)
+        self.assertIn(
+            'cache-bust:rpm=${RPM_SET_HASH};date=${BUILD_DATE}',
+            dockerfile[:rpm_run + 2000],
+        )
+        for hold in ("--exclude='gamescope*'", "--exclude='akmod-*'", "--exclude='kmod-*'"):
+            self.assertNotIn(hold, dockerfile)
+
     def test_fedora_nvidia_devel_tracks_coordinated_latest_kernel(self):
         script = (
             BUILD_FILES / "scripts/packages/16-gpu-nvidia.sh"

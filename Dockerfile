@@ -27,12 +27,12 @@ LABEL org.kyth.profile.virtualization-host="${ENABLE_VIRTUALIZATION_HOST}"
 LABEL org.kyth.profile.ksm="${ENABLE_KSM}"
 LABEL org.kyth.gaming-versions="${GAMING_VERSIONS_HASH}"
 
-# Build cache boundary: all RPM package installs (~2-3 GB).
-# Hash-gated — only re-run when packages-static.sh or packages/*.sh fragments
-# change or the base image is updated. RPM_SET_HASH is the SHA256 of those
-# files, computed in CI (build_files/scripts/hash-rpm-set.sh) and passed as
-# --build-arg so a daily dnf mirror refresh does not bust the 2–3 GB layer.
+# Build cache boundary: all RPM package installs (~2-3 GB). Source changes are
+# tracked by RPM_SET_HASH, while BUILD_DATE deliberately refreshes repository
+# resolution every daily build. This costs build time but prevents packages
+# excluded from an older cached transaction from lagging current repositories.
 ARG RPM_SET_HASH=unset
+ARG BUILD_DATE=unset
 # Published layer boundaries are defined later by legacy-rechunk metadata.
 RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=bind,source=build_files/config,target=/ctx/config \
@@ -44,7 +44,7 @@ RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
-    : "cache-bust:rpm=${RPM_SET_HASH}" && \
+    : "cache-bust:rpm=${RPM_SET_HASH};date=${BUILD_DATE}" && \
     PYTHONPATH="/ctx/kyth_shared" \
     ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS}" \
     ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST}" \
@@ -62,10 +62,9 @@ RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/p
     test -n "${PROTON_CACHYOS_VER}" && \
     PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" bash /ctx/proton-cachyos.sh
 
-# Third-party binary — umu launcher.
-# Placed before BUILD_DATE so the layer is only re-run when a tool ships a new
-# release. Exact tags are resolved once by CI and used for both cache identity
-# and downloads; installers never re-resolve "latest" inside the build.
+# Third-party binary — umu launcher. Exact tags are resolved once by CI and
+# used for both cache identity and downloads; installers never re-resolve
+# "latest" inside the build.
 ARG THIRDPARTY_VERSIONS_HASH=unset
 ARG GAMING_VERSIONS_HASH=unset
 ARG UMU_VERSION
@@ -87,7 +86,7 @@ RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/third
 # coordinated stack during package assembly; the later kernel-repair layer
 # validates the resulting latest kernel and initramfs. Sits after the large Proton-CachyOS/thirdparty download layers
 # (which it does not depend on) so splash tweaks don't re-pull them, and before
-# the BUILD_DATE cache-bust layer.
+# the daily RPM refresh boundary.
 ARG PLYMOUTH_HASH=unset
 COPY build_files/plymouth/kyth.plymouth             /tmp/kyth-plymouth/kyth.plymouth
 COPY build_files/plymouth/kyth.script               /tmp/kyth-plymouth/kyth.script
@@ -131,12 +130,6 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx
     : "cache-bust:sysconfig=${SYSCONFIG_HASH}" && \
     bash /ctx/sysconfig-static.sh
 
-# BUILD_DATE busts the cache for the upgrade layer and everything after it on
-# every daily build, ensuring dnf5 upgrade always runs even when the base image
-# digest and build_files/ contents haven't changed.
-# Pass as: --build-arg BUILD_DATE="$(date +%Y-%m-%d)"
-ARG BUILD_DATE=unset
-
 # Build cache boundary: upstream RPM upgrades and optional Mesa-git drivers.
 # Mesa-git is folded into this layer instead of a standalone RUN so the no-op
 # ENABLE_MESA_GIT=0 case does not add a separate empty layer to the manifest chain.
@@ -151,8 +144,7 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
     --mount=type=tmpfs,dst=/tmp \
     : "cache-bust=${BUILD_DATE}" && \
     set -euo pipefail; \
-    dnf5 upgrade -y --refresh --setopt=retries=10 --setopt=timeout=120 --setopt=zchunk=False --exclude='akmod-*' --exclude='kmod-*' \
-        --exclude='gamescope*' \
+    dnf5 upgrade -y --refresh --setopt=retries=10 --setopt=timeout=120 --setopt=zchunk=False \
         --disablerepo='fedora-multimedia' \
         --exclude='gstreamer1-plugins-bad' \
         --exclude='gstreamer1-plugins-bad.i686' && \
