@@ -56,6 +56,7 @@ DISK_TTL: dict[str, float] = {
     "ntfs-drives": 30.0,
     "secureboot-state": 300.0,
     "hardware-view": 30.0,
+    "network-identity": 60.0,
 }
 
 COLLECT_SECTIONS: tuple[str, ...] = tuple(DISK_TTL.keys())
@@ -346,6 +347,37 @@ def _collect_hardware_view() -> dict[str, Any]:
         return {"hardware-view": None}
 
 
+def _collect_network_identity() -> dict[str, Any]:
+    from kyth_shared.system.network_identity import get_network_identity
+
+    try:
+        ident = get_network_identity.__wrapped__ if hasattr(get_network_identity, "__wrapped__") else get_network_identity  # type: ignore[attr-defined]
+        # Avoid recursion via probe_cached — call fetch directly through module
+        from kyth_shared.system.network_identity import _vpn_status, _smb_mounts, _cloud_providers
+        from kyth_shared.system.network_identity import NetworkIdentity
+
+        vpn_connected, vpn_name = _vpn_status()
+        smb = _smb_mounts()
+        providers = _cloud_providers()
+        detail_parts: list[str] = []
+        if vpn_connected:
+            detail_parts.append(f"VPN {vpn_name} connected")
+        if smb:
+            detail_parts.append(f"{smb} SMB mount(s)")
+        if providers:
+            detail_parts.append(f"cloud: {', '.join(providers)}")
+        ident_obj = NetworkIdentity(
+            vpn_connected=vpn_connected,
+            vpn_name=vpn_name,
+            smb_mounts=smb,
+            cloud_providers=providers,
+            detail="; ".join(detail_parts) or "No active work network",
+        )
+        return {"network-identity": ident_obj}
+    except Exception:
+        return {"network-identity": None}
+
+
 def default_collectors() -> tuple[ProbeCollector, ...]:
     # Slice 2: async pool already uses ThreadPoolExecutor in collect_probe_results();
     # DISK_TTL below gates disk re-read so repeated Hub nav doesn't re-spawn lspci.
@@ -357,6 +389,7 @@ def default_collectors() -> tuple[ProbeCollector, ...]:
         ProbeCollector("controllers", ("controllers-detect",), _collect_controllers),
         ProbeCollector("display", ("display-detect",), _collect_display),
         ProbeCollector("hardware-view", ("hardware-view",), _collect_hardware_view),
+        ProbeCollector("network-identity", ("network-identity",), _collect_network_identity),
     )
 
 

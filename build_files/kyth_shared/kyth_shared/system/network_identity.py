@@ -98,5 +98,5 @@ def get_network_identity() -> NetworkIdentity:
             detail="; ".join(detail_parts) or "No active work network",
         )
 
-    # Single probe key so Hub pages share one fetch per TTL window
-    return probe_cached("network-identity", min(_VPN_STATUS_TTL, _SMB_STATUS_TTL), _fetch)
+    # Single probe key — canonical 60s matches DISK_TTL["network-identity"]
+    return probe_cached("network-identity", 60.0, _fetch)
