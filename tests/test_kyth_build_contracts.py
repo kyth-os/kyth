@@ -82,6 +82,27 @@ class ShippedCommandContracts(unittest.TestCase):
 
 
 class BuildAssemblyContracts(unittest.TestCase):
+    def test_package_install_sources_do_not_pin_literal_rpm_nvrs(self):
+        """Kyth resolves current RPMs at build time; manifests record results."""
+        sources = [ROOT / "Dockerfile"]
+        sources.extend((BUILD_FILES / "scripts/packages").glob("*.sh"))
+        literal_nvr = re.compile(
+            r"(?<![A-Za-z0-9_])"
+            r"[A-Za-z][A-Za-z0-9+_.-]*-\d+(?:\.\d+)+-\d+"
+            r"(?:\.[A-Za-z0-9_.]+)?"
+        )
+        for source in sources:
+            for line_number, line in enumerate(
+                source.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if line.lstrip().startswith("#"):
+                    continue
+                with self.subTest(source=source.relative_to(ROOT), line=line_number):
+                    self.assertIsNone(
+                        literal_nvr.search(line),
+                        f"literal RPM NVR pin in {source.relative_to(ROOT)}:{line_number}: {line.strip()}",
+                    )
+
     def test_daily_build_refreshes_rpm_layer_without_package_holds(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         rpm_run = dockerfile.index(
