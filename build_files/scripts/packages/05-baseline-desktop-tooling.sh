@@ -34,3 +34,6 @@ dnf5 install -y --skip-unavailable \
 	openssl \
 	fwupd
 
+# Small CPU-only runtime for the optional, user-downloaded Guardian model.
+# Keep image construction portable if the package is temporarily unavailable.
+dnf5 install -y --skip-unavailable llama-cpp

@@ -15,7 +15,8 @@ from .page_repair_assist import _AssistMixin
 from .page_repair_quick import _QuickFixMixin
 from .page_repair_reset import _ResetMixin
 from .qt import (
-    QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QUrl, single_shot,
+    QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QProgressBar,
+    QPushButton, QUrl, single_shot,
 )
 from .widgets import (
     CollapsibleLogPanel, FlowLayout, Page, _make_card, _make_tip_card,
@@ -59,6 +60,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._add(self._rollback_card)
 
         self._build_quick_fixes_card()
+        self._build_guardian_card()
         self._build_assist_card()
         self._build_printer_card()
         self._build_backup_card()
@@ -257,6 +259,101 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         quick_btns.addWidget(nightlight_btn)
         quick_layout.addLayout(quick_btns)
         self._add(quick)
+
+    def _build_guardian_card(self) -> None:
+        """Local-AI controls; the CLI remains the sole policy/execution boundary."""
+        from kyth_shared.guardian import status as guardian_status
+
+        try:
+            current = guardian_status()
+        except (OSError, ValueError):
+            current = {"enabled": True, "automatic_safe_fixes": False,
+                       "model": {"installed": False}}
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Kyth Guardian — local repair assistant")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "Guardian runs inexpensive health checks periodically and after probe changes. "
+            "Its optional local model starts only when a diagnosis is ambiguous, chooses "
+            "from fixed Kyth repair recipes, and then exits. Prompts and results stay on this PC."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+
+        controls = QHBoxLayout()
+        controls.setSpacing(8)
+        self._guardian_enabled = QCheckBox("Monitoring enabled")
+        self._guardian_enabled.setChecked(bool(current.get("enabled")))
+        self._guardian_enabled.toggled.connect(self._toggle_guardian)
+        controls.addWidget(self._guardian_enabled)
+        self._guardian_auto = QCheckBox("Automatically apply safe fixes")
+        self._guardian_auto.setChecked(bool(current.get("automatic_safe_fixes")))
+        self._guardian_auto.setToolTip(
+            "Only fixed, reversible, unprivileged recipes can run automatically. "
+            "Administrator and data-affecting actions always require confirmation."
+        )
+        self._guardian_auto.toggled.connect(self._toggle_guardian_auto)
+        controls.addWidget(self._guardian_auto)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        investigate = QPushButton("Investigate with Local AI")
+        investigate.setObjectName("primary")
+        investigate.clicked.connect(
+            lambda _=False: self._run_quick_fix(
+                "Guardian investigation", ["/usr/bin/kyth-guardian", "--json", "investigate"]
+            )
+        )
+        buttons.addWidget(investigate)
+        model_installed = bool(current.get("model", {}).get("installed"))
+        self._guardian_model_btn = QPushButton(
+            "Remove Local AI Model" if model_installed else "Download Local AI Model"
+        )
+        self._guardian_model_btn.setToolTip(
+            "Verified Apache-2.0 Q4 model; about 1.04 GiB on disk and loaded only on demand."
+        )
+        self._guardian_model_btn.clicked.connect(
+            lambda _=False, installed=model_installed: self._run_quick_fix(
+                "Guardian model removal" if installed else "Guardian model download",
+                ["/usr/bin/kyth-guardian", "model", "remove" if installed else "install"],
+            )
+        )
+        buttons.addWidget(self._guardian_model_btn)
+        history = QPushButton("Show Guardian History")
+        history.clicked.connect(
+            lambda _=False: self._run_quick_fix(
+                "Guardian history", ["/usr/bin/kyth-guardian", "--json", "history"]
+            )
+        )
+        buttons.addWidget(history)
+        buttons.addStretch()
+        layout.addLayout(buttons)
+
+        model = current.get("model", {})
+        self._guardian_summary = QLabel(
+            (f"Local AI: installed · {model.get('id', 'model')} · {model.get('license', 'license unknown')}"
+             if model_installed else
+             "Local AI: optional model not installed. Deterministic monitoring and repair remain available.")
+        )
+        self._guardian_summary.setObjectName("status-ok" if model_installed else "card-copy")
+        self._guardian_summary.setWordWrap(True)
+        layout.addWidget(self._guardian_summary)
+        self._add(card)
+
+    def _toggle_guardian(self, enabled: bool) -> None:
+        self._run_quick_fix(
+            "Guardian monitoring", ["/usr/bin/kyth-guardian", "enable" if enabled else "disable"]
+        )
+
+    def _toggle_guardian_auto(self, enabled: bool) -> None:
+        self._run_quick_fix(
+            "Guardian automatic safe fixes",
+            ["/usr/bin/kyth-guardian", "auto-fix", "on" if enabled else "off"],
+        )
 
     def _build_assist_card(self) -> None:
         assist_card, assist_layout = _make_card("card-accent-ok")

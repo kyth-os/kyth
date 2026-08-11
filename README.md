@@ -147,6 +147,7 @@ notifications from repeating the same expensive checks.
 | Desktop | Plasma and Wayland profiles, layout repair, screenshots, and screen-sharing help |
 | Network | VPN, SMB shares, and rclone-backed Google Drive, OneDrive, Dropbox, and other remotes |
 | Health and Repair | Diagnostics, support snapshots, focused repairs, setup transfer, and recovery actions |
+| Guardian | Low-resource health monitoring, bounded safe fixes, and optional on-demand local AI diagnosis |
 | Advanced | Channel switching, kernel image selection, NVIDIA support, and issue feedback |
 
 ### VPN
@@ -230,6 +231,8 @@ See [Architecture](docs/architecture.md) and the
 [security model](docs/security-model.md) for the detailed component and trust
 boundaries. The [health-aware update lifecycle](docs/update-safety.md) explains
 boot validation, automatic rollback, rollout rings, and digest quarantine.
+The [Guardian design](docs/guardian.md) documents local-AI resource, privacy,
+and repair-policy boundaries.
 The [hardware policy](docs/hardware-policy.md) documents device matching,
 managed quirks, and the generated [support matrix](docs/hardware-support-matrix.md).
 
