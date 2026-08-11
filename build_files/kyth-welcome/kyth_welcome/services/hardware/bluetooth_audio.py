@@ -81,7 +81,9 @@ def force_ldac_reconnect() -> str:
             res = run_command(["bluetoothctl", "connect", addr], timeout=12)
             # Check WirePlumber sink appears — true LDAC vs SBC fallback is headset-side,
             # but sink presence proves the reconnect succeeded before retrying.
-            sinks = command_stdout(["bash", "-c", "wpctl status 2>/dev/null | grep -E 'bluez_output' | head -1"], timeout=5)
+            _wpctl2 = command_stdout(["wpctl", "status"], timeout=5)
+            sinks = "\n".join(line for line in _wpctl2.splitlines() if "bluez_output" in line).splitlines()
+            sinks = sinks[0] if sinks else ""
             if sinks.strip() and (res is None or res.returncode == 0):
                 return (
                     f"Reconnected {addr} (attempt {attempt+1}/3). LDAC should now be active if your device supports it. "
