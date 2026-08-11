@@ -23,4 +23,14 @@ if pgrep -f "kyth-game-boost|kyth-game-launch|gamemoderun|game-performance" >/de
   exit 1
 fi
 
+# btrfs scrub active check: skip if scrub already running (avoid overlapping Io)
+if command -v btrfs >/dev/null 2>&1; then
+  for mnt in / /var /home; do
+    if btrfs scrub status "$mnt" 2>/dev/null | grep -q "running"; then
+      echo "kyth-storage-gate: btrfs scrub active on $mnt, skipping" >&2
+      exit 1
+    fi
+  done
+fi
+
 exit 0
