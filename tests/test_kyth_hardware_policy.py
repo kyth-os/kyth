@@ -171,6 +171,29 @@ class HardwarePolicySafetyTests(unittest.TestCase):
         self.assertNotIn("options i915", rendered)
         self.assertNotIn("options nvidia", rendered)
 
+    def test_missing_scheduler_cleans_stale_config_and_disables_service(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config = Path(temp) / "scx_loader.conf"
+            config.write_text("SCX_SCHEDULER=scx_rusty\n")
+            with (
+                patch.object(hp, "SCX_CONFIG_PATH", config),
+                patch.object(hp.Path, "is_dir", return_value=True),
+                patch.object(
+                    hp.shutil,
+                    "which",
+                    side_effect=lambda name: "/usr/bin/scx_loader" if name == "scx_loader" else None,
+                ),
+                patch.object(hp, "run_optional") as run_optional,
+            ):
+                selected = hp._configure_scheduler(["scx_rusty"])
+
+        self.assertEqual(selected, "kernel-default")
+        self.assertFalse(config.exists())
+        run_optional.assert_called_once_with(
+            ["systemctl", "disable", "--now", "scx_loader.service"],
+            capture_output=True,
+        )
+
     def test_booted_image_identity_uses_exact_bootc_deployment(self):
         status = {
             "status": {

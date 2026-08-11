@@ -3,6 +3,8 @@ Description=KythOS sched-ext scheduler launcher
 Documentation=https://github.com/sched-ext/scx
 ConditionPathExists=/sys/kernel/sched_ext
 After=basic.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple

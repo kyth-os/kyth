@@ -283,11 +283,11 @@ just run-live-iso-native-local     # fresh native QEMU test of the local ISO
 just preview-installer             # browser preview; does not touch disks
 ```
 
-Optional image profiles are disabled unless requested, except sched-ext support
-which is enabled by default:
+Optional image profiles are disabled unless requested. Sched-ext remains opt-in
+until KythOS ships a userspace scheduler matched to its kernel ABI:
 
 ```bash
-ENABLE_SCX=0 just build
+ENABLE_SCX=1 just build
 ENABLE_GAMING_PERIPHERALS=1 just build
 ENABLE_VIRTUALIZATION_HOST=1 just build
 ENABLE_KSM=1 just build

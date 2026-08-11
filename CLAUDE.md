@@ -46,7 +46,7 @@ PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-ins
 
 Feature flags (image build):
 ```bash
-ENABLE_SCX=0 sudo just build                     # sched-ext is on by default; disable with 0
+ENABLE_SCX=1 sudo just build                     # opt in only with a kernel-compatible scheduler
 ENABLE_GAMING_PERIPHERALS=1 sudo just build
 ENABLE_VIRTUALIZATION_HOST=1 sudo just build
 ENABLE_KSM=1 sudo just build

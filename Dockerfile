@@ -16,7 +16,10 @@ LABEL org.osbuild.version="44"
 LABEL org.osbuild.branding.release="KythOS 44"
 
 ### MODIFICATIONS
-ARG ENABLE_SCX=1
+# Fedora 44 ships scx_rusty 0.5.4, whose pre-upstream sched_ext BPF ABI is
+# incompatible with the kernel 7.1 interface. Keep SCX opt-in until KythOS
+# ships a scheduler build coordinated with its CachyOS kernel.
+ARG ENABLE_SCX=0
 ARG ENABLE_MESA_GIT=0
 ARG ENABLE_GAMING_PERIPHERALS=0
 ARG ENABLE_VIRTUALIZATION_HOST=0

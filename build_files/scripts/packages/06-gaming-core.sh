@@ -84,10 +84,10 @@ if is_enabled "${ENABLE_GAMING_CORE:-1}"; then
 	check_multilib_pairs "${KYTH_MULTILIB_PAIRS[@]}"
 fi
 
-# Upstream SCX GitHub releases do not publish Linux binaries. Use Fedora's
-# signed RPM instead of silently omitting the scheduler or compiling an
-# untracked payload during the image build.
-if is_enabled "${ENABLE_SCX:-1}"; then
+# Upstream SCX GitHub releases do not publish Linux binaries. Fedora's signed
+# RPM remains available for explicit compatibility testing, but is disabled by
+# default because its 0.5.4 BPF ABI is incompatible with kernel 7.1.
+if is_enabled "${ENABLE_SCX:-0}"; then
 	dnf_retry install -y scx_rusty
 	command -v scx_rusty >/dev/null
 fi
