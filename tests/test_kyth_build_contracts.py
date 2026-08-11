@@ -82,6 +82,21 @@ class ShippedCommandContracts(unittest.TestCase):
 
 
 class BuildAssemblyContracts(unittest.TestCase):
+    def test_fedora_nvidia_devel_tracks_coordinated_latest_kernel(self):
+        script = (
+            BUILD_FILES / "scripts/packages/16-gpu-nvidia.sh"
+        ).read_text(encoding="utf-8")
+        upgrade = script.index("dnf5 upgrade -y --refresh")
+        resolve = script.index("KERNEL_VR=$(rpm -q kernel-core")
+        self.assertLess(upgrade, resolve)
+        for package in (
+            "kernel-core", "kernel-modules", "kernel-modules-core",
+            "kernel-modules-extra",
+        ):
+            self.assertIn(package, script[upgrade:resolve])
+        self.assertIn('"kernel-devel-${KERNEL_VR}"', script)
+        self.assertIn('rpm --nodeps -e "${nevra}"', script)
+
     def test_fragment_relative_source_targets_exist(self):
         scripts = BUILD_FILES / "scripts"
         for tree in (scripts / "packages", scripts / "sysconfig"):

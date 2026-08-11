@@ -83,9 +83,9 @@ RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/third
 # cache key, so the expensive dracut rebuild only reruns when the splash assets
 # actually change — not on every daily dnf upgrade. Bind mounts do NOT contribute
 # to the BuildKit cache key and would silently ship a stale cached splash.
-# Kernel packages are excluded from dnf upgrade (see packages.sh excludepkgs), so
-# the kernel version is fixed from the base image and the initramfs built here is
-# the one that ships. Sits after the large Proton-CachyOS/thirdparty download layers
+# Kernel packages are excluded from ordinary dnf upgrades and updated as one
+# coordinated stack during package assembly; the later kernel-repair layer
+# validates the resulting latest kernel and initramfs. Sits after the large Proton-CachyOS/thirdparty download layers
 # (which it does not depend on) so splash tweaks don't re-pull them, and before
 # the BUILD_DATE cache-bust layer.
 ARG PLYMOUTH_HASH=unset
