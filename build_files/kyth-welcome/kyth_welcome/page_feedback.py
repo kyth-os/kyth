@@ -19,20 +19,10 @@ _GITHUB_REPO = "mrtrick37/kyth"
 
 
 def _scrub_logs(text: str) -> str:
-    """Arch #16: scrub PII (hostname, serial, SSID) before GitHub upload."""
-    import re
-    import socket
+    """Arch #16: central scrub via kyth_shared.diagnostics_scrub."""
+    from kyth_shared.diagnostics_scrub import scrub_logs as _central
 
-    try:
-        host = socket.gethostname()
-        if host:
-            text = text.replace(host, "[hostname]")
-    except Exception:
-        pass
-    # Serial-like, SSID
-    text = re.sub(r"Serial\s*[:=]\s*\S+", "Serial: [scrubbed]", text, flags=re.I)
-    text = re.sub(r"SSID\s*[:=]\s*\S+", "SSID: [scrubbed]", text, flags=re.I)
-    return text
+    return _central(text)
 
 
 def _collect_system_info() -> str:
