@@ -78,11 +78,11 @@ def _hardware_policy_probe(view=None) -> HardwareProbe:  # type: ignore[no-untyp
             "Update or remove the expired hardware quirk before the next release.",
         )
     if quirks:
+        quirk_label = "quirk" if len(quirks) == 1 else "quirks"
         return HardwareProbe(
-            "Hardware policy", "warn",
-            f"Hardware matched with {len(quirks)} active quirk{'s' if len(quirks)!=1 else ''}: {', '.join(quirks)}",
+            "Hardware policy", "ok",
+            f"Hardware matched with {len(quirks)} active {quirk_label}: {', '.join(quirks)}",
             "\n".join(details),
-            "Review the quirk in docs/hardware-support-matrix.md — it may need an update or removal.",
         )
     return HardwareProbe(
         "Hardware policy", "ok",

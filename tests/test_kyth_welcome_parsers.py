@@ -158,9 +158,10 @@ class UpdateOperationControllerTests(unittest.TestCase):
             "Hdr: disabled\n"
         )
         self.assertEqual(display.title, "Display")
-        self.assertEqual(display.status, "warn")
+        self.assertEqual(display.status, "ok")
         self.assertIn("HDMI-A-1", display.summary)
         self.assertIn("VRR/FreeSync", display.details)
+        self.assertIn("Enable VRR", display.action)
 
 
 class AppDefaultsTests(unittest.TestCase):

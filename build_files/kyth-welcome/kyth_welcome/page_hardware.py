@@ -151,9 +151,8 @@ class HardwarePage(Page):
         if getattr(self, "_display_vrr_warn_lbl", None) is not None:
             try:
                 probe = _parse_kscreen_output(text)
-                warn = getattr(probe, "action", "") or ""
                 # Surface VRR state per-output: never vs always on high-refresh
-                if probe.status == "warn" and probe.action:
+                if probe.action:
                     self._display_vrr_warn_lbl.setText(f"⚠️ {probe.action}")
                     self._display_vrr_warn_lbl.setObjectName("status-warn")
                     self._display_vrr_warn_lbl.show()
