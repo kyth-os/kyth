@@ -105,5 +105,21 @@ class HubState(Base if Base is not object else object):  # type: ignore[misc]
         return self.get("repair_plan")
 
 
+def rollback_available_from_probe() -> bool:
+    """Single-source rollback check — reads staged+rollback from probe cache, not per-page bootc spawn."""
+    try:
+        from kyth_shared.system.probe import read_section
+
+        data = read_section("bootc-status-data", max_age=90)
+        if isinstance(data, dict):
+            status = data.get("status") or {}
+            has_staged = status.get("staged") is not None
+            has_rollback = status.get("rollback") is not None
+            return bool(has_staged or has_rollback)
+    except Exception:
+        pass
+    return False
+
+
 # Singleton for the running Hub process
 HUB_STATE = HubState()
