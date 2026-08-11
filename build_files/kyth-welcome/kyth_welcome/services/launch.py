@@ -85,7 +85,12 @@ def reboot() -> subprocess.Popen | None:
 
 
 def open_terminal_command(command: str) -> subprocess.Popen | None:
-    """Run *command* in the first available terminal."""
+    """Run *command* in the first available terminal (no shell injection)."""
+    if not command or not command.strip():
+        return None
+    # Reject control chars / newlines that would break the bash -lc boundary
+    if any(ord(c) < 32 and c not in ("\t",) for c in command):
+        return None
     for terminal in ("konsole", "kgx", "gnome-terminal"):
         if not shutil.which(terminal):
             continue

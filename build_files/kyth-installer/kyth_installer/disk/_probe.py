@@ -30,9 +30,8 @@ def _get_live_usb_disk() -> Optional[str]:
             source = _disk._findmnt_source(path)
             if not source:
                 continue
-            # Batched single lsblk JSON call — replaces 3 sequential
-            # text-mode fallbacks (PKNAME, NAME,TYPE, TYPE) to avoid
-            # ~3× fork/exec on slow live USB.
+            # Single JSON path — no silent text-mode fallbacks; fail-closed
+            # rather than risk handing back the live USB as a wipe candidate.
             try:
                 result = _disk.run_command(
                     ["lsblk", "-J", "-o", "NAME,PKNAME,TYPE", source],
@@ -48,12 +47,9 @@ def _get_live_usb_disk() -> Optional[str]:
                     name = (dev.get("name") or "").strip().lstrip("└─├")
                     devtype = (dev.get("type") or "").strip()
                     if devtype == "disk":
-                        # lsblk -J returns absolute /dev path in NAME when --paths not used;
-                        # normalize to /dev/<name> form.
                         if name.startswith("/dev/"):
                             return name
                         return f"/dev/{name}" if name else source
-                    # Walk children if present (e.g. partition → disk via PKNAME missing)
                     for child in dev.get("children") or []:
                         if (child.get("type") or "").strip() == "disk":
                             cname = (child.get("name") or "").strip().lstrip("└─├")
@@ -61,43 +57,9 @@ def _get_live_usb_disk() -> Optional[str]:
                                 return cname
                             if cname:
                                 return f"/dev/{cname}"
-                # Fallback to legacy text mode if JSON gave no result (older lsblk)
-                raise ValueError("no disk from JSON")
+                _logger.debug("_get_live_usb_disk: JSON lookup for %s returned no disk", source)
             except Exception:
-                _logger.debug("_get_live_usb_disk: JSON lookup for %s failed, trying text fallbacks", source, exc_info=True)
-                try:
-                    result = _disk.run_command(
-                        ["lsblk", "-n", "-o", "PKNAME", source],
-                        capture_output=True, text=True, check=True, timeout=5,
-                    )
-                    pkname = result.stdout.strip().splitlines()
-                    parent = next((line.strip() for line in pkname if line.strip()), "")
-                    if parent:
-                        return f"/dev/{parent}"
-                except Exception:
-                    _logger.debug("_get_live_usb_disk: PKNAME lookup for %s failed", source, exc_info=True)
-                try:
-                    result = _disk.run_command(
-                        ["lsblk", "-n", "-o", "NAME,TYPE", source],
-                        capture_output=True, text=True, check=True, timeout=5,
-                    )
-                    disk = result.stdout
-                    for line in disk.splitlines():
-                        parts = line.split()
-                        if len(parts) >= 2 and parts[1] == "disk":
-                            return f"/dev/{parts[0].lstrip('└─├')}"
-                except Exception:
-                    _logger.debug("_get_live_usb_disk: NAME,TYPE lookup for %s failed", source, exc_info=True)
-                try:
-                    result = _disk.run_command(
-                        ["lsblk", "-n", "-o", "TYPE", source],
-                        capture_output=True, text=True, check=True, timeout=5,
-                    )
-                    devtype = result.stdout.strip()
-                    if devtype == "disk":
-                        return source
-                except Exception:
-                    _logger.debug("_get_live_usb_disk: TYPE lookup for %s failed", source, exc_info=True)
+                _logger.debug("_get_live_usb_disk: JSON lookup for %s failed", source, exc_info=True)
         except Exception:
             _logger.debug("_get_live_usb_disk: findmnt probe of %s failed", path, exc_info=True)
         _logger.warning("_get_live_usb_disk: all lsblk fallbacks failed for %s — live USB may be exposed as wipe candidate", source)
