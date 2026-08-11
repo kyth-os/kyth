@@ -252,11 +252,15 @@ class Journal:
                         return name
         return None
 
-    def _initial_table_state(self) -> tuple[str, int, int]:
+    def _initial_table_state(self, current_parts: list[dict]) -> tuple[str, int, int]:
         """Return (table_type, primary_count, disk_size_bytes) as the disk
         stands before this journal's ops are applied — the starting point
         validate() walks ops forward from, since a new_table op can replace
         either mid-journal.
+
+        `current_parts` is validate()'s own already-fetched list_partitions()
+        result, passed in so this doesn't re-scan the same disk a second time
+        just to count primaries.
 
         MBR (msdos) tables support at most 4 primary partitions, and this
         installer does not create extended/logical partitions to work around
@@ -266,7 +270,7 @@ class Journal:
         disk_info = disks_by_name.get(self.disk, {})
         table_type = (disk_info.get("partition_table") or "").lower()
         primary_count = (
-            len([pt for pt in list_partitions(self.disk) if pt.get("name")])
+            len([pt for pt in current_parts if pt.get("name")])
             if table_type == "msdos" else 0
         )
         disk_size_bytes = _safe_int(disk_info.get("size_bytes"), -1)
@@ -315,7 +319,7 @@ class Journal:
                     start + size if start >= 0 and size > 0 else -1,
                     part.get("fstype") or "",
                 )
-        table_type, primary_count, disk_size_bytes = self._initial_table_state()
+        table_type, primary_count, disk_size_bytes = self._initial_table_state(current_parts)
 
         for op in self.ops:
             kind = op["kind"]

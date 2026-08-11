@@ -67,21 +67,43 @@ def _get_live_usb_disk() -> Optional[str]:
 
 
 
-def _parent_disk(dev: str | None) -> str | None:
+def _parent_disk(dev: str | None, tree: dict | None = None) -> str | None:
     # Walks every layer of indirection (partition, LVM LV/PV, LUKS mapper)
     # up to the underlying physical disk. A single PKNAME hop is not enough
     # for e.g. an LVM logical volume on a LUKS-encrypted partition, where
     # the immediate PKNAME is itself another non-disk device.
+    #
+    # `tree` is an optional pre-fetched _disk._lsblk_tree() snapshot: callers
+    # that resolve ancestry for several devices in one operation (e.g.
+    # _protected_install_disks) fetch it once and pass it through so this
+    # walk costs zero further subprocess spawns per level/per call. Without
+    # one, a single fresh tree is fetched here (still just one lsblk
+    # invocation regardless of chain depth, vs. the old two-calls-per-level
+    # scheme).
     dev = _disk._normal_device_path(dev)
+    if tree is None:
+        tree = _disk._lsblk_tree()
     seen: set[str] = set()
     while dev and dev not in seen:
         seen.add(dev)
-        if _disk._device_type(dev) == "disk":
+        info = tree.get(dev)
+        if info is None:
+            # Not in the batched snapshot (e.g. it went stale, or the device
+            # is named unusually) — fail-safe by resolving just this hop the
+            # old way rather than giving up on the whole walk.
+            if _disk._device_type(dev) == "disk":
+                return dev
+            parent = _disk._lsblk_text(["-n", "-o", "PKNAME", dev])
+            if not parent:
+                return None
+            dev = _disk._normal_device_path(parent.splitlines()[0])
+            continue
+        if info.get("type") == "disk":
             return dev
-        parent = _disk._lsblk_text(["-n", "-o", "PKNAME", dev])
+        parent = info.get("pkname")
         if not parent:
             return None
-        dev = _disk._normal_device_path(parent.splitlines()[0])
+        dev = parent
     return None
 
 
@@ -107,24 +129,32 @@ def _mount_sources(path: str, recursive: bool = False) -> set[str]:
 
 
 
-def _protected_install_disks() -> set[str]:
+def _protected_install_disks(tree: dict | None = None, running_disk: str | None = None) -> set[str]:
+    # Resolves ancestry for up to ~8 mount sources (running-system disk plus
+    # every protected mountpoint). Fetching the device tree once up front
+    # means every one of those _parent_disk() calls below is a dict walk,
+    # not a fresh round of lsblk spawns.
+    if tree is None:
+        tree = _disk._lsblk_tree()
+    if running_disk is None:
+        running_disk = _disk._running_system_disk()
     protected: set[str] = set()
-    for dev in {_disk._running_system_disk()}:
-        disk = _disk._parent_disk(dev)
+    for dev in {running_disk}:
+        disk = _disk._parent_disk(dev, tree=tree)
         if disk:
             protected.add(disk)
     for mount in ("/", "/boot", "/boot/efi", "/sysroot", "/run/initramfs/live", "/run/initramfs/iso"):
         for source in _disk._mount_sources(mount):
-            disk = _disk._parent_disk(source)
+            disk = _disk._parent_disk(source, tree=tree)
             if disk:
                 protected.add(disk)
     for source in _disk._mount_sources("/run/initramfs", recursive=True):
-        disk = _disk._parent_disk(source)
+        disk = _disk._parent_disk(source, tree=tree)
         if disk:
             protected.add(disk)
     for source in _disk._mount_sources("/run/media", recursive=True):
         if _IS_LIVE_SESSION:
-            disk = _disk._parent_disk(source)
+            disk = _disk._parent_disk(source, tree=tree)
             if disk:
                 protected.add(disk)
     return protected

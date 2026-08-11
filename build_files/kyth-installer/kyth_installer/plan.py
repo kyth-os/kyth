@@ -115,10 +115,15 @@ def _probe_storage(
     *,
     include_partitions: bool = True,
     include_free_space: bool = False,
+    disks: tuple | None = None,
 ) -> StorageSnapshot:
-    """Capture all live discovery needed for one planning decision."""
+    """Capture all live discovery needed for one planning decision.
+
+    `disks` lets a caller that already has a fresh list_disks() result (e.g.
+    one iterating over every disk on the system) pass it straight through
+    instead of this re-running the disk scan once per call."""
     return StorageSnapshot(
-        disks=tuple(list_disks()),
+        disks=tuple(disks) if disks is not None else tuple(list_disks()),
         partitions=tuple(list_partitions(disk)) if include_partitions else (),
         free_regions=tuple(list_free_space(disk)) if include_free_space else (),
         efi_partition=find_efi_partition(disk) if include_partitions else None,
@@ -202,12 +207,16 @@ def suggest_windows_resize_target(snapshot=None) -> dict | None:
     """
     from .disk import list_disks as _list_disks  # local to avoid cycle
     best = None
-    for d in _list_disks():
+    all_disks = tuple(_list_disks())
+    for d in all_disks:
         name = d.get("name")
         if not name:
             continue
         try:
-            snap = snapshot if snapshot and snapshot.disks_by_name.get(name) else _probe_storage(name)
+            snap = (
+                snapshot if snapshot and snapshot.disks_by_name.get(name)
+                else _probe_storage(name, disks=all_disks)
+            )
         except Exception:
             continue
         for pname, part in snap.partitions_by_name.items():

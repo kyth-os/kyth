@@ -33,8 +33,13 @@ def _descendant_mountpoints(device: dict) -> list[str]:
 
 
 def list_disks():
-    protected = _disk._protected_install_disks()
-    current_disk = _disk._parent_disk(_disk._running_system_disk())
+    # Fetch the device tree and running-system disk once and share them with
+    # both _protected_install_disks() and the current-disk resolution below,
+    # instead of each independently re-walking ancestry from scratch.
+    tree = _disk._lsblk_tree()
+    running_disk = _disk._running_system_disk()
+    protected = _disk._protected_install_disks(tree=tree, running_disk=running_disk)
+    current_disk = _disk._parent_disk(running_disk, tree=tree)
     disks = []
     try:
         blockdevices = _disk._lsblk_blockdevices(

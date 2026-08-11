@@ -311,11 +311,14 @@ def _collect_flatpak_updates() -> dict[str, Any]:
 
 
 def _collect_nvidia() -> dict[str, Any]:
-    from kyth_shared.system.process import run_command
-
+    # Derive from the sysfs-based hardware view (already collected in the
+    # same probe batch via the "hardware-view" collector, and cached for
+    # _HARDWARE_VIEW_TTL regardless) instead of spawning a second `lspci` to
+    # re-derive the same fact by substring-matching its text output.
     try:
-        result = run_command(["lspci"], timeout=5)
-        value = bool(result and "nvidia" in (result.stdout or "").lower())
+        from kyth_shared.system.hardware_view import get_hardware_view
+
+        value = bool(get_hardware_view().has_nvidia)
     except Exception:
         value = False
     return {"nvidia-detect": value}

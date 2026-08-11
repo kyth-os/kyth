@@ -125,6 +125,7 @@ class MainWindow(QMainWindow):
         self._palette_shortcut.activated.connect(self._show_palette)
         self._mission_worker = None
         single_shot(self, 150, self._refresh_mission_bar)
+        self._sidebar_channel_worker = None
         self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
         self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
         self._switch_page(0)
@@ -586,7 +587,21 @@ class MainWindow(QMainWindow):
     # ── Navigation ────────────────────────────────────────────────────────────
 
     def _refresh_sidebar_channel(self):
-        branch = current_branch()
+        # current_branch() can shell out to `bootc status` on a cold cache
+        # (DISK_TTL["bootc-branch"] = 90s) — run it off the UI thread like
+        # _refresh_mission_bar, instead of blocking startup on the main thread.
+        if self._sidebar_channel_worker is not None:
+            return
+        from .services.runtime import DataWorker
+
+        self._sidebar_channel_worker = DataWorker("sidebar-channel", current_branch)
+        self._sidebar_channel_worker.result.connect(self._on_sidebar_channel_ready)
+        self._sidebar_channel_worker.failed.connect(lambda _k, _m: None)
+        self._sidebar_channel_worker.finished.connect(lambda: setattr(self, "_sidebar_channel_worker", None))
+        self._sidebar_channel_worker.finished.connect(self._sidebar_channel_worker.deleteLater)
+        self._sidebar_channel_worker.start()
+
+    def _on_sidebar_channel_ready(self, _key: str, branch: object):
         text = {"latest": "Stable Channel", "testing": "Testing Channel"}.get(branch or "", "System Hub")
         self._sidebar_ver_lbl.setText(text)
 

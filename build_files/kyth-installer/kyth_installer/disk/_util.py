@@ -1,4 +1,4 @@
-"""util — _safe_int, _normal_device_path, _lsblk_text, _lsblk_blockdevices, _findmnt_source, _device_type, _block_size_bytes"""
+"""util — _safe_int, _normal_device_path, _lsblk_text, _lsblk_blockdevices, _lsblk_tree, _findmnt_source, _device_type, _block_size_bytes"""
 
 from __future__ import annotations
 
@@ -57,6 +57,38 @@ def _lsblk_blockdevices(args: list[str], timeout: int = 5) -> list[dict]:
         capture_output=True, text=True, check=True, timeout=timeout,
     )
     return parse_lsblk_devices(result.stdout)
+
+
+
+def _lsblk_tree() -> dict[str, dict]:
+    """Single system-wide `lsblk --json --paths -o NAME,PKNAME,TYPE` snapshot,
+    flattened into {normalized_device_path: {"pkname": normalized_path_or_None,
+    "type": str}}.
+
+    Ancestry walks (_parent_disk) used to re-invoke lsblk once per level of
+    LVM/LUKS indirection (a TYPE check plus a PKNAME lookup, each its own
+    subprocess). This lets a caller fetch the whole device graph once and
+    resolve any number of ancestry walks against it with zero further
+    subprocess spawns. Best-effort: returns an empty dict on failure, and
+    callers fall back to the per-device lsblk calls for anything missing
+    from it.
+    """
+    tree: dict[str, dict] = {}
+    try:
+        devices = _disk._lsblk_blockdevices(["--paths", "-o", "NAME,PKNAME,TYPE"])
+    except Exception:
+        return tree
+
+    def walk(items):
+        for item in items or []:
+            name = _disk._normal_device_path(item.get("name"))
+            if name:
+                pkname = _disk._normal_device_path(item.get("pkname")) or None
+                tree[name] = {"pkname": pkname, "type": (item.get("type") or "").strip()}
+            walk(item.get("children"))
+
+    walk(devices)
+    return tree
 
 
 
