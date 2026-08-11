@@ -13,10 +13,13 @@ def bt_audio_device_summary() -> str:
         line.split()[1] for line in connected.splitlines()
         if len(line.split()) >= 2
     }
-    sinks_raw = command_stdout(
-        ["bash", "-c", "wpctl status 2>/dev/null | grep -E 'bluez_output' | head -8"],
-        timeout=5,
-    )
+    wpctl_out = command_stdout(["wpctl", "status"], timeout=5)
+    sinks_raw = "\n".join(
+        line for line in wpctl_out.splitlines() if "bluez_output" in line
+    ).strip()
+    # Limit to 8 lines like original `head -8`
+    if sinks_raw:
+        sinks_raw = "\n".join(sinks_raw.splitlines()[:8])
     lines: list[str] = []
     for line in paired.splitlines():
         parts = line.split(" ", 2)
@@ -33,15 +36,14 @@ def bt_audio_device_summary() -> str:
 
 
 def switch_to_bt_audio_output() -> str:
-    result = run_command(
-        [
-            "bash", "-c",
-            "wpctl status 2>/dev/null | grep -E '\\bbluez_output' | head -1"
-            " | awk '{print $1}' | tr -d '.*'",
-        ],
-        timeout=5,
-    )
-    sink_id = (result.stdout.strip() if result else "")
+    wpctl_out2 = command_stdout(["wpctl", "status"], timeout=5)
+    sink_id = ""
+    for line in wpctl_out2.splitlines():
+        if "bluez_output" in line:
+            # Original: awk '{print $1}' | tr -d '.*' — first token, strip dots
+            token = line.strip().split()[0] if line.strip().split() else ""
+            sink_id = token.replace(".", "").replace("*", "")
+            break
     if sink_id:
         run_command(["wpctl", "set-default", sink_id], timeout=5)
         return (
