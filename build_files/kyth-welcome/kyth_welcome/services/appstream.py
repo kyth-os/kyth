@@ -181,13 +181,35 @@ def warm_appstream_cache() -> bool:
     try:
         from kyth_shared.system.probe import read_section
 
+        # flatpak-apps is a list of installed app IDs (DISK_TTL 180s); we mirror
+        # it only as a liveness signal — the AppStream *catalog* (parsed XML)
+        # is cached separately at _APPSTREAM_CACHE_PATH with 1h TTL via staleness
+        # check in load_appstream_catalog. Don't confuse list with catalog dict.
         data = read_section("flatpak-apps", max_age=3600)
+        if isinstance(data, list) and data:
+            # Probe has fresh installed-apps data — AppStream catalog may still
+            # be stale; leave _APPSTREAM_CACHE_PATH to load_appstream_catalog's
+            # mtime check and offline fallback. Return True as probe-warm signal.
+            return True
         if isinstance(data, dict) and data:
             save_json_config(_APPSTREAM_CACHE_PATH, data)
             return True
     except Exception:
         pass
     return False
+
+
+def appstream_cache_status() -> str:
+    """Return banner text for AppStore stale cache, or '' if fresh."""
+    try:
+        if not os.path.exists(_APPSTREAM_CACHE_PATH):
+            return "UNAVAILABLE (cached)" if not os.path.exists("/var/lib/flatpak/appstream/flathub/x86_64/active/appstream.xml") else ""
+        age = __import__("time").time() - os.path.getmtime(_APPSTREAM_CACHE_PATH)
+        if age > 3600:
+            return "UNAVAILABLE (cached — stale, refresh when online)"
+    except OSError:
+        pass
+    return ""
 
 
 _fp_component_url = _component_url
