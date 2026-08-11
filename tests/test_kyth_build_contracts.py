@@ -108,27 +108,25 @@ class BuildAssemblyContracts(unittest.TestCase):
         rpm_run = dockerfile.index(
             "RUN --mount=type=bind,source=build_files/kyth_shared"
         )
-        self.assertLess(dockerfile.index("ARG BUILD_DATE=unset"), rpm_run)
-        self.assertIn(
-            'cache-bust:rpm=${RPM_SET_HASH};date=${BUILD_DATE}',
-            dockerfile[:rpm_run + 2000],
-        )
+        daily_upgrade = dockerfile.index('cache-bust=${BUILD_DATE}')
+        self.assertGreater(dockerfile.index("ARG BUILD_DATE=unset"), rpm_run)
+        self.assertLess(dockerfile.index("ARG BUILD_DATE=unset"), daily_upgrade)
+        self.assertIn('cache-bust:rpm=${RPM_SET_HASH}', dockerfile[:rpm_run + 2000])
+        self.assertIn("update_fedora_kernel", dockerfile[daily_upgrade:daily_upgrade + 2500])
         for hold in ("--exclude='gamescope*'", "--exclude='akmod-*'", "--exclude='kmod-*'"):
             self.assertNotIn(hold, dockerfile)
 
     def test_fedora_nvidia_devel_tracks_coordinated_latest_kernel(self):
-        script = (
-            BUILD_FILES / "scripts/packages/16-gpu-nvidia.sh"
-        ).read_text(encoding="utf-8")
+        script = (BUILD_FILES / "scripts/lib/fedora-kernel.sh").read_text(encoding="utf-8")
         upgrade = script.index("dnf5 upgrade -y --refresh")
-        resolve = script.index("KERNEL_VR=$(rpm -q kernel-core")
+        resolve = script.index('FEDORA_KERNEL_VR="$(')
         self.assertLess(upgrade, resolve)
         for package in (
             "kernel-core", "kernel-modules", "kernel-modules-core",
             "kernel-modules-extra",
         ):
             self.assertIn(package, script[upgrade:resolve])
-        self.assertIn('"kernel-devel-${KERNEL_VR}"', script)
+        self.assertIn('"kernel-devel-${FEDORA_KERNEL_VR}"', script)
         self.assertIn('rpm --nodeps -e "${nevra}"', script)
 
     def test_fragment_relative_source_targets_exist(self):

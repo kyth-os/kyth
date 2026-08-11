@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../lib/fedora-kernel.sh"
+
 # ── NVIDIA GPU ────────────────────────────────────────────────────────────────
 # Bundle akmod-nvidia so kyth-hw-setup can build the kernel module at first
 # boot without requiring a manual rpm-ostree layer step. On AMD/Intel systems
@@ -25,20 +27,9 @@ set -euo pipefail
 # fails outright.
 KERNEL_FLAVOR="$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)"
 if [[ "${KERNEL_FLAVOR}" == "fedora" ]]; then
-	# Upgrade the complete Fedora kernel payload together. Kernel packages are
-	# excluded globally so ordinary package transactions cannot leave core and
-	# module packages out of sync; this is the one coordinated exception.
-	dnf5 upgrade -y --refresh --setopt=excludepkgs= \
-		--disablerepo=fedora-multimedia \
-		kernel \
-		kernel-core \
-		kernel-modules \
-		kernel-modules-core \
-		kernel-modules-extra
-
-	KERNEL_VR=$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort -V | tail -n 1)
+	update_fedora_kernel
+	KERNEL_VR="${FEDORA_KERNEL_VR}"
 	dnf5 install -y --setopt=excludepkgs= --disablerepo=fedora-multimedia \
-		"kernel-devel-${KERNEL_VR}" \
 		akmod-nvidia \
 		xorg-x11-drv-nvidia \
 		xorg-x11-drv-nvidia-libs \
@@ -47,18 +38,6 @@ if [[ "${KERNEL_FLAVOR}" == "fedora" ]]; then
 		egl-wayland
 	rpm -q akmod-nvidia akmods "kernel-devel-${KERNEL_VR}" \
 		xorg-x11-drv-nvidia egl-wayland
-
-	# Fedora kernels are install-only packages, so upgrading can retain the base
-	# image's older kernel. An atomic image must expose one coherent deployment
-	# kernel; remove only old versioned payloads after the latest stack and its
-	# matching devel package have both been verified.
-	for package in kernel kernel-core kernel-modules kernel-modules-core kernel-modules-extra kernel-devel; do
-		while IFS= read -r nevra; do
-			[[ -z "${nevra}" || "${nevra}" == *"-${KERNEL_VR}" ]] && continue
-			echo "Removing superseded Fedora kernel package: ${nevra}"
-			rpm --nodeps -e "${nevra}"
-		done < <(rpm -q "${package}" --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' 2>/dev/null || true)
-	done
 else
 	# CachyOS flavor: matching headers (kernel-cachyos-devel-matched) come from
 	# the COPR in build_base; only the akmod machinery is needed here.

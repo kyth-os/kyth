@@ -27,12 +27,10 @@ LABEL org.kyth.profile.virtualization-host="${ENABLE_VIRTUALIZATION_HOST}"
 LABEL org.kyth.profile.ksm="${ENABLE_KSM}"
 LABEL org.kyth.gaming-versions="${GAMING_VERSIONS_HASH}"
 
-# Build cache boundary: all RPM package installs (~2-3 GB). Source changes are
-# tracked by RPM_SET_HASH, while BUILD_DATE deliberately refreshes repository
-# resolution every daily build. This costs build time but prevents packages
-# excluded from an older cached transaction from lagging current repositories.
+# Build cache boundary: all RPM package installs (~2-3 GB). This layer selects
+# the package set and is source-hash/base-image cached. The date-busted upgrade
+# layer later refreshes every installed RPM plus the coordinated kernel stack.
 ARG RPM_SET_HASH=unset
-ARG BUILD_DATE=unset
 # Published layer boundaries are defined later by legacy-rechunk metadata.
 RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=bind,source=build_files/config,target=/ctx/config \
@@ -44,7 +42,7 @@ RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
-    : "cache-bust:rpm=${RPM_SET_HASH};date=${BUILD_DATE}" && \
+    : "cache-bust:rpm=${RPM_SET_HASH}" && \
     PYTHONPATH="/ctx/kyth_shared" \
     ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS}" \
     ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST}" \
@@ -86,7 +84,7 @@ RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/third
 # coordinated stack during package assembly; the later kernel-repair layer
 # validates the resulting latest kernel and initramfs. Sits after the large Proton-CachyOS/thirdparty download layers
 # (which it does not depend on) so splash tweaks don't re-pull them, and before
-# the daily RPM refresh boundary.
+# the BUILD_DATE cache-bust layer.
 ARG PLYMOUTH_HASH=unset
 COPY build_files/plymouth/kyth.plymouth             /tmp/kyth-plymouth/kyth.plymouth
 COPY build_files/plymouth/kyth.script               /tmp/kyth-plymouth/kyth.script
@@ -130,6 +128,11 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx
     : "cache-bust:sysconfig=${SYSCONFIG_HASH}" && \
     bash /ctx/sysconfig-static.sh
 
+# BUILD_DATE busts the upgrade layer and everything after it on every daily
+# build. Package selection remains cached, but installed packages and the full
+# Fedora kernel stack are refreshed against current repositories here.
+ARG BUILD_DATE=unset
+
 # Build cache boundary: upstream RPM upgrades and optional Mesa-git drivers.
 # Mesa-git is folded into this layer instead of a standalone RUN so the no-op
 # ENABLE_MESA_GIT=0 case does not add a separate empty layer to the manifest chain.
@@ -137,6 +140,7 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx
 # cached until their scripts or the base image change.
 RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-git.sh \
     --mount=type=bind,source=build_files/scripts/kernel-repair.sh,target=/ctx/kernel-repair.sh \
+    --mount=type=bind,source=build_files/scripts/lib/fedora-kernel.sh,target=/ctx/lib/fedora-kernel.sh \
     --mount=type=bind,source=build_files/scripts/lib/find-kver.sh,target=/ctx/lib/find-kver.sh \
     --mount=type=bind,source=build_files/scripts/lib/dracut-retry.sh,target=/ctx/lib/dracut-retry.sh \
     --mount=type=bind,source=build_files/scripts/lib/check-multilib.sh,target=/ctx/lib/check-multilib.sh \
@@ -148,6 +152,8 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
         --disablerepo='fedora-multimedia' \
         --exclude='gstreamer1-plugins-bad' \
         --exclude='gstreamer1-plugins-bad.i686' && \
+    source /ctx/lib/fedora-kernel.sh && \
+    if [[ "$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)" == fedora ]]; then update_fedora_kernel; fi && \
     bash /ctx/kernel-repair.sh && \
     ENABLE_MESA_GIT=${ENABLE_MESA_GIT} bash /ctx/mesa-git.sh && \
     . /ctx/lib/check-multilib.sh && \
