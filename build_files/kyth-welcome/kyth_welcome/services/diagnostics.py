@@ -247,7 +247,15 @@ def _health_command_report() -> str:
             sections.append("stderr:")
             sections.append(err)
         sections.append("")
-    return "\n".join(sections)
+    text = "\n".join(sections)
+    # Scrub at source — all consumers (Copy/Save/Issue) get PII-free text (S13)
+    try:
+        from kyth_shared.diagnostics_scrub import scrub_logs
+
+        text = scrub_logs(text)
+    except Exception:
+        pass
+    return text
  # _health_command_report
 
 def _health_recommendations(report: str) -> str:
