@@ -158,11 +158,11 @@ class _AutoUpdateMixin:
 
     def _build_windows_update_style_card(self):
         card, layout = _make_card("card-accent-ok")
-        title = QLabel("Windows Update style — active hours & reboot scheduling")
+        title = QLabel("Active hours & reboot scheduling")
         title.setObjectName("card-title")
         layout.addWidget(title)
         body = QLabel(
-            "Like Windows Update: KythOS stages the new OS image in the background, then waits for you. "
+            "KythOS stages the new OS image in the background, then waits for you. "
             "Reboot when you are ready — active hours defer automatic staging, and your previous image stays as System Restore for 14 days. "
             "Files in /home are never touched."
         )
@@ -233,7 +233,7 @@ class _AutoUpdateMixin:
         self._add(card)
 
     def _refresh_wu_staged_label(self):
-        """H7: keep Windows-style staged label in sync with canonical bootc state."""
+        """H7: keep staged label in sync with canonical bootc state."""
         try:
             from .services.bootc import has_staged_update, bootc_status_data, bootc_image_timestamp, nested_get
 

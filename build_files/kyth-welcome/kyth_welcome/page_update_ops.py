@@ -88,7 +88,7 @@ class _UpdateOpsMixin:
         self._add(action_card)
 
     def _build_rollback_explainer_card(self) -> None:
-        """Complaint #5: make atomic updates + rollback obvious to Windows switchers."""
+        """Complaint #5: make atomic updates + rollback obvious."""
         card, layout = _make_card("card-accent-ok")
         title = QLabel("🛡️  Updates are atomic — rollback is one reboot away")
         title.setObjectName("card-title")
@@ -312,7 +312,7 @@ class _UpdateOpsMixin:
         return best
 
     def _run_full_update(self):
-        # Storage gate — Windows switcher filled C: then clicks Full Update and gets ENOSPC mid-pull. Block early.
+        # Storage gate — user filled disk then clicks Full Update and gets ENOSPC mid-pull. Block early.
         # Skip gate when an image is already staged — next boot just switches, no pull needed.
         if has_staged_update():
             self._start_operation_spec(full_update_operation())
