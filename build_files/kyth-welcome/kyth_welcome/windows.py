@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 rollback = False
             try:
-                portal = command_stdout(["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"], timeout=2) or ""
+                portal = command_stdout(["systemctl", "--user", "is-active", "xdg-desktop-portal.service"], timeout=2) or ""
                 portal = portal.strip()
             except Exception:
                 portal = ""

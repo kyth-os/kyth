@@ -195,16 +195,16 @@ class WelcomePage(Page):
         from .services.process import command_stdout
 
         # Fix 7: run 4 independent probes in parallel — portal/pipewire/nvidia/ntfs
-        # previously ran serially ~9 s worst-case, now ~3 s
+        # previously ran serially ~9 s worst-case, now ~3 s (no bash -lc — direct systemctl, see Unit 1)
         def _portal():
             return command_stdout(
-                ["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"],
+                ["systemctl", "--user", "is-active", "xdg-desktop-portal.service"],
                 timeout=3,
             ) or "unknown"
 
         def _pipewire():
             return command_stdout(
-                ["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"],
+                ["systemctl", "--user", "is-active", "pipewire.service"],
                 timeout=3,
             ) or "unknown"
 
