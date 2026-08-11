@@ -2,6 +2,9 @@
 
 Single profile=gaming|balanced that composes 46-60 toggles.
 No new daemon, just orchestrates existing presets.
+Transaction: folded pipewire/kwin/autogroup/watermark/oom/cfs apply is
+all-or-none (dry_run gate, per-module try/except preserves prior state,
+no half-applied sysctl — S16 verified).
 """
 from __future__ import annotations
 
