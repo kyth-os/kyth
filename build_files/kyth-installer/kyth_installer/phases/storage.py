@@ -4,6 +4,7 @@ from __future__ import annotations
 import pathlib
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 from ..context import InstallerContext, InstallPhase

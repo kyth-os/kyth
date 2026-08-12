@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
-from .context import InstallRequest
+from .context import InstallationState, InstallRequest  # pylint: disable=unused-import
 from .plan_types import InstallPlan, PlanReport, ResolvedInstallPlan  # pylint: disable=unused-import
 from .disk import (
     _human_size,
