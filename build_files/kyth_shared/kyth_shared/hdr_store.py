@@ -1,11 +1,10 @@
 """HDR store — preserve per-output HDR peak across updates, KWin."""
 from __future__ import annotations
 
-import os, tomllib, json
+import os, tomllib
 from pathlib import Path
 from typing import Any
 
-from .commands import run
 
 DEFAULT_HDR_STORE_PATH = Path("/etc/kyth/hdr-store.toml")
 KWINRC = Path.home() / ".config/kwinrc"

@@ -1,7 +1,6 @@
 """Welcome grid — category/section helpers, split from page_welcome.py 745 (R7)."""
 from __future__ import annotations
 
-import os
 
 from .qt import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, Qt
 

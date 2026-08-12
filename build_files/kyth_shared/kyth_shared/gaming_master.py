@@ -229,7 +229,6 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
     except Exception as e:
         out["net"] = f"error {e}"
     try:
-        from .zram import load_zram  # noqa
 
         pass
     except Exception:

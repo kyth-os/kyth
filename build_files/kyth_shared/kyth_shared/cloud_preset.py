@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os, tomllib
 from pathlib import Path
-from typing import Any
 
 DEFAULT_CLOUD_PATH = Path.home() / ".config" / "kyth" / "cloud.toml"
 

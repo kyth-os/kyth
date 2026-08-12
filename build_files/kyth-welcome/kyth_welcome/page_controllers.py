@@ -247,7 +247,7 @@ class ControllerPage(Page):
     # ── Actions ────────────────────────────────────────────────────────────────
 
     def _test_rumble(self) -> None:
-        import glob, shutil
+        import glob
         dev = next(iter(glob.glob("/dev/input/js*") or glob.glob("/dev/input/by-id/*joystick*")), None)
         if not dev and shutil.which("fftest"):
             dev = "/dev/input/js0"

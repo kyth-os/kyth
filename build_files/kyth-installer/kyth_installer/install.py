@@ -1,59 +1,44 @@
 """Install orchestration for an explicit installer runtime context."""
 
-import os
-import re
-import shutil
-import subprocess
-import threading
-import traceback
-from pathlib import Path
-import pathlib
+import shutil  # pylint: disable=unused-import
+from pathlib import Path  # pylint: disable=unused-import
 
-from .assurance import run_preflight, validate_installed_target
-from .config import FAILURE_SUMMARY_FILE, LOG_FILE, SKIP_FETCH_CHECK, TRANSACTION_FILE
-from .cleanup import clear_secrets_and_orphan_mount, unmount_configuration
-from .context import InstallLifecycle, InstallRequest, InstallerContext, InstallPhase
-from .disk import get_root_partition
+from .assurance import run_preflight, validate_installed_target  # pylint: disable=unused-import
+from .config import SKIP_FETCH_CHECK
+from .context import InstallRequest, InstallerContext, InstallPhase
+from .disk import get_root_partition  # pylint: disable=unused-import
 from .plan import InstallPlan
 from .imagesrc import (
-    _friendly_network_error,
     _install_images,
     _network_preflight,
     resolve_source_refs,
 )
-from .plan import (
+from .plan import (  # pylint: disable=unused-import
     ResolvedInstallPlan,
-    _get_manual_mounts,
+    _get_manual_mounts,  # pylint: disable=unused-import
     _prepare_install_plan,
     _validate_install_target,
     _validate_storage_intent,
 )
-from .runner import run_command
-from .recovery import cleanup_registered_mounts, write_failure_summary, write_transaction_state
-from .streaming import StreamingCommandRunner
-from kyth_shared import get_rx_bytes
+from .runner import run_command  # pylint: disable=unused-import
+from kyth_shared import get_rx_bytes  # pylint: disable=unused-import
 from kyth_shared.accounts import create_installer_user as _shared_create_installer_user
 
 from .phases.common import (
     _assert_still_on_ac,
-    _disk_image_hold,
-    _push,
     _record_transaction,
-    _start_power_watch,
-    _stop_power_watch,
 )
-from .phases.bootc_cmd import _build_bootc_install_cmd, _run_cmd
-from .system import (
-    _as_root,
-    _require_no_symlink,
-    _safe_umount,
-    _try_stage_mok_enrollment,
-    ensure_system_accounts,
-    find_deploy_etc,
-    format_install_error,
-    format_os_error,
-    require_root,
-    unmount_target_disk,
+from .phases.bootc_cmd import _build_bootc_install_cmd, _run_cmd  # pylint: disable=unused-import
+from .system import (  # pylint: disable=unused-import
+    _as_root,  # pylint: disable=unused-import
+    _require_no_symlink,  # pylint: disable=unused-import
+    _safe_umount,  # pylint: disable=unused-import
+    _try_stage_mok_enrollment,  # pylint: disable=unused-import
+    ensure_system_accounts,  # pylint: disable=unused-import
+    find_deploy_etc,  # pylint: disable=unused-import
+    format_install_error,  # pylint: disable=unused-import
+    require_root,  # pylint: disable=unused-import
+    unmount_target_disk,  # pylint: disable=unused-import
 )
 
 
@@ -134,27 +119,17 @@ def _resolve_and_record_plan(
 
 
 # Phase 2 verbatim — canonical implementations now live in phases/
-from .phases.storage import (
-    _EFI_BOOT_ENTRY_RE,
-    _create_btrfs_subvolumes,
-    _mount_efi_for_alongside,
-    _prepare_install_storage,
-    _prepare_partition_target_storage,
-    _prepare_storage_for_plan,
-    _prepare_wipe_disk_storage,
-    _snapshot_efi_boot_entries,
-    _warn_if_efi_boot_entries_disappeared,
+from .phases.storage import (  # pylint: disable=unused-import
+    _prepare_install_storage,  # pylint: disable=unused-import
+    _snapshot_efi_boot_entries,  # pylint: disable=unused-import
+    _warn_if_efi_boot_entries_disappeared,  # pylint: disable=unused-import
 )
-from .phases.finalize import (
-    _append_fstab_line,
-    _blkid_uuid,
-    _configure_alongside_fstab,
-    _configure_hostname_timezone,
-    _configure_installed_system,
-    _configure_manual_mounts,
-    _create_installer_user,
-    _fsck_pass_for,
-    _handle_install_failure,
+from .phases.finalize import (  # pylint: disable=unused-import
+    _blkid_uuid,  # pylint: disable=unused-import
+    _configure_alongside_fstab,  # pylint: disable=unused-import
+    _configure_hostname_timezone,  # pylint: disable=unused-import
+    _configure_manual_mounts,  # pylint: disable=unused-import
+    _fsck_pass_for,  # pylint: disable=unused-import
 )
-from .phases.run import _run_install, _run_install_worker
+from .phases.run import _run_install, _run_install_worker  # pylint: disable=unused-import
 

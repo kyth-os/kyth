@@ -38,18 +38,14 @@ whatever protections/flags apply to "alongside" (see above) apply to them too.
 
 import logging
 import contextlib
-import fcntl
-import os
 import shutil
 import subprocess
-import tempfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
-from .context import InstallationState, InstallRequest
-from .plan_types import InstallPlan, PlanReport, ResolvedInstallPlan  # re-export for compat (monolith split step 1)
+from .context import InstallRequest
+from .plan_types import InstallPlan, PlanReport, ResolvedInstallPlan  # pylint: disable=unused-import
 from .disk import (
     _human_size,
     _latest_partition_on_disk,
@@ -250,7 +246,6 @@ def disk_hold(disk: str, log):
 
 def find_bootcurrent_esp() -> str | None:
     """Return ESP device path from BootCurrent via efibootmgr -v, or None."""
-    import shutil, subprocess
     if shutil.which("efibootmgr") is None:
         return None
     try:
@@ -269,7 +264,6 @@ def find_bootcurrent_esp() -> str | None:
         for line in r.stdout.splitlines():
             if line.strip().startswith(f"Boot{boot}"):
                 # HD(2,GPT,uuid,0x800,0xFA000)/File(\EFI\arch\grubx64.efi)
-                hm = re.search(r"HD\(\d+,GPT,[^,]+,0x[0-9a-fA-F]+,0x[0-9a-fA-F]+\)", line)
                 # We can't map HD to /dev directly, so return hint that BootCurrent exists
                 # Caller will prefer existing find_efi_partition on BootCurrent disk if possible
                 # For now, just indicate BootCurrent ESP is not on target disk if needed
@@ -334,7 +328,7 @@ def _commit_new_kythos_partition(
 
     disk_service = DiskService()
     with disk_hold(disk, log):
-        with PartitionTableGuard(disk, log, disk_service=disk_service) as backup_path:
+        with PartitionTableGuard(disk, log, disk_service=disk_service):
             if before_partition is not None:
                 try:
                     before_partition()

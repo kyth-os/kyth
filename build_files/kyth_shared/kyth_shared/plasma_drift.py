@@ -1,7 +1,7 @@
 """Plasma drift reconciler — plasma.toml declarative, offline."""
 from __future__ import annotations
 
-import os, tomllib, json
+import os, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run

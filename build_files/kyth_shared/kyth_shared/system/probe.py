@@ -351,10 +351,7 @@ def _collect_hardware_view() -> dict[str, Any]:
 
 
 def _collect_network_identity() -> dict[str, Any]:
-    from kyth_shared.system.network_identity import get_network_identity
-
     try:
-        ident = get_network_identity.__wrapped__ if hasattr(get_network_identity, "__wrapped__") else get_network_identity  # type: ignore[attr-defined]
         # Avoid recursion via probe_cached — call fetch directly through module
         from kyth_shared.system.network_identity import _vpn_status, _smb_mounts, _cloud_providers
         from kyth_shared.system.network_identity import NetworkIdentity

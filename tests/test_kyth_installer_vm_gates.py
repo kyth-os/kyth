@@ -4,11 +4,11 @@ Uses dry_run DiskService + loop-mocked lsblk payloads to exercise
 validate_plan_state containment, free-space exact-match on 4K, and
 answer-file secret handling. CI runs this; real hardware gates run via
 `just vm-gate` against actual qemu images."""
-import json
+import json  # pylint: disable=unused-import
 import sys
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from types import SimpleNamespace  # pylint: disable=unused-import
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +16,7 @@ INSTALLER_ROOT = ROOT / "build_files/kyth-installer"
 if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
-from kyth_installer import disk, plan
+from kyth_installer import disk, plan  # pylint: disable=unused-import
 from kyth_installer.context import InstallerContext
 from kyth_installer.storage_snapshot import StorageSnapshot
 
@@ -32,12 +32,6 @@ class VmGateHarnessTests(unittest.TestCase):
 
         def fake_part_size_bytes(_d):
             return disk_size
-
-        def fake_block_size_4k(_d):
-            return 4096
-
-        def fake_block_size_512(_d):
-            return 512
 
         parts = [
             {
@@ -148,7 +142,7 @@ class VmGateHarnessTests(unittest.TestCase):
              patch("kyth_installer.system.list_keymaps", return_value=["us", "de"]), \
              patch("kyth_installer.system._hash_password", return_value="$6$hashed"):
             try:
-                req = validate_install_request(body, ctx, strict_locale=True)
+                validate_install_request(body, ctx, strict_locale=True)
             except Exception as exc:
                 self.fail(f"cross-disk EFI validation unexpectedly failed: {exc}")
             if mock_validate.called:
@@ -193,7 +187,7 @@ class VmGateHarnessTests(unittest.TestCase):
 
     # --- Gate #6: free/replace/wipe/manual under UEFI and BIOS ---
     def test_gate6_gpt_requires_bios_boot(self):
-        from kyth_installer.storage_snapshot import StorageSnapshot
+        from kyth_installer.storage_snapshot import StorageSnapshot  # pylint: disable=unused-import,reimported
         from kyth_installer.config import BIOS_BOOT_GUID
         # has_bios_boot_partition is the gate — validate via snapshot directly
         snap_no_bios = StorageSnapshot(
@@ -212,7 +206,7 @@ class VmGateHarnessTests(unittest.TestCase):
     # --- Gate #7: journal replay / mount cleanup ---
     def test_gate7_journal_commit_required_for_manual(self):
         from kyth_installer.plan_validate import _validate_install_target
-        from kyth_installer.storage_snapshot import StorageSnapshot
+        from kyth_installer.storage_snapshot import StorageSnapshot  # pylint: disable=unused-import,reimported
         ctx = InstallerContext()
         snap = StorageSnapshot(disks=({"name": "/dev/sda"},), partitions=(), free_regions=(), efi_partition="/dev/sda1", is_gpt=True)
         # No journal at all — manual requires a committed journal
@@ -251,6 +245,6 @@ class VmGateHarnessTests(unittest.TestCase):
         # without requiring a real Windows partition. This keeps the harness
         # honest about import paths that gate the actual hardware checks.
         import kyth_installer.fsresize as fsresize
-        import kyth_installer.plan as plan_mod
+        import kyth_installer.plan as plan_mod  # pylint: disable=reimported
         self.assertTrue(hasattr(fsresize, "resize_ntfs_partition") or hasattr(plan_mod, "_is_gpt_disk"))
         self.assertTrue(hasattr(plan_mod, "_has_bios_boot_partition"))

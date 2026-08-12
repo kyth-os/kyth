@@ -106,7 +106,6 @@ class PostRouteService:
         # Body may contain {"usb_mount": "/run/media/liveuser/USB"}
         # Best-effort: find first removable mount under /run/media if not given.
         import os
-        import shutil
         from pathlib import Path
         from .config import LOG_FILE, TRANSACTION_FILE, FAILURE_SUMMARY_FILE
         from .runner import run_command

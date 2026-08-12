@@ -7,25 +7,25 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .partition_ops_journal import Journal, _require_mkfs, _require_parted, _require_sgdisk
+from .partition_ops_journal import Journal, _require_mkfs  # pylint: disable=unused-import
 
 # Re-exported for server.py and tests that import from partition_ops
-from .config import BIOS_BOOT_BYTES, FILESYSTEM_OPTIONS, _FILESYSTEM  # noqa: F401
+from .config import FILESYSTEM_OPTIONS, _FILESYSTEM  # pylint: disable=unused-import
 # Disk helpers re-exported so mock.patch.object(partition_ops, "list_disks") works
-from .disk import (  # noqa: F401
-    _human_size,
-    _latest_partition_on_disk,
-    _normal_device_path,
-    _parent_disk,
-    _partition_number,
-    _partition_size_bytes,
-    _partition_start_bytes,
-    _safe_int,
-    list_disks,
-    list_free_space,
-    list_partitions,
+from .disk import (  # noqa: F401  # pylint: disable=unused-import
+    _human_size,  # pylint: disable=unused-import
+    _latest_partition_on_disk,  # pylint: disable=unused-import
+    _normal_device_path,  # pylint: disable=unused-import
+    _parent_disk,  # pylint: disable=unused-import
+    _partition_number,  # pylint: disable=unused-import
+    _partition_size_bytes,  # pylint: disable=unused-import
+    _partition_start_bytes,  # pylint: disable=unused-import
+    _safe_int,  # pylint: disable=unused-import
+    list_disks,  # pylint: disable=unused-import
+    list_free_space,  # pylint: disable=unused-import
+    list_partitions,  # pylint: disable=unused-import
 )
-from .fsresize import shrink_filesystem  # noqa: F401
+from .fsresize import shrink_filesystem  # pylint: disable=unused-import
 
 def _mkfs_cmd(fstype: str, device: str, label: str = "") -> list[str]:
     info = _FILESYSTEM.get(fstype)

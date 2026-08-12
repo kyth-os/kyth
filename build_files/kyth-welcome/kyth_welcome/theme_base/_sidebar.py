@@ -5,7 +5,7 @@ highlight) so it lifts off the main canvas. Active item uses a pill + blue
 accent stripe + subtle glow, matching Steam's focus treatment without copying
 its orange. Section labels stay muted upper-case but with more air.
 """
-from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_GLOW, KYTH_GROUND, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
+from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_GLOW, KYTH_HAIRLINE, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
 
 SIDEBAR_QSS = f"""
 /* ── Sidebar — control-center rail ─────────────────────────────────────── */

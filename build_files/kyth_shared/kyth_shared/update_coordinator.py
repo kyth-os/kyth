@@ -7,7 +7,6 @@ Pages should import *this* instead of calling `read_state`/`write_state` directl
 from __future__ import annotations
 
 import fcntl
-import json
 from pathlib import Path
 from typing import Callable, TypeVar
 
@@ -60,7 +59,7 @@ class UpdateCoordinator:
     def record_failure(self, digest: str, boot_id: str, reason: str, threshold: int = 3) -> BootHealthState:
         from .boot_health import record_failure
 
-        return self.transaction(lambda s: record_failure(s, digest, boot_id, reason, threshold))
+        return self.transaction(lambda s: record_failure(s, digest, boot_id, reason, threshold=threshold))
 
     def record_staged(self, digest: str, rollout_ring: str = "stable") -> BootHealthState:
         from .boot_health import record_staged

@@ -275,8 +275,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Also surface a one-line booted vs staged summary without
                 # adding a new subprocess — keeps rescue read-only and cheap.
                 try:
-                    import json as _json
-                    data = _json.loads(r.stdout)
+                    data = json.loads(r.stdout)
                     # bootc status json shape varies; handle common keys
                     booted = staged = ""
                     if isinstance(data, dict):

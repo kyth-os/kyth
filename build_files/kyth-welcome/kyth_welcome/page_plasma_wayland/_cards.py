@@ -215,12 +215,7 @@ kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Le
 kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Right" "Meta+Right,Meta+Right,Quick Tile Window to the Right"
 qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
 """
-        code, out, err = run_shell_script(script, timeout=10)
-        try:
-            from ..widgets import CommandResultPanel
-            # no-op if panel not present
-        except Exception:
-            pass
+        run_shell_script(script, timeout=10)
 
     def _make_snap_grid_card(self) -> QFrame:
         card, body = _make_card()

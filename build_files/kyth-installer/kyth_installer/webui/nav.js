@@ -1,4 +1,5 @@
 /* global document, loadDisks, initKernel, initConfig, buildReview, loadRescue */
+/* exported goto */
 // Wizard step navigation — the one thing every step page needs, split out
 // on its own (was previously the top of app.js, a single 1352-line file
 // covering every step) so it can load first and the step files that follow
@@ -6,6 +7,7 @@
 // install-flow.js) stay independently readable.
 const STEPS = ['welcome','disk','kernel','config','review','install'];
 
+// eslint-disable-next-line no-unused-vars -- called from index.html onclick= and other step files
 function goto(name) {
   document.querySelectorAll('.page').forEach(p => { p.classList.remove('active'); });
   document.getElementById('page-' + name).classList.add('active');

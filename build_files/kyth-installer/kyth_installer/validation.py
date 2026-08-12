@@ -1,7 +1,6 @@
 """Validation and normalization of installer start requests."""
 from __future__ import annotations
 
-import re
 import subprocess
 from typing import TYPE_CHECKING
 

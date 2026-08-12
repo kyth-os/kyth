@@ -4,13 +4,6 @@ Canonical after partition_ops 571 split; partition_ops.py re-exports for compat.
 """
 from __future__ import annotations
 
-"""Partition operation queue with commit, rollback, and filesystem support.
-
-Stages partition operations (create, delete, resize, format, mount) as a
-transaction journal. Operations are validated before commit and the original
-partition table is backed up for rollback via sgdisk.
-"""
-
 import shutil
 import tempfile
 from pathlib import Path
@@ -99,11 +92,6 @@ _partition_number = _patched_partition_number  # type: ignore
 _partition_start_bytes = _patched_partition_start_bytes  # type: ignore
 shrink_filesystem = _patched_shrink_filesystem  # type: ignore
 
-try:
-    from .services.disk_service import DiskService
-except ImportError:
-    DiskService = None  # type: ignore  # fallback for protocol-only import
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -162,9 +150,6 @@ class Journal:
         return self._root_partition
 
     def _save_snapshot(self) -> None:
-        # Now delegates to PartitionTableGuard for consistent fsync semantics
-        from .storage_guard import PartitionTableGuard
-
         if not self._disk_service.dry_run:
             _require_sgdisk()
         self._discard_snapshot()

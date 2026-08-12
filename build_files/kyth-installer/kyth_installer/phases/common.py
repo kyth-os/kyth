@@ -6,10 +6,9 @@ import os
 import contextlib
 import fcntl
 
-from ..config import FAILURE_SUMMARY_FILE, LOG_FILE, TRANSACTION_FILE
-from ..context import InstallerContext, InstallLifecycle, InstallPhase
-from ..recovery import write_failure_summary, write_transaction_state
-from ..system import format_install_error
+from ..config import TRANSACTION_FILE
+from ..context import InstallerContext
+from ..recovery import write_transaction_state
 
 
 def _push(event: dict, context: InstallerContext) -> None:

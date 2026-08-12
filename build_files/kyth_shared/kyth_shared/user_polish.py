@@ -14,10 +14,10 @@ from enum import Enum
 
 # Pure data lives in desktop/polish_manifest.py so Hub welcome checks and
 # tests can import USER_FOLDERS/MIME_DEFAULTS without pulling in ET/glob.
-from kyth_shared.desktop.polish_manifest import (  # noqa: E402 — re-export for compat
+from kyth_shared.desktop.polish_manifest import (  # noqa: E402 — re-export for compat  # pylint: disable=unused-import
     AUTOSTART_VERSION,
     FOLDER_METADATA,
-    MIME_DEFAULTS,
+    MIME_DEFAULTS,  # pylint: disable=unused-import
     PLACES_VERSION,
     USER_FOLDERS,
     VERSION,

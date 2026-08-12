@@ -1,8 +1,10 @@
 /* global document, S, el, apiFetch, postJSON, fmtBytes, loadPartitions, renderDiskLayouts */
+/* exported showManualControls */
 // Manual partitioning: the toolbar + dialogs for the disk step's "Manual
 // Partitioning" mode, plus the shared overlay-modal machinery every dialog
 // here (and a couple of other steps) builds on.
 
+// eslint-disable-next-line no-unused-vars -- called from disk.js
 function showManualControls() {
   document.getElementById('manual-controls').style.display = 'block';
   document.getElementById('visual-layout-section').style.display = 'block';

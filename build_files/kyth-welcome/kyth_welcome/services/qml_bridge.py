@@ -9,7 +9,7 @@ Keeps the decision: Python stays the privileged orchestrator, QML is view.
 from __future__ import annotations
 
 try:
-    from PyQt6.QtCore import QObject, pyqtProperty, pyqtSignal  # type: ignore
+    from PyQt6.QtCore import QObject
 except Exception:
     QObject = object  # type: ignore
     pyqtProperty = lambda *a, **k: property(lambda s: None)  # type: ignore

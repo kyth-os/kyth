@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os, tomllib
 from pathlib import Path
-from typing import Any
 
 DEFAULT_POWER_TUNED_PATH = Path("/etc/kyth/power.toml")
 

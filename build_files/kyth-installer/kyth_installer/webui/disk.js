@@ -1,10 +1,12 @@
 /* global document, setTimeout, S, el, apiFetch, fmtBytes, svgIcon, showManualControls */
+/* exported loadDisks */
 // Disk step: disk picker, install-mode cards, and the visual current/proposed
 // disk-layout bars. Manual partitioning's toolbar+dialogs live in their own
 // file (partition-editor.js) — this one covers the disk step's other four
 // modes (wipe / keep-windows / alongside / free-space) plus the shared
 // layout-bar rendering both manual and non-manual modes draw from.
 
+// eslint-disable-next-line no-unused-vars -- called from nav.js, install-flow.js, index.html
 function loadDisks(attempt) {
   attempt = attempt || 0;
   document.getElementById('disk-grid').innerHTML = '<div class="status-box status-info">Scanning for disks…</div>';

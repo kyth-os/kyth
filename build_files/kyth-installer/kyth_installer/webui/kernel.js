@@ -1,4 +1,5 @@
 /* global document, S, el, svgIcon */
+/* exported initKernel */
 // Kernel step: KythOS Standard vs. KythOS Performance (CachyOS) picker.
 
 const KERNELS = [
@@ -10,6 +11,7 @@ const KERNELS = [
     note: 'Requires network during installation; Secure Boot enrollment is staged for first boot' },
 ];
 
+// eslint-disable-next-line no-unused-vars -- called from nav.js's step router
 function initKernel() {
   const grid = document.getElementById('kernel-grid');
   if (grid.children.length) return;

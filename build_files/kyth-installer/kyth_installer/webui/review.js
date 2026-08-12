@@ -1,7 +1,9 @@
 /* global document, S, el */
+/* exported buildReview */
 // Review step: summary table + the backup/erase/current-disk confirmations
 // that gate the Install Now button.
 
+// eslint-disable-next-line no-unused-vars -- called from nav.js's step router
 function buildReview() {
   const kernelLabels = { fedora: 'KythOS Standard', cachy: 'KythOS Performance' };
   const modeLabels   = { wipe: 'Erase Full Disk', alongside: 'Install Alongside', resize_ntfs: 'Shrink NTFS & Install', free_space: 'Use Free Space', manual: 'Manual Partitioning' };

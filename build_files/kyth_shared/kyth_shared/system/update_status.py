@@ -52,7 +52,7 @@ def _fetch_status() -> UpdateStatus:
         try:
             # Hard timeout hedge — check_registry_update should be TTL-bounded
             # but we enforce via probe_cached wrapper.
-            remote = probe_cached("registry-digest", 10.0, lambda: check_registry_update())
+            remote = probe_cached("registry-digest", 10.0, check_registry_update)
             if remote and isinstance(remote, dict):
                 remote_digest = remote.get("digest")
                 if remote_digest:

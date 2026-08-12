@@ -1,6 +1,8 @@
 /* global document, apiFetch, Intl, S, goto */
+/* exported initConfig */
 // Config step: hostname/timezone/locale/keymap/user account.
 
+// eslint-disable-next-line no-unused-vars -- called from nav.js's step router
 function initConfig() {
   const sel = document.getElementById('sel-tz');
   if (sel.options.length === 0) {

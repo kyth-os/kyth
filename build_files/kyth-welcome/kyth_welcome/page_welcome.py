@@ -3,7 +3,7 @@ import time
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, load_profile, restyle, save_profile
-from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
+from .services.bootc import has_rollback_deployment
 from .services.launch import reboot
 from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (
@@ -18,15 +18,22 @@ from .services.welcome import (
     _printer_configured,
     home_categories,
     home_hero_view,
-    visible_category_indexes,
 )
 from .services.flatpak import _is_flatpak_installed as _flatpak_installed
 from .qt import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt, Signal, single_shot,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    Qt,
+    Signal,
+    single_shot,
 )
 from .lazy_page import compose_on_first_init
 from .widgets import (
-    Page, _make_card, _theme_icon,
+    Page,
+    _make_card,
 )
 
 def _load_welcome_mixins():
@@ -344,6 +351,11 @@ class WelcomePage(Page):
         drivers" when has_nvidia is True and the initial build used the
         False placeholder from self._facts (see __init__)."""
         self._nvidia_at_build = self._facts["has_nvidia"]
+        # False positive: _category_cards is set in
+        # _WelcomeGridMixin._build_category_section(), called from __init__
+        # before this method can ever run; pylint doesn't trace attribute
+        # definitions across mixin classes in another file.
+        # pylint: disable-next=access-member-before-definition
         for card, _is_games in self._category_cards:
             self._category_grid.removeWidget(card)
             card.deleteLater()
@@ -480,6 +492,9 @@ class WelcomePage(Page):
         try:
             from .services.migration import _ntfs_user_dirs
             from .services.runtime import DataWorker
+            # False positive: the hasattr() guard short-circuits before this
+            # attribute read on the first call, when it doesn't exist yet.
+            # pylint: disable-next=access-member-before-definition
             if not hasattr(self, "_win_dirs_worker") or self._win_dirs_worker is None:
                 w = DataWorker("win-user-dirs", _ntfs_user_dirs)
                 self._win_dirs_worker = w

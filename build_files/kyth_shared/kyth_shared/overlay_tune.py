@@ -26,7 +26,7 @@ def _on_btrfs() -> bool:
         from .commands import run
         r=run(["findmnt","-no","FSTYPE","-T","/var"],capture_output=True,text=True,timeout=5)
         return bool(r and "btrfs" in r.stdout)
-    except: return False
+    except Exception: return False
 def generate_overlay(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Path|None:
     if cfg is None: cfg=load_overlay()
     v=str(cfg.get("metacopy","auto"))

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os, tomllib
 from pathlib import Path
-from typing import Any
 
 DEFAULT_SCX_PRESET_PATH = Path.home() / ".config" / "kyth" / "scx.toml"
 

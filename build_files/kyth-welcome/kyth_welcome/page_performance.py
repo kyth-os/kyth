@@ -477,7 +477,7 @@ class PerformancePage(Page):
                 c = load_gaming_cfs()
                 self._clean_status.setText(f"cfs {c['profile']} {gaming_cfs_status()}")
             elif which == "audit":
-                from kyth_shared.perf_audit import collect_audit, format_audit
+                from kyth_shared.perf_audit import collect_audit
                 a = collect_audit()
                 self._clean_status.setText(f"audit master={a.get('master')} {a.get('systemd_analyze','')[:40]}")
             restyle(self._clean_status)

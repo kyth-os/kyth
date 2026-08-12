@@ -13,10 +13,19 @@ from .services.hardware import (
     hdr_vrr_status_text,
     switch_to_bt_audio_output,
 )
-from .services.launch import kcmshell, popen
+from .services.launch import popen
 from .services.runtime import finish_worker
 from .qt import (
-    QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QUrl, QVBoxLayout, QWidget, Signal, single_shot,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+    Signal,
+    single_shot,
 )
 from .widgets import (
     HardwareCard, Page, _make_card, _make_section_header,
@@ -406,7 +415,7 @@ class HardwarePage(Page):
 
     def _make_cooling_card(self):
         from .widgets import _make_card
-        from .qt import QLabel, QPushButton, QHBoxLayout, QVBoxLayout
+        from .qt import QLabel, QPushButton, QHBoxLayout
         card, layout = _make_card()
         title = QLabel("Cooling — fan curve, power cap, sleep drain")
         title.setObjectName("card-title")

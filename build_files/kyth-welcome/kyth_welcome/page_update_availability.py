@@ -7,7 +7,7 @@ from .services.runtime import release_worker_when_finished
 from .services.launch import reboot
 from .services.updates import AvailabilityCheckResult, UpdateProbeResult
 from .services.workers.updates import FlatpakCheckWorker, UpdateCheckWorker
-from .qt import QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, Qt, single_shot
+from .qt import QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, Qt
 from .widgets import _make_card
 
 

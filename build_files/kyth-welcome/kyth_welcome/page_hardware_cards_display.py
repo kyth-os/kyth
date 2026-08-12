@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 
 def make_display_card(page: "HardwarePage"):
-    from .qt import QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl
+    from .qt import QDesktopServices, QHBoxLayout, QLabel, QPushButton, QUrl
     from .widgets import _make_card
     from .services.launch import kcmshell
     import pathlib

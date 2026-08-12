@@ -43,7 +43,6 @@ def readahead_for_path(target: Path, size_mb: int = 512) -> int:
     """Fadvise WILLNEED up to size_mb files under target. Returns files touched."""
     if not target.exists():
         return 0
-    import os
 
     count = 0
     limit = size_mb * 1024 * 1024

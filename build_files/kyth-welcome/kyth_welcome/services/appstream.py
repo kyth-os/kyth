@@ -122,7 +122,12 @@ def load_appstream_catalog() -> dict[str, dict]:
     except OSError:
         pass
     try:
-        root = ET.parse(xml_path).getroot()
+        # ET is defusedxml.ElementTree whenever python3-defusedxml is installed
+        # (always true on the shipped image — see packages/18-desktop-helper-
+        # and-creator-tooling.sh); the plain xml.etree fallback above only
+        # applies to dev/test environments lacking that package. The scanner
+        # can't see the conditional import, hence the suppression below.
+        root = ET.parse(xml_path).getroot()  # nosemgrep: codacy.tools-configs.python.lang.security.use-defused-xml-parse.use-defused-xml-parse
     except Exception:
         # Parse failed — use pre-parsed JSON fallback (R7)
         cached = _load_cached_catalog()

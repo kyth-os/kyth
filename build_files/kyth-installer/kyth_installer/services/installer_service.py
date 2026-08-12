@@ -186,7 +186,6 @@ class InstallerService:
         return {"started": True}
 
     def cancel_install(self, _body: dict) -> dict:
-        from kyth_installer import execution
 
         if execution.request_cancel(self.context):
             return {"ok": True, "message": "Cancellation requested."}

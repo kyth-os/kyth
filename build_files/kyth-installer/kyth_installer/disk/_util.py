@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 
 from kyth_shared.disk_utils import _normal_device_path as _pure_normal_path
 from kyth_shared.disk_utils import _safe_int as _pure_safe_int

@@ -1,4 +1,4 @@
-/* global document, S, apiFetch, postRequest, postJSON, showError, goto, EventSource, appendLog, setProgress, showStats, onDone, setInterval, Date */
+/* global document, S, apiFetch, postRequest, postJSON, showError, goto, EventSource, appendLog, setProgress, showStats, onDone, setInterval */
 // Install step (kicks off the backend install + streams its progress),
 // the Rescue page, and page-load init — loads last so every step file
 // above it (nav/disk/partition-editor/kernel/config/review) has already
