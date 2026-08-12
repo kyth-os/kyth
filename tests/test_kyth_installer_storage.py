@@ -72,7 +72,7 @@ class InstallerWebuiTests(unittest.TestCase):
         # S.target_partition is set from p.name (a string), never a partition
         # object — `.name`/`.fstype` accesses on it are always undefined and
         # silently blank the review page's "which partition gets erased" text.
-        js = (WEBUI_DIR / "app.js").read_text()
+        js = self._javascript()
 
         self.assertNotIn("S.target_partition.name", js)
         self.assertNotIn("S.target_partition.fstype", js)
@@ -217,17 +217,57 @@ class InstallerStorageTests(unittest.TestCase):
 
         self.assertEqual([item["name"] for item in disks], ["/dev/sdb"])
 
-    def test_parent_disk_walks_through_lvm_and_luks_layers(self):
+    def test_parent_disk_walks_through_lvm_and_luks_layers_via_batched_tree(self):
         # Root on an LVM logical volume backed by a LUKS-encrypted partition:
-        # LV -> crypt mapper -> partition -> disk is three PKNAME hops, not one.
+        # LV -> crypt mapper -> partition -> disk is three PKNAME hops, not
+        # one. With a pre-fetched tree (as _protected_install_disks/list_disks
+        # now pass in), this walk costs zero subprocess calls.
+        tree = {
+            "/dev/mapper/kyth-root": {"pkname": "/dev/dm-0", "type": "lvm"},
+            "/dev/dm-0": {"pkname": "/dev/nvme0n1p3", "type": "crypt"},
+            "/dev/nvme0n1p3": {"pkname": "/dev/nvme0n1", "type": "part"},
+            "/dev/nvme0n1": {"pkname": None, "type": "disk"},
+        }
+
+        def fail_run_command(cmd, **_kwargs):
+            raise AssertionError(f"unexpected subprocess call with a tree supplied: {cmd}")
+
+        with patch.object(self.disk, "run_command", side_effect=fail_run_command):
+            result = self.disk._parent_disk("/dev/mapper/kyth-root", tree=tree)
+
+        self.assertEqual(result, "/dev/nvme0n1")
+
+    def test_parent_disk_fetches_tree_once_when_not_supplied(self):
+        payload = {
+            "blockdevices": [
+                {
+                    "name": "/dev/nvme0n1", "pkname": None, "type": "disk",
+                    "children": [
+                        {"name": "/dev/nvme0n1p3", "pkname": "nvme0n1", "type": "part"},
+                    ],
+                },
+            ]
+        }
+        calls = []
+
+        def fake_run_command(cmd, **_kwargs):
+            calls.append(cmd)
+            return SimpleNamespace(stdout=json.dumps(payload), returncode=0)
+
+        with patch.object(self.disk, "run_command", side_effect=fake_run_command):
+            result = self.disk._parent_disk("/dev/nvme0n1p3")
+
+        self.assertEqual(result, "/dev/nvme0n1")
+        self.assertEqual(len(calls), 1, f"expected exactly one lsblk call, got {calls}")
+
+    def test_parent_disk_falls_back_when_device_missing_from_tree(self):
+        # A device absent from the batched snapshot (e.g. it appeared after
+        # the tree was fetched) still resolves, via the old per-device calls,
+        # instead of the whole walk silently failing.
         chain = {
-            ("lsblk", "-n", "-o", "TYPE", "/dev/mapper/kyth-root"): "lvm\n",
-            ("lsblk", "-n", "-o", "PKNAME", "/dev/mapper/kyth-root"): "dm-0\n",
-            ("lsblk", "-n", "-o", "TYPE", "/dev/dm-0"): "crypt\n",
-            ("lsblk", "-n", "-o", "PKNAME", "/dev/dm-0"): "nvme0n1p3\n",
-            ("lsblk", "-n", "-o", "TYPE", "/dev/nvme0n1p3"): "part\n",
-            ("lsblk", "-n", "-o", "PKNAME", "/dev/nvme0n1p3"): "nvme0n1\n",
-            ("lsblk", "-n", "-o", "TYPE", "/dev/nvme0n1"): "disk\n",
+            ("lsblk", "-n", "-o", "TYPE", "/dev/sdb1"): "part\n",
+            ("lsblk", "-n", "-o", "PKNAME", "/dev/sdb1"): "sdb\n",
+            ("lsblk", "-n", "-o", "TYPE", "/dev/sdb"): "disk\n",
         }
 
         def fake_run_command(cmd, **_kwargs):
@@ -239,9 +279,32 @@ class InstallerStorageTests(unittest.TestCase):
         normalize = lambda p: p if p.startswith("/dev/") else f"/dev/{p}"
         with patch.object(self.disk, "_normal_device_path", side_effect=normalize), \
              patch.object(self.disk, "run_command", side_effect=fake_run_command):
-            result = self.disk._parent_disk("/dev/mapper/kyth-root")
+            result = self.disk._parent_disk("/dev/sdb1", tree={})
 
-        self.assertEqual(result, "/dev/nvme0n1")
+        self.assertEqual(result, "/dev/sdb")
+
+    def test_lsblk_tree_flattens_nested_children(self):
+        payload = {
+            "blockdevices": [
+                {
+                    "name": "/dev/nvme0n1", "pkname": None, "type": "disk",
+                    "children": [
+                        {
+                            "name": "/dev/nvme0n1p3", "pkname": "nvme0n1", "type": "part",
+                            "children": [
+                                {"name": "/dev/dm-0", "pkname": "nvme0n1p3", "type": "crypt"},
+                            ],
+                        },
+                    ],
+                },
+            ]
+        }
+        with patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
+            tree = self.disk._lsblk_tree()
+
+        self.assertEqual(tree["/dev/nvme0n1"], {"pkname": None, "type": "disk"})
+        self.assertEqual(tree["/dev/nvme0n1p3"], {"pkname": "/dev/nvme0n1", "type": "part"})
+        self.assertEqual(tree["/dev/dm-0"], {"pkname": "/dev/nvme0n1p3", "type": "crypt"})
 
     def test_list_partitions_marks_replaceable_unmounted_partitions(self):
         payload = {

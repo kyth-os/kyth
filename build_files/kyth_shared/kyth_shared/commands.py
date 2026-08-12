@@ -76,6 +76,22 @@ def normalize_command(command: Command) -> list[str]:
     return [os.fspath(part) for part in command]
 
 
+_UJUST_RECIPE_RE = __import__("re").compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
+def ujust_command(recipe: str) -> list[str]:
+    """Return a validated ``ujust`` argv without invoking a shell.
+
+    Centralizes the ``ujust <recipe>`` boundary that was previously
+    ``[\"bash\", \"-c\", f\"ujust {recipe}\"]`` in several Hub pages.
+    The recipe is restricted to ``[a-z0-9_-]`` to prevent argument
+    injection; callers must use a literal recipe name, not user input.
+    """
+    if not recipe or not _UJUST_RECIPE_RE.fullmatch(recipe):
+        raise ValueError(f"Refusing unsafe ujust recipe: {recipe!r}")
+    return ["ujust", recipe]
+
+
 def sanitized_environment(env: Mapping[str, str] | None = None) -> dict[str, str]:
     """Return a process environment without loader/interpreter injection."""
     source = os.environ if env is None else env
@@ -256,3 +272,26 @@ def command_stdout(
         env=env,
         strip=strip,
     )
+
+
+def run_quiet(
+    command: Command,
+    *,
+    timeout: float | None = 30,
+) -> subprocess.CompletedProcess[Any] | None:
+    """Run *command* discarding stdout/stderr, returning None on execution failure.
+
+    Centralizes the repeated ``stdout=DEVNULL, stderr=DEVNULL, check=False``
+    pattern used by health checks and notifications so callers do not import
+    ``subprocess`` solely for ``DEVNULL``.
+    """
+    try:
+        return DEFAULT_RUNNER.run(
+            command,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+        )
+    except _EXPECTED_COMMAND_ERRORS:
+        return None

@@ -147,6 +147,7 @@ notifications from repeating the same expensive checks.
 | Desktop | Plasma and Wayland profiles, layout repair, screenshots, and screen-sharing help |
 | Network | VPN, SMB shares, and rclone-backed Google Drive, OneDrive, Dropbox, and other remotes |
 | Health and Repair | Diagnostics, support snapshots, focused repairs, setup transfer, and recovery actions |
+| Guardian | Low-resource health monitoring, bounded safe fixes, and optional on-demand local AI diagnosis |
 | Advanced | Channel switching, kernel image selection, NVIDIA support, and issue feedback |
 
 ### VPN
@@ -230,6 +231,8 @@ See [Architecture](docs/architecture.md) and the
 [security model](docs/security-model.md) for the detailed component and trust
 boundaries. The [health-aware update lifecycle](docs/update-safety.md) explains
 boot validation, automatic rollback, rollout rings, and digest quarantine.
+The [Guardian design](docs/guardian.md) documents local-AI resource, privacy,
+and repair-policy boundaries.
 The [hardware policy](docs/hardware-policy.md) documents device matching,
 managed quirks, and the generated [support matrix](docs/hardware-support-matrix.md).
 
@@ -280,11 +283,11 @@ just run-live-iso-native-local     # fresh native QEMU test of the local ISO
 just preview-installer             # browser preview; does not touch disks
 ```
 
-Optional image profiles are disabled unless requested, except sched-ext support
-which is enabled by default:
+Optional image profiles are disabled unless requested. Sched-ext remains opt-in
+until KythOS ships a userspace scheduler matched to its kernel ABI:
 
 ```bash
-ENABLE_SCX=0 just build
+ENABLE_SCX=1 just build
 ENABLE_GAMING_PERIPHERALS=1 just build
 ENABLE_VIRTUALIZATION_HOST=1 just build
 ENABLE_KSM=1 just build

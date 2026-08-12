@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os, tomllib
 from pathlib import Path
-from typing import Any
 
 DEFAULT_DRIVER_PATH = Path("/etc/kyth/driver.toml")
 

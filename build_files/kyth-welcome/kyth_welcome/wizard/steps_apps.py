@@ -268,6 +268,8 @@ class _AppsStepMixin:
             script.append(f"echo __KYTH_APP_DONE__:{shlex.quote(app_id)}:{shlex.quote(name)}")
         cmd = ["bash", "-c", "\n".join(script)]
         self._wizard_extra_worker = Worker(cmd)
+        self._wizard_extra_worker.finished.connect(lambda: setattr(self, "_wizard_extra_worker", None))
+        self._wizard_extra_worker.finished.connect(self._wizard_extra_worker.deleteLater)
         self._wizard_extra_worker.line.connect(self._on_wizard_extra_install_line)
         self._wizard_extra_worker.done.connect(
             lambda code, installed=selected: self._on_wizard_extra_install_done(code, installed)

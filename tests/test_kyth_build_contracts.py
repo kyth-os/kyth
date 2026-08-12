@@ -82,6 +82,53 @@ class ShippedCommandContracts(unittest.TestCase):
 
 
 class BuildAssemblyContracts(unittest.TestCase):
+    def test_package_install_sources_do_not_pin_literal_rpm_nvrs(self):
+        """Kyth resolves current RPMs at build time; manifests record results."""
+        sources = [ROOT / "Dockerfile"]
+        sources.extend((BUILD_FILES / "scripts/packages").glob("*.sh"))
+        literal_nvr = re.compile(
+            r"(?<![A-Za-z0-9_])"
+            r"[A-Za-z][A-Za-z0-9+_.-]*-\d+(?:\.\d+)+-\d+"
+            r"(?:\.[A-Za-z0-9_.]+)?"
+        )
+        for source in sources:
+            for line_number, line in enumerate(
+                source.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if line.lstrip().startswith("#"):
+                    continue
+                with self.subTest(source=source.relative_to(ROOT), line=line_number):
+                    self.assertIsNone(
+                        literal_nvr.search(line),
+                        f"literal RPM NVR pin in {source.relative_to(ROOT)}:{line_number}: {line.strip()}",
+                    )
+
+    def test_daily_build_refreshes_rpm_layer_without_package_holds(self):
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        rpm_run = dockerfile.index(
+            "RUN --mount=type=bind,source=build_files/kyth_shared"
+        )
+        daily_upgrade = dockerfile.index('cache-bust=${BUILD_DATE}')
+        self.assertGreater(dockerfile.index("ARG BUILD_DATE=unset"), rpm_run)
+        self.assertLess(dockerfile.index("ARG BUILD_DATE=unset"), daily_upgrade)
+        self.assertIn('cache-bust:rpm=${RPM_SET_HASH}', dockerfile[:rpm_run + 2000])
+        self.assertIn("update_fedora_kernel", dockerfile[daily_upgrade:daily_upgrade + 2500])
+        for hold in ("--exclude='gamescope*'", "--exclude='akmod-*'", "--exclude='kmod-*'"):
+            self.assertNotIn(hold, dockerfile)
+
+    def test_fedora_nvidia_devel_tracks_coordinated_latest_kernel(self):
+        script = (BUILD_FILES / "scripts/lib/fedora-kernel.sh").read_text(encoding="utf-8")
+        upgrade = script.index("dnf5 upgrade -y --refresh")
+        resolve = script.index('FEDORA_KERNEL_VR="$(')
+        self.assertLess(upgrade, resolve)
+        for package in (
+            "kernel-core", "kernel-modules", "kernel-modules-core",
+            "kernel-modules-extra",
+        ):
+            self.assertIn(package, script[upgrade:resolve])
+        self.assertIn('"kernel-devel-${FEDORA_KERNEL_VR}"', script)
+        self.assertIn('rpm --nodeps -e "${nevra}"', script)
+
     def test_fragment_relative_source_targets_exist(self):
         scripts = BUILD_FILES / "scripts"
         for tree in (scripts / "packages", scripts / "sysconfig"):

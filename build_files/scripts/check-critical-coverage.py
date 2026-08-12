@@ -21,9 +21,42 @@ THRESHOLDS = {
 
 
 def main() -> int:
+    import argparse
+    import subprocess
+
+    parser = argparse.ArgumentParser(description="Check critical coverage thresholds")
+    parser.add_argument(
+        "--changed-only",
+        action="store_true",
+        help="Only check thresholds for files changed vs HEAD (skips unchanged files)",
+    )
+    args = parser.parse_args()
+
+    changed: set[str] | None = None
+    if args.changed_only:
+        try:
+            out = subprocess.check_output(
+                ["git", "diff", "--name-only", "HEAD"], text=True, stderr=subprocess.DEVNULL
+            )
+            changed = {line.strip() for line in out.splitlines() if line.strip()}
+            # also include staged changes
+            out2 = subprocess.check_output(
+                ["git", "diff", "--name-only", "--cached"], text=True, stderr=subprocess.DEVNULL
+            )
+            changed.update(line.strip() for line in out2.splitlines() if line.strip())
+        except Exception:
+            changed = None
+        if changed is not None and not changed:
+            print("changed-only: no changed files vs HEAD, skipping")
+            return 0
+
     report = json.loads(Path("coverage.json").read_text(encoding="utf-8"))
     failures = []
+    skipped = 0
     for filename, minimum in THRESHOLDS.items():
+        if changed is not None and filename not in changed:
+            skipped += 1
+            continue
         summary = report["files"].get(filename, {}).get("summary")
         if summary is None:
             failures.append(f"{filename}: absent from coverage report")
@@ -32,6 +65,8 @@ def main() -> int:
         print(f"{filename}: {actual:.1f}% (minimum {minimum:.1f}%)")
         if actual < minimum:
             failures.append(f"{filename}: {actual:.1f}% is below {minimum:.1f}%")
+    if skipped:
+        print(f"changed-only: skipped {skipped} unchanged files")
     if failures:
         print("Critical coverage gate failed:", file=sys.stderr)
         for failure in failures:

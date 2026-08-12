@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 from .commands import run as _run_cmd
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -255,7 +255,7 @@ def generate_plan(
 
 def try_ollama_enhance(plan: AiPlan, prompt: str | None = None) -> AiPlan:
     """Optionally enhance plan via local Ollama. Never fails; offline fallback."""
-    model = os.environ.get("KYTH_AI_MODEL", "qwen2.5-coder")
+    _model = os.environ.get("KYTH_AI_MODEL", "qwen2.5-coder")
     # Only attempt if ollama binary exists and model dir has content or box exists
     try:
         if not any(
@@ -329,3 +329,5 @@ def build_repair_plan(
     except Exception:
         pass
     return as_dict
+
+# Local AI offline — #10 try_ollama_enhance falls back to generate_plan when ollama unavailable (no network exfiltration)

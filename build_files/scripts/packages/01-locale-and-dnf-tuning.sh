@@ -23,6 +23,8 @@ echo '%_install_langs en_US' >>/etc/rpm/macros
 # repository-scoped and cannot be used as a KythOS-specific install count.
 cat >>/etc/dnf/dnf.conf <<'DNFCONFEOF'
 max_parallel_downloads=10
+# Kernel packages move only through the coordinated full-stack transaction in
+# 16-gpu-nvidia.sh; all ordinary installs/upgrades keep them excluded.
 excludepkgs=kernel,kernel-core*,kernel-modules*,kernel-modules-core*,kernel-modules-extra*,kernel-devel*,kernel-debug*
 countme=True
 nodocs=True

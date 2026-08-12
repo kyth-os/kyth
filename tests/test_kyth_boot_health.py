@@ -19,6 +19,7 @@ from kyth_shared.boot_health import (  # noqa: E402
     image_ring,
     mark_healthy,
     quarantine_reason,
+    QuarantineRecord,
     read_state,
     record_failure,
     record_staged,
@@ -275,6 +276,38 @@ class BootHealthPackagingTests(unittest.TestCase):
         ):
             text = (ROOT / "build_files" / name).read_text(encoding="utf-8")
             self.assertIn("/usr/bin/kyth-boot-health", text)
+
+    def test_invariants_hold_after_all_state_transitions(self):
+        """S7 exhaustive: every public state transition preserves invariants & round-trip."""
+        states: list[BootHealthState] = [BootHealthState()]
+        states.append(record_staged(states[-1], DIGEST, rollout_ring="testing", now=1))
+        states.append(record_failure(states[-1], DIGEST, "boot-1", "failed", now=2))
+        states.append(record_failure(states[-1], DIGEST, "boot-2", "failed", now=3))
+        states.append(record_failure(states[-1], DIGEST, "boot-3", "failed", now=4))  # quarantined
+        states.append(mark_healthy(states[-1], DIGEST, now=5))
+        states.append(clear_quarantine(states[-1], DIGEST, now=6))
+        states.append(record_failure(states[-1], OTHER_DIGEST, "boot-9", "failed", now=7))
+        for idx, st in enumerate(states):
+            with self.subTest(idx=idx, status=st.status):
+                self.assertEqual(st.invariants(), [], f"invariants failed at step {idx}: {st.invariants()}")
+                restored = BootHealthState.from_dict(st.to_dict())
+                self.assertEqual(restored, st)
+                self.assertEqual(restored.invariants(), [])
+
+    def test_invariants_catch_corrupt_quarantine(self):
+        corrupt = BootHealthState(
+            status="healthy",
+            last_healthy_digest="",  # violates healthy invariant
+            failures=-1,
+            quarantined={
+                DIGEST: QuarantineRecord(digest=OTHER_DIGEST, failures=1, reason="x", first_failed_at=1, last_failed_at=2)
+            },
+        )
+        errs = corrupt.invariants()
+        self.assertIn("failures<0", errs)
+        self.assertIn("healthy but last_healthy_digest empty", errs)
+        self.assertTrue(any("key" in e and "!=" in e for e in errs))
+        self.assertTrue(any("failures 1 < threshold" in e for e in errs))
 
 
 if __name__ == "__main__":

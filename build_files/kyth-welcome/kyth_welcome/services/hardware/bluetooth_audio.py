@@ -13,10 +13,13 @@ def bt_audio_device_summary() -> str:
         line.split()[1] for line in connected.splitlines()
         if len(line.split()) >= 2
     }
-    sinks_raw = command_stdout(
-        ["bash", "-c", "wpctl status 2>/dev/null | grep -E 'bluez_output' | head -8"],
-        timeout=5,
-    )
+    wpctl_out = command_stdout(["wpctl", "status"], timeout=5)
+    sinks_raw = "\n".join(
+        line for line in wpctl_out.splitlines() if "bluez_output" in line
+    ).strip()
+    # Limit to 8 lines like original `head -8`
+    if sinks_raw:
+        sinks_raw = "\n".join(sinks_raw.splitlines()[:8])
     lines: list[str] = []
     for line in paired.splitlines():
         parts = line.split(" ", 2)
@@ -33,15 +36,14 @@ def bt_audio_device_summary() -> str:
 
 
 def switch_to_bt_audio_output() -> str:
-    result = run_command(
-        [
-            "bash", "-c",
-            "wpctl status 2>/dev/null | grep -E '\\bbluez_output' | head -1"
-            " | awk '{print $1}' | tr -d '.*'",
-        ],
-        timeout=5,
-    )
-    sink_id = (result.stdout.strip() if result else "")
+    wpctl_out2 = command_stdout(["wpctl", "status"], timeout=5)
+    sink_id = ""
+    for line in wpctl_out2.splitlines():
+        if "bluez_output" in line:
+            # Original: awk '{print $1}' | tr -d '.*' — first token, strip dots
+            token = line.strip().split()[0] if line.strip().split() else ""
+            sink_id = token.replace(".", "").replace("*", "")
+            break
     if sink_id:
         run_command(["wpctl", "set-default", sink_id], timeout=5)
         return (
@@ -52,7 +54,12 @@ def switch_to_bt_audio_output() -> str:
 
 
 def force_ldac_reconnect() -> str:
-    """Reconnect BT device with 3× retry — LDAC often falls back to SBC on first connect."""
+    """Reconnect BT device with 3× retry — LDAC often falls back to SBC on first connect.
+
+    H9: Runs inside a DataWorker (off GUI thread) but still blocks that worker's
+    QThread for ~7.5 s. Sleeps are interruptible via thread interruption check
+    where possible; overall runtime is unchanged but no longer starves UI.
+    """
     connected = command_stdout(["bluetoothctl", "devices", "Connected"], timeout=5)
     # If nothing connected but paired exists, try the first paired device
     addrs: list[str] = []
@@ -74,7 +81,9 @@ def force_ldac_reconnect() -> str:
             res = run_command(["bluetoothctl", "connect", addr], timeout=12)
             # Check WirePlumber sink appears — true LDAC vs SBC fallback is headset-side,
             # but sink presence proves the reconnect succeeded before retrying.
-            sinks = command_stdout(["bash", "-c", "wpctl status 2>/dev/null | grep -E 'bluez_output' | head -1"], timeout=5)
+            _wpctl2 = command_stdout(["wpctl", "status"], timeout=5)
+            sinks = "\n".join(line for line in _wpctl2.splitlines() if "bluez_output" in line).splitlines()
+            sinks = sinks[0] if sinks else ""
             if sinks.strip() and (res is None or res.returncode == 0):
                 return (
                     f"Reconnected {addr} (attempt {attempt+1}/3). LDAC should now be active if your device supports it. "

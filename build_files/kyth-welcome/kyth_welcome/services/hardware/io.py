@@ -45,20 +45,52 @@ def _firmware_probe() -> HardwareProbe:
     )
  # _firmware_probe
 
+
+def _rfkill_blocks(output: str) -> dict[str, set[str]]:
+    """Return soft/hard block states keyed by the radio type rfkill reports."""
+    blocks: dict[str, set[str]] = {}
+    radio_type = ""
+    for line in output.splitlines():
+        stripped = line.strip().lower()
+        header = re.match(r"^\d+:\s+.*:\s+(.+)$", stripped)
+        if header:
+            label = header.group(1)
+            if any(token in label for token in ("wireless lan", "wi-fi", "wifi", "wlan")):
+                radio_type = "wifi"
+            elif "bluetooth" in label:
+                radio_type = "bluetooth"
+            else:
+                radio_type = ""
+            continue
+        if not radio_type:
+            continue
+        if stripped == "soft blocked: yes":
+            blocks.setdefault(radio_type, set()).add("soft-blocked")
+        elif stripped == "hard blocked: yes":
+            blocks.setdefault(radio_type, set()).add("hard-blocked")
+    return blocks
+
+
 def _connectivity_probe(pci_text: str, usb_text: str) -> HardwareProbe:
     combined = "\n".join([pci_text.lower(), usb_text.lower()])
-    wifi_present = any(token in combined for token in ("network controller", "wireless", "wi-fi", "802.11", "wlan"))
+    wifi_present = any(
+        token in combined
+        for token in ("network controller", "wireless", "wi-fi", "802.11", "wlan")
+    )
     bluetooth_present = "bluetooth" in combined
     rfkill = command_stdout(["rfkill", "list"], timeout=5)
     nmcli = command_stdout(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"], timeout=5)
 
-    blocked = []
-    if rfkill:
-        lines = rfkill.lower().splitlines()
-        if any("soft blocked: yes" in l for l in lines):
-            blocked.append("soft-blocked")
-        if any("hard blocked: yes" in l for l in lines):
-            blocked.append("hard-blocked")
+    detected_radios = {
+        radio
+        for radio, present in (("wifi", wifi_present), ("bluetooth", bluetooth_present))
+        if present
+    }
+    blocks = {
+        radio: states
+        for radio, states in _rfkill_blocks(rfkill).items()
+        if radio in detected_radios
+    }
 
     wifi_states = [l for l in nmcli.splitlines() if ":wifi:" in l]
 
@@ -81,13 +113,40 @@ def _connectivity_probe(pci_text: str, usb_text: str) -> HardwareProbe:
     if rfkill:
         details.append("rfkill:\n" + rfkill)
 
-    if blocked:
+    if blocks:
+        labels = {"wifi": "Wi-Fi", "bluetooth": "Bluetooth"}
+        blocked_radios = [radio for radio in ("wifi", "bluetooth") if radio in blocks]
+        blocked_labels = [labels[radio] for radio in blocked_radios]
+        blocked_states = sorted({state for states in blocks.values() for state in states})
+        ready_labels = [
+            labels[radio]
+            for radio in ("wifi", "bluetooth")
+            if radio in detected_radios and radio not in blocks
+        ]
+        subject = ", ".join(blocked_labels)
+        summary = (
+            f"{subject} detected but {'radio is' if len(blocked_radios) == 1 else 'radios are'} "
+            f"{', '.join(blocked_states)}."
+        )
+        if ready_labels:
+            verb = "is" if len(ready_labels) == 1 else "are"
+            summary += f" {', '.join(ready_labels)} {verb} ready."
+
+        soft_blocked = [
+            radio for radio in blocked_radios if "soft-blocked" in blocks[radio]
+        ]
+        action_target = soft_blocked[0] if len(soft_blocked) == 1 else "all"
+        action = None
+        if len(soft_blocked) == 1:
+            action = f"Enable {labels[soft_blocked[0]]}"
+        elif soft_blocked:
+            action = "Enable Wireless"
         return HardwareProbe(
             "Connectivity", "warn",
-            f"{', '.join(parts)} detected but radio is {', '.join(blocked)}.",
+            summary,
             "\n\n".join(details) or "rfkill reports blocked radios.",
-            "Enable Wireless",
-            action_cmd=["rfkill", "unblock", "all"],
+            action,
+            action_cmd=["rfkill", "unblock", action_target] if soft_blocked else None,
         )
 
     return HardwareProbe(

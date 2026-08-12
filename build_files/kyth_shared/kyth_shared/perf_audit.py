@@ -2,22 +2,35 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Any
 
 from .commands import run as _run
 
+# Pre-warm these modules into sys.modules so the fresh `from .x import y`
+# re-imports done deeper in this file (avoiding 50 dynamic imports per Hub
+# page open, per the cache below) resolve from the import cache instead of
+# re-reading from disk. The bound names themselves are intentionally unused
+# here — the import is for its sys.modules side effect only.
 try:
-    from .gaming_master import load_master
-    from .boot_loader import load_loader, loader_status
-    from .oom_gaming import load_oom_gaming, oom_gaming_status
-    from .shader_tmpfs import load_shader_tmpfs, shader_tmpfs_status
-    from .gaming_cfs import load_gaming_cfs, gaming_cfs_status
+    from .gaming_master import load_master  # noqa: F401  # pylint: disable=unused-import
+    from .boot_loader import load_loader, loader_status  # noqa: F401  # pylint: disable=unused-import
+    from .oom_gaming import load_oom_gaming, oom_gaming_status  # noqa: F401  # pylint: disable=unused-import
+    from .shader_tmpfs import load_shader_tmpfs, shader_tmpfs_status  # noqa: F401  # pylint: disable=unused-import
+    from .gaming_cfs import load_gaming_cfs, gaming_cfs_status  # noqa: F401  # pylint: disable=unused-import
 except Exception:
     pass
 
 
-def collect_audit() -> dict[str, Any]:
+# Simple TTL cache for probe/audit — avoids 50 dynamic imports per Hub page open
+_AUDIT_CACHE: dict[str, Any] | None = None
+_AUDIT_CACHE_TS: float = 0
+_AUDIT_TTL = 30.0  # seconds
+
+
+def collect_audit(force: bool = False) -> dict[str, Any]:
+    global _AUDIT_CACHE, _AUDIT_CACHE_TS
+    if not force and _AUDIT_CACHE is not None and (time.time() - _AUDIT_CACHE_TS) < _AUDIT_TTL:
+        return dict(_AUDIT_CACHE)
     out: dict[str, Any] = {}
     try:
         from .gaming_master import load_master
@@ -94,12 +107,14 @@ def collect_audit() -> dict[str, Any]:
         out["systemd_analyze"] = "unavailable (not booted with systemd)"
     # probe count
     try:
-        from .telemetry import load_sessions  # noqa
+        from .telemetry import load_sessions  # noqa  # pylint: disable=unused-import
         out["telemetry"] = "ok"
     except Exception:
         out["telemetry"] = "unknown"
     out["ts"] = int(time.time())
-    return out
+    _AUDIT_CACHE = dict(out)
+    _AUDIT_CACHE_TS = time.time()
+    return dict(out)
 
 
 def format_audit(a: dict[str, Any]) -> str:

@@ -118,13 +118,20 @@ def repair_ntfs_drives() -> None:
                     except Exception:
                         pass
                 else:
+                    backup_path = None
                     if target_cd.is_dir():
                         print("  Moving existing NTFS compatdata folder to backup...")
                         backup_name = f"compatdata.bak.{int(time.time())}"
+                        backup_path = target_cd.parent / backup_name
                         try:
-                            shutil.move(str(target_cd), str(target_cd.parent / backup_name))
-                        except Exception as e:
-                            print(f"  Failed to backup existing compatdata: {e}")
+                            # Atomic move via rename; backup restores on cancel/fail
+                            target_cd.rename(backup_path)
+                        except Exception:
+                            try:
+                                shutil.move(str(target_cd), str(backup_path))
+                            except Exception as e:
+                                print(f"  Failed to backup existing compatdata: {e}")
+                                backup_path = None
 
                     # Check if native compatdata already has contents
                     try:
@@ -137,16 +144,45 @@ def repair_ntfs_drives() -> None:
                         print("  Any App ID present in both will now share one Proton prefix instead of having separate ones.")
 
                     print(f"  Symlinking compatdata -> {native_compatdata}")
+                    # Atomic symlink: tmp -> replace, fsync parent, restore backup on fail
+                    tmp_link = target_cd.parent / f".compatdata.tmp.{os.getpid()}"
                     try:
                         if target_cd.exists() or target_cd.is_symlink():
-                            target_cd.unlink()
-                    except Exception:
-                        pass
-
-                    try:
-                        target_cd.symlink_to(native_compatdata)
+                            try:
+                                target_cd.unlink()
+                            except Exception:
+                                pass
+                        tmp_link.symlink_to(native_compatdata)
+                        os.replace(str(tmp_link), str(target_cd))
+                        # fsync parent for power-loss safety
+                        try:
+                            dfd = os.open(str(target_cd.parent), os.O_DIRECTORY)
+                            try:
+                                os.fsync(dfd)
+                            finally:
+                                os.close(dfd)
+                        except OSError:
+                            pass
                     except Exception as e:
                         print(f"  Failed to create symlink: {e}")
+                        try:
+                            tmp_link.unlink()
+                        except Exception:
+                            pass
+                        # Restore backup if we moved it
+                        if backup_path is not None and backup_path.exists():
+                            try:
+                                if target_cd.is_symlink() or target_cd.exists():
+                                    target_cd.unlink()
+                            except Exception:
+                                pass
+                            try:
+                                backup_path.rename(target_cd)
+                            except Exception:
+                                try:
+                                    shutil.move(str(backup_path), str(target_cd))
+                                except Exception:
+                                    pass
         else:
             print(f"[kyth-ntfs-repair] No steamapps folder found on {mount}.")
 

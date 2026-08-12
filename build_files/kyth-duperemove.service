@@ -2,9 +2,11 @@
 Description=KythOS Steam/Wine dedupe pass
 Documentation=https://github.com/mrtrick37/kyth
 After=local-fs.target
+ConditionACPower=true
 
 [Service]
 Type=oneshot
+ExecCondition=/usr/libexec/kyth-storage-gate
 ExecStart=/usr/bin/kyth-duperemove
 Nice=19
 IOSchedulingClass=idle

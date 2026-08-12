@@ -4,7 +4,7 @@ Extends display_hdr EDID path, writes kwinoutputconfig.json + colord ICC deploy.
 """
 from __future__ import annotations
 
-import os, tomllib, json
+import os, tomllib
 from pathlib import Path
 from typing import Any
 

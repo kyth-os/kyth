@@ -97,7 +97,11 @@ def upgrade(
         remote_digest,
         rollout_ring=image_ring(reference) or ring,
     )
-    write_state(new_state, state_path)
+    try:
+        write_state(new_state, state_path)
+    except ValueError as exc:
+        print(f"Refusing to persist corrupt boot health state: {exc}", file=sys.stderr)
+        return 1
     # Control-plane: surface staged digest to Hub without per-page bootc spawns.
     if _HUB_STATE is not None:
         try:

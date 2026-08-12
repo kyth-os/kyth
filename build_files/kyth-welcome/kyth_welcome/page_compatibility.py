@@ -286,6 +286,16 @@ class CompatibilityPage(Page):
         self._refresh_worker.unchanged.connect(self._on_compat_unchanged)
         self._refresh_worker.start()
 
+        # New #3: pre-flight — local GPU + HDR/VRR check for blocked titles
+        try:
+            from kyth_shared.system.gpu import lspci_gpu_lines
+
+            gpu = "\n".join(lspci_gpu_lines()[:1])
+            if gpu:
+                self._sum_copy.setText(self._sum_copy.text() + f"\n\nLocal GPU: {gpu[:80]}")
+        except Exception:
+            pass
+
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _update_summary(self, refresh_note: str = ""):

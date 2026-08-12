@@ -1,0 +1,100 @@
+# KythOS consolidated sysctl — tier: base (always-on VM/sched/kernel/fs)
+# Source of truth for /etc/sysctl.d/99-kyth-base.conf
+# Each key maps to { value, comment } — generator emits sorted `key = value` with trailing comment.
+# See build_files/kyth_shared/kyth_shared/sysctl_compose.py
+
+[keys."vm.swappiness"]
+value = "180"
+comment = "with zram: aggressively use fast compressed swap; Fedora/CachyOS/Bazzite 180"
+
+[keys."vm.watermark_scale_factor"]
+value = "125"
+comment = "larger free reserve, earlier reclaim avoids shader/map-load stalls"
+
+[keys."vm.compaction_proactiveness"]
+value = "0"
+comment = "disable proactive compaction — paired with extfrag_threshold in gaming tier"
+
+[keys."vm.dirty_bytes"]
+value = "268435456"
+comment = "256M absolute dirty — incremental writeback, avoids 3.2GB burst on 32GB"
+
+[keys."vm.dirty_background_bytes"]
+value = "67108864"
+comment = "64M background dirty"
+
+[keys."vm.page_lock_unfairness"]
+value = "1"
+comment = "fair page lock"
+
+[keys."vm.page-cluster"]
+value = "0"
+comment = "disable swap readahead on SSD — random I/O fast, prefetch wastes BW"
+
+[keys."vm.watermark_boost_factor"]
+value = "0"
+comment = "disable watermark boost — prevents reclaim spike stutter"
+
+[keys."vm.vfs_cache_pressure"]
+value = "50"
+comment = "half default (100) — keep game asset dentries longer"
+
+[keys."vm.max_map_count"]
+value = "16777216"
+comment = "16M — Star Citizen etc., avoids near-INT_MAX; supersedes dead 2147483642"
+
+[keys."vm.dirty_expire_centisecs"]
+value = "500"
+comment = "flush after 5s (default 30s) — short bursts during shader/asset load"
+
+[keys."vm.dirty_writeback_centisecs"]
+value = "500"
+comment = "paired with dirty_expire"
+
+[keys."vm.oom_kill_allocating_task"]
+value = "0"
+comment = "let kernel pick hog vs allocating task (avoids killing plasmashell)"
+
+[keys."vm.stat_interval"]
+value = "10"
+comment = "10s vs 1s — less vm_stat_work on pinned CPUs"
+
+[keys."vm.extfrag_threshold"]
+value = "750"
+comment = "migrated from 55-vm-compaction fragment — higher threshold, fewer compaction spikes"
+
+[keys."fs.inotify.max_user_watches"]
+value = "524288"
+comment = "EA App/Battle.net watch large trees (default 8192)"
+
+[keys."fs.inotify.max_user_instances"]
+value = "1024"
+comment = "Electron launchers"
+
+[keys."fs.file-max"]
+value = "2097152"
+comment = "migrated from dead config/sysctl.conf — parallel container ops"
+
+[keys."kernel.nmi_watchdog"]
+value = "0"
+comment = "reduce IRQ overhead on gaming desktop"
+
+[keys."kernel.sched_autogroup_enabled"]
+value = "1"
+comment = "autogroup — arbiter may disable per-gaming profile"
+
+[keys."kernel.split_lock_mitigate"]
+value = "0"
+comment = "disable system-wide; gamemode re-enables mitigation outside gaming"
+
+[keys."kernel.perf_event_paranoid"]
+value = "1"
+comment = "1 vs 2 — MangoHud accurate, safe vs 0 exposing kaddrs"
+
+[keys."kernel.sched_rt_runtime_us"]
+value = "980000"
+comment = "98% RT throttle (default 95%) — audio/render deadlines"
+
+[keys."kernel.timer_migration"]
+value = "0"
+comment = "timers fire on source CPU — avoids inter-CCD wakeup jitter (X3D/NUMA)"

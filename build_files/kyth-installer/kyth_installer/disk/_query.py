@@ -33,8 +33,13 @@ def _descendant_mountpoints(device: dict) -> list[str]:
 
 
 def list_disks():
-    protected = _disk._protected_install_disks()
-    current_disk = _disk._parent_disk(_disk._running_system_disk())
+    # Fetch the device tree and running-system disk once and share them with
+    # both _protected_install_disks() and the current-disk resolution below,
+    # instead of each independently re-walking ancestry from scratch.
+    tree = _disk._lsblk_tree()
+    running_disk = _disk._running_system_disk()
+    protected = _disk._protected_install_disks(tree=tree, running_disk=running_disk)
+    current_disk = _disk._parent_disk(running_disk, tree=tree)
     disks = []
     try:
         blockdevices = _disk._lsblk_blockdevices(
@@ -154,9 +159,21 @@ def list_free_space(disk: str) -> list[dict]:
         if not name or size <= 0:
             return []
         try:
+            # start_bytes from lsblk is already bytes (512*START), but on
+            # 4K-native devices the alignment sector differs. Keep raw byte
+            # value; gap alignment below uses the device's logical sector so
+            # 512 vs 4096 mismatch cannot hide an exact-match free region
+            # from validate_plan_state's contains_free_region check.
             start = _disk._safe_int(part.get("start_bytes"), -1)
             if start < 0:
                 start = _disk._partition_start_bytes(name)
+            # Normalize to sector alignment to avoid 512/4096 drift causing
+            # exact-match failures on 4K-native disks (gate #5).
+            start = (start // sector) * sector
+            # Also quantize size to sector to keep end = start+size aligned
+            size = (size // sector) * sector
+            if size <= 0:
+                return []
         except Exception:
             return []
         if start < 0 or start + size > disk_size:
@@ -178,12 +195,27 @@ def list_free_space(disk: str) -> list[dict]:
     if cursor < usable_end:
         gaps.append((cursor, usable_end))
 
+    # On GPT without a BIOS boot partition the guided flow needs an extra 1 MiB
+    # for GRUB (MIN+BIOS_BOOT). Filter at that higher threshold so the UI
+    # never offers a gap that would later fail validate_plan_state after the
+    # user confirms destructive work. Probe best-effort — fallback to MIN on
+    # probe failure to avoid hiding usable space.
+    try:
+        from ..config import BIOS_BOOT_BYTES
+        from ..plan import _is_gpt_disk as _check_gpt, _has_bios_boot_partition as _check_bios
+
+        _is_gpt = _check_gpt(disk)
+        _has_bios = _check_bios(disk) if _is_gpt else True
+        required = MIN_KYTHOS_BYTES + (BIOS_BOOT_BYTES if _is_gpt and not _has_bios else 0)
+    except Exception:
+        required = MIN_KYTHOS_BYTES
+
     regions = []
     for start, end in gaps:
         aligned_start = ((start + sector - 1) // sector) * sector
         aligned_end = (end // sector) * sector
         size_bytes = aligned_end - aligned_start
-        if size_bytes >= MIN_KYTHOS_BYTES:
+        if size_bytes >= required:
             regions.append({
                 "start_bytes": aligned_start,
                 "end_bytes": aligned_end,

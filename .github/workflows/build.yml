@@ -483,14 +483,31 @@ jobs:
             echo "::notice::Skopeo does not support --dest-force-compress-format; using compatible compression options"
           fi
           DIGEST_FILE="${RUNNER_TEMP}/rechunked-digest"
-          install -m 0600 /dev/null "${DIGEST_FILE}"
-          sudo skopeo copy \
-            --dest-authfile "${DOCKER_CONFIG}/config.json" \
-            "${SKOPEO_COMPRESSION_ARGS[@]}" \
-            --digestfile "${DIGEST_FILE}" \
-            --retry-times 3 \
-            "${SOURCE_REF}" \
-            "docker://${PRIMARY_REF}"
+          PUBLISH_LOG="${RUNNER_TEMP}/skopeo-publish.log"
+          publish_succeeded=false
+          for attempt in 1 2 3 4 5; do
+            install -m 0600 /dev/null "${DIGEST_FILE}"
+            : >"${PUBLISH_LOG}"
+            if sudo skopeo copy \
+              --dest-authfile "${DOCKER_CONFIG}/config.json" \
+              "${SKOPEO_COMPRESSION_ARGS[@]}" \
+              --digestfile "${DIGEST_FILE}" \
+              --retry-times 3 \
+              "${SOURCE_REF}" \
+              "docker://${PRIMARY_REF}" 2>&1 | tee "${PUBLISH_LOG}"; then
+              publish_succeeded=true
+              break
+            else
+              copy_status=${PIPESTATUS[0]}
+            fi
+            if ! grep -Fqi "secondary rate limit" "${PUBLISH_LOG}" || [[ "${attempt}" -eq 5 ]]; then
+              exit "${copy_status}"
+            fi
+            delay=$((60 * (2 ** (attempt - 1))))
+            echo "::warning::GHCR secondary rate limit; retrying resumable publish in ${delay}s (attempt ${attempt}/5)"
+            sleep "${delay}"
+          done
+          [[ "${publish_succeeded}" == true ]]
 
           DIGEST="$(cat "${DIGEST_FILE}")"
           build_files/scripts/validate-digest.sh "${DIGEST}"

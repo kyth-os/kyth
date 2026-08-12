@@ -83,43 +83,39 @@ def main() -> None:
         status_only()
         sys.exit(0)
 
-    # 1. CPU Core Affinity Optimization
-    affinity_cpus = None
+    # Arbiter is single placement owner — delegate affinity via cgroup slice,
+    # not os.sched_setaffinity (stripped by pressure-vessel/bwrap). Log topology
+    # only; placement is via systemd-run --slice=gaming.slice when available.
     vendor, _ = get_cpu_topology()
-
-    if vendor == "AuthenticAMD":
-        # If AMD 3D V-Cache, attempt to isolate CCD0
-        if has_3d_vcache():
-            ccd0 = get_amd_ccd0_cpus()
-            if ccd0:
-                log(f"Pinning game to 3D V-Cache CCD0 (CPUs: {ccd0})")
-                affinity_cpus = ccd0
+    if vendor == "AuthenticAMD" and has_3d_vcache():
+        ccd0 = get_amd_ccd0_cpus()
+        if ccd0:
+            log(f"Topology: 3D V-Cache CCD0 cpus {ccd0} (arbiter manages placement)")
     elif vendor == "GenuineIntel":
         pcores = get_intel_pcores()
         if pcores:
-            log(f"Pinning game to Intel Performance Cores (CPUs: {pcores})")
-            affinity_cpus = pcores
+            log(f"Topology: Intel P-cores {pcores} (arbiter manages placement)")
 
-    # Apply affinity to current process if supported
-    if affinity_cpus and hasattr(os, "sched_setaffinity"):
-        try:
-            cpu_set = parse_cpu_list(affinity_cpus)
-            if cpu_set:
-                os.sched_setaffinity(0, cpu_set)
-        except Exception as e:
-            log(f"Warning: failed to set CPU affinity: {e}")
+    # Ensure arbiter flag is fresh (no privileged writes here)
+    try:
+        from kyth_shared.sched_arbiter import generate_arbiter
 
-    # 2. Memory Cache & Transparent Hugepages Optimization
-    flush_page_caches()
-    set_transparent_hugepages("madvise")
+        generate_arbiter()
+    except Exception:
+        pass
 
-    # 3. Sched-Ext switcher
-    if shutil.which("scx_rusty"):
-        log("Switching sched-ext to the scx_rusty gaming scheduler...")
-        switch_sched_ext_profile("rusty")
-
-    # 4. Launch Target Application
+    # 4. Launch Target Application — prefer cgroup slice so placement survives container
     log(f"Launching game workload: {' '.join(args)}")
+    # Try systemd-run slice delegation first (survives pressure-vessel); fall back to direct exec
+    if shutil.which("systemd-run"):
+        try:
+            # --user when not root and logind session exists; else system slice
+            use_user = os.geteuid() != 0 and Path("/run/systemd/system").exists()
+            base = ["systemd-run", "--user", "--scope", "--slice=gaming.slice"] if use_user else ["systemd-run", "--scope", "--slice=gaming.slice"]
+            # Check if gaming.slice exists or can be created
+            os.execvp(base[0], base + ["--"] + args)
+        except Exception:
+            pass
     try:
         os.execvp(args[0], args)
     except Exception as e:

@@ -21,6 +21,12 @@ install -m 0755 /ctx/kyth-probe /usr/bin/kyth-probe
 install -m 0644 /ctx/kyth-probe.service /usr/lib/systemd/system/kyth-probe.service
 install -m 0644 /ctx/kyth-probe.timer /usr/lib/systemd/system/kyth-probe.timer
 
+install -m 0644 /ctx/kyth-guardian.service /usr/lib/systemd/user/kyth-guardian.service
+install -m 0644 /ctx/kyth-guardian.timer /usr/lib/systemd/user/kyth-guardian.timer
+install -m 0644 /ctx/kyth-guardian.path /usr/lib/systemd/user/kyth-guardian.path
+install -m 0755 /ctx/kyth-guardian /usr/bin/kyth-guardian
+install -Dm0644 /ctx/config/guardian-model.json /usr/share/kyth/guardian-model.json
+
 # tmpfs + persistent system cache dir
 mkdir -p /var/cache/kyth
 # Ensure unit names match WantedBy installs (user units ship as kyth-probe.*)

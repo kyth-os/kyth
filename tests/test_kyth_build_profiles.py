@@ -14,7 +14,7 @@ def _read(relative: str) -> str:
 class BuildProfileTests(unittest.TestCase):
     def test_optional_image_profiles_default_off(self):
         dockerfile = _read("Dockerfile")
-        for profile in ("ENABLE_GAMING_PERIPHERALS", "ENABLE_VIRTUALIZATION_HOST", "ENABLE_KSM"):
+        for profile in ("ENABLE_SCX", "ENABLE_GAMING_PERIPHERALS", "ENABLE_VIRTUALIZATION_HOST", "ENABLE_KSM"):
             self.assertIn(f"ARG {profile}=0", dockerfile)
             self.assertIn(f'{profile}="${{{profile}}}"', dockerfile)
 
@@ -74,13 +74,17 @@ class BuildProfileTests(unittest.TestCase):
         self.assertNotIn("LATENCYFLEX_VERSION", workflow)
         self.assertNotIn("SCX_VERSION", workflow)
 
-    def test_scx_uses_fedora_package_and_kyth_owned_launcher(self):
+    def test_scx_is_opt_in_and_uses_kyth_owned_launcher(self):
         gaming = _read("build_files/scripts/packages/06-gaming-core.sh")
         thirdparty = _read("build_files/scripts/thirdparty.sh")
         loader = _read("build_files/kyth-scx-loader")
+        service = _read("build_files/kyth-scx-loader.service")
+        self.assertIn('ENABLE_SCX:-0', gaming)
         self.assertRegex(gaming, r"dnf\w*\s+install.*scx_rusty")
         self.assertNotIn("install_scx", thirdparty)
         self.assertIn('^scx_[a-z0-9_]+$', loader)
+        self.assertIn("StartLimitIntervalSec=60", service)
+        self.assertIn("StartLimitBurst=3", service)
 
     def test_dependent_workflows_require_successful_image_build(self):
         workflow = _read(".github/workflows/build.yml")

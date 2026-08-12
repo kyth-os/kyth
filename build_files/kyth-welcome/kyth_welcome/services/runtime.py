@@ -54,25 +54,53 @@ class TaskSupervisor:
         record.attr = attr
 
     def running(self) -> list[QThread]:
-        return [record.thread for record in self._records.values() if record.thread.isRunning()]
+        alive: list[QThread] = []
+        for record in self._records.values():
+            try:
+                if record.thread.isRunning():
+                    alive.append(record.thread)
+            except RuntimeError:
+                continue
+        return alive
 
     def has_blocking_tasks(self) -> bool:
-        return any(getattr(thread, "BLOCKS_CLOSE", False) for thread in self.running())
+        for thread in self.running():
+            try:
+                if getattr(thread, "BLOCKS_CLOSE", False):
+                    return True
+            except RuntimeError:
+                continue
+        return False
 
     def finish_owner_task(self, owner: object, attr: str) -> None:
-        worker = getattr(owner, attr, None)
+        try:
+            worker = getattr(owner, attr, None)
+        except RuntimeError:
+            return
         if worker is None:
             return
         # Avoid blocking the GUI thread: if the worker already finished,
         # clean up synchronously; otherwise defer cleanup to the finished
         # signal (non-blocking). Called from `done` slots where the worker
         # has just emitted `done` but may still be unwinding.
-        if worker.isFinished():
+        try:
+            finished = worker.isFinished()
+        except RuntimeError:
+            try:
+                setattr(owner, attr, None)
+            except RuntimeError:
+                pass
+            self._records.pop(worker, None)
+            return
+        if finished:
             try:
                 worker.deleteLater()
             except RuntimeError:
                 pass
-            setattr(owner, attr, None)
+            try:
+                setattr(owner, attr, None)
+            except RuntimeError:
+                pass
             self._records.pop(worker, None)
             return
         # Defer — will re-enter this method when finished
@@ -81,44 +109,74 @@ class TaskSupervisor:
                 worker.deleteLater()
             except RuntimeError:
                 pass
-            if getattr(owner, attr, None) is worker:
-                setattr(owner, attr, None)
+            try:
+                if getattr(owner, attr, None) is worker:
+                    setattr(owner, attr, None)
+            except RuntimeError:
+                pass
             self._records.pop(worker, None)
 
         try:
             worker.finished.connect(_deferred_finish)
         except RuntimeError:
             # Worker already deleted — just clear
-            setattr(owner, attr, None)
+            try:
+                setattr(owner, attr, None)
+            except RuntimeError:
+                pass
             self._records.pop(worker, None)
 
     def release_when_finished(self, owner: object, attr: str, worker: QThread) -> None:
         self.attach(worker, owner, attr)
 
         def _release() -> None:
-            if getattr(owner, attr, None) is worker:
-                setattr(owner, attr, None)
-            worker.deleteLater()
+            try:
+                if getattr(owner, attr, None) is worker:
+                    setattr(owner, attr, None)
+            except RuntimeError:
+                pass
+            try:
+                worker.deleteLater()
+            except RuntimeError:
+                pass
             self._records.pop(worker, None)
 
-        worker.finished.connect(_release)
+        try:
+            worker.finished.connect(_release)
+        except RuntimeError:
+            _release()
 
     def shutdown(self, timeout_ms: int = 15000) -> None:
         for thread in list(self._records):
-            stop = getattr(thread, "cancel", None) or getattr(thread, "stop", None)
+            try:
+                stop = getattr(thread, "cancel", None) or getattr(thread, "stop", None)
+            except RuntimeError:
+                # Wrapped C++ object already deleted (atexit after QApplication teardown)
+                continue
             if callable(stop):
                 try:
                     stop()
+                except RuntimeError:
+                    continue
                 except Exception:
                     _logger.debug("TaskSupervisor.shutdown: stop() on %r failed", thread, exc_info=True)
         deadline = time.monotonic() + timeout_ms / 1000
-        while running := self.running():
+        while True:
+            try:
+                running = self.running()
+            except RuntimeError:
+                break
+            if not running:
+                break
             remaining_ms = int((deadline - time.monotonic()) * 1000)
             if remaining_ms <= 0:
                 break
             slice_ms = max(1, min(250, remaining_ms))
             for thread in running:
-                thread.wait(slice_ms)
+                try:
+                    thread.wait(slice_ms)
+                except RuntimeError:
+                    continue
                 if time.monotonic() >= deadline:
                     break
 
@@ -295,8 +353,28 @@ class StreamingProcessWorker(TrackedThread):
         return True
 
     def stop(self) -> None:
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+        proc = self._proc
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception:
+            try:
+                proc.terminate()
+            except Exception:
+                return
+        # In bwrap/sandbox the pgid may not match pid — ensure process dies
+        try:
+            time.sleep(0.05)
+            if proc.poll() is None:
+                proc.terminate()
+            time.sleep(0.05)
+            if proc.poll() is None:
+                proc.kill()
+        except Exception:
+            pass
 
     def run(self):
         try:
@@ -414,3 +492,16 @@ def finish_worker(owner: object, attr: str = "_worker") -> None:
 
 def release_worker_when_finished(owner: object, attr: str, worker: QThread) -> None:
     TASK_SUPERVISOR.release_when_finished(owner, attr, worker)
+
+
+# S11: lifecycle standard — every DataWorker must pair
+# finished->setattr(None) + finished->deleteLater OR use release_worker_when_finished.
+# TelemetryWorker fixed in S5; audit grep: setAttr.*None.*deleteLater
+
+
+# R2: single ProbeWorker factory so callers don't hand-roll probe_cached
+# lambdas and can use one tracked worker type everywhere.
+def probe_worker(key: str, ttl: float, fetch):  # type: ignore[no-untyped-def]
+    from kyth_shared.system.probe import probe_cached as _pc
+
+    return DataWorker(key, lambda: _pc(key, ttl, fetch))

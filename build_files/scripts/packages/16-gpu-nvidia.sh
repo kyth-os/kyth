@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+source "../lib/fedora-kernel.sh"
+
 # ── NVIDIA GPU ────────────────────────────────────────────────────────────────
 # Bundle akmod-nvidia so kyth-hw-setup can build the kernel module at first
 # boot without requiring a manual rpm-ostree layer step. On AMD/Intel systems
@@ -25,9 +27,9 @@ set -euo pipefail
 # fails outright.
 KERNEL_FLAVOR="$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)"
 if [[ "${KERNEL_FLAVOR}" == "fedora" ]]; then
-	KERNEL_VR=$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort -V | tail -n 1)
+	update_fedora_kernel
+	KERNEL_VR="${FEDORA_KERNEL_VR}"
 	dnf5 install -y --setopt=excludepkgs= --disablerepo=fedora-multimedia \
-		"kernel-devel-${KERNEL_VR}" \
 		akmod-nvidia \
 		xorg-x11-drv-nvidia \
 		xorg-x11-drv-nvidia-libs \

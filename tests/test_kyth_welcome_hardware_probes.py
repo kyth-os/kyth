@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,7 @@ from kyth_welcome.services.hardware import (  # noqa: E402
     _storage_probe,
     _thermal_probe,
 )
+from kyth_welcome.services.hardware.collect import _hardware_policy_probe  # noqa: E402
 
 
 class HardwareProbeTests(unittest.TestCase):
@@ -96,6 +98,21 @@ class HardwareProbeTests(unittest.TestCase):
         self.assertEqual(probe.status, "dim")
         self.assertIn("inside qemu", probe.summary)
 
+    def test_platform_probe_treats_secure_boot_as_healthy(self):
+        virt = MagicMock(returncode=1, stdout="none\n")
+        secure_boot_var = b"\x00\x00\x00\x00\x01"
+        with (
+            patch("builtins.open", unittest.mock.mock_open(read_data=secure_boot_var)),
+            patch("kyth_welcome.services.hardware.system.run_command", return_value=virt),
+            patch("kyth_welcome.services.hardware.system.current_branch", return_value="testing"),
+            patch("kyth_welcome.services.hardware.system.has_staged_update", return_value=False),
+        ):
+            probe = _platform_probe()
+
+        self.assertEqual(probe.status, "ok")
+        self.assertIn("Secure Boot enabled", probe.summary)
+        self.assertIsNone(probe.action)
+
     def test_firmware_probe_no_fwupd(self):
         with patch("kyth_welcome.services.hardware.io.run_command", return_value=None):
             probe = _firmware_probe()
@@ -114,6 +131,72 @@ class HardwareProbeTests(unittest.TestCase):
         self.assertEqual(probe.title, "Connectivity")
         self.assertEqual(probe.status, "ok")
         self.assertIn("Wi-Fi, Bluetooth", probe.summary)
+
+    def test_connectivity_probe_attributes_block_to_radio_type(self):
+        pci = "02:00.0 Network controller: Intel Corporation Wi-Fi 6 AX200"
+        usb = "Bus 001 Device 002: ID 8087:0029 Intel Corp. AX200 Bluetooth"
+        rfkill = (
+            "0: phy0: Wireless LAN\n"
+            "\tSoft blocked: no\n"
+            "\tHard blocked: no\n"
+            "1: hci0: Bluetooth\n"
+            "\tSoft blocked: yes\n"
+            "\tHard blocked: no\n"
+        )
+        with patch(
+            "kyth_welcome.services.hardware.io.command_stdout",
+            side_effect=[rfkill, "wlan0:wifi:connected\n"],
+        ):
+            probe = _connectivity_probe(pci, usb)
+
+        self.assertEqual(probe.status, "warn")
+        self.assertIn("Bluetooth detected", probe.summary)
+        self.assertIn("Wi-Fi is ready", probe.summary)
+        self.assertEqual(probe.action_cmd, ["rfkill", "unblock", "bluetooth"])
+
+    def test_connectivity_probe_ignores_block_for_undetected_radio(self):
+        pci = "02:00.0 Network controller: MediaTek Inc. Wi-Fi 6E MT7922"
+        rfkill = "0: hci0: Bluetooth\n\tSoft blocked: yes\n\tHard blocked: no\n"
+        with patch(
+            "kyth_welcome.services.hardware.io.command_stdout",
+            side_effect=[rfkill, "wlan0:wifi:connected\n"],
+        ):
+            probe = _connectivity_probe(pci, "")
+
+        self.assertEqual(probe.status, "ok")
+        self.assertIn("Wi-Fi hardware detected and ready", probe.summary)
+
+    def test_active_hardware_quirks_are_healthy_policy(self):
+        evaluation = SimpleNamespace(
+            policy_revision="1",
+            profiles=({"title": "AMD graphics", "tier": "supported"},),
+            quirks=({"id": "amdgpu-gaming-memory"},),
+            capabilities=("gpu.amd",),
+            recommended_variant="universal",
+            warnings=(),
+        )
+        view = SimpleNamespace(evaluation=evaluation, applied={"status": "applied"})
+
+        probe = _hardware_policy_probe(view)
+
+        self.assertEqual(probe.status, "ok")
+        self.assertIn("1 active quirk", probe.summary)
+
+    def test_expired_hardware_quirk_still_warns(self):
+        evaluation = SimpleNamespace(
+            policy_revision="1",
+            profiles=({"title": "AMD graphics", "tier": "supported"},),
+            quirks=({"id": "amdgpu-gaming-memory"},),
+            capabilities=("gpu.amd",),
+            recommended_variant="universal",
+            warnings=("quirk amdgpu-gaming-memory expired",),
+        )
+        view = SimpleNamespace(evaluation=evaluation, applied={"status": "applied"})
+
+        probe = _hardware_policy_probe(view)
+
+        self.assertEqual(probe.status, "warn")
+        self.assertIn("maintainer review", probe.summary)
 
     def test_audio_probe_healthy(self):
         pactl = MagicMock(returncode=0, stdout="Server Name: PulseAudio (on PipeWire 1.0)\n")

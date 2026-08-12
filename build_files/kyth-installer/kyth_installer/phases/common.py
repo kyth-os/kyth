@@ -6,10 +6,9 @@ import os
 import contextlib
 import fcntl
 
-from ..config import FAILURE_SUMMARY_FILE, LOG_FILE, TRANSACTION_FILE
-from ..context import InstallerContext, InstallLifecycle, InstallPhase
-from ..recovery import write_failure_summary, write_transaction_state
-from ..system import format_install_error
+from ..config import TRANSACTION_FILE
+from ..context import InstallerContext
+from ..recovery import write_transaction_state
 
 
 def _push(event: dict, context: InstallerContext) -> None:
@@ -42,6 +41,14 @@ def _start_power_watch(log, context, stop_event: threading.Event) -> threading.T
                     log(msg)
                     try:
                         context._power_failed = msg  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    # Also trigger the same abort path as user cancel — streaming loop
+                    # checks a single abort_event (cancel_requested). Unifying keeps
+                    # IMAGE from continuing on battery.
+                    try:
+                        context.cancel_requested.set()
+                        context.events.publish({"type": "log", "text": msg})
                     except Exception:
                         pass
                     break

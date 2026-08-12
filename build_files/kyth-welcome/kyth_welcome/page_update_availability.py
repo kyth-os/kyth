@@ -7,7 +7,7 @@ from .services.runtime import release_worker_when_finished
 from .services.launch import reboot
 from .services.updates import AvailabilityCheckResult, UpdateProbeResult
 from .services.workers.updates import FlatpakCheckWorker, UpdateCheckWorker
-from .qt import QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, Qt, single_shot
+from .qt import QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, Qt
 from .widgets import _make_card
 
 
@@ -87,9 +87,11 @@ class _UpdateAvailabilityMixin:
         self._remote_manifest = ""
         # Hub-side deadline — issue #164: neither skopeo (45 s) nor flatpak
         # should keep the spinner forever. After 15 s force a terminal state.
-        if getattr(self, "_avail_deadline_timer", None):
+        old_timer = getattr(self, "_avail_deadline_timer", None)
+        if old_timer is not None:
             try:
-                self._avail_deadline_timer.stop()
+                old_timer.stop()
+                old_timer.deleteLater()
             except Exception:
                 pass
         self._avail_deadline_timer = QTimer(self)
@@ -97,6 +99,9 @@ class _UpdateAvailabilityMixin:
         self._avail_deadline_timer.timeout.connect(self._on_availability_timeout)
         self._avail_deadline_timer.start(15000)
 
+        # P2-6: ProbeCollector batching — system + flatpak checks already run concurrently
+        # via two DataWorkers (ThreadPoolExecutor-style). Keep them started together
+        # so neither blocks the other behind the 15 s deadline; coordinator merges.
         # Start system update check
         self._check_worker = UpdateCheckWorker(use_cached_snapshot=not force_refresh)
         self._check_worker.result.connect(self._on_system_check_result)
@@ -133,17 +138,22 @@ class _UpdateAvailabilityMixin:
         self._accept_update_probe(result)
 
     def _accept_update_probe(self, result: UpdateProbeResult):
+        completed = self._check_coordinator.accept(result)
+        if completed is None:
+            return
         if getattr(self, "_avail_deadline_timer", None):
             try:
                 self._avail_deadline_timer.stop()
             except Exception:
                 pass
-        completed = self._check_coordinator.accept(result)
-        if completed is None:
-            return
         self._finish_availability_check(completed)
 
     def _finish_availability_check(self, completed: AvailabilityCheckResult):
+        if getattr(self, "_avail_deadline_timer", None):
+            try:
+                self._avail_deadline_timer.stop()
+            except Exception:
+                pass
         self._check_state = completed.system_state
         self._check_ts = datetime.now().strftime("%H:%M")
         self._check_ts_details = completed.system_detail

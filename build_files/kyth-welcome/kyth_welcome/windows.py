@@ -5,10 +5,10 @@ from .services.hardware import detect_nvidia_async
 from .services.runtime import has_blocking_tasks
 from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups
 from .qt import (
-    QCompleter, QDialog, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
+    QCompleter, QDialog, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .widgets import (
-    _divider, _theme_icon,
+    _divider, _theme_icon, fade_in,
 )
 from .services.launch import popen
 
@@ -98,11 +98,23 @@ class MainWindow(QMainWindow):
         self._build_sidebar(root.layout())
         self._build_page_stack(root.layout())
 
-        # Build Welcome page eagerly so its profile_changed signal is available.
-        welcome_idx = self._page_index_by_key["Welcome"]
-        welcome_page = self._ensure_page(welcome_idx)
-        welcome_page.profile_changed.connect(self._apply_profile_visibility)
-        self._apply_profile_visibility(load_profile())
+        # Welcome profile wiring was eager — defer to next tick so first
+        # frame paints without blocking on WelcomePage construction (see #1 cold-start).
+        def _wire_welcome_profile():
+            idx = self._page_index_by_key.get("Welcome")
+            if idx is None:
+                return
+            try:
+                page = self._ensure_page(idx)
+                page.profile_changed.connect(self._apply_profile_visibility)
+            except Exception:
+                pass
+            try:
+                self._apply_profile_visibility(load_profile())
+            except Exception:
+                pass
+
+        single_shot(self, 0, _wire_welcome_profile)
 
         self._history: list[int] = []
         self._history_pos: int = -1
@@ -113,6 +125,7 @@ class MainWindow(QMainWindow):
         self._palette_shortcut.activated.connect(self._show_palette)
         self._mission_worker = None
         single_shot(self, 150, self._refresh_mission_bar)
+        self._sidebar_channel_worker = None
         self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
         self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
         self._switch_page(0)
@@ -157,47 +170,18 @@ class MainWindow(QMainWindow):
 
         self._search_box = QLineEdit()
         self._search_box.setObjectName("search-box")
-        self._search_box.setPlaceholderText("Search settings, apps, or Windows name (Ctrl+K) — try hdr, clipboard, fancyzones")
-        self._search_box.setFixedWidth(320)
+        self._search_box.setPlaceholderText("Search settings, apps, features (Ctrl+K)...")
+        self._search_box.setToolTip("Search settings, apps, or Windows names (Ctrl+K)")
+        self._search_box.setFixedWidth(340)
         self._search_box.setClearButtonEnabled(True)
         topbar_layout.addWidget(self._search_box)
 
         central_layout.addWidget(topbar)
 
     def _build_mission_bar(self, central_layout):
-        bar = QWidget()
-        bar.setObjectName("mission-bar")
-        bar.setFixedHeight(30)
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(14, 4, 14, 4)
-        layout.setSpacing(8)
+        from .windows_panels import build_mission_bar
 
-        kicker = QLabel("System")
-        kicker.setObjectName("mission-kicker")
-        layout.addWidget(kicker)
-
-        sep = QLabel("·")
-        sep.setObjectName("mission-sep")
-        layout.addWidget(sep)
-
-        self._mission_pills: list[QLabel] = []
-        for _ in range(4):
-            pill = QLabel("")
-            pill.setObjectName("mission-pill-dim")
-            pill.hide()
-            layout.addWidget(pill)
-            self._mission_pills.append(pill)
-
-        layout.addStretch()
-
-        # AI/repair hint — single muted label, no glow
-        self._mission_ai_hint = QLabel("")
-        self._mission_ai_hint.setObjectName("mission-kicker")
-        self._mission_ai_hint.hide()
-        layout.addWidget(self._mission_ai_hint)
-
-        central_layout.addWidget(bar)
-        self._mission_bar = bar
+        return build_mission_bar(self, central_layout)
 
     def _refresh_mission_bar(self):
         if self._mission_worker is not None:
@@ -221,7 +205,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 rollback = False
             try:
-                portal = command_stdout(["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"], timeout=2) or ""
+                portal = command_stdout(["systemctl", "--user", "is-active", "xdg-desktop-portal.service"], timeout=2) or ""
                 portal = portal.strip()
             except Exception:
                 portal = ""
@@ -231,6 +215,7 @@ class MainWindow(QMainWindow):
         self._mission_worker.result.connect(self._on_mission_bar_ready)
         self._mission_worker.failed.connect(lambda _k, _m: None)
         self._mission_worker.finished.connect(lambda: setattr(self, "_mission_worker", None))
+        self._mission_worker.finished.connect(self._mission_worker.deleteLater)
         self._mission_worker.start()
 
     def _on_mission_bar_ready(self, _key: str, facts: object):
@@ -320,6 +305,20 @@ class MainWindow(QMainWindow):
                     dlg.accept()
                     self._navigate_to(matches[0][0])
 
+        def _key_press(event):
+            if event.key() == Qt.Key.Key_Down:
+                row = lst.currentRow()
+                if row < lst.count() - 1:
+                    lst.setCurrentRow(row + 1)
+                return True
+            elif event.key() == Qt.Key.Key_Up:
+                row = lst.currentRow()
+                if row > 0:
+                    lst.setCurrentRow(row - 1)
+                return True
+            return False
+
+        edit.keyPressEvent = lambda ev: (edit.keyPressEvent.__self__.keyPressEvent(ev) if not _key_press(ev) else None)
         edit.textChanged.connect(_refill)
         edit.returnPressed.connect(_accept)
         lst.itemActivated.connect(lambda it: (dlg.accept(), self._navigate_to(it.data(Qt.ItemDataRole.UserRole))))
@@ -330,26 +329,9 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _build_search_panel(self, central_layout):
-        self._search_panel = QFrame()
-        self._search_panel.setObjectName("search-results-panel")
-        self._search_panel.hide()
-        self._search_panel_layout = QVBoxLayout(self._search_panel)
-        self._search_panel_layout.setContentsMargins(266, 12, 24, 14)
-        self._search_panel_layout.setSpacing(8)
+        from .windows_panels import build_search_panel
 
-        self._search_results_title = QLabel("Search results")
-        self._search_results_title.setObjectName("search-results-title")
-        self._search_panel_layout.addWidget(self._search_results_title)
-
-        self._search_results_body = QVBoxLayout()
-        self._search_results_body.setSpacing(6)
-        self._search_panel_layout.addLayout(self._search_results_body)
-
-        self._search_results_hint = QLabel("")
-        self._search_results_hint.setObjectName("search-results-hint")
-        self._search_results_hint.setWordWrap(True)
-        self._search_panel_layout.addWidget(self._search_results_hint)
-        central_layout.addWidget(self._search_panel)
+        return build_search_panel(self, central_layout)
 
     def _create_main_content_root(self) -> QWidget:
         root = QWidget()
@@ -390,8 +372,20 @@ class MainWindow(QMainWindow):
         self._nav_section_labels = {}
         self._page_crumbs = []
 
+        scroll = QScrollArea()
+        scroll.setObjectName("sidebar-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("sidebar-scroll-content")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(0)
+
         nav_groups = get_nav_groups(self._navigate_to)
-        self._initialize_page_specs(nav_groups, sidebar_layout)
+        self._initialize_page_specs(nav_groups, scroll_layout)
 
         self._page_descriptors = descriptors_from_nav_groups(nav_groups, self._SEARCH_ITEMS)
         self._descriptor_by_key = {descriptor.key: descriptor for descriptor in self._page_descriptors}
@@ -402,7 +396,10 @@ class MainWindow(QMainWindow):
         if nvidia_btn is not None:
             nvidia_btn.setVisible(False)
 
-        sidebar_layout.addStretch()
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        sidebar_layout.addWidget(scroll, 1)
+
         sidebar_layout.addWidget(_divider())
         ver_hint = QLabel("KythOS System Hub")
         ver_hint.setObjectName("nav-section")
@@ -446,11 +443,21 @@ class MainWindow(QMainWindow):
 
     def _setup_search(self):
         self._search_key_by_entry: dict[str, str] = {}
-        for key, (title, _description, terms) in self._SEARCH_ITEMS.items():
+        for key, item in self._SEARCH_ITEMS.items():
             if key not in self._page_index_by_key:
                 continue
+            # S10: use typed SearchItem helpers if available, else tuple
+            if hasattr(item, "title"):
+                title, terms = item.title, tuple(item.terms)
+            else:
+                title, _description, terms = item  # type: ignore[misc]
+                terms = tuple(terms)
             for alias in [title, key, *terms]:
-                self._search_key_by_entry.setdefault(alias, key)
+                # S10: normalize alias lower at insert to make rank stable
+                norm = alias.strip().lower()
+                if norm:
+                    self._search_key_by_entry.setdefault(alias, key)
+                    self._search_key_by_entry.setdefault(norm, key)
 
         entries = sorted(self._search_key_by_entry)
         completer = QCompleter(entries, self._search_box)
@@ -522,7 +529,8 @@ class MainWindow(QMainWindow):
                     score = max(score, 130)
             if score:
                 ranked.append((key, score))
-        return sorted(ranked, key=lambda item: (-item[1], self._descriptor_by_key[item[0]].title))[:5]
+        # W4: stable tie-break — score desc then key asc (not title alpha which drifts with search_terms)
+        return sorted(ranked, key=lambda item: (-item[1], item[0]))[:5]
 
     def _update_search_results(self, text: str):
         self._clear_search_results()
@@ -579,7 +587,21 @@ class MainWindow(QMainWindow):
     # ── Navigation ────────────────────────────────────────────────────────────
 
     def _refresh_sidebar_channel(self):
-        branch = current_branch()
+        # current_branch() can shell out to `bootc status` on a cold cache
+        # (DISK_TTL["bootc-branch"] = 90s) — run it off the UI thread like
+        # _refresh_mission_bar, instead of blocking startup on the main thread.
+        if self._sidebar_channel_worker is not None:
+            return
+        from .services.runtime import DataWorker
+
+        self._sidebar_channel_worker = DataWorker("sidebar-channel", current_branch)
+        self._sidebar_channel_worker.result.connect(self._on_sidebar_channel_ready)
+        self._sidebar_channel_worker.failed.connect(lambda _k, _m: None)
+        self._sidebar_channel_worker.finished.connect(lambda: setattr(self, "_sidebar_channel_worker", None))
+        self._sidebar_channel_worker.finished.connect(self._sidebar_channel_worker.deleteLater)
+        self._sidebar_channel_worker.start()
+
+    def _on_sidebar_channel_ready(self, _key: str, branch: object):
         text = {"latest": "Stable Channel", "testing": "Testing Channel"}.get(branch or "", "System Hub")
         self._sidebar_ver_lbl.setText(text)
 
@@ -607,9 +629,23 @@ class MainWindow(QMainWindow):
     def _make_nav_handler(self, index: int):
         return lambda: self._switch_page(index)
 
+    # R3: legacy aliases so old keys (System/Graphics/...) still navigate
+    _LEGACY_ALIASES = {
+        "System": "Hardware",
+        "Graphics": "Performance",
+        "Network": "VPN",
+        "Software": "App Store",
+        "Display": "Plasma Wayland",
+        "About": "Feedback",
+    }
+
     def _navigate_to(self, destination: int | str):
         if isinstance(destination, str):
             index = self._page_index_by_key.get(destination)
+            if index is None:
+                alias = self._LEGACY_ALIASES.get(destination)
+                if alias is not None:
+                    index = self._page_index_by_key.get(alias)
             if index is None:
                 return
             self._switch_page(index)
@@ -631,6 +667,7 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate(self._nav_buttons):
             btn.set_active(i == index)
         self._stack.setCurrentIndex(index)
+        fade_in(self._stack.currentWidget())
         if record:
             del self._history[self._history_pos + 1:]
             if not self._history or self._history[-1] != index:

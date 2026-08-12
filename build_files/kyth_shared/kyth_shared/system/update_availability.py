@@ -19,12 +19,10 @@ terminal `available | uptodate | staged | error` state.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from kyth_shared.system.bootc import bootc_status_data, has_staged_update
-from kyth_shared.system.bootc_policy import UpdateAvailabilityView, update_availability_view
-from kyth_shared.system.registry import check_registry_update, REGISTRY
-from kyth_shared.system.bootc_query import image_digest_from_status
+from kyth_shared.system.bootc_policy import REGISTRY, UpdateAvailabilityView, update_availability_view
+from kyth_shared.system.registry import check_registry_update
 from kyth_shared.system.probe import probe_cached
 
 FLATPAK_CACHE_TTL = 10.0

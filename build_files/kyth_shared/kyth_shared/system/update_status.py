@@ -32,6 +32,7 @@ class UpdateStatus:
 _CHECK_TTL = 15.0
 _LAST_CHECK: dict[str, float] = {}
 _LAST_STATUS: dict[str, UpdateStatus] = {}
+_LOCK = __import__("threading").Lock()  # S8: protect concurrent DataWorkers
 
 def _fetch_status() -> UpdateStatus:
     # Best-effort gather — never blocks > TTL, never raises.
@@ -51,7 +52,7 @@ def _fetch_status() -> UpdateStatus:
         try:
             # Hard timeout hedge — check_registry_update should be TTL-bounded
             # but we enforce via probe_cached wrapper.
-            remote = probe_cached("registry-digest", 10.0, lambda: check_registry_update())
+            remote = probe_cached("registry-digest", 10.0, check_registry_update)
             if remote and isinstance(remote, dict):
                 remote_digest = remote.get("digest")
                 if remote_digest:
@@ -86,15 +87,18 @@ def _fetch_status() -> UpdateStatus:
 def get_update_status(*, force_refresh: bool = False) -> UpdateStatus:
     now = time.time()
     key = "update-status"
-    if not force_refresh and key in _LAST_STATUS:
-        age = now - _LAST_CHECK.get(key, 0)
-        if age < _CHECK_TTL:
-            return _LAST_STATUS[key]
+    with _LOCK:
+        if not force_refresh and key in _LAST_STATUS:
+            age = now - _LAST_CHECK.get(key, 0)
+            if age < _CHECK_TTL:
+                return _LAST_STATUS[key]
     status = _fetch_status()
-    _LAST_CHECK[key] = now
-    _LAST_STATUS[key] = status
+    with _LOCK:
+        _LAST_CHECK[key] = now
+        _LAST_STATUS[key] = status
     return status
 
 def invalidate_update_status() -> None:
-    _LAST_CHECK.clear()
-    _LAST_STATUS.clear()
+    with _LOCK:
+        _LAST_CHECK.clear()
+        _LAST_STATUS.clear()

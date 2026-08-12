@@ -169,7 +169,7 @@ class InstallerService:
         except RuntimeError as exc:
             return {"ok": False, "message": str(exc)}
 
-    def start_install(self, body: dict) -> dict:
+    def start_install(self, body: dict, *, strict_locale: bool = True) -> dict:
         # install.py is imported lazily here, not at module level: it pulls in
         # plan.py, which imports partition_ops.get_journal by name — a real
         # circular import when this module is reached via partition_ops.py's
@@ -178,7 +178,7 @@ class InstallerService:
         # plan.py -> back into the still-initializing partition_ops.py).
         from kyth_installer import install
         try:
-            state = validation.validate_install_request(body, self.context)
+            state = validation.validate_install_request(body, self.context, strict_locale=strict_locale)
         except validation.InstallRequestError as exc:
             return {"started": False, "message": str(exc)}
         if not execution.start_installation(self.context, state, install._run_install):
@@ -186,7 +186,6 @@ class InstallerService:
         return {"started": True}
 
     def cancel_install(self, _body: dict) -> dict:
-        from kyth_installer import execution
 
         if execution.request_cancel(self.context):
             return {"ok": True, "message": "Cancellation requested."}

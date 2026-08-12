@@ -242,6 +242,7 @@ class _MachineStepMixin:
         worker.result.connect(self._on_machine_facts_ready)
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_machine_facts_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_machine_facts_ready(self, _key: str, facts: object) -> None:

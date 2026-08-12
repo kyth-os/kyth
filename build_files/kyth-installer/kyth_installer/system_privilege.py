@@ -1,19 +1,10 @@
 """Privilege helpers — canonical after system 383 split."""
 from __future__ import annotations
 
-"""System-mutation helpers for kyth-installer: privilege escalation, account
-database repair, MOK/Secure Boot enrollment, timezone listing, and unmounting
-a target disk before a wipe install.
-"""
-
-import glob
-import json
 import logging
 import os
-import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
 from .runner import run_command as _orig_run_command, run_as_root as _orig_as_root
 from kyth_shared import accounts as _accounts
 

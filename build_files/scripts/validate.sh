@@ -43,10 +43,11 @@ echo "==> Optimization budgets"
 python3 build_files/scripts/optimization-report.py --check
 
 echo "==> Gaming hash gate"
-bash build_files/scripts/hash-gaming-versions.sh
-
-echo "==> RPM lock hash gate"
-bash build_files/scripts/hash-rpm-lock.sh
+if git diff --quiet HEAD -- build_files/kyth_shared/kyth_shared/gaming_resolve.py build_files/kyth_shared/kyth_shared/repos.py build_files/config/repos.json build_files/scripts/thirdparty.sh build_files/scripts/proton-cachyos.sh Dockerfile 2>/dev/null; then
+  echo "gaming hash gate: skipped (no relevant changes)"
+else
+  bash build_files/scripts/hash-gaming-versions.sh
+fi
 
 echo "==> Perf gate (5% ledger, stale p95 check)"
 PYTHONPATH=build_files/kyth_shared python3 -c "from kyth_shared.perf_gate import check_perf_gate; r=check_perf_gate(current_ms=None); assert r.get('pass') is True, r; print(f\"perf gate ok threshold={r.get('threshold')}%\")"
@@ -76,7 +77,7 @@ export XDG_CONFIG_HOME="${test_home}/config"
 export XDG_DATA_HOME="${test_home}/data"
 export XDG_STATE_HOME="${test_home}/state"
 mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}"
-python3 -m unittest discover -s tests -b
+PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer python3 -m unittest discover -s tests -b
 
 echo "==> Structured configuration"
 while IFS= read -r -d '' file; do

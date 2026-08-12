@@ -54,16 +54,27 @@ ROUTES = {
     "set_mountpoint": RouteSpec("POST", "/api/disk/set-mountpoint", requires_same_origin=True),
     "commit_partitions": RouteSpec("POST", "/api/disk/commit", requires_same_origin=True),
     "rollback_partitions": RouteSpec("POST", "/api/disk/rollback", requires_same_origin=True),
+    # Rescue
+    "rescue_probe": RouteSpec("GET", "/api/rescue/probe"),
+    "rescue_logs_to_usb": RouteSpec("POST", "/api/rescue/logs-to-usb", requires_same_origin=True),
 }
 
 
 # path -> (webui filename, content-type, whether to inject the session token)
 _STATIC_TEXT_ASSETS: dict[str, tuple[str, str, bool]] = {
     "/style.css": ("style.css", "text/css; charset=utf-8", False),
-    "/app.js": ("app.js", "application/javascript; charset=utf-8", False),
     "/api.js": ("api.js", "application/javascript; charset=utf-8", True),
+    "/icons.js": ("icons.js", "application/javascript; charset=utf-8", False),
     "/install-ui.js": ("install-ui.js", "application/javascript; charset=utf-8", False),
     "/state.js": ("state.js", "application/javascript; charset=utf-8", False),
+    # Former single app.js, split by wizard step — see index.html load order.
+    "/nav.js": ("nav.js", "application/javascript; charset=utf-8", False),
+    "/disk.js": ("disk.js", "application/javascript; charset=utf-8", False),
+    "/partition-editor.js": ("partition-editor.js", "application/javascript; charset=utf-8", False),
+    "/kernel.js": ("kernel.js", "application/javascript; charset=utf-8", False),
+    "/config.js": ("config.js", "application/javascript; charset=utf-8", False),
+    "/review.js": ("review.js", "application/javascript; charset=utf-8", False),
+    "/install-flow.js": ("install-flow.js", "application/javascript; charset=utf-8", False),
 }
 
 
@@ -217,8 +228,73 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_log()
         elif route == ROUTES["report"]:
             self._json(read_transaction_state(TRANSACTION_FILE))
+        elif route == ROUTES["rescue_probe"]:
+            self._json(self._rescue_probe())
         else:
             self.send_error(404)
+
+    def _rescue_probe(self) -> dict:
+        """Read-only diagnostics for the Rescue tab — no mounts, no writes."""
+        from .system import _as_root
+        from .runner import run_command
+
+        probe: dict = {
+            "log_tail": "",
+            "sgdisk_verify": "",
+            "efibootmgr": "",
+            "transaction": read_transaction_state(TRANSACTION_FILE),
+            "bootc_status": "",
+        }
+        # Last 80 lines of installer log (best-effort)
+        try:
+            if LOG_FILE.is_file() and not LOG_FILE.is_symlink():
+                lines = LOG_FILE.read_text(errors="replace").splitlines()
+                probe["log_tail"] = "\n".join(lines[-80:])
+        except Exception as exc:
+            probe["log_tail"] = f"(could not read log: {exc})"
+        # sgdisk --verify on the selected disk if any
+        try:
+            sel_disk = getattr(self.context, "state", {}).get("disk", "")
+            if sel_disk:
+                r = run_command(_as_root(["sgdisk", "--verify", sel_disk]), capture_output=True, text=True, timeout=10)
+                probe["sgdisk_verify"] = (r.stdout or "") + (r.stderr or "")
+        except Exception as exc:
+            probe["sgdisk_verify"] = f"(verify failed: {exc})"
+        # efibootmgr -v (read-only)
+        try:
+            r = run_command(_as_root(["efibootmgr", "-v"]), capture_output=True, text=True, timeout=5)
+            if r.stdout:
+                probe["efibootmgr"] = r.stdout
+        except Exception:
+            pass
+        # bootc status --json (read-only)
+        try:
+            r = run_command(_as_root(["bootc", "status", "--json"]), capture_output=True, text=True, timeout=5)
+            if r.stdout:
+                probe["bootc_status"] = r.stdout[:8000]
+                # Also surface a one-line booted vs staged summary without
+                # adding a new subprocess — keeps rescue read-only and cheap.
+                try:
+                    data = json.loads(r.stdout)
+                    # bootc status json shape varies; handle common keys
+                    booted = staged = ""
+                    if isinstance(data, dict):
+                        status = data.get("status") or data
+                        booted = str(status.get("booted") or status.get("bootedImage") or data.get("booted") or "")
+                        staged = str(status.get("staged") or status.get("stagedImage") or data.get("staged") or "")
+                        # Fallback: deployments list with booted flag
+                        if not booted and isinstance(data.get("deployments"), list):
+                            for dep in data["deployments"]:
+                                if dep.get("booted") and not booted:
+                                    booted = str(dep.get("image") or dep.get("id") or "")
+                                if dep.get("staged") and not staged:
+                                    staged = str(dep.get("image") or dep.get("id") or "")
+                    probe["bootc_status_summary"] = {"booted": booted[:256], "staged": staged[:256]}
+                except Exception:
+                    probe["bootc_status_summary"] = {"booted": "", "staged": ""}
+        except Exception:
+            pass
+        return probe
 
     def _serve_log(self) -> None:
         # Stream log to avoid OOM on large logs (>100 MiB)

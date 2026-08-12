@@ -4,7 +4,6 @@ from __future__ import annotations
 import os, tomllib
 from pathlib import Path
 from typing import Any
-from kyth_shared.commands import run
 
 DEFAULT_BACKUP_PATH = Path("/etc/kyth/backup.toml")
 

@@ -20,7 +20,6 @@ from pathlib import Path
 
 # Re-export the canonical COPR list — `repos.py` is the only place that
 # enumerates them; `packages-static.sh` must not duplicate the list.
-from kyth_shared.repos import GAMING_COPRS  # noqa: F401 — re-export
 
 _GAMING_VERSIONS_PATHS = (
     Path(__file__).resolve().parents[2] / "config" / "gaming-versions.json",

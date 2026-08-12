@@ -21,6 +21,13 @@ class ControllerPage(Page):
         super().__init__()
         self._probe_worker: ControllerProbeWorker | None = None
         self._probed = False
+        # Arch #12: hotplug — re-probe debounced 300ms on udev poll when page visible
+        from .qt import QTimer
+
+        self._hotplug_timer = QTimer(self)
+        self._hotplug_timer.setSingleShot(True)
+        self._hotplug_timer.setInterval(300)
+        self._hotplug_timer.timeout.connect(self._start_probe)
 
         self._page_header(
             "Gaming",
@@ -206,6 +213,9 @@ class ControllerPage(Page):
         if not self._probed:
             self._probed = True
             self._start_probe()
+        else:
+            # Re-probe debounced when returning to page (hotplug, BT re-pair)
+            self._hotplug_timer.start()
 
     def _start_probe(self) -> None:
         if self._probe_worker and self._probe_worker.isRunning():
@@ -237,7 +247,7 @@ class ControllerPage(Page):
     # ── Actions ────────────────────────────────────────────────────────────────
 
     def _test_rumble(self) -> None:
-        import glob, shutil
+        import glob
         dev = next(iter(glob.glob("/dev/input/js*") or glob.glob("/dev/input/by-id/*joystick*")), None)
         if not dev and shutil.which("fftest"):
             dev = "/dev/input/js0"

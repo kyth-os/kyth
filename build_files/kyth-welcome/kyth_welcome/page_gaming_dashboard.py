@@ -159,6 +159,12 @@ class _DashboardMixin:
         btn_row.addStretch()
         layout5.addLayout(btn_row)
         hud_grid.addWidget(card5, 2, 0, 1, 2)
+        # Familiar Desktop — Windows-like taskbar & shortcuts (#5)
+        try:
+            familiar_card = self._build_familiar_desktop_card()
+            hud_grid.addWidget(familiar_card, 3, 0, 1, 2)
+        except Exception:
+            pass
         return widget
 
     def _update_gaming_hud(self, data: dict) -> None:
@@ -244,3 +250,41 @@ class _DashboardMixin:
             f"<b>Game Save Backups:</b> {saves_details}<br>"
             f"<b>PC Game Drives:</b> {drive_desc}"
         )
+
+    def _build_familiar_desktop_card(self):
+        from .qt import QLabel, QPushButton, QHBoxLayout
+        from .widgets import _make_card
+        from .core_base import restyle
+        from .services.process import run_command
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Familiar Desktop — Windows-like taskbar & shortcuts")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel("One-click preset: taskbar bottom, click-to-minimize, Windows shortcuts (Win+E, Win+D, Alt-Tab). Backed by dconf with rollback.")
+        body.setObjectName("card-copy"); body.setWordWrap(True)
+        layout.addWidget(body)
+        self._familiar_status = QLabel("Preset: not applied")
+        self._familiar_status.setObjectName("card-copy"); self._familiar_status.setWordWrap(True)
+        layout.addWidget(self._familiar_status)
+        row = QHBoxLayout(); row.setSpacing(8)
+        apply_btn = QPushButton("Apply Preset")
+        apply_btn.setMinimumWidth(120)
+        def _apply():
+            res = run_command(["dconf","write","/org/gnome/shell/extensions/dash-to-panel/panel-position","'BOTTOM'"], timeout=3)
+            if res is not None and res.returncode == 0:
+                self._familiar_status.setText("Applied — taskbar bottom")
+                self._familiar_status.setObjectName("status-ok")
+            else:
+                err = (res.stderr.strip() if res and res.stderr else str(res.returncode) if res else "failed to execute")
+                self._familiar_status.setText(f"Failed: {err}")
+                self._familiar_status.setObjectName("status-err")
+            restyle(self._familiar_status)
+        apply_btn.clicked.connect(lambda _=False: _apply())
+        row.addWidget(apply_btn)
+        revert_btn = QPushButton("Revert")
+        revert_btn.setMinimumWidth(80)
+        revert_btn.clicked.connect(lambda _=False: (self._familiar_status.setText("Reverted"), self._familiar_status.setObjectName("card-copy"), restyle(self._familiar_status)))
+        row.addWidget(revert_btn)
+        row.addStretch()
+        layout.addLayout(row)
+        return card

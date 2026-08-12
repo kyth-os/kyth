@@ -53,6 +53,7 @@ class PostRouteService:
             "start": self.start,
             "cancel": self.cancel,
             "reboot": self.reboot,
+            "rescue_logs_to_usb": self.rescue_logs_to_usb,
         })
 
     def dispatch(self, route_name: str, body: dict) -> ApiResponse:
@@ -100,3 +101,44 @@ class PostRouteService:
         res = self.installer_service.reboot(body)
         status = 200 if res.get("ok") else 500
         return ApiResponse(res, status)
+
+    def rescue_logs_to_usb(self, body: dict) -> ApiResponse:
+        # Body may contain {"usb_mount": "/run/media/liveuser/USB"}
+        # Best-effort: find first removable mount under /run/media if not given.
+        import os
+        from pathlib import Path
+        from .config import LOG_FILE, TRANSACTION_FILE, FAILURE_SUMMARY_FILE
+        from .runner import run_command
+        from .system import _as_root
+
+        target = (body.get("usb_mount") or "").strip()
+        if not target:
+            # Auto-detect first USB mount
+            try:
+                candidates = [p for p in Path("/run/media").rglob("*") if p.is_dir()]
+                for c in candidates:
+                    try:
+                        if run_command(["findmnt", "-n", str(c)], capture_output=True, timeout=3).returncode == 0:
+                            target = str(c)
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+        if not target or not os.path.isdir(target):
+            return ApiResponse({"ok": False, "message": "No USB drive found. Insert a USB stick and try again."}, 400)
+        try:
+            dest = Path(target) / "kyth-installer-logs"
+            run_command(_as_root(["mkdir", "-p", str(dest)]), check=False)
+            copied = []
+            for src in (LOG_FILE, TRANSACTION_FILE, FAILURE_SUMMARY_FILE):
+                if src.is_file() and not src.is_symlink():
+                    run_command(_as_root(["cp", "-a", str(src), str(dest / src.name)]), check=False)
+                    # Also ensure world-readable on FAT USB
+                    run_command(_as_root(["chmod", "644", str(dest / src.name)]), check=False)
+                    copied.append(src.name)
+            if not copied:
+                return ApiResponse({"ok": False, "message": "No installer logs found to copy."}, 500)
+            return ApiResponse({"ok": True, "dest": str(dest), "copied": copied}, 200)
+        except Exception as exc:
+            return ApiResponse({"ok": False, "message": str(exc)}, 500)

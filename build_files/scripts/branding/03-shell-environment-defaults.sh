@@ -35,10 +35,16 @@ command -v rg   >/dev/null 2>&1 && alias search='rg'
     source /usr/share/fzf/shell/completion.zsh
 
 # zoxide — smarter cd with frecency-ranked jump (z foo, zi interactive)
-command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
+# Wrapper at /usr/bin/zoxide delegates to distrobox; guard execution not just
+# existence so a missing binary inside the container doesn't spam crun errors
+if command -v zoxide >/dev/null 2>&1; then
+  if zoxide init zsh >/dev/null 2>&1; then eval "$(zoxide init zsh)"; fi
+fi
 
 # Starship prompt — must come last to override any prompt set above
-command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"
+if command -v starship >/dev/null 2>&1; then
+  if starship init zsh >/dev/null 2>&1; then eval "$(starship init zsh)"; fi
+fi
 
 # zsh-syntax-highlighting — must be sourced after all other init (Zle hook)
 [[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] &&
@@ -74,11 +80,15 @@ command -v rg   >/dev/null 2>&1 && alias search='rg'
 [[ -f /usr/share/fzf/shell/key-bindings.bash ]] &&
     source /usr/share/fzf/shell/key-bindings.bash
 
-# zoxide
-command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init bash)"
+# zoxide — wrapper-aware guard so missing container binary doesn't spam
+if command -v zoxide >/dev/null 2>&1; then
+  if zoxide init bash >/dev/null 2>&1; then eval "$(zoxide init bash)"; fi
+fi
 
-# Starship prompt
-command -v starship >/dev/null 2>&1 && eval "$(starship init bash)"
+# Starship prompt — wrapper-aware guard
+if command -v starship >/dev/null 2>&1; then
+  if starship init bash >/dev/null 2>&1; then eval "$(starship init bash)"; fi
+fi
 BASHRCEOF
 
 # System-wide git-delta pager config — makes `git diff`, `git log`, and

@@ -5,7 +5,7 @@ Mission Central template (header → primary grid → disclosure → log drawer)
 while keeping per-page business logic owned by callers.
 """
 
-from ..qt import QFrame, QLabel, QLayout, QRect, QSize, Qt, QVBoxLayout, QWidget
+from ..qt import QLabel, QLayout, QRect, QSize, Qt, QVBoxLayout, QWidget
 
 from .cards import _divider, _make_card, _make_grid, _make_section_header
 
@@ -173,7 +173,6 @@ class HubPage(QWidget):
 
     def grid(self) -> QVBoxLayout:
         """Create a 2-col card grid attached to this page."""
-        from ..qt import QGridLayout
 
         return _make_grid(self._layout)
 

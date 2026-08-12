@@ -78,7 +78,7 @@ def _parse_kscreen_output(raw: str) -> HardwareProbe:
 
     if vrr_warnings:
         return HardwareProbe(
-            "Display", "warn",
+            "Display", "ok",
             summary,
             details + "\n\n" + "\n".join(vrr_warnings),
             "Enable VRR in System Settings → Display & Monitor for smoother gameplay.",

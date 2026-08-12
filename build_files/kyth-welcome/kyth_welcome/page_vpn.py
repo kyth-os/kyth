@@ -1,3 +1,4 @@
+# Arch #18: VPN SAML survives sleep — VpnConnectWorker uses StreamingProcessWorker killpg→terminate→kill + BLOCKS_CLOSE
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
 from .services.vpn import (

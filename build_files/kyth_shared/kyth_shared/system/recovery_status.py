@@ -30,6 +30,28 @@ class RecoveryStatus:
     clear_quarantine_cmd: str = ""
 
 
+# S2: truth table central — staged × rollback × quarantined → banner/retry
+# staged | rollback | quarant. | banner
+#   0        0        0        | up-to-date
+#   1        *        0        | reboot to apply staged
+#   *        1        0        | rollback available
+#   *        *        1        | quarantined — clear-quarantine retry
+RECOVERY_BANNER: dict[tuple[bool, bool, bool], str] = {
+    (False, False, False): "up-to-date",
+    (True, False, False): "reboot to apply staged",
+    (True, True, False): "reboot to apply staged",
+    (False, True, False): "rollback available",
+    (False, False, True): "quarantined — clear-quarantine retry",
+    (True, False, True): "quarantined — clear-quarantine retry",
+    (True, True, True): "quarantined — clear-quarantine retry",
+    (False, True, True): "quarantined — clear-quarantine retry",
+}
+
+
+def recovery_banner(status: RecoveryStatus) -> str:
+    return RECOVERY_BANNER[(bool(status.has_staged), bool(status.has_rollback), bool(status.quarantined_digest))]
+
+
 def get_recovery_status() -> RecoveryStatus:
     try:
         has_staged = bool(has_staged_update())

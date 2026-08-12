@@ -1,7 +1,6 @@
 """Validation and normalization of installer start requests."""
 from __future__ import annotations
 
-import re
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -60,7 +59,9 @@ def _storage_state(body: dict, context: InstallerContext) -> tuple[dict, dict]:
 
     mode = body.get("install_mode", "wipe")
     if mode not in INSTALL_MODES:
-        mode = "wipe"
+        raise InstallRequestError(
+            f"Invalid install mode: {mode!r}. Valid modes are: {', '.join(sorted(INSTALL_MODES))}."
+        )
 
     # Capture one StorageSnapshot per request — avoids 3-4 separate
     # list_partitions/list_free_space scans that were previously done
@@ -182,7 +183,25 @@ def _storage_state(body: dict, context: InstallerContext) -> tuple[dict, dict]:
     return state, disks[target_disk]
 
 
-def validate_install_request(body: dict, context: InstallerContext) -> InstallRequest:
+def _is_answer_file_request(body: dict) -> bool:
+    """Heuristic: answer-file CLI path pipes raw body without WebUI list checks.
+
+    Headless answer-files may specify locale/keymap/timezone that aren't in the
+    live session's timedatectl/localectl lists yet (e.g. minimal ISO). For
+    those, fall back to defaults silently; for interactive WebUI requests,
+    reject to surface typos instead of silently shipping UTC.
+    """
+    # Headless answer-file sets explicit values outside the WebUI's dropdowns
+    # and bypasses the is_live session; detect via missing confirm_* dance?
+    # Simpler: if body came with an explicit non-empty locale/keymap/zone that
+    # fails the allowlist, the WebUI path should error, answer-file path falls
+    # back. We treat answer-file as any request where raw values don't match
+    # the live allowlists but the caller explicitly supplied them — handled
+    # by caller passing _strict=False. Here default is strict (WebUI).
+    return False
+
+
+def validate_install_request(body: dict, context: InstallerContext, *, strict_locale: bool = True) -> InstallRequest:
     """Validate a start request and return an immutable normalized request."""
     state, disk_info = _storage_state(body, context)
     current_ok = (
@@ -195,15 +214,39 @@ def validate_install_request(body: dict, context: InstallerContext) -> InstallRe
 
     password_hash = _hash_password_for_request(body.get("password", ""))
 
+    _locale_warnings: list[str] = []
     timezone = body.get("timezone", "UTC") or "UTC"
     if timezone not in set(system.list_timezones()):
+        if strict_locale:
+            raise InstallRequestError(f"Invalid timezone: {timezone!r}.")
+        _locale_warnings.append(f"timezone {timezone!r} -> UTC")
         timezone = "UTC"
     locale = str(body.get("locale") or "en_US.UTF-8")
     if not LOCALE_PATTERN.fullmatch(locale) or locale not in set(system.list_locales()):
+        if strict_locale:
+            raise InstallRequestError(f"Invalid locale: {locale!r}.")
+        _locale_warnings.append(f"locale {locale!r} -> en_US.UTF-8")
         locale = "en_US.UTF-8"
     keymap = str(body.get("keymap") or "us")
     if not KEYMAP_PATTERN.fullmatch(keymap) or keymap not in set(system.list_keymaps()):
+        if strict_locale:
+            raise InstallRequestError(f"Invalid keymap: {keymap!r}.")
+        _locale_warnings.append(f"keymap {keymap!r} -> us")
         keymap = "us"
+    if _locale_warnings:
+        # Headless fallback is lenient but must be auditable — surface in
+        # both log and transaction state so answer-file typos don't silently
+        # ship UTC without evidence.
+        try:
+            import logging as _log_mod
+            _log_mod.getLogger("kyth_installer.validation").warning(
+                "Headless locale fallback: %s", "; ".join(_locale_warnings)
+            )
+            # Persist for rescue probe / failure summary — best-effort.
+            if hasattr(context, "state") and isinstance(context.state, dict):
+                context.state["locale_warnings"] = list(_locale_warnings)
+        except Exception:
+            pass
     username = body.get("username", "")
     _require_valid_username(username)
     hostname = body.get("hostname", "kyth")

@@ -7,9 +7,10 @@ restyling the Hub later doesn't ripple into the wizard, and vice versa. Colors
 come from ui_tokens.KYTH_* — see that module for the palette rationale.
 """
 from ..ui_tokens import (
-    KYTH_BLUE, KYTH_BLUE_DIM, KYTH_GROUND, KYTH_HAIRLINE, KYTH_RADIUS,
-    KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT,
-    KYTH_TEXT_MUTED, STATUS_ERROR, STATUS_OK, STATUS_WARN,
+    KYTH_BLUE, KYTH_BLUE_DIM, KYTH_BLUE_TINT_BG, KYTH_BLUE_TINT_BORDER,
+    KYTH_GROUND, KYTH_HAIRLINE, KYTH_RADIUS, KYTH_SURFACE, KYTH_SURFACE_RAISED,
+    KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED, STATUS_ERROR, STATUS_OK,
+    STATUS_WARN,
 )
 
 WIZARD_QSS = f"""
@@ -104,8 +105,8 @@ QLabel#wiz-pill {{
     font-weight: 800;
     letter-spacing: 0.8px;
     color: {KYTH_BLUE};
-    background: rgba(91, 140, 255, 30);
-    border: 1px solid rgba(91, 140, 255, 90);
+    background: {KYTH_BLUE_TINT_BG};
+    border: 1px solid {KYTH_BLUE_TINT_BORDER};
     border-radius: 999px;
     padding: 5px 11px;
 }}

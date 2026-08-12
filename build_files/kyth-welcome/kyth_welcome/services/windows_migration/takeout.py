@@ -1,7 +1,6 @@
 """Windows Takeout — unified launcher + cloud + browser inventory (pure, no Qt)."""
 from __future__ import annotations
 
-import os
 
 # Display names for launcher keys used in windows_partitions.launcher_paths
 _LAUNCHER_DISPLAY: dict[str, str] = {

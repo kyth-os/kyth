@@ -1,11 +1,8 @@
 """System health audit — ledger + snapshot + flatpak trim due (consolidated: reuses perf_audit.collect_audit, no duplicate collectors)."""
 from __future__ import annotations
 
-import json, time
-from pathlib import Path
 from typing import Any
 
-from .commands import run
 
 
 def system_audit() -> dict[str, Any]:

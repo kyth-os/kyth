@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""Installed compatibility launcher for Kyth Guardian."""
+from kyth_shared.guardian import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

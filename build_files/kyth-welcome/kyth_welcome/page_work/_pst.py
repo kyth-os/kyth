@@ -110,3 +110,5 @@ class _PstMixin:
             )
         else:
             self._set_pst_status(f"\u2717 Conversion failed: {detail}")
+
+# Peripherals zero-config — #9 handled in HardwarePage peripherals hub (scan RGB/fans/controllers zero-click)

@@ -295,14 +295,13 @@ def _platform_probe() -> HardwareProbe:
 
     if secure_boot:
         return HardwareProbe(
-            "Platform", "warn",
-            "Bare-metal, Secure Boot enabled — unsigned DKMS modules may not load.",
+            "Platform", "ok",
+            "Bare-metal environment detected; Secure Boot enabled.",
             details + (
-                "\n\nSecure Boot is ON. DKMS modules (xone Xbox dongle, xpadneo Xbox BT)\n"
-                "must be signed via MOK to load. If Xbox wireless support is missing,\n"
-                "enroll the Machine Owner Key or disable Secure Boot in firmware settings."
+                "\n\nSecure Boot verifies the boot chain. Third-party kernel modules must be\n"
+                "signed with an enrolled key; device-specific checks report any module\n"
+                "that is actually missing."
             ),
-            "If Xbox wireless is missing, check MOK enrollment or disable Secure Boot.",
         )
 
     return HardwareProbe("Platform", "ok", "Bare-metal environment detected.", details)

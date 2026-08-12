@@ -41,14 +41,28 @@ class _ResetMixin:
         set_session_inhibit(self, None)
         self._confirm_edit.setEnabled(True)
         self._on_confirm_text(self._confirm_edit.text())
-        if code == 0:
+        # S3: distinguish cancel (ksshaskpass Esc) from real failure
+        from .services.runtime import Worker
+
+        if code == Worker.CANCELLED:
+            self._status_lbl.setText("Cancelled — no change. Rollback not staged.")
+            self._status_lbl.setObjectName("status-warn")
+            self._log_panel.append("\nCancelled. No change was made.")
+            self._rollback_repair_btn.setEnabled(has_rollback_deployment())
+        elif code == 0:
+            try:
+                from kyth_shared.system.probe import invalidate_bootc
+                invalidate_bootc()
+            except Exception:
+                pass
             self._status_lbl.setText("Rollback staged — rebooting into the previous system image…")
             self._status_lbl.setObjectName("status-ok")
             self._log_panel.append("\nDone. Rebooting now.")
             single_shot(self, 2000, reboot)
         else:
-            self._status_lbl.setText(f"Rollback failed (exit code {code}).")
+            self._status_lbl.setText(f"Rollback failed (exit code {code}). See journal: journalctl --user -u kyth-probe")
             self._status_lbl.setObjectName("status-err")
+            self._log_panel.append("\nCheck journal: journalctl --user -u kyth-probe or /var/log/kyth/boot-health.json")
             self._rollback_repair_btn.setEnabled(has_rollback_deployment())
         restyle(self._status_lbl)
 

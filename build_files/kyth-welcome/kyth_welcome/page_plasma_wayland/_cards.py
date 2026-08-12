@@ -215,12 +215,7 @@ kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Le
 kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Right" "Meta+Right,Meta+Right,Quick Tile Window to the Right"
 qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
 """
-        code, out, err = run_shell_script(script, timeout=10)
-        try:
-            from ..widgets import CommandResultPanel
-            # no-op if panel not present
-        except Exception:
-            pass
+        run_shell_script(script, timeout=10)
 
     def _make_snap_grid_card(self) -> QFrame:
         card, body = _make_card()
@@ -293,11 +288,21 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
         worker = DataWorker("wayland-readiness", self._fetch_wayland_readiness_facts)
         self._wayland_readiness_worker = worker
         worker.result.connect(lambda _key, facts: self._apply_wayland_readiness_facts(facts))
-        worker.failed.connect(lambda _key, _message: None)
+        worker.failed.connect(lambda _k, msg: self._apply_wayland_readiness_facts({"Status": f"check failed: {msg}"}))
         worker.finished.connect(lambda: setattr(self, "_wayland_readiness_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_wayland_readiness_facts(self, facts: dict[str, str]) -> None:
+        # Arch #13: live-apply — verify HDR/VRR persisted via second kscreen-doctor read-back
+        # (kscreen-doctor apply can silently revert; read-back confirms)
+        try:
+            verify_out = kscreen_doctor_output().lower()
+            for key in ("vrr", "hdr"):
+                if key in verify_out and facts.get(key.upper(), "").lower() not in verify_out:
+                    facts[key.upper()] += " (pending — re-apply may be needed)"
+        except Exception:
+            pass
         for name, value in facts.items():
             label = self._wayland_row_labels.get(name)
             if label is not None:

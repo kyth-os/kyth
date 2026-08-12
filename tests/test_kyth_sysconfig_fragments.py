@@ -31,16 +31,18 @@ class SysconfigFragmentTests(unittest.TestCase):
             self.assertIn("set -euo pipefail", body)
 
     def test_kernel_sysctl_fragment(self):
-        # The fragment copies the sysctl values from a data file (build_files/data/)
-        # instead of embedding them in a heredoc — same pattern as every other
-        # extracted config in this refactor. The values themselves are checked
-        # against that data file, not the fragment script.
+        # Sysctl is now consolidated via 00-sysctl-compose (build_files/config/sysctl/*.toml).
+        # The old fragment copied 99-kyth.conf verbatim; now it retains only module loads.
         path = FRAG_DIR / "kernel" / "01-kernel-sysctl-parameters.sh"
+        compose = ROOT / "build_files" / "scripts" / "sysconfig" / "00-sysctl-compose.sh"
+        base_toml = ROOT / "build_files" / "config" / "sysctl" / "base.toml"
         self.assertTrue(path.is_file())
         body = path.read_text(encoding="utf-8")
-        self.assertIn("99-kyth.conf", body)
-        self.assertTrue(SYSCTL_DATA.is_file())
-        self.assertIn("vm.swappiness", SYSCTL_DATA.read_text(encoding="utf-8"))
+        self.assertIn("00-sysctl-compose", body)
+        self.assertNotIn("cp /ctx/data/sysctl.d/99-kyth.conf", body)
+        self.assertTrue(compose.is_file())
+        self.assertTrue(base_toml.is_file())
+        self.assertIn("vm.swappiness", base_toml.read_text(encoding="utf-8"))
 
     def test_boot_log_regression_guards(self):
         guards = (FRAG_DIR / "desktop" / "09-autostart-log-noise-guards.sh").read_text(

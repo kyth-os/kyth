@@ -1,0 +1,18 @@
+[Unit]
+Description=Kyth Guardian bounded desktop health check
+Documentation=https://github.com/mrtrick37/kyth
+After=graphical-session.target kyth-probe.service
+ConditionPathExists=/usr/bin/kyth-guardian
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/kyth-guardian check
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=90
+MemoryHigh=1536M
+MemoryMax=1792M
+CPUQuota=50%
+
+[Install]
+WantedBy=default.target

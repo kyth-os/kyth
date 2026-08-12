@@ -5,7 +5,6 @@ Offline, no cloud. Hashes glsl/spirv + driver version, stores under /var/cache/k
 from __future__ import annotations
 
 import hashlib
-import os
 from pathlib import Path
 
 DEFAULT_CACHE_ROOT = Path("/var/cache/kyth/shaders")

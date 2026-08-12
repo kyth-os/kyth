@@ -36,7 +36,7 @@ check-dockerfile check_base_image=default_base_image:
 # Run Python unit tests.
 [group('Quality')]
 test:
-    python3 -m unittest discover -s tests -b
+    PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer python3 -m unittest discover -s tests -b
 
 # Run Python unit tests with a statement coverage report.
 [group('Quality')]

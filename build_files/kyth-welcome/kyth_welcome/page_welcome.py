@@ -3,7 +3,7 @@ import time
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, load_profile, restyle, save_profile
-from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
+from .services.bootc import has_rollback_deployment
 from .services.launch import reboot
 from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (
@@ -18,15 +18,22 @@ from .services.welcome import (
     _printer_configured,
     home_categories,
     home_hero_view,
-    visible_category_indexes,
 )
 from .services.flatpak import _is_flatpak_installed as _flatpak_installed
 from .qt import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt, Signal, single_shot,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    Qt,
+    Signal,
+    single_shot,
 )
 from .lazy_page import compose_on_first_init
 from .widgets import (
-    Page, _make_card, _theme_icon,
+    Page,
+    _make_card,
 )
 
 def _load_welcome_mixins():
@@ -170,8 +177,9 @@ class WelcomePage(Page):
 
         self._ntfs_library_worker = DataWorker("ntfs-libraries", _steam_libraries_on_ntfs)
         self._ntfs_library_worker.result.connect(self._on_ntfs_library_warning_ready)
-        self._ntfs_library_worker.failed.connect(lambda _key, _message: None)
+        self._ntfs_library_worker.failed.connect(lambda _k, _m: None)
         self._ntfs_library_worker.finished.connect(lambda: setattr(self, "_ntfs_library_worker", None))
+        self._ntfs_library_worker.finished.connect(self._ntfs_library_worker.deleteLater)
         self._ntfs_library_worker.start()
 
     def _on_ntfs_library_warning_ready(self, _key: str, libs: object):
@@ -186,27 +194,50 @@ class WelcomePage(Page):
         """Run off the GUI thread by _refresh_system_status()'s DataWorker.
         Everything here is a subprocess/D-Bus call — see the comment at the
         top of __init__ for why none of it may run synchronously there."""
+        from concurrent.futures import ThreadPoolExecutor
+
         from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
         from .services.gaming import _find_ntfs_drives
         from .services.hardware import _detect_nvidia
         from .services.process import command_stdout
 
-        portal = command_stdout(
-            ["bash", "-lc", "systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || true"],
-            timeout=3,
-        ) or "unknown"
-        pipewire = command_stdout(
-            ["bash", "-lc", "systemctl --user is-active pipewire.service 2>/dev/null || true"],
-            timeout=3,
-        ) or "unknown"
+        # Fix 7: run 4 independent probes in parallel — portal/pipewire/nvidia/ntfs
+        # previously ran serially ~9 s worst-case, now ~3 s (no bash -lc — direct systemctl, see Unit 1)
+        def _portal():
+            return command_stdout(
+                ["systemctl", "--user", "is-active", "xdg-desktop-portal.service"],
+                timeout=3,
+            ) or "unknown"
+
+        def _pipewire():
+            return command_stdout(
+                ["systemctl", "--user", "is-active", "pipewire.service"],
+                timeout=3,
+            ) or "unknown"
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            f_portal = ex.submit(_portal)
+            f_pipewire = ex.submit(_pipewire)
+            f_branch = ex.submit(lambda: branch_display_name(current_branch()))
+            f_staged = ex.submit(has_staged_update)
+            f_rollback = ex.submit(has_rollback_deployment)
+            f_windows = ex.submit(lambda: bool(_find_ntfs_drives()))
+            f_nvidia = ex.submit(_detect_nvidia)
+            portal = f_portal.result()
+            pipewire = f_pipewire.result()
+            branch = f_branch.result()
+            staged = f_staged.result()
+            rollback = f_rollback.result()
+            windows_found = f_windows.result()
+            has_nvidia = f_nvidia.result()
         return {
-            "branch": branch_display_name(current_branch()),
-            "staged": has_staged_update(),
-            "rollback": has_rollback_deployment(),
-            "windows_found": bool(_find_ntfs_drives()),
+            "branch": branch,
+            "staged": staged,
+            "rollback": rollback,
+            "windows_found": windows_found,
             "portal": portal,
             "pipewire": pipewire,
-            "has_nvidia": _detect_nvidia(),
+            "has_nvidia": has_nvidia,
         }
 
     def _refresh_system_status(self):
@@ -216,8 +247,9 @@ class WelcomePage(Page):
 
         self._status_worker = DataWorker("welcome-status", self._gather_status_facts)
         self._status_worker.result.connect(self._on_status_facts_ready)
-        self._status_worker.failed.connect(lambda _key, _message: None)
+        self._status_worker.failed.connect(self._on_status_facts_failed)
         self._status_worker.finished.connect(lambda: setattr(self, "_status_worker", None))
+        self._status_worker.finished.connect(self._status_worker.deleteLater)
         self._status_worker.start()
 
     @staticmethod
@@ -238,6 +270,7 @@ class WelcomePage(Page):
         self._ai_worker.result.connect(self._on_ai_plan_ready)
         self._ai_worker.failed.connect(lambda _k, _m: self._ai_desc.setText("AI check failed"))
         self._ai_worker.finished.connect(lambda: setattr(self, "_ai_worker", None))
+        self._ai_worker.finished.connect(self._ai_worker.deleteLater)
         self._ai_worker.start()
 
     def _on_ai_plan_ready(self, _key: str, plan: object):
@@ -254,6 +287,17 @@ class WelcomePage(Page):
         else:
             self._ai_card.setObjectName("card-accent-ok")
         restyle(self._ai_card)
+
+    def _on_status_facts_failed(self, _key: str, message: str):
+        # H4/M8: surface failure instead of leaving "Checking…" forever
+        self._facts["branch"] = "Unavailable"
+        self._facts["portal"] = f"check failed: {message}"
+        self._facts["pipewire"] = "check failed"
+        try:
+            self._hud1_desc.setText(f"<b>Device:</b> {self._hostname}<br><b>Kernel:</b> {self._kernel}<br><b>Channel:</b> Unavailable")
+            self._hud2_desc.setText(f"<b>Session Type:</b> {self._session}<br><b>Audio Engine:</b> check failed<br><b>Desktop Portal:</b> check failed")
+        except Exception:
+            pass
 
     def _on_status_facts_ready(self, _key: str, facts: object):
         if not isinstance(facts, dict):
@@ -307,6 +351,11 @@ class WelcomePage(Page):
         drivers" when has_nvidia is True and the initial build used the
         False placeholder from self._facts (see __init__)."""
         self._nvidia_at_build = self._facts["has_nvidia"]
+        # False positive: _category_cards is set in
+        # _WelcomeGridMixin._build_category_section(), called from __init__
+        # before this method can ever run; pylint doesn't trace attribute
+        # definitions across mixin classes in another file.
+        # pylint: disable-next=access-member-before-definition
         for card, _is_games in self._category_cards:
             self._category_grid.removeWidget(card)
             card.deleteLater()
@@ -443,12 +492,16 @@ class WelcomePage(Page):
         try:
             from .services.migration import _ntfs_user_dirs
             from .services.runtime import DataWorker
+            # False positive: the hasattr() guard short-circuits before this
+            # attribute read on the first call, when it doesn't exist yet.
+            # pylint: disable-next=access-member-before-definition
             if not hasattr(self, "_win_dirs_worker") or self._win_dirs_worker is None:
                 w = DataWorker("win-user-dirs", _ntfs_user_dirs)
                 self._win_dirs_worker = w
                 w.result.connect(lambda _k, dirs: self._on_win_dirs_ready(dirs))
                 w.failed.connect(lambda _k, _m: None)
                 w.finished.connect(lambda: setattr(self, "_win_dirs_worker", None))
+                w.finished.connect(w.deleteLater)
                 w.start()
         except Exception:
             pass
@@ -520,6 +573,7 @@ class WelcomePage(Page):
         worker.result.connect(lambda _key, result: self._on_role_preset_result(result, profile))
         worker.failed.connect(lambda _key, message: self._on_role_preset_result(None, profile, message))
         worker.finished.connect(lambda: setattr(self, "_apply_preset_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_role_preset_result(self, result, profile: str, error: str | None = None):

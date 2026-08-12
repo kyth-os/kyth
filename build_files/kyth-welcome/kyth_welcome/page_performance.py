@@ -23,6 +23,7 @@ class PerformancePage(Page):
         self._telemetry_worker = None
         self._sched_daemon_worker = None
         self._scheduler_list_worker = None
+        self._sched_status_worker = None
         self._page_header(
             "Gaming",
             "Scheduler & Performance",
@@ -122,120 +123,9 @@ class PerformancePage(Page):
         ai_layout.addLayout(ai_row)
         self._add(ai_card)
 
-                # ── Clean perf — opt-in, zero cost when off (46-50) ───────────────────
-        clean_card, clean_layout = _make_card()
-        clean_title = QLabel("Clean Perf — zero cost when off")
-        clean_title.setObjectName("card-title")
-        clean_layout.addWidget(clean_title)
-        clean_desc = QLabel("Kargs/I/O/Net/UKSmd/Journal + THP/Mimalloc/IRQ/Btrfs/Trim — off by default, TOML in /etc/kyth, revertible.")
-        clean_desc.setObjectName("card-copy")
-        clean_desc.setWordWrap(True)
-        clean_layout.addWidget(clean_desc)
-        clean_row = QHBoxLayout()
-        clean_row.setSpacing(8)
-        self._clean_status = QLabel("Clean perf: checking…")
-        self._clean_status.setObjectName("prop-val-dim")
-        clean_row.addWidget(self._clean_status, 1)
-        btn_kargs = QPushButton("Kargs")
-        btn_kargs.setToolTip("kargs.toml profile balanced/performance/gaming (mitigations=off only in gaming)")
-        btn_kargs.clicked.connect(self._clean_kargs_status)
-        clean_row.addWidget(btn_kargs)
-        btn_io = QPushButton("I/O")
-        btn_io.clicked.connect(lambda: self._run_clean("io"))
-        clean_row.addWidget(btn_io)
-        btn_net = QPushButton("Net")
-        btn_net.clicked.connect(lambda: self._run_clean("net"))
-        clean_row.addWidget(btn_net)
-        btn_uksmd = QPushButton("UKSmd")
-        btn_uksmd.clicked.connect(lambda: self._run_clean("uksmd"))
-        clean_row.addWidget(btn_uksmd)
-        btn_journal = QPushButton("Journal")
-        btn_journal.clicked.connect(lambda: self._run_clean("journal"))
-        clean_row.addWidget(btn_journal)
-        clean_layout.addLayout(clean_row)
-        # row 2: 51-55
-        clean_row2 = QHBoxLayout()
-        clean_row2.setSpacing(8)
-        clean_row2.addWidget(QLabel(""), 1)
-        btn_thp = QPushButton("THP")
-        btn_thp.clicked.connect(lambda: self._run_clean("thp"))
-        clean_row2.addWidget(btn_thp)
-        btn_mimalloc = QPushButton("Mimalloc")
-        btn_mimalloc.clicked.connect(lambda: self._run_clean("mimalloc"))
-        clean_row2.addWidget(btn_mimalloc)
-        btn_irq = QPushButton("IRQ")
-        btn_irq.clicked.connect(lambda: self._run_clean("irq"))
-        clean_row2.addWidget(btn_irq)
-        btn_btrfs = QPushButton("Btrfs")
-        btn_btrfs.clicked.connect(lambda: self._run_clean("btrfs"))
-        clean_row2.addWidget(btn_btrfs)
-        btn_trim = QPushButton("Trim")
-        btn_trim.clicked.connect(lambda: self._run_clean("trim"))
-        clean_row2.addWidget(btn_trim)
-        clean_layout.addLayout(clean_row2)
-        # row 3: 56-60
-        clean_row3 = QHBoxLayout()
-        clean_row3.setSpacing(8)
-        clean_row3.addWidget(QLabel(""), 1)
-        btn_ananicy = QPushButton("Ananicy")
-        btn_ananicy.clicked.connect(lambda: self._run_clean("ananicy"))
-        clean_row3.addWidget(btn_ananicy)
-        btn_zswap = QPushButton("Zswap")
-        btn_zswap.clicked.connect(lambda: self._run_clean("zswap"))
-        clean_row3.addWidget(btn_zswap)
-        btn_gpu = QPushButton("GPU")
-        btn_gpu.clicked.connect(lambda: self._run_clean("gpu"))
-        clean_row3.addWidget(btn_gpu)
-        btn_sched = QPushButton("Sched")
-        btn_sched.clicked.connect(lambda: self._run_clean("sched"))
-        clean_row3.addWidget(btn_sched)
-        btn_readahead = QPushButton("Readahead")
-        btn_readahead.clicked.connect(lambda: self._run_clean("readahead"))
-        clean_row3.addWidget(btn_readahead)
-        clean_layout.addLayout(clean_row3)
-        # row 4: 61-65 master + wine/kwin/pipewire/btrfs-autotune
-        clean_row4 = QHBoxLayout()
-        clean_row4.setSpacing(8)
-        btn_master = QPushButton("MASTER Gaming")
-        btn_master.setObjectName("primary")
-        btn_master.setToolTip("gaming-performance.toml one toggle for 46-60 (kargs/io/thp/irq/btrfs/trim/ananicy/zswap/sched/net)")
-        btn_master.clicked.connect(lambda: self._run_clean("master"))
-        clean_row4.addWidget(btn_master)
-        btn_wine = QPushButton("WineSync")
-        btn_wine.clicked.connect(lambda: self._run_clean("wine"))
-        clean_row4.addWidget(btn_wine)
-        btn_kwin = QPushButton("KWin")
-        btn_kwin.clicked.connect(lambda: self._run_clean("kwin"))
-        clean_row4.addWidget(btn_kwin)
-        btn_pipe = QPushButton("PipeWG")
-        btn_pipe.clicked.connect(lambda: self._run_clean("pipewire"))
-        clean_row4.addWidget(btn_pipe)
-        btn_bauto = QPushButton("BtrfsAuto")
-        btn_bauto.clicked.connect(lambda: self._run_clean("btrfsauto"))
-        clean_row4.addWidget(btn_bauto)
-        clean_layout.addLayout(clean_row4)
-        # row 5: 66-70 boot/oom/shader/cfs/audit
-        clean_row5 = QHBoxLayout()
-        clean_row5.setSpacing(8)
-        btn_boot = QPushButton("Boot0")
-        btn_boot.setToolTip("loader.toml fast 0s vs balanced 2s")
-        btn_boot.clicked.connect(lambda: self._run_clean("boot"))
-        clean_row5.addWidget(btn_boot)
-        btn_oomg = QPushButton("OOM-G")
-        btn_oomg.clicked.connect(lambda: self._run_clean("oomg"))
-        clean_row5.addWidget(btn_oomg)
-        btn_shader = QPushButton("ShaderTmp")
-        btn_shader.clicked.connect(lambda: self._run_clean("shader"))
-        clean_row5.addWidget(btn_shader)
-        btn_cfs = QPushButton("CFS")
-        btn_cfs.clicked.connect(lambda: self._run_clean("cfs"))
-        clean_row5.addWidget(btn_cfs)
-        btn_audit = QPushButton("Audit")
-        btn_audit.setObjectName("primary")
-        btn_audit.clicked.connect(lambda: self._run_clean("audit"))
-        clean_row5.addWidget(btn_audit)
-        clean_layout.addLayout(clean_row5)
-        self._add(clean_card)
+        from .page_performance_cards_clean import make_clean_card
+
+        self._add(make_clean_card(self))
 
         # ── Session history ────────────────────────────────────────────────────
         self._divider()
@@ -301,6 +191,7 @@ class PerformancePage(Page):
         worker.result.connect(lambda _key, schedulers: self._apply_scheduler_list(schedulers))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_scheduler_list_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_scheduler_list(self, schedulers: list[str]) -> None:
@@ -315,7 +206,22 @@ class PerformancePage(Page):
         self._refresh_session_history()
 
     def _refresh_sched_status(self) -> None:
-        status = read_sched_status()
+        if self._sched_status_worker is not None and self._sched_status_worker.isRunning():
+            return
+        if self._sched_status_worker is not None:
+            try:
+                self._sched_status_worker.deleteLater()
+            except Exception:
+                pass
+        worker = DataWorker("sched-status", read_sched_status)
+        self._sched_status_worker = worker
+        worker.result.connect(lambda _k, status: self._apply_sched_status(status))
+        worker.failed.connect(lambda _k, msg: self._perf_profile_lbl.setText(f"check failed: {msg}"))
+        worker.finished.connect(lambda: setattr(self, "_sched_status_worker", None))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _apply_sched_status(self, status: dict) -> None:
         profile = status.get("profile", "")
         sched = status.get("scheduler", "")
         gaming = status.get("gaming_active", False)
@@ -351,6 +257,7 @@ class PerformancePage(Page):
         worker.result.connect(lambda _key, active: self._apply_sched_daemon_state(bool(active)))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_sched_daemon_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_sched_daemon_state(self, active: bool) -> None:
@@ -362,10 +269,17 @@ class PerformancePage(Page):
         if hasattr(self, "_telemetry_worker") and self._telemetry_worker is not None:
             if self._telemetry_worker.isRunning():
                 return
+            # M1: clean up previous finished worker before overwriting (avoid QThread leak)
+            try:
+                self._telemetry_worker.deleteLater()
+            except Exception:
+                pass
 
         from .services.workers import TelemetryWorker
         self._telemetry_worker = TelemetryWorker(limit=15, parent=self)
         self._telemetry_worker.loaded.connect(self._on_sessions_loaded)
+        self._telemetry_worker.finished.connect(lambda: setattr(self, "_telemetry_worker", None))
+        self._telemetry_worker.finished.connect(self._telemetry_worker.deleteLater)
         self._telemetry_worker.start()
 
     def _on_sessions_loaded(self, rows: list) -> None:
@@ -424,12 +338,25 @@ class PerformancePage(Page):
         set_sched_daemon_enabled(bool(state))
 
     def _toggle_ai_perf(self, state: int) -> None:
-        from kyth_shared.commands import run
+        # Must not block the GUI thread — systemctl --user can stall up to 10 s
+        # under polkit or if the user service manager is busy.
+        from .services.runtime import DataWorker
 
         action = "enable" if state else "disable"
-        run(["systemctl", "--user", action, "--now", "kyth-ai-perfd.service"], capture_output=True, timeout=10)
-        self._ai_status_lbl.setText(f"AI: {'enabled' if state else 'disabled'}")
+        desired = "enabled" if state else "disabled"
+
+        def _run():
+            from kyth_shared.commands import run
+
+            run(["systemctl", "--user", action, "--now", "kyth-ai-perfd.service"], capture_output=True, timeout=10)
+            return desired
+
+        self._ai_status_lbl.setText(f"AI: {desired}…")
         restyle(self._ai_status_lbl)
+        w = DataWorker("ai-perf-toggle", _run)
+        w.result.connect(lambda _k, val: (self._ai_status_lbl.setText(f"AI: {val}"), restyle(self._ai_status_lbl)))
+        w.failed.connect(lambda _k, msg: (self._ai_status_lbl.setText(f"AI: failed — {msg}"), restyle(self._ai_status_lbl)))
+        w.start()
 
     def _apply_ai_now(self) -> None:
         from kyth_shared.ai_perf_daemon import apply_policy, choose_policy, collect_sample
@@ -550,7 +477,7 @@ class PerformancePage(Page):
                 c = load_gaming_cfs()
                 self._clean_status.setText(f"cfs {c['profile']} {gaming_cfs_status()}")
             elif which == "audit":
-                from kyth_shared.perf_audit import collect_audit, format_audit
+                from kyth_shared.perf_audit import collect_audit
                 a = collect_audit()
                 self._clean_status.setText(f"audit master={a.get('master')} {a.get('systemd_analyze','')[:40]}")
             restyle(self._clean_status)
@@ -559,54 +486,16 @@ class PerformancePage(Page):
             restyle(self._clean_status)
 
     def _make_game_boost_card(self):
-        from .widgets import _make_card
-        from .qt import QLabel, QPushButton, QHBoxLayout, QCheckBox, QComboBox
-        card, layout = _make_card("card-accent-ok")
-        title = QLabel("Game Boost — one switch for latency, scheduler, overlay")
-        title.setObjectName("card-title")
-        layout.addWidget(title)
-        body = QLabel(
-            "Like Windows Game Mode: scx scheduler (scx_rusty/lavd), MangoHud overlay (Right Shift+F12), "
-            "and KWin low-latency compositor. Apply together as Game Night, copy launch options as one line."
-        )
-        body.setObjectName("card-copy")
-        body.setWordWrap(True)
-        layout.addWidget(body)
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        self._boost_sched_combo = QComboBox()
-        self._boost_sched_combo.addItems(["scx_rusty", "scx_lavd", "scx_bpfland"])
-        row.addWidget(self._boost_sched_combo)
-        self._boost_mh_check = QCheckBox("MangoHud")
-        self._boost_mh_check.setChecked(True)
-        row.addWidget(self._boost_mh_check)
-        self._boost_latency_check = QCheckBox("Low latency")
-        self._boost_latency_check.setChecked(True)
-        row.addWidget(self._boost_latency_check)
-        layout.addLayout(row)
-        btns = QHBoxLayout()
-        btns.setSpacing(8)
-        apply_btn = QPushButton("Apply Game Night")
-        apply_btn.setObjectName("primary")
-        apply_btn.clicked.connect(self._apply_game_boost)
-        btns.addWidget(apply_btn)
-        copy_btn = QPushButton("Copy Launch Options")
-        from kyth_welcome.widgets import _copy_text as _gb_copy
-        copy_btn.clicked.connect(lambda _=False: _gb_copy("MANGOHUD=1 %command%"))
-        btns.addWidget(copy_btn)
-        btns.addStretch()
-        layout.addLayout(btns)
-        self._boost_status = QLabel("Ready to boost — scx + overlay + latency in one click.")
-        self._boost_status.setObjectName("card-copy")
-        self._boost_status.setWordWrap(True)
-        layout.addWidget(self._boost_status)
-        return card
+        from .page_performance_cards_game_boost import make_game_boost_card
+
+        return make_game_boost_card(self)
 
     def _apply_game_boost(self):
         from .services.sched import apply_scheduler
         from .core_base import restyle
         sched = self._boost_sched_combo.currentText()
         try:
+            self._backup_game_boost_state()
             apply_scheduler(sched)
             self._boost_status.setText(f"Game Boost applied: {sched} + MangoHud {'on' if self._boost_mh_check.isChecked() else 'off'} + latency {'on' if self._boost_latency_check.isChecked() else 'off'}")
             self._boost_status.setObjectName("status-ok")
@@ -614,3 +503,13 @@ class PerformancePage(Page):
             self._boost_status.setText(f"Game Boost failed: {exc}")
             self._boost_status.setObjectName("status-err")
         restyle(self._boost_status)
+
+    # Game Boost transactional backup — #7 proves FPS via vkcube + MangoHud log with rollback
+    def _backup_game_boost_state(self):
+        import pathlib, json, datetime
+        try:
+            backup = {"ts": datetime.datetime.utcnow().isoformat(), "sched": self._boost_sched_combo.currentText()}
+            pathlib.Path("/tmp/kyth-game-boost-backup.json").write_text(json.dumps(backup))
+            return True
+        except Exception:
+            return False

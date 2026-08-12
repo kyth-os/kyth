@@ -3,7 +3,7 @@ from .core_base import restyle
 from .services.runtime import release_worker_when_finished
 from .services.workers.updates import FirmwareCheckWorker
 from .services.updates import UpdateProbeResult
-from .qt import QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from .qt import QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout
 from .widgets import _make_card
 
 
@@ -50,12 +50,36 @@ class _FirmwareUpdateMixin:
         restyle(self._fw_icon)
         self._fw_status_lbl.setText("Checking for firmware updates…")
         self._fw_btn.hide()
+        old_timer = getattr(self, "_fw_deadline_timer", None)
+        if old_timer is not None:
+            try:
+                old_timer.stop()
+                old_timer.deleteLater()
+            except Exception:
+                pass
+        self._fw_deadline_timer = QTimer(self)
+        self._fw_deadline_timer.setSingleShot(True)
+        self._fw_deadline_timer.timeout.connect(self._on_firmware_timeout)
+        self._fw_deadline_timer.start(30000)
         self._fw_check_worker = FirmwareCheckWorker()
         self._fw_check_worker.result.connect(self._on_firmware_check_result)
         release_worker_when_finished(self, "_fw_check_worker", self._fw_check_worker)
         self._fw_check_worker.start()
 
+    def _on_firmware_timeout(self) -> None:
+        if self._fw_check_worker is None or not self._fw_check_worker.isRunning():
+            return
+        self._on_firmware_check_result(UpdateProbeResult.error(
+            "firmware",
+            "Firmware check timed out after 30 s. fwupdmgr may be slow offline — click Refresh to retry.",
+        ))
+
     def _on_firmware_check_result(self, result: UpdateProbeResult) -> None:
+        if getattr(self, "_fw_deadline_timer", None):
+            try:
+                self._fw_deadline_timer.stop()
+            except Exception:
+                pass
         if result.state == "error":
             self._fw_icon.setText("—")
             self._fw_icon.setObjectName("fw-icon-dim")

@@ -53,6 +53,9 @@ class StreamingCommandRunner:
         absolute_timeout: int | None = 3600,
         error_factory: Callable[[int, list[str], Sequence[str]], Exception] | None = None,
         stdin_data: str | None = None,
+        cancel_event: threading.Event | None = None,
+        io_stall_timeout: int | None = None,
+        net_stall_timeout: int | None = None,
     ) -> None:
         argv = list(command)
         log(f"$ {' '.join(argv)}")
@@ -94,8 +97,15 @@ class StreamingCommandRunner:
         monitor_thread = threading.Thread(target=net_monitor, daemon=True)
         monitor_thread.start()
 
+        # Split stall into I/O vs network.  Slow pulls with periodic bootc
+        # progress lines were resetting a single last_activity, hiding network
+        # stalls.  Keep two clocks; fall back to stall_timeout for compat.
+        io_timeout = io_stall_timeout if io_stall_timeout is not None else stall_timeout
+        net_timeout = net_stall_timeout if net_stall_timeout is not None else stall_timeout
+
         started = self._monotonic()
         last_activity = started
+        last_rx_activity = started
         last_rx = self._rx_bytes()
         pending = ""
         last_line: str | None = None
@@ -138,6 +148,20 @@ class StreamingCommandRunner:
         try:
             fd = proc.stdout.fileno()
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    log("Cancellation requested — terminating install command...")
+                    if proc.poll() is None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except Exception:
+                            proc.kill()
+                            proc.wait()
+                    from .execution import InstallCancelled
+
+                    raise InstallCancelled(
+                        "Installation cancelled by user."
+                    )
                 ready, _, _ = select.select([fd], [], [], 1)
                 if ready:
                     chunk = os.read(fd, 64 * 1024)
@@ -150,15 +174,18 @@ class StreamingCommandRunner:
                 rx_now = self._rx_bytes()
                 if rx_now > last_rx:
                     last_rx = rx_now
-                    last_activity = now
+                    last_rx_activity = now
                 if absolute_timeout is not None and now - started > absolute_timeout:
                     raise RuntimeError(
                         f"Command exceeded absolute timeout of {absolute_timeout // 60} min"
                     )
-                if now - last_activity > stall_timeout:
+                if now - last_activity > io_timeout:
                     raise RuntimeError(
-                        "Command timed out after "
-                        f"{stall_timeout // 60} min with no output or network traffic"
+                        f"Command timed out after {io_timeout // 60} min with no output"
+                    )
+                if now - last_rx_activity > net_timeout and output_state["total"] > 0:
+                    raise RuntimeError(
+                        f"Command timed out after {net_timeout // 60} min with no network progress"
                     )
 
             consume_output(decoder.decode(b"", final=True), final=True)

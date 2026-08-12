@@ -6,7 +6,7 @@ Windows Settings search with a blue focus ring and subtle inner depth.
 Breadcrumb and nav arrows use rounded 8px and raised hover so the header
 doesn't read as flat text on flat surface.
 """
-from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_GLOW, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_SURFACE_OVERLAY, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
+from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_SURFACE_OVERLAY, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED
 
 TOPBAR_QSS = f"""
 /* ── Top command bar ─────────────────────────────────────────────────────── */
@@ -16,22 +16,23 @@ QWidget#topbar {{
 }}
 
 QPushButton#topbar-nav {{
-    background: transparent;
+    background: {KYTH_SURFACE_RAISED};
     color: {KYTH_TEXT};
-    border: 1px solid transparent;
+    border: 1px solid {KYTH_HAIRLINE};
     border-radius: 8px;
     padding: 4px 0;
     font-size: 15px;
-    font-weight: 400;
+    font-weight: 500;
 }}
 
 QPushButton#topbar-nav:hover {{
-    background: {KYTH_SURFACE_RAISED};
-    border-color: {KYTH_HAIRLINE};
+    background: {KYTH_SURFACE_OVERLAY};
+    border-color: {KYTH_BLUE};
+    color: {KYTH_BLUE_LIGHT};
 }}
 
 QPushButton#topbar-nav:pressed {{
-    background: {KYTH_SURFACE_OVERLAY};
+    background: {KYTH_SURFACE};
 }}
 
 QPushButton#topbar-nav:disabled {{
@@ -53,7 +54,7 @@ QPushButton#breadcrumb-link {{
 
 QPushButton#breadcrumb-link:hover {{
     background: {KYTH_SURFACE_RAISED};
-    color: {KYTH_TEXT};
+    color: {KYTH_BLUE_LIGHT};
 }}
 
 QLabel#breadcrumb {{
@@ -81,10 +82,10 @@ QLineEdit#search-box:hover {{
 }}
 
 QFrame#search-results-panel {{
-    background: {KYTH_SURFACE};
-    border-bottom: 1px solid {KYTH_HAIRLINE};
-    border-left: 1px solid {KYTH_HAIRLINE};
-    border-right: 1px solid {KYTH_HAIRLINE};
+    background: {KYTH_SURFACE_RAISED};
+    border-bottom: 1px solid {KYTH_HAIRLINE_LIGHT};
+    border-left: 1px solid {KYTH_HAIRLINE_LIGHT};
+    border-right: 1px solid {KYTH_HAIRLINE_LIGHT};
     border-bottom-left-radius: 12px;
     border-bottom-right-radius: 12px;
 }}
@@ -101,7 +102,7 @@ QLabel#search-results-hint {{
 }}
 
 QPushButton#search-result {{
-    background: {KYTH_SURFACE_RAISED};
+    background: {KYTH_SURFACE};
     color: {KYTH_TEXT_MUTED};
     border: 1px solid {KYTH_HAIRLINE};
     border-radius: 10px;
