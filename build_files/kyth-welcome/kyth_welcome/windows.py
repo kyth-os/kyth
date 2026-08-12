@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
             try:
                 page = self._ensure_page(idx)
                 page.profile_changed.connect(self._apply_profile_visibility)
-            except Exception:
+            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
             try:
                 self._apply_profile_visibility(load_profile())

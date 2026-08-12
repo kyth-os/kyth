@@ -442,7 +442,7 @@ def invalidate_after_flatpak_change() -> None:
     for cb in list(_FLATPAK_INVALIDATE_CBS):
         try:
             cb()
-        except Exception:
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
 
 

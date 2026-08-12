@@ -139,7 +139,7 @@ def write_state(state: BootHealthState, path: str | Path = DEFAULT_STATE_PATH) -
             try:
                 from kyth_shared.system.probe import invalidate_bootc
                 invalidate_bootc()
-            except Exception:
+            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
     except Exception:
         try:

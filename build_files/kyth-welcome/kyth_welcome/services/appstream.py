@@ -101,7 +101,11 @@ def load_appstream_catalog() -> dict[str, dict]:
     try:
         import defusedxml.ElementTree as ET
     except ImportError:
-        import xml.etree.ElementTree as ET  # fallback on minimal images / containers
+        # Fallback on minimal images / containers lacking python3-defusedxml
+        # (always installed on the shipped image — see packages/18-desktop-
+        # helper-and-creator-tooling.sh). The scanner can't see that this
+        # branch only runs when the safe defusedxml import above failed.
+        import xml.etree.ElementTree as ET  # nosec B405 -- nosemgrep: python.lang.security.use-defused-xml.use-defused-xml
 
     xml_path = "/var/lib/flatpak/appstream/flathub/x86_64/active/appstream.xml"
     if not os.path.exists(xml_path):
@@ -127,7 +131,7 @@ def load_appstream_catalog() -> dict[str, dict]:
         # and-creator-tooling.sh); the plain xml.etree fallback above only
         # applies to dev/test environments lacking that package. The scanner
         # can't see the conditional import, hence the suppression below.
-        root = ET.parse(xml_path).getroot()  # nosemgrep: codacy.tools-configs.python.lang.security.use-defused-xml-parse.use-defused-xml-parse
+        root = ET.parse(xml_path).getroot()  # nosec B314 -- nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
     except Exception:
         # Parse failed — use pre-parsed JSON fallback (R7)
         cached = _load_cached_catalog()

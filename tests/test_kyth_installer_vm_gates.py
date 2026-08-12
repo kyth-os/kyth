@@ -4,11 +4,11 @@ Uses dry_run DiskService + loop-mocked lsblk payloads to exercise
 validate_plan_state containment, free-space exact-match on 4K, and
 answer-file secret handling. CI runs this; real hardware gates run via
 `just vm-gate` against actual qemu images."""
-import json  # pylint: disable=unused-import
+import json  # pylint: disable=unused-import  # noqa: F401
 import sys
 import unittest
 from pathlib import Path
-from types import SimpleNamespace  # pylint: disable=unused-import
+from types import SimpleNamespace  # pylint: disable=unused-import  # noqa: F401
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +16,7 @@ INSTALLER_ROOT = ROOT / "build_files/kyth-installer"
 if str(INSTALLER_ROOT) not in sys.path:
     sys.path.insert(0, str(INSTALLER_ROOT))
 
-from kyth_installer import disk, plan  # pylint: disable=unused-import
+from kyth_installer import disk, plan  # pylint: disable=unused-import  # noqa: F401
 from kyth_installer.context import InstallerContext
 from kyth_installer.storage_snapshot import StorageSnapshot
 
@@ -128,7 +128,7 @@ class VmGateHarnessTests(unittest.TestCase):
         body = {
             "disk": target_disk, "install_mode": "alongside", "target_partition": target_part,
             "confirm_backup": True, "confirm_erase": True,
-            "password": "Secret123!", "username": "ada", "hostname": "kyth",
+            "password": "Secret123!", "username": "ada", "hostname": "kyth",  # nosec B105 -- test fixture, not a real credential
         }
         with patch.object(disk, "list_disks", return_value=fake_disks), \
              patch.object(disk, "list_partitions", side_effect=fake_list_parts), \

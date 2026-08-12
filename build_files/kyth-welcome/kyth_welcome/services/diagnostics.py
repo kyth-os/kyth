@@ -253,7 +253,7 @@ def _health_command_report() -> str:
         from kyth_shared.diagnostics_scrub import scrub_logs
 
         text = scrub_logs(text)
-    except Exception:
+    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     return text
  # _health_command_report

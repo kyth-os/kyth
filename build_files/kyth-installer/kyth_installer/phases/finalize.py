@@ -24,7 +24,7 @@ def _blkid_uuid(part: str, log, *, timeout: float = 5) -> str | None:
     lookup behavior (same timeout, same failure handling) instead of each
     reimplementing it slightly differently."""
     try:
-        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import
+        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import  # noqa: F811
     except ImportError:
         from ..runner import run_command  # fallback  # pylint: disable=unused-import
         from ..system import _as_root  # fallback
@@ -257,9 +257,9 @@ def _persist_artifacts_to_target(
     candidates: list[str] = []
     try:
         candidates.extend(list(getattr(context, "cleanup_mounts", []) or []))
-    except Exception:
+    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
-    for p in ("/var/tmp/kyth-alongside-target", "/var/tmp/kyth-install-root"):
+    for p in ("/var/tmp/kyth-alongside-target", "/var/tmp/kyth-install-root"):  # nosec B108 -- installer-owned bind-mount targets in the single-user live-ISO session, not a shared multi-user /tmp
         if p not in candidates:
             candidates.append(p)
 
@@ -295,7 +295,7 @@ def _persist_artifacts_to_target(
                 break
             except Exception as exc:
                 log(f"Warning: could not persist artifacts to {mnt}: {exc}")
-        except Exception:
+        except Exception:  # nosec B112 -- best-effort per-item skip, failure here is non-fatal by design
             continue
 
 
@@ -377,7 +377,7 @@ def _persist_failure_to_target_disk(log, context: InstallerContext, message: str
         candidates.extend(list(getattr(context, "cleanup_mounts", []) or []))
     except Exception:
         pass
-    for p in ("/var/tmp/kyth-alongside-target", "/var/tmp/kyth-install-root"):
+    for p in ("/var/tmp/kyth-alongside-target", "/var/tmp/kyth-install-root"):  # nosec B108 -- installer-owned bind-mount targets in the single-user live-ISO session, not a shared multi-user /tmp
         if p not in candidates:
             candidates.append(p)
 
@@ -416,9 +416,9 @@ def _handle_install_failure(exc: Exception, log, context: InstallerContext) -> N
     not prevent the error event from reaching the UI — hence the nested
     try/excepts around the log write and failure-summary write."""
     try:
-        from ..install import _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import
+        from ..install import _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import  # noqa: F811
     except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
+        from ..runner import run_command  # fallback  # pylint: disable=unused-import  # noqa: F401
         from ..system import _as_root  # fallback
         from ..system import _safe_umount  # fallback
         from ..system import _require_no_symlink  # fallback

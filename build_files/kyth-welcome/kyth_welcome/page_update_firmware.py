@@ -55,7 +55,7 @@ class _FirmwareUpdateMixin:
             try:
                 old_timer.stop()
                 old_timer.deleteLater()
-            except Exception:
+            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
         self._fw_deadline_timer = QTimer(self)
         self._fw_deadline_timer.setSingleShot(True)

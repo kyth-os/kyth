@@ -43,7 +43,7 @@ def DiskLease(disk: str, log, *, exclusive: bool = True):
         if fd != -1:
             try:
                 fcntl.flock(fd, fcntl.LOCK_UN)
-            except Exception:
+            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
             try:
                 os.close(fd)

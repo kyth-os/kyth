@@ -20,7 +20,7 @@ from .plan import (  # pylint: disable=unused-import
     _validate_install_target,
     _validate_storage_intent,
 )
-from .runner import run_command  # pylint: disable=unused-import
+from .runner import run_command  # pylint: disable=unused-import  # noqa: F401
 from kyth_shared import get_rx_bytes  # pylint: disable=unused-import
 from kyth_shared.accounts import create_installer_user as _shared_create_installer_user
 
@@ -119,17 +119,17 @@ def _resolve_and_record_plan(
 
 
 # Phase 2 verbatim — canonical implementations now live in phases/
-from .phases.storage import (  # pylint: disable=unused-import
+from .phases.storage import (  # pylint: disable=unused-import  # noqa: F401
     _prepare_install_storage,  # pylint: disable=unused-import
     _snapshot_efi_boot_entries,  # pylint: disable=unused-import
     _warn_if_efi_boot_entries_disappeared,  # pylint: disable=unused-import
 )
-from .phases.finalize import (  # pylint: disable=unused-import
+from .phases.finalize import (  # pylint: disable=unused-import  # noqa: F401
     _blkid_uuid,  # pylint: disable=unused-import
     _configure_alongside_fstab,  # pylint: disable=unused-import
     _configure_hostname_timezone,  # pylint: disable=unused-import
     _configure_manual_mounts,  # pylint: disable=unused-import
     _fsck_pass_for,  # pylint: disable=unused-import
 )
-from .phases.run import _run_install, _run_install_worker  # pylint: disable=unused-import
+from .phases.run import _run_install, _run_install_worker  # pylint: disable=unused-import  # noqa: F401
 

@@ -10,7 +10,7 @@ from typing import Optional
 from .partition_ops_journal import Journal, _require_mkfs  # pylint: disable=unused-import
 
 # Re-exported for server.py and tests that import from partition_ops
-from .config import FILESYSTEM_OPTIONS, _FILESYSTEM  # pylint: disable=unused-import
+from .config import FILESYSTEM_OPTIONS, _FILESYSTEM  # pylint: disable=unused-import  # noqa: F401
 # Disk helpers re-exported so mock.patch.object(partition_ops, "list_disks") works
 from .disk import (  # noqa: F401  # pylint: disable=unused-import
     _human_size,  # pylint: disable=unused-import
@@ -25,7 +25,7 @@ from .disk import (  # noqa: F401  # pylint: disable=unused-import
     list_free_space,  # pylint: disable=unused-import
     list_partitions,  # pylint: disable=unused-import
 )
-from .fsresize import shrink_filesystem  # pylint: disable=unused-import
+from .fsresize import shrink_filesystem  # pylint: disable=unused-import  # noqa: F401
 
 def _mkfs_cmd(fstype: str, device: str, label: str = "") -> list[str]:
     info = _FILESYSTEM.get(fstype)

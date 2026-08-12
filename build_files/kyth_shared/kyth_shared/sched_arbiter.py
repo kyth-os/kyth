@@ -53,7 +53,7 @@ def detect_scx_active() -> bool:
             r = run_command(["systemctl", "is-active", "--quiet", "scx_loader.service"], check=False, timeout=2)
             if r and r.returncode == 0:
                 return True
-        except Exception:
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
         try:
             r = run_command(["systemctl", "is-active", "--quiet", "scx.service"], check=False, timeout=2)

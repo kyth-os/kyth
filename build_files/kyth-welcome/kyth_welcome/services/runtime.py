@@ -373,7 +373,7 @@ class StreamingProcessWorker(TrackedThread):
             time.sleep(0.05)
             if proc.poll() is None:
                 proc.kill()
-        except Exception:
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
 
     def run(self):

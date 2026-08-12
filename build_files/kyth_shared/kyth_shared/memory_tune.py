@@ -42,7 +42,7 @@ def _read_memtotal_kb() -> int:
         m = re.search(r"MemTotal:\s+(\d+)\s+kB", txt)
         if m:
             return int(m.group(1))
-    except Exception:
+    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     return 32 * 1024 * 1024  # fallback 32GB
 

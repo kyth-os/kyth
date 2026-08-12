@@ -33,7 +33,7 @@ def installed_app_ids() -> frozenset[str] | None:
         from .appstream import warm_appstream_cache
 
         warm_appstream_cache()
-    except Exception:
+    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     if isinstance(raw, frozenset):
         return raw

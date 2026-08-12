@@ -26,7 +26,7 @@ def scrub_logs(text: str) -> str:
         host = _socket.gethostname()
         if host and len(host) > 2:
             text = text.replace(host, "[hostname]")
-    except Exception:
+    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     # XDG HOME fallback env
     try:

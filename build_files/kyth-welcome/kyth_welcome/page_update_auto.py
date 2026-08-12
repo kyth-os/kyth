@@ -228,7 +228,7 @@ class _AutoUpdateMixin:
             from .qt import single_shot as _ss
 
             _ss(self, 500, self._refresh_wu_staged_label)
-        except Exception:
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
         self._add(card)
 

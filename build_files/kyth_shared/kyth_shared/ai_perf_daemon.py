@@ -149,8 +149,8 @@ def collect_sample() -> PerfSample:
 
 def _ollama_choose(sample: PerfSample, evaluation: Any | None) -> PerfPolicy | None:
     """Try local ollama qwen2.5-coder for a nuanced pick. Never fails."""
-    _model = os.environ.get("KYTH_AI_MODEL", "qwen2.5-coder")
-    _prompt = (
+    _model = os.environ.get("KYTH_AI_MODEL", "qwen2.5-coder")  # noqa: F841
+    _prompt = (  # noqa: F841
         f"Sample is_gaming={sample.is_gaming} pressure={sample.pressure_some_avg10:.1f} "
         f"power={sample.power_profile} battery={sample.battery_percent} "
         f"nvidia={sample.has_nvidia} amd={sample.has_amd}. "

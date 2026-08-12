@@ -10,7 +10,7 @@ def warm_appstream_cache() -> str:
             data = json.loads(CACHE.read_text())
             if data:
                 return "cached"
-    except Exception:
+    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     # fallback to live probe
     return "live"

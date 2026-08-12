@@ -6,7 +6,7 @@ import io
 import json
 import os
 import pathlib
-import subprocess
+import subprocess  # nosec B404 -- only used below to build mock CompletedProcess return values
 import sys
 import tempfile
 import unittest
@@ -61,7 +61,7 @@ class GuardianPolicyTests(unittest.TestCase):
         self.assertEqual(guardian.RECIPES["audio.restart"].command, before)
 
     def test_only_safe_unprivileged_recipe_executes(self):
-        with patch.object(guardian, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+        with patch.object(guardian, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit -- building a mock return value, not executing anything
             ok, _detail = guardian.execute_recipe("audio.restart")
             self.assertTrue(ok)
             run.assert_called_once_with(guardian.RECIPES["audio.restart"].command, 30)
@@ -155,6 +155,18 @@ class GuardianStorageTests(unittest.TestCase):
                     guardian.install_model(manifest)
                 self.assertFalse((root / "data/kyth/guardian/model.gguf").exists())
 
+    def test_manifest_rejects_non_https_model_url(self):
+        with tempfile.TemporaryDirectory() as temp:
+            manifest = pathlib.Path(temp) / "manifest.json"
+            manifest.write_text(json.dumps({
+                "id": "test", "url": "http://example.invalid/model.gguf",
+                "filename": "model.gguf", "size": 1, "sha256": "0" * 64,
+                "license": "Apache-2.0", "prompt_version": 1,
+                "compatibility_version": 1,
+            }))
+            with self.assertRaisesRegex(ValueError, "must use https"):
+                guardian.load_manifest(manifest)
+
 
 class GuardianSuppressionTests(unittest.TestCase):
     def test_recent_ai_decision_prevents_periodic_model_reload(self):
@@ -178,7 +190,7 @@ class GuardianSuppressionTests(unittest.TestCase):
         with (
             patch.object(guardian.Path, "read_text", side_effect=OSError),
             patch.object(guardian, "_active", return_value=False),
-            patch.object(guardian, "_run", return_value=subprocess.CompletedProcess([], 0, "1\n", "")),
+            patch.object(guardian, "_run", return_value=subprocess.CompletedProcess([], 0, "1\n", "")),  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit -- building a mock return value, not executing anything
             patch.object(guardian.Path, "glob", return_value=[]),
         ):
             self.assertEqual(guardian.suppression_reason(), "gaming or screen capture")

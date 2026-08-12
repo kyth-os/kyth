@@ -163,7 +163,7 @@ class _DashboardMixin:
         try:
             familiar_card = self._build_familiar_desktop_card()
             hud_grid.addWidget(familiar_card, 3, 0, 1, 2)
-        except Exception:
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
         return widget
 

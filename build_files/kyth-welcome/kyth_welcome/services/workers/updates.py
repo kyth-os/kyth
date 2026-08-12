@@ -54,7 +54,7 @@ class UpdateCheckWorker(TrackedThread):
                             and snap_digest != cur_digest
                         ):
                             raise ValueError("booted digest changed since snapshot")
-                    except Exception:
+                    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
                         pass
                     else:
                         self.result.emit(UpdateProbeResult.success("system", snapshot.system_state))

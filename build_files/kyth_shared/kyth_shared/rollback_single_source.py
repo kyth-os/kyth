@@ -8,7 +8,7 @@ def update_coordinator_state() -> dict:
     try:
         if HUB_STATE.is_file():
             return json.loads(HUB_STATE.read_text())
-    except Exception:
+    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     return {"staged": False, "rollback_available": False}
 

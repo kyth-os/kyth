@@ -300,7 +300,7 @@ class _UpdateOpsMixin:
                         best = su_gb
                 except OSError:
                     pass
-            except Exception:
+            except Exception:  # nosec B112 -- best-effort per-item skip, failure here is non-fatal by design
                 continue
         if best < 0:
             try:

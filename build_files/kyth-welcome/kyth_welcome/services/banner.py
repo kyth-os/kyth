@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover — bare import for tests without Qt
         try:
             widget.style().unpolish(widget)
             widget.style().polish(widget)
-        except Exception:
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
 
 

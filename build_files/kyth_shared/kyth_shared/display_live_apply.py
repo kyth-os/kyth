@@ -7,6 +7,6 @@ def apply_display_live(mode: str) -> bool:
         if r and r.returncode == 0:
             # read-back verification: check output contains mode
             return mode in r.stdout
-    except Exception:
+    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     return False

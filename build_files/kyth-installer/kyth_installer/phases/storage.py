@@ -22,14 +22,14 @@ def _prepare_storage_for_plan(
     # Lazy import to respect tests that patch install.*
     """Execute storage preparation from a resolved immutable plan."""
     try:
-        from ..install import _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import
+        from ..install import _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import  # noqa: F811
     except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
+        from ..runner import run_command  # fallback  # pylint: disable=unused-import  # noqa: F401
         from ..system import _as_root  # fallback
         from ..system import _require_no_symlink  # fallback
         from ..system import _safe_umount  # fallback
         from ..system import unmount_target_disk  # fallback
-        from ..disk import get_root_partition  # fallback  # pylint: disable=unused-import
+        from ..disk import get_root_partition  # fallback  # pylint: disable=unused-import  # noqa: F401
         from .bootc_cmd import _run_cmd  # fallback
         from .bootc_cmd import _build_bootc_install_cmd  # fallback
     return _prepare_install_storage(
@@ -89,7 +89,7 @@ def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerConte
     function regardless of success or failure, hence the finally.
     """
     try:
-        from ..install import run_command, _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import
+        from ..install import run_command, _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import  # noqa: F811
     except ImportError:
         from ..runner import run_command  # fallback  # pylint: disable=unused-import
         from ..system import _as_root  # fallback
@@ -312,7 +312,7 @@ def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_
     disk, then write the OS image via `bootc install to-disk`.
     """
     try:
-        from ..install import _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, get_root_partition, _run_cmd, _build_bootc_install_cmd
+        from ..install import _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, get_root_partition, _run_cmd, _build_bootc_install_cmd  # noqa: F811
     except ImportError:
         from ..runner import run_command  # fallback  # pylint: disable=unused-import
         from ..system import _as_root  # fallback

@@ -6,7 +6,7 @@ def vpn_kill_cascade(pid: int) -> None:
     for sig in ["TERM", "KILL"]:
         try:
             _run(["kill", f"-{sig}", str(pid)], timeout=2)
-        except Exception:
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
 
 def vpn_sleep_survive() -> bool:

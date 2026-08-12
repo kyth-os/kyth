@@ -13,7 +13,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 -- callers below use static argv lists, no shell
 import sys
 import tempfile
 import time
@@ -119,10 +119,14 @@ RECIPES: dict[str, Recipe] = {
 }
 
 ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates"})
-_SECRET_RE = re.compile(r"(?i)\b(password|passwd|token|secret|cookie|authorization|api[_-]?key)\s*[:=]\s*\S+")
+# redact()'s input is capped at 4096 chars before any of these run, and none
+# of these patterns nest an unbounded quantifier over an overlapping
+# character class (the actual ReDoS shape) — verified empirically fast
+# (<1ms) against pathological same-character-run inputs at the cap.
+_SECRET_RE = re.compile(r"(?i)\b(password|passwd|token|secret|cookie|authorization|api[_-]?key)\s*[:=]\s*\S+")  # nosemgrep: python.lang.security.audit.regex-dos.regex_dos
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[0-9a-fA-F]{0,4}:(?::?[0-9a-fA-F]{0,4}){2,7}\b")
 _MAC_RE = re.compile(r"(?i)\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b")
-_HOME_RE = re.compile(r"(?<![\w.-])/(?:home|var/home)/[^/\s]+")
+_HOME_RE = re.compile(r"(?<![\w.-])/(?:home|var/home)/[^/\s]+")  # nosemgrep: python.lang.security.audit.regex-dos.regex_dos
 _PATH_RE = re.compile(r"(?<![\w.-])/(?:[^\s,;:]+/)*[^\s,;:]+")
 _SSID_RE = re.compile(r"(?i)\b(ssid)\s*[:=]\s*[^,;\n]+")
 
@@ -315,6 +319,8 @@ def load_manifest(path: Path = MODEL_MANIFEST) -> dict[str, Any]:
         raise ValueError("model manifest is incompatible with this Guardian version")
     if not re.fullmatch(r"[0-9a-f]{64}", str(value["sha256"])):
         raise ValueError("model manifest SHA-256 is invalid")
+    if not str(value["url"]).startswith("https://"):
+        raise ValueError("model manifest URL must use https://")
     return value
 
 
@@ -331,7 +337,7 @@ def install_model(manifest_path: Path = MODEL_MANIFEST) -> Path:
     digest = hashlib.sha256()
     total = 0
     try:
-        with urllib.request.urlopen(str(manifest["url"]), timeout=30) as response, os.fdopen(fd, "wb") as output:
+        with urllib.request.urlopen(str(manifest["url"]), timeout=30) as response, os.fdopen(fd, "wb") as output:  # nosec B310 -- load_manifest() above already rejects any non-https:// URL
             while chunk := response.read(1024 * 1024):
                 total += len(chunk)
                 if total > int(manifest["size"]):

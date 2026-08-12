@@ -22,7 +22,7 @@ THRESHOLDS = {
 
 def main() -> int:
     import argparse
-    import subprocess
+    import subprocess  # nosec B404 -- only used below with a static argv, no shell
 
     parser = argparse.ArgumentParser(description="Check critical coverage thresholds")
     parser.add_argument(
@@ -35,12 +35,15 @@ def main() -> int:
     changed: set[str] | None = None
     if args.changed_only:
         try:
-            out = subprocess.check_output(
+            # Static argv, no shell, no untrusted input — this is a dev/CI
+            # tooling script invoking git by its PATH name like the rest of
+            # this repo's build scripts do.
+            out = subprocess.check_output(  # nosec B603 B607
                 ["git", "diff", "--name-only", "HEAD"], text=True, stderr=subprocess.DEVNULL
             )
             changed = {line.strip() for line in out.splitlines() if line.strip()}
             # also include staged changes
-            out2 = subprocess.check_output(
+            out2 = subprocess.check_output(  # nosec B603 B607
                 ["git", "diff", "--name-only", "--cached"], text=True, stderr=subprocess.DEVNULL
             )
             changed.update(line.strip() for line in out2.splitlines() if line.strip())

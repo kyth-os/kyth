@@ -13,7 +13,7 @@ from .runner import run_command
 from kyth_shared import accounts as _accounts
 
 # Canonical modules
-from .system_privilege import (  # pylint: disable=unused-import
+from .system_privilege import (  # pylint: disable=unused-import  # noqa: F401
     _as_root,
     _require_no_symlink,  # pylint: disable=unused-import
     _safe_umount,  # pylint: disable=unused-import
@@ -22,7 +22,7 @@ from .system_privilege import (  # pylint: disable=unused-import
     format_os_error,
     require_root,  # pylint: disable=unused-import
 )
-from .system_mount import _lsblk_target_mounts, unmount_target_disk  # pylint: disable=unused-import
+from .system_mount import _lsblk_target_mounts, unmount_target_disk  # pylint: disable=unused-import  # noqa: F401
 
 _logger = logging.getLogger(__name__)
 

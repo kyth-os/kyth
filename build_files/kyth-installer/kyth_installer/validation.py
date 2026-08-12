@@ -245,7 +245,7 @@ def validate_install_request(body: dict, context: InstallerContext, *, strict_lo
             # Persist for rescue probe / failure summary — best-effort.
             if hasattr(context, "state") and isinstance(context.state, dict):
                 context.state["locale_warnings"] = list(_locale_warnings)
-        except Exception:
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
     username = body.get("username", "")
     _require_valid_username(username)

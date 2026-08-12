@@ -506,10 +506,17 @@ class PerformancePage(Page):
 
     # Game Boost transactional backup — #7 proves FPS via vkcube + MangoHud log with rollback
     def _backup_game_boost_state(self):
-        import pathlib, json, datetime
+        import os, json, datetime
         try:
             backup = {"ts": datetime.datetime.utcnow().isoformat(), "sched": self._boost_sched_combo.currentText()}
-            pathlib.Path("/tmp/kyth-game-boost-backup.json").write_text(json.dumps(backup))
+            # O_NOFOLLOW so a pre-created symlink at this predictable /tmp
+            # path can't redirect the write elsewhere. Fixed path is kept
+            # (not a random tempfile) since a future rollback read needs it.
+            fd = os.open("/tmp/kyth-game-boost-backup.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)  # nosec B108 -- O_NOFOLLOW guards this
+            try:
+                os.write(fd, json.dumps(backup).encode("utf-8"))
+            finally:
+                os.close(fd)
             return True
         except Exception:
             return False

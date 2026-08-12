@@ -121,9 +121,9 @@ class PostRouteService:
                         if run_command(["findmnt", "-n", str(c)], capture_output=True, timeout=3).returncode == 0:
                             target = str(c)
                             break
-                    except Exception:
+                    except Exception:  # nosec B112 -- best-effort per-item skip, failure here is non-fatal by design
                         continue
-            except Exception:
+            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
         if not target or not os.path.isdir(target):
             return ApiResponse({"ok": False, "message": "No USB drive found. Insert a USB stick and try again."}, 400)
