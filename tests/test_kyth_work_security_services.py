@@ -77,6 +77,24 @@ class SecurityServiceTests(unittest.TestCase):
         self.assertIn("kali-linux-headless", script)
         self.assertNotIn("distrobox-export", script)
 
+    def test_kali_create_command_verifies_existing_box_can_start(self):
+        # Metadata (image/privileged/label=disable) matching isn't enough —
+        # podman can leave a container 'exited' with correct metadata but
+        # unable to start (stale /run/containers/storage state after a
+        # reboot or storage driver change), failing with "creating
+        # resolv.conf: no such file or directory". Recreation must be
+        # gated on an actual start attempt, not just the inspect fields.
+        cmd = security.build_kali_create_command("kali", "img", "kali-linux-headless", False)
+        script = cmd[2]
+        self.assertIn('sudo -A podman start "${box}"', script)
+        start_check_pos = script.index('sudo -A podman start "${box}"')
+        metadata_check_pos = script.index("_security_opts}\" != *label=disable*")
+        recreate_pos = script.index("_needs_recreate}\" -eq 1")
+        # The start check runs only after the metadata check passes, and
+        # both feed the same recreate branch.
+        self.assertLess(metadata_check_pos, start_check_pos)
+        self.assertLess(start_check_pos, recreate_pos)
+
     def test_kali_create_command_gui_tier_bulk_exports_apps(self):
         cmd = security.build_kali_create_command("kali", "img", "kali-linux-default", True)
         script = cmd[2]

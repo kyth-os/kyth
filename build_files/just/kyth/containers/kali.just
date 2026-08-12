@@ -37,9 +37,12 @@ setup-kali-box tools="headless":
         _kali_privileged=$(_sudo podman inspect kali --format '{{ "{{" }}.HostConfig.Privileged{{ "}}" }}' 2>/dev/null || true)
         _kali_security_opts=$(_sudo podman inspect kali --format '{{ "{{" }}range .HostConfig.SecurityOpt{{ "}}" }}{{ "{{" }}.{{ "}}" }} {{ "{{" }}end{{ "}}" }}' 2>/dev/null || true)
         if [[ "${_kali_image}" == *kali* ]] && [[ "${_kali_privileged}" == "true" ]] && [[ "${_kali_security_opts}" == *label=disable* ]]; then
-            echo "Kali box already exists with raw-socket capable rootful settings."
-            echo "To enter: distrobox enter --root kali"
-            exit 0
+            if _sudo podman start kali >/dev/null 2>&1; then
+                echo "Kali box already exists with raw-socket capable rootful settings."
+                echo "To enter: distrobox enter --root kali"
+                exit 0
+            fi
+            echo "kali matches the security policy but will not start (stale runtime state); recreating..."
         fi
         distrobox stop --root kali --yes 2>/dev/null || true
         distrobox rm --root --force kali 2>/dev/null || true

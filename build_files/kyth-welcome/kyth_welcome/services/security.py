@@ -66,10 +66,16 @@ _DESKTOP_FILE_REWRITE_SCRIPT = "kyth-kali-desktop-fixup"
 def build_kali_create_command(
     box_name: str, box_image: str, meta: str, has_gui: bool,
 ) -> list[str]:
-    """Recreate the box if it exists but isn't rootful/privileged, install the
-    chosen tool metapackage with debconf preseeded to avoid install-time
-    prompts, grant the container user passwordless sudo, and (GUI tiers only)
-    bulk-export .desktop launchers and fix them up for the host menu."""
+    """Recreate the box if it exists but isn't rootful/privileged, or if its
+    security posture looks right yet it won't actually start (stale runtime
+    state under /run/containers/storage after e.g. a reboot or storage
+    driver change — podman leaves the container 'exited' with correct
+    metadata but fails with "creating resolv.conf: no such file or
+    directory"; a metadata-only check would wave that box through instead
+    of rebuilding it). Otherwise install the chosen tool metapackage with
+    debconf preseeded to avoid install-time prompts, grant the container
+    user passwordless sudo, and (GUI tiers only) bulk-export .desktop
+    launchers and fix them up for the host menu."""
     export_step = (
         f" && distrobox enter --root {box_name} --"
         r" bash -c 'for f in /usr/share/applications/*.desktop;"
@@ -96,7 +102,14 @@ def build_kali_create_command(
         "    _image=$(sudo -A podman inspect \"${box}\" --format '{{.ImageName}}' 2>/dev/null || true)\n"
         "    _privileged=$(sudo -A podman inspect \"${box}\" --format '{{.HostConfig.Privileged}}' 2>/dev/null || true)\n"
         "    _security_opts=$(sudo -A podman inspect \"${box}\" --format '{{range .HostConfig.SecurityOpt}}{{.}} {{end}}' 2>/dev/null || true)\n"
+        "    _needs_recreate=0\n"
         "    if [[ \"${_image}\" != *kali* ]] || [[ \"${_privileged}\" != \"true\" ]] || [[ \"${_security_opts}\" != *label=disable* ]]; then\n"
+        "        _needs_recreate=1\n"
+        "    elif ! sudo -A podman start \"${box}\" >/dev/null 2>&1; then\n"
+        "        echo \"${box} matches the security policy but will not start (stale runtime state); recreating...\"\n"
+        "        _needs_recreate=1\n"
+        "    fi\n"
+        "    if [[ \"${_needs_recreate}\" -eq 1 ]]; then\n"
         "        echo \"Recreating ${box} with privileged rootful networking and SELinux label disabled...\"\n"
         "        distrobox stop --root \"${box}\" --yes 2>/dev/null || distrobox stop --root \"${box}\" 2>/dev/null || true\n"
         "        distrobox rm --root --force \"${box}\" 2>/dev/null || distrobox rm --root \"${box}\" --yes 2>/dev/null || true\n"
