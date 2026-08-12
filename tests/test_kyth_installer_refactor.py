@@ -54,15 +54,17 @@ class InstallerRefactorTests(unittest.TestCase):
         self.assertEqual(plan._normalized_install_mode({}), "wipe")
         self.assertEqual(plan._normalized_install_mode({"install_mode": "  FREE_SPACE "}), "free_space")
 
-    def test_apply_install_plan_updates_only_present_targets(self):
+    def test_request_with_install_plan_is_immutable_and_updates_only_present_targets(self):
         state = {"install_mode": "wipe", "disk": "/dev/sda", "target_partition": "/dev/sda1"}
         install_plan = plan.InstallPlan("alongside", disk="/dev/nvme0n1")
 
-        plan._apply_install_plan(state, install_plan)
+        request = plan.request_with_install_plan(state, install_plan)
 
-        self.assertEqual(state["install_mode"], "alongside")
-        self.assertEqual(state["disk"], "/dev/nvme0n1")
-        self.assertEqual(state["target_partition"], "/dev/sda1")
+        self.assertEqual(request.install_mode, "alongside")
+        self.assertEqual(request.disk, "/dev/nvme0n1")
+        self.assertEqual(request.target_partition, "/dev/sda1")
+        self.assertEqual(state["install_mode"], "wipe")
+        self.assertEqual(state["disk"], "/dev/sda")
 
     def test_prepare_plan_does_not_rewrite_request_state(self):
         state = {"install_mode": "wipe", "disk": "/dev/sda", "target_partition": ""}

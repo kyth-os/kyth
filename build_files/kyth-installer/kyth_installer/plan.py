@@ -40,6 +40,7 @@ import logging
 import contextlib
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -90,21 +91,18 @@ def _install_plan_from_state(state: "InstallationState | InstallRequest") -> Ins
         target_partition=req.target_partition,
     )
 
-def _apply_install_plan(state: "InstallationState | InstallRequest", plan: InstallPlan) -> None:
-    # Kept for backward compat with tests that pass dict; now delegates to request
-    if isinstance(state, dict):
-        state["install_mode"] = plan.mode
-        if plan.disk is not None:
-            state["disk"] = plan.disk
-        if plan.target_partition is not None:
-            state["target_partition"] = plan.target_partition
-        return
-    # InstallRequest is frozen — use object.__setattr__ to mutate for compat
-    object.__setattr__(state, "install_mode", plan.mode)
+def request_with_install_plan(
+    state: "InstallationState | InstallRequest",
+    plan: InstallPlan,
+) -> InstallRequest:
+    """Return immutable request input updated with resolved storage fields."""
+    request = _as_request(state)
+    changes = {"install_mode": plan.mode}
     if plan.disk is not None:
-        object.__setattr__(state, "disk", plan.disk)
+        changes["disk"] = plan.disk
     if plan.target_partition is not None:
-        object.__setattr__(state, "target_partition", plan.target_partition)
+        changes["target_partition"] = plan.target_partition
+    return replace(request, **changes)
 
 def _probe_storage(
     disk: str,
@@ -127,43 +125,31 @@ def _probe_storage(
     )
 
 from .plan_validate import (  # canonical (plan.py 788 → split)
+    ValidationDependencies,
     _validate_efi_target as _pv_validate_efi_target,
     _validate_install_target as _pv_validate_install_target,
     _validate_partition_target as _pv_validate_partition_target,
 )
-# Wrapper to keep test mocks on plan._parent_disk effective after split
+
+def _validation_dependencies() -> ValidationDependencies:
+    """Bind validation to this module's stable, patchable public boundary."""
+    return ValidationDependencies(
+        parent_disk=_parent_disk,
+        list_partitions=list_partitions,
+        probe_storage=_probe_storage,
+        get_journal=partition_ops.get_journal,
+    )
+
 def _validate_install_target(*args, **kwargs):
-    import importlib
-    pv = importlib.import_module(__name__.rsplit('.', 1)[0] + '.plan_validate')
-    # Sync mocked _parent_disk / _is_gpt_disk / _has_bios_boot etc if tests patched plan.*
-    for attr in ('_parent_disk', '_is_gpt_disk', '_has_bios_boot_partition', 'find_efi_partition', 'list_disks', 'list_partitions'):
-        if hasattr(pv, attr) and attr in globals():
-            try:
-                pv.__dict__[attr] = globals()[attr]
-            except Exception:
-                pass
+    kwargs.setdefault("dependencies", _validation_dependencies())
     return _pv_validate_install_target(*args, **kwargs)
 
 def _validate_efi_target(*args, **kwargs):
-    import importlib
-    pv = importlib.import_module(__name__.rsplit('.', 1)[0] + '.plan_validate')
-    for attr in ('_parent_disk', '_is_gpt_disk', '_has_bios_boot_partition', 'find_efi_partition', 'list_disks', 'list_partitions'):
-        if hasattr(pv, attr) and attr in globals():
-            try:
-                pv.__dict__[attr] = globals()[attr]
-            except Exception:
-                pass
+    kwargs.setdefault("dependencies", _validation_dependencies())
     return _pv_validate_efi_target(*args, **kwargs)
 
 def _validate_partition_target(*args, **kwargs):
-    import importlib
-    pv = importlib.import_module(__name__.rsplit('.', 1)[0] + '.plan_validate')
-    for attr in ('_parent_disk', '_is_gpt_disk', '_has_bios_boot_partition', 'find_efi_partition', 'list_disks', 'list_partitions'):
-        if hasattr(pv, attr) and attr in globals():
-            try:
-                pv.__dict__[attr] = globals()[attr]
-            except Exception:
-                pass
+    kwargs.setdefault("dependencies", _validation_dependencies())
     return _pv_validate_partition_target(*args, **kwargs)
 
 def _is_gpt_disk(disk: str) -> bool:
