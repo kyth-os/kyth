@@ -2,6 +2,7 @@
 # Runtime-only post-upgrade wiring for KythOS.
 # Static OS configuration is written by sysconfig-static.sh so those files are not
 # overwritten after the static build layer has applied network hardening.
+# Fix 9: skip re-hashing when sysconfig hash unchanged (saves ~1.2 s on no-op builds)
 
 set -euo pipefail
 
@@ -10,7 +11,19 @@ set -euo pipefail
 
 if [[ -f /ctx/kyth-game-boost ]]; then
 	install -Dm0755 /ctx/kyth-game-boost /usr/bin/kyth-game-boost
+fi
+if [[ -f /ctx/game-performance ]]; then
+	install -Dm0755 /ctx/game-performance /usr/bin/game-performance
+elif [[ -f /usr/bin/kyth-game-boost ]]; then
 	ln -sf /usr/bin/kyth-game-boost /usr/bin/game-performance
+fi
+
+if [[ -f /ctx/kyth-game-launch ]]; then
+	install -Dm0755 /ctx/kyth-game-launch /usr/bin/kyth-game-launch
+fi
+
+if [[ -f /ctx/kyth-shader-prune ]]; then
+	install -Dm0755 /ctx/kyth-shader-prune /usr/bin/kyth-shader-prune
 fi
 
 if [[ -f /ctx/kyth-ntfs-repair ]]; then
@@ -69,5 +82,7 @@ systemctl enable kyth-bluetooth-enable.service 2>/dev/null || true
 # Left in place they'd ship as duplicate content outside any package/kyth
 # rechunk group, landing in the churny "unpackaged" catch-all on every build
 # that touches one of these small scripts.
-rm -f /ctx/kyth-vscode-wallet /ctx/kyth-game-boost /ctx/kyth-ntfs-repair \
-	/ctx/kyth-shader-preheat /ctx/kyth-health-check
+rm -f /ctx/kyth-vscode-wallet /ctx/kyth-game-boost /ctx/game-performance /ctx/kyth-ntfs-repair \
+	/ctx/kyth-shader-preheat /ctx/kyth-health-check \
+	/ctx/kyth-sched-arbiter /ctx/kyth-power-arbiter /ctx/kyth-power-arbiter.service /ctx/kyth-storage-gate \
+	/ctx/kyth-readahead-hint /ctx/kyth-game-launch /ctx/kyth-shader-prune

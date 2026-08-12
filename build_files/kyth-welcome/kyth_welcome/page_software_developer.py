@@ -134,6 +134,8 @@ class _DeveloperTabMixin:
         self._ai_log_panel.toggle.show()
         command = ["/usr/bin/kyth-ai-dev", action]
         self._ai_worker = Worker(command)
+        self._ai_worker.finished.connect(lambda: setattr(self, "_ai_worker", None))
+        self._ai_worker.finished.connect(self._ai_worker.deleteLater)
         self._ai_worker.line.connect(self._ai_on_line)
         self._ai_worker.done.connect(lambda code: self._ai_on_done(action, code))
         self._ai_worker.start()

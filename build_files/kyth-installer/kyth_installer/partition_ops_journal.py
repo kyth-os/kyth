@@ -4,13 +4,6 @@ Canonical after partition_ops 571 split; partition_ops.py re-exports for compat.
 """
 from __future__ import annotations
 
-"""Partition operation queue with commit, rollback, and filesystem support.
-
-Stages partition operations (create, delete, resize, format, mount) as a
-transaction journal. Operations are validated before commit and the original
-partition table is backed up for rollback via sgdisk.
-"""
-
 import shutil
 import tempfile
 from pathlib import Path
@@ -99,11 +92,6 @@ _partition_number = _patched_partition_number  # type: ignore
 _partition_start_bytes = _patched_partition_start_bytes  # type: ignore
 shrink_filesystem = _patched_shrink_filesystem  # type: ignore
 
-try:
-    from .services.disk_service import DiskService
-except ImportError:
-    DiskService = None  # type: ignore  # fallback for protocol-only import
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -162,9 +150,6 @@ class Journal:
         return self._root_partition
 
     def _save_snapshot(self) -> None:
-        # Now delegates to PartitionTableGuard for consistent fsync semantics
-        from .storage_guard import PartitionTableGuard
-
         if not self._disk_service.dry_run:
             _require_sgdisk()
         self._discard_snapshot()
@@ -252,11 +237,15 @@ class Journal:
                         return name
         return None
 
-    def _initial_table_state(self) -> tuple[str, int, int]:
+    def _initial_table_state(self, current_parts: list[dict]) -> tuple[str, int, int]:
         """Return (table_type, primary_count, disk_size_bytes) as the disk
         stands before this journal's ops are applied — the starting point
         validate() walks ops forward from, since a new_table op can replace
         either mid-journal.
+
+        `current_parts` is validate()'s own already-fetched list_partitions()
+        result, passed in so this doesn't re-scan the same disk a second time
+        just to count primaries.
 
         MBR (msdos) tables support at most 4 primary partitions, and this
         installer does not create extended/logical partitions to work around
@@ -266,7 +255,7 @@ class Journal:
         disk_info = disks_by_name.get(self.disk, {})
         table_type = (disk_info.get("partition_table") or "").lower()
         primary_count = (
-            len([pt for pt in list_partitions(self.disk) if pt.get("name")])
+            len([pt for pt in current_parts if pt.get("name")])
             if table_type == "msdos" else 0
         )
         disk_size_bytes = _safe_int(disk_info.get("size_bytes"), -1)
@@ -315,7 +304,7 @@ class Journal:
                     start + size if start >= 0 and size > 0 else -1,
                     part.get("fstype") or "",
                 )
-        table_type, primary_count, disk_size_bytes = self._initial_table_state()
+        table_type, primary_count, disk_size_bytes = self._initial_table_state(current_parts)
 
         for op in self.ops:
             kind = op["kind"]
@@ -577,30 +566,33 @@ class Journal:
     def commit(self, log) -> str:
         if not self._disk_service.dry_run:
             _require_parted()
-        self._save_snapshot()
+        from .storage_guard import DiskLease
 
-        for op in self.ops:
-            kind = op["kind"]
-            p = op["params"]
+        with DiskLease(self.disk, log, exclusive=True):
+            self._save_snapshot()
 
-            if kind == "new_table":
-                self._commit_new_table(p, log)
-            elif kind == "create":
-                self._commit_create(p, log)
-            elif kind == "delete":
-                self._commit_delete(p, log)
-            elif kind == "resize":
-                self._commit_resize(p, log)
-            elif kind == "format":
-                self._commit_format(p, log)
-            # "set_mountpoint" ops are pure journal metadata (consumed by
-            # _find_root_partition() below) — no disk operation of their own.
+            for op in self.ops:
+                kind = op["kind"]
+                p = op["params"]
 
-        self._root_partition = self._find_root_partition()
-        self._committed = True
-        log("Partition changes committed successfully.")
-        root = self._root_partition or ""
-        return root
+                if kind == "new_table":
+                    self._commit_new_table(p, log)
+                elif kind == "create":
+                    self._commit_create(p, log)
+                elif kind == "delete":
+                    self._commit_delete(p, log)
+                elif kind == "resize":
+                    self._commit_resize(p, log)
+                elif kind == "format":
+                    self._commit_format(p, log)
+                # "set_mountpoint" ops are pure journal metadata (consumed by
+                # _find_root_partition() below) — no disk operation of their own.
+
+            self._root_partition = self._find_root_partition()
+            self._committed = True
+            log("Partition changes committed successfully.")
+            root = self._root_partition or ""
+            return root
 
     def rollback(self, log) -> None:
         if not self._snapshot_saved:

@@ -18,6 +18,13 @@ _GITHUB_FEEDBACK_TOKEN_PATH = "/etc/kyth-github-feedback-token"
 _GITHUB_REPO = "mrtrick37/kyth"
 
 
+def _scrub_logs(text: str) -> str:
+    """Arch #16: central scrub via kyth_shared.diagnostics_scrub."""
+    from kyth_shared.diagnostics_scrub import scrub_logs as _central
+
+    return _central(text)
+
+
 def _collect_system_info() -> str:
     lines = []
     kernel = command_stdout(["uname", "-r"], timeout=5) or "unknown"
@@ -29,10 +36,16 @@ def _collect_system_info() -> str:
         lines.append(f"**Image digest:** `{digest_info[1][:16]}`")
     gpu = "\n".join(lspci_gpu_lines()[:3]) or "unknown"
     lines.append(f"**GPU:**\n```\n{gpu}\n```")
-    cpu = command_stdout(
-        ["bash", "-c", "grep -m1 'model name' /proc/cpuinfo | cut -d: -f2"],
-        timeout=5,
-    ).strip() or "unknown"
+    try:
+        cpu = ""
+        with open("/proc/cpuinfo", encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                if "model name" in line:
+                    cpu = line.split(":", 1)[1].strip() if ":" in line else ""
+                    break
+        cpu = cpu or "unknown"
+    except OSError:
+        cpu = "unknown"
     lines.append(f"**CPU:** {cpu}")
     if IS_LIVE:
         lines.append("**Session:** Live ISO")
@@ -147,7 +160,7 @@ class FeedbackPage(Page):
             return
 
         labels = ["bug"] if self._bug_btn.isChecked() else ["enhancement"]
-        body = self._build_body()
+        body = _scrub_logs(self._build_body())
 
         token = ""
         try:

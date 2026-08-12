@@ -200,6 +200,8 @@ class _LauncherToolsMixin:
             self._tool_op_status.show()
             restyle(self._tool_op_status)
             self._tool_worker = Worker(["ujust", "install-umu"])
+            self._tool_worker.finished.connect(lambda: setattr(self, "_tool_worker", None))
+            self._tool_worker.finished.connect(self._tool_worker.deleteLater)
             self._tool_worker.line.connect(self._tool_log_panel.append)
             self._tool_worker.done.connect(
                 lambda code, t=target, n=name: self._on_umu_install_done(code, t, n)

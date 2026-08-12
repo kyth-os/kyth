@@ -2,6 +2,10 @@
 
 ``kyth-probe`` (user/system oneshot) refreshes the cache; System Hub and other
 CLI tools read it before spawning ``bootc`` / ``flatpak`` / ``lspci``.
+
+Arch #6: This is a re-export shim only — single source of truth is
+``kyth_shared.system.probe``. New code should import from there;
+this shim exists for ``kyth_welcome`` backward compat only.
 """
 from __future__ import annotations
 

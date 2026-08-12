@@ -38,18 +38,14 @@ whatever protections/flags apply to "alongside" (see above) apply to them too.
 
 import logging
 import contextlib
-import fcntl
-import os
 import shutil
 import subprocess
-import tempfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
-from .context import InstallationState, InstallRequest
-from .plan_types import InstallPlan, PlanReport, ResolvedInstallPlan  # re-export for compat (monolith split step 1)
+from .context import InstallationState, InstallRequest  # pylint: disable=unused-import
+from .plan_types import InstallPlan, PlanReport, ResolvedInstallPlan  # pylint: disable=unused-import
 from .disk import (
     _human_size,
     _latest_partition_on_disk,
@@ -115,10 +111,15 @@ def _probe_storage(
     *,
     include_partitions: bool = True,
     include_free_space: bool = False,
+    disks: tuple | None = None,
 ) -> StorageSnapshot:
-    """Capture all live discovery needed for one planning decision."""
+    """Capture all live discovery needed for one planning decision.
+
+    `disks` lets a caller that already has a fresh list_disks() result (e.g.
+    one iterating over every disk on the system) pass it straight through
+    instead of this re-running the disk scan once per call."""
     return StorageSnapshot(
-        disks=tuple(list_disks()),
+        disks=tuple(disks) if disks is not None else tuple(list_disks()),
         partitions=tuple(list_partitions(disk)) if include_partitions else (),
         free_regions=tuple(list_free_space(disk)) if include_free_space else (),
         efi_partition=find_efi_partition(disk) if include_partitions else None,
@@ -202,12 +203,16 @@ def suggest_windows_resize_target(snapshot=None) -> dict | None:
     """
     from .disk import list_disks as _list_disks  # local to avoid cycle
     best = None
-    for d in _list_disks():
+    all_disks = tuple(_list_disks())
+    for d in all_disks:
         name = d.get("name")
         if not name:
             continue
         try:
-            snap = snapshot if snapshot and snapshot.disks_by_name.get(name) else _probe_storage(name)
+            snap = (
+                snapshot if snapshot and snapshot.disks_by_name.get(name)
+                else _probe_storage(name, disks=all_disks)
+            )
         except Exception:
             continue
         for pname, part in snap.partitions_by_name.items():
@@ -230,35 +235,17 @@ def disk_hold(disk: str, log):
     Prevents TOCTOU where a second installer request or udev automount
     reclaims a gap between validate_plan_state and parted mkpart. Best-effort
     on live ISO where the disk may be busy — falls back to advisory warning.
+
+    Delegates to storage_guard.DiskLease so guided and manual paths share one
+    flock primitive.
     """
-    fd = -1
-    try:
-        try:
-            fd = os.open(disk, os.O_RDONLY)
-        except OSError as exc:
-            log(f"Warning: could not open {disk} for exclusive hold: {exc}")
-            yield
-            return
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            log(f"Holding exclusive lock on {disk} for partition commit...")
-        except BlockingIOError:
-            raise RuntimeError(f"Another process is using {disk}; close other installers and retry.")
+    from .storage_guard import DiskLease
+
+    with DiskLease(disk, log, exclusive=True):
         yield
-    finally:
-        if fd != -1:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            except Exception:
-                pass
-            try:
-                os.close(fd)
-            except Exception:
-                pass
 
 def find_bootcurrent_esp() -> str | None:
     """Return ESP device path from BootCurrent via efibootmgr -v, or None."""
-    import shutil, subprocess
     if shutil.which("efibootmgr") is None:
         return None
     try:
@@ -277,7 +264,6 @@ def find_bootcurrent_esp() -> str | None:
         for line in r.stdout.splitlines():
             if line.strip().startswith(f"Boot{boot}"):
                 # HD(2,GPT,uuid,0x800,0xFA000)/File(\EFI\arch\grubx64.efi)
-                hm = re.search(r"HD\(\d+,GPT,[^,]+,0x[0-9a-fA-F]+,0x[0-9a-fA-F]+\)", line)
                 # We can't map HD to /dev directly, so return hint that BootCurrent exists
                 # Caller will prefer existing find_efi_partition on BootCurrent disk if possible
                 # For now, just indicate BootCurrent ESP is not on target disk if needed
@@ -311,8 +297,11 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     bios_end = gap_start + BIOS_BOOT_BYTES - sector
     log("Creating BIOS boot partition for GRUB...")
     run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "biosboot", f"{gap_start}B", f"{bios_end}B"]), check=True, timeout=120)
-    _settle()
     created = _latest_partition_on_disk(disk, before)
+    if not created:
+        # R8: settle batch — wait once for udev after mkpart before probing
+        _settle()
+        created = _latest_partition_on_disk(disk, before)
     if not created:
         raise RuntimeError("The installer could not find the new BIOS boot partition after partitioning.")
     run_command(_as_root(["parted", "-s", disk, "set", str(_partition_number(created)), "bios_grub", "on"]), check=True, timeout=120)
@@ -339,12 +328,13 @@ def _commit_new_kythos_partition(
 
     disk_service = DiskService()
     with disk_hold(disk, log):
-        with PartitionTableGuard(disk, log, disk_service=disk_service) as backup_path:
+        with PartitionTableGuard(disk, log, disk_service=disk_service):
             if before_partition is not None:
                 try:
                     before_partition()
-                except Exception:
-                    log(failure_message)
+                except Exception as exc:
+                    # W3: surface cause; guard still restores on mkfs fail per test — split deferred
+                    log(f"{failure_message}: {exc}")
                     raise
             # Failure messages handled by PartitionTableGuard's restore; keep original messages for outer log
             btrfs_start = _ensure_bios_boot_partition(disk, gap_start, log)
@@ -354,22 +344,18 @@ def _commit_new_kythos_partition(
 
             log(f"Creating KythOS Btrfs partition in {_human_size(gap_end - btrfs_start)} of free space...")
             run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{partition_end}B"]), check=True, timeout=120)
-            # Force kernel to re-read partition table before any mkfs — avoids half-table on power loss
-            try:
-                run_command(_as_root(["blockdev", "--rereadpt", disk]), check=False, timeout=15)
-            except Exception:
-                pass
-            try:
-                run_command(_as_root(["partprobe", disk]), check=False, timeout=15)
-            except Exception:
-                pass
+            # R8: batch reread — one settle after both reread attempts
+            for _cmd in [[_as_root(["blockdev", "--rereadpt", disk])], [_as_root(["partprobe", disk])]]:
+                try:
+                    run_command(_cmd[0], check=False, timeout=15)
+                except Exception:
+                    pass
             _settle()
 
             created = _latest_partition_on_disk(disk, before)
             if not created:
                 raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
             run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
-            # Re-read to confirm the new partition is visible to the kernel before returning
             _settle()
             try:
                 _verify = {p["name"] for p in list_partitions(disk) if p.get("name")}
@@ -437,7 +423,70 @@ def _validate_resize_ntfs_target(
         raise RuntimeError("Refusing to leave the NTFS partition smaller than 64 GiB.")
     return disk, partition, shrink_bytes
 
+def _shrink_ntfs_filesystem_guarded(
+    partition: str, new_ntfs_size: int, shrink_bytes: int, log
+) -> None:
+    """Shrink the NTFS filesystem in place, with explicit non-atomic warning.
+
+    This step is **not** covered by the partition-table guard that follows.
+    If the filesystem shrink succeeds but the later ``resizepart`` or KythOS
+    partition creation fails, ``sgdisk --load-backup`` will restore the table
+    but the filesystem stays shrunk. That leaves a partition larger than its
+    filesystem — benign and recoverable (Windows Disk Management or
+    ``ntfsresize`` can regrow), but not automatically rolled back. Log that
+    explicitly so the failure path can surface accurate remediation and so
+    tests can assert the boundary between the two durability domains.
+    """
+    log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
+    try:
+        shrink_filesystem(partition, "ntfs", new_ntfs_size, log)
+    except Exception:
+        log(
+            "NTFS filesystem shrink failed — no partition table change was made. "
+            "The NTFS volume is unchanged and the installer made no destructive write."
+        )
+        raise
+    log(
+        "NTFS filesystem shrink complete. If the next partition step fails, "
+        "the partition table will be restored but this filesystem will remain "
+        "at its new smaller size. Windows will see unallocated space after it; "
+        "use Windows Disk Management to extend the volume back if you want to undo."
+    )
+    # Marker to guard against immediate second shrink without regrow/reboot.
+    # Filesystem shrink is not covered by the sgdisk guard, so a second attempt
+    # in the same live session would shrink an already-small filesystem again.
+    try:
+        marker_dir = Path("/run/kyth-installer")
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = partition.replace("/", "_")
+        marker = marker_dir / f"ntfs-shrunk-{safe_name}"
+        marker.write_text(f"{new_ntfs_size}\n")
+    except Exception:
+        pass
+
+
 def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
+    # Guard against double-shrink in same session after a prior filesystem
+    # shrink succeeded but table restore left FS small. Prevents second shrink
+    # of an already-shrunk FS which would fail confusingly or over-shrink.
+    try:
+        prelim_partition = _normal_device_path(config.get("resize_partition") or config.get("target_partition"))
+        if prelim_partition:
+            safe_name = prelim_partition.replace("/", "_")
+            marker = Path("/run/kyth-installer") / f"ntfs-shrunk-{safe_name}"
+            if marker.is_file():
+                raise RuntimeError(
+                    "This NTFS partition was already shrunk in this installer session "
+                    "but the partition table was restored after a later failure. "
+                    "The filesystem is already at its new smaller size while the "
+                    "partition still describes the old larger size. Reboot, let "
+                    "Windows extend the volume back, or reboot the live ISO before "
+                    "retrying. Marker: " + str(marker)
+                )
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
     disk, partition, shrink_bytes = _validate_resize_ntfs_target(config)
     missing = [cmd for cmd in ("ntfsresize", "parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk") if shutil.which(cmd) is None]
     if missing:
@@ -452,8 +501,7 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
     old_end = partition_start + current_size - sector
     new_end = partition_start + new_ntfs_size - sector
 
-    log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
-    shrink_filesystem(partition, "ntfs", new_ntfs_size, log)
+    _shrink_ntfs_filesystem_guarded(partition, new_ntfs_size, shrink_bytes, log)
 
     def _shrink_partition_boundary() -> None:
         log("Shrinking partition boundary...")

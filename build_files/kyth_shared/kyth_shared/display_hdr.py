@@ -5,7 +5,6 @@ Pure, offline, no cloud. Parses /sys/class/drm/card*-*/edid via edid-decode (if 
 from __future__ import annotations
 
 import os
-import struct
 import tomllib
 from pathlib import Path
 from typing import Any

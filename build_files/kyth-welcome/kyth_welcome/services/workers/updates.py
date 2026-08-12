@@ -34,8 +34,31 @@ class UpdateCheckWorker(TrackedThread):
             if self._use_cached_snapshot:
                 snapshot = read_update_snapshot(max_age=300)
                 if snapshot is not None and snapshot.system_state != "unknown":
-                    self.result.emit(UpdateProbeResult.success("system", snapshot.system_state))
-                    return
+                    # Validate snapshot freshness against current booted digest;
+                    # a stale snapshot (e.g. booted image changed or snapshot
+                    # was written before the registry moved) would make the Hub
+                    # say "no updates" when an update is actually available.
+                    try:
+                        cur_digest = None
+                        data = bootc_status_data()
+                        if data is not None:
+                            from kyth_shared.system.bootc_query import image_digest_from_status
+
+                            cur_digest = image_digest_from_status(data, "booted")
+                        snap_digest = getattr(snapshot, "booted_digest", "")
+                        if (
+                            isinstance(snap_digest, str)
+                            and snap_digest
+                            and isinstance(cur_digest, str)
+                            and cur_digest
+                            and snap_digest != cur_digest
+                        ):
+                            raise ValueError("booted digest changed since snapshot")
+                    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+                        pass
+                    else:
+                        self.result.emit(UpdateProbeResult.success("system", snapshot.system_state))
+                        return
             result = check_registry_update(
                 status_data=bootc_status_data() or {},
                 branch=current_branch() or "latest",

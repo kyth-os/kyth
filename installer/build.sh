@@ -361,10 +361,63 @@ WantedBy=local-fs.target
 EOF
 systemctl enable var-tmp.mount
 
-# ── Passwordless sudo for liveuser ────────────────────────────────────────────
+# ── Scoped sudo for liveuser (least-privilege) ───────────────────────────────
+# Installer needs root for partitioning, bootc, and mounts. Restrict the
+# live account to the installer entry points and a minimal allowlist so a
+# compromised renderer (chromium --no-sandbox) cannot sudo to arbitrary
+# commands.
 install -Dm440 /dev/stdin /etc/sudoers.d/liveuser-live <<'EOF'
-liveuser ALL=(ALL) NOPASSWD: ALL
+liveuser ALL=(root) NOPASSWD: /usr/bin/kyth-installer
+liveuser ALL=(root) NOPASSWD: /usr/bin/kyth-launch-installer
+liveuser ALL=(root) NOPASSWD: /usr/libexec/kyth-plymouth-branding-guard
+liveuser ALL=(root) NOPASSWD: /usr/bin/chromium
+liveuser ALL=(root) NOPASSWD: /usr/bin/chromium-browser
+liveuser ALL=(root) NOPASSWD: /usr/bin/chromium-bin
+# Explicit tool allowlist mirroring runner._ALLOWED_EXECUTABLES (partition +
+# system helpers). Full ALL is intentionally not granted.
+liveuser ALL=(root) NOPASSWD: /usr/sbin/parted
+liveuser ALL=(root) NOPASSWD: /usr/bin/parted
+liveuser ALL=(root) NOPASSWD: /usr/sbin/sgdisk
+liveuser ALL=(root) NOPASSWD: /usr/bin/sgdisk
+liveuser ALL=(root) NOPASSWD: /usr/bin/mkfs.btrfs
+liveuser ALL=(root) NOPASSWD: /usr/bin/mkfs.ext4
+liveuser ALL=(root) NOPASSWD: /usr/bin/mkfs.fat
+liveuser ALL=(root) NOPASSWD: /usr/bin/mkfs.xfs
+liveuser ALL=(root) NOPASSWD: /usr/bin/mkswap
+liveuser ALL=(root) NOPASSWD: /usr/bin/btrfs
+liveuser ALL=(root) NOPASSWD: /usr/bin/mount
+liveuser ALL=(root) NOPASSWD: /usr/bin/umount
+liveuser ALL=(root) NOPASSWD: /usr/bin/findmnt
+liveuser ALL=(root) NOPASSWD: /usr/bin/lsblk
+liveuser ALL=(root) NOPASSWD: /usr/bin/blkid
+liveuser ALL=(root) NOPASSWD: /usr/bin/blockdev
+liveuser ALL=(root) NOPASSWD: /usr/bin/partprobe
+liveuser ALL=(root) NOPASSWD: /usr/sbin/partprobe
+liveuser ALL=(root) NOPASSWD: /usr/bin/udevadm
+liveuser ALL=(root) NOPASSWD: /usr/bin/ntfsresize
+liveuser ALL=(root) NOPASSWD: /usr/bin/resize2fs
+liveuser ALL=(root) NOPASSWD: /usr/sbin/e2fsck
+liveuser ALL=(root) NOPASSWD: /usr/bin/e2fsck
+liveuser ALL=(root) NOPASSWD: /usr/bin/bootc
+liveuser ALL=(root) NOPASSWD: /usr/bin/mokutil
+liveuser ALL=(root) NOPASSWD: /usr/bin/systemctl
+liveuser ALL=(root) NOPASSWD: /usr/bin/efibootmgr
+liveuser ALL=(root) NOPASSWD: /usr/bin/openssl
+liveuser ALL=(root) NOPASSWD: /usr/bin/sync
+liveuser ALL=(root) NOPASSWD: /usr/bin/tee
+liveuser ALL=(root) NOPASSWD: /usr/bin/cat
+liveuser ALL=(root) NOPASSWD: /usr/bin/mkdir
+liveuser ALL=(root) NOPASSWD: /usr/bin/chmod
+liveuser ALL=(root) NOPASSWD: /usr/bin/chown
+liveuser ALL=(root) NOPASSWD: /usr/bin/ln
+liveuser ALL=(root) NOPASSWD: /usr/bin/cp
+liveuser ALL=(root) NOPASSWD: /usr/bin/restorecon
+liveuser ALL=(root) NOPASSWD: /usr/bin/useradd
+liveuser ALL=(root) NOPASSWD: /usr/bin/timedatectl
+liveuser ALL=(root) NOPASSWD: /usr/bin/ip
 EOF
+# Validate sudoers syntax — fail the ISO build instead of shipping a broken file.
+visudo -c -f /etc/sudoers.d/liveuser-live
 
 # ── Timezone + machine-id (same as Bazzite) ───────────────────────────────────
 rm -f /etc/localtime

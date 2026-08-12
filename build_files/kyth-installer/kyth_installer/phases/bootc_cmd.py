@@ -1,15 +1,12 @@
 """bootc install command construction and streaming execution."""
 from __future__ import annotations
 
-import re
-from pathlib import Path
 
 from kyth_shared import get_rx_bytes
 
 from ..config import SKIP_FETCH_CHECK
 from ..imagesrc import _friendly_network_error
 from ..streaming import StreamingCommandRunner
-from .common import _push
 
 
 def _build_bootc_install_cmd(
@@ -47,6 +44,9 @@ def _run_cmd(
     stall_timeout: int = 600,
     absolute_timeout: int | None = 3600,
     publish=None,
+    cancel_event=None,
+    io_stall_timeout: int | None = None,
+    net_stall_timeout: int | None = None,
 ) -> None:
     # Import _as_root lazily so tests that patch `install._as_root` still apply
     try:
@@ -91,4 +91,7 @@ def _run_cmd(
         stall_timeout=stall_timeout,
         absolute_timeout=absolute_timeout,
         error_factory=error_factory,
+        cancel_event=cancel_event,
+        io_stall_timeout=io_stall_timeout,
+        net_stall_timeout=net_stall_timeout,
     )

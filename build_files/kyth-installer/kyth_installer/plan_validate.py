@@ -12,9 +12,7 @@ from .config import BIOS_BOOT_GUID, MIN_KYTHOS_BYTES, MIN_KYTHOS_GIB
 from .disk import (
     _normal_device_path,
     _safe_int,
-    find_efi_partition,
 )
-from .plan_types import PlanReport
 
 if TYPE_CHECKING:
     from .storage_snapshot import StorageSnapshot

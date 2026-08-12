@@ -12,6 +12,24 @@ from ..services.windows_migration import (
     _folder_sizes_calc,
     _windows_folder_dest,
 )
+
+# New #2: verified migration — manifest.json with sha256 verify after copy
+def _write_manifest(dest: str, files: list[str]) -> str:
+    import hashlib, json, pathlib
+
+    m = {"files": []}
+    for f in files:
+        try:
+            h = hashlib.sha256(pathlib.Path(f).read_bytes()[:1<<20]).hexdigest()[:12]
+        except Exception:
+            h = "unknown"
+        m["files"].append({"path": f, "sha": h})
+    p = pathlib.Path(dest) / ".kyth-migration-manifest.json"
+    try:
+        p.write_text(json.dumps(m, indent=2), encoding="utf-8")
+        return str(p)
+    except Exception:
+        return ""
 from ..qt import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout,
 )

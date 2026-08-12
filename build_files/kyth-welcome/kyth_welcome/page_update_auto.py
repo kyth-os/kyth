@@ -7,7 +7,7 @@ from kyth_shared.update_status import read_update_snapshot
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
 from .services.dbus_utils import is_systemd_unit_enabled
-from .services.launch import popen_privileged
+from .services.launch import popen_privileged, reboot
 from .services.privileged import AuthFrontend, systemctl_action
 from .qt import QCheckBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt
 from .widgets import _make_card
@@ -128,6 +128,13 @@ class _AutoUpdateMixin:
         self._au_enable_toggle.blockSignals(False)
 
     def _toggle_auto_update(self, state: int) -> None:
+        # H3: debounce — toggling rapidly would race two pkexec dialogs
+        if getattr(self, "_au_toggle_guard", False):
+            return
+        self._au_toggle_guard = True
+        from .qt import single_shot
+
+        single_shot(self, 1200, lambda: setattr(self, "_au_toggle_guard", False))
         cmd = "enable" if state else "disable"
         popen_privileged(systemctl_action(
             cmd,
@@ -137,6 +144,12 @@ class _AutoUpdateMixin:
         ))
 
     def _run_auto_update_now(self) -> None:
+        if getattr(self, "_au_run_guard", False):
+            return
+        self._au_run_guard = True
+        from .qt import single_shot
+
+        single_shot(self, 2000, lambda: setattr(self, "_au_run_guard", False))
         popen_privileged(systemctl_action(
             "start",
             "kyth-update-watcher.service",
@@ -145,11 +158,11 @@ class _AutoUpdateMixin:
 
     def _build_windows_update_style_card(self):
         card, layout = _make_card("card-accent-ok")
-        title = QLabel("Windows Update style — active hours & reboot scheduling")
+        title = QLabel("Active hours & reboot scheduling")
         title.setObjectName("card-title")
         layout.addWidget(title)
         body = QLabel(
-            "Like Windows Update: KythOS stages the new OS image in the background, then waits for you. "
+            "KythOS stages the new OS image in the background, then waits for you. "
             "Reboot when you are ready — active hours defer automatic staging, and your previous image stays as System Restore for 14 days. "
             "Files in /home are never touched."
         )
@@ -179,15 +192,65 @@ class _AutoUpdateMixin:
         reboot_now = QPushButton("Reboot Now")
         reboot_now.setObjectName("primary")
         reboot_now.setToolTip("Reboot to the staged image now (if one is staged)")
-        reboot_now.clicked.connect(lambda _=False: popen_privileged(["systemctl", "reboot"]))
+        reboot_now.clicked.connect(lambda _=False: reboot())
         btns.addWidget(reboot_now)
         defer_btn = QPushButton("Defer Automatic Updates 3 Days")
         defer_btn.setToolTip("Stops the watcher timer for 72h — stops the watcher timer via systemctl stop")
-        defer_btn.clicked.connect(lambda _=False: popen_privileged(systemctl_action("stop", "kyth-update-watcher.timer", frontend=AuthFrontend.PKEXEC)))
+        # H3: guard against double-click spawning two pkexec dialogs
+        def _defer_click():
+            if getattr(self, "_wu_defer_guard", False):
+                return
+            self._wu_defer_guard = True
+            from .qt import single_shot
+
+            single_shot(self, 2000, lambda: setattr(self, "_wu_defer_guard", False))
+            popen_privileged(systemctl_action("stop", "kyth-update-watcher.timer", frontend=AuthFrontend.PKEXEC))
+
+        defer_btn.clicked.connect(lambda _=False: _defer_click())
         btns.addWidget(defer_btn)
         enable_btn = QPushButton("Re-enable Updates")
-        enable_btn.clicked.connect(lambda _=False: popen_privileged(systemctl_action("enable", "kyth-update-watcher.timer", now=True, frontend=AuthFrontend.PKEXEC)))
+
+        def _enable_click():
+            if getattr(self, "_wu_enable_guard", False):
+                return
+            self._wu_enable_guard = True
+            from .qt import single_shot
+
+            single_shot(self, 2000, lambda: setattr(self, "_wu_enable_guard", False))
+            popen_privileged(systemctl_action("enable", "kyth-update-watcher.timer", now=True, frontend=AuthFrontend.PKEXEC))
+
+        enable_btn.clicked.connect(lambda _=False: _enable_click())
         btns.addWidget(enable_btn)
         btns.addStretch()
         layout.addLayout(btns)
+        # H7: staged label was never refreshed — sync with bootc state when card is shown
+        try:
+            from .qt import single_shot as _ss
+
+            _ss(self, 500, self._refresh_wu_staged_label)
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+            pass
         self._add(card)
+
+    def _refresh_wu_staged_label(self):
+        """H7: keep staged label in sync with canonical bootc state."""
+        try:
+            from .services.bootc import has_staged_update, bootc_status_data, bootc_image_timestamp, nested_get
+
+            if not has_staged_update():
+                self._wu_staged_lbl.setText("None — system is current")
+                self._wu_staged_lbl.setObjectName("prop-val-dim")
+            else:
+                data = bootc_status_data() or {}
+                ref = nested_get(data, ("status", "staged", "image", "image")) or ""
+                if isinstance(ref, dict):
+                    ref = ref.get("image", "") or ref.get("imageref", "") or ""
+                label = ref.split("@")[0].split("/")[-1] if isinstance(ref, str) and ref else "Staged"
+                ts = bootc_image_timestamp("staged")
+                self._wu_staged_lbl.setText(f"{label} — reboot to apply" + (f" · {ts}" if ts else ""))
+                self._wu_staged_lbl.setObjectName("prop-val-blue")
+            from .core_base import restyle
+
+            restyle(self._wu_staged_lbl)
+        except Exception:
+            pass

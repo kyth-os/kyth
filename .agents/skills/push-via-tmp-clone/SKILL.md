@@ -60,6 +60,19 @@ Use when `git add`/`commit`/`push` fails with `Read-only file system` on `.git` 
    ```
    Do not skip this step. A dirty working tree after a successful push confuses the next `git diff` / `git status` and risks re-pushing the same changes or hiding new work. If `git status` still shows modifications, you missed a path — enumerate it with `git status --porcelain` and restore it.
 
+## Validation gate (arch #10 — parity with CI)
+
+Always run **exactly** CI's gates before pushing from the tmp clone (tmp clone bypasses `.githooks/pre-push`):
+
+```bash
+./build_files/scripts/validate.sh  # includes zizmor/hadolint/shellcheck + 1057 unit tests + portability
+./build_files/scripts/run-quality.sh  # ruff + coverage (skip Hub smoke under coverage, it OOMs)
+python3 -m unittest tests.test_validation_portability  # explicit portability (blocked PySide6)
+QT_QPA_PLATFORM=offscreen PYTHONPATH=build_files/kyth-welcome:build_files/kyth_shared python3 -m unittest tests.test_kyth_welcome_hub_smoke  # 20/20 smoke, explicit
+```
+
+This catches F821/QSS regressions before CI (e.g. 31288193192).
+
 ## Notes
 
 - Do not `sudo mount -o remount,rw` — that bypasses the sandbox and violates the git skill's lock safety.

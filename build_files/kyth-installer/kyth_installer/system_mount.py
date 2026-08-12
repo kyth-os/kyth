@@ -2,9 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-from pathlib import Path
 import logging
 from .runner import run_command as _orig_run_command, run_as_root as _orig_as_root
 from .system_privilege import _require_no_symlink as _orig_safe_require, _safe_umount as _orig_safe_umount, _settle as _orig_settle

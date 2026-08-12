@@ -25,6 +25,7 @@ from ._util import (  # noqa: F401
     _normal_device_path,
     _lsblk_text,
     _lsblk_blockdevices,
+    _lsblk_tree,
     _findmnt_source,
     _device_type,
     _block_size_bytes,

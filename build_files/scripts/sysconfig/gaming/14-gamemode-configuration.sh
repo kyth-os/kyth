@@ -33,7 +33,10 @@ endscript=DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/u
 
 [cpu]
 park_cores = no
-pin_cores = yes
+pin_cores = no
+# pin_cores is now owned by sched_arbiter (single writer). Default no when SCX is
+# available; arbiter flips to yes only on BORE + explicit opt-in. Do not change
+# this default without updating kyth_shared/sched_arbiter.py.
 
 [gpu]
 apply_gpu_optimisations = accept-responsibility

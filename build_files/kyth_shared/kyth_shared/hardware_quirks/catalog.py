@@ -21,7 +21,11 @@ QUIRK_MODULES: tuple[str, ...] = (
     "bluetooth_usb_autosuspend",
 )
 
-__all__ = [*QUIRK_MODULES, "QUIRK_MODULES", "list_managed_quirks"]
+__all__ = ["QUIRK_MODULES", "list_managed_quirks"]
+# Note: unlike hardware_quirks/__init__.py's identical-looking __all__, this
+# module is not a package — QUIRK_MODULES' entries name submodules of the
+# *parent* package, not attributes of this file, so splicing them in here
+# (as __init__.py correctly does) would just be undefined names.
 
 
 def list_managed_quirks() -> tuple[dict[str, Any], ...]:

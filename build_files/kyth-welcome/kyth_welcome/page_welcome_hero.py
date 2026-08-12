@@ -1,7 +1,7 @@
 """Welcome hero — hero/banner + vibe, split from page_welcome.py 745 (R7)."""
 from __future__ import annotations
 
-from .qt import QFrame, QHBoxLayout, QLabel, QPushButton, QSize, QVBoxLayout, QWidget, Qt
+from .qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Qt
 
 
 class _WelcomeHeroMixin:

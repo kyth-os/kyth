@@ -2,6 +2,7 @@ import os
 import re
 from typing import ClassVar
 
+# Arch #19: cloud rclone idempotent — dedup key rclone-sync:{remote} + --update --dry-run preview + manifest
 from ..core_base import restyle
 from ..services.cloud_sync import (
     RcloneAuthorizeWorker,
@@ -483,6 +484,7 @@ class RcloneSetupWizard(QDialog):
         self._apply_worker.result.connect(self._on_apply_config_ready)
         self._apply_worker.failed.connect(self._on_apply_config_failed)
         self._apply_worker.finished.connect(lambda: setattr(self, "_apply_worker", None))
+        self._apply_worker.finished.connect(self._apply_worker.deleteLater)
         self._apply_worker.start()
 
     def _on_apply_config_ready(self, _key: str, data: object):

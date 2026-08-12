@@ -106,7 +106,7 @@ def current_kernel_flavor() -> str:
             pass
         return "cachy" if "cachy" in command_stdout(["uname", "-r"]).lower() else "fedora"
 
-    return probe_cached("kernel-flavor", 60.0, fetch)
+    return probe_cached("kernel-flavor", 600.0, fetch)
 
 
 def image_tag_for_channel(channel: str, flavor: str | None = None) -> str:

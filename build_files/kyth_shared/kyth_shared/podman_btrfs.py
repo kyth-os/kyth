@@ -43,7 +43,6 @@ def save_podman_btrfs(cfg: dict[str, Any], path: Path | None = None) -> Path:
 
 def _on_btrfs() -> bool:
     try:
-        import subprocess
 
         from .commands import run as _run
 

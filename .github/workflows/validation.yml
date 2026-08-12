@@ -79,8 +79,13 @@ jobs:
       - name: Install pinned quality tools
         run: python3 -m pip install --disable-pip-version-check -r requirements-quality.txt
 
-      - name: Run Python quality gates
-        run: ./build_files/scripts/run-quality.sh
+      - name: Run Python quality gates (changed-only on PR)
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            ./build_files/scripts/run-quality.sh --changed-only
+          else
+            ./build_files/scripts/run-quality.sh
+          fi
 
       - name: Upload coverage report
         if: always()

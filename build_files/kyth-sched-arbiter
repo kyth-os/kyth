@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# kyth-sched-arbiter — sched-arbiter.toml → /run/kyth/sched-arbiter.json + gamemode.ini pin
+set -euo pipefail
+need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-sched-arbiter "$@"; }
+case "${1:-status}" in
+    status) python3 -c 'from kyth_shared.sched_arbiter import arbiter_status, _desired_state; import json; print(json.dumps(_desired_state(), indent=2))' ;;
+    apply) need_root "$@"; python3 -c 'from kyth_shared.sched_arbiter import generate_arbiter; generate_arbiter(); print("arbiter applied")' ;;
+    auto) need_root "$@"; python3 -c 'from kyth_shared.sched_arbiter import load_arbiter, save_arbiter, generate_arbiter; c=load_arbiter(); c["chosen"]="auto"; save_arbiter(c); generate_arbiter(c); print("arbiter auto")' ;;
+    scx) need_root "$@"; python3 -c 'from kyth_shared.sched_arbiter import load_arbiter, save_arbiter, generate_arbiter; c=load_arbiter(); c["chosen"]="scx_rusty"; save_arbiter(c); generate_arbiter(c); print("arbiter scx_rusty")' ;;
+    bore) need_root "$@"; python3 -c 'from kyth_shared.sched_arbiter import load_arbiter, save_arbiter, generate_arbiter; c=load_arbiter(); c["chosen"]="bore"; save_arbiter(c); generate_arbiter(c); print("arbiter bore")' ;;
+    balanced) need_root "$@"; python3 -c 'from kyth_shared.sched_arbiter import load_arbiter, save_arbiter, generate_arbiter; c=load_arbiter(); c["chosen"]="balanced"; save_arbiter(c); generate_arbiter(c); print("arbiter balanced")' ;;
+    *) echo "Usage: kyth-sched-arbiter [status|apply|auto|scx|bore|balanced]" >&2; exit 1 ;;
+esac

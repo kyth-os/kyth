@@ -28,6 +28,13 @@ def installed_app_ids() -> frozenset[str] | None:
     raw = probe_cached("flatpak-apps", FLATPAK_CACHE_TTL, fetch)
     if raw is None:
         return None
+    # Arch #14: after successful probe, warm AppStream JSON so Hub cold start hits cache
+    try:
+        from .appstream import warm_appstream_cache
+
+        warm_appstream_cache()
+    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+        pass
     if isinstance(raw, frozenset):
         return raw
     if isinstance(raw, (list, set, tuple)):

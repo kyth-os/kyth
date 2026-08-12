@@ -31,7 +31,9 @@ dnf5 install -y --skip-unavailable \
 	openconnect \
 	vpnc \
 	kde-connect \
-	plasma-browser-integration
+	plasma-browser-integration \
+	zoxide \
+	starship
 
 # Generic Distrobox wrapper — delegates to kyth-ai-dev container dynamically
 install -Dm 0755 /dev/stdin /usr/libexec/kyth-distrobox-wrapper <<'WRAPPEREOF'
@@ -81,7 +83,14 @@ fi
 
 box="${KYTH_AI_DEV_BOX:-kyth-ai-dev}"
 if command -v distrobox >/dev/null 2>&1 && distrobox list --no-color 2>/dev/null | awk '{print $3}' | grep -qx "${box}"; then
-	exec distrobox enter "${box}" -- "${tool}" "$@"
+	# Only delegate if the binary exists inside the container — otherwise return
+	# a clean 127 without crun's stack trace so shell rc guards stay silent.
+	if distrobox enter "${box}" -- sh -c "command -v ${tool} >/dev/null 2>&1" 2>/dev/null; then
+		exec distrobox enter "${box}" -- "${tool}" "$@"
+	else
+		echo "${desc} not found in container ${box} (run: kyth-ai-dev setup)" >&2
+		exit 127
+	fi
 fi
 
 echo "${desc} is managed in the KythOS AI Developer container (${box})."
@@ -91,7 +100,9 @@ exec distrobox enter "${box}" -- "${tool}" "$@"
 WRAPPEREOF
 
 # Create host symlinks to the generic distrobox wrapper
-for tool in shellcheck shfmt gh hx zellij bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux rclone flatpak-builder pipx uv starship direnv delta gum 7z 7za cabextract readpst; do
+# zoxide/starship are host-native (dnf installed above) so shell init doesn't
+# require the container; keep them out of the wrapper loop.
+for tool in shellcheck shfmt gh hx zellij bat eza fastfetch evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux rclone flatpak-builder pipx uv direnv delta gum 7z 7za cabextract readpst; do
 	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
 done
 

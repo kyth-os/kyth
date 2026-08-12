@@ -505,14 +505,18 @@ def _command_ok(argv: list[str]) -> bool:
     return result is not None and result.returncode == 0
 
 
+def _disable_scheduler() -> str:
+    SCX_CONFIG_PATH.unlink(missing_ok=True)
+    run_optional(["systemctl", "disable", "--now", "scx_loader.service"], capture_output=True)
+    return "kernel-default"
+
+
 def _configure_scheduler(candidates: list[str]) -> str:
     if not Path("/sys/kernel/sched_ext").is_dir() or not shutil.which("scx_loader"):
-        SCX_CONFIG_PATH.unlink(missing_ok=True)
-        run_optional(["systemctl", "disable", "--now", "scx_loader.service"], capture_output=True)
-        return "kernel-default"
+        return _disable_scheduler()
     selected = next((name for name in candidates if shutil.which(name)), "")
     if not selected:
-        return "kernel-default"
+        return _disable_scheduler()
     _atomic_write(SCX_CONFIG_PATH, f"SCX_SCHEDULER={selected}\n")
     run_optional(["systemctl", "enable", "scx_loader.service"], capture_output=True)
     run_optional(["systemctl", "restart", "scx_loader.service"], capture_output=True)

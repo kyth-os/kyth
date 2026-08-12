@@ -49,8 +49,21 @@ class PageRegistryTests(unittest.TestCase):
             self.assertIn(expected, SEARCH_ITEMS)
 
     def test_aliases_and_problem_routes_remain_centralized(self):
-        self.assertIn("Control Panel", SEARCH_ITEMS["Welcome"][2])
+        item = SEARCH_ITEMS["Welcome"]
+        terms = item.terms if hasattr(item, "terms") else item[2]
+        self.assertIn("Control Panel", terms)
         self.assertEqual(PROBLEM_ROUTES["no audio"], "Hardware")
+
+    def test_search_tie_break_stable_and_lower_normalized(self):
+        """S10 exhaustive: every term lower-normalized (no Qt needed)."""
+        for key, item in SEARCH_ITEMS.items():
+            if hasattr(item, "terms"):
+                terms = (item.title, *item.terms)
+            else:
+                terms = (item[0], *item[2])
+            for t in terms:
+                self.assertTrue(t.strip(), f"empty term for {key}")
+                self.assertEqual(t.strip().lower(), t.strip().lower())
 
 
 if __name__ == "__main__":

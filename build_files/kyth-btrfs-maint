@@ -27,12 +27,29 @@ def _on_ac() -> bool:
             pass
     return True
 
+def _gaming_active() -> bool:
+    try:
+        import subprocess, shutil
+        from kyth_shared.commands import run as _run
+        # check via pgrep for gaming launchers (lightweight, no systemd dep)
+        if shutil.which("pgrep"):
+            r = _run(["pgrep", "-f", "kyth-game-boost|kyth-game-launch|gamemoderun"], capture_output=True, check=False, timeout=2)
+            if r and r.returncode == 0 and getattr(r, "stdout", b""):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def main() -> int:
     if not _pressure_low():
         print("kyth-btrfs-maint: pressure high, skipping")
         return 0
     if not _on_ac():
         print("kyth-btrfs-maint: on battery, skipping")
+        return 0
+    if _gaming_active():
+        print("kyth-btrfs-maint: gaming active, skipping")
         return 0
     # scrub read-only first
     for mnt in ("/", "/home", "/var"):

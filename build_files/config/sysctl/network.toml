@@ -1,0 +1,85 @@
+# KythOS consolidated sysctl — tier: network (always-on BBR/buffers/qdisc)
+# Source of truth for /etc/sysctl.d/99-kyth-network.conf
+
+[keys."net.ipv4.tcp_congestion_control"]
+value = "bbr"
+comment = "BBR when available; fallback if module absent"
+
+[keys."net.core.default_qdisc"]
+value = "fq_codel"
+comment = "fq_codel — low-latency desktop qdisc; cake is router shaper, no shape on WAN"
+
+[keys."net.core.rmem_max"]
+value = "16777216"
+comment = "16M caps — balanced for gaming + CDN (was 64M bufferbloat)"
+
+[keys."net.core.wmem_max"]
+value = "16777216"
+comment = "16M caps"
+
+[keys."net.ipv4.tcp_rmem"]
+value = "4096 87380 16777216"
+comment = "min default max — 16M cap"
+
+[keys."net.ipv4.tcp_wmem"]
+value = "4096 65536 16777216"
+comment = "min default max — 16M cap"
+
+[keys."net.ipv4.tcp_fastopen"]
+value = "3"
+comment = "reduce repeat-connection latency"
+
+[keys."net.ipv4.tcp_mtu_probing"]
+value = "1"
+comment = "detect MTU black holes on ISP/VPN with BBR"
+
+[keys."net.ipv4.tcp_ecn"]
+value = "1"
+comment = "migrated from 51-tcp-bbr — ECN on"
+
+[keys."net.ipv4.tcp_slow_start_after_idle"]
+value = "0"
+comment = "migrated from 51-tcp-bbr — disable slow start after idle"
+
+# tcp_tw_reuse=1 removed — deprecated per RFC 6191, breaks NAT; modern
+# ephemeral port range + tcp_fastopen covers matchmaking bursts.
+
+[keys."net.core.netdev_max_backlog"]
+value = "16384"
+comment = "per-CPU queue before drop — Valorant/CS2 bursts"
+
+[keys."net.ipv4.udp_rmem_min"]
+value = "8192"
+comment = "floor for small-buffer game engines (default 4096 drops)"
+
+[keys."net.ipv4.udp_wmem_min"]
+value = "8192"
+comment = "floor"
+
+[keys."net.ipv4.conf.all.accept_source_route"]
+value = "0"
+comment = "hardening — disable source routing"
+
+[keys."net.ipv4.conf.default.accept_source_route"]
+value = "0"
+comment = "hardening"
+
+[keys."net.ipv4.conf.all.accept_redirects"]
+value = "0"
+comment = "hardening — ICMP redirects"
+
+[keys."net.ipv4.conf.default.accept_redirects"]
+value = "0"
+comment = "hardening"
+
+[keys."net.ipv6.conf.all.accept_redirects"]
+value = "0"
+comment = "hardening"
+
+[keys."net.ipv6.conf.default.accept_redirects"]
+value = "0"
+comment = "hardening"
+
+[keys."net.ipv4.icmp_echo_ignore_broadcasts"]
+value = "1"
+comment = "hardening — ignore broadcast echo"

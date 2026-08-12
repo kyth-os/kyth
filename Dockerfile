@@ -16,7 +16,10 @@ LABEL org.osbuild.version="44"
 LABEL org.osbuild.branding.release="KythOS 44"
 
 ### MODIFICATIONS
-ARG ENABLE_SCX=1
+# Fedora 44 ships scx_rusty 0.5.4, whose pre-upstream sched_ext BPF ABI is
+# incompatible with the kernel 7.1 interface. Keep SCX opt-in until KythOS
+# ships a scheduler build coordinated with its CachyOS kernel.
+ARG ENABLE_SCX=0
 ARG ENABLE_MESA_GIT=0
 ARG ENABLE_GAMING_PERIPHERALS=0
 ARG ENABLE_VIRTUALIZATION_HOST=0
@@ -27,11 +30,9 @@ LABEL org.kyth.profile.virtualization-host="${ENABLE_VIRTUALIZATION_HOST}"
 LABEL org.kyth.profile.ksm="${ENABLE_KSM}"
 LABEL org.kyth.gaming-versions="${GAMING_VERSIONS_HASH}"
 
-# Build cache boundary: all RPM package installs (~2-3 GB).
-# Hash-gated — only re-run when packages-static.sh or packages/*.sh fragments
-# change or the base image is updated. RPM_SET_HASH is the SHA256 of those
-# files, computed in CI (build_files/scripts/hash-rpm-set.sh) and passed as
-# --build-arg so a daily dnf mirror refresh does not bust the 2–3 GB layer.
+# Build cache boundary: all RPM package installs (~2-3 GB). This layer selects
+# the package set and is source-hash/base-image cached. The date-busted upgrade
+# layer later refreshes every installed RPM plus the coordinated kernel stack.
 ARG RPM_SET_HASH=unset
 # Published layer boundaries are defined later by legacy-rechunk metadata.
 RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
@@ -62,10 +63,9 @@ RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/p
     test -n "${PROTON_CACHYOS_VER}" && \
     PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" bash /ctx/proton-cachyos.sh
 
-# Third-party binary — umu launcher.
-# Placed before BUILD_DATE so the layer is only re-run when a tool ships a new
-# release. Exact tags are resolved once by CI and used for both cache identity
-# and downloads; installers never re-resolve "latest" inside the build.
+# Third-party binary — umu launcher. Exact tags are resolved once by CI and
+# used for both cache identity and downloads; installers never re-resolve
+# "latest" inside the build.
 ARG THIRDPARTY_VERSIONS_HASH=unset
 ARG GAMING_VERSIONS_HASH=unset
 ARG UMU_VERSION
@@ -83,9 +83,9 @@ RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/third
 # cache key, so the expensive dracut rebuild only reruns when the splash assets
 # actually change — not on every daily dnf upgrade. Bind mounts do NOT contribute
 # to the BuildKit cache key and would silently ship a stale cached splash.
-# Kernel packages are excluded from dnf upgrade (see packages.sh excludepkgs), so
-# the kernel version is fixed from the base image and the initramfs built here is
-# the one that ships. Sits after the large Proton-CachyOS/thirdparty download layers
+# Kernel packages are excluded from ordinary dnf upgrades and updated as one
+# coordinated stack during package assembly; the later kernel-repair layer
+# validates the resulting latest kernel and initramfs. Sits after the large Proton-CachyOS/thirdparty download layers
 # (which it does not depend on) so splash tweaks don't re-pull them, and before
 # the BUILD_DATE cache-bust layer.
 ARG PLYMOUTH_HASH=unset
@@ -104,7 +104,7 @@ RUN : "cache-bust:plymouth=${PLYMOUTH_HASH}" && \
 # sysconfig-static and sysconfig layers. COPY once so neither layer needs a
 # redundant bind-mount. sysconfig.sh removes these from /ctx once installed
 # (see its tail) so they don't linger as duplicate content in the final image.
-COPY build_files/kyth-vscode-wallet build_files/kyth-game-boost build_files/kyth-ntfs-repair build_files/kyth-shader-preheat build_files/kyth-health-check /ctx/
+COPY build_files/kyth-vscode-wallet build_files/kyth-game-boost build_files/game-performance build_files/kyth-ntfs-repair build_files/kyth-shader-preheat build_files/kyth-health-check build_files/kyth-sched-arbiter build_files/kyth-power-arbiter build_files/kyth-power-arbiter.service build_files/kyth-storage-gate build_files/kyth-readahead-hint build_files/kyth-game-launch build_files/kyth-shader-prune /ctx/
 
 # Install the shared Python distribution for runtime scripts.
 COPY build_files/kyth_shared /tmp/kyth-shared-package
@@ -131,10 +131,9 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx
     : "cache-bust:sysconfig=${SYSCONFIG_HASH}" && \
     bash /ctx/sysconfig-static.sh
 
-# BUILD_DATE busts the cache for the upgrade layer and everything after it on
-# every daily build, ensuring dnf5 upgrade always runs even when the base image
-# digest and build_files/ contents haven't changed.
-# Pass as: --build-arg BUILD_DATE="$(date +%Y-%m-%d)"
+# BUILD_DATE busts the upgrade layer and everything after it on every daily
+# build. Package selection remains cached, but installed packages and the full
+# Fedora kernel stack are refreshed against current repositories here.
 ARG BUILD_DATE=unset
 
 # Build cache boundary: upstream RPM upgrades and optional Mesa-git drivers.
@@ -144,6 +143,7 @@ ARG BUILD_DATE=unset
 # cached until their scripts or the base image change.
 RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-git.sh \
     --mount=type=bind,source=build_files/scripts/kernel-repair.sh,target=/ctx/kernel-repair.sh \
+    --mount=type=bind,source=build_files/scripts/lib/fedora-kernel.sh,target=/ctx/lib/fedora-kernel.sh \
     --mount=type=bind,source=build_files/scripts/lib/find-kver.sh,target=/ctx/lib/find-kver.sh \
     --mount=type=bind,source=build_files/scripts/lib/dracut-retry.sh,target=/ctx/lib/dracut-retry.sh \
     --mount=type=bind,source=build_files/scripts/lib/check-multilib.sh,target=/ctx/lib/check-multilib.sh \
@@ -151,11 +151,12 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
     --mount=type=tmpfs,dst=/tmp \
     : "cache-bust=${BUILD_DATE}" && \
     set -euo pipefail; \
-    dnf5 upgrade -y --refresh --setopt=retries=10 --setopt=timeout=120 --exclude='akmod-*' --exclude='kmod-*' \
-        --exclude='gamescope*' \
+    dnf5 upgrade -y --refresh --setopt=retries=10 --setopt=timeout=120 --setopt=zchunk=False \
         --disablerepo='fedora-multimedia' \
         --exclude='gstreamer1-plugins-bad' \
         --exclude='gstreamer1-plugins-bad.i686' && \
+    source /ctx/lib/fedora-kernel.sh && \
+    if [[ "$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)" == fedora ]]; then update_fedora_kernel; fi && \
     bash /ctx/kernel-repair.sh && \
     ENABLE_MESA_GIT=${ENABLE_MESA_GIT} bash /ctx/mesa-git.sh && \
     . /ctx/lib/check-multilib.sh && \

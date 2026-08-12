@@ -109,6 +109,7 @@ class NvidiaPage(Page):
         worker.result.connect(lambda _key, facts: self._apply_status_facts(facts))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_status_worker", None))
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_status_facts(self, facts: dict) -> None:
@@ -170,8 +171,20 @@ class NvidiaPage(Page):
         self._install_btn.setEnabled(True)
         finish_worker(self)
         set_session_inhibit(self, None)
+        # S3: cancelled (Esc on ksshaskpass) must not invalidate 300s cache nor show err
+        from .services.runtime import Worker
 
-        if code == 0:
+        if code == Worker.CANCELLED:
+            self._log_panel.append("\nCancelled — no change.")
+            self._status_lbl.setText("Cancelled — no change.")
+            self._status_lbl.setObjectName("status-warn")
+            restyle(self._status_lbl)
+        elif code == 0:
+            try:
+                from kyth_shared.system.probe import invalidate_nvidia
+                invalidate_nvidia()
+            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+                pass
             self._log_panel.append("\nDone. Reboot to activate NVIDIA drivers.")
             self._reboot_btn.show()
         else:

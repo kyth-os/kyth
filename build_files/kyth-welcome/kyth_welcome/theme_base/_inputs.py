@@ -33,6 +33,7 @@ QComboBox:hover {{
 
 QCheckBox {{
     color: {KYTH_TEXT};
+    background: transparent;
     spacing: 9px;
 }}
 

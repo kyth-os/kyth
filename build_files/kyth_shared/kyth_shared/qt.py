@@ -15,8 +15,9 @@ __all__ = [
     "QFrame", "QScrollArea", "QFileDialog", "QMessageBox", "QLineEdit",
     "QSizePolicy", "QDialog", "QCheckBox", "QComboBox", "QRadioButton", "QButtonGroup",
     "QDialogButtonBox", "QGridLayout", "QCompleter", "QInputDialog", "QLayout",
-    "QListWidget", "QListWidgetItem",
+    "QListWidget", "QListWidgetItem", "QGraphicsOpacityEffect",
     "Qt", "QThread", "Signal", "QTimer", "QUrl", "QLibraryInfo", "QSize", "QRect", "QStringListModel",
+    "QPropertyAnimation", "QEasingCurve",
     "QDesktopServices", "QIcon", "QKeySequence", "QShortcut", "QAction",
     "QDBusConnection", "QDBusInterface",
     "QLocalServer", "QLocalSocket",
@@ -37,10 +38,11 @@ try:
         QFrame, QScrollArea, QFileDialog, QMessageBox, QLineEdit,
         QSizePolicy, QDialog, QCheckBox, QComboBox, QRadioButton, QButtonGroup,
         QDialogButtonBox, QGridLayout, QCompleter, QInputDialog, QLayout,
-        QListWidget, QListWidgetItem,
+        QListWidget, QListWidgetItem, QGraphicsOpacityEffect,
     )
     from PySide6.QtCore import (
         Qt, QThread, Signal, QTimer, QUrl, QLibraryInfo, QSize, QRect, QStringListModel,
+        QPropertyAnimation, QEasingCurve,
     )
     from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction
     from PySide6.QtDBus import QDBusConnection, QDBusInterface
@@ -54,10 +56,11 @@ except ImportError:
         QFrame, QScrollArea, QFileDialog, QMessageBox, QLineEdit,
         QSizePolicy, QDialog, QCheckBox, QComboBox, QRadioButton, QButtonGroup,
         QDialogButtonBox, QGridLayout, QCompleter, QInputDialog, QLayout,
-        QListWidget, QListWidgetItem,
+        QListWidget, QListWidgetItem, QGraphicsOpacityEffect,
     )
     from PyQt6.QtCore import (
         Qt, QThread, QTimer, QUrl, QLibraryInfo, QSize, QRect, QStringListModel,
+        QPropertyAnimation, QEasingCurve,
     )
     from PyQt6.QtCore import pyqtSignal as Signal
     from PyQt6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction

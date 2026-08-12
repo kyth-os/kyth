@@ -169,6 +169,8 @@ def run_worker(
     """Construct, wire, and start a Worker stored on owner.<attr>.
 
     Collapses the ubiquitous ``self._worker = Worker(cmd);
+    self._worker.finished.connect(lambda: setattr(self, "_worker", None))
+    self._worker.finished.connect(self._worker.deleteLater)
     self._worker.line.connect(on_line); self._worker.done.connect(on_done);
     self._worker.start()`` sequence — optionally preceded by a session-inhibit
     call, in the same order pages already issue it — repeated across pages.
@@ -240,6 +242,12 @@ def save_profile(profile: str) -> None:
 
 
 def wait_for_display_setup(timeout: float = 8.0, interval: float = 0.25):
+    """C3: must not be called on the GUI thread — blocks for up to 8 s.
+
+    Callers in the wizard/live path run this before QApplication is created
+    (safe). Pages must not call it from showEvent/__init__; use a DataWorker
+    or QTimer instead.
+    """
     autostart = os.path.expanduser("~/.config/autostart/kyth-set-resolution.desktop")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

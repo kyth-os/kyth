@@ -1,5 +1,5 @@
 import unittest
-from unittest import mock
+from unittest import mock  # pylint: disable=unused-import
 from kyth_installer.context import InstallerContext, InstallLifecycle
 from kyth_installer import execution
 from kyth_installer.install import _warn_if_efi_boot_entries_disappeared

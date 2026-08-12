@@ -1,8 +1,9 @@
 """Single validation contract for installer — Python + JS shared.
 
-Backend `validation.py` and frontend `webui/app.js` must use identical
-hostname/username/keymap/locale regexes. This module is the source of
-truth; `validation_rules.json` is generated from it for the web UI build.
+Backend `validation.py` and frontend `webui/config.js` (`saveConfig()`) must
+use identical hostname/username/keymap/locale regexes. This module is the
+source of truth; `validation_rules.json` is generated from it for the web UI
+build.
 """
 
 from __future__ import annotations

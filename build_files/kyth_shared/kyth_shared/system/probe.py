@@ -52,6 +52,11 @@ DISK_TTL: dict[str, float] = {
     "flatpak-updates": 180.0,
     "nvidia-detect": 300.0,
     "controllers-detect": 120.0,
+    "hardware-probes": 30.0,
+    "ntfs-drives": 30.0,
+    "secureboot-state": 300.0,
+    "hardware-view": 30.0,
+    "network-identity": 60.0,
 }
 
 COLLECT_SECTIONS: tuple[str, ...] = tuple(DISK_TTL.keys())
@@ -107,7 +112,20 @@ def _empty_doc() -> dict[str, Any]:
     return {"version": CACHE_VERSION, "generated_at": 0.0, "sections": {}}
 
 
+_FILE_CACHE: dict[Path, tuple[float, dict[str, Any]]] = {}
+_FILE_CACHE_LOCK = threading.Lock()
+
+
 def load_cache_file(path: Path) -> dict[str, Any] | None:
+    try:
+        st = path.stat()
+        mtime = st.st_mtime
+    except OSError:
+        return None
+    with _FILE_CACHE_LOCK:
+        cached = _FILE_CACHE.get(path)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
     try:
         raw = path.read_text(encoding="utf-8")
         data = json.loads(raw)
@@ -118,6 +136,12 @@ def load_cache_file(path: Path) -> dict[str, Any] | None:
     sections = data.get("sections")
     if not isinstance(sections, dict):
         return None
+    with _FILE_CACHE_LOCK:
+        # LRU cap: keep at most 16 file entries
+        if len(_FILE_CACHE) >= 16 and path not in _FILE_CACHE:
+            oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
+            _FILE_CACHE.pop(oldest, None)
+        _FILE_CACHE[path] = (mtime, data)
     return data
 
 
@@ -131,6 +155,15 @@ def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp_name, path)
+        with _FILE_CACHE_LOCK:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = time.time()
+            if len(_FILE_CACHE) >= 16 and path not in _FILE_CACHE:
+                oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
+                _FILE_CACHE.pop(oldest, None)
+            _FILE_CACHE[path] = (mtime, doc)
     except Exception:
         try:
             os.unlink(tmp_name)
@@ -190,6 +223,13 @@ def update_sections(
 
 
 def invalidate_disk_sections(keys: Iterable[str] | None = None) -> None:
+    # Invalidate file-level mtime cache alongside disk
+    with _FILE_CACHE_LOCK:
+        if keys is None:
+            _FILE_CACHE.clear()
+        else:
+            # Drop any cached file that may contain dropped keys — conservative
+            _FILE_CACHE.clear()
     drop = set(keys) if keys is not None else set(DISK_TTL)
     for path in cache_read_paths():
         doc = load_cache_file(path)
@@ -271,11 +311,14 @@ def _collect_flatpak_updates() -> dict[str, Any]:
 
 
 def _collect_nvidia() -> dict[str, Any]:
-    from kyth_shared.system.process import run_command
-
+    # Derive from the sysfs-based hardware view (already collected in the
+    # same probe batch via the "hardware-view" collector, and cached for
+    # _HARDWARE_VIEW_TTL regardless) instead of spawning a second `lspci` to
+    # re-derive the same fact by substring-matching its text output.
     try:
-        result = run_command(["lspci"], timeout=5)
-        value = bool(result and "nvidia" in (result.stdout or "").lower())
+        from kyth_shared.system.hardware_view import get_hardware_view
+
+        value = bool(get_hardware_view().has_nvidia)
     except Exception:
         value = False
     return {"nvidia-detect": value}
@@ -307,6 +350,34 @@ def _collect_hardware_view() -> dict[str, Any]:
         return {"hardware-view": None}
 
 
+def _collect_network_identity() -> dict[str, Any]:
+    try:
+        # Avoid recursion via probe_cached — call fetch directly through module
+        from kyth_shared.system.network_identity import _vpn_status, _smb_mounts, _cloud_providers
+        from kyth_shared.system.network_identity import NetworkIdentity
+
+        vpn_connected, vpn_name = _vpn_status()
+        smb = _smb_mounts()
+        providers = _cloud_providers()
+        detail_parts: list[str] = []
+        if vpn_connected:
+            detail_parts.append(f"VPN {vpn_name} connected")
+        if smb:
+            detail_parts.append(f"{smb} SMB mount(s)")
+        if providers:
+            detail_parts.append(f"cloud: {', '.join(providers)}")
+        ident_obj = NetworkIdentity(
+            vpn_connected=vpn_connected,
+            vpn_name=vpn_name,
+            smb_mounts=smb,
+            cloud_providers=providers,
+            detail="; ".join(detail_parts) or "No active work network",
+        )
+        return {"network-identity": ident_obj}
+    except Exception:
+        return {"network-identity": None}
+
+
 def default_collectors() -> tuple[ProbeCollector, ...]:
     # Slice 2: async pool already uses ThreadPoolExecutor in collect_probe_results();
     # DISK_TTL below gates disk re-read so repeated Hub nav doesn't re-spawn lspci.
@@ -318,6 +389,7 @@ def default_collectors() -> tuple[ProbeCollector, ...]:
         ProbeCollector("controllers", ("controllers-detect",), _collect_controllers),
         ProbeCollector("display", ("display-detect",), _collect_display),
         ProbeCollector("hardware-view", ("hardware-view",), _collect_hardware_view),
+        ProbeCollector("network-identity", ("network-identity",), _collect_network_identity),
     )
 
 
@@ -345,7 +417,9 @@ def collect_probe_results(
     """Run independent probe groups concurrently and retain failure state."""
     selected = tuple(collectors or default_collectors())
     results: dict[str, ProbeResult] = {}
-    with ThreadPoolExecutor(max_workers=len(selected), thread_name_prefix="kyth-probe") as pool:
+    # Cap workers to avoid oversubscription on tiny systems; selected is at most 7
+    workers = min(len(selected), 8) if selected else 1
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="kyth-probe") as pool:
         for group in pool.map(_run_collector, selected):
             results.update(group)
     return results
@@ -356,12 +430,33 @@ def collect_snapshot() -> dict[str, Any]:
     return {key: result.data for key, result in collect_probe_results().items()}
 
 
+_FLATPAK_INVALIDATE_CBS: list[Callable[[], None]] = []  # S14: welcome registers cache_clear
+
+
+def register_flatpak_invalidate(cb: Callable[[], None]) -> None:
+    _FLATPAK_INVALIDATE_CBS.append(cb)
+
+
 def invalidate_after_flatpak_change() -> None:
     invalidate_disk_sections(MUTATION_KEYS_FLATPAK)
+    for cb in list(_FLATPAK_INVALIDATE_CBS):
+        try:
+            cb()
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+            pass
 
 
 def invalidate_after_bootc_change() -> None:
     invalidate_disk_sections(MUTATION_KEYS_BOOTC)
+
+
+# R6: central helpers so pages don't scatter key lists (led to 3 duplicate blocks)
+def invalidate_bootc() -> None:
+    invalidate_probe_caches(["bootc-status-data", "bootc-status-text", "bootc-branch"])
+
+
+def invalidate_nvidia() -> None:
+    invalidate_probe_caches(["nvidia-detect", "hardware-view"])
 
 
 def refresh_cache(*, system: bool = False, path: Path | None = None) -> tuple[Path, dict[str, Any]]:
@@ -400,10 +495,14 @@ class ProbeService:
         self._lock = threading.Lock()
         self._mem: dict[str, tuple[float, object]] = {}
 
+    _MEM_CAP = 64
+
     def cached(self, key: str, ttl: float, fetch: Callable[[], T]) -> T:
         with self._lock:
             hit = self._mem.get(key)
             if hit is not None and time.monotonic() - hit[0] < ttl:
+                # Move to end for LRU
+                self._mem[key] = self._mem.pop(key)
                 return hit[1]  # type: ignore[return-value]
 
         if key in DISK_BACKED_KEYS:
@@ -413,17 +512,31 @@ class ProbeService:
                     with self._lock:
                         mem = self._mem.get(key)
                         if mem is not None and time.monotonic() - mem[0] < ttl:
+                            self._mem[key] = self._mem.pop(key)
                             return mem[1]  # type: ignore[return-value]
+                        if len(self._mem) >= self._MEM_CAP:
+                            oldest = next(iter(self._mem))
+                            self._mem.pop(oldest, None)
                         self._mem[key] = (time.monotonic(), disk_hit)
                     return disk_hit  # type: ignore[return-value]
             except Exception:
                 _logger.debug("ProbeService.cached: disk read for %r failed", key, exc_info=True)
 
         value = fetch()
+        # Do not cache empty bootc results — a transient `sudo -n` failure or
+        # missing digest would otherwise poison the mem+disk cache for 90s and
+        # make the Hub appear "up to date" while bootc is actually unreachable.
+        if key in DISK_BACKED_KEYS and not _disk_section_usable(key, value):
+            return value  # type: ignore[return-value]
         with self._lock:
             hit = self._mem.get(key)
             if hit is not None and time.monotonic() - hit[0] < ttl:
+                self._mem[key] = self._mem.pop(key)
                 return hit[1]  # type: ignore[return-value]
+            if len(self._mem) >= self._MEM_CAP:
+                # Evict oldest
+                oldest = next(iter(self._mem))
+                self._mem.pop(oldest, None)
             self._mem[key] = (time.monotonic(), value)
 
         if key in DISK_BACKED_KEYS:

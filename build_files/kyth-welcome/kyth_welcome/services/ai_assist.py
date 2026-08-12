@@ -5,10 +5,10 @@ import without Qt. System Hub imports this thin facade.
 """
 from __future__ import annotations
 
-from kyth_shared.ai_assist import (  # noqa: F401 — re-export for Hub
-    AiAction,
-    AiPlan,
-    build_repair_plan,
-    generate_plan,
-    try_ollama_enhance,
+from kyth_shared.ai_assist import (  # noqa: F401 — re-export for Hub  # pylint: disable=unused-import
+    AiAction,  # pylint: disable=unused-import
+    AiPlan,  # pylint: disable=unused-import
+    build_repair_plan,  # pylint: disable=unused-import
+    generate_plan,  # pylint: disable=unused-import
+    try_ollama_enhance,  # pylint: disable=unused-import
 )

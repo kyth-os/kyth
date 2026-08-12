@@ -9,3 +9,25 @@ fi
 repo_root="$(git rev-parse --show-toplevel)"
 echo "[pre-push] Running GitHub/Codacy preflight..."
 "${repo_root}/build_files/scripts/ci-preflight.sh"
+
+# P1-3: also catch System Hub F821/QSS regressions that ci-preflight's ruff doesn't cover alone
+echo "[pre-push] Running Hub headless smoke (MainWindow 20/20)..."
+PYTHONPATH=build_files/kyth-welcome:build_files/kyth_shared QT_QPA_PLATFORM=offscreen python3 -c "
+from PySide6.QtWidgets import QApplication
+import sys
+app = QApplication.instance() or QApplication(sys.argv)
+from kyth_welcome.windows import MainWindow
+w = MainWindow()
+ok = 0
+for k in list(w._page_index_by_key.keys()):
+    try:
+        w._ensure_page(w._page_index_by_key[k])
+        w._navigate_to(k)
+        ok += 1
+    except Exception as e:
+        print(f'[pre-push] Hub smoke FAIL {k}: {e}')
+        sys.exit(1)
+print(f'[pre-push] Hub smoke {ok}/20 OK')
+app.quit()
+" 2>&1 | grep -E "pre-push.*Hub smoke"
+echo "[pre-push] Hub smoke passed"

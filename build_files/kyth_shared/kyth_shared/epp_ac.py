@@ -24,7 +24,7 @@ def generate_epp_ac(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Path|
     dest=dest or DEFAULT_RULE
     if not cfg.get("enabled"):
         try: dest.exists() and dest.unlink()
-        except: pass
+        except OSError: pass
         return None
     content='# Kyth EPP AC — generated\nSUBSYSTEM=="power_supply", ATTR{online}=="1", RUN+="/usr/bin/sh -c \'echo performance > /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference\'"\nSUBSYSTEM=="power_supply", ATTR{online}=="0", RUN+="/usr/bin/sh -c \'echo balance_performance > /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference\'"\n'
     dest.parent.mkdir(parents=True, exist_ok=True)

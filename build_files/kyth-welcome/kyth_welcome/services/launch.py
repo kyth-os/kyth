@@ -19,6 +19,9 @@ PRIVILEGED_GATEWAY = PrivilegedGateway()
 
 def popen(cmd: Sequence[str], *, env: dict[str, str] | None = None) -> subprocess.Popen | None:
     """Fire-and-forget process start; returns None if the binary is missing."""
+    import logging
+
+    _log = logging.getLogger(__name__)
     if not cmd:
         return None
     binary = cmd[0]
@@ -26,6 +29,7 @@ def popen(cmd: Sequence[str], *, env: dict[str, str] | None = None) -> subproces
         raise ValueError("privileged commands must use popen_privileged()")
     if binary not in ("flatpak", "bash", "env") and not os.path.isabs(binary):
         if shutil.which(binary) is None:
+            _log.debug("launch.popen: binary not found on PATH: %s", binary)
             return None
     try:
         return APPLICATION_RUNNER.spawn(
@@ -35,7 +39,8 @@ def popen(cmd: Sequence[str], *, env: dict[str, str] | None = None) -> subproces
             env=env,
             start_new_session=True,
         )
-    except OSError:
+    except OSError as exc:
+        _log.debug("launch.popen: spawn failed for %s: %s", cmd, exc)
         return None
 
 
@@ -80,7 +85,12 @@ def reboot() -> subprocess.Popen | None:
 
 
 def open_terminal_command(command: str) -> subprocess.Popen | None:
-    """Run *command* in the first available terminal."""
+    """Run *command* in the first available terminal (no shell injection)."""
+    if not command or not command.strip():
+        return None
+    # Reject control chars / newlines that would break the bash -lc boundary
+    if any(ord(c) < 32 and c not in ("\t",) for c in command):
+        return None
     for terminal in ("konsole", "kgx", "gnome-terminal"):
         if not shutil.which(terminal):
             continue

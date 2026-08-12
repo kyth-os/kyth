@@ -1,5 +1,5 @@
 """Cards — layered panels with Steam-like hover elevation."""
-from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_RADIUS, KYTH_RADIUS_SM, KYTH_SURFACE, KYTH_SURFACE_OVERLAY, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED, STATUS_ERROR, STATUS_OK, STATUS_WARN
+from ..ui_tokens import KYTH_BLUE, KYTH_BLUE_LIGHT, KYTH_HAIRLINE, KYTH_HAIRLINE_LIGHT, KYTH_RADIUS, KYTH_RADIUS_SM, KYTH_SURFACE, KYTH_SURFACE_RAISED, KYTH_TEXT, KYTH_TEXT_FAINT, KYTH_TEXT_MUTED, STATUS_ERROR, STATUS_OK, STATUS_WARN
 
 CARDS_QSS = f"""
 /* ── Cards — control-center panels ─────────────────────────────────────── */
@@ -43,14 +43,17 @@ QFrame#store-category-card:hover {{
 
 QFrame#card-accent-ok {{
     border-left: 3px solid {STATUS_OK};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(16, 185, 129, 0.08), stop:1 {KYTH_SURFACE});
 }}
 
 QFrame#card-accent-warn {{
     border-left: 3px solid {STATUS_WARN};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(245, 158, 11, 0.08), stop:1 {KYTH_SURFACE});
 }}
 
 QFrame#card-accent-err {{
     border-left: 3px solid {STATUS_ERROR};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(247, 118, 142, 0.08), stop:1 {KYTH_SURFACE});
 }}
 
 QFrame#card-accent-dim,

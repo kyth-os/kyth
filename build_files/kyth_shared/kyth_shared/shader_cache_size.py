@@ -34,8 +34,8 @@ def _vram_gb() -> int:
     try:
         for d in Path("/sys/class/drm").glob("card*/device/mem_info_vram_total"):
             try: return int(d.read_text().strip())//1024//1024//1024
-            except: pass
-    except: pass
+            except OSError: pass
+    except OSError: pass
     return 8
 def resolve_size(cfg: dict[str,Any]|None=None) -> str:
     if cfg is None: cfg=load_shader_size()

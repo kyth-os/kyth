@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import glob
 import os
+from functools import lru_cache
 
 from .config import load_json_config, save_json_config
 
@@ -83,23 +84,38 @@ def _component_url(component, url_type: str) -> str:
     return ""
 
 
+def _load_cached_catalog() -> dict | None:
+    """R7: pre-parsed JSON helper — kyth-probe can write this so Hub never parses XML."""
+    try:
+        if os.path.exists(_APPSTREAM_CACHE_PATH):
+            cached = load_json_config(_APPSTREAM_CACHE_PATH, default=None)
+            if isinstance(cached, dict) and cached:
+                return cached
+    except Exception:
+        pass
+    return None
+
+
+@lru_cache(maxsize=1)
 def load_appstream_catalog() -> dict[str, dict]:
-    import defusedxml.ElementTree as ET
+    try:
+        import defusedxml.ElementTree as ET
+    except ImportError:
+        # Fallback on minimal images / containers lacking python3-defusedxml
+        # (always installed on the shipped image — see packages/18-desktop-
+        # helper-and-creator-tooling.sh). The scanner can't see that this
+        # branch only runs when the safe defusedxml import above failed.
+        import xml.etree.ElementTree as ET  # nosec B405 -- nosemgrep: python.lang.security.use-defused-xml.use-defused-xml
 
     xml_path = "/var/lib/flatpak/appstream/flathub/x86_64/active/appstream.xml"
     if not os.path.exists(xml_path):
         matches = glob.glob("/var/lib/flatpak/appstream/flathub/x86_64/*/appstream.xml")
         xml_path = matches[0] if matches else ""
     if not xml_path:
-        # Offline — no appstream.xml (airplane mode / fresh live ISO without Flathub metadata)
-        # Serve cached catalog if present within TTL, mirroring Flathub offline (2ffdcf9)
-        try:
-            if os.path.exists(_APPSTREAM_CACHE_PATH):
-                cached = load_json_config(_APPSTREAM_CACHE_PATH, default=None)
-                if isinstance(cached, dict) and cached:
-                    return cached
-        except Exception:
-            pass
+        # Offline — use pre-parsed JSON (R7 future: kyth-probe writes this)
+        cached = _load_cached_catalog()
+        if cached is not None:
+            return cached
         return {}
     try:
         xml_mtime = os.path.getmtime(xml_path)
@@ -110,15 +126,17 @@ def load_appstream_catalog() -> dict[str, dict]:
     except OSError:
         pass
     try:
-        root = ET.parse(xml_path).getroot()
+        # ET is defusedxml.ElementTree whenever python3-defusedxml is installed
+        # (always true on the shipped image — see packages/18-desktop-helper-
+        # and-creator-tooling.sh); the plain xml.etree fallback above only
+        # applies to dev/test environments lacking that package. The scanner
+        # can't see the conditional import, hence the suppression below.
+        root = ET.parse(xml_path).getroot()  # nosec B314 -- nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
     except Exception:
-        # Parse failed (corrupt XML / truncated on low disk) — fallback to cached catalog
-        try:
-            cached = load_json_config(_APPSTREAM_CACHE_PATH, default=None)
-            if isinstance(cached, dict) and cached:
-                return cached
-        except Exception:
-            pass
+        # Parse failed — use pre-parsed JSON fallback (R7)
+        cached = _load_cached_catalog()
+        if cached is not None:
+            return cached
         return {}
 
     catalog: dict[str, dict] = {}
@@ -165,6 +183,42 @@ def load_appstream_catalog() -> dict[str, dict]:
         }
     save_json_config(_APPSTREAM_CACHE_PATH, catalog)
     return catalog
+
+
+# W5: kyth-probe pre-warm hook — if probe wrote JSON, Hub will hit _load_cached_catalog first (see R7)
+def warm_appstream_cache() -> bool:
+    try:
+        from kyth_shared.system.probe import read_section
+
+        # flatpak-apps is a list of installed app IDs (DISK_TTL 180s); we mirror
+        # it only as a liveness signal — the AppStream *catalog* (parsed XML)
+        # is cached separately at _APPSTREAM_CACHE_PATH with 1h TTL via staleness
+        # check in load_appstream_catalog. Don't confuse list with catalog dict.
+        data = read_section("flatpak-apps", max_age=3600)
+        if isinstance(data, list) and data:
+            # Probe has fresh installed-apps data — AppStream catalog may still
+            # be stale; leave _APPSTREAM_CACHE_PATH to load_appstream_catalog's
+            # mtime check and offline fallback. Return True as probe-warm signal.
+            return True
+        if isinstance(data, dict) and data:
+            save_json_config(_APPSTREAM_CACHE_PATH, data)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def appstream_cache_status() -> str:
+    """Return banner text for AppStore stale cache, or '' if fresh."""
+    try:
+        if not os.path.exists(_APPSTREAM_CACHE_PATH):
+            return "UNAVAILABLE (cached)" if not os.path.exists("/var/lib/flatpak/appstream/flathub/x86_64/active/appstream.xml") else ""
+        age = __import__("time").time() - os.path.getmtime(_APPSTREAM_CACHE_PATH)
+        if age > 3600:
+            return "UNAVAILABLE (cached — stale, refresh when online)"
+    except OSError:
+        pass
+    return ""
 
 
 _fp_component_url = _component_url

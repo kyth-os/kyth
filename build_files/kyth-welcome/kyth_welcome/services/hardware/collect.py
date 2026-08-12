@@ -28,24 +28,31 @@ from .codec import _codec_probe
 from ..process import command_stdout, probe_cached
 
 
-def _hardware_policy_probe() -> HardwareProbe:
-    # Use the single hardware_view probe cache — one PCI/LSUSB parse behind
-    # evaluate_system() instead of parsing again per probe.
-    try:
-        view = get_hardware_view()
-        evaluation = view.evaluation
-        applied = view.applied
-    except Exception:
+def _hardware_policy_probe(view=None) -> HardwareProbe:  # type: ignore[no-untyped-def]
+    # R4: accept pre-fetched view to avoid double evaluate_system() when
+    # _collect_hardware_probes already has it. Single PCI/LSUSB parse.
+    if view is not None:
         try:
-            evaluation = evaluate_system()
-            applied = read_applied_state()
-        except Exception as exc:
-            return HardwareProbe(
-                "Hardware policy", "warn",
-                "Hardware policy could not be evaluated.",
-                str(exc),
-                "Run kyth-hardware-policy validate and review the service journal.",
-            )
+            evaluation = view.evaluation
+            applied = view.applied
+        except Exception:
+            view = None
+    if view is None:
+        try:
+            view = get_hardware_view()
+            evaluation = view.evaluation
+            applied = view.applied
+        except Exception:
+            try:
+                evaluation = evaluate_system()
+                applied = read_applied_state()
+            except Exception as exc:
+                return HardwareProbe(
+                    "Hardware policy", "warn",
+                    "Hardware policy could not be evaluated.",
+                    str(exc),
+                    "Run kyth-hardware-policy validate and review the service journal.",
+                )
     profiles = [profile["title"] for profile in evaluation.profiles]
     tiers = sorted({str(p.get("tier", "supported")).lower() for p in evaluation.profiles if isinstance(p, dict)} or {"supported"})
     quirks = [quirk["id"] for quirk in evaluation.quirks]
@@ -69,6 +76,13 @@ def _hardware_policy_probe() -> HardwareProbe:
             "Hardware matched, but one or more quirks need maintainer review.",
             "\n".join(details),
             "Update or remove the expired hardware quirk before the next release.",
+        )
+    if quirks:
+        quirk_label = "quirk" if len(quirks) == 1 else "quirks"
+        return HardwareProbe(
+            "Hardware policy", "ok",
+            f"Hardware matched with {len(quirks)} active {quirk_label}: {', '.join(quirks)}",
+            "\n".join(details),
         )
     return HardwareProbe(
         "Hardware policy", "ok",

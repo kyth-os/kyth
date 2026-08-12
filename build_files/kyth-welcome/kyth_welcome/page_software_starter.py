@@ -1,4 +1,5 @@
 import shlex
+from kyth_shared.commands import ujust_command
 from .core_base import restyle
 from .actions import _install_flatpak_inline, _open_chromium_webapp
 from .services.flatpak import _is_flatpak_installed
@@ -95,7 +96,7 @@ class _StarterPackTabMixin:
         self._ms_fonts_btn.setText("Installing…")
         self._ms_fonts_status.setText("Downloading Microsoft fonts from SourceForge…")
         self._ms_fonts_status.show()
-        self._ms_fonts_worker = Worker(["bash", "-c", "ujust install-ms-fonts"])
+        self._ms_fonts_worker = Worker(ujust_command("install-ms-fonts"))
         self._ms_fonts_worker.done.connect(self._on_ms_fonts_done)
         self._ms_fonts_worker.start()
 
@@ -274,10 +275,27 @@ class _StarterPackTabMixin:
             try:
                 from kyth_welcome.services.gaming.windows_partitions import _probe_windows_partitions
                 from kyth_welcome.services.windows_migration.win_apps import scan_windows_program_files, map_to_familiar
+                from pathlib import Path as _P
+
                 parts = _probe_windows_partitions()
                 names = scan_windows_program_files(parts)
-                mapped = map_to_familiar(names, list(self._FAMILIAR_APPS))
-                return {"names": names, "mapped": mapped}
+                # New #1: also scan ~/Downloads for .exe installers and map via exe_compat
+                dl_exes: list[str] = []
+                try:
+                    dl = _P.home() / "Downloads"
+                    if dl.is_dir():
+                        for p in dl.glob("*.exe"):
+                            if p.is_file():
+                                dl_exes.append(p.name)
+                        for p in dl.glob("*.msi"):
+                            if p.is_file():
+                                dl_exes.append(p.name)
+                    # Merge Program Files + Downloads, dedup
+                    all_names = list(dict.fromkeys([*names, *dl_exes]))
+                except Exception:
+                    all_names = names
+                mapped = map_to_familiar(all_names, list(self._FAMILIAR_APPS))
+                return {"names": all_names, "mapped": mapped, "dl_count": len(dl_exes)}
             except Exception as exc:
                 return {"error": str(exc)}
 

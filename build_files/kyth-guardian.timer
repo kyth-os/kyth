@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodic Kyth Guardian health check
+Documentation=https://github.com/mrtrick37/kyth
+
+[Timer]
+OnStartupSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60s
+AccuracySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import platform
+import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field, replace
@@ -43,6 +44,20 @@ class BootHealthState:
     rollout_ring: str = "follow-image"
     updated_at: int = 0
     quarantined: Mapping[str, QuarantineRecord] = field(default_factory=dict)
+
+    def invariants(self) -> list[str]:
+        """S7: return list of violated invariants, [] if ok."""
+        errs: list[str] = []
+        if self.failures < 0:
+            errs.append("failures<0")
+        if self.status == "healthy" and not self.last_healthy_digest:
+            errs.append("healthy but last_healthy_digest empty")
+        for d, r in self.quarantined.items():
+            if r.failures < DEFAULT_FAILURE_THRESHOLD:
+                errs.append(f"quarantined {d} failures {r.failures} < threshold")
+            if d != r.digest:
+                errs.append(f"quarantined key {d} != record.digest {r.digest}")
+        return errs
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -94,6 +109,10 @@ def read_state(path: str | Path = DEFAULT_STATE_PATH) -> BootHealthState:
 
 
 def write_state(state: BootHealthState, path: str | Path = DEFAULT_STATE_PATH) -> None:
+    # W1: fail-closed — don't persist corrupt state that S16 banner would mis-render
+    errs = state.invariants()
+    if errs:
+        raise ValueError(f"refusing to write BootHealthState with invariant violations: {errs}")
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(
@@ -107,6 +126,21 @@ def write_state(state: BootHealthState, path: str | Path = DEFAULT_STATE_PATH) -
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, destination)
+        # S1: fsync parent dir so quarantine+healthy_digest survive power-loss
+        try:
+            dir_fd = os.open(destination.parent, os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+        if state.quarantined:
+            try:
+                from kyth_shared.system.probe import invalidate_bootc
+                invalidate_bootc()
+            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+                pass
     except Exception:
         try:
             os.unlink(temporary)
@@ -355,7 +389,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "clear-quarantine":
         was_quarantined = args.digest in state.quarantined
-        write_state(clear_quarantine(state, args.digest), args.state)
+        try:
+            write_state(clear_quarantine(state, args.digest), args.state)
+        except ValueError as exc:
+            print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
+            return 1
         print(
             f"Cleared quarantine for {args.digest}"
             if was_quarantined else f"Digest {args.digest} was not quarantined"
@@ -366,13 +404,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Could not determine booted image digest")
         return 1
     if args.command == "mark-healthy":
-        write_state(mark_healthy(state, digest), args.state)
+        try:
+            write_state(mark_healthy(state, digest), args.state)
+        except ValueError as exc:
+            print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
+            return 1
         print(f"Marked {digest} healthy")
         return 0
     updated = record_failure(
         state, digest, current_boot_id(), args.reason, threshold=max(1, args.threshold)
     )
-    write_state(updated, args.state)
+    try:
+        write_state(updated, args.state)
+    except ValueError as exc:
+        print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
+        return 1
     print(_state_summary(updated))
     return 0
 
