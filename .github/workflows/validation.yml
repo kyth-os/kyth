@@ -98,3 +98,26 @@ jobs:
             coverage-html
           if-no-files-found: warn
           retention-days: 14
+
+  gui-smoke:
+    name: PySide6 offscreen smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Qt runtime and pinned PySide6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1
+          python3 -m pip install --disable-pip-version-check PySide6==6.11.1
+
+      - name: Run warning-strict offscreen Hub smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: build_files/kyth-welcome:build_files/kyth_shared
+        run: python3 -W error -m unittest tests.test_kyth_welcome_hub_smoke
