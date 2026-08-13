@@ -70,6 +70,62 @@ class GuidedPlanValidationTests(unittest.TestCase):
                 config, snapshot=self.snapshot(), dependencies=self.dependencies(),
             )
 
+    def test_guided_validation_rejects_malformed_and_ambiguous_targets(self):
+        ntfs_cases = (
+            ({"resize_partition": "/dev/sda2", "resize_gib": 40}, self.snapshot(), "No target disk"),
+            ({"disk": "/dev/sda", "resize_gib": 40}, self.snapshot(), "No NTFS partition"),
+            ({"disk": "/dev/sda", "resize_partition": "/dev/sda2", "resize_gib": 1}, self.snapshot(), "at least"),
+            ({"disk": "/dev/sdb", "resize_partition": "/dev/sda2", "resize_gib": 40}, self.snapshot(), "safe install target"),
+        )
+        for config, snapshot, message in ntfs_cases:
+            with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, message):
+                validate_resize_ntfs_target(
+                    config, snapshot=snapshot, dependencies=self.dependencies(),
+                )
+
+        free_cases = (
+            ({"free_region_start": 0, "free_region_end": MIN_KYTHOS_BYTES}, "No target disk"),
+            ({"disk": "/dev/sda", "free_region_start": 10, "free_region_end": 5}, "No free space"),
+            ({"disk": "/dev/sda", "free_region_start": 1, "free_region_end": 1025}, "at least"),
+            ({"disk": "/dev/sdb", "free_region_start": 1, "free_region_end": MIN_KYTHOS_BYTES + 1}, "safe install target"),
+        )
+        for config, message in free_cases:
+            with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, message):
+                validate_free_space_target(
+                    config, snapshot=self.snapshot(), dependencies=self.dependencies(),
+                )
+
+    def test_report_builder_covers_free_space_and_manual_capacity(self):
+        start = 1024**2
+        end = start + MIN_KYTHOS_BYTES
+        free_snapshot = StorageSnapshot(
+            disks=({"name": "/dev/sda"},), partitions=(),
+            free_regions=({"start_bytes": start, "end_bytes": end},),
+            efi_partition="/dev/sda1", is_gpt=False,
+        )
+        report = build_plan_report(
+            {"disk": "/dev/sda", "install_mode": "free_space"},
+            snapshot=free_snapshot, dependencies=self.report_dependencies(
+                validate_free_space=lambda *_args, **_kwargs: ("/dev/sda", start, end)
+            ),
+        )
+        self.assertTrue(report.valid)
+        self.assertEqual(report.available_bytes, MIN_KYTHOS_BYTES)
+
+        manual_snapshot = StorageSnapshot(
+            disks=({"name": "/dev/sda"},),
+            partitions=({"name": "/dev/sda2", "size_bytes": 80 * 1024**3},),
+            free_regions=(), efi_partition="/dev/sda1", is_gpt=False,
+        )
+        report = build_plan_report(
+            {"disk": "/dev/sda", "install_mode": "manual"},
+            snapshot=manual_snapshot, dependencies=self.report_dependencies(
+                validate_install=lambda *_args, **_kwargs: ("/dev/sda", "/dev/sda2")
+            ),
+        )
+        self.assertTrue(report.valid)
+        self.assertEqual(report.available_bytes, 80 * 1024**3)
+
     def report_dependencies(self, **changes):
         values = {
             "as_request": lambda state: (

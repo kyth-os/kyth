@@ -27,7 +27,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/plan_commit.py": 95.0,
     "build_files/kyth-installer/kyth_installer/plan_query.py": 88.0,
     "build_files/kyth-installer/kyth_installer/plan_request.py": 95.0,
-    "build_files/kyth-installer/kyth_installer/plan_validate.py": 75.0,
+    "build_files/kyth-installer/kyth_installer/plan_validate.py": 80.0,
     "build_files/kyth-installer/kyth_installer/post_routes.py": 85.0,
     "build_files/kyth-installer/kyth_installer/phases/bootc_cmd.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/common.py": 90.0,
