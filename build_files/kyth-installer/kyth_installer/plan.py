@@ -162,7 +162,7 @@ def _is_gpt_disk(disk: str) -> bool:
         if out.strip().lower() == "gpt":
             return True
     except Exception:
-        _logger.debug("_is_gpt_disk: blkid probe of %r failed", disk, exc_info=True)
+        _logger.debug("_is_gpt_disk: blkid probe of %r failed", disk, exc_info=True)  # lgtm[py/log-injection]
     try:
         result = run_command(
             ["parted", "-s", disk, "print"],
