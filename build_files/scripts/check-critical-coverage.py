@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 THRESHOLDS = {
+    "build_files/kyth-installer/kyth_installer/assurance.py": 90.0,
     "build_files/kyth-installer/kyth_installer/fsresize.py": 90.0,
     "build_files/kyth-installer/kyth_installer/recovery.py": 85.0,
     "build_files/kyth-installer/kyth_installer/services/installer_service.py": 85.0,
