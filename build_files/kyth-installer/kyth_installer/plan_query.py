@@ -1,27 +1,153 @@
-"""Plan query — read-only discovery helpers for the review/install pages.
+"""Read-only discovery helpers for installer planning."""
 
-Extracted from plan.py 678 monolith (step 4). No writes.
-"""
 from __future__ import annotations
 
-from .plan import (  # noqa: F401
-    _get_manual_mounts,
-    _has_bios_boot_partition,
-    _is_gpt_disk,
-    _probe_storage,
-    _required_guided_space,
-    disk_hold,
-    find_bootcurrent_esp,
-    suggest_windows_resize_target,
-)
+import contextlib
+import logging
+import re
+import shutil
+
+from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_BYTES, MIN_KYTHOS_GIB
+from .disk import _safe_int
+
+_logger = logging.getLogger(__name__)
+
+
+def is_gpt_disk(disk: str, *, run_command) -> bool:
+    """Probe a disk's partition-table type without mutating it."""
+    try:
+        result = run_command(
+            ["blkid", "-o", "value", "-s", "PTTYPE", disk],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+        if result.stdout.strip().lower() == "gpt":
+            return True
+    except Exception:
+        _logger.debug("GPT blkid probe failed for %r", disk, exc_info=True)
+    try:
+        result = run_command(
+            ["parted", "-s", disk, "print"],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+        return "Partition Table: gpt" in result.stdout
+    except Exception:
+        return False
+
+
+def has_bios_boot_partition(disk: str, *, list_partitions) -> bool:
+    """Return whether a disk already contains the required BIOS boot partition."""
+    return any(
+        (part.get("parttype") or "").lower() == BIOS_BOOT_GUID
+        for part in list_partitions(disk)
+    )
+
+
+def suggest_windows_resize_target(*, list_disks, probe_storage, snapshot=None) -> dict | None:
+    """Return the largest viable NTFS partition across safe disks."""
+    best = None
+    all_disks = tuple(list_disks())
+    for disk_info in all_disks:
+        name = disk_info.get("name")
+        if not name:
+            continue
+        try:
+            current = (
+                snapshot if snapshot and snapshot.disks_by_name.get(name)
+                else probe_storage(name, disks=all_disks)
+            )
+        except Exception:
+            continue
+        for partition, info in current.partitions_by_name.items():
+            if info.get("fstype", "").lower() != "ntfs":
+                continue
+            size = _safe_int(info.get("size_bytes"))
+            if size < (64 + MIN_KYTHOS_GIB) * 1024**3:
+                continue
+            candidate = {
+                "disk": name,
+                "partition": partition,
+                "size_bytes": size,
+                "free_bytes": _safe_int(info.get("free_bytes") or 0),
+            }
+            if best is None or size > best["size_bytes"]:
+                best = candidate
+    return best
+
+
+@contextlib.contextmanager
+def disk_hold(disk: str, log):
+    """Hold the shared exclusive storage lease through a planning mutation."""
+    from .storage_guard import DiskLease
+
+    with DiskLease(disk, log, exclusive=True):
+        yield
+
+
+def find_bootcurrent_esp(*, run_command, as_root, which=shutil.which) -> str | None:
+    """Return the BootCurrent firmware entry, when efibootmgr can read it."""
+    if which("efibootmgr") is None:
+        return None
+    try:
+        result = run_command(
+            as_root(["efibootmgr", "-v"]), capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0 or not result.stdout:
+            return None
+        match = re.search(r"BootCurrent:\s*([0-9A-Fa-f]{4})", result.stdout)
+        if not match:
+            return None
+        boot = match.group(1)
+        return next(
+            (line.strip() for line in result.stdout.splitlines()
+             if line.strip().startswith(f"Boot{boot}")),
+            None,
+        )
+    except Exception:
+        return None
+
+
+def required_guided_space(disk: str, *, is_gpt, has_bios_boot) -> int:
+    """Return required guided-install bytes including a missing BIOS helper."""
+    if is_gpt(disk) and not has_bios_boot(disk):
+        return MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
+    return MIN_KYTHOS_BYTES
+
+
+def get_manual_mounts(context, *, get_journal, list_partitions) -> list[dict]:
+    """Return non-root mount assignments from a committed manual journal."""
+    journal = get_journal(context)
+    if not journal or not journal.committed:
+        return []
+    mounts: list[dict] = []
+    for op in journal.ops:
+        if op["kind"] not in ("create", "set_mountpoint"):
+            continue
+        mountpoint = op["params"].get("mountpoint", "").strip()
+        partition = op["params"].get("partition", "")
+        if not mountpoint or mountpoint in ("/", "/boot/efi") or not partition:
+            continue
+        fs_type = op["params"].get("fs_type", "") if op["kind"] == "create" else ""
+        for format_op in journal.ops:
+            if (format_op["kind"] == "format"
+                    and format_op["params"].get("partition") == partition):
+                fs_type = format_op["params"].get("fs_type", "")
+                break
+        if not fs_type:
+            fs_type = next(
+                (part.get("fstype", "") for part in list_partitions(journal.disk)
+                 if part.get("name") == partition),
+                "",
+            )
+        mounts.append({
+            "partition": partition,
+            "mountpoint": mountpoint,
+            "fstype": fs_type or "btrfs",
+        })
+    return mounts
+
 
 __all__ = [
-    "_get_manual_mounts",
-    "_has_bios_boot_partition",
-    "_is_gpt_disk",
-    "_probe_storage",
-    "_required_guided_space",
-    "disk_hold",
-    "find_bootcurrent_esp",
+    "disk_hold", "find_bootcurrent_esp", "get_manual_mounts",
+    "has_bios_boot_partition", "is_gpt_disk", "required_guided_space",
     "suggest_windows_resize_target",
 ]

@@ -36,8 +36,6 @@ Both resize_ntfs and free_space are thin front-ends onto the alongside path:
 whatever protections/flags apply to "alongside" (see above) apply to them too.
 """
 
-import logging
-import contextlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -74,7 +72,7 @@ from .system import _as_root, _settle, unmount_target_disk
 from .runner import run_command
 from .storage_snapshot import StorageSnapshot
 
-_logger = logging.getLogger(__name__)
+from . import plan_query as _plan_query
 
 def _as_request(state: "InstallationState | InstallRequest") -> "InstallRequest":
     """Coerce InstallationState dict to InstallRequest — R-02 single-type boundary."""
@@ -142,31 +140,10 @@ def _validate_partition_target(*args, **kwargs):
     return _pv_validate_partition_target(*args, **kwargs)
 
 def _is_gpt_disk(disk: str) -> bool:
-    try:
-        result = run_command(
-            ["blkid", "-o", "value", "-s", "PTTYPE", disk],
-            capture_output=True, text=True, check=True, timeout=5,
-        )
-        out = result.stdout
-        if out.strip().lower() == "gpt":
-            return True
-    except Exception:
-        _logger.debug("_is_gpt_disk: blkid probe of %r failed", disk, exc_info=True)  # lgtm[py/log-injection]
-    try:
-        result = run_command(
-            ["parted", "-s", disk, "print"],
-            capture_output=True, text=True, check=True, timeout=5,
-        )
-        out = result.stdout
-        return "Partition Table: gpt" in out
-    except Exception:
-        return False
+    return _plan_query.is_gpt_disk(disk, run_command=run_command)
 
 def _has_bios_boot_partition(disk: str) -> bool:
-    return any(
-        (part.get("parttype") or "").lower() == BIOS_BOOT_GUID
-        for part in list_partitions(disk)
-    )
+    return _plan_query.has_bios_boot_partition(disk, list_partitions=list_partitions)
 
 def suggest_windows_resize_target(snapshot=None) -> dict | None:
     """Best NTFS candidate for 'Keep Windows' one-click alongside.
@@ -176,34 +153,10 @@ def suggest_windows_resize_target(snapshot=None) -> dict | None:
     room). Returns {disk, partition, size_gib, free_gib} or None — pure
     suggestion, validation still goes through _validate_resize_ntfs_target.
     """
-    from .disk import list_disks as _list_disks  # local to avoid cycle
-    best = None
-    all_disks = tuple(_list_disks())
-    for d in all_disks:
-        name = d.get("name")
-        if not name:
-            continue
-        try:
-            snap = (
-                snapshot if snapshot and snapshot.disks_by_name.get(name)
-                else _probe_storage(name, disks=all_disks)
-            )
-        except Exception:
-            continue
-        for pname, part in snap.partitions_by_name.items():
-            if part.get("fstype", "").lower() != "ntfs":
-                continue
-            size = _safe_int(part.get("size_bytes"))
-            if size < (64 + MIN_KYTHOS_GIB) * 1024**3:
-                continue
-            free = _safe_int(part.get("free_bytes") or 0)
-            # free_bytes may be missing; fall back to size heuristic
-            candidate = {"disk": name, "partition": pname, "size_bytes": size, "free_bytes": free}
-            if best is None or size > best["size_bytes"]:
-                best = candidate
-    return best
+    return _plan_query.suggest_windows_resize_target(
+        list_disks=list_disks, probe_storage=_probe_storage, snapshot=snapshot,
+    )
 
-@contextlib.contextmanager
 def disk_hold(disk: str, log):
     """Hold an exclusive open on the whole disk through partitioning.
 
@@ -214,43 +167,18 @@ def disk_hold(disk: str, log):
     Delegates to storage_guard.DiskLease so guided and manual paths share one
     flock primitive.
     """
-    from .storage_guard import DiskLease
-
-    with DiskLease(disk, log, exclusive=True):
-        yield
+    return _plan_query.disk_hold(disk, log)
 
 def find_bootcurrent_esp() -> str | None:
     """Return ESP device path from BootCurrent via efibootmgr -v, or None."""
-    if shutil.which("efibootmgr") is None:
-        return None
-    try:
-        from .runner import run_command
-        from .system import _as_root
-        r = run_command(_as_root(["efibootmgr", "-v"]), capture_output=True, text=True, timeout=5)
-        if r.returncode != 0 or not r.stdout:
-            return None
-        # Find BootCurrent line, then its HD() device path
-        import re
-        m = re.search(r"BootCurrent:\s*([0-9A-Fa-f]{4})", r.stdout)
-        if not m:
-            return None
-        boot = m.group(1)
-        # Find BootXXXX* line with HD(...)/File(\\EFI ...)
-        for line in r.stdout.splitlines():
-            if line.strip().startswith(f"Boot{boot}"):
-                # HD(2,GPT,uuid,0x800,0xFA000)/File(\EFI\arch\grubx64.efi)
-                # We can't map HD to /dev directly, so return hint that BootCurrent exists
-                # Caller will prefer existing find_efi_partition on BootCurrent disk if possible
-                # For now, just indicate BootCurrent ESP is not on target disk if needed
-                return line.strip()
-    except Exception:
-        pass
-    return None
+    return _plan_query.find_bootcurrent_esp(
+        run_command=run_command, as_root=_as_root, which=shutil.which,
+    )
 
 def _required_guided_space(disk: str) -> int:
-    if _is_gpt_disk(disk) and not _has_bios_boot_partition(disk):
-        return MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
-    return MIN_KYTHOS_BYTES
+    return _plan_query.required_guided_space(
+        disk, is_gpt=_is_gpt_disk, has_bios_boot=_has_bios_boot_partition,
+    )
 
 def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     """Create a 1 MiB bios_grub partition at gap_start if the GPT disk lacks
@@ -695,33 +623,9 @@ def _prepare_install_plan(state: dict | InstallRequest, log, context=None) -> In
 
 def _get_manual_mounts(context) -> list[dict]:
     """Return non-root partition mount assignments from the committed journal."""
-    journal = partition_ops.get_journal(context)
-    if not journal or not journal.committed:
-        return []
-    mounts: list[dict] = []
-    for op in journal.ops:
-        if op["kind"] in ("create", "set_mountpoint"):
-            mountpoint = op["params"].get("mountpoint", "").strip()
-            partition = op["params"].get("partition", "")
-            if mountpoint and mountpoint not in ("/", "/boot/efi") and partition:
-                fs_type = op["params"].get("fs_type", "") if op["kind"] == "create" else ""
-                for fmt_op in journal.ops:
-                    if (fmt_op["kind"] == "format" and
-                        fmt_op["params"].get("partition") == partition):
-                        fs_type = fmt_op["params"].get("fs_type", "")
-                        break
-                if not fs_type:
-                    parts = list_partitions(journal.disk)
-                    for p in parts:
-                        if p.get("name") == partition:
-                            fs_type = p.get("fstype", "")
-                            break
-                mounts.append({
-                    "partition": partition,
-                    "mountpoint": mountpoint,
-                    "fstype": fs_type or "btrfs",
-                })
-    return mounts
+    return _plan_query.get_manual_mounts(
+        context, get_journal=partition_ops.get_journal, list_partitions=list_partitions,
+    )
 
 def _validate_storage_intent(state: dict, context=None, snapshot=None) -> None:
     """Validate a review-page storage choice without changing the machine."""
