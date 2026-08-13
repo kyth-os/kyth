@@ -312,32 +312,10 @@ def _shrink_ntfs_filesystem_guarded(
     explicitly so the failure path can surface accurate remediation and so
     tests can assert the boundary between the two durability domains.
     """
-    log(f"NTFS resize requested: shrink {partition} by {_human_size(shrink_bytes)}")
-    try:
-        shrink_filesystem(partition, "ntfs", new_ntfs_size, log)
-    except Exception:
-        log(
-            "NTFS filesystem shrink failed — no partition table change was made. "
-            "The NTFS volume is unchanged and the installer made no destructive write."
-        )
-        raise
-    log(
-        "NTFS filesystem shrink complete. If the next partition step fails, "
-        "the partition table will be restored but this filesystem will remain "
-        "at its new smaller size. Windows will see unallocated space after it; "
-        "use Windows Disk Management to extend the volume back if you want to undo."
+    _plan_commit.shrink_ntfs_filesystem_guarded(
+        partition, new_ntfs_size, shrink_bytes, log,
+        shrink_filesystem=shrink_filesystem, human_size=_human_size,
     )
-    # Marker to guard against immediate second shrink without regrow/reboot.
-    # Filesystem shrink is not covered by the sgdisk guard, so a second attempt
-    # in the same live session would shrink an already-small filesystem again.
-    try:
-        marker_dir = Path("/run/kyth-installer")
-        marker_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = partition.replace("/", "_")
-        marker = marker_dir / f"ntfs-shrunk-{safe_name}"
-        marker.write_text(f"{new_ntfs_size}\n")
-    except Exception:
-        pass
 
 
 def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
@@ -455,15 +433,12 @@ def _validate_free_space_target(
     return disk, start, end
 
 def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
-    disk, start, end = _validate_free_space_target(config)
-    missing = [cmd for cmd in ("parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk") if shutil.which(cmd) is None]
-    if missing:
-        raise RuntimeError(f"Required partitioning tools are missing from the live environment: {', '.join(missing)}")
-    unmount_target_disk(disk, log)
-    disk, start, end = _validate_free_space_target(config)
-
-    created = _commit_new_kythos_partition(disk, start, end, log)
-    return disk, created
+    return _plan_commit.prepare_free_space_target(
+        config, log, validate_target=_validate_free_space_target,
+        required_tools=("parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk"),
+        which=shutil.which, unmount_target_disk=unmount_target_disk,
+        commit_partition=_commit_new_kythos_partition,
+    )
 
 def _prepare_ntfs_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
     _validate_resize_ntfs_target(state)

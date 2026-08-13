@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from .config import BIOS_BOOT_BYTES
@@ -143,3 +144,51 @@ def commit_new_kythos_partition(
 
 
 __all__ = ["CommitDependencies", "commit_new_kythos_partition", "ensure_bios_boot_partition"]
+
+
+def shrink_ntfs_filesystem_guarded(
+    partition: str, new_size: int, shrink_bytes: int, log, *, shrink_filesystem,
+    human_size, marker_root: Path = Path("/run/kyth-installer"),
+) -> None:
+    """Shrink NTFS before table mutation and record the non-atomic boundary."""
+    log(f"NTFS resize requested: shrink {partition} by {human_size(shrink_bytes)}")
+    try:
+        shrink_filesystem(partition, "ntfs", new_size, log)
+    except Exception:
+        log(
+            "NTFS filesystem shrink failed — no partition table change was made. "
+            "The NTFS volume is unchanged and the installer made no destructive write."
+        )
+        raise
+    log(
+        "NTFS filesystem shrink complete. If the next partition step fails, "
+        "the partition table will be restored but this filesystem will remain "
+        "at its new smaller size. Windows will see unallocated space after it; "
+        "use Windows Disk Management to extend the volume back if you want to undo."
+    )
+    try:
+        marker_root.mkdir(parents=True, exist_ok=True)
+        marker = marker_root / f"ntfs-shrunk-{partition.replace('/', '_')}"
+        marker.write_text(f"{new_size}\n")
+    except Exception:
+        pass
+
+
+def prepare_free_space_target(
+    config: dict, log, *, validate_target, required_tools, which,
+    unmount_target_disk, commit_partition,
+) -> tuple[str, str]:
+    """Revalidate and commit a guided install into an existing free region."""
+    disk, start, end = validate_target(config)
+    missing = [command for command in required_tools if which(command) is None]
+    if missing:
+        raise RuntimeError(
+            "Required partitioning tools are missing from the live environment: "
+            + ", ".join(missing)
+        )
+    unmount_target_disk(disk, log)
+    disk, start, end = validate_target(config)
+    return disk, commit_partition(disk, start, end, log)
+
+
+__all__ += ["prepare_free_space_target", "shrink_ntfs_filesystem_guarded"]
