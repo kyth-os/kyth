@@ -38,6 +38,11 @@ class TestInstallerService(unittest.TestCase):
         res_invalid = self.service.new_table(body_invalid)
         self.assertFalse(res_invalid.get("ok"))
 
+        self.assertFalse(self.service.new_table({})["ok"])
+        self.assertFalse(
+            self.service.new_table({"disk": "/dev/sda", "table_type": "invalid"})["ok"]
+        )
+
     @patch("kyth_installer.disk.list_disks")
     @patch("kyth_installer.system.list_timezones")
     def test_start_install_validations(self, mock_timezones, mock_list_disks):
@@ -365,6 +370,66 @@ class InstallerServiceCrudTests(unittest.TestCase):
             res = self.service.rollback_partitions({"disk": "/dev/sda"})
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("message"), "sgdisk restore failed")
+
+    def test_partition_actions_return_missing_journal_error_consistently(self):
+        body = {"disk": "/dev/sda", "partition": "/dev/sda1"}
+        for action in (
+            self.service.resize_partition,
+            self.service.format_partition,
+            self.service.remove_pending,
+            self.service.set_mountpoint,
+            self.service.commit_partitions,
+            self.service.rollback_partitions,
+        ):
+            with self.subTest(action=action.__name__):
+                result = action(body)
+                self.assertFalse(result["ok"])
+                self.assertIn("No active partition journal", result["message"])
+
+    def test_install_busy_and_cancel_outcomes(self):
+        with patch(
+            "kyth_installer.services.installer_service.validation.validate_install_request",
+            return_value={},
+        ), patch(
+            "kyth_installer.services.installer_service.execution.start_installation",
+            return_value=False,
+        ):
+            self.assertIn("already running", self.service.start_install({})["message"])
+
+        with patch(
+            "kyth_installer.services.installer_service.validation.validate_install_request",
+            return_value={},
+        ), patch(
+            "kyth_installer.services.installer_service.execution.start_installation",
+            return_value=True,
+        ):
+            self.assertTrue(self.service.start_install({})["started"])
+
+        with patch(
+            "kyth_installer.services.installer_service.execution.request_cancel",
+            side_effect=[True, False],
+        ):
+            self.assertTrue(self.service.cancel_install({})["ok"])
+            self.assertFalse(self.service.cancel_install({})["ok"])
+
+    def test_preview_plan_reports_runtime_error_and_success(self):
+        with patch(
+            "kyth_installer.plan.validate_plan_state", side_effect=RuntimeError("unsafe disk")
+        ):
+            failed = self.service.preview_plan({})
+        self.assertFalse(failed["valid"])
+        self.assertEqual(failed["errors"], ("unsafe disk",))
+
+        report = MagicMock(
+            valid=True, mode="wipe", disk="/dev/sda", target_partition="/dev/sda1",
+            efi_partition=None, will_create_partition=True,
+            will_shrink_filesystem=False, needs_bios_boot=False,
+            errors=(), warnings=("backup",),
+        )
+        with patch("kyth_installer.plan.validate_plan_state", return_value=report):
+            success = self.service.preview_plan({})
+        self.assertTrue(success["ok"])
+        self.assertEqual(success["warnings"], ("backup",))
 
     # ── reboot ───────────────────────────────────────────────────────
 

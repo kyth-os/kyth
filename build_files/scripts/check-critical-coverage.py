@@ -18,7 +18,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/fsresize.py": 90.0,
     "build_files/kyth-installer/kyth_installer/imagesrc.py": 90.0,
     "build_files/kyth-installer/kyth_installer/recovery.py": 85.0,
-    "build_files/kyth-installer/kyth_installer/services/installer_service.py": 85.0,
+    "build_files/kyth-installer/kyth_installer/services/installer_service.py": 95.0,
     "build_files/kyth-installer/kyth_installer/mount_registry.py": 90.0,
     "build_files/kyth-installer/kyth_installer/partition_ops.py": 95.0,
     "build_files/kyth-installer/kyth_installer/partition_ops_journal.py": 88.0,
