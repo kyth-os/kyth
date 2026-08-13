@@ -17,6 +17,7 @@ from .plan import (  # pylint: disable=unused-import
     ResolvedInstallPlan,
     _get_manual_mounts,  # pylint: disable=unused-import
     _prepare_install_plan,
+    request_with_install_plan,
     _validate_install_target,
     _validate_storage_intent,
 )
@@ -95,13 +96,8 @@ def _resolve_and_record_plan(
     context: InstallerContext,
     log,
 ) -> ResolvedInstallPlan:
-    effective_state = request.as_state()
-    effective_state["install_mode"] = storage_plan.mode
-    if storage_plan.disk:
-        effective_state["disk"] = storage_plan.disk
-    if storage_plan.target_partition:
-        effective_state["target_partition"] = storage_plan.target_partition
-    disk, target_partition = _validate_install_target(effective_state, context)
+    effective_request = request_with_install_plan(request, storage_plan)
+    disk, target_partition = _validate_install_target(effective_request, context)
     storage_plan = type(storage_plan)(storage_plan.mode, disk=disk, target_partition=target_partition)
 
     resolved = ResolvedInstallPlan(
@@ -132,4 +128,3 @@ from .phases.finalize import (  # pylint: disable=unused-import  # noqa: F401
     _fsck_pass_for,  # pylint: disable=unused-import
 )
 from .phases.run import _run_install, _run_install_worker  # pylint: disable=unused-import  # noqa: F401
-
