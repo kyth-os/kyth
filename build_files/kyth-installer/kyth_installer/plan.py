@@ -134,10 +134,13 @@ def _probe_storage(
     )
 
 from .plan_validate import (  # canonical (plan.py 788 → split)
+    GuidedValidationDependencies,
     ValidationDependencies,
     _validate_efi_target as _pv_validate_efi_target,
     _validate_install_target as _pv_validate_install_target,
     _validate_partition_target as _pv_validate_partition_target,
+    validate_free_space_target as _pv_validate_free_space_target,
+    validate_resize_ntfs_target as _pv_validate_resize_ntfs_target,
 )
 
 def _validation_dependencies() -> ValidationDependencies:
@@ -241,62 +244,25 @@ def _commit_new_kythos_partition(
         restored_message=restored_message,
     )
 
+def _guided_validation_dependencies() -> GuidedValidationDependencies:
+    """Bind guided validation to the facade's patchable storage helpers."""
+    return GuidedValidationDependencies(
+        probe_storage=_probe_storage,
+        parent_disk=_parent_disk,
+        partition_size=_partition_size_bytes,
+    )
+
+
 def _validate_resize_ntfs_target(
     config: dict,
     snapshot: StorageSnapshot | None = None,
 ) -> tuple[str, str, int]:
-    disk = _normal_device_path(config.get("disk"))
-    partition = _normal_device_path(config.get("resize_partition") or config.get("target_partition"))
-    shrink_gib = _safe_int(config.get("resize_gib") or config.get("shrink_gib") or 0)
-
-    if not disk:
-        raise RuntimeError("No target disk was selected.")
-    if not partition:
-        raise RuntimeError("No NTFS partition was selected to shrink.")
-    if shrink_gib < MIN_KYTHOS_GIB:
-        raise RuntimeError(f"NTFS shrink install requires at least {MIN_KYTHOS_GIB} GiB for KythOS.")
-
-    snapshot = snapshot or _probe_storage(disk)
-    safe_disks = snapshot.disks_by_name
-    if disk not in safe_disks:
-        raise RuntimeError("The selected disk is not a safe install target.")
-    if _parent_disk(partition) != disk:
-        raise RuntimeError("The selected NTFS partition does not belong to the selected disk.")
-    parts = snapshot.partitions_by_name
-    part = parts.get(partition)
-    if not part:
-        raise RuntimeError("The selected NTFS partition was not found during the final disk scan.")
-    if part.get("efi") or part.get("current") or part.get("in_use") or part.get("read_only"):
-        raise RuntimeError("The selected partition is mounted, read-only, or reserved and cannot be resized.")
-    part_fstype = (part.get("fstype") or "").lower()
-    if part_fstype == "bitlocker":
-        raise RuntimeError(
-            "This partition is BitLocker-encrypted and cannot be resized while "
-            "locked. In Windows, suspend or disable BitLocker protection "
-            "(Control Panel > BitLocker Drive Encryption, or 'manage-bde -off "
-            "C:'), wait for decryption to finish, then try again."
-        )
-    if part_fstype not in ("ntfs", "ntfs3"):
-        raise RuntimeError("Only NTFS partitions can be resized by this installer path.")
-    if not snapshot.efi_partition:
-        raise RuntimeError("NTFS resize installation requires an EFI system partition on the system.")
-
-    shrink_bytes = shrink_gib * 1024**3
-    required_space = (
-        MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
-        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
-        else MIN_KYTHOS_BYTES
+    return _pv_validate_resize_ntfs_target(
+        config,
+        snapshot=snapshot,
+        dependencies=_guided_validation_dependencies(),
     )
-    if shrink_bytes < required_space:
-        raise RuntimeError(
-            f"This layout needs at least {MIN_KYTHOS_GIB + 1} GiB of shrink space "
-            "to create KythOS and its boot partition."
-        )
-    current_size = _safe_int(part.get("size_bytes")) or _partition_size_bytes(partition)
-    remaining_size = current_size - shrink_bytes
-    if remaining_size < 64 * 1024**3:
-        raise RuntimeError("Refusing to leave the NTFS partition smaller than 64 GiB.")
-    return disk, partition, shrink_bytes
+
 
 def _shrink_ntfs_filesystem_guarded(
     partition: str, new_ntfs_size: int, shrink_bytes: int, log
@@ -397,40 +363,12 @@ def _validate_free_space_target(
     config: dict,
     snapshot: StorageSnapshot | None = None,
 ) -> tuple[str, int, int]:
-    disk = _normal_device_path(config.get("disk"))
-    start = _safe_int(config.get("free_region_start"), -1)
-    end = _safe_int(config.get("free_region_end"), -1)
-
-    if not disk:
-        raise RuntimeError("No target disk was selected.")
-    if start < 0 or end <= start:
-        raise RuntimeError("No free space region was selected for installation.")
-    if end - start < MIN_KYTHOS_BYTES:
-        raise RuntimeError(f"Free space install requires at least {MIN_KYTHOS_GIB} GiB for KythOS.")
-
-    snapshot = snapshot or _probe_storage(disk, include_free_space=True)
-    safe_disks = snapshot.disks_by_name
-    if disk not in safe_disks:
-        raise RuntimeError("The selected disk is not a safe install target.")
-    required_space = (
-        MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
-        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
-        else MIN_KYTHOS_BYTES
+    return _pv_validate_free_space_target(
+        config,
+        snapshot=snapshot,
+        dependencies=_guided_validation_dependencies(),
     )
-    if end - start < required_space:
-        raise RuntimeError(
-            f"This layout needs at least {MIN_KYTHOS_GIB + 1} GiB of free space "
-            "to create KythOS and its boot partition."
-        )
-    if not snapshot.efi_partition:
-        raise RuntimeError("Free space installation requires an EFI system partition on the system.")
 
-    # Re-scan right before committing so a stale UI selection can't partition
-    # space that's no longer actually free.
-    if not snapshot.contains_free_region(start, end):
-        raise RuntimeError("The selected free space is no longer available. Re-scan the disk and try again.")
-
-    return disk, start, end
 
 def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     return _plan_commit.prepare_free_space_target(
