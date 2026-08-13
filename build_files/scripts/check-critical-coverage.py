@@ -12,6 +12,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/services/installer_service.py": 85.0,
     "build_files/kyth-installer/kyth_installer/mount_registry.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/common.py": 90.0,
+    "build_files/kyth-installer/kyth_installer/phases/finalize.py": 65.0,
     "build_files/kyth-installer/kyth_installer/phases/run.py": 75.0,
     "build_files/kyth-installer/kyth_installer/phases/storage.py": 60.0,
     "build_files/kyth-installer/kyth_installer/storage_guard.py": 90.0,
