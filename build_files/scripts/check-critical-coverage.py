@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 THRESHOLDS = {
+    "build_files/kyth-installer/kyth_installer/app.py": 90.0,
     "build_files/kyth-installer/kyth_installer/assurance.py": 90.0,
     "build_files/kyth-installer/kyth_installer/cleanup.py": 95.0,
     "build_files/kyth-installer/kyth_installer/disk/_lookup.py": 90.0,
@@ -21,6 +22,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/mount_registry.py": 90.0,
     "build_files/kyth-installer/kyth_installer/partition_ops.py": 95.0,
     "build_files/kyth-installer/kyth_installer/partition_ops_journal.py": 85.0,
+    "build_files/kyth-installer/kyth_installer/partition_cli.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/bootc_cmd.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/common.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/finalize.py": 65.0,
