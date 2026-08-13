@@ -184,6 +184,29 @@ class PlanCommitTests(unittest.TestCase):
                 )
                 self.assertEqual(result, expected)
 
+    def test_explicit_modes_preserve_mode_and_resolved_targets(self):
+        validate = mock.Mock(return_value=("/dev/sda", "/dev/sda2"))
+        context = object()
+        for mode in ("wipe", "alongside", "manual"):
+            with self.subTest(mode=mode):
+                result = plan_commit.prepare_explicit_install_plan(
+                    SimpleNamespace(mode=mode), {"install_mode": mode}, context,
+                    validate_target=validate,
+                )
+                self.assertEqual(result.mode, mode)
+                self.assertEqual(result.disk, "/dev/sda")
+                self.assertEqual(result.target_partition, "/dev/sda2")
+                validate.assert_called_with({"install_mode": mode}, context)
+
+    def test_explicit_preparation_propagates_validation_failure(self):
+        with self.assertRaisesRegex(RuntimeError, "manual root is missing"):
+            plan_commit.prepare_explicit_install_plan(
+                SimpleNamespace(mode="manual"), {}, object(),
+                validate_target=mock.Mock(
+                    side_effect=RuntimeError("manual root is missing")
+                ),
+            )
+
     def test_plan_dispatch_stops_on_report_error(self):
         with self.assertRaisesRegex(RuntimeError, "unsafe layout"):
             plan_commit.prepare_install_plan(

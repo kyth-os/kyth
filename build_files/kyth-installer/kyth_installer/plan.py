@@ -340,8 +340,9 @@ def _prepare_explicit_install_plan(
     state: dict | InstallRequest,
     context=None,
 ) -> InstallPlan:
-    disk, target_partition = _validate_install_target(state, context)
-    return InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
+    return _plan_commit.prepare_explicit_install_plan(
+        plan, state, context, validate_target=_validate_install_target,
+    )
 
 def _report_dependencies() -> ReportDependencies:
     return ReportDependencies(

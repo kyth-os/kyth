@@ -281,6 +281,21 @@ __all__ += [
 ]
 
 
+def prepare_explicit_install_plan(
+    plan: InstallPlan,
+    state,
+    context=None,
+    *,
+    validate_target,
+) -> InstallPlan:
+    """Resolve a validated wipe, alongside, or manual plan without mutation."""
+    disk, target_partition = validate_target(state, context)
+    return InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
+
+
+__all__.append("prepare_explicit_install_plan")
+
+
 def prepare_install_plan(
     state,
     log,
