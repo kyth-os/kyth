@@ -1,5 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import restyle
+from ..core_base import replace_clicked_handler, restyle
 from ..services.flatpak import _is_flatpak_installed
 from ..qt import (
     QDesktopServices, QDialog, QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QTextEdit, QUrl, QVBoxLayout,
@@ -157,32 +157,29 @@ class _DetailsMixin:
         installed: bool | None = None,
     ) -> None:
         installed = _is_flatpak_installed(app_id) if installed is None else installed
-        for btn in (action_btn, open_btn):
-            if btn is None:
-                continue
-            try:
-                btn.clicked.disconnect()
-            except (RuntimeError, TypeError):
-                pass
-
         if open_btn is not None:
             open_btn.setVisible(installed)
             open_btn.setEnabled(installed)
             open_btn.setObjectName("primary" if installed else "")
             if installed:
-                open_btn.clicked.connect(lambda _=False, aid=app_id: self._open_fp_app(aid))
+                replace_clicked_handler(
+                    open_btn,
+                    lambda _=False, aid=app_id: self._open_fp_app(aid),
+                )
             restyle(open_btn)
 
         if installed:
             action_btn.setText("Uninstall")
             action_btn.setObjectName("danger")
-            action_btn.clicked.connect(
+            replace_clicked_handler(
+                action_btn,
                 lambda _=False, aid=app_id, n=name, b=action_btn, ob=open_btn: self._fp_store_uninstall(aid, n, b, ob)
             )
         else:
             action_btn.setText("Install")
             action_btn.setObjectName("primary")
-            action_btn.clicked.connect(
+            replace_clicked_handler(
+                action_btn,
                 lambda _=False, aid=app_id, n=name, b=action_btn, ob=open_btn: self._fp_install(aid, n, b, ob)
             )
         action_btn.setEnabled(True)

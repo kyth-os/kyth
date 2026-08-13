@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
-from ..core_base import restyle
+from ..core_base import replace_clicked_handler, restyle
 from ..services.hardware import HardwareProbe
 from ..qt import (
     QApplication, QFrame, QGridLayout, QHBoxLayout, QIcon, QLabel, QPushButton, QScrollArea, QSize, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, Qt, Signal, single_shot,
@@ -607,11 +607,7 @@ class HardwareCard(QFrame):
     def set_action_fn(self, label: str, fn) -> None:
         self._action.hide()
         self._action_btn.setText(label)
-        try:
-            self._action_btn.clicked.disconnect()
-        except (RuntimeError, TypeError):
-            pass
-        self._action_btn.clicked.connect(fn)
+        replace_clicked_handler(self._action_btn, fn)
         self._action_btn.show()
 
 
