@@ -26,6 +26,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/phases/bootc_cmd.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/common.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/finalize.py": 75.0,
+    "build_files/kyth-installer/kyth_installer/phases/finalize_artifacts.py": 85.0,
     "build_files/kyth-installer/kyth_installer/phases/finalize_fstab.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/preflight.py": 95.0,
     "build_files/kyth-installer/kyth_installer/phases/run.py": 95.0,
