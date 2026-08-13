@@ -57,6 +57,14 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         self.assertIsNone(journal._backup_dir)
         journal._discard_snapshot()
 
+    def test_snapshot_fsync_failure_keeps_recoverable_backup(self):
+        journal = self._journal()
+        with mock.patch("os.fsync", side_effect=OSError("sync unavailable")):
+            journal._save_snapshot()
+        self.assertTrue(journal._snapshot_saved)
+        self.assertTrue((Path(journal._backup_dir.name) / "partition-table.backup").exists())
+        journal._discard_snapshot()
+
     def test_restore_without_snapshot_or_backup_is_safe(self):
         journal = self._journal(dry_run=False)
         journal._restore_snapshot()
@@ -91,6 +99,79 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         self.assertEqual(params["partition"], "/dev/sdap99")
         journal._disk_service.create_partition.assert_called_once()
         journal._disk_service.format_filesystem.assert_not_called()
+
+    def test_gpt_table_requires_discoverable_bios_partition(self):
+        journal = self._journal(dry_run=False)
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(journal_mod, "_latest_partition_on_disk", return_value=None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "automatic BIOS boot partition"):
+                journal._commit_new_table({"table_type": "gpt"}, mock.Mock())
+
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(
+                journal_mod, "_latest_partition_on_disk", return_value="/dev/sda1"
+            ),
+            mock.patch.object(journal_mod, "_partition_number", return_value=1),
+        ):
+            journal._commit_new_table({"table_type": "gpt"}, mock.Mock())
+        journal._disk_service.set_partition_flag.assert_called_with(
+            "/dev/sda", 1, "bios_grub"
+        )
+
+    def test_real_create_requires_discovery_and_formats_esp(self):
+        journal = self._journal(dry_run=False)
+        params = {
+            "start_bytes": 1024**2,
+            "size_bytes": 1024**3,
+            "fs_type": "fat32",
+            "label": "EFI",
+            "mountpoint": "/boot/efi",
+        }
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(journal_mod, "_latest_partition_on_disk", return_value=None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "newly created partition"):
+                journal._commit_create(dict(params), mock.Mock())
+
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(
+                journal_mod, "_latest_partition_on_disk", return_value="/dev/sda2"
+            ),
+            mock.patch.object(journal_mod, "_partition_number", return_value=2),
+        ):
+            journal._commit_create(params, mock.Mock())
+        self.assertEqual(params["partition"], "/dev/sda2")
+        journal._disk_service.format_filesystem.assert_called_with(
+            "/dev/sda2", "fat32", "EFI"
+        )
+        journal._disk_service.set_partition_flag.assert_called_with("/dev/sda", 2, "esp")
+
+    def test_real_resize_shrinks_filesystem_before_partition_boundary(self):
+        journal = self._journal(dry_run=False)
+        params = {"partition": "/dev/sda2", "new_size_bytes": 8 * 1024**3}
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "was not found"):
+                journal._commit_resize(params, mock.Mock())
+
+        with (
+            mock.patch.object(
+                journal_mod, "list_partitions",
+                return_value=[{"name": "/dev/sda2", "fstype": "ext4"}],
+            ),
+            mock.patch.object(journal_mod, "shrink_filesystem") as shrink,
+            mock.patch.object(journal_mod, "_partition_number", return_value=2),
+            mock.patch.object(journal_mod, "_partition_start_bytes", return_value=1024**2),
+        ):
+            journal._commit_resize(params, mock.Mock())
+        shrink.assert_called_once_with("/dev/sda2", "ext4", 8 * 1024**3, mock.ANY)
+        journal._disk_service.resize_partition.assert_called_once_with(
+            "/dev/sda", 2, 1024**2, 8 * 1024**3
+        )
 
     def test_commit_dispatches_metadata_and_format_operations(self):
         journal = self._journal()
