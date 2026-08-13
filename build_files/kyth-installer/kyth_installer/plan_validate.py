@@ -55,6 +55,20 @@ class ReportDependencies:
     validate_free_space: Callable[..., tuple[str, int, int]]
 
 
+def validate_storage_intent(
+    state, context=None, snapshot=None, *, normalized_mode, validate_install,
+    validate_resize, validate_free_space,
+) -> None:
+    """Dispatch review-page validation without changing storage."""
+    mode = normalized_mode(state)
+    if mode == "resize_ntfs":
+        validate_resize(state, snapshot=snapshot)
+    elif mode == "free_space":
+        validate_free_space(state, snapshot=snapshot)
+    else:
+        validate_install(state, context, snapshot=snapshot)
+
+
 def default_validation_dependencies() -> ValidationDependencies:
     """Bind validation directly to production storage implementations."""
     from .disk import _parent_disk, list_partitions

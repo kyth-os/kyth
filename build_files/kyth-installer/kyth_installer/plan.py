@@ -95,22 +95,10 @@ def _commit_dependencies() -> _plan_commit.CommitDependencies:
         disk_service_factory=DiskService,
     )
 
-def _as_request(state: "InstallationState | InstallRequest") -> "InstallRequest":
-    """Coerce InstallationState dict to InstallRequest — R-02 single-type boundary."""
-    return _request_as_request(state)
-
-def _normalized_install_mode(state: "InstallationState | InstallRequest") -> str:
-    return _request_normalized_install_mode(state)
-
-def _install_plan_from_state(state: "InstallationState | InstallRequest") -> InstallPlan:
-    return _request_install_plan_from_state(state)
-
-def request_with_install_plan(
-    state: "InstallationState | InstallRequest",
-    plan: InstallPlan,
-) -> InstallRequest:
-    """Return immutable request input updated with resolved storage fields."""
-    return _request_with_install_plan(state, plan)
+_as_request = _request_as_request
+_normalized_install_mode = _request_normalized_install_mode
+_install_plan_from_state = _request_install_plan_from_state
+request_with_install_plan = _request_with_install_plan
 
 def _probe_storage(
     disk: str,
@@ -142,6 +130,7 @@ from .plan_validate import (  # canonical (plan.py 788 → split)
     _validate_partition_target as _pv_validate_partition_target,
     validate_free_space_target as _pv_validate_free_space_target,
     validate_resize_ntfs_target as _pv_validate_resize_ntfs_target,
+    validate_storage_intent as _pv_validate_storage_intent,
 )
 
 def _validate_install_target(*args, **kwargs):
@@ -381,12 +370,9 @@ def _get_manual_mounts(context) -> list[dict]:
 
 def _validate_storage_intent(state: dict, context=None, snapshot=None) -> None:
     """Validate a review-page storage choice without changing the machine."""
-    mode = _normalized_install_mode(state)
-    if mode == "resize_ntfs":
-        _validate_resize_ntfs_target(state, snapshot=snapshot)
-    elif mode == "free_space":
-        _validate_free_space_target(state, snapshot=snapshot)
-    elif mode == "manual":
-        _validate_install_target(state, context, snapshot=snapshot)
-    else:
-        _validate_install_target(state, context, snapshot=snapshot)
+    _pv_validate_storage_intent(
+        state, context, snapshot, normalized_mode=_normalized_install_mode,
+        validate_install=_validate_install_target,
+        validate_resize=_validate_resize_ntfs_target,
+        validate_free_space=_validate_free_space_target,
+    )

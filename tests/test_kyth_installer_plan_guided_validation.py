@@ -1,5 +1,6 @@
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,12 +13,33 @@ from kyth_installer.plan_validate import (  # noqa: E402
     build_plan_report,
     validate_free_space_target,
     validate_resize_ntfs_target,
+    validate_storage_intent,
 )
 from kyth_installer.storage_snapshot import StorageSnapshot  # noqa: E402
 from kyth_installer.context import InstallRequest  # noqa: E402
 
 
 class GuidedPlanValidationTests(unittest.TestCase):
+    def test_storage_intent_dispatches_all_mode_families(self):
+        validators = {
+            "validate_install": mock.Mock(),
+            "validate_resize": mock.Mock(),
+            "validate_free_space": mock.Mock(),
+        }
+        for mode, expected in (
+            ("resize_ntfs", "validate_resize"),
+            ("free_space", "validate_free_space"),
+            ("manual", "validate_install"),
+            ("wipe", "validate_install"),
+        ):
+            for validator in validators.values():
+                validator.reset_mock()
+            validate_storage_intent(
+                {"install_mode": mode}, object(), object(),
+                normalized_mode=lambda state: state["install_mode"], **validators,
+            )
+            validators[expected].assert_called_once()
+
     def dependencies(self):
         return GuidedValidationDependencies(
             probe_storage=lambda *_args, **_kwargs: None,
