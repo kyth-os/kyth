@@ -1,13 +1,18 @@
 """Shared utilities for KythOS system maintenance and cleanups."""
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
+import stat
 import subprocess
 
 from .commands import run as run_command
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+_DUPE_HASH_DIR = Path("/var/lib/kyth/duperemove")
 
 
 def prune_trash(days: int = 30) -> None:
@@ -131,18 +136,46 @@ def find_dedupe_targets(root_path: str = "/var/home") -> list[str]:
     return sorted(list(set(targets)))
 
 
-def dedupe_directory(dir_path: str) -> None:
+def _secure_dedupe_hash_file(dir_path: str, state_dir: Path) -> Path:
+    """Create and validate a private, non-symlink duperemove database."""
+    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    dir_info = state_dir.lstat()
+    if not stat.S_ISDIR(dir_info.st_mode) or stat.S_ISLNK(dir_info.st_mode):
+        raise RuntimeError(f"Unsafe duperemove state directory: {state_dir}")
+    if dir_info.st_uid != os.geteuid():
+        raise RuntimeError(f"Duperemove state directory has an unexpected owner: {state_dir}")
+    state_dir.chmod(0o700)
+
+    target_key = os.path.realpath(dir_path).encode("utf-8", errors="surrogateescape")
+    hash_file = state_dir / f"{hashlib.sha256(target_key).hexdigest()}.hash"
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise RuntimeError("Secure duperemove state requires O_NOFOLLOW support")
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW
+    fd = os.open(hash_file, flags, 0o600)
+    try:
+        file_info = os.fstat(fd)
+        if not stat.S_ISREG(file_info.st_mode) or file_info.st_uid != os.geteuid():
+            raise RuntimeError(f"Unsafe duperemove hash database: {hash_file}")
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+    return hash_file
+
+
+def dedupe_directory(dir_path: str, *, state_dir: Path = _DUPE_HASH_DIR) -> None:
     """Perform deduplication on the given directory using duperemove."""
     if not shutil.which("duperemove"):
         return
-    # Generate unique hash filename from path
-    hash_name = dir_path.replace("/", "__").replace(" ", "__")
-    hash_file = f"/var/tmp/{hash_name}.duperemove.hash"
+
+    try:
+        hash_file = _secure_dedupe_hash_file(dir_path, state_dir)
+    except (OSError, RuntimeError):
+        return
 
     # Run nice/ionice wrapper
     cmd = [
         "nice", "-n", "19",
-        "duperemove", "-rdh", "--hashfile", hash_file, dir_path
+        "duperemove", "-rdh", "--hashfile", str(hash_file), dir_path
     ]
     if shutil.which("ionice"):
         cmd = ["ionice", "-c3"] + cmd

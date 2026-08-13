@@ -97,19 +97,45 @@ class SysconfigFragmentTests(unittest.TestCase):
         )
         self.assertIn("--key Theme org.kythos.desktop", guard)
 
-    def test_antigravity_uses_desktop_safe_wrapper(self):
-        body = (SCRIPTS / "packages" / "20-google-antigravity-ide.sh").read_text(
-            encoding="utf-8"
+    def test_antigravity_host_wrapper_is_not_built(self):
+        self.assertFalse(
+            (SCRIPTS / "packages" / "20-google-antigravity-ide.sh").exists()
         )
-        self.assertIn("/usr/bin/antigravity", body)
-        self.assertIn("kyth-ai-dev", body)
 
-    def test_bootc_sudoers_allows_status_without_arguments(self):
-        body = (ROOT / "build_files" / "kyth-bootc-sudo").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("/usr/bin/bootc status,", body)
-        self.assertIn("/usr/sbin/bootc status,", body)
+    def test_bootc_sudoers_uses_only_fixed_guard_operations(self):
+        body = (
+            FRAG_DIR / "systemd/35-sudoers-passwordless-safe-upgrade-firmware-operati.sh"
+        ).read_text(encoding="utf-8")
+        for operation in (
+            "status",
+            "switch-latest",
+            "switch-testing",
+            "switch-latest-cachy",
+            "switch-testing-cachy",
+        ):
+            self.assertIn(f"/usr/bin/kyth-bootc-guard {operation}", body)
+        self.assertNotIn("NOPASSWD: /usr/bin/bootc", body)
+        self.assertFalse((ROOT / "build_files/kyth-bootc-sudo").exists())
+        self.assertFalse((ROOT / "build_files/kyth-sched-sudo").exists())
+
+    def test_upgrade_sudoers_never_grants_podman(self):
+        fragment = (
+            FRAG_DIR / "systemd/35-sudoers-passwordless-safe-upgrade-firmware-operati.sh"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("NOPASSWD: /usr/bin/podman", fragment)
+
+    def test_passwordless_sudo_rules_do_not_use_argument_globs(self):
+        for path in (ROOT / "build_files").rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except UnicodeDecodeError:
+                continue
+            for line in lines:
+                if "NOPASSWD:" in line:
+                    with self.subTest(path=path.relative_to(ROOT), line=line):
+                        self.assertNotIn("*", line)
 
     def test_firstboot_missing_apps_is_a_successful_status(self):
         body = (ROOT / "build_files" / "kyth-firstboot-app-status").read_text(

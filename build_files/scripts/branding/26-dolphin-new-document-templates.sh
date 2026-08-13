@@ -22,8 +22,6 @@ install -m 0644 /ctx/kyth-proton-cachyos-update.timer /usr/lib/systemd/system/ky
 
 install -m 0644 /ctx/kyth-flathub-setup.service /usr/lib/systemd/system/kyth-flathub-setup.service
 install -m 0644 /ctx/kyth-default-flatpaks.service /usr/lib/systemd/system/kyth-default-flatpaks.service
-install -m 0440 /ctx/kyth-bootc-sudo /etc/sudoers.d/kyth-bootc
-install -m 0440 /ctx/kyth-sched-sudo /etc/sudoers.d/kyth-sched
 install -m 0755 /ctx/kyth-hw-setup /usr/bin/kyth-hw-setup
 install -m 0644 /ctx/kyth-hw-setup.service /usr/lib/systemd/system/kyth-hw-setup.service
 install -Dm 0644 /ctx/config/hardware-profiles.toml /usr/share/kyth/hardware-profiles.toml

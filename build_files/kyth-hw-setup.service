@@ -11,6 +11,14 @@ ExecStart=/usr/bin/kyth-hw-setup
 RemainAfterExit=yes
 StandardOutput=journal
 StandardError=journal
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectClock=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
 
 [Install]
 WantedBy=multi-user.target

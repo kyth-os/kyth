@@ -6,6 +6,8 @@ ConditionACPower=true
 
 [Service]
 Type=oneshot
+StateDirectory=kyth/duperemove
+StateDirectoryMode=0700
 ExecCondition=/usr/libexec/kyth-storage-gate
 ExecStart=/usr/bin/kyth-duperemove
 Nice=19

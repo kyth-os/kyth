@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# KythOS passwordless bootc gateway.
+#
+# Only fixed release channels are exposed here. Arbitrary rebases deliberately
+# continue to invoke bootc directly and therefore require normal authentication.
+set -euo pipefail
+
+[[ $# -eq 1 ]] || {
+    echo "Usage: kyth-bootc-guard <status|switch-latest|switch-testing|switch-latest-cachy|switch-testing-cachy>" >&2
+    exit 2
+}
+
+case "$1" in
+    status)
+        exec /usr/bin/bootc status
+        ;;
+    switch-latest)
+        ref="ghcr.io/mrtrick37/kyth:latest"
+        ;;
+    switch-testing)
+        ref="ghcr.io/mrtrick37/kyth:testing"
+        ;;
+    switch-latest-cachy)
+        ref="ghcr.io/mrtrick37/kyth:latest-cachy"
+        ;;
+    switch-testing-cachy)
+        ref="ghcr.io/mrtrick37/kyth:testing-cachy"
+        ;;
+    *)
+        echo "kyth-bootc-guard: unsupported operation: $1" >&2
+        exit 2
+        ;;
+esac
+
+exec /usr/bin/bootc switch "${ref}"

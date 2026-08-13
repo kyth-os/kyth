@@ -289,7 +289,7 @@ class VpnPage(Page):
             )
             return
         self._saml_pending = True
-        dlg = SamlBrowserDialog(saml_url, self)
+        dlg = SamlBrowserDialog(saml_url, self._saml_gateway, self)
         dlg.cookie_ready.connect(self._on_saml_cookie)
         dlg.rejected.connect(self._on_saml_cancelled)
         dlg.exec()

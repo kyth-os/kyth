@@ -13,6 +13,17 @@ StandardError=journal
 SyslogIdentifier=kyth-update-watcher
 # Runs as root; bootc upgrade requires it
 User=root
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
 
 # Give the upgrade plenty of time (large container layers on slow connections)
 TimeoutStartSec=2400

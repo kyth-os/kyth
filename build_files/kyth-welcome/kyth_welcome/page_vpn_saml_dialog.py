@@ -60,7 +60,7 @@ if _WEBENGINE_AVAILABLE:
     class SamlBrowserDialog(QDialog):
         cookie_ready = Signal(str)
 
-        def __init__(self, saml_url: str, parent=None):
+        def __init__(self, saml_url: str, expected_gateway: str, parent=None):
             super().__init__(parent)
             self.setWindowTitle("VPN — SAML Authentication")
             self.resize(960, 720)
@@ -68,6 +68,7 @@ if _WEBENGINE_AVAILABLE:
             self.setModal(True)
             self.setObjectName("saml-dialog")
             self._done = False
+            self._expected_gateway = expected_gateway
             self._all_cookies: dict[str, str] = {}
 
             layout = QVBoxLayout(self)
@@ -419,7 +420,9 @@ if _WEBENGINE_AVAILABLE:
             print("[SAML dbg] captured SAML ACS form; replaying to read GP headers")
             self._status_msg.setText("Completing VPN handoff")
             try:
-                cookie_str = replay_saml_acs(action_url, body)
+                cookie_str = replay_saml_acs(
+                    action_url, body, self._expected_gateway
+                )
             except Exception as exc:
                 print(f"[SAML dbg] ACS replay failed: {exc}")
                 self._info.setText("Could not replay the SAML response to the VPN portal.")

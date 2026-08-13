@@ -74,6 +74,12 @@ class PrivilegedGateway:
 
 
 _SAFE_IMAGE_REF_RE = re.compile(r"^[A-Za-z0-9._/@:+-]+$")
+_PASSWORDLESS_KYTH_REFS = {
+    "ghcr.io/mrtrick37/kyth:latest": "switch-latest",
+    "ghcr.io/mrtrick37/kyth:testing": "switch-testing",
+    "ghcr.io/mrtrick37/kyth:latest-cachy": "switch-latest-cachy",
+    "ghcr.io/mrtrick37/kyth:testing-cachy": "switch-testing-cachy",
+}
 _SAFE_GATEWAY_RE = re.compile(r"^[A-Za-z0-9._:/?&=%+@\[\]-]+$")
 _SAFE_SCHEDULER_RE = re.compile(r"^scx_[A-Za-z0-9_-]+$")
 _SAFE_SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@\\-]+\.(?:service|timer|mount)$")
@@ -112,7 +118,11 @@ def bootc_action(action: str, image_ref: str | None = None) -> PrivilegedAction:
     if action == "switch":
         if not image_ref or not _SAFE_IMAGE_REF_RE.fullmatch(image_ref):
             raise PrivilegedActionError("bootc switch requires a safe image reference")
-        args.append(image_ref)
+        guarded_operation = _PASSWORDLESS_KYTH_REFS.get(image_ref)
+        if guarded_operation:
+            args = ["/usr/bin/kyth-bootc-guard", guarded_operation]
+        else:
+            args.append(image_ref)
     elif image_ref is not None:
         raise PrivilegedActionError(f"bootc {action} does not accept an image reference")
     return PrivilegedAction(
@@ -214,7 +224,7 @@ def openconnect_action(
     if usergroup:
         args += ["--usergroup", usergroup]
     if cookie:
-        args += ["--cookie", cookie]
+        args.append("--cookie-on-stdin")
     if username:
         args += ["--user", username]
     args.append(gateway)
@@ -223,7 +233,6 @@ def openconnect_action(
         argv=tuple(args),
         timeout=300,
         environment=EnvironmentPolicy.DESKTOP,
-        sensitive_options=("--cookie",),
     )
 
 

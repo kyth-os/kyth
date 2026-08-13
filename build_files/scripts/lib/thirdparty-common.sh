@@ -21,6 +21,54 @@ require_release_tag() {
 	fi
 }
 
+# Extract a tar archive into a new, empty staging directory using Python's
+# security filter. The filter rejects traversal, absolute paths, device nodes,
+# unsafe links and dangerous modes before any member is written.
+safe_extract_tar() {
+	local archive=$1 destination=$2
+	python3 - "${archive}" "${destination}" <<'PY'
+import os
+import sys
+import tarfile
+from pathlib import Path, PurePosixPath
+
+archive = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+max_members = 100_000
+max_unpacked_bytes = 16 * 1024 * 1024 * 1024
+
+if not archive.is_file():
+    raise SystemExit(f"ERROR: Archive does not exist: {archive}")
+destination.mkdir(parents=True, exist_ok=False)
+
+with tarfile.open(archive, "r:*") as bundle:
+    seen: set[str] = set()
+    total_size = 0
+    filtered = []
+    for member_number, member in enumerate(bundle, 1):
+        if member_number > max_members:
+            raise SystemExit("ERROR: Archive contains too many entries")
+        path = PurePosixPath(member.name)
+        normalized = str(path)
+        if normalized in seen:
+            raise SystemExit(f"ERROR: Archive contains duplicate path: {normalized}")
+        seen.add(normalized)
+        if member.isfile():
+            total_size += member.size
+            if total_size > max_unpacked_bytes:
+                raise SystemExit("ERROR: Archive exceeds the unpacked-size limit")
+        try:
+            safe_member = tarfile.data_filter(member, os.fspath(destination))
+        except (tarfile.FilterError, OSError, ValueError) as exc:
+            raise SystemExit(f"ERROR: Unsafe archive member {member.name!r}: {exc}") from exc
+        if safe_member is None:
+            raise SystemExit(f"ERROR: Archive member was rejected: {member.name!r}")
+        filtered.append(safe_member)
+
+    bundle.extractall(destination, members=filtered, filter="fully_trusted")
+PY
+}
+
 # verify_release_asset RELEASE_JSON TARBALL_PATH TARBALL_NAME TMPDIR
 verify_release_asset() {
 	local release_json=$1
@@ -28,7 +76,7 @@ verify_release_asset() {
 	local tarball_name=$3
 	local tmpdir=$4
 
-	local checksum_url="" algo=""
+	local checksum_url="" algo="" checksum_is_sidecar=0
 	local expected_hash=""
 
 	local asset_digest=""
@@ -62,7 +110,8 @@ PY
 			expected_hash=""
 		fi
 
-		if [[ -n "${algo}" && -n "${expected_hash}" ]]; then
+		if [[ "${algo}" == "sha256" && "${expected_hash}" =~ ^[0-9a-fA-F]{64}$ ]] ||
+			[[ "${algo}" == "sha512" && "${expected_hash}" =~ ^[0-9a-fA-F]{128}$ ]]; then
 			local actual_hash=""
 			case "${algo}" in
 			sha256) actual_hash=$(sha256sum "${tarball_path}" | awk '{print $1}') ;;
@@ -94,6 +143,7 @@ PY
 			grep -F "${tarball_name}.${ext}" | head -n1 || true)
 		if [[ -n "${candidate}" ]]; then
 			checksum_url="${candidate}"
+			checksum_is_sidecar=1
 			case "${ext,,}" in
 			*512*) algo="sha512" ;;
 			*) algo="sha256" ;;
@@ -133,16 +183,37 @@ PY
 		exit 1
 	fi
 
-	expected_hash=$(grep -F "${tarball_name}" "${checksum_file_path}" |
-		awk '{print $1}' | head -n1 || true)
-	if [[ -z "${expected_hash}" ]]; then
-		expected_hash=$(awk '{print $1}' "${checksum_file_path}" | head -n1 || true)
-	fi
+	expected_hash=$(
+		python3 - "${checksum_file_path}" "${tarball_name}" "${algo}" "${checksum_is_sidecar}" <<'PY'
+import re
+import sys
 
-	if [[ -z "${expected_hash}" ]]; then
-		echo "ERROR: Could not extract hash for ${tarball_name} from checksum file." >&2
-		exit 1
-	fi
+checksum_path, target, algorithm, sidecar = sys.argv[1:]
+digest_length = {"sha256": 64, "sha512": 128}.get(algorithm)
+if digest_length is None:
+    raise SystemExit(f"ERROR: Unsupported checksum algorithm: {algorithm}")
+
+matches = []
+pattern = re.compile(rf"^([0-9A-Fa-f]{{{digest_length}}})(?:[ \t]+[*]?(.+?))?[ \t]*$")
+with open(checksum_path, "r", encoding="utf-8") as checksum_file:
+    for line_number, raw_line in enumerate(checksum_file, 1):
+        line = raw_line.rstrip("\r\n")
+        if not line:
+            continue
+        match = pattern.fullmatch(line)
+        if not match:
+            raise SystemExit(f"ERROR: Malformed checksum line {line_number}")
+        digest, filename = match.groups()
+        if filename == target or (sidecar == "1" and filename is None):
+            matches.append(digest.lower())
+
+if len(matches) != 1:
+    raise SystemExit(
+        f"ERROR: Expected exactly one checksum entry for {target}, found {len(matches)}"
+    )
+print(matches[0])
+PY
+	)
 
 	local actual_hash=""
 	case "${algo}" in
@@ -150,7 +221,7 @@ PY
 	sha512) actual_hash=$(sha512sum "${tarball_path}" | awk '{print $1}') ;;
 	esac
 
-	if [[ "${actual_hash}" != "${expected_hash}" ]]; then
+	if [[ "${actual_hash,,}" != "${expected_hash,,}" ]]; then
 		echo "ERROR: ${algo^^} mismatch for ${tarball_name}!" >&2
 		echo "  Expected: ${expected_hash}" >&2
 		echo "  Got:      ${actual_hash}" >&2

@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # ── Misc maintenance/utility tools ─────────────────────────────────────────────
 install -m 0755 /ctx/kyth-davinci-install /usr/bin/kyth-davinci-install
-install -m 0755 /ctx/kyth-widevine-install /usr/bin/kyth-widevine-install
+install -m 0755 /ctx/kyth-bootc-guard /usr/bin/kyth-bootc-guard
 install -m 0755 /ctx/kyth-duperemove /usr/bin/kyth-duperemove
 install -m 0755 /ctx/kyth-distrobox-root-launch /usr/bin/kyth-distrobox-root-launch
 install -m 0755 /ctx/kyth-kali-desktop-fixup /usr/bin/kyth-kali-desktop-fixup
@@ -20,4 +20,3 @@ install -m 0644 /ctx/kyth-dynamic-lock.service /usr/lib/systemd/user/kyth-dynami
 install -m 0644 /ctx/kyth-browser-wallet-defaults.service /usr/lib/systemd/user/kyth-browser-wallet-defaults.service
 ln -sf ../kyth-browser-wallet-defaults.service \
 	/usr/lib/systemd/user/default.target.wants/kyth-browser-wallet-defaults.service
-

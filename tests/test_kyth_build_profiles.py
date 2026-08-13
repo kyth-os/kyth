@@ -67,6 +67,18 @@ class BuildProfileTests(unittest.TestCase):
         self.assertIn("/tags/${PROTON_CACHYOS_VER}", proton)
         self.assertIn("PROTON_CACHYOS_VER must be an exact release tag", proton)
 
+    def test_third_party_archives_use_exact_checksums_and_safe_extraction(self):
+        common = _read("build_files/scripts/lib/thirdparty-common.sh")
+        umu = _read("build_files/scripts/thirdparty/umu.sh")
+        proton = _read("build_files/scripts/proton-cachyos.sh")
+
+        self.assertIn("Expected exactly one checksum entry", common)
+        self.assertNotIn("expected_hash=$(awk", common)
+        self.assertIn("tarfile.data_filter", common)
+        for installer in (umu, proton):
+            self.assertIn("safe_extract_tar", installer)
+            self.assertNotRegex(installer, r"\btar\s+-[A-Za-z]*x")
+
     def test_ci_passes_and_records_exact_third_party_versions(self):
         workflow = _read(".github/workflows/build.yml")
         self.assertIn("--build-arg UMU_VERSION=", workflow)

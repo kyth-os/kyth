@@ -22,47 +22,28 @@ LAUNCH_LOG="/tmp/kyth-installer-launch.log"
 export KYTH_SOURCE_IMAGE="${KYTH_SOURCE_IMAGE:-ghcr.io/mrtrick37/kyth:latest}"
 export KYTH_TARGET_IMAGE="${KYTH_TARGET_IMAGE:-${KYTH_SOURCE_IMAGE}}"
 export KYTH_SOURCE_DIGEST="${KYTH_SOURCE_DIGEST:-}"
-export KYTH_INSTALL_SKIP_FETCH_CHECK="${KYTH_INSTALL_SKIP_FETCH_CHECK:-0}"
-
-ENV_ARGS=()
-for key in \
-	DISPLAY \
-	WAYLAND_DISPLAY \
-	XAUTHORITY \
-	XDG_RUNTIME_DIR \
-	DBUS_SESSION_BUS_ADDRESS \
-	XDG_SESSION_TYPE \
-	LIBGL_ALWAYS_SOFTWARE \
-	GALLIUM_DRIVER \
-	MESA_LOADER_DRIVER_OVERRIDE \
-	QT_QUICK_BACKEND \
-	KYTH_SOURCE_IMAGE \
-	KYTH_TARGET_IMAGE \
-	KYTH_SOURCE_DIGEST \
-	KYTH_INSTALL_SKIP_FETCH_CHECK
-do
-	val=${!key-}
-	if [ -n "${val}" ]; then
-		ENV_ARGS+=("${key}=${val}")
-	fi
-done
+# Live installations always perform the fetch/source preflight. Development
+# tests invoke the Python entry point directly when they need to bypass it.
+export KYTH_INSTALL_SKIP_FETCH_CHECK=0
 
 run_logged() {
 	"$@" >> "${LAUNCH_LOG}" 2>&1
 }
 
-if run_logged sudo -n env "${ENV_ARGS[@]}" /usr/bin/kyth-installer "$@"; then
+# sudoers preserves the narrow GUI/image environment above. Only the
+# argument-free graphical launch is passwordless; other modes authenticate.
+if run_logged sudo -n /usr/bin/kyth-installer "$@"; then
 	exit 0
 fi
 
 if command -v pkexec >/dev/null 2>&1; then
-	if run_logged pkexec env "SUDO_USER=$(id -un)" "${ENV_ARGS[@]}" /usr/bin/kyth-installer "$@"; then
+	if run_logged pkexec env "SUDO_USER=$(id -un)" /usr/bin/kyth-installer "$@"; then
 		exit 0
 	fi
 fi
 
 if command -v sudo >/dev/null 2>&1; then
-	if run_logged sudo env "${ENV_ARGS[@]}" /usr/bin/kyth-installer "$@"; then
+	if run_logged sudo /usr/bin/kyth-installer "$@"; then
 		exit 0
 	fi
 fi

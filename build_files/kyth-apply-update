@@ -12,7 +12,7 @@ echo "━━━ KythOS Update ━━━━━━━━━━━━━━━━�
 echo ""
 
 # Show current image so the user knows what they're running.
-if CURRENT=$(sudo -n bootc status 2>/dev/null | grep -E "^\s*(Image|Digest|Timestamp)" | head -6); then
+if CURRENT=$(sudo -n /usr/bin/kyth-bootc-guard status 2>/dev/null | grep -E "^\s*(Image|Digest|Timestamp)" | head -6); then
     echo "Current deployment:"
     echo "$CURRENT" | sed 's/^/  /'
     echo ""

@@ -25,8 +25,8 @@ setup-boot-windows-steam:
     rm -f "${tmpscript}"
 
     # Add sudo rule for boot-windows (passwordless reboot + efibootmgr)
-    printf '%%wheel ALL=(root) NOPASSWD: /usr/sbin/efibootmgr -n *, /usr/bin/systemctl reboot\n' \
-        | sudo tee /etc/sudoers.d/kyth-boot-windows >/dev/null
+    printf '%%wheel ALL=(root) NOPASSWD: /usr/sbin/efibootmgr -n %s, /usr/bin/systemctl reboot\n' \
+        "${windows_entry}" | sudo tee /etc/sudoers.d/kyth-boot-windows >/dev/null
     sudo chmod 0440 /etc/sudoers.d/kyth-boot-windows
 
     echo "boot-windows helper installed."

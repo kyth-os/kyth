@@ -171,7 +171,7 @@ switch-channel channel="stable" *args:
     esac
     tag="${base_tag}${suffix}"
     echo "Switching to KythOS :${tag}..."
-    sudo bootc switch "{{ kyth_registry }}/kyth:${tag}"
+    sudo /usr/bin/kyth-bootc-guard "switch-${tag}"
     echo "Channel switch staged. Reboot to activate."
 
 # Compat wrapper for internal tests that call switch-channel-impl
@@ -195,7 +195,7 @@ switch-channel-impl channel="stable":
     esac
     tag="${base_tag}${suffix}"
     echo "Switching to KythOS :${tag}..."
-    sudo bootc switch "{{ kyth_registry }}/kyth:${tag}"
+    sudo /usr/bin/kyth-bootc-guard "switch-${tag}"
     echo "Channel switch staged. Reboot to activate."
 
 # Switch to a kernel-flavored KythOS image.
@@ -220,7 +220,7 @@ switch-kernel flavor="fedora":
             ;;
     esac
 
-    status_text="$(sudo -n bootc status 2>/dev/null || bootc status 2>/dev/null || true)"
+    status_text="$(sudo -n /usr/bin/kyth-bootc-guard status 2>/dev/null || bootc status 2>/dev/null || true)"
     current_ref="$(awk '/Booted image:/ {print $NF; exit}' <<<"${status_text}")"
     current_tag=""
     if [[ "${current_ref}" == {{ kyth_registry }}/kyth:* ]]; then
@@ -239,7 +239,8 @@ switch-kernel flavor="fedora":
     target="{{ kyth_registry }}/kyth:${channel}${suffix}"
     echo "Switching to ${label} kernel image: ${target}"
     echo "This stages a new deployment and keeps rollback available from the boot menu."
-    if ! output="$(sudo bootc switch "${target}" 2>&1)"; then
+    guard_operation="switch-${channel}${suffix}"
+    if ! output="$(sudo /usr/bin/kyth-bootc-guard "${guard_operation}" 2>&1)"; then
         printf '%s\n' "${output}" >&2
         if grep -qi 'manifest unknown' <<<"${output}"; then
             echo "ERROR: ${target} is not published yet." >&2

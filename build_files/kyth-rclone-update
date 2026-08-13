@@ -81,7 +81,7 @@ def main() -> None:
 
         try:
             print("Verifying checksum...")
-            verify_checksum_file(sums_dest, temp_path, "sha256")
+            verify_checksum_file(sums_dest, zip_dest, "sha256")
         except Exception as e:
             print(f"ERROR: Checksum verification failed: {e}", file=sys.stderr)
             sys.exit(1)

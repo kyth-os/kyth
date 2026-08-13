@@ -6,6 +6,22 @@ After=multi-user.target
 Type=simple
 ExecStart=/usr/bin/kyth-batteryd
 Restart=on-failure
+CacheDirectory=kyth
+CacheDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/sys/class/power_supply
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
 
 [Install]
 WantedBy=multi-user.target

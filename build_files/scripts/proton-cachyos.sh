@@ -48,4 +48,7 @@ curl -fsSL "${CURL_COMMON_ARGS[@]}" "${PROTON_CACHYOS_TARBALL_URL}" \
 verify_release_asset "${release_json}" "${TMPDIR_PC}/${PROTON_CACHYOS_TARBALL}" \
 	"${PROTON_CACHYOS_TARBALL}" "${TMPDIR_PC}"
 
-tar -xJf "${TMPDIR_PC}/${PROTON_CACHYOS_TARBALL}" -C /usr/share/steam/compatibilitytools.d/
+PROTON_EXTRACT_DIR="${TMPDIR_PC}/extracted"
+safe_extract_tar "${TMPDIR_PC}/${PROTON_CACHYOS_TARBALL}" "${PROTON_EXTRACT_DIR}"
+cp -a --no-preserve=ownership "${PROTON_EXTRACT_DIR}/." \
+	/usr/share/steam/compatibilitytools.d/

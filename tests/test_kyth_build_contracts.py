@@ -210,6 +210,39 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertIn('kyth-installer = "kyth_installer.app:main"', installer.read_text())
         self.assertIn("/usr/bin/kyth-installer", launcher.read_text())
 
+    def test_live_installer_sudo_is_single_argument_free_entry_point(self):
+        build = (ROOT / "installer/build.sh").read_text(encoding="utf-8")
+        policy = build.split("/etc/sudoers.d/liveuser-live <<'EOF'", 1)[1].split("\nEOF", 1)[0]
+        grants = [line for line in policy.splitlines() if "NOPASSWD:" in line]
+        self.assertEqual(grants, ['liveuser ALL=(root) NOPASSWD: /usr/bin/kyth-installer ""'])
+        for dangerous in ("/usr/bin/cp", "/usr/bin/tee", "/usr/bin/systemctl", "/usr/bin/podman"):
+            self.assertNotIn(dangerous, policy)
+
+        launcher = (BUILD_FILES / "kyth-launch-installer").read_text(encoding="utf-8")
+        self.assertIn('sudo -n /usr/bin/kyth-installer "$@"', launcher)
+        self.assertNotIn("sudo -n env", launcher)
+
+    def test_webengine_no_sandbox_is_scoped_to_live_installer(self):
+        installed_roots = (
+            BUILD_FILES / "kyth_shared/kyth_shared",
+            BUILD_FILES / "kyth-welcome/kyth_welcome",
+        )
+        forbidden = (
+            "QTWEBENGINE_DISABLE_SANDBOX",
+            "QTWEBENGINE_CHROMIUM_FLAGS",
+            "--no-sandbox",
+        )
+        for root in installed_roots:
+            for source in root.rglob("*.py"):
+                body = source.read_text(encoding="utf-8")
+                for setting in forbidden:
+                    self.assertNotIn(setting, body, source)
+
+        live_installer = (
+            BUILD_FILES / "kyth-installer/kyth_installer/app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"--no-sandbox"', live_installer)
+
     def test_installer_web_assets_referenced_by_html_and_server_exist(self):
         webui = BUILD_FILES / "kyth-installer/kyth_installer/webui"
         html = (webui / "index.html").read_text(encoding="utf-8")

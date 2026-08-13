@@ -5,6 +5,18 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
+StateDirectory=kyth/duperemove
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
 ExecCondition=/usr/libexec/kyth-storage-gate
 ExecStart=/usr/bin/kyth-btrfs-maint
 ExecStart=/usr/bin/kyth-duperemove

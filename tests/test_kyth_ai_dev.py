@@ -9,7 +9,14 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
-from kyth_shared.ai_dev import AiDev, Config, DEFAULT_IMAGE, DEFAULT_MODEL, build_parser
+from kyth_shared.ai_dev import (
+    PROVISION_SCRIPT,
+    AiDev,
+    Config,
+    DEFAULT_IMAGE,
+    DEFAULT_MODEL,
+    build_parser,
+)
 
 
 class AiDevTests(unittest.TestCase):
@@ -57,6 +64,9 @@ class AiDevTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "distrobox is not installed"):
             app.require_distrobox()
+
+    def test_antigravity_is_not_preinstalled_or_exported(self) -> None:
+        self.assertNotIn("antigravity", PROVISION_SCRIPT.lower())
 
 
 if __name__ == "__main__":

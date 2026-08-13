@@ -205,8 +205,9 @@ class _HealthMixin:
             from kyth_shared.diagnostics_scrub import scrub_logs as _scrub
 
             report = _scrub(report)
-        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
-            pass
+        except Exception:
+            self._set_status("err", "Privacy scrub failed; the issue was not opened.")
+            return
         report_dir = os.path.expanduser("~/.local/state/kyth")
         body_path = os.path.join(report_dir, f"health-report-issue-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md")
         body = (

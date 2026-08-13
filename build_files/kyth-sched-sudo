@@ -1,4 +1,0 @@
-# KythOS sched-ext profile switcher — passwordless scheduler change for wheel users.
-# kyth-sched (user daemon) calls: sudo -n /usr/bin/kyth-scx set <scheduler>
-# This rule allows that without a password prompt.
-%wheel ALL=(root) NOPASSWD: /usr/bin/kyth-scx set *

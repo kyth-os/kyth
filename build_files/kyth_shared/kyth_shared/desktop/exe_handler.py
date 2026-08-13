@@ -198,8 +198,6 @@ class _InstallerDialog(QDialog):
 
 def run_exe_handler(argv: list[str]) -> int:
     """Main execution handler logic for CLI or Dolphin invocation."""
-    os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
-
     force_dialog = "--dialog" in argv[1:]
     args = [a for a in argv[1:] if a != "--dialog"]
     if not args:

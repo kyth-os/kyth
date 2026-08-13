@@ -24,13 +24,12 @@ set -euo pipefail
 sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc || true
 printf "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc\n" | sudo tee /etc/yum.repos.d/vscode.repo >/dev/null
 printf "[azure-cli]\nname=Azure CLI\nbaseurl=https://packages.microsoft.com/yumrepos/azure-cli\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc\n" | sudo tee /etc/yum.repos.d/azure-cli.repo >/dev/null
-printf "[antigravity-rpm]\nname=Antigravity RPM Repository\nbaseurl=https://us-central1-yum.pkg.dev/projects/antigravity-auto-updater-dev/antigravity-rpm\nenabled=1\ngpgcheck=0\nrepo_gpgcheck=0\n" | sudo tee /etc/yum.repos.d/antigravity.repo >/dev/null
 packages=(
   git git-lfs curl wget jq yq make cmake gcc gcc-c++
   python3 python3-pip python3-virtualenv python3-devel
   nodejs npm rust cargo golang podman skopeo podman-compose
   vulkan-tools clinfo ollama llama.cpp helix zellij shellcheck shfmt
-  ripgrep fd-find fzf code antigravity azure-cli gh
+  ripgrep fd-find fzf code azure-cli gh
   flatpak-builder rclone duperemove trivy bat eza fastfetch zoxide
   evtest lm_sensors i2c-tools v4l-utils hyperfine tmux starship direnv git-delta gum p7zip p7zip-plugins cabextract libpst
 )
@@ -52,8 +51,7 @@ else
 fi
 echo "Exporting applications and CLI wrappers to host..."
 distrobox-export --app code || true
-distrobox-export --app antigravity || true
-for binary in code antigravity az node npm npx hx zellij shellcheck shfmt gh flatpak-builder rclone duperemove trivy zizmor bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux pipx uv starship direnv delta gum 7z 7za cabextract readpst; do
+for binary in code az node npm npx hx zellij shellcheck shfmt gh flatpak-builder rclone duperemove trivy zizmor bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux pipx uv starship direnv delta gum 7z 7za cabextract readpst; do
   path="$(command -v "$binary" 2>/dev/null || true)"
   [[ -n "$path" ]] && distrobox-export --bin "$path" --export-path ~/.local/bin || true
 done
@@ -169,7 +167,7 @@ class AiDev:
         print(f"Installing developer & AI tools in {self.config.box}...")
         self.inside("bash", "-lc", PROVISION_SCRIPT)
         print(f"\nDeveloper & AI environment ({self.config.box}) is ready.")
-        print("Exported to host: VS Code, Antigravity, Node.js, Azure CLI, GitHub CLI, "
+        print("Exported to host: VS Code, Node.js, Azure CLI, GitHub CLI, "
               "Claude Code, Codex CLI, Helix, Zellij, ShellCheck, shfmt.")
         print("Optional Distrobox tools in the shared user PATH: Headroom and RTK.")
         print(f"Enter environment manually with: distrobox enter {self.config.box}")
@@ -184,8 +182,8 @@ class AiDev:
             return
         print("Box: present")
         labels = {
-            "code": "VS Code", "antigravity": "Google Antigravity IDE",
-            "node": "Node.js", "headroom": "Headroom CLI", "rtk": "RTK CLI",
+            "code": "VS Code", "node": "Node.js",
+            "headroom": "Headroom CLI", "rtk": "RTK CLI",
             "hx": "Helix Editor",
             "zellij": "Zellij Multiplexer", "gh": "GitHub CLI",
             "flatpak-builder": "Flatpak Builder", "rclone": "RClone Cloud Sync",

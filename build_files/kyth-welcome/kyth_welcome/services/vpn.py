@@ -8,8 +8,8 @@ import configparser
 import os
 import re
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .privileged import openconnect_action
 
@@ -32,6 +32,50 @@ _GP_SAML_FIELDS = frozenset({
     "cas",
     "prelogin-cookie",
 })
+_SAML_ACS_PATH = "/SAML20/SP/ACS"
+_MAX_SAML_FORM_BYTES = 2 * 1024 * 1024
+_MAX_SAML_RESPONSE_BYTES = 2 * 1024 * 1024
+
+
+def _https_origin(url: str, *, bare_host: bool = False) -> tuple[str, int]:
+    candidate = f"https://{url}" if bare_host and "://" not in url else url
+    parsed = urlsplit(candidate)
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValueError("SAML ACS destination must use HTTPS")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("SAML ACS destination must not contain credentials")
+    try:
+        port = parsed.port or 443
+    except ValueError as exc:
+        raise ValueError("SAML ACS destination has an invalid port") from exc
+    try:
+        hostname = parsed.hostname.rstrip(".").encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise ValueError("SAML ACS destination has an invalid hostname") from exc
+    return hostname, port
+
+
+def validate_saml_acs_url(action_url: str, expected_gateway: str) -> str:
+    """Return a validated ACS URL bound to the configured VPN gateway origin."""
+    parsed = urlsplit(action_url)
+    if parsed.fragment:
+        raise ValueError("SAML ACS destination must not contain a fragment")
+    if parsed.path.rstrip("/") != _SAML_ACS_PATH:
+        raise ValueError("SAML ACS destination has an unexpected path")
+    if _https_origin(action_url) != _https_origin(expected_gateway, bare_host=True):
+        raise ValueError("SAML ACS destination does not match the VPN gateway")
+    return action_url
+
+
+class _SameOriginRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, expected_gateway: str) -> None:
+        super().__init__()
+        self._origin = _https_origin(expected_gateway, bare_host=True)
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if _https_origin(newurl) != self._origin:
+            raise ValueError("SAML ACS redirect left the VPN gateway origin")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def load_vpn_config() -> dict:
@@ -180,9 +224,8 @@ def build_saml_reconnect_command(
 ) -> tuple[list[str], str, str]:
     """Build the authenticated reconnect and return command/stdin/username."""
     field, value, saml_username = parse_gp_saml_cookie(cookie)
-    stdin_text = ""
-    if protocol == "gp" and field and value:
-        stdin_text = value
+    password_stdin = protocol == "gp" and bool(field and value)
+    stdin_text = value if password_stdin else cookie
     username = saml_username or configured_username
     command = openconnect_action(
         gateway=gateway,
@@ -190,8 +233,8 @@ def build_saml_reconnect_command(
         os_emulation=os_emul,
         username=username,
         usergroup=f"{interface}:{field}" if protocol == "gp" and field and value else "",
-        password_stdin=bool(stdin_text),
-        cookie="" if stdin_text else cookie,
+        password_stdin=password_stdin,
+        cookie="" if password_stdin else cookie,
     ).command()
     return command, stdin_text, username
 
@@ -240,19 +283,29 @@ def parse_saml_acs_response(headers: dict[str, str], body_text: str) -> str | No
     return None
 
 
-def replay_saml_acs(action_url: str, body: str) -> str | None:
+def replay_saml_acs(action_url: str, body: str, expected_gateway: str) -> str | None:
     """Replays the SAML ACS response to the VPN portal and returns the cookie string if found."""
+    action_url = validate_saml_acs_url(action_url, expected_gateway)
+    encoded_body = body.encode("utf-8")
+    if len(encoded_body) > _MAX_SAML_FORM_BYTES:
+        raise ValueError("SAML ACS form is too large")
+    if not parse_qs(body, keep_blank_values=True).get("SAMLResponse"):
+        raise ValueError("SAML ACS form does not contain SAMLResponse")
     req = Request(
         action_url,
-        data=body.encode("utf-8"),
+        data=encoded_body,
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "PAN GlobalProtect",
         },
         method="POST",
     )
-    with urlopen(req, timeout=30) as resp:
+    opener = build_opener(_SameOriginRedirectHandler(expected_gateway))
+    with opener.open(req, timeout=30) as resp:
         headers = {k.lower(): v for k, v in resp.headers.items()}
-        text = resp.read().decode("utf-8", errors="replace")
+        response_body = resp.read(_MAX_SAML_RESPONSE_BYTES + 1)
+        if len(response_body) > _MAX_SAML_RESPONSE_BYTES:
+            raise ValueError("SAML ACS response is too large")
+        text = response_body.decode("utf-8", errors="replace")
 
     return parse_saml_acs_response(headers, text)

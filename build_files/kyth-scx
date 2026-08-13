@@ -67,6 +67,7 @@ case "$cmd" in
         ;;
     set)
         need_root "$@"
+        [[ $# -eq 2 ]] || { usage >&2; exit 2; }
         scheduler="${2:-}"
         [[ -n "$scheduler" ]] || { usage >&2; exit 1; }
         scheduler="$(normalise_scheduler "$scheduler")"
@@ -84,11 +85,13 @@ case "$cmd" in
         ;;
     restart)
         need_root "$@"
+        [[ $# -eq 1 ]] || { usage >&2; exit 2; }
         systemctl restart "$SERVICE"
         echo "Restarted ${SERVICE}."
         ;;
     stop)
         need_root "$@"
+        [[ $# -eq 1 ]] || { usage >&2; exit 2; }
         systemctl disable --now "$SERVICE"
         rm -f "$CONFIG_FILE"
         echo "Stopped sched-ext loader. Kernel default scheduler is active."

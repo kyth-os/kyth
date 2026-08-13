@@ -40,6 +40,12 @@ class PrivilegedActionTests(unittest.TestCase):
         with self.assertRaises(PrivilegedActionError):
             bootc_action("install")
 
+    def test_known_kyth_channels_use_fixed_bootc_guard_operations(self):
+        self.assertEqual(
+            bootc_action("switch", "ghcr.io/mrtrick37/kyth:testing-cachy").command(),
+            ["sudo", "-A", "/usr/bin/kyth-bootc-guard", "switch-testing-cachy"],
+        )
+
     def test_systemctl_policy_is_allowlisted(self):
         action = systemctl_action(
             "enable", "kyth-update-watcher.timer", now=True,
@@ -104,7 +110,7 @@ class PrivilegedActionTests(unittest.TestCase):
         self.assertFalse(kwargs["shell"])
         self.assertEqual(kwargs["timeout"], 300)
 
-    def test_gateway_redacts_vpn_cookie_from_audit_log(self):
+    def test_gateway_keeps_vpn_cookie_out_of_argv_and_audit_log(self):
         audit = []
         action = openconnect_action(
             gateway="vpn.example",
@@ -119,7 +125,8 @@ class PrivilegedActionTests(unittest.TestCase):
         gateway.spawn(action)
 
         self.assertNotIn("secret-cookie", audit[0])
-        self.assertIn("<redacted>", audit[0])
+        self.assertNotIn("secret-cookie", action.command())
+        self.assertIn("--cookie-on-stdin", action.command())
 
     def test_sanitized_environment_keeps_only_runtime_context(self):
         self.assertEqual(

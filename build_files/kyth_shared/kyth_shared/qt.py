@@ -6,8 +6,6 @@ allowing applications to remain binding-agnostic.
 
 # pylint: disable=unused-import
 
-import os
-
 __all__ = [
     "QT_BINDING",
     "QApplication", "QMainWindow", "QWidget", "QVBoxLayout", "QHBoxLayout",
@@ -26,10 +24,6 @@ __all__ = [
     "_WEBENGINE_AVAILABLE",
     "single_shot",
 ]
-
-# Must be set before any Qt WebEngine module is imported or initialized.
-os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
-os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox --disable-dev-shm-usage")
 
 try:
     from PySide6.QtWidgets import (

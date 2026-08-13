@@ -4,7 +4,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
@@ -23,6 +23,7 @@ from kyth_welcome.services.vpn import (  # noqa: E402
     vpn_status_view,
     parse_saml_acs_response,
     replay_saml_acs,
+    validate_saml_acs_url,
 )
 
 
@@ -118,6 +119,15 @@ class VpnParserTests(unittest.TestCase):
         self.assertEqual(username, "saml-user")
         self.assertEqual(command[-3:], ["--user", "saml-user", "vpn.example"])
 
+    def test_saml_cookie_is_sent_only_on_stdin(self):
+        cookie = "opaque-cookie-secret"
+        command, stdin_text, _username = build_saml_reconnect_command(
+            "vpn.example", "anyconnect", "linux", "gateway", cookie,
+        )
+        self.assertIn("--cookie-on-stdin", command)
+        self.assertNotIn(cookie, command)
+        self.assertEqual(stdin_text, cookie)
+
     def test_gateway_probe_targets_gateway_usergroup(self):
         command = build_gateway_probe_command(
             "vpn.example", "gp", "win", "alice"
@@ -147,15 +157,49 @@ class VpnParserTests(unittest.TestCase):
         res = parse_saml_acs_response({}, "invalid body")
         self.assertIsNone(res)
 
-    @patch("kyth_welcome.services.vpn.urlopen")
-    def test_replay_saml_acs_network(self, mock_urlopen):
+    def test_saml_acs_url_is_bound_to_configured_https_gateway(self):
+        valid = "https://vpn.example/SAML20/SP/ACS"
+        self.assertEqual(validate_saml_acs_url(valid, "vpn.example"), valid)
+        self.assertEqual(validate_saml_acs_url(valid, "https://vpn.example"), valid)
+        for invalid in (
+            "http://vpn.example/SAML20/SP/ACS",
+            "https://evil.example/SAML20/SP/ACS",
+            "https://vpn.example.evil/SAML20/SP/ACS",
+            "https://vpn.example/other/SAML20/SP/ACS",
+            "https://user:pass@vpn.example/SAML20/SP/ACS",
+            "https://vpn.example/SAML20/SP/ACS#secret",
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                validate_saml_acs_url(invalid, "vpn.example")
+
+    @patch("kyth_welcome.services.vpn.build_opener")
+    def test_replay_saml_acs_network(self, mock_build_opener):
         # Setup mock response
-        mock_resp = mock_urlopen.return_value.__enter__.return_value
+        mock_resp = Mock()
+        mock_build_opener.return_value.open.return_value.__enter__.return_value = mock_resp
         mock_resp.headers = {"preloginuserauthcookie": "token789", "saml-username": "user789"}
         mock_resp.read.return_value = b""
 
-        res = replay_saml_acs("https://vpn.example", "body")
+        res = replay_saml_acs(
+            "https://vpn.example/SAML20/SP/ACS",
+            "SAMLResponse=body",
+            "vpn.example",
+        )
         self.assertEqual(res, "preloginuserauthcookie=token789&saml-username=user789")
+
+    @patch("kyth_welcome.services.vpn.build_opener")
+    def test_replay_saml_acs_rejects_untrusted_or_oversized_input(self, mock_build_opener):
+        with self.assertRaises(ValueError):
+            replay_saml_acs(
+                "https://localhost/SAML20/SP/ACS",
+                "SAMLResponse=body",
+                "vpn.example",
+            )
+        with self.assertRaises(ValueError):
+            replay_saml_acs(
+                "https://vpn.example/SAML20/SP/ACS", "RelayState=only", "vpn.example"
+            )
+        mock_build_opener.assert_not_called()
 
 
 class VpnConfigTests(unittest.TestCase):
