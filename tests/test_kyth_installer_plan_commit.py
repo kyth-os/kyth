@@ -304,6 +304,18 @@ class PlanCommitTests(unittest.TestCase):
                 ),
             )
 
+    def test_guided_preparation_revalidates_before_target_mutation(self):
+        validate = mock.Mock()
+        prepare = mock.Mock(return_value=("/dev/sda", "/dev/sda3"))
+        result = plan_commit.prepare_guided_install_plan(
+            {"install_mode": "free_space"}, mock.Mock(),
+            validate_target=validate, prepare_target=prepare,
+        )
+        self.assertEqual(result.mode, "alongside")
+        self.assertEqual(result.target_partition, "/dev/sda3")
+        validate.assert_called_once()
+        prepare.assert_called_once()
+
     def test_plan_dispatch_stops_on_report_error(self):
         with self.assertRaisesRegex(RuntimeError, "unsafe layout"):
             plan_commit.prepare_install_plan(

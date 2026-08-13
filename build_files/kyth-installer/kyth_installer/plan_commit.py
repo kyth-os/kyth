@@ -306,6 +306,16 @@ def prepare_explicit_install_plan(
 __all__.append("prepare_explicit_install_plan")
 
 
+def prepare_guided_install_plan(state, log, *, validate_target, prepare_target) -> InstallPlan:
+    """Revalidate and convert a guided target into the alongside execution mode."""
+    validate_target(state)
+    disk, target_partition = prepare_target(state, log)
+    return InstallPlan("alongside", disk=disk, target_partition=target_partition)
+
+
+__all__.append("prepare_guided_install_plan")
+
+
 def prepare_install_plan(
     state,
     log,

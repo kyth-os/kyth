@@ -144,25 +144,25 @@ from .plan_validate import (  # canonical (plan.py 788 → split)
     validate_resize_ntfs_target as _pv_validate_resize_ntfs_target,
 )
 
-def _validation_dependencies() -> ValidationDependencies:
-    """Bind validation to this module's stable, patchable public boundary."""
-    return ValidationDependencies(
-        parent_disk=_parent_disk,
-        list_partitions=list_partitions,
-        probe_storage=_probe_storage,
-        get_journal=partition_ops.get_journal,
-    )
-
 def _validate_install_target(*args, **kwargs):
-    kwargs.setdefault("dependencies", _validation_dependencies())
+    kwargs.setdefault("dependencies", ValidationDependencies(
+        parent_disk=_parent_disk, list_partitions=list_partitions,
+        probe_storage=_probe_storage, get_journal=partition_ops.get_journal,
+    ))
     return _pv_validate_install_target(*args, **kwargs)
 
 def _validate_efi_target(*args, **kwargs):
-    kwargs.setdefault("dependencies", _validation_dependencies())
+    kwargs.setdefault("dependencies", ValidationDependencies(
+        parent_disk=_parent_disk, list_partitions=list_partitions,
+        probe_storage=_probe_storage, get_journal=partition_ops.get_journal,
+    ))
     return _pv_validate_efi_target(*args, **kwargs)
 
 def _validate_partition_target(*args, **kwargs):
-    kwargs.setdefault("dependencies", _validation_dependencies())
+    kwargs.setdefault("dependencies", ValidationDependencies(
+        parent_disk=_parent_disk, list_partitions=list_partitions,
+        probe_storage=_probe_storage, get_journal=partition_ops.get_journal,
+    ))
     return _pv_validate_partition_target(*args, **kwargs)
 
 def _is_gpt_disk(disk: str) -> bool:
@@ -245,15 +245,6 @@ def _commit_new_kythos_partition(
         restored_message=restored_message,
     )
 
-def _guided_validation_dependencies() -> GuidedValidationDependencies:
-    """Bind guided validation to the facade's patchable storage helpers."""
-    return GuidedValidationDependencies(
-        probe_storage=_probe_storage,
-        parent_disk=_parent_disk,
-        partition_size=_partition_size_bytes,
-    )
-
-
 def _validate_resize_ntfs_target(
     config: dict,
     snapshot: StorageSnapshot | None = None,
@@ -261,7 +252,10 @@ def _validate_resize_ntfs_target(
     return _pv_validate_resize_ntfs_target(
         config,
         snapshot=snapshot,
-        dependencies=_guided_validation_dependencies(),
+        dependencies=GuidedValidationDependencies(
+            probe_storage=_probe_storage, parent_disk=_parent_disk,
+            partition_size=_partition_size_bytes,
+        ),
     )
 
 
@@ -313,7 +307,10 @@ def _validate_free_space_target(
     return _pv_validate_free_space_target(
         config,
         snapshot=snapshot,
-        dependencies=_guided_validation_dependencies(),
+        dependencies=GuidedValidationDependencies(
+            probe_storage=_probe_storage, parent_disk=_parent_disk,
+            partition_size=_partition_size_bytes,
+        ),
     )
 
 
@@ -326,14 +323,16 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
     )
 
 def _prepare_ntfs_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
-    _validate_resize_ntfs_target(state)
-    disk, target_partition = _prepare_ntfs_resize_target(state, log)
-    return InstallPlan("alongside", disk=disk, target_partition=target_partition)
+    return _plan_commit.prepare_guided_install_plan(
+        state, log, validate_target=_validate_resize_ntfs_target,
+        prepare_target=_prepare_ntfs_resize_target,
+    )
 
 def _prepare_free_space_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
-    _validate_free_space_target(state)
-    disk, target_partition = _prepare_free_space_target(state, log)
-    return InstallPlan("alongside", disk=disk, target_partition=target_partition)
+    return _plan_commit.prepare_guided_install_plan(
+        state, log, validate_target=_validate_free_space_target,
+        prepare_target=_prepare_free_space_target,
+    )
 
 def _prepare_explicit_install_plan(
     plan: InstallPlan,
@@ -344,17 +343,6 @@ def _prepare_explicit_install_plan(
         plan, state, context, validate_target=_validate_install_target,
     )
 
-def _report_dependencies() -> ReportDependencies:
-    return ReportDependencies(
-        as_request=_as_request,
-        normalized_mode=_normalized_install_mode,
-        probe_storage=_probe_storage,
-        validate_install=_validate_install_target,
-        validate_resize=_validate_resize_ntfs_target,
-        validate_free_space=_validate_free_space_target,
-    )
-
-
 def validate_plan_state(
     state: "InstallationState | InstallRequest",
     context=None,
@@ -363,7 +351,12 @@ def validate_plan_state(
 ) -> PlanReport:
     """Return the canonical read-only report through the compatibility facade."""
     return _pv_build_plan_report(
-        state, context, snapshot=snapshot, dependencies=_report_dependencies(),
+        state, context, snapshot=snapshot, dependencies=ReportDependencies(
+            as_request=_as_request, normalized_mode=_normalized_install_mode,
+            probe_storage=_probe_storage, validate_install=_validate_install_target,
+            validate_resize=_validate_resize_ntfs_target,
+            validate_free_space=_validate_free_space_target,
+        ),
     )
 
 
