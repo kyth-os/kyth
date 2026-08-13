@@ -9,23 +9,19 @@ from ..cleanup import clear_secrets_and_orphan_mount
 from ..recovery import cleanup_registered_mounts
 from ..system import _try_stage_mok_enrollment, format_os_error  # pylint: disable=unused-import
 from .common import _push, _record_transaction
+from .compat import phase_dependency
 from .finalize import _configure_installed_system, _handle_install_failure
 from .storage import _prepare_storage_for_plan
 
 def _run_install_worker(
     log, progress, alongside_mount, context: InstallerContext,
 ):
-    # Lazy import to respect tests that patch install.*
-    try:
-        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, require_root, _try_stage_mok_enrollment  # noqa: F811
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import require_root  # fallback
-        from ..system import _try_stage_mok_enrollment  # fallback
-        from ..system import format_install_error  # fallback  # pylint: disable=unused-import  # noqa: F401
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
+    _safe_umount = phase_dependency("_safe_umount")
+    _require_no_symlink = phase_dependency("_require_no_symlink")
+    require_root = phase_dependency("require_root")
+    _try_stage_mok_enrollment = phase_dependency("_try_stage_mok_enrollment")
     # The execution service owns these transitions in production. Keeping the
     # worker independently invokable also supports the partition CLI and
     # focused phase tests without weakening transition validation.
@@ -84,17 +80,8 @@ def _run_install_worker(
         cleanup_registered_mounts(context, run=run_command)
 
 def _run_install(context: InstallerContext) -> None:
-    # Lazy import to respect tests that patch install.*
-    try:
-        from ..install import _as_root, _safe_umount, _require_no_symlink, require_root, _try_stage_mok_enrollment, format_install_error  # noqa: F811
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import  # noqa: F401
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import require_root  # fallback
-        from ..system import _try_stage_mok_enrollment  # fallback
-        from ..system import format_install_error  # fallback  # pylint: disable=unused-import
+    require_root = phase_dependency("require_root")
+    format_install_error = phase_dependency("format_install_error")
     context.events.clear()
 
     def log(msg: str) -> None:

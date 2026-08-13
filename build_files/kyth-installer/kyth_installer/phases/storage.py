@@ -11,6 +11,7 @@ from ..context import InstallerContext, InstallPhase
 from ..plan import ResolvedInstallPlan
 from ..system import unmount_target_disk  # pylint: disable=unused-import
 from .common import _assert_still_on_ac, _disk_image_hold, _push
+from .compat import phase_dependency
 
 def _prepare_storage_for_plan(
     plan: ResolvedInstallPlan,
@@ -19,19 +20,7 @@ def _prepare_storage_for_plan(
     alongside_mount: str,
     context: InstallerContext,
 ):
-    # Lazy import to respect tests that patch install.*
     """Execute storage preparation from a resolved immutable plan."""
-    try:
-        from ..install import _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import  # noqa: F811
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import  # noqa: F401
-        from ..system import _as_root  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import unmount_target_disk  # fallback
-        from ..disk import get_root_partition  # fallback  # pylint: disable=unused-import  # noqa: F401
-        from .bootc_cmd import _run_cmd  # fallback
-        from .bootc_cmd import _build_bootc_install_cmd  # fallback
     return _prepare_install_storage(
         plan.disk,
         plan.mode,
@@ -52,18 +41,6 @@ def _prepare_install_storage(
     target_partition: str | None = None,
     efi_partition: str | None = None,
 ):
-    # Lazy import to respect tests that patch install.*
-    try:
-        from ..install import _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import unmount_target_disk  # fallback
-        from ..disk import get_root_partition  # fallback  # pylint: disable=unused-import
-        from .bootc_cmd import _run_cmd  # fallback
-        from .bootc_cmd import _build_bootc_install_cmd  # fallback
     from ..execution import check_cancelled
 
     check_cancelled(context)
@@ -81,24 +58,17 @@ def _prepare_install_storage(
 
 
 def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerContext) -> None:
-    # Lazy import to respect tests that patch install.*
     """Format `target_part` as btrfs and lay out the @ / @home subvolumes.
 
     Mounts target_part at a private temp root just long enough to create the
     subvolumes and set @ as default; the temp mount must not outlive this
     function regardless of success or failure, hence the finally.
     """
-    try:
-        from ..install import run_command, _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import  # noqa: F811
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import unmount_target_disk  # fallback
-        from ..disk import get_root_partition  # fallback  # pylint: disable=unused-import
-        from .bootc_cmd import _run_cmd  # fallback
-        from .bootc_cmd import _build_bootc_install_cmd  # fallback
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
+    _require_no_symlink = phase_dependency("_require_no_symlink")
+    _safe_umount = phase_dependency("_safe_umount")
+    _run_cmd = phase_dependency("_run_cmd")
     log(f"Formatting {target_part} as btrfs ...")
     _run_cmd(
         ["mkfs.btrfs", "-f", "-L", "KythOS", target_part],
@@ -125,24 +95,14 @@ def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerConte
 
 
 def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerContext) -> None:
-    # Lazy import to respect tests that patch install.*
     """Mount efi_part under alongside_mount/boot/efi.
 
     Bind-mounts from efi_part's current mountpoint when the live session
     already has it mounted (e.g. /boot/efi), rather than mounting the device
     a second time.
     """
-    try:
-        from ..install import run_command, _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import unmount_target_disk  # fallback
-        from ..disk import get_root_partition  # fallback  # pylint: disable=unused-import
-        from .bootc_cmd import _run_cmd  # fallback
-        from .bootc_cmd import _build_bootc_install_cmd  # fallback
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
     efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
     run_command(_as_root(["mkdir", "-p", str(efi_mountpoint)]), check=True)
     context.register_mount(str(efi_mountpoint))
@@ -169,7 +129,6 @@ def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerC
 
 
 def _snapshot_efi_boot_entries(log) -> str:
-    # Lazy import to respect tests that patch install.*
     """Best-effort capture of 'efibootmgr -v' output for later comparison.
 
     Returns "" (never raises) when efibootmgr is unavailable — legacy BIOS
@@ -177,17 +136,8 @@ def _snapshot_efi_boot_entries(log) -> str:
     firmware access — since this is a diagnostic safety net, not a
     requirement the install should ever fail on.
     """
-    try:
-        from ..install import run_command, _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import unmount_target_disk  # fallback
-        from ..disk import get_root_partition  # fallback  # pylint: disable=unused-import
-        from .bootc_cmd import _run_cmd  # fallback
-        from .bootc_cmd import _build_bootc_install_cmd  # fallback
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
     if shutil.which("efibootmgr") is None:
         return ""
     try:
@@ -235,23 +185,17 @@ def _prepare_partition_target_storage(
     target_part, efi_part, alongside_mount, src_ref, tgt_ref, log, progress,
     context: InstallerContext,
 ):
-    # Lazy import to respect tests that patch install.*
     """Storage prep for the alongside/manual install modes: format the
     user-selected target partition as btrfs, lay out @ / @home subvolumes,
     mount it (plus EFI if present) under alongside_mount, then write the OS
     image into that mountpoint via `bootc install to-filesystem`.
     """
-    try:
-        from ..install import run_command, _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, _run_cmd, _build_bootc_install_cmd  # pylint: disable=unused-import
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import unmount_target_disk  # fallback
-        from ..disk import get_root_partition  # fallback  # pylint: disable=unused-import
-        from .bootc_cmd import _run_cmd  # fallback
-        from .bootc_cmd import _build_bootc_install_cmd  # fallback
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
+    _require_no_symlink = phase_dependency("_require_no_symlink")
+    _safe_umount = phase_dependency("_safe_umount")
+    _run_cmd = phase_dependency("_run_cmd")
+    _build_bootc_install_cmd = phase_dependency("_build_bootc_install_cmd")
     log(f"Target partition : {target_part}")
     log(f"EFI partition    : {efi_part or '(none detected)'}")
 
@@ -307,21 +251,13 @@ def _prepare_partition_target_storage(
 
 
 def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_mount, context: InstallerContext):
-    # Lazy import to respect tests that patch install.*
     """Storage prep for the wipe install mode: unmount anything blocking the
     disk, then write the OS image via `bootc install to-disk`.
     """
-    try:
-        from ..install import _as_root, _require_no_symlink, _safe_umount, unmount_target_disk, get_root_partition, _run_cmd, _build_bootc_install_cmd  # noqa: F811
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import unmount_target_disk  # fallback
-        from ..disk import get_root_partition  # fallback  # pylint: disable=unused-import
-        from .bootc_cmd import _run_cmd  # fallback
-        from .bootc_cmd import _build_bootc_install_cmd  # fallback
+    unmount_target_disk = phase_dependency("unmount_target_disk")
+    get_root_partition = phase_dependency("get_root_partition")
+    _run_cmd = phase_dependency("_run_cmd")
+    _build_bootc_install_cmd = phase_dependency("_build_bootc_install_cmd")
     unmount_target_disk(disk, log)
     install_cmd = _build_bootc_install_cmd(
         "to-disk", src_ref, tgt_ref, disk,

@@ -12,27 +12,19 @@ from ..runner import run_command
 from ..system import _as_root, ensure_system_accounts, find_deploy_etc, format_install_error, format_os_error  # pylint: disable=unused-import
 from kyth_shared.accounts import create_installer_user as _shared_create_installer_user
 from .common import _push, _record_transaction
+from .compat import phase_dependency
+from .finalize_identity import configure_hostname_timezone, create_installer_user
 from ..recovery import write_failure_summary
 from ..config import FAILURE_SUMMARY_FILE, LOG_FILE, TRANSACTION_FILE
 
 def _blkid_uuid(part: str, log, *, timeout: float = 5) -> str | None:
-    # Lazy import to respect tests that patch install.*
     """Look up a partition's filesystem UUID via blkid, for building an
     fstab entry. Returns None (after logging a warning) on any failure —
     callers should skip that fstab entry rather than write one with a
     blank UUID. Shared by every fstab-writing path so they see the same
     lookup behavior (same timeout, same failure handling) instead of each
     reimplementing it slightly differently."""
-    try:
-        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import  # noqa: F811
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import ensure_system_accounts  # fallback
-        from ..system import find_deploy_etc  # fallback
-        from ..plan import _get_manual_mounts  # fallback
+    run_command = phase_dependency("run_command")
     try:
         result = run_command(
             ["blkid", "-s", "UUID", "-o", "value", part],
@@ -58,20 +50,11 @@ def _fsck_pass_for(fstype: str) -> int:
 
 
 def _append_fstab_line(etc, fstab_line: str, log, description: str) -> bool:
-    # Lazy import to respect tests that patch install.*
     """Append one line to the target system's fstab. Returns whether it
     succeeded; callers decide whether that's fatal for the mount it was
     building an entry for."""
-    try:
-        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import ensure_system_accounts  # fallback
-        from ..system import find_deploy_etc  # fallback
-        from ..plan import _get_manual_mounts  # fallback
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
     try:
         run_command(
             _as_root(["/usr/bin/tee", "-a", str(Path(etc, "fstab"))]),
@@ -92,19 +75,11 @@ def _append_fstab_line(etc, fstab_line: str, log, description: str) -> bool:
 
 
 def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
-    # Lazy import to respect tests that patch install.*
     """Mount the alongside-install target's @home subvolume under the ostree
     deploy root and wire it into the target system's fstab."""
-    try:
-        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import ensure_system_accounts  # fallback
-        from ..system import find_deploy_etc  # fallback
-        from ..plan import _get_manual_mounts  # fallback
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
+    _safe_umount = phase_dependency("_safe_umount")
     target_home = Path(config_root) / "ostree/deploy/default/var/home"
     run_command(_as_root(["mkdir", "-p", str(target_home)]), check=True)
     _safe_umount(run_command, str(target_home))
@@ -118,19 +93,12 @@ def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
 
 
 def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -> None:
-    # Lazy import to respect tests that patch install.*
     """Mount each manually-configured partition under the ostree deploy root
     and add a matching fstab entry (mapping /home to /var/home)."""
-    try:
-        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import ensure_system_accounts  # fallback
-        from ..system import find_deploy_etc  # fallback
-        from ..plan import _get_manual_mounts  # fallback
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
+    _safe_umount = phase_dependency("_safe_umount")
+    _get_manual_mounts = phase_dependency("_get_manual_mounts")
     manual_mounts = _get_manual_mounts(context)
     for mnt in manual_mounts:
         part = mnt["partition"]
@@ -168,86 +136,16 @@ def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -
 
 
 def _configure_hostname_timezone(etc, state, log) -> None:
-    # Lazy import to respect tests that patch install.*
-    try:
-        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import ensure_system_accounts  # fallback
-        from ..system import find_deploy_etc  # fallback
-        from ..plan import _get_manual_mounts  # fallback
-    hostname_path = str(Path(etc, "hostname"))
-    try:
-        run_command(
-            _as_root(["/usr/bin/tee", hostname_path]),
-            input=f"{state['hostname']}\n", text=True,
-            stdout=subprocess.DEVNULL, check=True,
-        )
-    except OSError as exc:
-        raise OSError(format_os_error(exc, path=hostname_path)) from exc
-    log(f"Hostname : {state['hostname']}")
-
-    localtime_path = str(Path(etc, "localtime"))
-    try:
-        run_command(
-            _as_root(["ln", "-snf",
-                      f"/usr/share/zoneinfo/{state['timezone']}",
-                      localtime_path]),
-            check=True,
-        )
-    except OSError as exc:
-        raise OSError(format_os_error(exc, path=localtime_path)) from exc
-    log(f"Timezone : {state['timezone']}")
-
-    locale_path = str(Path(etc, "locale.conf"))
-    run_command(
-        _as_root(["/usr/bin/tee", locale_path]),
-        input=f"LANG={state.get('locale', 'en_US.UTF-8')}\n", text=True,
-        stdout=subprocess.DEVNULL, check=True,
-    )
-    vconsole_path = str(Path(etc, "vconsole.conf"))
-    run_command(
-        _as_root(["/usr/bin/tee", vconsole_path]),
-        input=f"KEYMAP={state.get('keymap', 'us')}\n", text=True,
-        stdout=subprocess.DEVNULL, check=True,
-    )
-    log(f"Locale   : {state.get('locale', 'en_US.UTF-8')}")
-    log(f"Keyboard : {state.get('keymap', 'us')}")
+    configure_hostname_timezone(etc, state, log, format_error=format_os_error)
 
 
 def _create_installer_user(config_root, deploy_root, username, password_hash, log, progress) -> None:
-    # Lazy import to respect tests that patch install.*
-    try:
-        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import ensure_system_accounts  # fallback
-        from ..system import find_deploy_etc  # fallback
-        from ..plan import _get_manual_mounts  # fallback
-    log(f"Creating user: {username}")
-    try:
-        _shared_create_installer_user(
-            deploy_root, config_root, username, password_hash, log,
-            run=lambda argv, **kw: run_command(_as_root(argv), **kw),
-        )
-        # Re-lock /etc/shadow now that this user's entry exists in it.
-        ensure_system_accounts(deploy_root, log)
-        progress(97)
-    except OSError as ue:
-        log(
-            "Warning: user creation failed: "
-            f"{format_os_error(ue)}"
-        )
-        log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
-    except Exception as ue:
-        log(f"Warning: user creation failed: {ue}")
-        log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
+    create_installer_user(
+        config_root, deploy_root, username, password_hash, log, progress,
+        creator=_shared_create_installer_user,
+        ensure_accounts=phase_dependency("ensure_system_accounts"),
+        format_error=format_os_error,
+    )
 
 
 def _persist_artifacts_to_target(
@@ -303,17 +201,9 @@ def _configure_installed_system(
     root_part, target_part, disk, kernel, install_mode, config_root, alongside_mount, log, progress,
     context: InstallerContext, request: InstallRequest | None = None,
 ):
-    # Lazy import to respect tests that patch install.*
-    try:
-        from ..install import run_command, _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import ensure_system_accounts  # fallback
-        from ..system import find_deploy_etc  # fallback
-        from ..plan import _get_manual_mounts  # fallback
+    run_command = phase_dependency("run_command")
+    find_deploy_etc = phase_dependency("find_deploy_etc")
+    ensure_system_accounts = phase_dependency("ensure_system_accounts")
     context.enter_phase(InstallPhase.CONFIGURE)
     request = request or context.request or InstallRequest.from_state(context.state)
     try:
@@ -410,21 +300,10 @@ def _persist_failure_to_target_disk(log, context: InstallerContext, message: str
 
 
 def _handle_install_failure(exc: Exception, log, context: InstallerContext) -> None:
-    # Lazy import to respect tests that patch install.*
     """Log, record, and publish an install failure. Runs inside
     _run_install_worker's except block, so a failure in any step here must
     not prevent the error event from reaching the UI — hence the nested
     try/excepts around the log write and failure-summary write."""
-    try:
-        from ..install import _as_root, _safe_umount, _require_no_symlink, ensure_system_accounts, find_deploy_etc, _get_manual_mounts  # pylint: disable=unused-import  # noqa: F811
-    except ImportError:
-        from ..runner import run_command  # fallback  # pylint: disable=unused-import  # noqa: F401
-        from ..system import _as_root  # fallback
-        from ..system import _safe_umount  # fallback
-        from ..system import _require_no_symlink  # fallback
-        from ..system import ensure_system_accounts  # fallback
-        from ..system import find_deploy_etc  # fallback
-        from ..plan import _get_manual_mounts  # fallback
     message = format_install_error(exc)
     try:
         with LOG_FILE.open("a") as f:
