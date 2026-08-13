@@ -5,6 +5,13 @@ description: Push to testing when .git is read-only by cloning to /tmp, applying
 
 # Push via Tmp Clone
 
+## Publishing invariants
+
+- Never create or open a pull request for this repository.
+- Commit approved changes directly to the `testing` branch.
+- Push only to `origin/testing`; never infer another destination from the current clone.
+- Require an explicit user request before committing or pushing.
+
 Use when `git add`/`commit`/`push` fails with `Read-only file system` on `.git` (or `.agents`) because the sandbox mounts them `ro`. The workspace root is still writable, but git metadata is not. Work around by using a writable clone in `/tmp`.
 
 ## When to use
@@ -67,8 +74,12 @@ Always run **exactly** CI's gates before pushing from the tmp clone (tmp clone b
 ```bash
 ./build_files/scripts/validate.sh  # includes zizmor/hadolint/shellcheck + 1057 unit tests + portability
 ./build_files/scripts/run-quality.sh  # ruff + coverage (skip Hub smoke under coverage, it OOMs)
-python3 -m unittest tests.test_validation_portability  # explicit portability (blocked PySide6)
-QT_QPA_PLATFORM=offscreen PYTHONPATH=build_files/kyth-welcome:build_files/kyth_shared python3 -m unittest tests.test_kyth_welcome_hub_smoke  # 20/20 smoke, explicit
+PYTHONPATH=build_files/kyth-installer:build_files/kyth-welcome:build_files/kyth_shared python3 -m unittest tests.test_validation_portability
+if python3 -c 'import PySide6' 2>/dev/null; then
+  QT_QPA_PLATFORM=offscreen PYTHONPATH=build_files/kyth-welcome:build_files/kyth_shared python3 -m unittest tests.test_kyth_welcome_hub_smoke
+else
+  echo "Hub smoke unavailable: PySide6 is not installed; blocked-Qt portability remains mandatory"
+fi
 ```
 
 This catches F821/QSS regressions before CI (e.g. 31288193192).

@@ -37,9 +37,12 @@ _LOCK = __import__("threading").Lock()  # S8: protect concurrent DataWorkers
 def _fetch_status() -> UpdateStatus:
     # Best-effort gather — never blocks > TTL, never raises.
     try:
-        from kyth_shared.system.bootc import bootc_status_data
+        from kyth_shared.system.bootc import (
+            bootc_status_data,
+            has_rollback_deployment,
+            has_staged_update,
+        )
         from kyth_shared.system.registry import check_registry_update
-        from kyth_shared.system.bootc_query import has_staged_update, has_rollback_deployment
 
         data = bootc_status_data()
         staged = bool(has_staged_update())
