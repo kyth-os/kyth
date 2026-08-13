@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
-from .config import BIOS_BOOT_GUID, MIN_KYTHOS_BYTES, MIN_KYTHOS_GIB
+from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_BYTES, MIN_KYTHOS_GIB
 from .disk import (
     _normal_device_path,
     _safe_int,
@@ -30,6 +30,15 @@ class ValidationDependencies:
     list_partitions: Callable[[str], list[dict]]
     probe_storage: Callable[..., "StorageSnapshot"]
     get_journal: Callable[["InstallerContext"], object | None]
+
+
+@dataclass(frozen=True, slots=True)
+class GuidedValidationDependencies:
+    """Read-only collaborators for guided resize/free-space validation."""
+
+    probe_storage: Callable[..., "StorageSnapshot"]
+    parent_disk: Callable[[str], str]
+    partition_size: Callable[[str], int]
 
 
 def default_validation_dependencies() -> ValidationDependencies:
@@ -171,3 +180,102 @@ def _validate_install_target(
         return disk, target
 
     raise RuntimeError(f"Unsupported install mode: {mode}")
+
+
+def validate_resize_ntfs_target(
+    config: dict,
+    snapshot: StorageSnapshot | None = None,
+    *,
+    dependencies: GuidedValidationDependencies,
+) -> tuple[str, str, int]:
+    """Validate an NTFS shrink request without modifying its filesystem."""
+    disk = _normal_device_path(config.get("disk"))
+    partition = _normal_device_path(
+        config.get("resize_partition") or config.get("target_partition")
+    )
+    shrink_gib = _safe_int(config.get("resize_gib") or config.get("shrink_gib") or 0)
+    if not disk:
+        raise RuntimeError("No target disk was selected.")
+    if not partition:
+        raise RuntimeError("No NTFS partition was selected to shrink.")
+    if shrink_gib < MIN_KYTHOS_GIB:
+        raise RuntimeError(
+            f"NTFS shrink install requires at least {MIN_KYTHOS_GIB} GiB for KythOS."
+        )
+    snapshot = snapshot or dependencies.probe_storage(disk)
+    if disk not in snapshot.disks_by_name:
+        raise RuntimeError("The selected disk is not a safe install target.")
+    if dependencies.parent_disk(partition) != disk:
+        raise RuntimeError("The selected NTFS partition does not belong to the selected disk.")
+    part = snapshot.partitions_by_name.get(partition)
+    if not part:
+        raise RuntimeError("The selected NTFS partition was not found during the final disk scan.")
+    if part.get("efi") or part.get("current") or part.get("in_use") or part.get("read_only"):
+        raise RuntimeError(
+            "The selected partition is mounted, read-only, or reserved and cannot be resized."
+        )
+    filesystem = (part.get("fstype") or "").lower()
+    if filesystem == "bitlocker":
+        raise RuntimeError(
+            "This partition is BitLocker-encrypted and cannot be resized while locked. "
+            "In Windows, suspend or disable BitLocker protection and wait for decryption."
+        )
+    if filesystem not in ("ntfs", "ntfs3"):
+        raise RuntimeError("Only NTFS partitions can be resized by this installer path.")
+    if not snapshot.efi_partition:
+        raise RuntimeError("NTFS resize installation requires an EFI system partition on the system.")
+    shrink_bytes = shrink_gib * 1024**3
+    required = (
+        MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
+        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+        else MIN_KYTHOS_BYTES
+    )
+    if shrink_bytes < required:
+        raise RuntimeError(
+            f"This layout needs at least {MIN_KYTHOS_GIB + 1} GiB of shrink space "
+            "to create KythOS and its boot partition."
+        )
+    current_size = _safe_int(part.get("size_bytes")) or dependencies.partition_size(partition)
+    if current_size - shrink_bytes < 64 * 1024**3:
+        raise RuntimeError("Refusing to leave the NTFS partition smaller than 64 GiB.")
+    return disk, partition, shrink_bytes
+
+
+def validate_free_space_target(
+    config: dict,
+    snapshot: StorageSnapshot | None = None,
+    *,
+    dependencies: GuidedValidationDependencies,
+) -> tuple[str, int, int]:
+    """Validate that a selected free region remains safe and available."""
+    disk = _normal_device_path(config.get("disk"))
+    start = _safe_int(config.get("free_region_start"), -1)
+    end = _safe_int(config.get("free_region_end"), -1)
+    if not disk:
+        raise RuntimeError("No target disk was selected.")
+    if start < 0 or end <= start:
+        raise RuntimeError("No free space region was selected for installation.")
+    if end - start < MIN_KYTHOS_BYTES:
+        raise RuntimeError(
+            f"Free space install requires at least {MIN_KYTHOS_GIB} GiB for KythOS."
+        )
+    snapshot = snapshot or dependencies.probe_storage(disk, include_free_space=True)
+    if disk not in snapshot.disks_by_name:
+        raise RuntimeError("The selected disk is not a safe install target.")
+    required = (
+        MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
+        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+        else MIN_KYTHOS_BYTES
+    )
+    if end - start < required:
+        raise RuntimeError(
+            f"This layout needs at least {MIN_KYTHOS_GIB + 1} GiB of free space "
+            "to create KythOS and its boot partition."
+        )
+    if not snapshot.efi_partition:
+        raise RuntimeError("Free space installation requires an EFI system partition on the system.")
+    if not snapshot.contains_free_region(start, end):
+        raise RuntimeError(
+            "The selected free space is no longer available. Re-scan the disk and try again."
+        )
+    return disk, start, end
