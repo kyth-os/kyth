@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import subprocess
 import traceback
-from pathlib import Path
 
-from ..context import InstallRequest, InstallerContext, InstallLifecycle, InstallPhase
+from ..context import InstallRequest, InstallerContext, InstallLifecycle
 from ..assurance import validate_installed_target
 from ..cleanup import unmount_configuration
 from ..runner import run_command
@@ -21,6 +20,7 @@ from .finalize_fstab import (
     fsck_pass_for,
 )
 from .finalize_artifacts import persist_artifacts, persist_failure_message
+from .finalize_configure import configure_installed_system
 from ..recovery import write_failure_summary
 from ..config import FAILURE_SUMMARY_FILE, LOG_FILE, TRANSACTION_FILE
 
@@ -103,49 +103,19 @@ def _configure_installed_system(
     run_command = phase_dependency("run_command")
     find_deploy_etc = phase_dependency("find_deploy_etc")
     ensure_system_accounts = phase_dependency("ensure_system_accounts")
-    context.enter_phase(InstallPhase.CONFIGURE)
-    request = request or context.request or InstallRequest.from_state(context.state)
-    try:
-        etc = find_deploy_etc(config_root)
-        if not etc:
-            raise RuntimeError("Installed deployment could not be located for final configuration.")
-        if install_mode == "alongside":
-            _configure_alongside_fstab(config_root, target_part, etc, log)
-
-        # Manual partition mode: mount additional partitions and update fstab
-        if install_mode == "manual":
-            _configure_manual_mounts(config_root, etc, log, context)
-
-        _configure_hostname_timezone(etc, request, log)
-        progress(95)
-
-        deploy_root = str(Path(etc).parent)
-        ensure_system_accounts(deploy_root, log)
-
-        username = request.username.strip()
-        password_hash = request.password_hash
-        if username and password_hash:
-            _create_installer_user(config_root, deploy_root, username, password_hash, log, progress)
-
-        checks = validate_installed_target(Path(etc), request)
-        context.assurance_checks.extend(check.as_dict() for check in checks)
-        for check in checks:
-            log(f"Final check [{check.status}]: {check.name} — {check.detail}")
-        # Persist success artifacts too — /run is tmpfs, so without this a
-        # successful install leaves no post-mortem if the next boot fails.
-        try:
-            _persist_artifacts_to_target(log, context)
-        except Exception as exc:
-            log(f"Warning: could not persist success artifacts: {exc}")
-    finally:
-        progress(99)
-        unmount_configuration(config_root, alongside_mount, run=run_command)
-        if alongside_mount:
-            for mountpoint in list(context.cleanup_mounts):
-                if mountpoint == alongside_mount or mountpoint.startswith(f"{alongside_mount}/"):
-                    context.release_mount(mountpoint)
-        else:
-            context.release_mount(config_root)
+    configure_installed_system(
+        target_part=target_part, install_mode=install_mode, config_root=config_root,
+        alongside_mount=alongside_mount, log=log, progress=progress, context=context,
+        request=request, find_deploy_etc=find_deploy_etc,
+        ensure_system_accounts=ensure_system_accounts,
+        configure_alongside_fstab=_configure_alongside_fstab,
+        configure_manual_mounts=_configure_manual_mounts,
+        configure_hostname_timezone=_configure_hostname_timezone,
+        create_installer_user=_create_installer_user,
+        validate_installed_target=validate_installed_target,
+        persist_artifacts=_persist_artifacts_to_target,
+        unmount_configuration=unmount_configuration, run_command=run_command,
+    )
 
 def _persist_failure_to_target_disk(log, context: InstallerContext, message: str) -> None:
     """Best-effort mirror of installer log + failure summary onto the target disk.
