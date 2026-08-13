@@ -118,14 +118,36 @@ def get_manual_mounts(context, *, get_journal, list_partitions) -> list[dict]:
     journal = get_journal(context)
     if not journal or not journal.committed:
         return []
+    if not getattr(journal, "disk", ""):
+        raise RuntimeError("Committed partition journal has no target disk.")
+    discovered = {
+        part.get("name"): part for part in list_partitions(journal.disk)
+        if part.get("name")
+    }
+    created = {
+        op.get("params", {}).get("partition")
+        for op in journal.ops if isinstance(op, dict) and op.get("kind") == "create"
+    }
     mounts: list[dict] = []
+    assigned_mountpoints: set[str] = set()
+    assigned_partitions: set[str] = set()
     for op in journal.ops:
-        if op["kind"] not in ("create", "set_mountpoint"):
+        if not isinstance(op, dict) or not isinstance(op.get("params"), dict):
+            raise RuntimeError("Committed partition journal contains malformed operations.")
+        if op.get("kind") not in ("create", "set_mountpoint"):
             continue
-        mountpoint = op["params"].get("mountpoint", "").strip()
-        partition = op["params"].get("partition", "")
+        mountpoint = str(op["params"].get("mountpoint", "")).strip()
+        partition = str(op["params"].get("partition", "")).strip()
         if not mountpoint or mountpoint in ("/", "/boot/efi") or not partition:
             continue
+        if partition not in discovered and partition not in created:
+            raise RuntimeError(
+                f"Manual mount target {partition} disappeared after partition commit."
+            )
+        if mountpoint in assigned_mountpoints:
+            raise RuntimeError(f"Manual mount point {mountpoint} is assigned more than once.")
+        if partition in assigned_partitions:
+            raise RuntimeError(f"Manual partition {partition} has multiple mount assignments.")
         fs_type = op["params"].get("fs_type", "") if op["kind"] == "create" else ""
         for format_op in journal.ops:
             if (format_op["kind"] == "format"
@@ -133,11 +155,9 @@ def get_manual_mounts(context, *, get_journal, list_partitions) -> list[dict]:
                 fs_type = format_op["params"].get("fs_type", "")
                 break
         if not fs_type:
-            fs_type = next(
-                (part.get("fstype", "") for part in list_partitions(journal.disk)
-                 if part.get("name") == partition),
-                "",
-            )
+            fs_type = discovered.get(partition, {}).get("fstype", "")
+        assigned_mountpoints.add(mountpoint)
+        assigned_partitions.add(partition)
         mounts.append({
             "partition": partition,
             "mountpoint": mountpoint,

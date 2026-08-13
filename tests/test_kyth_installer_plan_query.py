@@ -79,13 +79,50 @@ class PlanQueryTests(unittest.TestCase):
         )
         mounts = plan_query.get_manual_mounts(
             object(), get_journal=lambda _context: journal,
-            list_partitions=lambda _disk: [{"name": "/dev/sda3", "fstype": "swap"}],
+            list_partitions=lambda _disk: [
+                {"name": "/dev/sda2", "fstype": "ext4"},
+                {"name": "/dev/sda3", "fstype": "swap"},
+            ],
         )
         self.assertEqual(mounts[0]["fstype"], "xfs")
         self.assertEqual(mounts[1]["fstype"], "swap")
         self.assertEqual(plan_query.get_manual_mounts(
             object(), get_journal=lambda _context: None, list_partitions=lambda _disk: [],
         ), [])
+
+    def test_manual_mounts_fail_closed_on_stale_duplicate_or_malformed_journal(self):
+        def journal(ops, disk="/dev/sda"):
+            return SimpleNamespace(committed=True, disk=disk, ops=ops)
+
+        with self.assertRaisesRegex(RuntimeError, "disappeared"):
+            plan_query.get_manual_mounts(
+                object(), get_journal=lambda _context: journal([{
+                    "kind": "set_mountpoint",
+                    "params": {"partition": "/dev/sda9", "mountpoint": "/home"},
+                }]), list_partitions=lambda _disk: [],
+            )
+
+        duplicate = [
+            {"kind": "set_mountpoint", "params": {
+                "partition": "/dev/sda2", "mountpoint": "/home",
+            }},
+            {"kind": "set_mountpoint", "params": {
+                "partition": "/dev/sda3", "mountpoint": "/home",
+            }},
+        ]
+        with self.assertRaisesRegex(RuntimeError, "assigned more than once"):
+            plan_query.get_manual_mounts(
+                object(), get_journal=lambda _context: journal(duplicate),
+                list_partitions=lambda _disk: [
+                    {"name": "/dev/sda2"}, {"name": "/dev/sda3"},
+                ],
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "malformed"):
+            plan_query.get_manual_mounts(
+                object(), get_journal=lambda _context: journal([{"kind": "create"}]),
+                list_partitions=lambda _disk: [],
+            )
 
 
 if __name__ == "__main__":
