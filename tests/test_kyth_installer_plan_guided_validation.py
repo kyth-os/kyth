@@ -1,6 +1,7 @@
 import sys
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,6 +11,8 @@ from kyth_installer.config import MIN_KYTHOS_BYTES  # noqa: E402
 from kyth_installer.plan_validate import (  # noqa: E402
     GuidedValidationDependencies,
     ReportDependencies,
+    ValidationDependencies,
+    _validate_install_target,
     build_plan_report,
     validate_free_space_target,
     validate_resize_ntfs_target,
@@ -40,12 +43,14 @@ class GuidedPlanValidationTests(unittest.TestCase):
             )
             validators[expected].assert_called_once()
 
-    def dependencies(self):
-        return GuidedValidationDependencies(
-            probe_storage=lambda *_args, **_kwargs: None,
-            parent_disk=lambda _partition: "/dev/sda",
-            partition_size=lambda _partition: 200 * 1024**3,
-        )
+    def dependencies(self, **changes):
+        values = {
+            "probe_storage": lambda *_args, **_kwargs: None,
+            "parent_disk": lambda _partition: "/dev/sda",
+            "partition_size": lambda _partition: 200 * 1024**3,
+        }
+        values.update(changes)
+        return GuidedValidationDependencies(**values)
 
     def snapshot(self, *, filesystem="ntfs", efi="/dev/sda1", free=()):
         return StorageSnapshot(
@@ -75,6 +80,73 @@ class GuidedPlanValidationTests(unittest.TestCase):
             validate_resize_ntfs_target(
                 config, snapshot=self.snapshot(efi=None), dependencies=self.dependencies(),
             )
+
+    def test_ntfs_resize_rejects_drift_reserved_space_and_unsafe_remainder(self):
+        config = {"disk": "/dev/sda", "resize_partition": "/dev/sda2", "resize_gib": 40}
+        cases = (
+            (self.dependencies(parent_disk=lambda _partition: "/dev/sdb"), self.snapshot(), "does not belong"),
+            (self.dependencies(), StorageSnapshot(
+                disks=({"name": "/dev/sda"},), partitions=(), free_regions=(),
+                efi_partition="/dev/sda1", is_gpt=False,
+            ), "not found"),
+            (self.dependencies(), StorageSnapshot(
+                disks=({"name": "/dev/sda"},), partitions=({
+                    "name": "/dev/sda2", "fstype": "ntfs", "current": True,
+                    "size_bytes": 200 * 1024**3,
+                },), free_regions=(), efi_partition="/dev/sda1", is_gpt=False,
+            ), "mounted"),
+            (self.dependencies(), self.snapshot(), "smaller than 64"),
+        )
+        for dependencies, snapshot, message in cases:
+            selected = dict(config)
+            if message == "smaller than 64":
+                selected["resize_gib"] = 140
+            with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, message):
+                validate_resize_ntfs_target(
+                    selected, snapshot=snapshot, dependencies=dependencies,
+                )
+
+        gpt = StorageSnapshot(
+            disks=({"name": "/dev/sda"},), partitions=({
+                "name": "/dev/sda2", "fstype": "ntfs", "size_bytes": 200 * 1024**3,
+            },), free_regions=(), efi_partition="/dev/sda1", is_gpt=True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "boot partition"):
+            validate_resize_ntfs_target(
+                {**config, "resize_gib": 32}, snapshot=gpt,
+                dependencies=self.dependencies(),
+            )
+
+    def test_explicit_validation_rejects_partition_and_manual_invariants(self):
+        snapshot = StorageSnapshot(
+            disks=({"name": "/dev/sda", "size_bytes": 100 * 1024**3},),
+            partitions=({"name": "/dev/sda2", "size_bytes": 80 * 1024**3},),
+            free_regions=(), efi_partition="/dev/sda1", is_gpt=False,
+        )
+        journal = SimpleNamespace(committed=True, root_partition="/dev/sda2")
+        dependencies = ValidationDependencies(
+            parent_disk=lambda _partition: "/dev/sda",
+            list_partitions=lambda _disk: [],
+            probe_storage=lambda *_args, **_kwargs: snapshot,
+            get_journal=lambda _context: journal,
+        )
+        self.assertEqual(
+            _validate_install_target(
+                {"disk": "/dev/sda", "install_mode": "manual"}, object(),
+                snapshot=snapshot, dependencies=dependencies,
+            ),
+            ("/dev/sda", "/dev/sda2"),
+        )
+        cases = (
+            ({"disk": "/dev/sda", "install_mode": "manual"}, None, "session context"),
+            ({"disk": "/dev/sda", "install_mode": "alongside"}, object(), "No target partition"),
+            ({"disk": "/dev/sda", "install_mode": "unknown"}, object(), "Unsupported"),
+        )
+        for config, context, message in cases:
+            with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, message):
+                _validate_install_target(
+                    config, context, snapshot=snapshot, dependencies=dependencies,
+                )
 
     def test_free_space_requires_exact_current_region(self):
         start = 1024**2
