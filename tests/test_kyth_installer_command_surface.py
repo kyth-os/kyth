@@ -472,16 +472,50 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 cmd, 5, 90, logs.append, progress_values.append,
                 stall_timeout=10, absolute_timeout=10,
             )
-
         stats_events = [e for e in pushed if e.get("type") == "stats"]
         self.assertTrue(
             stats_events,
             "net monitor never pushed a stats event — output_state is likely undefined again",
         )
-        # Exact fraction is environment-dependent (real /proc/net/dev rx bytes
-        # may tick slightly between rx_start capture and the first sample) —
-        # what matters is the monitor thread ran at all, not the precise value.
         self.assertTrue(any(5 <= v <= 90 for v in progress_values))
+
+    def test_streaming_runner_reports_failure_output_and_custom_error(self):
+        runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
+        with mock.patch(
+            "kyth_installer.runner._validate_executable", side_effect=lambda value: value
+        ):
+            with self.assertRaisesRegex(RuntimeError, "exit 3"):
+                runner.run(
+                    [sys.executable, "-c", "print('disk failed'); raise SystemExit(3)"],
+                    0, 100, lambda _msg: None, lambda _pct: None,
+                )
+            with self.assertRaisesRegex(ValueError, "custom 4"):
+                runner.run(
+                    [sys.executable, "-c", "raise SystemExit(4)"], 0, 100,
+                    lambda _msg: None, lambda _pct: None,
+                    error_factory=lambda code, _lines, _argv: ValueError(f"custom {code}"),
+                )
+
+    def test_streaming_runner_writes_stdin_and_honors_cancellation(self):
+        runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
+        progress = []
+        with mock.patch(
+            "kyth_installer.runner._validate_executable", side_effect=lambda value: value
+        ):
+            runner.run(
+                [sys.executable, "-c", "import sys; assert sys.stdin.read() == 'yes\\n'"],
+                0, 100, lambda _msg: None, progress.append, stdin_data="yes\n",
+            )
+            cancelled = __import__("threading").Event()
+            cancelled.set()
+            from kyth_installer.execution import InstallCancelled
+
+            with self.assertRaises(InstallCancelled):
+                runner.run(
+                    [sys.executable, "-c", "import time; time.sleep(30)"], 0, 100,
+                    lambda _msg: None, lambda _pct: None, cancel_event=cancelled,
+                )
+        self.assertEqual(progress[-1], 100)
 
     def test_worker_fails_closed_when_not_root(self):
         context = InstallerContext()
