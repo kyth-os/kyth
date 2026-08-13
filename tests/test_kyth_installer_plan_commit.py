@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
@@ -103,6 +104,37 @@ class PlanCommitTests(unittest.TestCase):
                 {}, mock.Mock(), validate_target=mock.Mock(return_value=("/dev/sda", 1, 2)),
                 required_tools=("parted",), which=lambda _name: None,
                 unmount_target_disk=mock.Mock(), commit_partition=mock.Mock(),
+            )
+
+    def test_plan_dispatch_validates_before_each_mode(self):
+        validate = mock.Mock(return_value=SimpleNamespace(valid=True, errors=()))
+        ntfs = mock.Mock(return_value="ntfs-plan")
+        free = mock.Mock(return_value="free-plan")
+        explicit = mock.Mock(return_value="explicit-plan")
+        modes = (
+            ("resize_ntfs", "ntfs-plan"),
+            ("free_space", "free-plan"),
+            ("wipe", "explicit-plan"),
+        )
+        for mode, expected in modes:
+            with self.subTest(mode=mode):
+                result = plan_commit.prepare_install_plan(
+                    {"install_mode": mode}, mock.Mock(), object(),
+                    validate_report=validate,
+                    plan_from_state=lambda state: SimpleNamespace(mode=state["install_mode"]),
+                    prepare_ntfs=ntfs, prepare_free_space=free,
+                    prepare_explicit=explicit,
+                )
+                self.assertEqual(result, expected)
+
+    def test_plan_dispatch_stops_on_report_error(self):
+        with self.assertRaisesRegex(RuntimeError, "unsafe layout"):
+            plan_commit.prepare_install_plan(
+                {}, mock.Mock(), validate_report=mock.Mock(return_value=SimpleNamespace(
+                    valid=False, errors=("unsafe layout",),
+                )),
+                plan_from_state=mock.Mock(), prepare_ntfs=mock.Mock(),
+                prepare_free_space=mock.Mock(), prepare_explicit=mock.Mock(),
             )
 
 

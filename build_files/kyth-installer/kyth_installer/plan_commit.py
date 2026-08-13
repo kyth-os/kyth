@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import BIOS_BOOT_BYTES
+from .plan_types import InstallPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,3 +193,31 @@ def prepare_free_space_target(
 
 
 __all__ += ["prepare_free_space_target", "shrink_ntfs_filesystem_guarded"]
+
+
+def prepare_install_plan(
+    state,
+    log,
+    context=None,
+    *,
+    validate_report,
+    plan_from_state,
+    prepare_ntfs,
+    prepare_free_space,
+    prepare_explicit,
+) -> InstallPlan:
+    """Validate once, then dispatch to the selected destructive preparation path."""
+    report = validate_report(state, context)
+    if not report.valid:
+        raise RuntimeError(
+            report.errors[0] if report.errors else "Install plan validation failed"
+        )
+    plan = plan_from_state(state)
+    if plan.mode == "resize_ntfs":
+        return prepare_ntfs(state, log)
+    if plan.mode == "free_space":
+        return prepare_free_space(state, log)
+    return prepare_explicit(plan, state, context)
+
+
+__all__.append("prepare_install_plan")

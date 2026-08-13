@@ -425,15 +425,14 @@ def _prepare_install_plan(state: dict | InstallRequest, log, context=None) -> In
     # Explicit validate→commit: fail fast with a structured report before any
     # partition-table backup, ntfsresize, or mkfs is attempted. Mirrors the
     # UI's dry-run validation so the same message is shown in both places.
-    report = validate_plan_state(state, context)
-    if not report.valid:
-        raise RuntimeError(report.errors[0] if report.errors else "Install plan validation failed")
-    plan = _install_plan_from_state(state)
-    if plan.mode == "resize_ntfs":
-        return _prepare_ntfs_install_plan(state, log)
-    if plan.mode == "free_space":
-        return _prepare_free_space_install_plan(state, log)
-    return _prepare_explicit_install_plan(plan, state, context)
+    return _plan_commit.prepare_install_plan(
+        state, log, context,
+        validate_report=validate_plan_state,
+        plan_from_state=_install_plan_from_state,
+        prepare_ntfs=_prepare_ntfs_install_plan,
+        prepare_free_space=_prepare_free_space_install_plan,
+        prepare_explicit=_prepare_explicit_install_plan,
+    )
 
 def _get_manual_mounts(context) -> list[dict]:
     """Return non-root partition mount assignments from the committed journal."""
