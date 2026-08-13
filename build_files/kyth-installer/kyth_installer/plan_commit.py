@@ -1,30 +1,145 @@
-"""Plan commit — destructive helpers that back up, partition, and mkfs.
+"""Destructive partition commits used by guided installer planning."""
 
-Extracted from plan.py 678 monolith (step 3). These mutate the disk;
-validate_plan_state is the gate before entering.
-"""
 from __future__ import annotations
 
-# Re-export for compat — canonical implementations still live in plan.py
-# until the next hunk-level split moves them here.
-from .plan import (  # noqa: F401
-    _commit_new_kythos_partition,
-    _ensure_bios_boot_partition,
-    _prepare_explicit_install_plan,
-    _prepare_free_space_install_plan,
-    _prepare_free_space_target,
-    _prepare_install_plan,
-    _prepare_ntfs_install_plan,
-    _prepare_ntfs_resize_target,
-)
+from dataclasses import dataclass
+from typing import Callable
 
-__all__ = [
-    "_commit_new_kythos_partition",
-    "_ensure_bios_boot_partition",
-    "_prepare_explicit_install_plan",
-    "_prepare_free_space_install_plan",
-    "_prepare_free_space_target",
-    "_prepare_install_plan",
-    "_prepare_ntfs_install_plan",
-    "_prepare_ntfs_resize_target",
-]
+from .config import BIOS_BOOT_BYTES
+
+
+@dataclass(frozen=True, slots=True)
+class CommitDependencies:
+    """Patchable mutation boundary for partition commits."""
+
+    is_gpt: Callable[[str], bool]
+    has_bios_boot: Callable[[str], bool]
+    list_partitions: Callable[[str], list[dict]]
+    block_size: Callable[[str], int]
+    latest_partition: Callable[[str, set[str]], str | None]
+    partition_number: Callable[[str], int]
+    human_size: Callable[[int], str]
+    run_command: Callable
+    as_root: Callable[[list[str]], list[str]]
+    settle: Callable[[], None]
+    disk_hold: Callable
+    guard_factory: Callable
+    disk_service_factory: Callable
+
+
+def ensure_bios_boot_partition(
+    disk: str, gap_start: int, log, *, dependencies: CommitDependencies,
+) -> int:
+    """Create a missing GPT BIOS helper and return the next usable byte offset."""
+    if not dependencies.is_gpt(disk) or dependencies.has_bios_boot(disk):
+        return gap_start
+    before = {
+        part["name"] for part in dependencies.list_partitions(disk) if part.get("name")
+    }
+    sector = dependencies.block_size(disk)
+    bios_end = gap_start + BIOS_BOOT_BYTES - sector
+    log("Creating BIOS boot partition for GRUB...")
+    dependencies.run_command(
+        dependencies.as_root([
+            "parted", "-s", disk, "unit", "B", "mkpart", "biosboot",
+            f"{gap_start}B", f"{bios_end}B",
+        ]),
+        check=True, timeout=120,
+    )
+    created = dependencies.latest_partition(disk, before)
+    if not created:
+        dependencies.settle()
+        created = dependencies.latest_partition(disk, before)
+    if not created:
+        raise RuntimeError(
+            "The installer could not find the new BIOS boot partition after partitioning."
+        )
+    dependencies.run_command(
+        dependencies.as_root([
+            "parted", "-s", disk, "set", str(dependencies.partition_number(created)),
+            "bios_grub", "on",
+        ]),
+        check=True, timeout=120,
+    )
+    dependencies.settle()
+    return bios_end + sector
+
+
+def commit_new_kythos_partition(
+    disk: str,
+    gap_start: int,
+    gap_end: int,
+    log,
+    *,
+    dependencies: CommitDependencies,
+    before_partition: Callable[[], None] | None = None,
+    failure_message: str = "A step failed — restoring the original partition table...",
+    restored_message: str = "Partition table restored to its state before this attempt.",
+) -> str:
+    """Create and format a target partition inside a guarded table transaction."""
+    del restored_message  # guard owns restore logging; retained for compatibility
+    disk_service = dependencies.disk_service_factory()
+    with dependencies.disk_hold(disk, log):
+        with dependencies.guard_factory(disk, log, disk_service=disk_service):
+            if before_partition is not None:
+                try:
+                    before_partition()
+                except Exception as exc:
+                    log(f"{failure_message}: {exc}")
+                    raise
+            btrfs_start = ensure_bios_boot_partition(
+                disk, gap_start, log, dependencies=dependencies,
+            )
+            sector = dependencies.block_size(disk)
+            partition_end = gap_end - sector
+            before = {
+                part["name"] for part in dependencies.list_partitions(disk)
+                if part.get("name")
+            }
+            log(
+                "Creating KythOS Btrfs partition in "
+                f"{dependencies.human_size(gap_end - btrfs_start)} of free space..."
+            )
+            dependencies.run_command(
+                dependencies.as_root([
+                    "parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs",
+                    f"{btrfs_start}B", f"{partition_end}B",
+                ]),
+                check=True, timeout=120,
+            )
+            for command in (
+                dependencies.as_root(["blockdev", "--rereadpt", disk]),
+                dependencies.as_root(["partprobe", disk]),
+            ):
+                try:
+                    dependencies.run_command(command, check=False, timeout=15)
+                except Exception:
+                    pass
+            dependencies.settle()
+            created = dependencies.latest_partition(disk, before)
+            if not created:
+                raise RuntimeError(
+                    "The installer could not find the new KythOS partition after partitioning."
+                )
+            dependencies.run_command(
+                dependencies.as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]),
+                check=True, timeout=300,
+            )
+            dependencies.settle()
+            try:
+                visible = {
+                    part["name"] for part in dependencies.list_partitions(disk)
+                    if part.get("name")
+                }
+                if created not in visible:
+                    log(
+                        f"Warning: kernel did not yet expose {created} after rereadpt — "
+                        "proceeding, udev may still settle."
+                    )
+            except Exception as exc:
+                log(f"Warning: could not verify new partition {created}: {exc}")
+            log(f"Created target partition {created}")
+            return created
+
+
+__all__ = ["CommitDependencies", "commit_new_kythos_partition", "ensure_bios_boot_partition"]

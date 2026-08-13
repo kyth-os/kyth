@@ -73,6 +73,28 @@ from .runner import run_command
 from .storage_snapshot import StorageSnapshot
 
 from . import plan_query as _plan_query
+from . import plan_commit as _plan_commit
+
+
+def _commit_dependencies() -> _plan_commit.CommitDependencies:
+    """Bind destructive planning to this module's patchable compatibility surface."""
+    from .storage_guard import PartitionTableGuard
+
+    return _plan_commit.CommitDependencies(
+        is_gpt=_is_gpt_disk,
+        has_bios_boot=_has_bios_boot_partition,
+        list_partitions=list_partitions,
+        block_size=_block_size_bytes,
+        latest_partition=_latest_partition_on_disk,
+        partition_number=_partition_number,
+        human_size=_human_size,
+        run_command=run_command,
+        as_root=_as_root,
+        settle=_settle,
+        disk_hold=disk_hold,
+        guard_factory=PartitionTableGuard,
+        disk_service_factory=DiskService,
+    )
 
 def _as_request(state: "InstallationState | InstallRequest") -> "InstallRequest":
     """Coerce InstallationState dict to InstallRequest — R-02 single-type boundary."""
@@ -191,25 +213,9 @@ def _ensure_bios_boot_partition(disk: str, gap_start: int, log) -> int:
     install. bootc install to-disk creates this partition itself; the
     alongside paths partition the disk manually, so they must match.
     """
-    if not _is_gpt_disk(disk):
-        return gap_start
-    if _has_bios_boot_partition(disk):
-        return gap_start
-    before = {p["name"] for p in list_partitions(disk) if p.get("name")}
-    sector = _block_size_bytes(disk)
-    bios_end = gap_start + BIOS_BOOT_BYTES - sector
-    log("Creating BIOS boot partition for GRUB...")
-    run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "biosboot", f"{gap_start}B", f"{bios_end}B"]), check=True, timeout=120)
-    created = _latest_partition_on_disk(disk, before)
-    if not created:
-        # R8: settle batch — wait once for udev after mkpart before probing
-        _settle()
-        created = _latest_partition_on_disk(disk, before)
-    if not created:
-        raise RuntimeError("The installer could not find the new BIOS boot partition after partitioning.")
-    run_command(_as_root(["parted", "-s", disk, "set", str(_partition_number(created)), "bios_grub", "on"]), check=True, timeout=120)
-    _settle()
-    return bios_end + sector
+    return _plan_commit.ensure_bios_boot_partition(
+        disk, gap_start, log, dependencies=_commit_dependencies(),
+    )
 
 def _commit_new_kythos_partition(
     disk: str,
@@ -227,47 +233,13 @@ def _commit_new_kythos_partition(
     inside the same backed-up/restored scope (e.g. the NTFS boundary-shrink
     resizepart call) so its failures are covered by the same safety net.
     Returns the new partition's device path."""
-    from .storage_guard import PartitionTableGuard
-
-    disk_service = DiskService()
-    with disk_hold(disk, log):
-        with PartitionTableGuard(disk, log, disk_service=disk_service):
-            if before_partition is not None:
-                try:
-                    before_partition()
-                except Exception as exc:
-                    # W3: surface cause; guard still restores on mkfs fail per test — split deferred
-                    log(f"{failure_message}: {exc}")
-                    raise
-            # Failure messages handled by PartitionTableGuard's restore; keep original messages for outer log
-            btrfs_start = _ensure_bios_boot_partition(disk, gap_start, log)
-            sector = _block_size_bytes(disk)
-            partition_end = gap_end - sector
-            before = {p["name"] for p in list_partitions(disk) if p.get("name")}
-
-            log(f"Creating KythOS Btrfs partition in {_human_size(gap_end - btrfs_start)} of free space...")
-            run_command(_as_root(["parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs", f"{btrfs_start}B", f"{partition_end}B"]), check=True, timeout=120)
-            # R8: batch reread — one settle after both reread attempts
-            for _cmd in [[_as_root(["blockdev", "--rereadpt", disk])], [_as_root(["partprobe", disk])]]:
-                try:
-                    run_command(_cmd[0], check=False, timeout=15)
-                except Exception:
-                    pass
-            _settle()
-
-            created = _latest_partition_on_disk(disk, before)
-            if not created:
-                raise RuntimeError("The installer could not find the new KythOS partition after partitioning.")
-            run_command(_as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]), check=True, timeout=300)
-            _settle()
-            try:
-                _verify = {p["name"] for p in list_partitions(disk) if p.get("name")}
-                if created not in _verify:
-                    log(f"Warning: kernel did not yet expose {created} after rereadpt — proceeding, udev may still settle.")
-            except Exception as exc:
-                log(f"Warning: could not verify new partition {created}: {exc}")
-            log(f"Created target partition {created}")
-            return created
+    return _plan_commit.commit_new_kythos_partition(
+        disk, gap_start, gap_end, log,
+        dependencies=_commit_dependencies(),
+        before_partition=before_partition,
+        failure_message=failure_message,
+        restored_message=restored_message,
+    )
 
 def _validate_resize_ntfs_target(
     config: dict,
