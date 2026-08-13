@@ -40,13 +40,18 @@ import logging
 import contextlib
 import shutil
 import subprocess
-from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
 from .context import InstallationState, InstallRequest  # pylint: disable=unused-import
 from .plan_types import InstallPlan, PlanReport, ResolvedInstallPlan  # pylint: disable=unused-import
+from .plan_request import (
+    as_request as _request_as_request,
+    install_plan_from_state as _request_install_plan_from_state,
+    normalized_install_mode as _request_normalized_install_mode,
+    request_with_install_plan as _request_with_install_plan,
+)
 from .disk import (
     _human_size,
     _latest_partition_on_disk,
@@ -73,36 +78,20 @@ _logger = logging.getLogger(__name__)
 
 def _as_request(state: "InstallationState | InstallRequest") -> "InstallRequest":
     """Coerce InstallationState dict to InstallRequest — R-02 single-type boundary."""
-    from .context import InstallRequest as _Req
-
-    if isinstance(state, _Req):
-        return state
-    return _Req.from_state(state)  # dict -> InstallRequest, InstallationState remains HTTP-only
+    return _request_as_request(state)
 
 def _normalized_install_mode(state: "InstallationState | InstallRequest") -> str:
-    req = _as_request(state)
-    return str(req.install_mode or "wipe").strip().lower() or "wipe"
+    return _request_normalized_install_mode(state)
 
 def _install_plan_from_state(state: "InstallationState | InstallRequest") -> InstallPlan:
-    req = _as_request(state)
-    return InstallPlan(
-        mode=_normalized_install_mode(req),
-        disk=req.disk,
-        target_partition=req.target_partition,
-    )
+    return _request_install_plan_from_state(state)
 
 def request_with_install_plan(
     state: "InstallationState | InstallRequest",
     plan: InstallPlan,
 ) -> InstallRequest:
     """Return immutable request input updated with resolved storage fields."""
-    request = _as_request(state)
-    changes = {"install_mode": plan.mode}
-    if plan.disk is not None:
-        changes["disk"] = plan.disk
-    if plan.target_partition is not None:
-        changes["target_partition"] = plan.target_partition
-    return replace(request, **changes)
+    return _request_with_install_plan(state, plan)
 
 def _probe_storage(
     disk: str,

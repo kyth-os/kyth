@@ -23,6 +23,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/partition_ops.py": 95.0,
     "build_files/kyth-installer/kyth_installer/partition_ops_journal.py": 88.0,
     "build_files/kyth-installer/kyth_installer/partition_cli.py": 90.0,
+    "build_files/kyth-installer/kyth_installer/plan_request.py": 95.0,
     "build_files/kyth-installer/kyth_installer/post_routes.py": 85.0,
     "build_files/kyth-installer/kyth_installer/phases/bootc_cmd.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/common.py": 90.0,
