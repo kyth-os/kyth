@@ -32,6 +32,28 @@ class PlanCommitTests(unittest.TestCase):
         values.update(changes)
         return plan_commit.CommitDependencies(**values)
 
+    def ntfs_dependencies(self, **changes):
+        values = {
+            "normal_device_path": lambda value: value or "",
+            "validate_target": mock.Mock(
+                return_value=("/dev/sda", "/dev/sda2", 20)
+            ),
+            "required_tools": ("ntfsresize", "parted"),
+            "which": lambda command: f"/usr/bin/{command}",
+            "unmount_target_disk": mock.Mock(),
+            "partition_size": mock.Mock(side_effect=[100, 80]),
+            "partition_number": lambda _partition: 2,
+            "block_size": lambda _disk: 1,
+            "partition_start": lambda _partition: 1000,
+            "shrink_filesystem_guarded": mock.Mock(),
+            "run_command": mock.Mock(),
+            "as_root": lambda command: command,
+            "settle": mock.Mock(),
+            "commit_partition": mock.Mock(return_value="/dev/sda3"),
+        }
+        values.update(changes)
+        return values
+
     def test_bios_helper_is_skipped_when_not_required(self):
         deps = self.dependencies(is_gpt=lambda _disk: False)
         self.assertEqual(
@@ -105,6 +127,41 @@ class PlanCommitTests(unittest.TestCase):
                 required_tools=("parted",), which=lambda _name: None,
                 unmount_target_disk=mock.Mock(), commit_partition=mock.Mock(),
             )
+
+    def test_ntfs_preparation_revalidates_and_commits_freed_tail(self):
+        dependencies = self.ntfs_dependencies()
+        result = plan_commit.prepare_ntfs_resize_target(
+            {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+        )
+        self.assertEqual(result, ("/dev/sda", "/dev/sda3"))
+        self.assertEqual(dependencies["validate_target"].call_count, 2)
+        dependencies["shrink_filesystem_guarded"].assert_called_once_with(
+            "/dev/sda2", 80, 20, mock.ANY,
+        )
+        commit_call = dependencies["commit_partition"].call_args
+        self.assertEqual(commit_call.args[:3], ("/dev/sda", 1080, 1100))
+        commit_call.kwargs["before_partition"]()
+        command = dependencies["run_command"].call_args
+        self.assertEqual(command.args[0][-3:], ["resizepart", "2", "1079B"])
+        self.assertEqual(command.kwargs["input"], "Yes\n")
+
+    def test_ntfs_preparation_stops_on_session_marker_or_missing_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker_root = Path(tmp)
+            (marker_root / "ntfs-shrunk-_dev_sda2").touch()
+            dependencies = self.ntfs_dependencies(marker_root=marker_root)
+            with self.assertRaisesRegex(RuntimeError, "already shrunk"):
+                plan_commit.prepare_ntfs_resize_target(
+                    {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+                )
+            dependencies["validate_target"].assert_not_called()
+
+        dependencies = self.ntfs_dependencies(which=lambda _command: None)
+        with self.assertRaisesRegex(RuntimeError, "ntfsresize, parted"):
+            plan_commit.prepare_ntfs_resize_target(
+                {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+            )
+        dependencies["unmount_target_disk"].assert_not_called()
 
     def test_plan_dispatch_validates_before_each_mode(self):
         validate = mock.Mock(return_value=SimpleNamespace(valid=True, errors=()))

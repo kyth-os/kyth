@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -192,7 +193,92 @@ def prepare_free_space_target(
     return disk, commit_partition(disk, start, end, log)
 
 
-__all__ += ["prepare_free_space_target", "shrink_ntfs_filesystem_guarded"]
+def prepare_ntfs_resize_target(
+    config: dict, log, *, normal_device_path, validate_target, required_tools,
+    which, unmount_target_disk, partition_size, partition_number, block_size,
+    partition_start, shrink_filesystem_guarded, run_command, as_root, settle,
+    commit_partition, marker_root: Path = Path("/run/kyth-installer"),
+) -> tuple[str, str]:
+    """Shrink a validated NTFS target and commit a partition in its freed tail."""
+    try:
+        preliminary = normal_device_path(
+            config.get("resize_partition") or config.get("target_partition")
+        )
+        if preliminary:
+            marker = marker_root / f"ntfs-shrunk-{preliminary.replace('/', '_')}"
+            if marker.is_file():
+                raise RuntimeError(
+                    "This NTFS partition was already shrunk in this installer session "
+                    "but the partition table was restored after a later failure. "
+                    "The filesystem is already at its new smaller size while the "
+                    "partition still describes the old larger size. Reboot, let "
+                    "Windows extend the volume back, or reboot the live ISO before "
+                    "retrying. Marker: " + str(marker)
+                )
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+
+    disk, partition, shrink_bytes = validate_target(config)
+    missing = [command for command in required_tools if which(command) is None]
+    if missing:
+        raise RuntimeError(
+            "Required NTFS resize tools are missing from the live environment: "
+            + ", ".join(missing)
+        )
+    unmount_target_disk(disk, log)
+    disk, partition, shrink_bytes = validate_target(config)
+    current_size = partition_size(partition)
+    new_ntfs_size = current_size - shrink_bytes
+    part_num = partition_number(partition)
+    sector = block_size(disk)
+    start = partition_start(partition)
+    old_end = start + current_size - sector
+    new_end = start + new_ntfs_size - sector
+
+    shrink_filesystem_guarded(partition, new_ntfs_size, shrink_bytes, log)
+
+    def shrink_partition_boundary() -> None:
+        log("Shrinking partition boundary...")
+        run_command(
+            as_root([
+                "parted", "---pretend-input-tty", disk, "unit", "B", "resizepart",
+                str(part_num), f"{new_end}B",
+            ]),
+            input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True,
+            timeout=120,
+        )
+        settle()
+        actual_size = partition_size(partition)
+        if abs(actual_size - new_ntfs_size) > sector:
+            raise RuntimeError(
+                "The partition tool did not produce the requested NTFS boundary. "
+                "No KythOS partition was created; the original partition table will "
+                "be restored."
+            )
+
+    created = commit_partition(
+        disk, new_end + sector, old_end + sector, log,
+        before_partition=shrink_partition_boundary,
+        failure_message=(
+            "A step after the NTFS shrink failed — restoring the original partition "
+            "table..."
+        ),
+        restored_message=(
+            "Partition table restored. The NTFS filesystem itself was already shrunk "
+            "and remains intact and usable — Windows may offer to grow it back to fill "
+            "the partition, or you can leave it as-is and try the install again."
+        ),
+    )
+    return disk, created
+
+
+__all__ += [
+    "prepare_free_space_target",
+    "prepare_ntfs_resize_target",
+    "shrink_ntfs_filesystem_guarded",
+]
 
 
 def prepare_install_plan(
