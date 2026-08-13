@@ -14,6 +14,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/recovery.py": 85.0,
     "build_files/kyth-installer/kyth_installer/services/installer_service.py": 85.0,
     "build_files/kyth-installer/kyth_installer/mount_registry.py": 90.0,
+    "build_files/kyth-installer/kyth_installer/phases/bootc_cmd.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/common.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/finalize.py": 65.0,
     "build_files/kyth-installer/kyth_installer/phases/preflight.py": 95.0,
