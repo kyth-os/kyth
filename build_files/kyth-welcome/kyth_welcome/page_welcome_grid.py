@@ -68,7 +68,9 @@ class _WelcomeGridMixin:
         title: str,
         tasks: list[tuple[str, str]],
     ) -> QFrame:
-        card = QFrame()
+        # Keep ownership even when profile filtering removes a card before the
+        # grid itself is attached to the page (notably the hidden Games card).
+        card = QFrame(self)
         title_lower = title.lower()
         if "games" in title_lower:
             card.setObjectName("genz-category-gaming")

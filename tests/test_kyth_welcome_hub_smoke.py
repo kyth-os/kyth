@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 try:
+    from PySide6.QtCore import QCoreApplication, QEvent, Qt  # noqa: E402
     from PySide6.QtWidgets import QApplication  # noqa: E402
 except ImportError:
     raise unittest.SkipTest("PySide6 required for Hub smoke") from None
@@ -109,3 +110,27 @@ class TestHubSmoke(unittest.TestCase):
         for txt in ["", "a", "wifi"]:
             self.window._update_search_results(txt)
             self._app.processEvents()
+
+    def test_repeated_window_lifecycle_releases_workers_and_widgets(self):
+        from kyth_welcome.services.runtime import running_threads, shutdown_threads
+
+        baseline = set(QApplication.topLevelWidgets())
+        for cycle in range(3):
+            with self.subTest(cycle=cycle):
+                window = self.MainWindow()
+                window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+                window.resize(900, 600)
+                window.show()
+                for key in [d.key for d in window._page_descriptors][:5]:
+                    window._navigate_to(key)
+                    self._app.processEvents()
+                window.close()
+                window.deleteLater()
+                QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                self._app.processEvents()
+                for _ in range(3):
+                    shutdown_threads(5000)
+                    self._app.processEvents()
+                self.assertEqual(running_threads(), [])
+                self.assertNotIn(window, QApplication.topLevelWidgets())
+        self.assertEqual(set(QApplication.topLevelWidgets()), baseline)
