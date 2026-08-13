@@ -1,6 +1,7 @@
 import sys
 import json
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -448,6 +449,42 @@ class InstallerServiceCrudTests(unittest.TestCase):
 
 
 class AnswerFileTests(unittest.TestCase):
+    def test_answer_file_rejects_symlink_wrong_owner_and_oversize(self):
+        fd, path = tempfile.mkstemp()
+        os.write(fd, b"{}")
+        os.close(fd)
+        try:
+            real = os.lstat(path)
+            for mode, uid, size, message in (
+                (stat.S_IFLNK | 0o600, real.st_uid, 2, "regular file"),
+                (real.st_mode, real.st_uid + 1, 2, "owned by"),
+                (real.st_mode, real.st_uid, 65 * 1024, "too large"),
+            ):
+                fake = MagicMock(spec=real)
+                fake.st_mode = mode
+                fake.st_uid = uid
+                fake.st_size = size
+                with patch("kyth_installer.app.os.lstat", return_value=fake):
+                    with self.assertRaisesRegex(ValueError, message):
+                        _load_answer_file(path)
+        finally:
+            os.unlink(path)
+
+    def test_answer_file_requires_json_object(self):
+        fd, path = tempfile.mkstemp()
+        try:
+            os.write(fd, b"[]")
+            os.close(fd)
+            os.chmod(path, 0o600)
+            with self.assertRaisesRegex(ValueError, "one JSON object"):
+                _load_answer_file(path)
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            os.unlink(path)
+
     def test_secure_answer_file_loads_supported_fields(self):
         fd, path = tempfile.mkstemp()
         try:
