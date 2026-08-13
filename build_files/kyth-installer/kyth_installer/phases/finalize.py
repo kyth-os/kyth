@@ -14,6 +14,12 @@ from kyth_shared.accounts import create_installer_user as _shared_create_install
 from .common import _push, _record_transaction
 from .compat import phase_dependency
 from .finalize_identity import configure_hostname_timezone, create_installer_user
+from .finalize_fstab import (
+    append_fstab_line,
+    configure_alongside_fstab,
+    configure_manual_mounts,
+    fsck_pass_for,
+)
 from ..recovery import write_failure_summary
 from ..config import FAILURE_SUMMARY_FILE, LOG_FILE, TRANSACTION_FILE
 
@@ -41,98 +47,27 @@ def _blkid_uuid(part: str, log, *, timeout: float = 5) -> str | None:
 
 
 def _fsck_pass_for(fstype: str) -> int:
-    """fstab fsck pass number for a non-root mount. 0 for swap and btrfs —
-    btrfs has no traditional boot-time fsck integration, so passing it to
-    e2fsck-style checking is a no-op at best and a boot delay at worst — 2
-    for everything else with a real fsck tool. Never 1: that's reserved
-    for the root filesystem, which isn't written through this path."""
-    return 0 if fstype in ("linux-swap", "btrfs") else 2
+    return fsck_pass_for(fstype)
 
 
 def _append_fstab_line(etc, fstab_line: str, log, description: str) -> bool:
-    """Append one line to the target system's fstab. Returns whether it
-    succeeded; callers decide whether that's fatal for the mount it was
-    building an entry for."""
-    run_command = phase_dependency("run_command")
-    _as_root = phase_dependency("_as_root")
-    try:
-        run_command(
-            _as_root(["/usr/bin/tee", "-a", str(Path(etc, "fstab"))]),
-            input=fstab_line, text=True,
-            stdout=subprocess.DEVNULL, check=True,
-        )
-    except OSError as fe:
-        log(
-            f"Warning: failed to update fstab for {description}: "
-            f"{format_os_error(fe, path=Path(etc, 'fstab'))}"
-        )
-        return False
-    except Exception as fe:
-        log(f"Warning: failed to update fstab for {description}: {fe}")
-        return False
-    log(f"Fstab updated for {description}: {fstab_line.strip()}")
-    return True
+    return append_fstab_line(
+        etc, fstab_line, log, description, format_error=format_os_error,
+    )
 
 
 def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
-    """Mount the alongside-install target's @home subvolume under the ostree
-    deploy root and wire it into the target system's fstab."""
-    run_command = phase_dependency("run_command")
-    _as_root = phase_dependency("_as_root")
-    _safe_umount = phase_dependency("_safe_umount")
-    target_home = Path(config_root) / "ostree/deploy/default/var/home"
-    run_command(_as_root(["mkdir", "-p", str(target_home)]), check=True)
-    _safe_umount(run_command, str(target_home))
-    run_command(_as_root(["mount", "-o", "subvol=@home", target_part, str(target_home)]), check=True)
-
-    uuid_out = _blkid_uuid(target_part, log)
-    if uuid_out is None:
-        return
-    fstab_line = f"UUID={uuid_out} /var/home btrfs subvol=@home,compress=zstd:1 0 {_fsck_pass_for('btrfs')}\n"
-    _append_fstab_line(etc, fstab_line, log, "@home subvolume")
+    configure_alongside_fstab(
+        config_root, target_part, etc, log,
+        uuid_lookup=_blkid_uuid, append_line=_append_fstab_line,
+    )
 
 
 def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -> None:
-    """Mount each manually-configured partition under the ostree deploy root
-    and add a matching fstab entry (mapping /home to /var/home)."""
-    run_command = phase_dependency("run_command")
-    _as_root = phase_dependency("_as_root")
-    _safe_umount = phase_dependency("_safe_umount")
-    _get_manual_mounts = phase_dependency("_get_manual_mounts")
-    manual_mounts = _get_manual_mounts(context)
-    for mnt in manual_mounts:
-        part = mnt["partition"]
-        mp = mnt["mountpoint"]
-        fs = mnt["fstype"]
-        try:
-            uuid_out = _blkid_uuid(part, log)
-            if uuid_out is None:
-                log(f"Warning: skipping fstab entry for {mp} ({part}) — no UUID")
-                continue
-            # Map /home to /var/home in ostree layout
-            fstab_mp = "/var/home" if mp == "/home" else mp
-            target_path = Path(config_root) / fstab_mp.lstrip("/")
-            if fs == "linux-swap":
-                fstab_line = f"UUID={uuid_out} none swap defaults 0 {_fsck_pass_for(fs)}\n"
-            else:
-                mount_options = "defaults,compress=zstd:1" if fs == "btrfs" else "defaults"
-                fstab_line = f"UUID={uuid_out} {fstab_mp} {fs} {mount_options} 0 {_fsck_pass_for(fs)}\n"
-                run_command(
-                    _as_root(["mkdir", "-p", str(target_path)]),
-                    check=False,
-                )
-                # Unmount any existing mount at this path (e.g. @home subvolume)
-                _safe_umount(run_command, str(target_path))
-            if not _append_fstab_line(etc, fstab_line, log, f"{part} at {mp}"):
-                continue
-            if fs != "linux-swap":
-                run_command(
-                    _as_root(["mount", part, str(target_path)]),
-                    check=False,
-                )
-            log(f"Manual mount: {part} at {mp} ({fs})")
-        except Exception as me:
-            log(f"Warning: failed to configure manual mount {part} at {mp}: {me}")
+    configure_manual_mounts(
+        config_root, etc, log, context,
+        uuid_lookup=_blkid_uuid, append_line=_append_fstab_line,
+    )
 
 
 def _configure_hostname_timezone(etc, state, log) -> None:
