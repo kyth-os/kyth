@@ -8,12 +8,15 @@ from pathlib import Path
 
 THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/assurance.py": 90.0,
+    "build_files/kyth-installer/kyth_installer/cleanup.py": 95.0,
+    "build_files/kyth-installer/kyth_installer/execution.py": 95.0,
     "build_files/kyth-installer/kyth_installer/fsresize.py": 90.0,
     "build_files/kyth-installer/kyth_installer/recovery.py": 85.0,
     "build_files/kyth-installer/kyth_installer/services/installer_service.py": 85.0,
     "build_files/kyth-installer/kyth_installer/mount_registry.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/common.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/finalize.py": 65.0,
+    "build_files/kyth-installer/kyth_installer/phases/preflight.py": 95.0,
     "build_files/kyth-installer/kyth_installer/phases/run.py": 75.0,
     "build_files/kyth-installer/kyth_installer/phases/storage.py": 60.0,
     "build_files/kyth-installer/kyth_installer/storage_guard.py": 90.0,
