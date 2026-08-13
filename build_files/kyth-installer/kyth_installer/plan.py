@@ -135,7 +135,9 @@ def _probe_storage(
 
 from .plan_validate import (  # canonical (plan.py 788 → split)
     GuidedValidationDependencies,
+    ReportDependencies,
     ValidationDependencies,
+    build_plan_report as _pv_build_plan_report,
     _validate_efi_target as _pv_validate_efi_target,
     _validate_install_target as _pv_validate_install_target,
     _validate_partition_target as _pv_validate_partition_target,
@@ -396,101 +398,28 @@ def _prepare_explicit_install_plan(
     disk, target_partition = _validate_install_target(state, context)
     return InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
 
+def _report_dependencies() -> ReportDependencies:
+    return ReportDependencies(
+        as_request=_as_request,
+        normalized_mode=_normalized_install_mode,
+        probe_storage=_probe_storage,
+        validate_install=_validate_install_target,
+        validate_resize=_validate_resize_ntfs_target,
+        validate_free_space=_validate_free_space_target,
+    )
+
+
 def validate_plan_state(
     state: "InstallationState | InstallRequest",
     context=None,
     *,
     snapshot: StorageSnapshot | None = None,
 ) -> PlanReport:
-    """Pure validation — no disk writes, no partition-table backup, no mkfs.
+    """Return the canonical read-only report through the compatibility facade."""
+    return _pv_build_plan_report(
+        state, context, snapshot=snapshot, dependencies=_report_dependencies(),
+    )
 
-    Returns a structured :class:`PlanReport` that the API route can surface
-    before the user confirms destructive work, and that the commit path re-runs
-    as a guard before touching the disk. Keeping this separate from
-    ``_prepare_*`` (which *does* mutate) makes the validate→commit boundary
-    explicit and testable with plain ``StorageSnapshot`` fixtures.
-
-    R-02: InstallationState is HTTP-only; destructive validation consumes
-    InstallRequest via _as_request.
-    """
-    req = _as_request(state)
-    mode = _normalized_install_mode(req)
-    disk = _normal_device_path(req.disk)
-    errors: list[str] = []
-    warnings: list[str] = []
-    efi = ""
-    target = ""
-    required = MIN_KYTHOS_BYTES
-    available = 0
-    is_gpt = False
-    needs_bios = False
-    will_create = mode in ("resize_ntfs", "free_space")
-    will_shrink = mode == "resize_ntfs"
-    try:
-        if mode == "resize_ntfs":
-            d, p, shrink_bytes = _validate_resize_ntfs_target(state, snapshot=snapshot)  # type: ignore[arg-type]
-            disk, target, required = d, p, shrink_bytes
-            snapshot = snapshot or _probe_storage(disk)
-            efi = snapshot.efi_partition or ""
-            is_gpt = snapshot.is_gpt
-            needs_bios = is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
-            available = shrink_bytes
-        elif mode == "free_space":
-            d, start, end = _validate_free_space_target(state, snapshot=snapshot)  # type: ignore[arg-type]
-            disk, available = d, end - start
-            snapshot = snapshot or _probe_storage(disk, include_free_space=True)
-            efi = snapshot.efi_partition or ""
-            is_gpt = snapshot.is_gpt
-            needs_bios = is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
-            required = MIN_KYTHOS_BYTES + (BIOS_BOOT_BYTES if needs_bios else 0)
-        else:
-            raw = _as_request(state).as_state()
-            eff_snapshot = snapshot or _probe_storage(disk, include_partitions=mode != "wipe")
-            is_gpt = eff_snapshot.is_gpt
-            needs_bios = is_gpt and not eff_snapshot.has_bios_boot_partition(BIOS_BOOT_GUID) if mode == "alongside" else False
-            d, t = _validate_install_target(raw, context, snapshot=eff_snapshot)
-            disk, target = d, t or ""
-            efi = eff_snapshot.efi_partition or ""
-            if mode == "wipe":
-                info = eff_snapshot.disks_by_name.get(disk, {})
-                available = _safe_int(info.get("size_bytes"))
-                required = MIN_KYTHOS_BYTES
-            elif target:
-                part = eff_snapshot.partitions_by_name.get(target, {})
-                available = _safe_int(part.get("size_bytes"))
-                required = MIN_KYTHOS_BYTES
-    except RuntimeError as exc:
-        errors.append(str(exc))
-        return PlanReport(valid=False, mode=mode, disk=disk, target_partition=target, efi_partition=efi,
-                          will_create_partition=will_create, will_shrink_filesystem=will_shrink,
-                          required_bytes=required, available_bytes=available, is_gpt=is_gpt,
-                          needs_bios_boot=needs_bios, errors=tuple(errors), warnings=tuple(warnings))
-    except Exception as exc:
-        errors.append(f"Unexpected validation error: {exc}")
-        return PlanReport(valid=False, mode=mode, disk=disk, target_partition=target, efi_partition=efi,
-                          will_create_partition=will_create, will_shrink_filesystem=will_shrink,
-                          required_bytes=required, available_bytes=available, is_gpt=is_gpt,
-                          needs_bios_boot=needs_bios, errors=tuple(errors), warnings=tuple(warnings))
-
-    if needs_bios and mode in ("resize_ntfs", "free_space"):
-        warnings.append("A 1 MiB BIOS boot partition will be created for GRUB on this GPT disk.")
-    if needs_bios and mode == "alongside":
-        errors.append(
-            "Legacy BIOS on GPT requires a 1 MiB BIOS boot partition for GRUB. "
-            "Create a 1 MiB partition with the bios_grub flag in the manual "
-            "partition editor, or use free-space/NTFS-shrink install which "
-            "creates it automatically. Without it GRUB falls back to "
-            "blocklists, which Btrfs rejects."
-        )
-        return PlanReport(valid=False, mode=mode, disk=disk, target_partition=target, efi_partition=efi,
-                          will_create_partition=will_create, will_shrink_filesystem=will_shrink,
-                          required_bytes=required, available_bytes=available, is_gpt=is_gpt,
-                          needs_bios_boot=needs_bios, errors=tuple(errors), warnings=tuple(warnings))
-
-    return PlanReport(valid=True, mode=mode, disk=disk, target_partition=target, efi_partition=efi,
-                      will_create_partition=will_create, will_shrink_filesystem=will_shrink,
-                      required_bytes=required, available_bytes=available, is_gpt=is_gpt,
-                      needs_bios_boot=needs_bios, errors=(), warnings=tuple(warnings))
 
 def _prepare_install_plan(state: dict | InstallRequest, log, context=None) -> InstallPlan:
     # Explicit validate→commit: fail fast with a structured report before any

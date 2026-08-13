@@ -16,8 +16,10 @@ from .disk import (
 )
 
 if TYPE_CHECKING:
-    from .context import InstallerContext
+    from .context import InstallRequest, InstallerContext
     from .storage_snapshot import StorageSnapshot
+
+from .plan_types import PlanReport
 
 _logger = logging.getLogger(__name__)
 
@@ -39,6 +41,18 @@ class GuidedValidationDependencies:
     probe_storage: Callable[..., "StorageSnapshot"]
     parent_disk: Callable[[str], str]
     partition_size: Callable[[str], int]
+
+
+@dataclass(frozen=True, slots=True)
+class ReportDependencies:
+    """Pure collaborators needed to build a pre-mutation plan report."""
+
+    as_request: Callable[[object], "InstallRequest"]
+    normalized_mode: Callable[[object], str]
+    probe_storage: Callable[..., "StorageSnapshot"]
+    validate_install: Callable[..., tuple[str, str | None]]
+    validate_resize: Callable[..., tuple[str, str, int]]
+    validate_free_space: Callable[..., tuple[str, int, int]]
 
 
 def default_validation_dependencies() -> ValidationDependencies:
@@ -279,3 +293,102 @@ def validate_free_space_target(
             "The selected free space is no longer available. Re-scan the disk and try again."
         )
     return disk, start, end
+
+
+def build_plan_report(
+    state,
+    context=None,
+    *,
+    snapshot: StorageSnapshot | None = None,
+    dependencies: ReportDependencies,
+) -> PlanReport:
+    """Build the complete read-only plan report for every installation mode."""
+    request = dependencies.as_request(state)
+    mode = dependencies.normalized_mode(request)
+    disk = _normal_device_path(request.disk)
+    errors: list[str] = []
+    warnings: list[str] = []
+    efi = ""
+    target = ""
+    required = MIN_KYTHOS_BYTES
+    available = 0
+    is_gpt = False
+    needs_bios = False
+    will_create = mode in ("resize_ntfs", "free_space")
+    will_shrink = mode == "resize_ntfs"
+
+    def report(valid: bool) -> PlanReport:
+        return PlanReport(
+            valid=valid, mode=mode, disk=disk, target_partition=target,
+            efi_partition=efi, will_create_partition=will_create,
+            will_shrink_filesystem=will_shrink, required_bytes=required,
+            available_bytes=available, is_gpt=is_gpt,
+            needs_bios_boot=needs_bios, errors=tuple(errors),
+            warnings=tuple(warnings),
+        )
+
+    try:
+        if mode == "resize_ntfs":
+            disk, target, required = dependencies.validate_resize(
+                state, snapshot=snapshot,
+            )
+            snapshot = snapshot or dependencies.probe_storage(disk)
+            efi = snapshot.efi_partition or ""
+            is_gpt = snapshot.is_gpt
+            needs_bios = is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+            available = required
+        elif mode == "free_space":
+            disk, start, end = dependencies.validate_free_space(
+                state, snapshot=snapshot,
+            )
+            available = end - start
+            snapshot = snapshot or dependencies.probe_storage(
+                disk, include_free_space=True,
+            )
+            efi = snapshot.efi_partition or ""
+            is_gpt = snapshot.is_gpt
+            needs_bios = is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+            required = MIN_KYTHOS_BYTES + (BIOS_BOOT_BYTES if needs_bios else 0)
+        else:
+            effective = snapshot or dependencies.probe_storage(
+                disk, include_partitions=mode != "wipe",
+            )
+            is_gpt = effective.is_gpt
+            needs_bios = (
+                is_gpt and not effective.has_bios_boot_partition(BIOS_BOOT_GUID)
+                if mode == "alongside" else False
+            )
+            disk, resolved = dependencies.validate_install(
+                request.as_state(), context, snapshot=effective,
+            )
+            target = resolved or ""
+            efi = effective.efi_partition or ""
+            if mode == "wipe":
+                available = _safe_int(
+                    effective.disks_by_name.get(disk, {}).get("size_bytes")
+                )
+            elif target:
+                available = _safe_int(
+                    effective.partitions_by_name.get(target, {}).get("size_bytes")
+                )
+    except RuntimeError as exc:
+        errors.append(str(exc))
+        return report(False)
+    except Exception as exc:
+        errors.append(f"Unexpected validation error: {exc}")
+        return report(False)
+
+    if needs_bios and mode in ("resize_ntfs", "free_space"):
+        warnings.append(
+            "A 1 MiB BIOS boot partition will be created for GRUB on this GPT disk."
+        )
+    if needs_bios and mode == "alongside":
+        errors.append(
+            "Legacy BIOS on GPT requires a 1 MiB BIOS boot partition for GRUB. "
+            "Create a 1 MiB partition with the bios_grub flag in the manual "
+            "partition editor, or use free-space/NTFS-shrink install which "
+            "creates it automatically. Without it GRUB falls back to "
+            "blocklists, which Btrfs rejects."
+        )
+        return report(False)
+    return report(True)
