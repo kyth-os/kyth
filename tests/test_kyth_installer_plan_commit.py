@@ -93,6 +93,28 @@ class PlanCommitTests(unittest.TestCase):
             )
         self.assertIn("resize failed", log.call_args.args[0])
 
+    def test_partition_commit_tolerates_reread_and_visibility_failures(self):
+        commands = mock.Mock(side_effect=[None, RuntimeError("reread"), None, None])
+        partitions = mock.Mock(side_effect=[[], RuntimeError("scan failed")])
+        log = mock.Mock()
+        deps = self.dependencies(
+            is_gpt=lambda _disk: False,
+            run_command=commands, list_partitions=partitions,
+            latest_partition=mock.Mock(return_value="/dev/sda2"),
+        )
+        created = plan_commit.commit_new_kythos_partition(
+            "/dev/sda", 1024, 4096, log, dependencies=deps,
+        )
+        self.assertEqual(created, "/dev/sda2")
+        self.assertIn("could not verify", log.call_args_list[-2].args[0])
+
+    def test_partition_commit_fails_when_created_partition_is_not_discoverable(self):
+        deps = self.dependencies(latest_partition=mock.Mock(return_value=None))
+        with self.assertRaisesRegex(RuntimeError, "could not find"):
+            plan_commit.commit_new_kythos_partition(
+                "/dev/sda", 1024, 4096, mock.Mock(), dependencies=deps,
+            )
+
     def test_ntfs_shrink_records_marker_and_surfaces_failure_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -111,6 +133,16 @@ class PlanCommitTests(unittest.TestCase):
             )
         self.assertIn("no partition table change", log.call_args.args[0])
 
+    def test_ntfs_shrink_tolerates_marker_write_failure(self):
+        marker_root = mock.Mock()
+        marker_root.mkdir.side_effect = PermissionError("read-only runtime")
+        shrink = mock.Mock()
+        plan_commit.shrink_ntfs_filesystem_guarded(
+            "/dev/sda2", 100, 20, mock.Mock(), shrink_filesystem=shrink,
+            human_size=str, marker_root=marker_root,
+        )
+        shrink.assert_called_once()
+
     def test_free_space_preparation_revalidates_after_unmount(self):
         validate = mock.Mock(side_effect=[("/dev/sda", 10, 100), ("/dev/sda", 20, 90)])
         commit = mock.Mock(return_value="/dev/sda3")
@@ -127,6 +159,19 @@ class PlanCommitTests(unittest.TestCase):
                 required_tools=("parted",), which=lambda _name: None,
                 unmount_target_disk=mock.Mock(), commit_partition=mock.Mock(),
             )
+
+    def test_free_space_preparation_rejects_disk_drift(self):
+        validate = mock.Mock(side_effect=[
+            ("/dev/sda", 10, 100), ("/dev/sdb", 20, 90),
+        ])
+        commit = mock.Mock()
+        with self.assertRaisesRegex(RuntimeError, "target disk changed"):
+            plan_commit.prepare_free_space_target(
+                {}, mock.Mock(), validate_target=validate, required_tools=("parted",),
+                which=lambda _name: "/usr/bin/parted",
+                unmount_target_disk=mock.Mock(), commit_partition=commit,
+            )
+        commit.assert_not_called()
 
     def test_ntfs_preparation_revalidates_and_commits_freed_tail(self):
         dependencies = self.ntfs_dependencies()
@@ -162,6 +207,40 @@ class PlanCommitTests(unittest.TestCase):
                 {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
             )
         dependencies["unmount_target_disk"].assert_not_called()
+
+    def test_ntfs_preparation_rejects_target_drift_before_shrink(self):
+        dependencies = self.ntfs_dependencies(validate_target=mock.Mock(side_effect=[
+            ("/dev/sda", "/dev/sda2", 20),
+            ("/dev/sda", "/dev/sda3", 20),
+        ]))
+        with self.assertRaisesRegex(RuntimeError, "NTFS target changed"):
+            plan_commit.prepare_ntfs_resize_target(
+                {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+            )
+        dependencies["shrink_filesystem_guarded"].assert_not_called()
+
+    def test_ntfs_boundary_mismatch_and_post_shrink_failure_propagate(self):
+        dependencies = self.ntfs_dependencies(
+            partition_size=mock.Mock(side_effect=[100, 70]),
+        )
+        plan_commit.prepare_ntfs_resize_target(
+            {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+        )
+        callback = dependencies["commit_partition"].call_args.kwargs["before_partition"]
+        with self.assertRaisesRegex(RuntimeError, "requested NTFS boundary"):
+            callback()
+
+        dependencies = self.ntfs_dependencies(
+            commit_partition=mock.Mock(side_effect=RuntimeError("mkfs failed")),
+        )
+        with self.assertRaisesRegex(RuntimeError, "mkfs failed"):
+            plan_commit.prepare_ntfs_resize_target(
+                {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+            )
+        dependencies["shrink_filesystem_guarded"].assert_called_once()
+        call = dependencies["commit_partition"].call_args
+        self.assertIn("restoring", call.kwargs["failure_message"])
+        self.assertIn("already shrunk", call.kwargs["restored_message"])
 
     def test_plan_dispatch_validates_before_each_mode(self):
         validate = mock.Mock(return_value=SimpleNamespace(valid=True, errors=()))

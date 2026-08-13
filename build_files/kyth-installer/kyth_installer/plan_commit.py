@@ -182,6 +182,7 @@ def prepare_free_space_target(
 ) -> tuple[str, str]:
     """Revalidate and commit a guided install into an existing free region."""
     disk, start, end = validate_target(config)
+    selected_disk = disk
     missing = [command for command in required_tools if which(command) is None]
     if missing:
         raise RuntimeError(
@@ -190,6 +191,10 @@ def prepare_free_space_target(
         )
     unmount_target_disk(disk, log)
     disk, start, end = validate_target(config)
+    if disk != selected_disk:
+        raise RuntimeError(
+            "The selected target disk changed during preparation; no partition was created."
+        )
     return disk, commit_partition(disk, start, end, log)
 
 
@@ -221,6 +226,7 @@ def prepare_ntfs_resize_target(
         pass
 
     disk, partition, shrink_bytes = validate_target(config)
+    selected_target = (disk, partition)
     missing = [command for command in required_tools if which(command) is None]
     if missing:
         raise RuntimeError(
@@ -229,6 +235,10 @@ def prepare_ntfs_resize_target(
         )
     unmount_target_disk(disk, log)
     disk, partition, shrink_bytes = validate_target(config)
+    if (disk, partition) != selected_target:
+        raise RuntimeError(
+            "The selected NTFS target changed during preparation; no filesystem was shrunk."
+        )
     current_size = partition_size(partition)
     new_ntfs_size = current_size - shrink_bytes
     part_num = partition_number(partition)
