@@ -109,7 +109,10 @@ class PlanCommitTests(unittest.TestCase):
         self.assertIn("could not verify", log.call_args_list[-2].args[0])
 
     def test_partition_commit_fails_when_created_partition_is_not_discoverable(self):
-        deps = self.dependencies(latest_partition=mock.Mock(return_value=None))
+        deps = self.dependencies(
+            is_gpt=lambda _disk: False,
+            latest_partition=mock.Mock(return_value=None),
+        )
         with self.assertRaisesRegex(RuntimeError, "could not find"):
             plan_commit.commit_new_kythos_partition(
                 "/dev/sda", 1024, 4096, mock.Mock(), dependencies=deps,
@@ -207,6 +210,21 @@ class PlanCommitTests(unittest.TestCase):
                 {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
             )
         dependencies["unmount_target_disk"].assert_not_called()
+
+    def test_ntfs_preparation_continues_when_marker_probe_is_unavailable(self):
+        dependencies = self.ntfs_dependencies(
+            normal_device_path=mock.Mock(side_effect=OSError("device lookup failed")),
+        )
+        result = plan_commit.prepare_ntfs_resize_target(
+            {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+        )
+        self.assertEqual(result, ("/dev/sda", "/dev/sda3"))
+
+        dependencies = self.ntfs_dependencies(normal_device_path=lambda _value: "")
+        result = plan_commit.prepare_ntfs_resize_target(
+            {}, mock.Mock(), **dependencies,
+        )
+        self.assertEqual(result, ("/dev/sda", "/dev/sda3"))
 
     def test_ntfs_preparation_rejects_target_drift_before_shrink(self):
         dependencies = self.ntfs_dependencies(validate_target=mock.Mock(side_effect=[
