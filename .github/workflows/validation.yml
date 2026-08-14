@@ -76,6 +76,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Cache pip (quality)
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684f # v4.2.3
+        with:
+          path: ~/.cache/pip
+          key: pip-quality-${{ runner.os }}-${{ hashFiles('requirements-quality.txt') }}
+          restore-keys: |
+            pip-quality-${{ runner.os }}-
+
+      - name: Cache validation tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/kyth-ci-tools
+          key: validation-tools-${{ runner.os }}-${{ env.ACTIONLINT_VERSION }}-${{ env.HADOLINT_VERSION }}-${{ env.JUST_VERSION }}-${{ env.SHELLCHECK_VERSION }}-${{ env.ZIZMOR_VERSION }}
+          restore-keys: |
+            validation-tools-${{ runner.os }}-
+
       - name: Install pinned quality tools
         run: python3 -m pip install --disable-pip-version-check -r requirements-quality.txt
 
@@ -109,6 +125,22 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      - name: Cache pip (gui-smoke)
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684f # v4.2.3
+        with:
+          path: ~/.cache/pip
+          key: pip-gui-${{ runner.os }}-pyside6-6.11.1
+          restore-keys: |
+            pip-gui-${{ runner.os }}-
+
+      - name: Cache validation tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/kyth-ci-tools
+          key: validation-tools-${{ runner.os }}-${{ env.ACTIONLINT_VERSION }}-${{ env.HADOLINT_VERSION }}-${{ env.JUST_VERSION }}-${{ env.SHELLCHECK_VERSION }}-${{ env.ZIZMOR_VERSION }}
+          restore-keys: |
+            validation-tools-${{ runner.os }}-
 
       - name: Install Qt runtime and pinned PySide6
         run: |

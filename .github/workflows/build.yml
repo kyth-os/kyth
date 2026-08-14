@@ -249,7 +249,9 @@ jobs:
             --build-arg BASE_IMAGE="${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}" \
             --build-arg KYTH_KERNEL_FLAVOR="${MATRIX_KERNEL_FLAVOR}" \
             --build-arg CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VERSION}" \
+            --cache-from "type=gha,scope=base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}" \
             --cache-from "type=registry,ref=${BASE_CACHE_REF}" \
+            --cache-to "type=gha,scope=base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR},mode=max" \
             --cache-to "type=registry,ref=${BASE_CACHE_REF},mode=max" \
             --tag "${BASE_IMAGE_REF}" \
             --metadata-file "${RUNNER_TEMP}/base-build-metadata.json" \
@@ -334,7 +336,9 @@ jobs:
             --build-arg ENABLE_KSM=0 \
             --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
             --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
+            --cache-from "type=gha,scope=final-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}" \
             --cache-from "type=registry,ref=${FINAL_CACHE_REF}" \
+            --cache-to "type=gha,scope=final-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR},mode=max" \
             --cache-to "type=registry,ref=${FINAL_CACHE_REF},mode=max" \
             --tag "${RAW_IMAGE_REF}" \
             "${LABEL_ARGS[@]}" \
