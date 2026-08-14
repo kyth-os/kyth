@@ -99,7 +99,9 @@ class PostRouteCoverageTests(unittest.TestCase):
             mount.mkdir()
             log_file = Path(tmp) / "install.log"
             log_file.write_text("log")
-            fake_usb = Path("/run/media/user/USB")
+            fake_usb = mock.MagicMock(spec=Path)
+            fake_usb.__str__.return_value = "/run/media/user/USB"
+            fake_usb.is_dir.return_value = True
             mock_path_instance = mock.MagicMock()
             mock_path_instance.rglob.return_value = [fake_usb]
             # pathlib.Path("/run/media") returns mock_path_instance
@@ -126,7 +128,13 @@ class PostRouteCoverageTests(unittest.TestCase):
 
         # per-item exception is swallowed and next candidate is tried
         with tempfile.TemporaryDirectory() as tmp:
-            candidates = [Path("/run/media/a"), Path("/run/media/b")]
+            cand_a = mock.MagicMock(spec=Path)
+            cand_a.__str__.return_value = "/run/media/a"
+            cand_a.is_dir.return_value = True
+            cand_b = mock.MagicMock(spec=Path)
+            cand_b.__str__.return_value = "/run/media/b"
+            cand_b.is_dir.return_value = True
+            candidates = [cand_a, cand_b]
             mock_path_instance = mock.MagicMock()
             mock_path_instance.rglob.return_value = candidates
 
@@ -174,8 +182,11 @@ class PostRouteCoverageTests(unittest.TestCase):
             self.assertIn("No USB", response.payload["message"])
 
         # findmnt returns non-zero for all candidates -> 400
+        cand_x = mock.MagicMock(spec=Path)
+        cand_x.__str__.return_value = "/run/media/x"
+        cand_x.is_dir.return_value = True
         mock_path_instance = mock.MagicMock()
-        mock_path_instance.rglob.return_value = [Path("/run/media/x")]
+        mock_path_instance.rglob.return_value = [cand_x]
 
         def fake_path4(arg):
             if arg == "/run/media":
