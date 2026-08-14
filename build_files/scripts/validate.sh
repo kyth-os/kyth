@@ -77,7 +77,8 @@ export XDG_CONFIG_HOME="${test_home}/config"
 export XDG_DATA_HOME="${test_home}/data"
 export XDG_STATE_HOME="${test_home}/state"
 mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}"
-PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer python3 -m unittest discover -s tests -b
+# Use pytest -q for speed/parity with Justfile:test; guard with timeout so CI doesn't hang on slow network/hardware probes.
+timeout 90 PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer python3 -m pytest tests/ -q
 
 echo "==> Structured configuration"
 while IFS= read -r -d '' file; do
