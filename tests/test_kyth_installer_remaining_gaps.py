@@ -267,6 +267,41 @@ class InstallerAppCoverageTests(unittest.TestCase):
         command = spawn.call_args.args[0]
         self.assertEqual(command[:5], ["sudo", "-u", "alice", "env", "DISPLAY=:0"])
 
+    def test_headless_answer_file_error_calls_parser_error(self):
+        with mock.patch.object(app, "_load_answer_file", side_effect=OSError("boom")) as loader:
+            with mock.patch.object(sys, "argv", ["prog", "--headless", "--answer-file", "/tmp/answers.json"]):
+                with mock.patch.object(app.argparse.ArgumentParser, "error", side_effect=SystemExit(2)) as parser_error:
+                    with self.assertRaises(SystemExit) as ctx:
+                        app.run_headless()
+                    self.assertEqual(ctx.exception.code, 2)
+                    parser_error.assert_called_once()
+                    self.assertIn("boom", parser_error.call_args.args[0])
+            loader.assert_called_once()
+
+    def test_headless_json_decode_error_calls_parser_error(self):
+        with mock.patch.object(app, "_load_answer_file", side_effect=json.JSONDecodeError("bad", "", 0)):
+            with mock.patch.object(sys, "argv", ["prog", "--headless", "--answer-file", "/tmp/answers.json"]):
+                with mock.patch.object(app.argparse.ArgumentParser, "error", side_effect=SystemExit(2)) as parser_error:
+                    with self.assertRaises(SystemExit):
+                        app.run_headless()
+                    parser_error.assert_called_once()
+
+    def test_main_dispatches_to_run_headless(self):
+        with mock.patch.object(sys, "argv", ["kyth-installer", "--headless"]), mock.patch.object(
+            app, "run_headless"
+        ) as headless:
+            app.main()
+            headless.assert_called_once()
+
+    def test_main_dispatches_to_run_headless_with_return(self):
+        # also verify the return after run_headless prevents token generation
+        with mock.patch.object(sys, "argv", ["kyth-installer", "--headless"]), mock.patch.object(
+            app, "run_headless"
+        ) as headless, mock.patch.object(app.secrets, "token_urlsafe") as token:
+            app.main()
+            headless.assert_called_once()
+            token.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

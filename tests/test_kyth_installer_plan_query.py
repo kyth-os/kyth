@@ -124,6 +124,70 @@ class PlanQueryTests(unittest.TestCase):
                 list_partitions=lambda _disk: [],
             )
 
+    def test_suggest_windows_filters_exceptions_and_small_or_wrong_fstype(self):
+        # probe raises for one disk, ext4 and undersized ntfs are skipped
+        snapshots = {
+            "/dev/sdb": SimpleNamespace(partitions_by_name={
+                "/dev/sdb1": {"fstype": "ext4", "size_bytes": 200 * 1024**3},
+                "/dev/sdb2": {"fstype": "ntfs", "size_bytes": 50 * 1024**3},
+                "/dev/sdb3": {"fstype": "ntfs", "size_bytes": 200 * 1024**3},
+            }),
+        }
+
+        def probe(name, **_kwargs):
+            if name == "/dev/sda":
+                raise RuntimeError("probe failed")
+            return snapshots[name]
+
+        result = plan_query.suggest_windows_resize_target(
+            list_disks=lambda: [{"name": "/dev/sda"}, {"name": "/dev/sdb"}],
+            probe_storage=probe,
+        )
+        self.assertEqual(result["partition"], "/dev/sdb3")
+
+    def test_bootcurrent_returns_none_on_nonzero_or_empty_or_no_match(self):
+        # non-zero returncode
+        run = mock.Mock(return_value=SimpleNamespace(returncode=1, stdout="BootCurrent: 0001\n"))
+        self.assertIsNone(plan_query.find_bootcurrent_esp(run_command=run, as_root=lambda v: v, which=lambda _: "/usr/bin/efibootmgr"))
+        # empty stdout
+        run = mock.Mock(return_value=SimpleNamespace(returncode=0, stdout=""))
+        self.assertIsNone(plan_query.find_bootcurrent_esp(run_command=run, as_root=lambda v: v, which=lambda _: "/usr/bin/efibootmgr"))
+        # no BootCurrent match
+        run = mock.Mock(return_value=SimpleNamespace(returncode=0, stdout="BootOrder: 0001\nBoot0001* something\n"))
+        self.assertIsNone(plan_query.find_bootcurrent_esp(run_command=run, as_root=lambda v: v, which=lambda _: "/usr/bin/efibootmgr"))
+
+    def test_manual_mounts_validates_empty_disk_and_skips_root_and_duplicate_partition(self):
+        def journal(ops, disk="/dev/sda"):
+            return SimpleNamespace(committed=True, disk=disk, ops=ops)
+
+        with self.assertRaisesRegex(RuntimeError, "no target disk"):
+            plan_query.get_manual_mounts(
+                object(), get_journal=lambda _c: journal([], disk=""), list_partitions=lambda _d: []
+            )
+        # root and /boot/efi are skipped, leaving only /home
+        ops = [
+            {"kind": "set_mountpoint", "params": {"partition": "/dev/sda2", "mountpoint": "/"}},
+            {"kind": "set_mountpoint", "params": {"partition": "/dev/sda3", "mountpoint": "/boot/efi"}},
+            {"kind": "set_mountpoint", "params": {"partition": "/dev/sda4", "mountpoint": ""}},
+            {"kind": "set_mountpoint", "params": {"partition": "/dev/sda5", "mountpoint": "/home"}},
+        ]
+        mounts = plan_query.get_manual_mounts(
+            object(), get_journal=lambda _c: journal(ops), list_partitions=lambda _d: [{"name": "/dev/sda5", "fstype": "btrfs"}]
+        )
+        self.assertEqual(len(mounts), 1)
+        self.assertEqual(mounts[0]["mountpoint"], "/home")
+
+        # duplicate partition assignment
+        duplicate_part = [
+            {"kind": "set_mountpoint", "params": {"partition": "/dev/sda2", "mountpoint": "/home"}},
+            {"kind": "set_mountpoint", "params": {"partition": "/dev/sda2", "mountpoint": "/data"}},
+        ]
+        with self.assertRaisesRegex(RuntimeError, "multiple mount assignments"):
+            plan_query.get_manual_mounts(
+                object(), get_journal=lambda _c: journal(duplicate_part),
+                list_partitions=lambda _d: [{"name": "/dev/sda2"}],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

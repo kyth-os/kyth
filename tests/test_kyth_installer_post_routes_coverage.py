@@ -92,6 +92,104 @@ class PostRouteCoverageTests(unittest.TestCase):
             self.assertEqual(response.status, 500)
             self.assertIn("copy failed", response.payload["message"])
 
+    def test_rescue_logs_auto_detect_covers_rglob_and_findmnt_branches(self):
+        # success: rglob finds USB, findmnt confirms it, copy succeeds
+        with tempfile.TemporaryDirectory() as tmp:
+            mount = Path(tmp) / "usb"
+            mount.mkdir()
+            log_file = Path(tmp) / "install.log"
+            log_file.write_text("log")
+            fake_usb = Path("/run/media/user/USB")
+            mock_path_instance = mock.MagicMock()
+            mock_path_instance.rglob.return_value = [fake_usb]
+            # pathlib.Path("/run/media") returns mock_path_instance
+            def fake_path(arg):
+                if arg == "/run/media":
+                    return mock_path_instance
+                return Path(arg)
+
+            mock_run = mock.Mock(return_value=mock.Mock(returncode=0))
+            with (
+                mock.patch("pathlib.Path", side_effect=fake_path),
+                mock.patch("kyth_installer.runner.run_command", mock_run),
+                mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+                mock.patch("kyth_installer.config.LOG_FILE", log_file),
+                mock.patch("kyth_installer.config.TRANSACTION_FILE", Path(tmp) / "missing"),
+                mock.patch("kyth_installer.config.FAILURE_SUMMARY_FILE", Path(tmp) / "missing"),
+                mock.patch("os.path.isdir", return_value=True),
+            ):
+                # need to also patch the local Path import inside function - pathlib.Path is already patched
+                # provide mount via auto-detect: body has no usb_mount
+                response = self.routes.rescue_logs_to_usb({})
+                self.assertEqual(response.status, 200)
+                mock_run.assert_any_call(["findmnt", "-n", str(fake_usb)], capture_output=True, timeout=3)
+
+        # per-item exception is swallowed and next candidate is tried
+        with tempfile.TemporaryDirectory() as tmp:
+            candidates = [Path("/run/media/a"), Path("/run/media/b")]
+            mock_path_instance = mock.MagicMock()
+            mock_path_instance.rglob.return_value = candidates
+
+            def fake_path2(arg):
+                if arg == "/run/media":
+                    return mock_path_instance
+                return Path(arg)
+
+            calls = []
+
+            def run_side_effect(argv, **kwargs):
+                calls.append(argv)
+                if argv[0] == "findmnt":
+                    if str(candidates[0]) in argv:
+                        raise RuntimeError("findmnt boom")
+                    return mock.Mock(returncode=0)
+                return mock.Mock(returncode=0)
+
+            log_file = Path(tmp) / "install.log"
+            log_file.write_text("log")
+            with (
+                mock.patch("pathlib.Path", side_effect=fake_path2),
+                mock.patch("kyth_installer.runner.run_command", side_effect=run_side_effect),
+                mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+                mock.patch("kyth_installer.config.LOG_FILE", log_file),
+                mock.patch("kyth_installer.config.TRANSACTION_FILE", Path(tmp) / "missing"),
+                mock.patch("kyth_installer.config.FAILURE_SUMMARY_FILE", Path(tmp) / "missing"),
+                mock.patch("os.path.isdir", return_value=True),
+            ):
+                response = self.routes.rescue_logs_to_usb({})
+                self.assertEqual(response.status, 200)
+
+        # outer rglob exception is swallowed -> 400 (no USB found)
+        mock_path_instance = mock.MagicMock()
+        mock_path_instance.rglob.side_effect = OSError("rglob failed")
+
+        def fake_path3(arg):
+            if arg == "/run/media":
+                return mock_path_instance
+            return Path(arg)
+
+        with mock.patch("pathlib.Path", side_effect=fake_path3), mock.patch("os.path.isdir", return_value=False):
+            response = self.routes.rescue_logs_to_usb({})
+            self.assertEqual(response.status, 400)
+            self.assertIn("No USB", response.payload["message"])
+
+        # findmnt returns non-zero for all candidates -> 400
+        mock_path_instance = mock.MagicMock()
+        mock_path_instance.rglob.return_value = [Path("/run/media/x")]
+
+        def fake_path4(arg):
+            if arg == "/run/media":
+                return mock_path_instance
+            return Path(arg)
+
+        with (
+            mock.patch("pathlib.Path", side_effect=fake_path4),
+            mock.patch("kyth_installer.runner.run_command", return_value=mock.Mock(returncode=1)),
+            mock.patch("os.path.isdir", return_value=False),
+        ):
+            response = self.routes.rescue_logs_to_usb({})
+            self.assertEqual(response.status, 400)
+
 
 if __name__ == "__main__":
     unittest.main()
