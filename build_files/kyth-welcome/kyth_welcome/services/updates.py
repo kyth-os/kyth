@@ -26,10 +26,13 @@ from .registry import (  # noqa: F401 — re-export pure API for existing import
 
 
 def firmware_check_commands(refresh: bool = True) -> list[list[str]]:
+    # Re-export from shared firmware lib — single source for fwupd commands.
+    from kyth_shared.system.firmware import firmware_refresh_commands, firmware_updates_command
+
     commands: list[list[str]] = []
     if refresh:
-        commands.append(["fwupdmgr", "refresh"])
-    commands.append(["fwupdmgr", "get-updates"])
+        commands.extend(firmware_refresh_commands())
+    commands.append(firmware_updates_command())
     return commands
 
 

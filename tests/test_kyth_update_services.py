@@ -114,7 +114,7 @@ class UpdateServiceTests(unittest.TestCase):
     def test_firmware_check_commands_refreshes_before_checking(self):
         self.assertEqual(
             firmware_check_commands(refresh=True),
-            [["fwupdmgr", "refresh"], ["fwupdmgr", "get-updates"]],
+            [["fwupdmgr", "refresh", "--force"], ["fwupdmgr", "get-updates"]],
         )
 
 

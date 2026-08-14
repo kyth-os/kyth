@@ -13,7 +13,6 @@ from ..bootc import REGISTRY, bootc_image_digest, bootc_status_data, current_bra
 from ..process import run_command
 from ..registry import check_registry_update, image_annotations, image_revision
 from ..runtime import TrackedThread
-from ..updates import firmware_check_commands
 from ..updates import UpdateProbeResult
 
 _logger = logging.getLogger(__name__)
@@ -84,9 +83,16 @@ class FirmwareCheckWorker(TrackedThread):
 
     def run(self):
         try:
-            refresh_cmd, updates_cmd = firmware_check_commands(refresh=True)
-            run_command(refresh_cmd, timeout=30)
-            updates = run_command(updates_cmd, timeout=20)
+            # Shared single source for fwupd commands + count parser.
+            from kyth_shared.system.firmware import firmware_refresh_commands, firmware_updates_command
+            from kyth_welcome.services.process import run_command as _run
+
+            refresh_cmds = firmware_refresh_commands()
+            updates_cmd = firmware_updates_command()
+            # Refresh is optional — mirrors watcher.
+            if refresh_cmds:
+                _run(refresh_cmds[0], timeout=30)
+            updates = _run(updates_cmd, timeout=20)
             if updates is None:
                 self.result.emit(UpdateProbeResult.error("firmware", "fwupd not available."))
                 return
@@ -100,7 +106,10 @@ class FirmwareCheckWorker(TrackedThread):
                     )
                 )
                 return
-            count = count_fwupd_updates(updates.stdout)
+            # Use shared parser — single source for Device ID: counting.
+            from kyth_shared.runtime_output import count_fwupd_updates as _count
+
+            count = _count(updates.stdout)
             if count == 0:
                 self.result.emit(
                     UpdateProbeResult.error(

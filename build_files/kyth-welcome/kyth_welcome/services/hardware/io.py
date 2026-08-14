@@ -7,7 +7,7 @@ import shutil
 
 from .types import HardwareProbe
 from ..process import command_stdout, run_command
-from ..updates import firmware_check_commands
+from kyth_shared.system.firmware import firmware_refresh_commands, firmware_updates_command
 from ..privileged import AuthFrontend, helper_action
 
 
@@ -23,8 +23,10 @@ def _firmware_probe() -> HardwareProbe:
         )
 
     device_count = devices.stdout.count("Device ID:")
-    refresh_cmd, updates_cmd = firmware_check_commands(refresh=True)
-    run_command(refresh_cmd, timeout=60)
+    refresh_cmds = firmware_refresh_commands()
+    updates_cmd = firmware_updates_command()
+    if refresh_cmds:
+        run_command(refresh_cmds[0], timeout=60)
     updates = run_command(updates_cmd, timeout=20)
     if updates is not None and updates.returncode == 0:
         return HardwareProbe(

@@ -38,7 +38,8 @@ run_step() {
 }
 
 if command -v fwupdmgr >/dev/null 2>&1; then
-	run_step optional "Firmware metadata" sudo -n /usr/bin/fwupdmgr refresh
+	# Shared fwupd commands — keep in sync with kyth_shared/system/firmware.py
+	run_step optional "Firmware metadata" sudo -n /usr/bin/fwupdmgr refresh --force
 	run_step optional "Firmware upgrades" sudo -n /usr/bin/fwupdmgr update --assume-yes --no-reboot-check
 fi
 
