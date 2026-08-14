@@ -5,9 +5,18 @@ Used by kyth-sched and kyth-update-watcher to avoid duplicate busctl/proc scanni
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 from kyth_shared.commands import run_text
+
+_GAMING_CACHE: dict[tuple, tuple[float, str | None]] = {}
+_GAMING_TTL = 30.0
+
+
+def invalidate_gaming_cache() -> None:
+    """Clear gaming detection cache (for tests)."""
+    _GAMING_CACHE.clear()
 
 # Process names that indicate a game is active
 GAMING_PROCS = frozenset(
@@ -101,7 +110,14 @@ def check_gaming_reason(
     """Check if gaming is active and return a description of the trigger, or None.
 
     If check_all_uids is True, all active loginctl sessions are scanned.
-    """
+    Results are cached 30s to avoid thundering herd on busctl/proc scans.
+    """ 
+    _key = (uid, check_all_uids)
+    _now = time.monotonic()
+    if _key in _GAMING_CACHE:
+        _ts, _val = _GAMING_CACHE[_key]
+        if _now - _ts < _GAMING_TTL:
+            return _val
     uids = _active_uids() if check_all_uids else []
     if uid is not None and uid not in uids:
         uids.append(uid)
@@ -111,17 +127,24 @@ def check_gaming_reason(
     # 1. Gamescope check
     for u in uids:
         if gamescope_session_active(u):
-            return f"gamescope session active (uid {u})"
+            _res = f"gamescope session active (uid {u})"
+            _GAMING_CACHE[_key] = (_now, _res)
+            return _res
 
     # 2. GameMode D-Bus check
     for u in uids:
         if gamemode_active(u):
-            return f"GameMode active (uid {u})"
+            _res = f"GameMode active (uid {u})"
+            _GAMING_CACHE[_key] = (_now, _res)
+            return _res
 
     # 3. Proc scan check
     if proc_gaming_active():
-        return "gaming process detected (/proc scan)"
+        _res: str | None = "gaming process detected (/proc scan)"
+        _GAMING_CACHE[_key] = (_now, _res)
+        return _res
 
+    _GAMING_CACHE[_key] = (_now, None)
     return None
 
 
