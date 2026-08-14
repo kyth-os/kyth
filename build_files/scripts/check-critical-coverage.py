@@ -44,7 +44,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/system_mount.py": 83.0,
     "build_files/kyth-installer/kyth_installer/validation.py": 73.5,
     "build_files/kyth-installer/kyth_installer/server.py": 79.0,
-    "build_files/kyth-welcome/kyth_welcome/services/privileged.py": 84.0,
+    "build_files/kyth-welcome/kyth_welcome/services/privileged.py": 85.0,
     "build_files/kyth-welcome/kyth_welcome/services/updates.py": 80.0,
     "build_files/kyth_shared/kyth_shared/desktop/windows_installer.py": 85.0,
     "build_files/kyth_shared/kyth_shared/system/update_availability.py": 90.0,
