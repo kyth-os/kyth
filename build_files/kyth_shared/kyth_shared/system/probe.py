@@ -445,8 +445,8 @@ def collect_probe_results(
     """Run independent probe groups concurrently and retain failure state."""
     selected = tuple(collectors or default_collectors())
     results: dict[str, ProbeResult] = {}
-    # Cap workers to avoid oversubscription on tiny systems; selected is at most 7
-    workers = min(len(selected), 8) if selected else 1
+    # Cap workers to 4 to avoid oversubscription on 4-core tiny systems; selected is at most 7
+    workers = min(len(selected), 4) if selected else 1
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="kyth-probe") as pool:
         for group in pool.map(_run_collector, selected):
             results.update(group)
