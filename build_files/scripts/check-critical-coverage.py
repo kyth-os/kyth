@@ -8,10 +8,10 @@ from pathlib import Path
 
 THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/app.py": 96.0,
-    "build_files/kyth-installer/kyth_installer/assurance.py": 90.0,
+    "build_files/kyth-installer/kyth_installer/assurance.py": 95.0,
     "build_files/kyth-installer/kyth_installer/cleanup.py": 95.0,
-    "build_files/kyth-installer/kyth_installer/disk/_lookup.py": 90.0,
-    "build_files/kyth-installer/kyth_installer/disk/_probe.py": 90.0,
+    "build_files/kyth-installer/kyth_installer/disk/_lookup.py": 95.0,
+    "build_files/kyth-installer/kyth_installer/disk/_probe.py": 95.0,
     "build_files/kyth-installer/kyth_installer/disk/_query.py": 90.0,
     "build_files/kyth-installer/kyth_installer/disk/_util.py": 95.0,
     "build_files/kyth-installer/kyth_installer/execution.py": 95.0,
@@ -30,7 +30,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/plan_validate.py": 95.0,
     "build_files/kyth-installer/kyth_installer/post_routes.py": 95.0,
     "build_files/kyth-installer/kyth_installer/phases/bootc_cmd.py": 90.0,
-    "build_files/kyth-installer/kyth_installer/phases/common.py": 90.0,
+    "build_files/kyth-installer/kyth_installer/phases/common.py": 95.0,
     "build_files/kyth-installer/kyth_installer/phases/finalize.py": 90.0,
     "build_files/kyth-installer/kyth_installer/phases/finalize_artifacts.py": 95.0,
     "build_files/kyth-installer/kyth_installer/phases/finalize_configure.py": 95.0,
