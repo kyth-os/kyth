@@ -42,7 +42,11 @@ from kyth_shared.update_status import (  # noqa: E402
 )
 from kyth_shared.gaming import check_gaming_reason  # noqa: E402
 from kyth_shared.daemon import BaseDaemon  # noqa: E402
-from kyth_shared.runtime_output import count_fwupd_updates  # noqa: E402
+from kyth_shared.system.firmware import (  # noqa: E402
+    check_firmware_updates,
+    run_firmware_refresh,
+    run_firmware_update,
+)
 from kyth_shared.boot_health import (  # noqa: E402
     DEFAULT_STATE_PATH as BOOT_HEALTH_PATH,
     image_ring,
@@ -194,59 +198,6 @@ def check_flatpak_updates() -> int:
         return len([ln for ln in r.stdout.splitlines() if ln.strip()])
     except Exception:
         return 0
-
-
-def run_firmware_refresh(timeout: int = 60) -> tuple[bool, str]:
-    """Refresh fwupd metadata. Returns (ok, output). Optional — failures are non-fatal."""
-    try:
-        r = subprocess.run(
-            ["fwupdmgr", "refresh", "--force"],
-            capture_output=True, text=True, timeout=timeout, check=False,
-        )
-        output = (r.stdout + r.stderr).strip()
-        return r.returncode == 0, output
-    except subprocess.TimeoutExpired:
-        return False, f"fwupdmgr refresh timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "fwupdmgr not found"
-    except Exception as exc:
-        return False, str(exc)
-
-
-def check_firmware_updates(timeout: int = 20) -> int:
-    """Return count of pending fwupd device updates, 0 on error or none."""
-    try:
-        r = subprocess.run(
-            ["fwupdmgr", "get-updates"],
-            capture_output=True, text=True, timeout=timeout, check=False,
-        )
-        # fwupdmgr exit 2 or empty stdout means no updates
-        if r.returncode == 2 or not r.stdout.strip():
-            return 0
-        if r.returncode != 0:
-            return 0
-        return count_fwupd_updates(r.stdout)
-    except FileNotFoundError:
-        return 0
-    except Exception:
-        return 0
-
-
-def run_firmware_update(timeout: int = 600) -> tuple[bool, str]:
-    """Stage available fwupd updates. Returns (ok, output)."""
-    try:
-        r = subprocess.run(
-            ["fwupdmgr", "update", "--assume-yes", "--no-reboot-check"],
-            capture_output=True, text=True, timeout=timeout, check=False,
-        )
-        output = (r.stdout + r.stderr).strip()
-        return r.returncode == 0, output
-    except subprocess.TimeoutExpired:
-        return False, f"fwupdmgr update timed out after {timeout}s"
-    except FileNotFoundError:
-        return False, "fwupdmgr not found"
-    except Exception as exc:
-        return False, str(exc)
 
 
 def _notify_updates(os_staged: bool, flatpak_count: int) -> None:
