@@ -77,7 +77,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache pip (quality)
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684f # v4.2.3
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ~/.cache/pip
           key: pip-quality-${{ runner.os }}-${{ hashFiles('requirements-quality.txt') }}
@@ -127,7 +127,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache pip (gui-smoke)
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684f # v4.2.3
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ~/.cache/pip
           key: pip-gui-${{ runner.os }}-pyside6-6.11.1
