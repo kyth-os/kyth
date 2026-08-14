@@ -136,11 +136,43 @@ class AiDev:
         return "cpu"
 
     def create_command(self) -> list[str]:
+        # Always mount .git rw inside the toolbox — prevents pre-push
+        # update_ref / credential-lock failures when .git inherits ro
+        # from the parent /var/home bind (ostree/rslave propagation).
+        home = Path.home()
+        # Prefer the actual checkout's .git if we're inside a repo,
+        # otherwise fall back to the canonical ~/git/kyth location.
+        candidates: list[Path] = []
+        try:
+            # Use git to locate the enclosing repo (quiet, fast).
+            import subprocess as _sp
+
+            res = _sp.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                candidates.append(Path(res.stdout.strip()) / ".git")
+        except Exception:
+            pass
+        canonical = home / "git" / "kyth" / ".git"
+        if canonical not in candidates:
+            candidates.append(canonical)
+        # Also ensure the repo's .agents (toolbox cache lock) stays rw
+        # when it exists alongside .git.
+        extra_volumes: list[str] = []
+        for git_path in candidates:
+            extra_volumes.append(f"{git_path}:{git_path}:rw")
+            agents_path = git_path.parent / ".agents"
+            extra_volumes.append(f"{agents_path}:{agents_path}:rw")
+
         command = [
             "distrobox", "create", "--yes", "--name", self.config.box,
             "--image", self.config.image,
             "--volume", f"{self.config.model_dir}:{self.config.model_dir}:rw",
         ]
+        for vol in extra_volumes:
+            command.extend(["--volume", vol])
         gpu = self.gpu_kind()
         if gpu == "nvidia":
             command.append("--nvidia")
@@ -166,6 +198,21 @@ class AiDev:
             print(f"{self.config.box} already exists.")
         print(f"Installing developer & AI tools in {self.config.box}...")
         self.inside("bash", "-lc", PROVISION_SCRIPT)
+        # Ensure .git is rw even for pre-existing boxes where create_command
+        # has already been used — remount inherits ro from /var/home.
+        self.inside(
+            "bash", "-lc",
+            "for p in /var/home/*/git/kyth/.git /var/home/*/git/kyth/.agents; do "
+            "[ -e \"$p\" ] && mount -o remount,rw \"$p\" 2>/dev/null || "
+            "sudo mount -o remount,rw \"$p\" 2>/dev/null || true; done; "
+            "gitdir=$(git rev-parse --show-toplevel 2>/dev/null)/.git; "
+            "[ -e \"$gitdir\" ] && mount -o remount,rw \"$gitdir\" 2>/dev/null || "
+            "sudo mount -o remount,rw \"$gitdir\" 2>/dev/null || true; "
+            "agentsdir=$(git rev-parse --show-toplevel 2>/dev/null)/.agents; "
+            "[ -e \"$agentsdir\" ] && mount -o remount,rw \"$agentsdir\" 2>/dev/null || "
+            "sudo mount -o remount,rw \"$agentsdir\" 2>/dev/null || true",
+            check=False,
+        )
         print(f"\nDeveloper & AI environment ({self.config.box}) is ready.")
         print("Exported to host: VS Code, Node.js, Azure CLI, GitHub CLI, "
               "Claude Code, Codex CLI, Helix, Zellij, ShellCheck, shfmt.")
