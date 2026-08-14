@@ -42,6 +42,7 @@ from kyth_shared.update_status import (  # noqa: E402
 )
 from kyth_shared.gaming import check_gaming_reason  # noqa: E402
 from kyth_shared.daemon import BaseDaemon  # noqa: E402
+from kyth_shared.runtime_output import count_fwupd_updates  # noqa: E402
 from kyth_shared.boot_health import (  # noqa: E402
     DEFAULT_STATE_PATH as BOOT_HEALTH_PATH,
     image_ring,
@@ -193,6 +194,59 @@ def check_flatpak_updates() -> int:
         return len([ln for ln in r.stdout.splitlines() if ln.strip()])
     except Exception:
         return 0
+
+
+def run_firmware_refresh(timeout: int = 60) -> tuple[bool, str]:
+    """Refresh fwupd metadata. Returns (ok, output). Optional — failures are non-fatal."""
+    try:
+        r = subprocess.run(
+            ["fwupdmgr", "refresh", "--force"],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+        output = (r.stdout + r.stderr).strip()
+        return r.returncode == 0, output
+    except subprocess.TimeoutExpired:
+        return False, f"fwupdmgr refresh timed out after {timeout}s"
+    except FileNotFoundError:
+        return False, "fwupdmgr not found"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def check_firmware_updates(timeout: int = 20) -> int:
+    """Return count of pending fwupd device updates, 0 on error or none."""
+    try:
+        r = subprocess.run(
+            ["fwupdmgr", "get-updates"],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+        # fwupdmgr exit 2 or empty stdout means no updates
+        if r.returncode == 2 or not r.stdout.strip():
+            return 0
+        if r.returncode != 0:
+            return 0
+        return count_fwupd_updates(r.stdout)
+    except FileNotFoundError:
+        return 0
+    except Exception:
+        return 0
+
+
+def run_firmware_update(timeout: int = 600) -> tuple[bool, str]:
+    """Stage available fwupd updates. Returns (ok, output)."""
+    try:
+        r = subprocess.run(
+            ["fwupdmgr", "update", "--assume-yes", "--no-reboot-check"],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+        output = (r.stdout + r.stderr).strip()
+        return r.returncode == 0, output
+    except subprocess.TimeoutExpired:
+        return False, f"fwupdmgr update timed out after {timeout}s"
+    except FileNotFoundError:
+        return False, "fwupdmgr not found"
+    except Exception as exc:
+        return False, str(exc)
 
 
 def _notify_updates(os_staged: bool, flatpak_count: int) -> None:
@@ -392,6 +446,34 @@ class UpdateWatcherDaemon(BaseDaemon):
         flatpak_count = check_flatpak_updates()
         self.logger.info("Flatpak updates pending: %d", flatpak_count)
 
+        # ── Firmware updates (optional, ensures latest device firmware) ───────
+        # Mirrors kyth-full-update's optional firmware steps but runs
+        # automatically every watcher cycle. Failures are logged, not fatal —
+        # bootc/flatpak work proceeds even if fwupd is absent or offline.
+        firmware_updated = False
+        firmware_output = ""
+        try:
+            ok, out = run_firmware_refresh()
+            if not ok:
+                self.logger.debug("fwupd refresh: %s", out[:300])
+            else:
+                self.logger.info("fwupd refresh succeeded")
+            fw_count = check_firmware_updates()
+            self.logger.info("Firmware updates pending: %d", fw_count)
+            if fw_count > 0:
+                self.logger.info("Staging %d firmware update(s) via fwupdmgr", fw_count)
+                ok, out = run_firmware_update()
+                firmware_output = out
+                if ok:
+                    self.logger.info("Firmware updates queued: %s", out[:500])
+                    firmware_updated = True
+                else:
+                    self.logger.warning("fwupd update failed: %s", out[:500])
+            else:
+                self.logger.info("No firmware updates to stage")
+        except Exception as exc:
+            self.logger.debug("Firmware update probe failed: %s", exc)
+
         # Check digests before downloading (shared bootc + registry helpers)
         status_data = get_bootc_status()
         if status_data:
@@ -415,7 +497,7 @@ class UpdateWatcherDaemon(BaseDaemon):
                 ring_reason = rollout_policy_reason(ref, configured_ring)
                 if ring_reason:
                     self.logger.warning("Skipping update: %s", ring_reason)
-                    write_status("skipped", ring_reason, "", start_ts, flatpak_count)
+                    write_status("skipped", ring_reason, firmware_output, start_ts, flatpak_count)
                     return
 
                 self.logger.info("Booted digest: %s, Staged digest: %s", booted_digest, staged_digest)
@@ -429,18 +511,29 @@ class UpdateWatcherDaemon(BaseDaemon):
                     )
                     if quarantined:
                         self.logger.warning("Skipping quarantined update: %s", quarantined)
-                        write_status("quarantined", quarantined, "", start_ts, flatpak_count)
+                        write_status("quarantined", quarantined, firmware_output, start_ts, flatpak_count)
                         return
                     if staged_digest and remote_digest == staged_digest:
                         self.logger.info("System already has staged update matching latest remote digest. Skipping bootc upgrade.")
-                        write_status("no_change", "Update already staged and matches latest registry version", "", start_ts, flatpak_count)
-                        _notify_updates(os_staged=True, flatpak_count=flatpak_count)
+                        # Firmware still staged automatically — report as upgrade if firmware queued
+                        combined = firmware_output if firmware_output else ""
+                        if firmware_updated:
+                            write_status("upgraded", None, combined or "Firmware updates queued — reboot to flash.", start_ts, flatpak_count)
+                            _notify_updates(os_staged=True, flatpak_count=flatpak_count)
+                        else:
+                            write_status("no_change", "Update already staged and matches latest registry version", combined, start_ts, flatpak_count)
+                            _notify_updates(os_staged=True, flatpak_count=flatpak_count)
                         return
                     elif not staged_digest and booted_digest and remote_digest == booted_digest:
                         self.logger.info("System is already up to date (booted digest matches remote). Skipping bootc upgrade.")
-                        write_status("no_change", None, "Already up to date", start_ts, flatpak_count)
-                        if flatpak_count > 0:
-                            _notify_updates(os_staged=False, flatpak_count=flatpak_count)
+                        combined = firmware_output if firmware_output else "Already up to date"
+                        if firmware_updated:
+                            write_status("upgraded", None, combined, start_ts, flatpak_count)
+                            _notify_updates(os_staged=True, flatpak_count=flatpak_count)
+                        else:
+                            write_status("no_change", None, combined, start_ts, flatpak_count)
+                            if flatpak_count > 0:
+                                _notify_updates(os_staged=False, flatpak_count=flatpak_count)
                         return
 
         self.logger.info("Proceeding to run bootc upgrade")
@@ -449,9 +542,14 @@ class UpdateWatcherDaemon(BaseDaemon):
         if ok:
             if "No update available" in output or "already up to date" in output.lower():
                 self.logger.info("System already up to date")
-                write_status("no_change", None, output, start_ts, flatpak_count)
-                if flatpak_count > 0:
-                    _notify_updates(os_staged=False, flatpak_count=flatpak_count)
+                combined = "\n".join(x for x in [output, firmware_output] if x) or output
+                if firmware_updated:
+                    write_status("upgraded", None, combined, start_ts, flatpak_count)
+                    _notify_updates(os_staged=True, flatpak_count=flatpak_count)
+                else:
+                    write_status("no_change", None, combined, start_ts, flatpak_count)
+                    if flatpak_count > 0:
+                        _notify_updates(os_staged=False, flatpak_count=flatpak_count)
             else:
                 self.logger.info("Upgrade staged successfully")
                 if _STATUS_IDENTITY.get("remote_digest"):
@@ -471,7 +569,8 @@ class UpdateWatcherDaemon(BaseDaemon):
                         )
                     except OSError as exc:
                         self.logger.warning("Could not record staged digest: %s", exc)
-                write_status("upgraded", None, output, start_ts, flatpak_count)
+                combined = "\n".join(x for x in [output, firmware_output] if x) or output
+                write_status("upgraded", None, combined, start_ts, flatpak_count)
                 _notify_updates(os_staged=True, flatpak_count=flatpak_count)
                 try:
                     from kyth_shared.system.probe import invalidate_after_bootc_change, refresh_cache
@@ -481,7 +580,8 @@ class UpdateWatcherDaemon(BaseDaemon):
                     self.logger.debug("probe refresh after upgrade failed: %s", exc)
         else:
             self.logger.error("bootc upgrade failed: %s", output[:500])
-            write_status("error", output[:500], output, start_ts, flatpak_count)
+            combined = "\n".join(x for x in [output, firmware_output] if x) or output
+            write_status("error", output[:500], combined, start_ts, flatpak_count)
             self._exit_code = 1
 
 
