@@ -28,10 +28,10 @@
 
 | Quirk | Review by | Reason | Provenance |
 |---|---|---|---|
-| `amdgpu-gaming-memory` | 2027-08-01 | Expose PowerPlay controls while bounding APU GTT pressure and retaining recoverable VM fault handling | [policy rationale](hardware-policy.md#managed-quirks) |
+| `amdgpu-gaming-memory` | 2027-02-01 | Expose PowerPlay controls while bounding APU GTT pressure and retaining recoverable VM fault handling | [policy rationale](hardware-policy.md#managed-quirks) |
 | `amdgpu-psr-disable` | 2027-08-01 | Disable Display Core PSR on Navi 33 (7480) DCN 3.2.1 and Rembrandt (1681) DCN 3.1.2 to avoid Pageflip timed out on eDP under Wayland/VRR | https://gitlab.freedesktop.org/drm/amd/-/issues and journalctl amdgpu Pageflip timed out (DCN 3.2.1 on 7480, DCN 3.1.2 eDP-2 PSR 1) |
 | `bluetooth-usb-autosuspend` | 2027-08-01 | Prevent missed remote wake traffic from Bluetooth controllers and low-bandwidth peripherals | [policy rationale](hardware-policy.md#managed-quirks) |
-| `intel-i915-media-firmware` | 2027-08-01 | Enable GuC submission and HuC media firmware on systems still using i915 | [policy rationale](hardware-policy.md#managed-quirks) |
-| `intel-wifi-association-power` | 2027-08-01 | Keep Intel wireless active during WPA association while preserving Bluetooth coexistence | [policy rationale](hardware-policy.md#managed-quirks) |
-| `mediatek-pcie-wifi-aspm` | 2027-08-01 | Avoid intermittent wake and association failures on mt7921e and mt7925e adapters | [policy rationale](hardware-policy.md#managed-quirks) |
-| `nvidia-wayland-suspend` | 2027-08-01 | Enable DRM modesetting and preserve video memory across suspend on the proprietary driver | [policy rationale](hardware-policy.md#managed-quirks) |
+| `intel-i915-media-firmware` | 2027-02-01 | Enable GuC submission and HuC media firmware on systems still using i915 | [policy rationale](hardware-policy.md#managed-quirks) |
+| `intel-wifi-association-power` | 2027-05-01 | Keep Intel wireless active during WPA association while preserving Bluetooth coexistence | [policy rationale](hardware-policy.md#managed-quirks) |
+| `mediatek-pcie-wifi-aspm` | 2027-05-01 | Avoid intermittent wake and association failures on mt7921e and mt7925e adapters | [policy rationale](hardware-policy.md#managed-quirks) |
+| `nvidia-wayland-suspend` | 2027-05-01 | Enable DRM modesetting and preserve video memory across suspend on the proprietary driver | [policy rationale](hardware-policy.md#managed-quirks) |

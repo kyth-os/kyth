@@ -4,7 +4,7 @@ from __future__ import annotations
 QUIRK = {
     "id": "nvidia-wayland-suspend",
     "reason": "Enable DRM modesetting and preserve video memory across suspend on the proprietary driver",
-    "expires_on": "2027-08-01",
+    "expires_on": "2027-05-01",
     "provenance": "[policy rationale](hardware-policy.md#managed-quirks)",
     "match": {"pci": [{"vendor": "10de", "classes": ["0300", "0302", "0380"]}]},
     "actions": [

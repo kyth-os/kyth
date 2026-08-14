@@ -4,7 +4,7 @@ from __future__ import annotations
 QUIRK = {
     "id": "intel-wifi-association-power",
     "reason": "Keep Intel wireless active during WPA association while preserving Bluetooth coexistence",
-    "expires_on": "2027-08-01",
+    "expires_on": "2027-05-01",
     "provenance": "[policy rationale](hardware-policy.md#managed-quirks)",
     "match": {"pci": [{"vendor": "8086", "drivers": ["iwlwifi"]}]},
     "actions": [

@@ -4,7 +4,7 @@ from __future__ import annotations
 QUIRK = {
     "id": "mediatek-pcie-wifi-aspm",
     "reason": "Avoid intermittent wake and association failures on mt7921e and mt7925e adapters",
-    "expires_on": "2027-08-01",
+    "expires_on": "2027-05-01",
     "provenance": "[policy rationale](hardware-policy.md#managed-quirks)",
     "match": {"pci": [{"vendor": "14c3", "drivers": ["mt7921e", "mt7925e"]}]},
     "actions": [
