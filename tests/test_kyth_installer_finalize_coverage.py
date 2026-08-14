@@ -222,6 +222,302 @@ class ConfigureSystemTests(unittest.TestCase):
         self.assertTrue(any("success artifacts" in call.args[0] for call in log.call_args_list))
 
 
+class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
+    """Direct coverage for kyth_installer.phases.finalize_configure transactional paths."""
+
+    def _call(self, **overrides):
+        from kyth_installer.phases import finalize_configure as fc
+
+        context = InstallerContext()
+        context.register_mount("/config")
+        log = mock.Mock()
+        progress = mock.Mock()
+        etc = "/config/deploy/etc"
+
+        # Path mock for fstab handling + deploy_root
+        mock_fstab = mock.Mock()
+        mock_fstab.is_file.return_value = overrides.get("fstab_is_file", False)
+        if overrides.get("read_bytes_error"):
+            mock_fstab.read_bytes.side_effect = OSError("read fail")
+        else:
+            mock_fstab.read_bytes.return_value = b"original fstab"
+        if overrides.get("write_error"):
+            mock_fstab.write_bytes.side_effect = OSError("write fail")
+        if overrides.get("unlink_error"):
+            mock_fstab.unlink.side_effect = OSError("unlink fail")
+
+        mock_etc_path = mock.MagicMock()
+        mock_etc_path.__truediv__.return_value = mock_fstab
+        mock_etc_path.parent = pathlib.Path("/config/deploy")
+        # For validate_installed_target(Path(etc), ...) we pass mock_etc_path as Path(etc)
+        mock_path_cls = mock.Mock(return_value=mock_etc_path)
+
+        find_deploy_etc = mock.Mock(return_value=etc)
+        ensure_system_accounts = mock.Mock()
+        configure_alongside = mock.Mock()
+        configure_manual = mock.Mock()
+        configure_hostname = mock.Mock(side_effect=overrides.get("hostname_side_effect"))
+        create_user = mock.Mock()
+        validate_target = mock.Mock(return_value=[])
+        persist = mock.Mock(side_effect=overrides.get("persist_side_effect"))
+        unmount = mock.Mock()
+        run_cmd = mock.Mock()
+
+        request = _request()
+
+        # Patch Path in finalize_configure
+        with mock.patch.object(fc, "Path", mock_path_cls):
+            try:
+                fc.configure_installed_system(
+                    target_part="/dev/sda3",
+                    install_mode=overrides.get("install_mode", "wipe"),
+                    config_root="/config",
+                    alongside_mount="",
+                    log=log,
+                    progress=progress,
+                    context=context,
+                    request=request,
+                    find_deploy_etc=find_deploy_etc,
+                    ensure_system_accounts=ensure_system_accounts,
+                    configure_alongside_fstab=configure_alongside,
+                    configure_manual_mounts=configure_manual,
+                    configure_hostname_timezone=configure_hostname,
+                    create_installer_user=create_user,
+                    validate_installed_target=validate_target,
+                    persist_artifacts=persist,
+                    unmount_configuration=unmount,
+                    run_command=run_cmd,
+                )
+                raised = None
+            except Exception as exc:
+                raised = exc
+
+        return {
+            "context": context,
+            "log": log,
+            "progress": progress,
+            "mock_fstab": mock_fstab,
+            "mock_path_cls": mock_path_cls,
+            "unmount": unmount,
+            "raised": raised,
+        }
+
+    def test_fstab_read_oserror_sets_backup_none(self):
+        result = self._call(fstab_is_file=True, read_bytes_error=True)
+        self.assertIsNone(result["raised"])
+        # Should not have raised; backup was None due to OSError then continued
+        result["mock_fstab"].read_bytes.assert_called_once()
+
+    def test_rollback_unlinks_when_backup_none_and_file_exists(self):
+        # Exercise rollback path where backup is restored via write or unlink
+        # (previous _call helper already validates the OSError backup path)
+        from kyth_installer.phases import finalize_configure as fc
+
+        context = InstallerContext()
+        context.register_mount("/config")
+        log = mock.Mock()
+        progress = mock.Mock()
+        mock_fstab = mock.Mock()
+        # First is_file check returns False? Actually we need read_bytes not called then backup None
+        # Simulate: fstab does not exist at backup time, but does exist at rollback (partial write)
+        # Simpler: force backup None via OSError, then during rollback is_file True -> unlink
+        call_count = {"is_file": 0}
+
+        def is_file_side_effect():
+            call_count["is_file"] += 1
+            # First call: backup check -> True but read will raise OSError -> backup None
+            # Second call: rollback check -> True -> unlink
+            return True
+
+        mock_fstab.is_file.side_effect = is_file_side_effect
+        mock_fstab.read_bytes.side_effect = OSError("read fail")
+        mock_etc_path = mock.MagicMock()
+        mock_etc_path.__truediv__.return_value = mock_fstab
+        mock_etc_path.parent = pathlib.Path("/config/deploy")
+        mock_path_cls = mock.Mock(return_value=mock_etc_path)
+
+        with mock.patch.object(fc, "Path", mock_path_cls):
+            with self.assertRaises(RuntimeError):
+                fc.configure_installed_system(
+                    target_part="/dev/sda3",
+                    install_mode="wipe",
+                    config_root="/config",
+                    alongside_mount="",
+                    log=log,
+                    progress=progress,
+                    context=context,
+                    request=_request(),
+                    find_deploy_etc=mock.Mock(return_value="/config/deploy/etc"),
+                    ensure_system_accounts=mock.Mock(),
+                    configure_alongside_fstab=mock.Mock(),
+                    configure_manual_mounts=mock.Mock(),
+                    configure_hostname_timezone=mock.Mock(side_effect=RuntimeError("fail")),
+                    create_installer_user=mock.Mock(),
+                    validate_installed_target=mock.Mock(return_value=[]),
+                    persist_artifacts=mock.Mock(),
+                    unmount_configuration=mock.Mock(),
+                    run_command=mock.Mock(),
+                )
+        mock_fstab.unlink.assert_called_once()
+        self.assertTrue(any("Rolled back" in c.args[0] for c in log.call_args_list))
+
+    def test_rollback_restores_backup_when_present(self):
+        from kyth_installer.phases import finalize_configure as fc
+
+        context = InstallerContext()
+        context.register_mount("/config")
+        log = mock.Mock()
+        progress = mock.Mock()
+        mock_fstab = mock.Mock()
+        mock_fstab.is_file.return_value = True
+        mock_fstab.read_bytes.return_value = b"orig"
+        mock_etc_path = mock.MagicMock()
+        mock_etc_path.__truediv__.return_value = mock_fstab
+        mock_etc_path.parent = pathlib.Path("/config/deploy")
+        mock_path_cls = mock.Mock(return_value=mock_etc_path)
+        with mock.patch.object(fc, "Path", mock_path_cls):
+            with self.assertRaises(RuntimeError):
+                fc.configure_installed_system(
+                    target_part="/dev/sda3",
+                    install_mode="wipe",
+                    config_root="/config",
+                    alongside_mount="",
+                    log=log,
+                    progress=progress,
+                    context=context,
+                    request=_request(),
+                    find_deploy_etc=mock.Mock(return_value="/config/deploy/etc"),
+                    ensure_system_accounts=mock.Mock(),
+                    configure_alongside_fstab=mock.Mock(),
+                    configure_manual_mounts=mock.Mock(),
+                    configure_hostname_timezone=mock.Mock(side_effect=RuntimeError("fail2")),
+                    create_installer_user=mock.Mock(),
+                    validate_installed_target=mock.Mock(return_value=[]),
+                    persist_artifacts=mock.Mock(),
+                    unmount_configuration=mock.Mock(),
+                    run_command=mock.Mock(),
+                )
+        mock_fstab.write_bytes.assert_called_once_with(b"orig")
+        self.assertTrue(any("Rolled back" in c.args[0] for c in log.call_args_list))
+
+    def test_rollback_write_oserror_is_logged(self):
+        from kyth_installer.phases import finalize_configure as fc
+
+        context = InstallerContext()
+        context.register_mount("/config")
+        log = mock.Mock()
+        progress = mock.Mock()
+        mock_fstab = mock.Mock()
+        mock_fstab.is_file.return_value = True
+        mock_fstab.read_bytes.return_value = b"orig"
+        mock_fstab.write_bytes.side_effect = OSError("write fail")
+        mock_etc_path = mock.MagicMock()
+        mock_etc_path.__truediv__.return_value = mock_fstab
+        mock_etc_path.parent = pathlib.Path("/config/deploy")
+        mock_path_cls = mock.Mock(return_value=mock_etc_path)
+        with mock.patch.object(fc, "Path", mock_path_cls):
+            with self.assertRaises(RuntimeError):
+                fc.configure_installed_system(
+                    target_part="/dev/sda3",
+                    install_mode="wipe",
+                    config_root="/config",
+                    alongside_mount="",
+                    log=log,
+                    progress=progress,
+                    context=context,
+                    request=_request(),
+                    find_deploy_etc=mock.Mock(return_value="/config/deploy/etc"),
+                    ensure_system_accounts=mock.Mock(),
+                    configure_alongside_fstab=mock.Mock(),
+                    configure_manual_mounts=mock.Mock(),
+                    configure_hostname_timezone=mock.Mock(side_effect=RuntimeError("fail3")),
+                    create_installer_user=mock.Mock(),
+                    validate_installed_target=mock.Mock(return_value=[]),
+                    persist_artifacts=mock.Mock(),
+                    unmount_configuration=mock.Mock(),
+                    run_command=mock.Mock(),
+                )
+        self.assertTrue(any("rollback failed" in c.args[0] for c in log.call_args_list))
+
+    def test_rollback_no_file_when_backup_none_skips_unlink(self):
+        from kyth_installer.phases import finalize_configure as fc
+
+        context = InstallerContext()
+        context.register_mount("/config")
+        log = mock.Mock()
+        progress = mock.Mock()
+        mock_fstab = mock.Mock()
+        # First call (backup): is_file False -> backup None, second call (rollback): is_file False -> no unlink
+        mock_fstab.is_file.return_value = False
+        mock_etc_path = mock.MagicMock()
+        mock_etc_path.__truediv__.return_value = mock_fstab
+        mock_etc_path.parent = pathlib.Path("/config/deploy")
+        mock_path_cls = mock.Mock(return_value=mock_etc_path)
+        with mock.patch.object(fc, "Path", mock_path_cls):
+            with self.assertRaises(RuntimeError):
+                fc.configure_installed_system(
+                    target_part="/dev/sda3",
+                    install_mode="wipe",
+                    config_root="/config",
+                    alongside_mount="",
+                    log=log,
+                    progress=progress,
+                    context=context,
+                    request=_request(),
+                    find_deploy_etc=mock.Mock(return_value="/config/deploy/etc"),
+                    ensure_system_accounts=mock.Mock(),
+                    configure_alongside_fstab=mock.Mock(),
+                    configure_manual_mounts=mock.Mock(),
+                    configure_hostname_timezone=mock.Mock(side_effect=RuntimeError("fail4")),
+                    create_installer_user=mock.Mock(),
+                    validate_installed_target=mock.Mock(return_value=[]),
+                    persist_artifacts=mock.Mock(),
+                    unmount_configuration=mock.Mock(),
+                    run_command=mock.Mock(),
+                )
+        mock_fstab.unlink.assert_not_called()
+        mock_fstab.write_bytes.assert_not_called()
+
+    def test_rollback_unlink_oserror_is_logged(self):
+        from kyth_installer.phases import finalize_configure as fc
+
+        context = InstallerContext()
+        context.register_mount("/config")
+        log = mock.Mock()
+        progress = mock.Mock()
+        mock_fstab = mock.Mock()
+        mock_fstab.is_file.return_value = True
+        mock_fstab.read_bytes.side_effect = OSError("read fail")
+        mock_fstab.unlink.side_effect = OSError("unlink fail")
+        mock_etc_path = mock.MagicMock()
+        mock_etc_path.__truediv__.return_value = mock_fstab
+        mock_etc_path.parent = pathlib.Path("/config/deploy")
+        mock_path_cls = mock.Mock(return_value=mock_etc_path)
+        with mock.patch.object(fc, "Path", mock_path_cls):
+            with self.assertRaises(RuntimeError):
+                fc.configure_installed_system(
+                    target_part="/dev/sda3",
+                    install_mode="wipe",
+                    config_root="/config",
+                    alongside_mount="",
+                    log=log,
+                    progress=progress,
+                    context=context,
+                    request=_request(),
+                    find_deploy_etc=mock.Mock(return_value="/config/deploy/etc"),
+                    ensure_system_accounts=mock.Mock(),
+                    configure_alongside_fstab=mock.Mock(),
+                    configure_manual_mounts=mock.Mock(),
+                    configure_hostname_timezone=mock.Mock(side_effect=RuntimeError("fail5")),
+                    create_installer_user=mock.Mock(),
+                    validate_installed_target=mock.Mock(return_value=[]),
+                    persist_artifacts=mock.Mock(),
+                    unmount_configuration=mock.Mock(),
+                    run_command=mock.Mock(),
+                )
+        self.assertTrue(any("rollback failed" in c.args[0] for c in log.call_args_list))
+
+
 class InstallFailureTests(unittest.TestCase):
     def test_failure_handler_publishes_error_and_records_diagnostics(self):
         context = InstallerContext()
