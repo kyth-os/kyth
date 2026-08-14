@@ -244,3 +244,20 @@ drivers = ["btusb"]
 kind = "modprobe"
 module = "btusb"
 options = { enable_autosuspend = "0" }
+
+[[quirks]]
+id = "amdgpu-psr-disable"
+reason = "Disable Display Core PSR on Navi 33 (7480) DCN 3.2.1 to avoid Pageflip timed out under Wayland/VRR"
+expires_on = "2027-08-01"
+provenance = "https://gitlab.freedesktop.org/drm/amd/-/issues and journalctl amdgpu Pageflip timed out (DCN 3.2.1)"
+
+[[quirks.match.pci]]
+vendor = "1002"
+devices = ["7480"]
+classes = ["0300", "0302", "0380"]
+drivers = ["amdgpu"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "amdgpu"
+options = { dcdebugmask = "0x10" }

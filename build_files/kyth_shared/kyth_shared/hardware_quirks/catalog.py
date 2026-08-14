@@ -14,6 +14,7 @@ from typing import Any
 # and one entry here — reviewable, grep-friendly, and CI-enforceable.
 QUIRK_MODULES: tuple[str, ...] = (
     "amdgpu_gaming_memory",
+    "amdgpu_psr_disable",
     "intel_i915_media",
     "nvidia_wayland_suspend",
     "mediatek_pcie_wifi_aspm",
