@@ -1,8 +1,9 @@
 """Consolidated sysctl composer — single source for /etc/sysctl.d/99-kyth-*.conf.
 
 Reads build_files/config/sysctl/{base,gaming,network}.toml typed inputs and
-emits exactly three files. Fails on duplicate key across tiers (duplicate was
-the CAKE/bbr silent clobber bug before).
+emits base + network always, plus gaming when populated (gaming empty → no
+file to avoid stale header-only). Fails on duplicate key across tiers
+(duplicate was the CAKE/bbr silent clobber bug before).
 
 Pattern mirrors kyth_shared/gaming_resolve.py single-source and
 sched_autogroup.py atomic tmp→replace.
