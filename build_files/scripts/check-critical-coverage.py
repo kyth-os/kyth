@@ -42,7 +42,7 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/streaming.py": 84.0,
     "build_files/kyth-installer/kyth_installer/system.py": 90.0,
     "build_files/kyth-installer/kyth_installer/system_mount.py": 83.0,
-    "build_files/kyth-installer/kyth_installer/validation.py": 73.5,
+    "build_files/kyth-installer/kyth_installer/validation.py": 90.0,
     "build_files/kyth-installer/kyth_installer/server.py": 79.0,
     "build_files/kyth-welcome/kyth_welcome/services/privileged.py": 85.0,
     "build_files/kyth-welcome/kyth_welcome/services/updates.py": 80.0,
