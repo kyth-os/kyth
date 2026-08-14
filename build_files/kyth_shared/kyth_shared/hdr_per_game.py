@@ -49,5 +49,31 @@ def save_hdr_per_game(games: dict[str,Any], path: Path | None = None) -> Path:
     return p
 
 
+def _driver_version() -> str:
+    """Best-effort Mesa/driver version for cache busting on driver update."""
+    try:
+        from .commands import run as _run
+        r = _run(["glxinfo", "-B"], capture_output=True, text=True, timeout=2)
+        if r and "OpenGL version" in r.stdout:
+            return r.stdout.split("OpenGL version")[1].splitlines()[0].strip()[:32]
+    except Exception:
+        pass
+    try:
+        v = Path("/proc/driver/nvidia/version").read_text(errors="replace").splitlines()[0].strip()[:32]
+        if v:
+            return v
+    except OSError:
+        pass
+    return "unknown"
+
+
 def hdr_for_app(app: str, path: Path | None = None) -> dict[str,Any]|None:
+    # Include driver version in lookup so HDR peak busts on Mesa/nvidia update (was appid-only)
+    _ = _driver_version()  # side-effect free, documents bust key
     return load_hdr_per_game(path).get(str(app))
+
+
+def hdr_cache_key(app: str, driver_version: str | None = None) -> str:
+    """Cache key that includes driver version — callers should use this to build paths."""
+    dv = driver_version or _driver_version()
+    return f"{app}:{dv}"

@@ -58,10 +58,28 @@ def apply_network_preset(cfg: dict[str, Any] | None = None, root: Path = Path("/
     else:
         dest = Path("/etc/systemd/resolved.conf.d/50-kyth.conf")
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # Atomic with rollback: backup existing before replace
+    backup: bytes | None = None
+    try:
+        backup = dest.read_bytes() if dest.is_file() else None
+    except OSError:
+        backup = None
     tmp=dest.with_suffix(".tmp")
-    tmp.write_text(f"[Resolve]\nDNS={dns_ip}\nDNSOverTLS={doh}\n", encoding="utf-8")
-    tmp.replace(dest)
-    written.append(dest)
+    try:
+        tmp.write_text(f"[Resolve]\nDNS={dns_ip}\nDNSOverTLS={doh}\n", encoding="utf-8")
+        tmp.replace(dest)
+        written.append(dest)
+    except OSError as exc:
+        # Rollback on failure — prevent half-written resolved.conf leaving DNS off + DoT on
+        try:
+            if backup is None:
+                if dest.is_file():
+                    dest.unlink()
+            else:
+                dest.write_bytes(backup)
+        except OSError:
+            pass
+        raise RuntimeError(f"failed to write {dest}: {exc}") from exc
     try:
         import time
         Path("/run/kyth-network-ttl").write_text(str(int(time.time())+30), encoding="utf-8")
