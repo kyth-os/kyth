@@ -5,8 +5,8 @@ Documentation=https://github.com/mrtrick37/kyth
 [Timer]
 OnStartupSec=2min
 OnUnitActiveSec=15min
-RandomizedDelaySec=60s
-AccuracySec=30s
+RandomizedDelaySec=90s
+AccuracySec=60s
 Persistent=false
 
 [Install]

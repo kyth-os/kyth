@@ -6,8 +6,8 @@ Documentation=https://github.com/mrtrick37/kyth
 # Warm cache early so first System Hub open is cheap.
 OnBootSec=45s
 OnUnitActiveSec=5min
-RandomizedDelaySec=30s
-AccuracySec=30s
+RandomizedDelaySec=60s
+AccuracySec=45s
 Persistent=true
 
 [Install]

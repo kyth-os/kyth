@@ -5,6 +5,8 @@ Documentation=https://github.com/mrtrick37/kyth
 [Path]
 PathChanged=%t/kyth/probe-cache.json
 Unit=kyth-guardian.service
+TriggerLimitIntervalSec=30s
+TriggerLimitBurst=3
 
 [Install]
 WantedBy=default.target

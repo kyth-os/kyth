@@ -19,6 +19,9 @@ ProtectClock=yes
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
+TimeoutStartSec=90
+Nice=10
+IOSchedulingClass=idle
 
 [Install]
 WantedBy=multi-user.target
