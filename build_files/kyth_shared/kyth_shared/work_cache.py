@@ -56,6 +56,15 @@ def generate_work_cache(cfg: dict[str, Any] | None = None, tmpfiles: Path | None
                 pass
         return None
     size = str(cfg.get("size", "1G"))
+    # Clamp to RAM/4 to avoid OOM on 8G boxes (item 9)
+    try:
+        mem_kb = int(Path("/proc/meminfo").read_text().split("MemTotal:")[1].split()[0]) if Path("/proc/meminfo").is_file() else 0
+        max_gb = max(1, mem_kb // 1024 // 1024 // 4)
+        req_gb = {"1G": 1, "2G": 2, "4G": 4}.get(size, 1)
+        if req_gb > max_gb:
+            size = f"{max_gb}G"
+    except Exception:
+        pass
     try:
         tmpfiles.parent.mkdir(parents=True, exist_ok=True)
         tmpfiles.write_text(f"# Kyth work cache — generated\nd /run/kyth-work-cache 0755 1000 1000 -\n", encoding="utf-8")
