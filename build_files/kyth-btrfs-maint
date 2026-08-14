@@ -81,6 +81,18 @@ def main() -> int:
     MAINT_JSONL.parent.mkdir(parents=True, exist_ok=True)
     try:
         import json, time
+        # Rotate if >1M to prevent unbounded /var growth
+        try:
+            if MAINT_JSONL.is_file() and MAINT_JSONL.stat().st_size > 1_048_576:
+                backup = MAINT_JSONL.with_suffix(".1.jsonl")
+                try:
+                    if backup.is_file():
+                        backup.unlink()
+                except OSError:
+                    pass
+                MAINT_JSONL.rename(backup)
+        except OSError:
+            pass
         MAINT_JSONL.open("a").write(json.dumps({"ts": int(time.time()), "action": "maint"}) + "\n")
     except Exception:
         pass
