@@ -64,6 +64,31 @@ class DiskLeaseTests(unittest.TestCase):
             with DiskLease("/dev/sda", mock.Mock()):
                 raise ValueError("body failed")
 
+    def test_runtime_error_wrapped_as_oserror_is_reraised(self):
+        # line 38: outer OSError handler must re-raise a RuntimeError that is also an OSError
+        class Both(OSError, RuntimeError):
+            pass
+
+        with mock.patch("kyth_installer.storage_guard.os.open", side_effect=Both("both")):
+            with self.assertRaises(Both):
+                with DiskLease("/dev/sda", mock.Mock()):
+                    self.fail("must not enter body when open fails with Both")
+
+    def test_partition_guard_uses_lazy_disk_service(self):
+        # lines 64,66: when disk_service is None, lazily construct DiskService
+        service = mock.Mock()
+
+        def backup(_disk, path):
+            pathlib.Path(path).write_bytes(b"lazy table")
+
+        service.backup_table.side_effect = backup
+        with mock.patch("kyth_installer.services.disk_service.DiskService", return_value=service) as ctor:
+            log = mock.Mock()
+            with PartitionTableGuard("/dev/sda", log, disk_service=None) as backup_path:
+                self.assertTrue(pathlib.Path(backup_path).is_file())
+            ctor.assert_called_once()
+            service.backup_table.assert_called_once()
+
 
 class PartitionTableGuardTests(unittest.TestCase):
     def _service(self, *, restore_error: Exception | None = None):

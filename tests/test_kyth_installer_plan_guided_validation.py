@@ -238,6 +238,90 @@ class GuidedPlanValidationTests(unittest.TestCase):
         values.update(changes)
         return ReportDependencies(**values)
 
+    def test_validate_partition_target_error_branches(self):
+        from kyth_installer.plan_validate import _validate_partition_target
+
+        deps = ValidationDependencies(
+            parent_disk=lambda p: "/dev/sda",
+            list_partitions=lambda d: [],
+            probe_storage=lambda *a, **k: None,
+            get_journal=lambda c: None,
+        )
+        # not found
+        with self.assertRaisesRegex(RuntimeError, "was not found"):
+            _validate_partition_target("/dev/sda", "/dev/sda9", "target partition", snapshot=None, dependencies=deps)
+        # efi
+        snap = StorageSnapshot(disks=(), partitions=({"name": "/dev/sda1", "efi": True, "size_bytes": 100 * 1024**3},), free_regions=(), efi_partition="/dev/sda1", is_gpt=False)
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as"):
+            _validate_partition_target("/dev/sda", "/dev/sda1", "target partition", snapshot=snap, dependencies=deps)
+        # mounted/read-only
+        snap2 = StorageSnapshot(disks=(), partitions=({"name": "/dev/sda2", "current": True, "size_bytes": 100 * 1024**3},), free_regions=(), efi_partition="/dev/sda1", is_gpt=False)
+        with self.assertRaisesRegex(RuntimeError, "mounted, read-only"):
+            _validate_partition_target("/dev/sda", "/dev/sda2", "target partition", snapshot=snap2, dependencies=deps)
+        # too small
+        snap3 = StorageSnapshot(disks=(), partitions=({"name": "/dev/sda2", "size_bytes": 1 * 1024**3},), free_regions=(), efi_partition="/dev/sda1", is_gpt=False)
+        with self.assertRaisesRegex(RuntimeError, "too small"):
+            _validate_partition_target("/dev/sda", "/dev/sda2", "target partition", snapshot=snap3, dependencies=deps)
+
+    def test_validate_efi_target_error_branches(self):
+        from kyth_installer.plan_validate import _validate_efi_target
+
+        deps = ValidationDependencies(
+            parent_disk=lambda p: "",
+            list_partitions=lambda d: [],
+            probe_storage=lambda *a, **k: None,
+            get_journal=lambda c: None,
+        )
+        # no efi at all
+        with self.assertRaisesRegex(RuntimeError, "requires an EFI"):
+            _validate_efi_target({}, "/dev/sda2", None, dependencies=deps)
+        # efi == target
+        with self.assertRaisesRegex(RuntimeError, "must be different"):
+            _validate_efi_target({"efi_partition": "/dev/sda2"}, "/dev/sda2", "/dev/sda1", dependencies=deps)
+        # could not determine disk
+        with self.assertRaisesRegex(RuntimeError, "Could not determine"):
+            _validate_efi_target({"efi_partition": "/dev/sda1"}, "/dev/sda2", None, dependencies=deps)
+        # read-only EFI
+        deps2 = ValidationDependencies(
+            parent_disk=lambda p: "/dev/sda",
+            list_partitions=lambda d: [{"name": "/dev/sda1", "efi": True, "read_only": True}],
+            probe_storage=lambda *a, **k: None,
+            get_journal=lambda c: None,
+        )
+        with self.assertRaisesRegex(RuntimeError, "read-only"):
+            _validate_efi_target({"efi_partition": "/dev/sda1"}, "/dev/sda2", None, dependencies=deps2)
+        # success path hits return efi (line 140)
+        deps3 = ValidationDependencies(
+            parent_disk=lambda p: "/dev/sda",
+            list_partitions=lambda d: [{"name": "/dev/sda1", "efi": True}],
+            probe_storage=lambda *a, **k: None,
+            get_journal=lambda c: None,
+        )
+        self.assertEqual(_validate_efi_target({"efi_partition": "/dev/sda1"}, "/dev/sda2", None, dependencies=deps3), "/dev/sda1")
+
+    def test_validate_install_target_no_disk_and_manual_root_branches(self):
+        deps = ValidationDependencies(
+            parent_disk=lambda p: "/dev/sdb" if p == "/dev/sda2" else "/dev/sda",
+            list_partitions=lambda d: [],
+            probe_storage=lambda *a, **k: StorageSnapshot(disks=({"name": "/dev/sda"},), partitions=(), free_regions=(), efi_partition="/dev/sda1", is_gpt=False),
+            get_journal=lambda c: SimpleNamespace(committed=True, root_partition=""),
+        )
+        with self.assertRaisesRegex(RuntimeError, "No target disk"):
+            _validate_install_target({}, dependencies=deps)
+        # manual no root
+        snap = StorageSnapshot(disks=({"name": "/dev/sda"},), partitions=(), free_regions=(), efi_partition="/dev/sda1", is_gpt=False)
+        with self.assertRaisesRegex(RuntimeError, "No root partition"):
+            _validate_install_target({"disk": "/dev/sda", "install_mode": "manual"}, object(), snapshot=snap, dependencies=deps)
+        # manual root does not belong to disk
+        deps2 = ValidationDependencies(
+            parent_disk=lambda p: "/dev/sdb",
+            list_partitions=lambda d: [],
+            probe_storage=lambda *a, **k: snap,
+            get_journal=lambda c: SimpleNamespace(committed=True, root_partition="/dev/sda2"),
+        )
+        with self.assertRaisesRegex(RuntimeError, "does not belong"):
+            _validate_install_target({"disk": "/dev/sda", "install_mode": "manual"}, object(), snapshot=snap, dependencies=deps2)
+
     def test_report_builder_covers_wipe_and_runtime_validation_error(self):
         snapshot = StorageSnapshot(
             disks=({"name": "/dev/sda", "size_bytes": 100 * 1024**3},),

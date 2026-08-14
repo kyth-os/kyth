@@ -234,6 +234,102 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         old._discard_snapshot.assert_called_once()
         self.assertIsNone(context.journal)
 
+    def test_shim_fallbacks_cover_exception_and_original_paths(self):
+        # Each _patched_* shim has an except Exception: pass + fallback import
+        # Trigger the exception path by making the facade function raise
+        with mock.patch("kyth_installer.partition_ops._parent_disk", side_effect=RuntimeError("facade boom")):
+            # should fall back to disk._parent_disk without propagating
+            with mock.patch("kyth_installer.disk._parent_disk", return_value="/dev/sda") as orig:
+                self.assertEqual(journal_mod._patched_parent_disk("/dev/sda1"), "/dev/sda")
+                orig.assert_called_once()
+        with mock.patch("kyth_installer.partition_ops.list_disks", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.disk.list_disks", return_value=[{"name": "/dev/sda"}]) as orig:
+                self.assertEqual(journal_mod._patched_list_disks(), [{"name": "/dev/sda"}])
+        with mock.patch("kyth_installer.partition_ops.list_partitions", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.disk.list_partitions", return_value=[]) as orig:
+                self.assertEqual(journal_mod._patched_list_partitions("/dev/sda"), [])
+        with mock.patch("kyth_installer.partition_ops._partition_number", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.disk._partition_number", return_value=1) as orig:
+                self.assertEqual(journal_mod._patched_partition_number("/dev/sda1"), 1)
+        with mock.patch("kyth_installer.partition_ops._partition_start_bytes", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.disk._partition_start_bytes", return_value=1024) as orig:
+                self.assertEqual(journal_mod._patched_partition_start_bytes("/dev/sda1"), 1024)
+        with mock.patch("kyth_installer.partition_ops.shrink_filesystem", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.fsresize.shrink_filesystem", return_value=None) as orig:
+                journal_mod._patched_shrink_filesystem("/dev/sda1", "ext4", 1024, log=mock.Mock())
+                orig.assert_called_once()
+
+    def test_journal_validation_covers_create_and_resize_error_branches(self):
+        journal = self._journal()
+        # invalid start/size (389)
+        journal.clear()
+        journal.add_op("create", {"start_bytes": -1, "size_bytes": -1, "fs_type": "btrfs"})
+        errs = journal.validate()
+        self.assertTrue(any("invalid start" in e for e in errs))
+        # not present (427) and invalid new_size (432)
+        journal.clear()
+        journal.add_op("delete", {"partition": "/dev/sda9"})
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errs = journal.validate()
+            self.assertTrue(any("is not present" in e for e in errs))
+        journal.clear()
+        journal.add_op("resize", {"partition": "/dev/sda1", "new_size_bytes": 0})
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errs = journal.validate()
+            self.assertTrue(any("invalid new size" in e for e in errs))
+        # mountpoint duplicate (460) — use non-overlapping regions so overlap doesn't mask duplicate
+        journal.clear()
+        journal.add_op("create", {"partition": "/dev/sda2", "mountpoint": "/home", "fs_type": "btrfs", "start_bytes": 1024**2, "size_bytes": 4 * 1024**3})
+        journal.add_op("create", {"partition": "/dev/sda3", "mountpoint": "/home", "fs_type": "btrfs", "start_bytes": 8 * 1024**3, "size_bytes": 4 * 1024**3})
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errs = journal.validate()
+            self.assertTrue(any("assigned more than once" in e for e in errs))
+
+    def test_journal_msdos_delete_and_commit_dispatch(self):
+        # msdos delete and commit dispatch — use delete of a present partition without new_table reset
+        # to hit 353-355 and 583/585/568 we use a simple delete+resize on a gpt disk
+        journal = self._journal()
+        journal.clear()
+        journal.add_op("delete", {"partition": "/dev/sda2"})
+        # make delete present: list_partitions contains sda2, parent returns sda
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}, {"name": "/dev/sda2"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errs = journal.validate()
+            # may still have no-root error but should not have delete-not-present
+            self.assertFalse(any("is not present" in e for e in errs))
+        # delete commit with dry_run True (528-530) and commit dispatch (583,585,568)
+        journal = self._journal(dry_run=True)
+        journal.add_op("delete", {"partition": "/dev/sda1"})
+        journal.add_op("resize", {"partition": "/dev/sda2", "new_size_bytes": 1024**3})
+        # commit should dispatch delete and resize even in dry_run (uses 99 and mocked helpers)
+        with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(journal, "_save_snapshot"), mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}, {"name": "/dev/sda2"}]), mock.patch.object(journal_mod, "_partition_number", return_value=1), mock.patch.object(journal_mod, "_partition_start_bytes", return_value=0), mock.patch.object(journal_mod, "shrink_filesystem"):
+            journal.commit(mock.Mock())
+            self.assertTrue(journal.committed)
+            journal._disk_service.delete_partition.assert_called()
+            journal._disk_service.resize_partition.assert_called()
+        # non-dry_run commit must call _require_parted (568)
+        journal2 = self._journal(dry_run=False)
+        journal2.add_op("delete", {"partition": "/dev/sda1"})
+        with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(journal2, "_save_snapshot"), mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}]), mock.patch.object(journal_mod, "_partition_number", return_value=1), mock.patch.object(journal_mod, "_require_parted") as req:
+            journal2.commit(mock.Mock())
+            req.assert_called()
+
+    def test_journal_save_snapshot_requires_sgdisk_and_handles_missing_backup(self):
+        journal = self._journal(dry_run=False)
+        # save snapshot when not dry_run must call _require_sgdisk (154)
+        with mock.patch.object(journal_mod, "_require_sgdisk") as req, mock.patch.object(journal, "_discard_snapshot"):
+            journal._save_snapshot()
+            req.assert_called()
+        # restore without backup dir returns early (185)
+        journal = self._journal(dry_run=False)
+        journal._snapshot_saved = True
+        journal._backup_dir = None
+        with mock.patch.object(journal_mod, "_require_sgdisk"):
+            journal._restore_snapshot()
+            journal._disk_service.restore_table.assert_not_called()
+        # _find_root_partition returns None when no root (238)
+        journal = self._journal()
+        self.assertIsNone(journal._find_root_partition())
+
 
 if __name__ == "__main__":
     unittest.main()
