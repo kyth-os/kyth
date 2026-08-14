@@ -11,7 +11,7 @@ from pathlib import Path
 from kyth_shared.commands import run_text
 
 _GAMING_CACHE: dict[tuple, tuple[float, str | None]] = {}
-_GAMING_TTL = 30.0
+_GAMING_TTL = 60.0
 
 
 def invalidate_gaming_cache() -> None:
@@ -110,7 +110,7 @@ def check_gaming_reason(
     """Check if gaming is active and return a description of the trigger, or None.
 
     If check_all_uids is True, all active loginctl sessions are scanned.
-    Results are cached 30s to avoid thundering herd on busctl/proc scans.
+    Results are cached 60s to avoid thundering herd on busctl/proc scans.
     """ 
     _key = (uid, check_all_uids)
     _now = time.monotonic()

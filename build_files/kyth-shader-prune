@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# kyth-shader-prune — LRU prune Mesa shader cache when PSI>40% or free<2G
+# kyth-shader-prune — LRU prune Mesa shader cache when PSI>40% or free<2G (idle I/O, single scan)
 set -euo pipefail
+# Run idle to avoid stutter during shader load
+if command -v ionice >/dev/null 2>&1; then
+  ionice -c 3 -p $$ 2>/dev/null || true
+fi
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/mesa_shader_cache"
 if [[ ! -d "$cache" ]]; then exit 0; fi
 # check pressure
