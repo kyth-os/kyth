@@ -115,10 +115,15 @@ def emit_all(config_dir: Path | None = None, dest_root: Path | None = None) -> l
     written: list[Path] = []
     for tier in TIERS:
         dest = (dest_root / OUTPUTS[tier].name) if dest_root else OUTPUTS[tier]
-        # gaming tier with zero keys still emits header-only file so the tier is explicit;
-        # consumers can treat header-only as inactive.
+        # gaming tier empty → no file; prevents stale header-only file from being active
+        if tier == "gaming" and not inputs[tier]:
+            try:
+                if dest.exists():
+                    dest.unlink()
+            except OSError:
+                pass
+            continue
         content = _render_tier(inputs[tier])
-        # gaming empty check — still write header so file exists explicitly
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_suffix(".tmp")
         tmp.write_text(content, encoding="utf-8")

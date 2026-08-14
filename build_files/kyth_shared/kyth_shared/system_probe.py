@@ -11,7 +11,7 @@ from .commands import run as run_command
 from .runtime_output import parse_secure_boot_state, parse_systemd_state
 
 _PROBE_CACHE: tuple[float, dict[str, str | bool]] | None = None
-_PROBE_TTL = 30.0
+_PROBE_TTL = 60.0
 
 
 class SystemProbe:

@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
-"""kyth-btrfs-maint — pressure/battery-aware btrfs scrub+balance (offline, hash-gated)."""
+"""kyth-btrfs-maint — pressure/battery-aware btrfs scrub+balance (offline, hash-gated, idle I/O)."""
+import os
 import sys
 from pathlib import Path
 from kyth_shared.commands import run
+
+# Best-effort idle I/O so scrub/balance don't contend with shader prune or game load
+try:
+    if hasattr(os, "setpriority"):
+        os.nice(10)
+    import subprocess
+    subprocess.run(["ionice", "-c", "3", "-p", str(os.getpid())], capture_output=True, timeout=2)  # noqa: S603,S607
+except Exception:
+    pass
 
 MAINT_JSONL = Path("/var/cache/kyth/btrfs/maint.jsonl")
 

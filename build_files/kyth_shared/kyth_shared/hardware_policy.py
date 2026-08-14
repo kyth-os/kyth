@@ -24,9 +24,9 @@ from .commands import run_optional, run_text
 
 import time as _time
 
-# Inventory cache — avoid re-scanning /sys on every hw-setup/guardian/probe tick (30s TTL, host paths only)
+# Inventory cache — avoid re-scanning /sys on every hw-setup/guardian/probe tick (60s TTL, host paths only, aligns with probe/gaming)
 _INVENTORY_CACHE: tuple[float, Inventory] | None = None
-_INVENTORY_TTL = 30.0
+_INVENTORY_TTL = 60.0
 
 # Progressive: per-quirk modules under hardware_quirks/ for testable catalog
 try:
