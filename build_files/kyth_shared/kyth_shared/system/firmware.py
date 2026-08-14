@@ -14,6 +14,7 @@ Mirrors the subprocess patterns previously duplicated in:
 from __future__ import annotations
 
 import subprocess
+from kyth_shared.commands import run
 
 from kyth_shared.runtime_output import count_fwupd_updates
 
@@ -33,7 +34,7 @@ def firmware_update_command() -> list[str]:
 def run_firmware_refresh(timeout: int = 60) -> tuple[bool, str]:
     """Refresh fwupd metadata. Returns (ok, output). Optional — failures are non-fatal."""
     try:
-        r = subprocess.run(
+        r = run(
             firmware_refresh_commands()[0],
             capture_output=True,
             text=True,
@@ -53,7 +54,7 @@ def run_firmware_refresh(timeout: int = 60) -> tuple[bool, str]:
 def check_firmware_updates(timeout: int = 20) -> int:
     """Return count of pending fwupd device updates, 0 on error or none."""
     try:
-        r = subprocess.run(
+        r = run(
             firmware_updates_command(),
             capture_output=True,
             text=True,
@@ -74,7 +75,7 @@ def check_firmware_updates(timeout: int = 20) -> int:
 def run_firmware_update(timeout: int = 600) -> tuple[bool, str]:
     """Stage available fwupd updates. Returns (ok, output)."""
     try:
-        r = subprocess.run(
+        r = run(
             firmware_update_command(),
             capture_output=True,
             text=True,
