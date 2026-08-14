@@ -272,6 +272,34 @@ def _count_flatpak_updates() -> int | None:
         total += len([ln for ln in result.stdout.splitlines() if ln.strip()])
     return total if saw_ok else None
 
+def flatpak_updates_cached(*, system: bool = False) -> int:
+    """Return cached flatpak pending count if fresh (180s), else compute and warm cache."""
+    # Prefer disk cache to avoid spawning flatpak every 6h watcher cycle.
+    cached = read_section("flatpak-updates")
+    if cached is not None:
+        try:
+            # probe stores int directly; handle str/int
+            return int(cached)  # type: ignore[arg-type]
+        except Exception:
+            if isinstance(cached, int):
+                return cached
+    val = _count_flatpak_updates()
+    if val is not None:
+        try:
+            update_sections({"flatpak-updates": val}, system=system)
+        except Exception:
+            pass
+        return val
+    return 0
+
+
+def bootc_status_data_cached() -> dict | None:
+    """Return cached bootc status data if fresh (90s), else None."""
+    data = read_section("bootc-status-data")
+    if isinstance(data, dict):
+        return data
+    return None
+
 
 def _collect_bootc() -> dict[str, Any]:
     from kyth_shared.system.bootc import (

@@ -47,6 +47,10 @@ from kyth_shared.system.firmware import (  # noqa: E402
     run_firmware_refresh,
     run_firmware_update,
 )
+from kyth_shared.system.probe import (  # noqa: E402
+    bootc_status_data_cached,
+    flatpak_updates_cached,
+)
 from kyth_shared.boot_health import (  # noqa: E402
     DEFAULT_STATE_PATH as BOOT_HEALTH_PATH,
     image_ring,
@@ -394,7 +398,11 @@ class UpdateWatcherDaemon(BaseDaemon):
 
         self.logger.info("All checks passed — checking remote registry digest")
         start_ts = int(time.time())
-        flatpak_count = check_flatpak_updates()
+        # Use probe cache (180s) to avoid thundering herd on flatpak remote-ls.
+        try:
+            flatpak_count = flatpak_updates_cached(system=True)
+        except Exception:
+            flatpak_count = check_flatpak_updates()
         self.logger.info("Flatpak updates pending: %d", flatpak_count)
 
         # ── Firmware updates (optional, ensures latest device firmware) ───────
@@ -426,13 +434,27 @@ class UpdateWatcherDaemon(BaseDaemon):
             self.logger.debug("Firmware update probe failed: %s", exc)
 
         # Check digests before downloading (shared bootc + registry helpers)
-        status_data = get_bootc_status()
-        if status_data:
+        # Prefer cached bootc data (90s) to avoid spawning bootc/skopeo every cycle.
+        try:
+            status_data = bootc_status_data_cached()
+        except Exception:
+            status_data = None
+        if status_data is None:
+            status_data = get_bootc_status()
+            if status_data:
+                try:
+                    from kyth_shared.system.probe import update_sections
+                    update_sections({"bootc-status-data": status_data}, system=True)
+                except Exception as exc:
+                    self.logger.debug("Could not warm system probe cache: %s", exc)
+        else:
+            # Warm other sections from cached data if needed
             try:
                 from kyth_shared.system.probe import update_sections
+                # Touch cache to keep bootc-status-data fresh for Hub
                 update_sections({"bootc-status-data": status_data}, system=True)
-            except Exception as exc:
-                self.logger.debug("Could not warm system probe cache: %s", exc)
+            except Exception:
+                pass
         if status_data:
             ref = get_bootc_image_reference(status_data)
             if ref:
