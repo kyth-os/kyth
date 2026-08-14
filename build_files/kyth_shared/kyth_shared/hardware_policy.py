@@ -22,6 +22,12 @@ from typing import Any
 
 from .commands import run_optional, run_text
 
+import time as _time
+
+# Inventory cache — avoid re-scanning /sys on every hw-setup/guardian/probe tick (30s TTL, host paths only)
+_INVENTORY_CACHE: tuple[float, Inventory] | None = None
+_INVENTORY_TTL = 30.0
+
 # Progressive: per-quirk modules under hardware_quirks/ for testable catalog
 try:
     from .hardware_quirks import __all__ as _QUIRK_MODULES  # noqa: F401
@@ -103,6 +109,12 @@ def _driver_name(path: Path) -> str:
         return ""
 
 
+def invalidate_inventory_cache() -> None:
+    """Clear inventory cache (for tests)."""
+    global _INVENTORY_CACHE
+    _INVENTORY_CACHE = None
+
+
 def collect_inventory(
     *,
     pci_root: Path = Path("/sys/bus/pci/devices"),
@@ -111,6 +123,14 @@ def collect_inventory(
     cpuinfo_path: Path = Path("/proc/cpuinfo"),
 ) -> Inventory:
     """Collect stable matching identifiers without invoking parsing utilities."""
+    # Fast-path cache for default host paths — custom temp dirs in tests bypass cache
+    _default = (Path("/sys/bus/pci/devices"), Path("/sys/bus/usb/devices"), Path("/sys/class/dmi/id"), Path("/proc/cpuinfo"))
+    if (pci_root, usb_root, dmi_root, cpuinfo_path) == _default:
+        global _INVENTORY_CACHE
+        if _INVENTORY_CACHE is not None:
+            _ts, _inv = _INVENTORY_CACHE
+            if _time.monotonic() - _ts < _INVENTORY_TTL:
+                return _inv
     pci: list[Device] = []
     if pci_root.is_dir():
         for node in sorted(pci_root.iterdir()):
@@ -159,7 +179,7 @@ def collect_inventory(
     except OSError:
         pass
 
-    return Inventory(
+    inv = Inventory(
         cpu_vendor=cpu_vendor,
         dmi_vendor=_read_text(dmi_root / "sys_vendor"),
         dmi_product=_read_text(dmi_root / "product_name"),
@@ -167,6 +187,9 @@ def collect_inventory(
         pci=tuple(pci),
         usb=tuple(usb),
     )
+    if (pci_root, usb_root, dmi_root, cpuinfo_path) == _default:
+        _INVENTORY_CACHE = (_time.monotonic(), inv)
+    return inv
 
 
 def load_policy(path: Path = DEFAULT_POLICY_PATH) -> tuple[dict[str, Any], str]:

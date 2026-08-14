@@ -5,9 +5,13 @@ import configparser
 import glob
 import shutil
 import subprocess
+import time as _time
 
 from .commands import run as run_command
 from .runtime_output import parse_secure_boot_state, parse_systemd_state
+
+_PROBE_CACHE: tuple[float, dict[str, str | bool]] | None = None
+_PROBE_TTL = 30.0
 
 
 class SystemProbe:
@@ -95,10 +99,20 @@ class SystemProbe:
         return wallet_enabled not in ("false", "0")
 
     @classmethod
+    def invalidate_probe_cache(cls) -> None:
+        global _PROBE_CACHE
+        _PROBE_CACHE = None
+
+    @classmethod
     def get_probe_snapshot(cls) -> dict[str, str | bool]:
         """Return a aggregated snapshot of system state."""
+        global _PROBE_CACHE
+        if _PROBE_CACHE is not None:
+            _ts, _val = _PROBE_CACHE
+            if _time.monotonic() - _ts < _PROBE_TTL:
+                return dict(_val)
         autolock, lock_resume = cls.get_screen_lock_status()
-        return {
+        snap = {
             "firewall": cls.get_firewall_status(),
             "selinux": cls.get_selinux_status(),
             "secure_boot": cls.get_secure_boot_status(),
@@ -107,6 +121,8 @@ class SystemProbe:
             "lock_on_resume": lock_resume,
             "kwallet_enabled": cls.get_kwallet_enabled(),
         }
+        _PROBE_CACHE = (_time.monotonic(), dict(snap))
+        return snap
 
     @classmethod
     def export_probe_cache(cls, path_str: str = "/run/kyth/hardware-probe.json") -> bool:
