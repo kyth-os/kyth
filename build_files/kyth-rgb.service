@@ -7,6 +7,9 @@ PartOf=graphical-session.target
 Type=oneshot
 ExecStart=/usr/bin/kyth-apply-rgb
 RemainAfterExit=yes
+TimeoutStartSec=30
+Nice=10
+IOSchedulingClass=idle
 
 [Install]
 WantedBy=graphical-session.target
