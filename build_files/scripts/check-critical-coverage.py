@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 THRESHOLDS = {
-    "build_files/kyth-installer/kyth_installer/app.py": 96.0,
+    "build_files/kyth-installer/kyth_installer/app.py": 97.0,
     "build_files/kyth-installer/kyth_installer/assurance.py": 95.0,
     "build_files/kyth-installer/kyth_installer/cleanup.py": 95.0,
     "build_files/kyth-installer/kyth_installer/disk/_lookup.py": 95.0,
@@ -42,9 +42,9 @@ THRESHOLDS = {
     "build_files/kyth-installer/kyth_installer/streaming.py": 80.0,
     "build_files/kyth-installer/kyth_installer/system.py": 85.0,
     "build_files/kyth-installer/kyth_installer/system_mount.py": 80.0,
-    "build_files/kyth-installer/kyth_installer/validation.py": 72.0,
-    "build_files/kyth-installer/kyth_installer/server.py": 75.0,
-    "build_files/kyth-welcome/kyth_welcome/services/privileged.py": 82.0,
+    "build_files/kyth-installer/kyth_installer/validation.py": 73.0,
+    "build_files/kyth-installer/kyth_installer/server.py": 78.0,
+    "build_files/kyth-welcome/kyth_welcome/services/privileged.py": 84.0,
     "build_files/kyth-welcome/kyth_welcome/services/updates.py": 75.0,
     "build_files/kyth_shared/kyth_shared/desktop/windows_installer.py": 80.0,
     "build_files/kyth_shared/kyth_shared/system/update_availability.py": 90.0,
