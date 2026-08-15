@@ -324,6 +324,15 @@ enable-plasma-next:
     echo "Cutting Plasma next overlay (stable default):"
     echo "  sudo dnf5 copr enable xxx/plasma-unstable -y  # dry-run + rollback"
 
+# Cutting kernel/sched per-game (kinoite stable + Cachy/bore/scx cutting edge) (N42)
+[group('Utility')]
+enable-sched-next:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cutting sched per-game (scx lavd/rusty, bore, kinoite stable default):"
+    echo "  just enable-cachy-kernel  # kernel"
+    echo "  sudo dnf5 copr enable xxx/scx-next -y  # sched-ext next, then per-game gaming_slice"
+
 # Cachy-style v3/PGO opt-in (no default change, keep fedora generic).
 [group('Utility')]
 enable-cachy-kernel:
