@@ -40,9 +40,14 @@ if ! echo "${SB_STATE}" | grep -q "SecureBoot enabled"; then
     exit 0
 fi
 
-# Check if our key is already enrolled
+# Check if our key is already enrolled or already staged (idempotent double-run)
 if "${MOKUTIL}" --list-enrolled 2>/dev/null | grep -q "KythOS Secure Boot"; then
     echo "kyth-enroll-mok: KythOS Secure Boot key already enrolled"
+    touch "${FLAG}"
+    exit 0
+fi
+if "${MOKUTIL}" --list-new 2>/dev/null | grep -q "KythOS Secure Boot"; then
+    echo "kyth-enroll-mok: KythOS Secure Boot enrollment already staged (awaiting MokManager)"
     touch "${FLAG}"
     exit 0
 fi
