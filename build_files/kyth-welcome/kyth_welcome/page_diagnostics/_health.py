@@ -18,6 +18,13 @@ from ..widgets import HardwareCard
 
 
 class _HealthMixin:
+    def _btrfs_banner_text(self) -> tuple[str, str]:
+        try:
+            from kyth_shared.system.btrfs_status import btrfs_health_summary
+            return btrfs_health_summary()
+        except Exception:
+            return "ok", "btrfs maint idle"
+
     def _set_status(self, state: str, text: str) -> None:
         self._status_lbl.set_state(state, text)
 
