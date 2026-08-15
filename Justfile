@@ -326,6 +326,30 @@ enable-brew:
     echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     echo "Then: eval \"\$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)\""
 
+# Power profile slider (Windows-like, PPD or TLP fallback) (N27)
+[group('Utility')]
+power-profile mode="balanced":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Power profile opt-in (PPD/TLP, no base daemon):"
+    if command -v powerprofilesctl >/dev/null 2>&1; then echo "  powerprofilesctl set {{ mode }}  # balanced/performance/power-saver"; else echo "  sudo dnf install -y tuned && sudo tuned-adm profile {{ mode }}  # fallback"; fi
+
+# VPN/Tailscale one-click (Aurora-like, wait-online already enabled) (N28)
+[group('Utility')]
+vpn-up provider="tailscale":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "VPN opt-in (no base service, uses NetworkManager-wait-online):"
+    if [[ "{{ provider }}" == "tailscale" ]]; then echo "  sudo tailscale up"; else echo "  nmcli connection up {{ provider }}  # or: sudo wg-quick up wg0"; fi
+
+# Per-game audio preset (Nobara-like, no global env) (N29)
+[group('Utility')]
+audio-preset profile="gaming":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Audio preset {{ profile }} (pipewire/easyeffects, tmp→apply, no env.d):"
+    echo "  # gaming: easyeffects --load-preset Gaming; work: easyeffects --load-preset Work"
+
 [group('Utility')]
 create-devbox flavor="fedora":
     #!/usr/bin/env bash
