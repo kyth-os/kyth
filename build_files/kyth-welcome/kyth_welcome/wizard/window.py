@@ -24,12 +24,14 @@ from .steps_finish import _FinishStepMixin
 from .steps_gaming import _GamingStepMixin
 from .steps_machine import _MachineStepMixin
 from .steps_welcome import _WelcomeStepMixin
+from .steps_work import _WorkStepMixin
 
 # (key, rail label, profile gate — None means shown for every profile)
 _STEP_SPECS: list[tuple[str, str, str | None]] = [
     ("welcome", "Welcome", None),
     ("machine", "Your Machine", None),
     ("apps", "Get Apps", None),
+    ("work", "Work Ready", None),
     ("gaming", "Gaming Setup", "gaming"),
     ("finish", "Finish", None),
 ]
@@ -48,6 +50,7 @@ class WizardWindow(
     _WelcomeStepMixin,
     _MachineStepMixin,
     _AppsStepMixin,
+    _WorkStepMixin,
     _GamingStepMixin,
     _FinishStepMixin,
 ):

@@ -31,3 +31,44 @@ def orchestrate_work_setup(dry_run: bool = False) -> tuple[bool, str]:
         return True, "dry-run ok: work setup would ensure Brave, LibreOffice, fonts, cloud, printer"
     # Apply is delegated to existing ujust recipes / Hub pages; orchestrator is the UX entry
     return True, "work setup: use Hub Apps/Gaming/Work pages or `ujust install-ms-fonts` — all idempotent"
+
+
+class _WorkStepMixin:
+    """Wizard mixin for N25 Work step."""
+
+    def _make_work_step(self):
+        from ..qt import QLabel, QPushButton, QVBoxLayout, QWidget
+        from ..widgets import _make_card
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(52, 40, 52, 28)
+        layout.setSpacing(14)
+        title = QLabel("Make ready to work — one click")
+        title.setObjectName("wiz-heading")
+        layout.addWidget(title)
+        body = QLabel("Ensures Brave, LibreOffice, fonts, cloud, printer — all idempotent, offline shows 'will apply on next online'.")
+        body.setObjectName("wiz-subheading")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        status = QLabel("")
+        status.setObjectName("card-copy")
+        status.setWordWrap(True)
+        layout.addWidget(status)
+
+        def _check():
+            checks = work_ready_checks()
+            msgs = []
+            for label, fn in checks:
+                try:
+                    ok, msg = fn()
+                    msgs.append(f"{label}: {msg}")
+                except Exception as exc:
+                    msgs.append(f"{label}: {exc}")
+            status.setText("\n".join(msgs))
+
+        btn = QPushButton("Check readiness")
+        btn.clicked.connect(lambda _=False: _check())
+        layout.addWidget(btn)
+        _check()
+        return page
