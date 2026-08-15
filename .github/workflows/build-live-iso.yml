@@ -295,6 +295,12 @@ jobs:
           report: 'true'
           extra-docker-cleanup: 'true'
 
+      - name: Cache apt (acceptance)
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-acceptance-${{ hashFiles('.github/workflows/build-live-iso.yml') }}
+
       - name: Install QEMU acceptance dependencies
         run: |
           set -euo pipefail

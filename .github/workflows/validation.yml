@@ -49,6 +49,12 @@ jobs:
       - name: Install pinned validators
         run: ./build_files/scripts/install-validation-tools.sh
 
+      - name: Cache apt (validation)
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-validation-${{ hashFiles('.github/workflows/validation.yml') }}
+
       - name: Install system dependencies for validation
         run: |
           sudo apt-get update
@@ -141,6 +147,12 @@ jobs:
           key: validation-tools-${{ runner.os }}-${{ env.ACTIONLINT_VERSION }}-${{ env.HADOLINT_VERSION }}-${{ env.JUST_VERSION }}-${{ env.SHELLCHECK_VERSION }}-${{ env.ZIZMOR_VERSION }}
           restore-keys: |
             validation-tools-${{ runner.os }}-
+
+      - name: Cache apt (gui-smoke)
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-gui-${{ hashFiles('.github/workflows/validation.yml') }}
 
       - name: Install Qt runtime and pinned PySide6
         run: |
