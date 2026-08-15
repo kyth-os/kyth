@@ -38,6 +38,16 @@ check-dockerfile check_base_image=default_base_image:
 test:
     PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer python3 -m unittest discover -s tests -b
 
+# Verify codecs/drivers are baked (Nobara-style one-click, no post-install dnf)
+[group('Quality')]
+verify-codecs image="localhost/kyth:latest":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for pkg in gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly gstreamer1-libav gstreamer1-vaapi; do
+        podman run --rm {{ image }} rpm -q $pkg >/dev/null && echo "OK $pkg" || (echo "MISSING $pkg" >&2; exit 1)
+    done
+    echo "Codecs baked — no post-install dnf needed"
+
 # Run Python unit tests with a statement coverage report.
 [group('Quality')]
 test-coverage:
