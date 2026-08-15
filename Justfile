@@ -409,6 +409,15 @@ enable-flathub-beta:
     echo "Cutting Flathub beta (stable default, opt-in beta):"
     echo "  flatpak remote-add --if-not-exists flathub-beta https://flathub.org/beta-repo/flathub-beta.flatpakrepo"
 
+# Reproducible perf audit + compare (Cachy no artifact) (N50)
+[group('Utility')]
+perf-compare:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Reproducible perf compare (hyperfine + systemd-analyze + probe json):"
+    echo "  hyperfine 'python3 -m unittest tests.test_kyth_welcome_hub_smoke' --warmup 1"
+    echo "  systemd-analyze; cat /run/user/1000/kyth/probe-cache.json | jq ."
+
 [group('Utility')]
 create-arch-latest:
     #!/usr/bin/env bash
