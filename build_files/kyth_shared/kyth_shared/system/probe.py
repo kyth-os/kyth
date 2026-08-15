@@ -156,7 +156,14 @@ def load_cache_file(path: Path) -> dict[str, Any] | None:
 
 def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
+    try:
+        payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
+    except TypeError:
+        # Defensive fallback: stringify non-serialisable leaves (e.g. a
+        # future HardwareView/NetworkIdentity regression) instead of
+        # crashing kyth-probe.service and poisoning the on-disk cache.
+        payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False, default=str)
+        _logger.warning("write_cache_file: fell back to default=str for %s", path)
     fd, tmp_name = tempfile.mkstemp(prefix=".probe-", suffix=".json", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:

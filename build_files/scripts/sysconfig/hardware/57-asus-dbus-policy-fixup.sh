@@ -21,7 +21,11 @@ set -euo pipefail
 for dbus_policy in \
 	/usr/share/dbus-1/system.d/asusd.conf \
 	/etc/dbus-1/system.d/org.supergfxctl.Daemon.conf; do
-	[[ -f "${dbus_policy}" ]] && sed -i 's/group="sudo"/group="wheel"/' "${dbus_policy}"
+	[[ -f "${dbus_policy}" ]] || continue
+	# On bootc the base image is read-only; skip if not writable instead of
+	# exiting non-zero and failing kyth-asus-dbus-policy-fixup.service.
+	[[ -w "${dbus_policy}" ]] || continue
+	sed -i 's/group="sudo"/group="wheel"/' "${dbus_policy}" || true
 done
 ASUSDBUSFIXEOF
 
