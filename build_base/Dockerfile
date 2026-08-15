@@ -12,6 +12,10 @@ ARG KYTH_KERNEL_FLAVOR=fedora
 # digest for non-NVIDIA, separate stable-nvidia tag when enabled.
 ARG ENABLE_NVIDIA=0
 
+# Cachy v3 is x86-64-v3 opt-in (like CachyOS znver4/v3), not v4 (breaks older CPUs).
+# Fedora default stays x86-64.
+ARG CACHYOS_ARCH=x86-64-v3
+
 # Passed at build time so the layer cache is busted whenever an alternate
 # kernel version is published. Build scripts resolve the latest versions and
 # pass them here. Explicitly referenced via the no-op ':' builtin so Docker
@@ -21,8 +25,9 @@ ARG CACHYOS_KERNEL_VER=unset
 # Use a bind-mount so the script is never written into any image layer
 RUN --mount=type=bind,source=build.sh,target=/run/build.sh \
     --mount=type=bind,source=plymouth,target=/run/plymouth \
-    : "cache-bust=${KYTH_KERNEL_FLAVOR}-${CACHYOS_KERNEL_VER}-${ENABLE_NVIDIA}" \
+    : "cache-bust=${KYTH_KERNEL_FLAVOR}-${CACHYOS_KERNEL_VER}-${ENABLE_NVIDIA}-${CACHYOS_ARCH}" \
     && KYTH_KERNEL_FLAVOR="${KYTH_KERNEL_FLAVOR}" \
        CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VER}" \
        ENABLE_NVIDIA="${ENABLE_NVIDIA}" \
+       CACHYOS_ARCH="${CACHYOS_ARCH}" \
        bash /run/build.sh
