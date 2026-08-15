@@ -11,7 +11,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from .commands import run as _run
+from kyth_shared.commands import run as _run
 
 _PRESETS = {
     "hdr": {"Compositing": {"HDR": "true"}, "Wayland": {"ExplicitSync": "true"}},
