@@ -200,8 +200,8 @@ jobs:
             --security-opt label=disable \
             --build-arg "BASE_IMAGE=${SOURCE_IMAGE_PINNED}" \
             --build-arg "SOURCE_TAG=${SOURCE_TAG}" \
-            --cache-from ghcr.io/mrtrick37/kyth:payloadcache-${{ inputs.source_tag }} \
-            --cache-to ghcr.io/mrtrick37/kyth:payloadcache-${{ inputs.source_tag }} \
+            --cache-from "ghcr.io/mrtrick37/kyth:payloadcache-${SOURCE_TAG}" \
+            --cache-to "ghcr.io/mrtrick37/kyth:payloadcache-${SOURCE_TAG}" \
             --tag localhost/payload:latest \
             -f installer/Containerfile \
             .
