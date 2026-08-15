@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import sys
@@ -15,7 +14,6 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 from kyth_installer import app, partition_cli  # noqa: E402
 from kyth_installer.context import InstallLifecycle, InstallerContext  # noqa: E402
 from kyth_installer.phases import finalize, run as phase_run, storage  # noqa: E402
-from kyth_installer.plan import ResolvedInstallPlan  # noqa: E402
 from kyth_installer.validation import InstallRequestError  # noqa: E402
 
 

@@ -7,7 +7,6 @@ bootc rollback Worker with ostree admin status 2 deploys intact.
 from __future__ import annotations
 
 from kyth_shared.commands import run
-from kyth_shared.system.firmware import firmware_updates_command
 
 
 def pending_updates_summary() -> dict[str, str]:

@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 
 from kyth_installer import validation
 from kyth_installer.validation import InstallRequestError
-from kyth_welcome.services.privileged import PrivilegedActionError, PrivilegedGateway, PrivilegedAction, AuthFrontend
+from kyth_welcome.services.privileged import PrivilegedActionError, PrivilegedGateway
 
 
 class ValidationGapTests(unittest.TestCase):

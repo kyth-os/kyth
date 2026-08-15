@@ -6,11 +6,9 @@ import logging
 from kyth_welcome.services.command import run_sync
 
 from kyth_shared.update_status import read_update_snapshot
-from kyth_shared.runtime_output import count_fwupd_updates
 
 from ...qt import Signal
 from ..bootc import REGISTRY, bootc_image_digest, bootc_status_data, current_branch
-from ..process import run_command
 from ..registry import check_registry_update, image_annotations, image_revision
 from ..runtime import TrackedThread
 from ..updates import UpdateProbeResult

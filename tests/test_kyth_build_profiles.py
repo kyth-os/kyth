@@ -100,7 +100,13 @@ class BuildProfileTests(unittest.TestCase):
 
     def test_dependent_workflows_require_successful_image_build(self):
         workflow = _read(".github/workflows/build.yml")
-        self.assertGreaterEqual(workflow.count("needs.build_push.result == 'success'"), 2)
+        iso = _read(".github/workflows/build-live-iso.yml")
+        # ISO is now decoupled to a workflow_run-triggered workflow; only
+        # finalize remains as a dependent in build.yml.
+        self.assertGreaterEqual(workflow.count("needs.build_push.result == 'success'"), 1)
+        self.assertIn("needs.build_push.result == 'success'", workflow)
+        # And the ISO workflow must not silently publish without a source image
+        self.assertIn("source_tag", iso)
 
 
 if __name__ == "__main__":

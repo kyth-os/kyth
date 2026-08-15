@@ -5,7 +5,6 @@ from ..qt import QHBoxLayout, QLabel, QPushButton
 from ..widgets import _make_card
 from ..services.runtime import Worker
 from kyth_shared.commands import ujust_command
-import shutil
 
 
 class _DevMixin:

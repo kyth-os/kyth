@@ -40,7 +40,6 @@ class AssuranceGapTests(unittest.TestCase):
 
     def test_run_preflight_swallows_encryption_exception(self):
         # lines 114-115 outer except in run_preflight
-        from kyth_installer.imagesrc import ImageSource
         source = mock.Mock(kind="embedded", verified=True, digest="abc", requires_network=False)
         with mock.patch("kyth_installer.assurance._encryption_check", side_effect=RuntimeError("boom")):
             checks = assurance.run_preflight(source)

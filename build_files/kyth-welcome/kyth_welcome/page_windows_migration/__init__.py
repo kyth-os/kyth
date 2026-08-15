@@ -150,17 +150,24 @@ class WindowsMigrationPage(
         self._win_import_status = QLabel("")
         self._win_import_status.setObjectName("card-copy")
         win_btn = QPushButton("Import from NTFS")
+
         def _import_win():
             part = "/dev/sda2"
             try:
                 from ..services.runtime import Worker as _W
+
                 w = _W(["/usr/bin/kyth-windows-import", part])
-                w.line.connect(lambda t: self._win_import_status.setText(t))
-                w.done.connect(lambda code: self._win_import_status.setText(f"Import done exit {code} → ~/WindowsImport"))
+                w.line.connect(self._win_import_status.setText)
+                w.done.connect(
+                    lambda code: self._win_import_status.setText(
+                        f"Import done exit {code} → ~/WindowsImport"
+                    )
+                )
                 w.start()
             except Exception as exc:
                 self._win_import_status.setText(f"Import failed: {exc}")
-        win_btn.clicked.connect(lambda _=False: _import_win())
+
+        win_btn.clicked.connect(lambda _checked=False: _import_win())  # pylint: disable=unnecessary-lambda
         win_row.addWidget(win_btn)
         win_row.addWidget(self._win_import_status, 1)
         win_layout.addLayout(win_row)

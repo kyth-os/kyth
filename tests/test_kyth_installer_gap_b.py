@@ -2,7 +2,6 @@ import sys
 import unittest
 from pathlib import Path
 from unittest import mock
-from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))

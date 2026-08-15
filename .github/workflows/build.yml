@@ -581,38 +581,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  build_live_iso:
-    name: Build Live ISO (${{ matrix.branch == 'main' && 'latest' || matrix.branch }})
-    needs: [plan, build_push]
-    if: ${{ github.event_name != 'pull_request' && needs.build_push.result == 'success' }}
-    # Decoupled from container signal — ISO infra (podman/Titanoboa/QEMU) must
-    # not hide a successful container publish. Container workflow stays green
-    # even if ISO fails; ISO failures are tracked in their own workflow run.
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        branch: ${{ fromJSON(needs.plan.outputs.branches) }}
-    uses: ./.github/workflows/build-live-iso.yml
-    with:
-      # The live ISO is built from the Fedora variant only — it must boot the
-      # signed Fedora kernel for Secure Boot. CachyOS is an opt-in bootc switch
-      # on the installed system, not in the live environment.
-      source_tag: ${{ matrix.branch == 'main' && 'latest' || matrix.branch }}
-      source_digest: ""
-      source_sha: ${{ github.event_name != 'schedule' && github.sha || '' }}
-    secrets:
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
-    permissions:
-      actions: read
-      contents: write
-      packages: read
-      id-token: write
-      attestations: write
-
   finalize:
     name: Attest and dispatch (${{ matrix.branch }}, ${{ matrix.kernel_flavor }})
     needs: [plan, build_push]

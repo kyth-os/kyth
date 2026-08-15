@@ -11,10 +11,7 @@ from .boot_health import (
     DEFAULT_STATE_PATH,
     image_ring,
     quarantine_reason,
-    read_state,
-    record_staged,
     rollout_policy_reason,
-    write_state,
 )
 
 # Progressive: Hub control-plane hook — record staged state for RepairPage

@@ -145,7 +145,7 @@ class AiDev:
         candidates: list[Path] = []
         try:
             # Use git to locate the enclosing repo (quiet, fast).
-            import subprocess as _sp
+            import subprocess as _sp  # pylint: disable=reimported
 
             res = _sp.run(
                 ["git", "rev-parse", "--show-toplevel"],

@@ -75,12 +75,12 @@ class RunFirmwareUpdateTests(unittest.TestCase):
     def test_ok(self):
         with patch("kyth_shared.system.firmware.subprocess.run") as mr:
             mr.return_value = subprocess.CompletedProcess(args=["fwupdmgr"], returncode=0, stdout="queued", stderr="")
-            ok, out = run_firmware_update()
+            ok, _out = run_firmware_update()
             self.assertTrue(ok)
 
     def test_timeout(self):
         with patch("kyth_shared.system.firmware.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="fwupdmgr", timeout=600)):
-            ok, out = run_firmware_update()
+            ok, _out = run_firmware_update()
             self.assertFalse(ok)
 
 
@@ -101,7 +101,7 @@ class StageFirmwareUpdatesTests(unittest.TestCase):
         with patch("kyth_shared.system.firmware.run_firmware_refresh", return_value=(True, "")), \
              patch("kyth_shared.system.firmware.check_firmware_updates", return_value=0), \
              patch("kyth_shared.system.firmware.run_firmware_update") as ru:
-            updated, count, out = stage_firmware_updates()
+            updated, count, _out = stage_firmware_updates()
             self.assertFalse(updated)
             self.assertEqual(count, 0)
             ru.assert_not_called()

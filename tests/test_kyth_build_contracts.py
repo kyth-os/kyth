@@ -280,9 +280,22 @@ class BuildAssemblyContracts(unittest.TestCase):
                 self.assertIn(consumer, dockerfile)
 
     def test_branch_to_image_channel_mapping_is_explicit(self):
-        workflow = (ROOT / ".github/workflows/build.yml").read_text()
-        self.assertIn('branches=["main","testing"]', workflow)
-        self.assertIn("matrix.branch == 'main' && 'latest' || matrix.branch", workflow)
+        build = (ROOT / ".github/workflows/build.yml").read_text()
+        iso = (ROOT / ".github/workflows/build-live-iso.yml").read_text()
+        self.assertIn('branches=["main","testing"]', build)
+        # ISO is now decoupled from the container workflow — the channel
+        # mapping (main -> latest, else branch) lives in the standalone
+        # Build Live ISO workflow. Accept either the legacy inline expression
+        # or the new effective-tag resolution.
+        has_legacy = "matrix.branch == 'main' && 'latest' || matrix.branch" in build
+        has_iso_legacy = "matrix.branch == 'main' && 'latest' || matrix.branch" in iso
+        has_iso_effective = (
+            "source_tag" in iso and "latest" in iso and "testing" in iso
+        )
+        self.assertTrue(
+            has_legacy or has_iso_legacy or has_iso_effective,
+            "branch -> channel mapping (main->latest) must be explicit in build or ISO workflow",
+        )
 
     def test_build_time_python_imports_are_resolvable_in_build_context(self):
         dockerfile = (ROOT / "Dockerfile").read_text()

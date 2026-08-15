@@ -8,7 +8,6 @@ directly — tmp→fsync→replace pattern.
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 
 from kyth_shared.commands import run as _run
@@ -87,7 +86,7 @@ def preset_status(name: str) -> str:
         return "kwinrc not found"
     try:
         txt = kwinrc.read_text()
-        for section, keys in _PRESETS.get(name, {}).items():
+        for _section, keys in _PRESETS.get(name, {}).items():
             for k, v in keys.items():
                 if f"{k}={v}" not in txt:
                     return f"{k}={v} not active"

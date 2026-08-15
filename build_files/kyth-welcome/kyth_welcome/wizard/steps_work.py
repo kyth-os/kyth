@@ -61,7 +61,7 @@ class _WorkStepMixin:
             msgs = []
             for label, fn in checks:
                 try:
-                    ok, msg = fn()
+                    _ok, msg = fn()
                     msgs.append(f"{label}: {msg}")
                 except Exception as exc:
                     msgs.append(f"{label}: {exc}")

@@ -64,10 +64,11 @@ class WindowSnapTests(unittest.TestCase):
 
     def test_apply_returns_list(self):
         with tempfile.TemporaryDirectory() as td:
-            p = Path(td) / "snap.toml"
+            _p = Path(td) / "snap.toml"
             cfg = {"layout": "2x2", "win_z": True, "electric": True}
             # avoid touching real kwinrc — mock run via patch of commands.run
             from unittest.mock import patch
+
             with patch.object(snap_mod, "run", return_value=None):
                 applied = snap_mod.apply_snap(cfg)
                 self.assertIsInstance(applied, list)

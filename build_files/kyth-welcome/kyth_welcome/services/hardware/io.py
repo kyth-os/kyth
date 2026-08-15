@@ -10,8 +10,6 @@ from ..process import command_stdout, run_command
 from kyth_shared.system.firmware import (
     check_firmware_updates,
     firmware_devices_command,
-    firmware_refresh_commands,
-    firmware_updates_command,
     get_firmware_devices,
     run_firmware_refresh,
 )

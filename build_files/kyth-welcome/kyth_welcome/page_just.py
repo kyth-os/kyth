@@ -1,9 +1,12 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import restyle
 from .services.launch import popen
 from .services.runtime import Worker
 from .qt import (
-    QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt, QScrollArea, QWidget,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 from .widgets import (
     Page, _make_card,
@@ -37,6 +40,8 @@ class JustPage(Page):
         self._status.setObjectName("mono-inline")
         layout.addWidget(self._status)
 
+        self._just_worker = None
+        self._just_lines: list[str] = []
         self._add(card)
         self._refresh()
 
@@ -49,13 +54,13 @@ class JustPage(Page):
                 w.deleteLater()
         self._status.setText("Loading recipes…")
         # Must use Worker (not subprocess) per quality contracts; collect stdout async.
-        if getattr(self, "_just_worker", None) is not None:
+        if self._just_worker is not None:
             try:
                 if self._just_worker.isRunning():
                     return
             except RuntimeError:
                 pass
-        self._just_lines: list[str] = []
+        self._just_lines.clear()
         self._just_worker = Worker(["just", "--list"])
         self._just_worker.line.connect(self._just_lines.append)
         self._just_worker.done.connect(self._on_just_list_done)

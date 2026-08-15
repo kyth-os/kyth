@@ -1,7 +1,7 @@
 """Filesystem finalization (fstab, hostname, user) — Phase 2 verbatim."""
 from __future__ import annotations
 
-import subprocess
+import subprocess  # pylint: disable=unused-import
 import traceback
 
 from ..context import InstallRequest, InstallerContext, InstallLifecycle

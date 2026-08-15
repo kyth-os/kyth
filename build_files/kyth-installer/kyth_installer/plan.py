@@ -37,10 +37,10 @@ whatever protections/flags apply to "alongside" (see above) apply to them too.
 """
 
 import shutil
-import subprocess  # noqa: F401  # compatibility surface for storage tests/callers
+import subprocess  # noqa: F401  # pylint: disable=unused-import  # compatibility surface for storage tests/callers
 from typing import Callable
 
-from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES
+from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES  # pylint: disable=unused-import
 from .context import InstallationState, InstallRequest  # pylint: disable=unused-import
 from .plan_types import InstallPlan, PlanReport, ResolvedInstallPlan  # pylint: disable=unused-import
 from .plan_request import (
@@ -49,7 +49,7 @@ from .plan_request import (
     normalized_install_mode as _request_normalized_install_mode,
     request_with_install_plan as _request_with_install_plan,
 )
-from .disk import (
+from .disk import (  # pylint: disable=unused-import
     _human_size,
     _latest_partition_on_disk,
     _normal_device_path,

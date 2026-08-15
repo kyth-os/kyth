@@ -6,7 +6,6 @@ tmp→apply without global env.d, rollback on fail. No daemon.
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 
 _PRESETS = {"gaming": "128", "work": "256", "balanced": "256"}
@@ -35,12 +34,11 @@ def apply_pipewire_quantum(preset: str, dry_run: bool = False) -> tuple[bool, st
         tmp.chmod(0o644)
         # fsync tmp
         try:
-            import os as _os
-            fd = _os.open(str(tmp), _os.O_RDONLY)
+            fd = os.open(str(tmp), os.O_RDONLY)
             try:
-                _os.fsync(fd)
+                os.fsync(fd)
             finally:
-                _os.close(fd)
+                os.close(fd)
         except Exception:
             pass
         tmp.replace(target)

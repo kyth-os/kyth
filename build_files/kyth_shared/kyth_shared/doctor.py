@@ -5,11 +5,9 @@ Suggests just fixes; no daemon, same probe code.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from kyth_shared.system.probe import read_section
-from kyth_shared.hardware_policy import load_policy
 from kyth_shared.system.hardware_view import get_hardware_view
 
 
@@ -19,7 +17,6 @@ def _score() -> tuple[int, list[str], list[str]]:
     score = 0
 
     # kernel
-    kver = Path("/usr/lib/modules").glob("*")
     has_cachy = any("cachy" in p.name for p in Path("/usr/lib/modules").glob("*"))
     if has_cachy:
         checks.append("kernel: cachy (opt-in)")
@@ -30,7 +27,7 @@ def _score() -> tuple[int, list[str], list[str]]:
         suggestions.append("For v3: just build-base cachy")
 
     # v3
-    arch = Path("/usr/lib/os-release").read_text(errors="ignore") if Path("/usr/lib/os-release").exists() else ""
+    _ = Path("/usr/lib/os-release").read_text(errors="ignore") if Path("/usr/lib/os-release").exists() else ""
     # Use probe hardware-summary if available
     hw = read_section("hardware-summary")
     if hw and isinstance(hw, dict) and hw.get("capabilities"):

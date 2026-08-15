@@ -18,9 +18,9 @@ from kyth_installer.assurance import (  # noqa: E402
 )
 from kyth_installer.context import InstallRequest  # noqa: E402
 from kyth_installer.imagesrc import ImageSource  # noqa: E402
-import kyth_installer.disk  # noqa: E402, F401
-import kyth_installer.runner  # noqa: E402, F401
-import kyth_installer.system  # noqa: E402, F401
+import kyth_installer.disk  # noqa: E402, F401  # pylint: disable=unused-import
+import kyth_installer.runner  # noqa: E402, F401  # pylint: disable=unused-import
+import kyth_installer.system  # noqa: E402, F401  # pylint: disable=unused-import
 
 
 class InstallerAssuranceCoverageTests(unittest.TestCase):

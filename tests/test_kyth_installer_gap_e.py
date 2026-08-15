@@ -29,7 +29,7 @@ class JournalFinalTests(unittest.TestCase):
         # The line 235 is `if __name__ == "__main__": main()` - we can cover by checking file contains it
         # Instead, execute the file as module to cover the guard (without relative import issue)
         # Use exec with mocked main
-        with mock.patch.object(app_mod, "main") as mocked:
+        with mock.patch.object(app_mod, "main") as _mocked:
             code = Path(ROOT / "build_files" / "kyth-installer" / "kyth_installer" / "app.py").read_text()
             # Replace the relative imports with mocks for exec
             # Simpler: just verify the guard exists and main is callable
