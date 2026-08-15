@@ -57,6 +57,8 @@ DISK_TTL: dict[str, float] = {
     "secureboot-state": 300.0,
     "hardware-view": 30.0,
     "network-identity": 60.0,
+    "audit-cache": 30.0,
+    "firmware-cache": 300.0,
 }
 
 COLLECT_SECTIONS: tuple[str, ...] = tuple(DISK_TTL.keys())

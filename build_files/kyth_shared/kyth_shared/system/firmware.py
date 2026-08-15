@@ -14,6 +14,8 @@ Mirrors the subprocess patterns previously duplicated in:
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
+
 from kyth_shared.commands import run
 
 from kyth_shared.runtime_output import count_fwupd_updates
@@ -21,6 +23,10 @@ from kyth_shared.runtime_output import count_fwupd_updates
 
 def firmware_refresh_commands() -> list[list[str]]:
     return [["fwupdmgr", "refresh", "--force"]]
+
+
+def firmware_devices_command() -> list[str]:
+    return ["fwupdmgr", "get-devices"]
 
 
 def firmware_updates_command() -> list[str]:
@@ -92,6 +98,29 @@ def run_firmware_update(timeout: int = 600) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def get_firmware_devices(timeout: int = 15) -> tuple[int, str, int]:
+    """Return (device_count, output, returncode). Optional — 0, '', 2 on missing."""
+    try:
+        r = run(
+            firmware_devices_command(),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        out = (r.stdout or "").strip()
+        if r.returncode != 0:
+            return 0, out or r.stderr.strip(), r.returncode
+        count = out.count("Device ID:")
+        return count, out, 0
+    except FileNotFoundError:
+        return 0, "fwupdmgr not found", 2
+    except subprocess.TimeoutExpired:
+        return 0, f"fwupdmgr get-devices timed out after {timeout}s", 1
+    except Exception as exc:  # noqa: BLE001
+        return 0, str(exc), 1
+
+
 def stage_firmware_updates(
     refresh_timeout: int = 60,
     check_timeout: int = 20,
@@ -104,3 +133,39 @@ def stage_firmware_updates(
         return False, 0, ""
     ok, out = run_firmware_update(timeout=update_timeout)
     return (ok, count, out)
+
+
+def stage_firmware_batch(
+    refresh_timeout: int = 60,
+    check_timeout: int = 20,
+    update_timeout: int = 600,
+    lock_path: str | None = None,
+) -> tuple[bool, int, str]:
+    """Batched refresh→check→update behind flock (60s). Prevents thundering herd."""
+    import fcntl
+    import os
+
+    if lock_path is None:
+        lock_path = os.environ.get("KYTH_FWUPD_LOCK", "/run/kyth-fwupd.lock")
+    try:
+        Path(lock_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as lf:
+            try:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return False, 0, ""
+            return stage_firmware_updates(
+                refresh_timeout=refresh_timeout,
+                check_timeout=check_timeout,
+                update_timeout=update_timeout,
+            )
+    except Exception:  # noqa: BLE001
+        # Fallback: no lock (e.g. /run ro in tests), just do direct batch
+        try:
+            return stage_firmware_updates(
+                refresh_timeout=refresh_timeout,
+                check_timeout=check_timeout,
+                update_timeout=update_timeout,
+            )
+        except Exception:
+            return False, 0, ""

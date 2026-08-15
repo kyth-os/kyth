@@ -7,43 +7,51 @@ import shutil
 
 from .types import HardwareProbe
 from ..process import command_stdout, run_command
-from kyth_shared.system.firmware import firmware_refresh_commands, firmware_updates_command
+from kyth_shared.system.firmware import (
+    check_firmware_updates,
+    firmware_refresh_commands,
+    firmware_updates_command,
+    get_firmware_devices,
+    run_firmware_refresh,
+)
 from ..privileged import AuthFrontend, helper_action
 
 
 def _firmware_probe() -> HardwareProbe:
-    devices = run_command(["fwupdmgr", "get-devices"], timeout=15)
-    if devices is None:
+    # Single-source fwupd via kyth_shared/system/firmware.py — no raw fwupdmgr strings
+    device_count, devices_out, rc = get_firmware_devices(timeout=15)
+    if rc == 2:
         return HardwareProbe("Firmware", "dim", "fwupd not available.", "Install fwupd to inspect firmware-managed devices.")
-    if devices.returncode != 0:
+    if rc != 0:
         return HardwareProbe(
             "Firmware", "warn",
             "Firmware tooling installed but device enumeration failed.",
-            devices.stdout.strip() or "fwupdmgr get-devices exited with an error.",
+            devices_out.strip() or "fwupdmgr get-devices exited with an error.",
         )
 
-    device_count = devices.stdout.count("Device ID:")
-    refresh_cmds = firmware_refresh_commands()
-    updates_cmd = firmware_updates_command()
-    if refresh_cmds:
-        run_command(refresh_cmds[0], timeout=60)
-    updates = run_command(updates_cmd, timeout=20)
-    if updates is not None and updates.returncode == 0:
+    # Optional refresh (batched, non-fatal) — keep probe fast
+    try:
+        run_firmware_refresh(timeout=60)
+    except Exception:
+        pass
+    fw_count = check_firmware_updates(timeout=20)
+    if fw_count > 0:
         return HardwareProbe(
             "Firmware", "warn",
             f"Firmware updates available for {device_count or 'one or more'} device(s).",
-            updates.stdout.strip() or devices.stdout.strip(),
+            devices_out.strip(),
         )
-    if updates is not None and updates.returncode == 2:
+    # returncode 2 is already handled; fw_count==0 means no pending
+    if device_count > 0:
         return HardwareProbe(
             "Firmware", "ok",
             f"fwupd managing {device_count} device(s), no pending updates.",
-            devices.stdout.strip(),
+            devices_out.strip(),
         )
     return HardwareProbe(
         "Firmware", "dim",
         f"fwupd available, {device_count} managed device(s).",
-        devices.stdout.strip(),
+        devices_out.strip(),
     )
  # _firmware_probe
 

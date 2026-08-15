@@ -405,29 +405,22 @@ class UpdateWatcherDaemon(BaseDaemon):
             flatpak_count = check_flatpak_updates()
         self.logger.info("Flatpak updates pending: %d", flatpak_count)
 
-        # ── Firmware updates (optional, ensures latest device firmware) ───────
-        # Mirrors kyth-full-update's optional firmware steps but runs
-        # automatically every watcher cycle. Failures are logged, not fatal —
-        # bootc/flatpak work proceeds even if fwupd is absent or offline.
+        # ── Firmware updates (single-source, flock-batched) ──────────────────
+        # Uses kyth_shared/system/firmware stage_firmware_batch behind
+        # /run/kyth-fwupd.lock to prevent thundering herd with Hub probe.
         firmware_updated = False
         firmware_output = ""
         try:
-            ok, out = run_firmware_refresh()
-            if not ok:
-                self.logger.debug("fwupd refresh: %s", out[:300])
-            else:
-                self.logger.info("fwupd refresh succeeded")
-            fw_count = check_firmware_updates()
-            self.logger.info("Firmware updates pending: %d", fw_count)
-            if fw_count > 0:
+            from kyth_shared.system.firmware import stage_firmware_batch
+
+            updated, fw_count, out = stage_firmware_batch()
+            firmware_output = out if out and "locked" not in out.lower() else ""
+            firmware_updated = updated
+            if fw_count > 0 and updated:
                 self.logger.info("Staging %d firmware update(s) via fwupdmgr", fw_count)
-                ok, out = run_firmware_update()
-                firmware_output = out
-                if ok:
-                    self.logger.info("Firmware updates queued: %s", out[:500])
-                    firmware_updated = True
-                else:
-                    self.logger.warning("fwupd update failed: %s", out[:500])
+                self.logger.info("Firmware updates queued: %s", out[:500])
+            elif fw_count > 0:
+                self.logger.warning("fwupd update failed: %s", out[:500])
             else:
                 self.logger.info("No firmware updates to stage")
         except Exception as exc:

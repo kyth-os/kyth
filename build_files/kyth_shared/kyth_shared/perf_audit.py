@@ -21,16 +21,43 @@ except Exception:
     pass
 
 
-# Simple TTL cache for probe/audit — avoids 50 dynamic imports per Hub page open
+# TTL cache: mem (30s) + disk probe-cache (audit-cache 30s) — avoids 50 imports per Hub open
 _AUDIT_CACHE: dict[str, Any] | None = None
 _AUDIT_CACHE_TS: float = 0
 _AUDIT_TTL = 30.0  # seconds
+
+
+def _audit_from_disk_cache() -> dict[str, Any] | None:
+    try:
+        from .system.probe import read_section
+
+        cached = read_section("audit-cache", max_age=_AUDIT_TTL)
+        if isinstance(cached, dict) and cached:
+            return cached
+    except Exception:
+        pass
+    return None
+
+
+def _audit_to_disk_cache(data: dict[str, Any]) -> None:
+    try:
+        from .system.probe import update_sections
+
+        update_sections({"audit-cache": data})
+    except Exception:
+        pass
 
 
 def collect_audit(force: bool = False) -> dict[str, Any]:
     global _AUDIT_CACHE, _AUDIT_CACHE_TS
     if not force and _AUDIT_CACHE is not None and (time.time() - _AUDIT_CACHE_TS) < _AUDIT_TTL:
         return dict(_AUDIT_CACHE)
+    if not force:
+        disk = _audit_from_disk_cache()
+        if disk is not None:
+            _AUDIT_CACHE = dict(disk)
+            _AUDIT_CACHE_TS = time.time()
+            return dict(disk)
     out: dict[str, Any] = {}
     try:
         from .gaming_master import load_master
@@ -114,6 +141,7 @@ def collect_audit(force: bool = False) -> dict[str, Any]:
     out["ts"] = int(time.time())
     _AUDIT_CACHE = dict(out)
     _AUDIT_CACHE_TS = time.time()
+    _audit_to_disk_cache(dict(out))
     return dict(out)
 
 
