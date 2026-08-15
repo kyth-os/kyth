@@ -308,6 +308,23 @@ enable-copr repo:
     echo "  sudo dnf5 copr enable {{ repo }}"
     echo "Run above on the host; base stays vanilla."
 
+# Brew/distrobox-style opt-in (Aurora-like, no base bloat).
+[group('Utility')]
+enable-brew:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Opt-in Homebrew (Aurora-like, not in base):"
+    echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    echo "Then: eval \"\$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)\""
+
+[group('Utility')]
+create-devbox flavor="fedora":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Opt-in distrobox (Aurora/Endeavour-like, no base bloat):"
+    echo "  distrobox create --image {{ flavor }} --name dev-{{ flavor }} && distrobox enter dev-{{ flavor }}"
+    echo "Run above on host; toolbox stays vanilla."
+
 # Preview the installer UI in your browser (no disk changes — safe for dev)
 [group('Utility')]
 preview-installer:
