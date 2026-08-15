@@ -102,7 +102,7 @@ class FirmwareCheckWorker(TrackedThread):
             if updates.returncode != 0:
                 self.result.emit(
                     UpdateProbeResult.error(
-                        "firmware", updates.stdout.strip() or "fwupdmgr get-updates failed.",
+                        "firmware", updates.stdout.strip() or " ".join(firmware_updates_command()) + " failed.",
                     )
                 )
                 return
@@ -113,7 +113,7 @@ class FirmwareCheckWorker(TrackedThread):
             if count == 0:
                 self.result.emit(
                     UpdateProbeResult.error(
-                        "firmware", "fwupdmgr output did not contain a recognizable update.",
+                        "firmware", " ".join(firmware_updates_command()) + " output did not contain a recognizable update.",
                     )
                 )
                 return

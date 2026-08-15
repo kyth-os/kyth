@@ -26,7 +26,7 @@ def _firmware_probe() -> HardwareProbe:
         return HardwareProbe(
             "Firmware", "warn",
             "Firmware tooling installed but device enumeration failed.",
-            devices_out.strip() or "fwupdmgr get-devices exited with an error.",
+            devices_out.strip() or " ".join(firmware_devices_command()) + " exited with an error.",
         )
 
     # Optional refresh (batched, non-fatal) — keep probe fast
