@@ -14,6 +14,7 @@ false failures.
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import pathlib
 import subprocess
@@ -38,6 +39,23 @@ try:
 except SystemExit:
     pass
 """
+
+
+def qt_binding_available() -> bool:
+    return any(
+        importlib.util.find_spec(binding) is not None
+        for binding in ("PySide6", "PyQt6")
+    )
+
+
+# The Validation image installs no Qt binding, and every entry point here pulls
+# one in. Static undefined-name coverage for these same files does not depend on
+# Qt: ruff.toml extend-includes them, so F82 catches the NameError class in CI
+# regardless. This import check adds the runtime half wherever Qt exists — the
+# pre-push Hub smoke and developer machines.
+requires_qt = unittest.skipUnless(
+    qt_binding_available(), "no Qt binding available (neither PySide6 nor PyQt6)"
+)
 
 
 def python_entry_points() -> list[pathlib.Path]:
@@ -77,6 +95,7 @@ class EntryPointImportTests(unittest.TestCase):
         """Guard the guard: a discovery regression must not silently pass."""
         self.assertTrue(python_entry_points())
 
+    @requires_qt
     def test_every_python_entry_point_imports(self):
         for script in python_entry_points():
             with self.subTest(script=script.name):
@@ -88,6 +107,7 @@ class EntryPointImportTests(unittest.TestCase):
                 )
 
 
+@requires_qt
 class QtShimExportTests(unittest.TestCase):
     def test_every_declared_symbol_actually_exists(self):
         """__all__ is the contract callers import against; keep it honest."""

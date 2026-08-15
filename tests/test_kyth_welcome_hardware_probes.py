@@ -114,11 +114,19 @@ class HardwareProbeTests(unittest.TestCase):
         self.assertIsNone(probe.action)
 
     def test_firmware_probe_no_fwupd(self):
-        with patch("kyth_welcome.services.hardware.io.run_command", return_value=None):
+        # _firmware_probe delegates to kyth_shared/system/firmware since the
+        # single-source refactor, so patching io.run_command no longer
+        # intercepts anything and this silently exercised the real fwupd path.
+        # rc == 2 is the helper's "fwupd not installed" contract.
+        with patch(
+            "kyth_welcome.services.hardware.io.get_firmware_devices",
+            return_value=(0, "", 2),
+        ):
             probe = _firmware_probe()
 
         self.assertEqual(probe.title, "Firmware")
         self.assertEqual(probe.status, "dim")
+        self.assertIn("fwupd not available", probe.summary)
 
     def test_connectivity_probe_detects_wifi_and_bt(self):
         pci = "02:00.0 Network controller: Intel Corporation Wi-Fi 6 AX200"
