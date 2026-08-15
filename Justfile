@@ -333,6 +333,15 @@ enable-sched-next:
     echo "  just enable-cachy-kernel  # kernel"
     echo "  sudo dnf5 copr enable xxx/scx-next -y  # sched-ext next, then per-game gaming_slice"
 
+# Provenance + umu nightly opt-in (Bazzite stale) (N44)
+[group('Utility')]
+enable-proton-next:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cutting Proton next (umu main / Proton-CachyOS slr nightly, stable baked):"
+    echo "  mkdir -p ~/.local/share/Steam/compatibilitytools.d"
+    echo "  curl -L https://github.com/Open-Wine-Components/umu-proton/releases/latest/download/umu-proton.tar.gz | tar -xz -C ~/.local/share/Steam/compatibilitytools.d"
+
 # Cachy-style v3/PGO opt-in (no default change, keep fedora generic).
 [group('Utility')]
 enable-cachy-kernel:
