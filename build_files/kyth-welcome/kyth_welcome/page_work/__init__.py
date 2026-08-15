@@ -5,11 +5,12 @@ from ._fonts import _FontsMixin
 from ._pst import _PstMixin
 from ._focus import _FocusMixin
 from ._connect import _ConnectMixin
+from ._dev import _DevMixin
 from ..qt import QApplication, QTimer
 from ..widgets import Page
 
 
-class WorkSetupPage(Page, _WorkAppsMixin, _M365Mixin, _FontsMixin, _PstMixin, _FocusMixin, _ConnectMixin):
+class WorkSetupPage(Page, _WorkAppsMixin, _M365Mixin, _FontsMixin, _PstMixin, _FocusMixin, _ConnectMixin, _DevMixin):
     def __init__(self, navigate=None):
         super().__init__()
         self._navigate = navigate or (lambda _: None)
@@ -40,4 +41,5 @@ class WorkSetupPage(Page, _WorkAppsMixin, _M365Mixin, _FontsMixin, _PstMixin, _F
         self._add(self._make_pst_card())
         self._add(self._make_focus_card())
         self._add(self._make_connect_card())
+        self._add(self._make_dev_card())
         self._stretch()
