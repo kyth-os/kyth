@@ -400,6 +400,14 @@ audio-preset profile="gaming":
     echo "Audio preset {{ profile }} (pipewire/easyeffects, tmp→apply, no env.d):"
     echo "  # gaming: easyeffects --load-preset Gaming; work: easyeffects --load-preset Work"
 
+# Latest Arch distrobox cutting edge (Endeavour AUR freshness, base lean) (N47)
+[group('Utility')]
+create-arch-latest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cutting Arch latest via distrobox (base lean, Endeavour freshness):"
+    echo "  distrobox create --image archlinux:latest --name arch-latest && distrobox enter arch-latest  # yay -Syu"
+
 [group('Utility')]
 create-devbox flavor="fedora":
     #!/usr/bin/env bash
