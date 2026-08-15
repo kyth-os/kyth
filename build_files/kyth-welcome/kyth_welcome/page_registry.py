@@ -207,6 +207,7 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
     ]
     advanced_items.append((("cpu", "applications-system"), "◌", "Kernel", "Kernel", _page_factory("page_kernel", "KernelPage")))
     advanced_items.append((("vcs-branch", "system-switch-user"), "⎇", "Channels", "Channels", _page_factory("page_branches", "BranchesPage")))
+    advanced_items.append((("application-x-executable", "utilities-terminal"), "▶", "Just", "Just", _page_factory("page_just", "JustPage")))
     advanced_items.append((("mail-send", "mail-message"), "✉", "Feedback", "Feedback", _page_factory("page_feedback", "FeedbackPage")))
     nav_groups.append(("Advanced", advanced_items))
 
