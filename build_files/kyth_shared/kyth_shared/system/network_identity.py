@@ -97,5 +97,7 @@ def get_network_identity() -> NetworkIdentity:
             detail="; ".join(detail_parts) or "No active work network",
         )
 
-    # Single probe key — canonical 60s matches DISK_TTL["network-identity"]
+    # Memory-only key: the typed NetworkIdentity cannot round-trip through the
+    # JSON cache file, so the disk-backed projection lives under
+    # DISK_TTL["network-summary"] and this 60s memo mirrors its age.
     return probe_cached("network-identity", 60.0, _fetch)

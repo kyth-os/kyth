@@ -14,6 +14,7 @@ __all__ = [
     "QSizePolicy", "QDialog", "QCheckBox", "QComboBox", "QRadioButton", "QButtonGroup",
     "QDialogButtonBox", "QGridLayout", "QCompleter", "QInputDialog", "QLayout",
     "QListWidget", "QListWidgetItem", "QGraphicsOpacityEffect",
+    "QMenu", "QSystemTrayIcon",
     "Qt", "QThread", "Signal", "QTimer", "QUrl", "QLibraryInfo", "QSize", "QRect", "QStringListModel",
     "QPropertyAnimation", "QEasingCurve",
     "QDesktopServices", "QIcon", "QKeySequence", "QShortcut", "QAction",
@@ -33,6 +34,7 @@ try:
         QSizePolicy, QDialog, QCheckBox, QComboBox, QRadioButton, QButtonGroup,
         QDialogButtonBox, QGridLayout, QCompleter, QInputDialog, QLayout,
         QListWidget, QListWidgetItem, QGraphicsOpacityEffect,
+        QMenu, QSystemTrayIcon,
     )
     from PySide6.QtCore import (
         Qt, QThread, Signal, QTimer, QUrl, QLibraryInfo, QSize, QRect, QStringListModel,
@@ -51,6 +53,7 @@ except ImportError:
         QSizePolicy, QDialog, QCheckBox, QComboBox, QRadioButton, QButtonGroup,
         QDialogButtonBox, QGridLayout, QCompleter, QInputDialog, QLayout,
         QListWidget, QListWidgetItem, QGraphicsOpacityEffect,
+        QMenu, QSystemTrayIcon,
     )
     from PyQt6.QtCore import (
         Qt, QThread, QTimer, QUrl, QLibraryInfo, QSize, QRect, QStringListModel,

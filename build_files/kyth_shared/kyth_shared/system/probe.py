@@ -55,8 +55,15 @@ DISK_TTL: dict[str, float] = {
     "hardware-probes": 30.0,
     "ntfs-drives": 30.0,
     "secureboot-state": 300.0,
-    "hardware-view": 30.0,
-    "network-identity": 60.0,
+    # "hardware-view" is deliberately absent: it caches a live HardwareView
+    # (Evaluation + Inventory dataclasses) that neither serializes to JSON nor
+    # reconstructs from it. Disk-backing it crashed kyth-probe.service on write
+    # and would have handed callers a plain dict on read. The typed value keeps
+    # its 30s in-process memo; this JSON-safe summary is what goes to disk.
+    "hardware-summary": 30.0,
+    # "network-identity" is absent for the same reason: the typed
+    # NetworkIdentity is memo-only, "network-summary" is its disk projection.
+    "network-summary": 60.0,
     "audit-cache": 30.0,
     "firmware-cache": 300.0,
 }
@@ -375,9 +382,19 @@ def _collect_hardware_view() -> dict[str, Any]:
 
     try:
         view = get_hardware_view()
-        return {"hardware-view": view}
+        # Emit a JSON-safe projection, never the HardwareView itself: this
+        # value is written to the shared probe cache file, and the dataclass
+        # graph behind it (Evaluation, Inventory) is not serializable.
+        return {
+            "hardware-summary": {
+                "has_nvidia": bool(view.has_nvidia),
+                "is_hybrid": bool(view.is_hybrid),
+                "capabilities": list(view.evaluation.capabilities[:8]),
+                "profiles": [profile.id for profile in view.evaluation.profiles[:3]],
+            }
+        }
     except Exception:
-        return {"hardware-view": None}
+        return {"hardware-summary": None}
 
 
 def _collect_network_identity() -> dict[str, Any]:
@@ -396,6 +413,10 @@ def _collect_network_identity() -> dict[str, Any]:
             detail_parts.append(f"{smb} SMB mount(s)")
         if providers:
             detail_parts.append(f"cloud: {', '.join(providers)}")
+        # Same rule as hardware-summary: the typed NetworkIdentity stays in the
+        # in-process memo, and only this JSON-safe projection reaches the shared
+        # cache file. NetworkIdentity is constructed here purely to keep the
+        # field names honest against the dataclass.
         ident_obj = NetworkIdentity(
             vpn_connected=vpn_connected,
             vpn_name=vpn_name,
@@ -403,9 +424,17 @@ def _collect_network_identity() -> dict[str, Any]:
             cloud_providers=providers,
             detail="; ".join(detail_parts) or "No active work network",
         )
-        return {"network-identity": ident_obj}
+        return {
+            "network-summary": {
+                "vpn_connected": bool(ident_obj.vpn_connected),
+                "vpn_name": str(ident_obj.vpn_name),
+                "smb_mounts": int(ident_obj.smb_mounts),
+                "cloud_providers": list(ident_obj.cloud_providers),
+                "detail": str(ident_obj.detail),
+            }
+        }
     except Exception:
-        return {"network-identity": None}
+        return {"network-summary": None}
 
 
 def default_collectors() -> tuple[ProbeCollector, ...]:
@@ -418,8 +447,8 @@ def default_collectors() -> tuple[ProbeCollector, ...]:
         ProbeCollector("nvidia", ("nvidia-detect",), _collect_nvidia),
         ProbeCollector("controllers", ("controllers-detect",), _collect_controllers),
         ProbeCollector("display", ("display-detect",), _collect_display),
-        ProbeCollector("hardware-view", ("hardware-view",), _collect_hardware_view),
-        ProbeCollector("network-identity", ("network-identity",), _collect_network_identity),
+        ProbeCollector("hardware-view", ("hardware-summary",), _collect_hardware_view),
+        ProbeCollector("network-identity", ("network-summary",), _collect_network_identity),
     )
 
 
@@ -486,7 +515,7 @@ def invalidate_bootc() -> None:
 
 
 def invalidate_nvidia() -> None:
-    invalidate_probe_caches(["nvidia-detect", "hardware-view"])
+    invalidate_probe_caches(["nvidia-detect", "hardware-view", "hardware-summary"])
 
 
 def refresh_cache(*, system: bool = False, path: Path | None = None) -> tuple[Path, dict[str, Any]]:

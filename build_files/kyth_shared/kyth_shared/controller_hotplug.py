@@ -34,5 +34,12 @@ def hotplug_invalidate(cache_key: str = "controllers-detect") -> None:
 
 def hotplug_invalidate_all() -> None:
     """Invalidate all hotplug-sensitive keys (block/usb add/remove)."""
-    for key in ("controllers-detect", "ntfs-drives", "hardware-view", "secureboot-state"):
+    # Both hardware keys: "hardware-view" is the typed in-process memo,
+    # "hardware-summary" its disk-backed projection. Dropping only one would
+    # leave a stale answer behind whichever survived.
+    for key in (
+        "controllers-detect", "ntfs-drives",
+        "hardware-view", "hardware-summary",
+        "secureboot-state",
+    ):
         hotplug_invalidate(key)
