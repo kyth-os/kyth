@@ -39,12 +39,15 @@ RUN mkdir -p /etc/yum.repos.d.bak && \
         'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-$releasever-$basearch' \
         > /etc/yum.repos.d/fedora.repo
 
+ARG CALAMARES=0
 RUN --mount=type=bind,source=installer/build.sh,target=/src/installer/build.sh \
     --mount=type=bind,source=installer/iso.yaml,target=/src/installer/iso.yaml \
+    --mount=type=bind,source=installer/calamares,target=/src/installer/calamares \
     --mount=type=bind,source=build_files/scripts,target=/src/build_files/scripts \
     --mount=type=bind,source=build_files/kyth-installer,target=/src/build_files/kyth-installer \
     --mount=type=bind,source=build_files/kyth_shared,target=/src/build_files/kyth_shared \
     --mount=type=bind,source=build_files/kyth-launch-installer,target=/src/build_files/kyth-launch-installer \
     env BASE_IMAGE="${BASE_IMAGE}" INSTALL_SOURCE_IMAGE="${INSTALL_SOURCE_IMAGE}" \
-    SOURCE_TAG="${SOURCE_TAG}" \
-    bash /src/installer/build.sh
+    SOURCE_TAG="${SOURCE_TAG}" CALAMARES="${CALAMARES}" \
+    bash /src/installer/build.sh; \
+    if [ "${CALAMARES}" = "1" ]; then mkdir -p /etc/calamares/modules && cp -r /src/installer/calamares/* /etc/calamares/ 2>/dev/null || true; fi
