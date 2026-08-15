@@ -7,6 +7,7 @@ from .services.gaming import (
     _save_protondb_cache, find_compat_game, game_row_status_view, library_summary_text,
     readiness_result_text,
 )
+from kyth_shared.system.gaming_slice import gaming_slice_command
 from .services.gaming import _COMPAT_GAMES
 from .qt import QComboBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QPushButton, QUrl, QVBoxLayout, Qt
 from .widgets import _copy_text, _make_card
@@ -147,6 +148,25 @@ class _LibraryMixin:
             open_path = QPushButton("Open Folder")
             open_path.clicked.connect(lambda _=False, p=path: self._open_user_path(p))
             btns.addWidget(open_path)
+        # N21 per-game slice: scoped launch via gaming.slice, fallback direct
+        appid = game_info.get("appid", "")
+        if appid or path:
+            launch_btn = QPushButton("Launch (scoped)")
+            launch_btn.setToolTip("Launch via systemd-run --slice=gaming.slice --scope (fallback direct on VM)")
+            def _launch_scoped(p=path, a=appid, launcher=game_info.get("launcher", "")):
+                try:
+                    from .services.launch import popen as _popen
+                    if launcher == "Steam" and a:
+                        cmd = ["xdg-open", f"steam://rungameid/{a}"]
+                    elif p:
+                        cmd = ["xdg-open", p]
+                    else:
+                        return
+                    _popen(gaming_slice_command(cmd))
+                except Exception:
+                    pass
+            launch_btn.clicked.connect(lambda _=False: _launch_scoped())
+            btns.addWidget(launch_btn)
         btns.addStretch()
         layout.addLayout(btns)
         return row
