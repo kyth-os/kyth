@@ -308,6 +308,22 @@ enable-copr repo:
     echo "  sudo dnf5 copr enable {{ repo }}"
     echo "Run above on the host; base stays vanilla."
 
+# Mesa + Plasma cutting edge overlay gated (kinoite stable default) (N41)
+[group('Utility')]
+enable-mesa-git:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cutting Mesa git overlay (stable default, kinoite rollback):"
+    echo "  sudo dnf5 copr enable xxx/mesa-git -y  # dry-run: bootc container lint, then overlay"
+    echo "  bootc rollback  # if latest Mesa bricks, stable Mesa stays"
+
+[group('Utility')]
+enable-plasma-next:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cutting Plasma next overlay (stable default):"
+    echo "  sudo dnf5 copr enable xxx/plasma-unstable -y  # dry-run + rollback"
+
 # Cachy-style v3/PGO opt-in (no default change, keep fedora generic).
 [group('Utility')]
 enable-cachy-kernel:
