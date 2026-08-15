@@ -1,8 +1,7 @@
-import subprocess
-
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
 from .services.launch import popen
+from .services.runtime import Worker
 from .qt import (
     QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt, QScrollArea, QWidget,
 )
@@ -48,13 +47,33 @@ class JustPage(Page):
             w = item.widget()
             if w:
                 w.deleteLater()
+        self._status.setText("Loading recipes…")
+        # Must use Worker (not subprocess) per quality contracts; collect stdout async.
+        if getattr(self, "_just_worker", None) is not None:
+            try:
+                if self._just_worker.isRunning():
+                    return
+            except RuntimeError:
+                pass
+        self._just_lines: list[str] = []
+        self._just_worker = Worker(["just", "--list"])
+        self._just_worker.line.connect(self._just_lines.append)
+        self._just_worker.done.connect(self._on_just_list_done)
         try:
-            result = subprocess.run(
-                ["just", "--list"], capture_output=True, text=True, timeout=5
-            )
-            text = result.stdout.strip() or result.stderr.strip()
-        except Exception as e:
-            text = f"just --list failed: {e}"
+            self._just_worker.finished.connect(lambda: setattr(self, "_just_worker", None))
+        except Exception:
+            pass
+        try:
+            self._just_worker.finished.connect(self._just_worker.deleteLater)
+        except Exception:
+            pass
+        self._just_worker.start()
+        return
+
+    def _on_just_list_done(self, code: int):
+        text = "\n".join(self._just_lines).strip()
+        if code != 0 and not text:
+            text = f"just --list failed (exit {code})"
         if not text:
             text = "No just recipes found."
         # Parse `just --list` output: lines like `    build    # Build the full KythOS image.`

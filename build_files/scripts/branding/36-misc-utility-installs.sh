@@ -14,6 +14,7 @@ install -m 0755 /ctx/kyth-dynamic-lock /usr/bin/kyth-dynamic-lock
 # `systemctl enable` calls that need them to already exist.
 install -m 0755 /ctx/kyth-full-update /usr/bin/kyth-full-update
 install -m 0755 /ctx/kyth-scx-loader /usr/bin/scx_loader
+install -m 0755 /ctx/kyth-doctor /usr/bin/kyth-doctor
 install -m 0755 /ctx/kyth-vscode-wallet /usr/bin/kyth-vscode-wallet
 mkdir -p /usr/lib/systemd/user /usr/lib/systemd/user/default.target.wants
 install -m 0644 /ctx/kyth-dynamic-lock.service /usr/lib/systemd/user/kyth-dynamic-lock.service

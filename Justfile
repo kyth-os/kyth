@@ -294,6 +294,20 @@ run-hub *args:
     echo "No Qt binding found. Run: just setup-hub" >&2
     exit 1
 
+# Health like cachy-doctor (probe + zram/btrfs/scx); no daemon.
+[group('Utility')]
+doctor:
+    PYTHONPATH=build_files/kyth_shared python3 -m kyth_shared.doctor
+
+# COPR/AUR-style opt-in (Endeavour-like vanilla base).
+[group('Utility')]
+enable-copr repo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "This enables a COPR repo on an installed system (opt-in):"
+    echo "  sudo dnf5 copr enable {{ repo }}"
+    echo "Run above on the host; base stays vanilla."
+
 # Preview the installer UI in your browser (no disk changes — safe for dev)
 [group('Utility')]
 preview-installer:
