@@ -342,6 +342,14 @@ enable-proton-next:
     echo "  mkdir -p ~/.local/share/Steam/compatibilitytools.d"
     echo "  curl -L https://github.com/Open-Wine-Components/umu-proton/releases/latest/download/umu-proton.tar.gz | tar -xz -C ~/.local/share/Steam/compatibilitytools.d"
 
+# Per-game MangoHud/Gamescope git cutting edge (Nobara global env) (N45)
+[group('Utility')]
+enable-mangohud-next:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cutting MangoHud git per-game (MANGOHUD_CONFIG per-game, not global env):"
+    echo "  sudo dnf5 copr enable xxx/mangohud-git -y  # then per-game MANGOHUD=1 %command% via N22 slice"
+
 # Cachy-style v3/PGO opt-in (no default change, keep fedora generic).
 [group('Utility')]
 enable-cachy-kernel:
