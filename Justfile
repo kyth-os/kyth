@@ -308,6 +308,15 @@ enable-copr repo:
     echo "  sudo dnf5 copr enable {{ repo }}"
     echo "Run above on the host; base stays vanilla."
 
+# Cachy-style v3/PGO opt-in (no default change, keep fedora generic).
+[group('Utility')]
+enable-cachy-kernel:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Opt-in CachyOS kernel / x86-64-v3 (Cachy wins perf, default stays fedora):"
+    echo "  ENABLE_CACHY=1 just build-base    # builds base with CACHYOS_KERNEL_VER via resolve-versions.py"
+    echo "  kyth-doctor  # shows kernel: cachy vs fedora"
+
 # Brew/distrobox-style opt-in (Aurora-like, no base bloat).
 [group('Utility')]
 enable-brew:
