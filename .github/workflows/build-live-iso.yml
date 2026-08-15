@@ -6,7 +6,7 @@ on:
   # container publishes. Container workflow calls this via workflow_call with
   # a pinned digest; workflow_run provides the independent retry path and
   # push covers installer/**-only changes.
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: ["Build container image"]
     types: [completed]
     branches: [main, testing]
