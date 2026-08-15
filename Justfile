@@ -342,6 +342,14 @@ enable-proton-next:
     echo "  mkdir -p ~/.local/share/Steam/compatibilitytools.d"
     echo "  curl -L https://github.com/Open-Wine-Components/umu-proton/releases/latest/download/umu-proton.tar.gz | tar -xz -C ~/.local/share/Steam/compatibilitytools.d"
 
+# PSI-gated btrfs+zram+irq cutting edge (Cachy no gate) (N46)
+[group('Utility')]
+enable-psi-tuning:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "PSI-gated cutting tuning (btrfs+zram+irq, skip when PSI>80):"
+    echo "  PSI>80 → skip btrfs balance/zram tuning, kinoite stable under pressure"
+
 # Per-game MangoHud/Gamescope git cutting edge (Nobara global env) (N45)
 [group('Utility')]
 enable-mangohud-next:
