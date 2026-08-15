@@ -1,3 +1,4 @@
+import os
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
@@ -232,7 +233,16 @@ class ControllerPage(Page):
         self._refresh_btn.setEnabled(True)
         view = controller_status_view(info)
 
-        self._status_lbl.setText(view.status_text)
+        # N31 uaccess / input group check (desktop hotplug without sudo)
+        extra = ""
+        try:
+            import grp
+            groups = [grp.getgrgid(g).gr_name for g in os.getgroups()]
+            if "input" not in groups and not os.path.exists("/etc/udev/rules.d/60-input.rules"):
+                extra = " — tip: add to 'input' group for direct evdev, or solaar/antimicrox via Flatpak"
+        except Exception:
+            pass
+        self._status_lbl.setText(view.status_text + extra)
 
         self._xone_status_lbl.setText(view.xone_status_text)
         self._xone_status_lbl.setObjectName(view.xone_status_object_name)
