@@ -1,7 +1,24 @@
 name: Build Live ISO
-run-name: "Build Live ISO - ${{ inputs.source_tag }}"
+run-name: "Build Live ISO - ${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }}"
 
 on:
+  # Separate from container build — ISO failures no longer hide successful
+  # container publishes. Container workflow calls this via workflow_call with
+  # a pinned digest; workflow_run provides the independent retry path and
+  # push covers installer/**-only changes.
+  workflow_run:
+    workflows: ["Build container image"]
+    types: [completed]
+    branches: [main, testing]
+  push:
+    branches: [main, testing]
+    paths:
+      - 'installer/**'
+      - 'disk_config/**'
+      - '.github/workflows/build-live-iso.yml'
+      - '.github/actions/setup-compressed-storage/**'
+      - '.github/actions/free-disk-space/**'
+      - '.github/actions/fetch-image-metadata/**'
   workflow_call:
     inputs:
       source_tag:
@@ -75,7 +92,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-live-iso-${{ inputs.source_tag }}
+  group: build-live-iso-${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }}
   cancel-in-progress: true
 
 env:
@@ -83,7 +100,7 @@ env:
 
 jobs:
   build:
-    name: Build ISO (${{ inputs.source_tag }})
+    name: Build ISO (${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }})
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -99,18 +116,53 @@ jobs:
       immutable_tag: ${{ steps.release.outputs.immutable_tag }}
       source_image: ${{ steps.source_image.outputs.name }}
       source_digest: ${{ steps.source_image.outputs.digest }}
+      effective_tag: ${{ steps.effective.outputs.tag }}
 
     steps:
+      - name: Resolve effective source tag
+        id: effective
+        env:
+          INPUT_TAG: ${{ inputs.source_tag }}
+          INPUT_SHA: ${{ inputs.source_sha }}
+          INPUT_DIGEST: ${{ inputs.source_digest }}
+          WR_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WR_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          exec 3>>"${GITHUB_OUTPUT}"
+          if [[ -n "${INPUT_TAG}" ]]; then
+            TAG="${INPUT_TAG}"
+            SHA="${INPUT_SHA}"
+            DIGEST="${INPUT_DIGEST}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+            BRANCH="${WR_HEAD_BRANCH}"
+            if [[ "${BRANCH}" == "main" ]]; then TAG="latest"; else TAG="testing"; fi
+            SHA="${WR_HEAD_SHA}"
+            DIGEST=""
+          elif [[ -n "${REF_NAME}" && "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            if [[ "${REF_NAME}" == "main" ]]; then TAG="latest"; else TAG="testing"; fi
+            SHA=""
+            DIGEST=""
+          else
+            TAG="${INPUT_TAG:-testing}"
+            SHA="${INPUT_SHA}"
+            DIGEST="${INPUT_DIGEST}"
+          fi
+          echo "tag=${TAG}" >&3
+          echo "sha=${SHA}" >&3
+          echo "digest=${DIGEST}" >&3
+          echo "Effective source tag=${TAG} sha=${SHA:0:8} digest=${DIGEST:0:12}" >&2
+
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ inputs.source_sha || (startsWith(inputs.source_tag, 'testing') && 'testing' || 'main') }}
+          ref: ${{ steps.effective.outputs.sha || (startsWith(steps.effective.outputs.tag, 'testing') && 'testing' || 'main') }}
           persist-credentials: false
 
       - name: Prepare immutable release identity
         id: release
         env:
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
         run: |
           python3 build_files/scripts/release_identity.py \
             --source-tag "${SOURCE_TAG}" \
@@ -148,36 +200,58 @@ jobs:
       # When called from build.yml, this run already carries the immutable
       # build metadata artifact — use its digest so the ISO is built from the
       # exact image this run published, not whatever the moving tag points to.
-      # Standalone workflow_dispatch runs have no such artifact and fall back
-      # to resolving the tag.
+      # Standalone workflow_dispatch/workflow_run/push runs have no such artifact
+      # and fall back to resolving the tag (workflow_run tries the triggering run first).
       - name: Load build metadata from this run
         id: build_metadata
-        if: inputs.source_digest == ''
+        if: steps.effective.outputs.digest == ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
+          EFFECTIVE_DIGEST: ${{ steps.effective.outputs.digest }}
+          WR_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
-          if ! gh run download "${GITHUB_RUN_ID}" \
-            -n "image-build-metadata-${SOURCE_TAG}" \
-            -D "${RUNNER_TEMP}/build-metadata" 2>/dev/null; then
-            echo "::notice::No image-build-metadata-${SOURCE_TAG} artifact in this run; the moving ${SOURCE_TAG} tag will be resolved instead"
+          # Prefer an explicitly supplied digest (workflow_call)
+          if [[ -n "${EFFECTIVE_DIGEST}" ]]; then
+            echo "digest=${EFFECTIVE_DIGEST}" >&3
             exit 0
           fi
-          METADATA="${RUNNER_TEMP}/build-metadata/image.json"
-          jq -e . "${METADATA}" >/dev/null
-          DIGEST="$(jq -r .digest "${METADATA}")"
-          build_files/scripts/validate-digest.sh "${DIGEST}"
-          echo "Pinned source digest from build metadata: ${DIGEST}"
-          echo "digest=${DIGEST}" >&3
+          # Try current run's artifact (workflow_call from build.yml)
+          if gh run download "${GITHUB_RUN_ID}" \
+            -n "image-build-metadata-${SOURCE_TAG}" \
+            -D "${RUNNER_TEMP}/build-metadata" 2>/dev/null; then
+            METADATA="${RUNNER_TEMP}/build-metadata/image.json"
+            jq -e . "${METADATA}" >/dev/null
+            DIGEST="$(jq -r .digest "${METADATA}")"
+            build_files/scripts/validate-digest.sh "${DIGEST}"
+            echo "Pinned source digest from build metadata: ${DIGEST}"
+            echo "digest=${DIGEST}" >&3
+            exit 0
+          fi
+          # For workflow_run, try the triggering run's artifact (pinned digest)
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" && -n "${WR_RUN_ID:-}" ]]; then
+            if gh run download "${WR_RUN_ID}" \
+              -n "image-build-metadata-${SOURCE_TAG}" \
+              -D "${RUNNER_TEMP}/build-metadata-wr" 2>/dev/null; then
+              METADATA="${RUNNER_TEMP}/build-metadata-wr/image.json"
+              jq -e . "${METADATA}" >/dev/null
+              DIGEST="$(jq -r .digest "${METADATA}")"
+              build_files/scripts/validate-digest.sh "${DIGEST}"
+              echo "Pinned source digest from workflow_run ${WR_RUN_ID}: ${DIGEST}"
+              echo "digest=${DIGEST}" >&3
+              exit 0
+            fi
+          fi
+          echo "::notice::No image-build-metadata-${SOURCE_TAG} artifact in this run; the moving ${SOURCE_TAG} tag will be resolved instead"
 
       - name: Resolve source image digest
         id: source_image
         uses: ./.github/actions/fetch-image-metadata
         with:
-          image-tag: ${{ inputs.source_tag }}
-          expected-digest: ${{ inputs.source_digest || steps.build_metadata.outputs.digest }}
+          image-tag: ${{ steps.effective.outputs.tag }}
+          expected-digest: ${{ steps.effective.outputs.digest || steps.build_metadata.outputs.digest }}
 
       - name: Verify source image revision matches checkout
         env:
@@ -191,18 +265,19 @@ jobs:
 
       - name: Build live payload container
         env:
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
           SOURCE_IMAGE_PINNED: ${{ steps.source_image.outputs.pinned }}
         run: |
-          # registry cache for payload — same output, faster on no-op installer/** changes
-          # Use type=registry form so podman/buildah accepts a tagged ref (bare repo:tag is rejected as "must contain neither tag nor digest")
+          # No registry cache — podman/buildah cache syntax is incompatible
+          # with buildx type=registry (and bare tagged refs are rejected by
+          # newer podman as "must contain neither tag nor digest"). Keep the
+          # build hermetic; re-add cache only with --layers + untagged cache
+          # repo or a docker-buildx payload step.
           sudo podman build \
             --cap-add SYS_ADMIN \
             --security-opt label=disable \
             --build-arg "BASE_IMAGE=${SOURCE_IMAGE_PINNED}" \
             --build-arg "SOURCE_TAG=${SOURCE_TAG}" \
-            --cache-from "type=registry,ref=ghcr.io/mrtrick37/kyth:payloadcache-${SOURCE_TAG}" \
-            --cache-to "type=registry,ref=ghcr.io/mrtrick37/kyth:payloadcache-${SOURCE_TAG},mode=max" \
             --tag localhost/payload:latest \
             -f installer/Containerfile \
             .
@@ -221,7 +296,7 @@ jobs:
         uses: Zeglius/titanoboa@7737f4748458252ac827dca14b3d6dd09298472a
         with:
           image-ref: localhost/payload:latest
-          iso-dest: ${{ runner.temp }}/kyth-live-${{ inputs.source_tag }}.iso
+          iso-dest: ${{ runner.temp }}/kyth-live-${{ steps.effective.outputs.tag }}.iso
 
       - name: Report disk usage after ISO build
         run: |
@@ -230,7 +305,7 @@ jobs:
           du -h "${RUNNER_TEMP}/kyth-live-${SOURCE_TAG}.iso"
         env:
           RUNNER_TEMP: ${{ runner.temp }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
 
       - name: Move and verify ISO
         run: |
@@ -243,7 +318,7 @@ jobs:
           echo "==> Built $(du -h "${ISO}" | cut -f1) ISO: ${ISO}"
         env:
           RUNNER_TEMP: ${{ runner.temp }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
           STEPS_RELEASE_OUTPUTS_ISO_BASENAME: ${{ steps.release.outputs.iso_basename }}
 
       - name: Generate ISO checksums
@@ -267,7 +342,7 @@ jobs:
           retention-days: 7
 
   acceptance:
-    name: VM acceptance (${{ inputs.source_tag }})
+    name: VM acceptance (${{ inputs.source_tag || needs.build.outputs.effective_tag }})
     needs: build
     # Default true from both entry points. A maintainer can dispatch with this
     # off to ship an emergency ISO, which is why publish tolerates a *skipped*
@@ -370,7 +445,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: vm-acceptance-${{ inputs.source_tag }}-${{ github.run_number }}-${{ github.run_attempt }}
+          name: vm-acceptance-${{ inputs.source_tag || needs.build.outputs.effective_tag }}-${{ github.run_number }}-${{ github.run_attempt }}
           path: |
             /mnt/kyth-acceptance/artifacts/serial.log
             /mnt/kyth-acceptance/artifacts/qemu.log
@@ -393,7 +468,7 @@ jobs:
           fi
 
   publish:
-    name: Publish ISO (${{ inputs.source_tag }})
+    name: Publish ISO (${{ inputs.source_tag || needs.build.outputs.effective_tag }})
     needs: [build, acceptance]
     # A skipped acceptance (emergency dispatch) still publishes; a failed or
     # cancelled one must not.
@@ -407,7 +482,7 @@ jobs:
     # publishes from scheduled rebuilds or the repository owner (push or
     # manual dispatch) skip the approval gate via stable-release-auto; only
     # builds triggered by anyone else keep the manual gate on stable-release.
-    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || (github.event_name == 'schedule' || github.actor == github.repository_owner) && 'stable-release-auto' || 'stable-release' }}
+    environment: ${{ (inputs.source_tag || needs.build.outputs.effective_tag) == 'testing' && 'testing-release' || (github.event_name == 'schedule' || github.actor == github.repository_owner) && 'stable-release-auto' || 'stable-release' }}
     permissions:
       actions: read
       contents: write
@@ -463,7 +538,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
           IMMUTABLE_TAG: ${{ needs.build.outputs.immutable_tag }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
@@ -514,7 +589,7 @@ jobs:
         id: iso_changelog
         env:
           GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
           SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
           SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
           SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
@@ -569,7 +644,7 @@ jobs:
 
       - name: Generate signed release metadata
         env:
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
           ATTESTATION_URL: ${{ steps.attest_iso.outputs.attestation-url }}
           ATTESTATION_BUNDLE_PATH: ${{ steps.attest_iso.outputs.bundle-path }}
           ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
@@ -620,8 +695,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
-          CHANNEL_TAG: ${{ inputs.source_tag == 'testing' && 'iso-testing' || 'iso-latest' }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
+          CHANNEL_TAG: ${{ (inputs.source_tag || needs.build.outputs.effective_tag) == 'testing' && 'iso-testing' || 'iso-latest' }}
           IMMUTABLE_TAG: ${{ needs.build.outputs.immutable_tag }}
           RELEASE_ID: ${{ needs.build.outputs.release_id }}
           SOURCE_SHA: ${{ needs.build.outputs.source_sha }}

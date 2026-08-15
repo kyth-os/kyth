@@ -585,6 +585,10 @@ jobs:
     name: Build Live ISO (${{ matrix.branch == 'main' && 'latest' || matrix.branch }})
     needs: [plan, build_push]
     if: ${{ github.event_name != 'pull_request' && needs.build_push.result == 'success' }}
+    # Decoupled from container signal — ISO infra (podman/Titanoboa/QEMU) must
+    # not hide a successful container publish. Container workflow stays green
+    # even if ISO fails; ISO failures are tracked in their own workflow run.
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
