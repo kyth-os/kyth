@@ -477,9 +477,10 @@ jobs:
           set -euo pipefail
           PRIMARY_REF="${IMAGE_FULL}:${PRIMARY_TAG}"
           SKOPEO_COMPRESSION_ARGS=(
-            --dest-compress-format zstd
+            --dest-compress-format zstd:chunked
             --dest-compress-level 3
           )
+          export ZSTD_NBTHREADS="$(nproc)"
           SKOPEO_COPY_HELP="$(skopeo copy --help)"
           if [[ "${SKOPEO_COPY_HELP}" == *"--dest-force-compress-format"* ]]; then
             SKOPEO_COMPRESSION_ARGS+=(--dest-force-compress-format)
