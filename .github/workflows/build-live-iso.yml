@@ -296,7 +296,7 @@ jobs:
           extra-docker-cleanup: 'true'
 
       - name: Cache apt (acceptance)
-        uses: actions/cache@v4
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-acceptance-${{ hashFiles('.github/workflows/build-live-iso.yml') }}

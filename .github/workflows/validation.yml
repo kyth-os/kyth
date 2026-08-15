@@ -50,7 +50,7 @@ jobs:
         run: ./build_files/scripts/install-validation-tools.sh
 
       - name: Cache apt (validation)
-        uses: actions/cache@v4
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-validation-${{ hashFiles('.github/workflows/validation.yml') }}
@@ -149,7 +149,7 @@ jobs:
             validation-tools-${{ runner.os }}-
 
       - name: Cache apt (gui-smoke)
-        uses: actions/cache@v4
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-gui-${{ hashFiles('.github/workflows/validation.yml') }}
