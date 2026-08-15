@@ -15,6 +15,7 @@ from kyth_shared.commands import run as _run
 
 _PRESETS = {
     "hdr": {"Compositing": {"HDR": "true"}, "Wayland": {"ExplicitSync": "true"}},
+    "hdr10plus": {"Compositing": {"HDR": "true", "HDR10Plus": "true"}, "Wayland": {"ExplicitSync": "true"}},
     "sdr": {"Compositing": {"HDR": "false"}, "Wayland": {"ExplicitSync": "true"}},
     "vrr": {"Compositing": {"VRR": "true"}},
     "vrr_off": {"Compositing": {"VRR": "false"}},
