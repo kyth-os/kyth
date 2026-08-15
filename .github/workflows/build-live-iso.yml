@@ -195,13 +195,14 @@ jobs:
           SOURCE_IMAGE_PINNED: ${{ steps.source_image.outputs.pinned }}
         run: |
           # registry cache for payload — same output, faster on no-op installer/** changes
+          # Use type=registry form so podman/buildah accepts a tagged ref (bare repo:tag is rejected as "must contain neither tag nor digest")
           sudo podman build \
             --cap-add SYS_ADMIN \
             --security-opt label=disable \
             --build-arg "BASE_IMAGE=${SOURCE_IMAGE_PINNED}" \
             --build-arg "SOURCE_TAG=${SOURCE_TAG}" \
-            --cache-from "ghcr.io/mrtrick37/kyth:payloadcache-${SOURCE_TAG}" \
-            --cache-to "ghcr.io/mrtrick37/kyth:payloadcache-${SOURCE_TAG}" \
+            --cache-from "type=registry,ref=ghcr.io/mrtrick37/kyth:payloadcache-${SOURCE_TAG}" \
+            --cache-to "type=registry,ref=ghcr.io/mrtrick37/kyth:payloadcache-${SOURCE_TAG},mode=max" \
             --tag localhost/payload:latest \
             -f installer/Containerfile \
             .
