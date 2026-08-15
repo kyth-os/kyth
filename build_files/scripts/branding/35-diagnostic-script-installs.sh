@@ -19,3 +19,14 @@ install -m 0755 /ctx/kyth-boot-verify /usr/bin/kyth-boot-verify
 install -Dm0755 /ctx/kyth-greenboot-required /etc/greenboot/check/required.d/40_kyth_core_health.sh
 install -Dm0755 /ctx/kyth-greenboot-success /etc/greenboot/green.d/40_kyth_record_success.sh
 install -Dm0755 /ctx/kyth-greenboot-failure /etc/greenboot/red.d/40_kyth_record_failure.sh
+
+# The required check polls for graphical.target and a DRM device (see
+# kyth_shared/system/boot_runtime.py) because greenboot runs long before the
+# display stack settles. Pin the runner's start timeout well above that poll
+# budget: inheriting a shorter default would kill the check mid-wait and score
+# a healthy boot as red — turning the rollback machinery into a reboot loop.
+install -d /usr/lib/systemd/system/greenboot-healthcheck.service.d
+cat >/usr/lib/systemd/system/greenboot-healthcheck.service.d/40-kyth-timeout.conf <<'EOF'
+[Service]
+TimeoutStartSec=300
+EOF

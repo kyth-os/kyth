@@ -27,6 +27,7 @@ from kyth_shared.boot_health import (  # noqa: E402
     rollout_policy_reason,
     write_state,
 )
+from kyth_shared.system.boot_runtime import RuntimeCheck  # noqa: E402
 from kyth_shared import safe_upgrade  # noqa: E402
 
 
@@ -150,6 +151,13 @@ class RolloutPolicyTests(unittest.TestCase):
 
 
 class RequiredHealthCheckTests(unittest.TestCase):
+    # Runtime assertions shell out to systemctl and poll for the display stack;
+    # they are injected here so these stay tree-completeness tests. Their own
+    # behaviour is covered by tests/test_kyth_boot_runtime.py.
+    @staticmethod
+    def _runtime(*checks):
+        return lambda: checks
+
     def test_complete_immutable_deployment_passes(self):
         status = {
             "status": {"booted": {"image": {"imageDigest": DIGEST}}}
@@ -160,6 +168,9 @@ class RequiredHealthCheckTests(unittest.TestCase):
             os_release='NAME="KythOS"\nID="kythos"\n',
             path_exists=lambda _path: True,
             kernel_release="6.0-fixture",
+            runtime_probe=self._runtime(
+                RuntimeCheck("Graphical session", True, "graphical.target active")
+            ),
         )
 
         self.assertTrue(all(check.passed for check in checks))
@@ -174,10 +185,51 @@ class RequiredHealthCheckTests(unittest.TestCase):
             os_release="ID=kythos\n",
             path_exists=lambda path: str(path) != missing,
             kernel_release="6.0-fixture",
+            runtime_probe=self._runtime(
+                RuntimeCheck("Graphical session", True, "graphical.target active")
+            ),
         )
 
         plasma = next(check for check in checks if check.name == "Plasma shell")
         self.assertFalse(plasma.passed)
+
+    def test_runtime_failure_fails_the_required_set(self):
+        """A complete tree that never reached a desktop must still score red."""
+        checks = required_checks(
+            status_data={
+                "status": {"booted": {"image": {"imageDigest": DIGEST}}}
+            },
+            os_release="ID=kythos\n",
+            path_exists=lambda _path: True,
+            kernel_release="6.0-fixture",
+            runtime_probe=self._runtime(
+                RuntimeCheck(
+                    "Display device", False, "no DRM card device — GPU driver did not load"
+                )
+            ),
+        )
+
+        self.assertFalse(all(check.passed for check in checks))
+        display = next(check for check in checks if check.name == "Display device")
+        self.assertFalse(display.passed)
+
+    def test_real_runtime_probe_is_used_by_default(self):
+        """Default path must reach boot_runtime, not silently check nothing."""
+        with patch(
+            "kyth_shared.system.boot_runtime.runtime_checks",
+            return_value=(RuntimeCheck("Critical units", False, "failed: sddm.service"),),
+        ):
+            checks = required_checks(
+                status_data={
+                    "status": {"booted": {"image": {"imageDigest": DIGEST}}}
+                },
+                os_release="ID=kythos\n",
+                path_exists=lambda _path: True,
+                kernel_release="6.0-fixture",
+            )
+
+        units = next(check for check in checks if check.name == "Critical units")
+        self.assertFalse(units.passed)
 
 
 class SafeUpgradeTests(unittest.TestCase):

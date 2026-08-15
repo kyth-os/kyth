@@ -301,7 +301,15 @@ def required_checks(
     os_release: str | None = None,
     path_exists: Callable[[str | Path], bool] = lambda path: Path(path).exists(),
     kernel_release: str | None = None,
+    runtime_probe: Callable[[], Sequence[object]] | None = None,
 ) -> tuple[BootCheck, ...]:
+    """Return the checks greenboot treats as required for this boot.
+
+    The first group asserts the deployed tree is complete; the second, supplied
+    by :func:`kyth_shared.system.boot_runtime.runtime_checks`, asserts the boot
+    actually produced a usable desktop. Without the latter, every required
+    check inspects a path baked into the image and rollback can never trigger.
+    """
     status = fetch_status_data() if status_data is None else status_data
     digest = current_digest(status)
     if os_release is None:
@@ -345,6 +353,15 @@ def required_checks(
             "kyth-boot-verify present (composefs + UKI + TPM)",
         ),
     ]
+    probe = runtime_probe
+    if probe is None:
+        # Imported lazily so boot_health stays importable (and cheap) for the
+        # many Hub callers that only want read_state().
+        from .system.boot_runtime import runtime_checks as probe  # noqa: PLC0415
+    checks.extend(
+        BootCheck(observed.name, observed.passed, observed.detail)
+        for observed in probe()
+    )
     return tuple(checks)
 
 
