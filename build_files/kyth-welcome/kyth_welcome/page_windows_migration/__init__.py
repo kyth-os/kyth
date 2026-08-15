@@ -136,6 +136,36 @@ class WindowsMigrationPage(
         intro_layout.addLayout(intro_btns)
         self._add(intro)
 
+        # N24 ro NTFS import helper (kyth-windows-import, never writes NTFS)
+        win_card, win_layout = _make_card()
+        win_title = QLabel("Import Windows Documents (read-only)")
+        win_title.setObjectName("card-title")
+        win_layout.addWidget(win_title)
+        win_body = QLabel("Mounts NTFS read-only and copies Users/*/Documents,Pictures to ~/WindowsImport — Windows stays untouched. Pick partition (e.g. /dev/sda2).")
+        win_body.setObjectName("card-copy")
+        win_body.setWordWrap(True)
+        win_layout.addWidget(win_body)
+        win_row = QHBoxLayout()
+        win_row.setSpacing(8)
+        self._win_import_status = QLabel("")
+        self._win_import_status.setObjectName("card-copy")
+        win_btn = QPushButton("Import from NTFS")
+        def _import_win():
+            part = "/dev/sda2"
+            try:
+                from ..services.runtime import Worker as _W
+                w = _W(["/usr/bin/kyth-windows-import", part])
+                w.line.connect(lambda t: self._win_import_status.setText(t))
+                w.done.connect(lambda code: self._win_import_status.setText(f"Import done exit {code} → ~/WindowsImport"))
+                w.start()
+            except Exception as exc:
+                self._win_import_status.setText(f"Import failed: {exc}")
+        win_btn.clicked.connect(lambda _=False: _import_win())
+        win_row.addWidget(win_btn)
+        win_row.addWidget(self._win_import_status, 1)
+        win_layout.addLayout(win_row)
+        self._add(win_card)
+
 
 
     def _build_flow_card(self):
