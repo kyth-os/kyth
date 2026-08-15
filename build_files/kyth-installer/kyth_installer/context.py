@@ -192,6 +192,11 @@ class InstallerContext:
     mount_registry: MountRegistry = field(default_factory=MountRegistry)
     transaction_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     assurance_checks: list[dict[str, str]] = field(default_factory=list)
+    # Destructive partition steps, appended as they start and again as they
+    # finish. This is the only record of how far a wipe got if the machine
+    # loses power mid-commit: the coarse transaction statuses jump straight
+    # from "prepared" to "image_installed" across the whole storage phase.
+    partition_steps: list[dict[str, str]] = field(default_factory=list)
     cancel_requested: threading.Event = field(default_factory=threading.Event)
 
     def transition(self, lifecycle: InstallLifecycle) -> None:
@@ -214,6 +219,7 @@ class InstallerContext:
                 self.lifecycle = InstallLifecycle.IDLE
                 self.transaction_id = uuid.uuid4().hex
                 self.assurance_checks.clear()
+                self.partition_steps.clear()
             self.request = request
             self.state = request.as_state()
             self.plan = None
@@ -254,6 +260,18 @@ class InstallerContext:
                 self.events.publish({"type": "phase", "phase": phase.value})
             except Exception:
                 pass
+
+    def record_partition_step(self, kind: str, status: str, target: str = "") -> dict[str, str]:
+        """Append one destructive partition step and return the record."""
+        with self.state_lock:
+            step = {
+                "index": str(len(self.partition_steps)),
+                "kind": kind,
+                "status": status,
+                "target": target,
+            }
+            self.partition_steps.append(step)
+            return step
 
     def register_mount(self, mountpoint: str) -> None:
         with self.state_lock:

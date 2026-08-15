@@ -563,10 +563,30 @@ class Journal:
         log(f"Formatting {part_name} as {fs}...")
         self._disk_service.format_filesystem(part_name, fs, label)
 
-    def commit(self, log) -> str:
+    def commit(self, log, record=None) -> str:
+        """Apply every staged op against the disk.
+
+        *record*, when supplied, is called as ``record(kind, status, target)``
+        immediately before and after each destructive op, with the caller
+        responsible for persisting it durably. The two calls bracket the
+        window where the disk and the journal disagree: a step left at
+        "started" is exactly the operation that was in flight when the machine
+        died, which is the only way a later recovery pass can tell a completed
+        wipe from a half-written partition table.
+        """
         if not self._disk_service.dry_run:
             _require_parted()
         from .storage_guard import DiskLease
+
+        def _note(kind: str, status: str, target: str) -> None:
+            if record is None:
+                return
+            try:
+                record(kind, status, target)
+            except Exception:
+                # A failed bookkeeping write must never abort a partition
+                # commit that is already mid-flight on the real disk.
+                pass
 
         with DiskLease(self.disk, log, exclusive=True):
             self._save_snapshot()
@@ -575,6 +595,14 @@ class Journal:
                 kind = op["kind"]
                 p = op["params"]
 
+                # "set_mountpoint" ops are pure journal metadata (consumed by
+                # _find_root_partition() below) — no disk operation of their
+                # own, so they are not bracketed as destructive steps.
+                if kind == "set_mountpoint":
+                    continue
+
+                target = str(p.get("partition") or self.disk)
+                _note(kind, "started", target)
                 if kind == "new_table":
                     self._commit_new_table(p, log)
                 elif kind == "create":
@@ -585,8 +613,9 @@ class Journal:
                     self._commit_resize(p, log)
                 elif kind == "format":
                     self._commit_format(p, log)
-                # "set_mountpoint" ops are pure journal metadata (consumed by
-                # _find_root_partition() below) — no disk operation of their own.
+                # _commit_create resolves the real device name onto the op, so
+                # re-read it rather than reporting the pre-commit placeholder.
+                _note(kind, "completed", str(p.get("partition") or self.disk))
 
             self._root_partition = self._find_root_partition()
             self._committed = True

@@ -14,6 +14,40 @@ from .system import _as_root
 RunCommand = Callable[..., Any]
 
 
+def _fsync_directory(path: Path) -> None:
+    """Persist *path*'s directory entries.
+
+    Must be called *after* the rename it is meant to make durable: fsyncing the
+    parent beforehand flushes a directory state that does not yet contain the
+    new name, so a power loss can still lose the replace.
+    """
+    try:
+        dfd = os.open(str(path), os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Write *payload* so a power loss leaves either the old file or the new."""
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    fd = os.open(
+        str(temporary),
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+        0o600,
+    )
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    _fsync_directory(path.parent)
+
+
 def cleanup_registered_mounts(context: InstallerContext, *, run: RunCommand) -> None:
     """Unmount every mount owned by this attempt, deepest/most-recent first."""
     for mountpoint in reversed(context.cleanup_mounts.copy()):
@@ -40,27 +74,7 @@ def write_failure_summary(
         "message": message,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    fd = os.open(
-        str(temporary),
-        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
-        0o600,
-    )
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(payload, stream, indent=2, sort_keys=True)
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    # fsync directory so the rename survives a power-loss immediately after install
-    try:
-        dfd = os.open(str(path.parent), os.O_DIRECTORY)
-        try:
-            os.fsync(dfd)
-        finally:
-            os.close(dfd)
-    except OSError:
-        pass
-    os.replace(temporary, path)
+    _atomic_write_json(path, payload)
 
 
 def write_transaction_state(
@@ -91,6 +105,7 @@ def write_transaction_state(
             "target_ref": plan.target_ref if plan is not None else "",
         },
         "checks": list(context.assurance_checks),
+        "partition_steps": list(context.partition_steps),
         "message": message,
     }
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -99,27 +114,7 @@ def write_transaction_state(
     if path.parent.stat().st_uid != os.geteuid():
         raise RuntimeError(f"Transaction report directory is not owned by this installer: {path.parent}")
     path.parent.chmod(0o700)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    fd = os.open(
-        str(temporary),
-        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
-        0o600,
-    )
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(payload, stream, indent=2, sort_keys=True)
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    # fsync directory so the rename survives a power-loss immediately after install
-    try:
-        dfd = os.open(str(path.parent), os.O_DIRECTORY)
-        try:
-            os.fsync(dfd)
-        finally:
-            os.close(dfd)
-    except OSError:
-        pass
-    os.replace(temporary, path)
+    _atomic_write_json(path, payload)
 
 
 def read_transaction_state(path: Path) -> dict:

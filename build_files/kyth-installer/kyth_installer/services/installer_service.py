@@ -139,6 +139,18 @@ class InstallerService:
         journal.add_op("set_mountpoint", {"partition": partition, "mountpoint": mountpoint})
         return {"ok": True, "pending": len(journal.ops)}
 
+    def _record_partition_step(self, kind: str, status: str, target: str) -> None:
+        """Persist one destructive partition step before/after it runs.
+
+        Written through the transaction report so it reaches the disk with an
+        fsync at each boundary — a step still marked "started" after a power
+        loss names the exact operation that was in flight.
+        """
+        from kyth_installer.phases.common import _record_transaction
+
+        self.context.record_partition_step(kind, status, target)
+        _record_transaction(self.context, "partitioning")
+
     def commit_partitions(self, body: dict) -> dict:
         _disk, journal, error = self._journal_for(body)
         if error:
@@ -149,7 +161,8 @@ class InstallerService:
         try:
             self.context.transition(context_module.InstallLifecycle.PARTITIONING)
             root_part = journal.commit(
-                lambda msg: self.context.events.publish({"type": "log", "text": f"[partition] {msg}"})
+                lambda msg: self.context.events.publish({"type": "log", "text": f"[partition] {msg}"}),
+                record=self._record_partition_step,
             )
             self.context.transition(context_module.InstallLifecycle.IDLE)
             return {"ok": True, "root_partition": root_part}
