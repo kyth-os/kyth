@@ -26,15 +26,25 @@ build-base base_image=default_base_image kernel_flavor="fedora":
     else
         echo "WARNING: cosign not found — skipping signature verification."
     fi
-    echo "Refreshing upstream base image {{ base_image }}..."
-    docker pull {{ base_image }}
+    if ! docker image inspect {{ base_image }} >/dev/null 2>&1; then
+        echo "Refreshing upstream base image {{ base_image }}..."
+        docker pull {{ base_image }}
+    fi
     CACHYOS_KERNEL_VER=unused
     if [[ "{{ kernel_flavor }}" != "fedora" ]]; then
         CACHYOS_KERNEL_VER=$(python3 ./build_files/scripts/resolve-versions.py cachyos-kernel)
     fi
     echo "CachyOS kernel: ${CACHYOS_KERNEL_VER}"
     echo "Kernel flavor: {{ kernel_flavor }}"
-    docker build \
+    REGISTRY="${REGISTRY:-ghcr.io/mrtrick37/kyth}"
+    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
+    docker buildx build \
+        --cache-from type=gha,scope=base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER} \
+        --cache-from type=registry,ref=${REGISTRY}:buildcache-base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER} \
+        --cache-to type=gha,scope=base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER},mode=max \
+        --cache-to type=registry,ref=${REGISTRY}:buildcache-base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER},mode=max \
+        --load \
         --build-arg BASE_IMAGE={{ base_image }} \
         --build-arg KYTH_KERNEL_FLAVOR="{{ kernel_flavor }}" \
         --build-arg CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VER}" \
@@ -86,7 +96,10 @@ build: build-base
         --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
         --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
         "${MOK_SECRET_ARG[@]}" \
+        --cache-from "type=gha,scope=final-${CACHE_BRANCH}-fedora" \
         --cache-from "type=registry,ref=${REGISTRY}:buildcache-final-${CACHE_BRANCH}-fedora" \
+        --cache-to "type=gha,scope=final-${CACHE_BRANCH}-fedora,mode=max" \
+        --cache-to "type=registry,ref=${REGISTRY}:buildcache-final-${CACHE_BRANCH}-fedora,mode=max" \
         --tag localhost/kyth:latest \
         --load \
         .
