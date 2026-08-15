@@ -235,3 +235,20 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
         pass
     out["profile"] = profile
     return out
+
+
+def apply_per_game_preset(argv: list[str] | None = None, dry_run: bool = False) -> dict[str, str]:
+    """N22 per-game scoped preset — dry-run gate then apply, tmp→replace already in callees.
+
+    argv is the game launch argv (for future per-game profile selection); currently
+    maps to gaming profile when non-empty, balanced otherwise. All callees do
+    tmp conf + dry_run guard, so this is all-or-none and rollback-safe.
+    """
+    profile = "gaming" if argv else "balanced"
+    # Dry-run first (validates without writing), then real apply
+    probe = apply_master(profile=profile, dry_run=True)
+    if any(str(v).startswith("error") for v in probe.values()):
+        return probe
+    if dry_run:
+        return probe
+    return apply_master(profile=profile, dry_run=False)
