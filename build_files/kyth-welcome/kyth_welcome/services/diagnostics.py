@@ -119,15 +119,29 @@ def _diagnostics_report(probes: list[HardwareProbe]) -> str:
     staged = "yes" if has_staged_update() else "no"
     rollback = "yes" if has_rollback_deployment() else "no"
     boot_health = read_boot_health_state()
-    fwupd = run_command(["fwupdmgr", "get-updates"], timeout=20)
-    if fwupd is None:
-        fwupd_status = "fwupd unavailable"
-    elif fwupd.returncode == 0:
-        fwupd_status = "updates available"
-    elif fwupd.returncode == 2:
-        fwupd_status = "up to date"
-    else:
-        fwupd_status = f"check failed (exit {fwupd.returncode})"
+    # Single-source fwupd via firmware.py helper
+    try:
+        from kyth_shared.system.firmware import firmware_updates_command
+        from kyth_shared.commands import run as _fw_run
+        _fw = _fw_run(firmware_updates_command(), capture_output=True, text=True, timeout=20, check=False)
+        if _fw is None:
+            fwupd_status = "fwupd unavailable"
+        elif _fw.returncode == 0:
+            fwupd_status = "updates available"
+        elif _fw.returncode == 2:
+            fwupd_status = "up to date"
+        else:
+            fwupd_status = f"check failed (exit {_fw.returncode})"
+    except Exception:
+        fwupd = run_command(["fwupdmgr", "get-updates"], timeout=20)
+        if fwupd is None:
+            fwupd_status = "fwupd unavailable"
+        elif fwupd.returncode == 0:
+            fwupd_status = "updates available"
+        elif fwupd.returncode == 2:
+            fwupd_status = "up to date"
+        else:
+            fwupd_status = f"check failed (exit {fwupd.returncode})"
 
     lines = [
         "KythOS Diagnostics Report",

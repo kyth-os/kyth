@@ -39,7 +39,13 @@ def make_driver_fwupd_card(page: "HardwarePage"):
             restyle(page._fwupd_status)
             sb = run_command(["mokutil", "--sb-state"], timeout=5)
             mok = sb.stdout.strip().splitlines()[0] if sb and sb.returncode == 0 and sb.stdout else "mokutil unavailable"
-            upd = run_command(["fwupdmgr", "get-updates"], timeout=15)
+            # Single-source via firmware.py
+            try:
+                from kyth_shared.system.firmware import firmware_updates_command
+                from kyth_shared.commands import run as _fw_run2
+                upd = _fw_run2(firmware_updates_command(), capture_output=True, text=True, timeout=15, check=False)
+            except Exception:
+                upd = run_command(["fwupdmgr", "get-updates"], timeout=15)
             upd_ok = upd is not None and upd.returncode == 0
             upd_stdout = upd.stdout if upd and upd.stdout else ""
             msg = f"{mok} — fwupd: {'updates available' if 'Updates' in upd_stdout else 'up to date' if upd_ok else 'fwupd unavailable'}"
