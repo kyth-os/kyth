@@ -24,7 +24,7 @@ from typing import Callable, Sequence
 
 from ..commands import run_text
 
-DEFAULT_DEADLINE = 120.0
+DEFAULT_DEADLINE = 180.0
 DEFAULT_INTERVAL = 2.0
 SYSTEMD_RUNTIME_MARKER = Path("/run/systemd/system")
 DRM_DEVICE_DIR = Path("/dev/dri")
@@ -126,6 +126,10 @@ def runtime_checks(
 
     def _ready() -> bool:
         if expects_graphical and not unit_active(GRAPHICAL_TARGET):
+            return False
+        if expects_graphical and not (
+            unit_active("sddm.service") or unit_active("display-manager.service")
+        ):
             return False
         if expects_graphical:
             return bool(drm_devices())

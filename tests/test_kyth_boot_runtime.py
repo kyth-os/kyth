@@ -32,7 +32,7 @@ def probe(
     *,
     booted=True,
     target="graphical.target",
-    active_units=("graphical.target",),
+    active_units=("graphical.target", "sddm.service"),
     failed=(),
     devices=("card0",),
     clock=None,
@@ -122,7 +122,11 @@ class LateReadinessTests(unittest.TestCase):
             # Becomes reachable only after the poll loop has slept a while.
             if clock.now >= 6.0:
                 state["active"] = True
-            return state["active"] and unit == "graphical.target"
+            return state["active"] and unit in (
+                "graphical.target",
+                "sddm.service",
+                "display-manager.service",
+            )
 
         checks = runtime_checks(
             systemd_booted=lambda: True,
