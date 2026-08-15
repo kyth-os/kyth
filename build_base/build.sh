@@ -114,6 +114,17 @@ cachy | cachyos)
 	exit 1
 	;;
 esac
+
+# ── NVIDIA pre-stage (opt-in, Bazzite desktop-nvidia) ─────────────────────────
+# Keep fedora default lean; when ENABLE_NVIDIA=1, pre-install akmod-nvidia so
+# first boot on NVIDIA hardware skips the 49s flatpak-system-update-like akmod
+# build. Same base digest when 0.
+if [[ "${ENABLE_NVIDIA:-0}" == "1" ]]; then
+	echo "Pre-staging NVIDIA akmods (ENABLE_NVIDIA=1)..."
+	dnf5 install -y --setopt=install_weak_deps=False akmod-nvidia xorg-x11-drv-nvidia || \
+		echo "WARNING: akmod-nvidia pre-stage failed — continuing without NVIDIA pre-stage." >&2
+fi
+
 write_kernel_flavor
 
 write_kyth_os_release /usr/lib/os-release

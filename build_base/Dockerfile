@@ -8,6 +8,10 @@ FROM ${BASE_IMAGE}
 # variant built from the same tree and exposed to users through bootc switches.
 ARG KYTH_KERNEL_FLAVOR=fedora
 
+# NVIDIA pre-stage is opt-in (Bazzite desktop-nvidia vs desktop) — same base
+# digest for non-NVIDIA, separate stable-nvidia tag when enabled.
+ARG ENABLE_NVIDIA=0
+
 # Passed at build time so the layer cache is busted whenever an alternate
 # kernel version is published. Build scripts resolve the latest versions and
 # pass them here. Explicitly referenced via the no-op ':' builtin so Docker
@@ -17,7 +21,8 @@ ARG CACHYOS_KERNEL_VER=unset
 # Use a bind-mount so the script is never written into any image layer
 RUN --mount=type=bind,source=build.sh,target=/run/build.sh \
     --mount=type=bind,source=plymouth,target=/run/plymouth \
-    : "cache-bust=${KYTH_KERNEL_FLAVOR}-${CACHYOS_KERNEL_VER}" \
+    : "cache-bust=${KYTH_KERNEL_FLAVOR}-${CACHYOS_KERNEL_VER}-${ENABLE_NVIDIA}" \
     && KYTH_KERNEL_FLAVOR="${KYTH_KERNEL_FLAVOR}" \
        CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VER}" \
+       ENABLE_NVIDIA="${ENABLE_NVIDIA}" \
        bash /run/build.sh

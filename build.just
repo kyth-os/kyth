@@ -5,7 +5,7 @@ import "_internal.just"
 
 # Build the base image from build_base/.
 [group('Build')]
-build-base base_image=default_base_image kernel_flavor="fedora":
+build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0":
     #!/usr/bin/env bash
     if ! id -nG | grep -qw docker; then
         if ! id -nG "$USER" | grep -qw docker; then
@@ -36,20 +36,27 @@ build-base base_image=default_base_image kernel_flavor="fedora":
     fi
     echo "CachyOS kernel: ${CACHYOS_KERNEL_VER}"
     echo "Kernel flavor: {{ kernel_flavor }}"
+    echo "Enable NVIDIA: {{ enable_nvidia }}"
     REGISTRY="${REGISTRY:-ghcr.io/mrtrick37/kyth}"
     BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
+    CACHE_KEY="base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER}-nvidia-{{ enable_nvidia }}"
     docker buildx build \
-        --cache-from type=gha,scope=base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER} \
-        --cache-from type=registry,ref=${REGISTRY}:buildcache-base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER} \
-        --cache-to type=gha,scope=base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER},mode=max \
-        --cache-to type=registry,ref=${REGISTRY}:buildcache-base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER},mode=max \
+        --cache-from type=gha,scope=${CACHE_KEY} \
+        --cache-from type=registry,ref=${REGISTRY}:buildcache-${CACHE_KEY} \
+        --cache-to type=gha,scope=${CACHE_KEY},mode=max \
+        --cache-to type=registry,ref=${REGISTRY}:buildcache-${CACHE_KEY},mode=max \
         --load \
         --build-arg BASE_IMAGE={{ base_image }} \
         --build-arg KYTH_KERNEL_FLAVOR="{{ kernel_flavor }}" \
         --build-arg CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VER}" \
+        --build-arg ENABLE_NVIDIA="{{ enable_nvidia }}" \
         --tag localhost/kyth-base:stable \
         build_base/
+    if [[ "{{ enable_nvidia }}" == "1" ]]; then
+        docker tag localhost/kyth-base:stable localhost/kyth-base:stable-nvidia
+        echo "Tagged localhost/kyth-base:stable-nvidia"
+    fi
 
 # Build the full KythOS image.
 [group('Build')]
