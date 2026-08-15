@@ -153,19 +153,17 @@ def stage_firmware_batch(
             try:
                 fcntl.flock(lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
+                # Lock contended — another watcher/probe is already handling fwupd.
+                # Return empty to avoid parallel fwupd DB contention (thundering herd).
                 return False, 0, ""
             return stage_firmware_updates(
                 refresh_timeout=refresh_timeout,
                 check_timeout=check_timeout,
                 update_timeout=update_timeout,
             )
+    except (OSError, BlockingIOError):
+        # Could not open/lock file (e.g. /run ro). Don't run unprotected batch
+        # that would thunder-herd fwupd; just skip.
+        return False, 0, ""
     except Exception:  # noqa: BLE001
-        # Fallback: no lock (e.g. /run ro in tests), just do direct batch
-        try:
-            return stage_firmware_updates(
-                refresh_timeout=refresh_timeout,
-                check_timeout=check_timeout,
-                update_timeout=update_timeout,
-            )
-        except Exception:
-            return False, 0, ""
+        return False, 0, ""

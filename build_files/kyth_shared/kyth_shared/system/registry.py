@@ -124,7 +124,9 @@ def remote_digest_for_ref(
     except Exception:
         remote_digest = None
     if remote_digest is None:
-        remote_digest = "sha256:" + hashlib.sha256(result.stdout).hexdigest()
+        # Unknown manifest type — don't fabricate a digest that would falsely
+        # appear as "available" and re-stage every watcher cycle.
+        return None
     return remote_digest
 
 
@@ -159,7 +161,7 @@ def check_registry_update(
         remote_digest, remote_ts = None, ""
 
     if remote_digest is None:
-        remote_digest = "sha256:" + hashlib.sha256(result.stdout).hexdigest()
+        return UpdateCheckResult("error", f"Could not parse manifest for {ref}.")
 
     if remote_digest == local_digest:
         return UpdateCheckResult("uptodate", remote_ts, result.stdout)

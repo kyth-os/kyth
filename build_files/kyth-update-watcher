@@ -241,32 +241,59 @@ def _notify_updates(os_staged: bool, flatpak_count: int) -> None:
             os.setgid(gid)
             os.setuid(uid)
 
-        def _notify_user(env: dict = env, drop: object = _drop_privs) -> None:
+        def _notify_user(env: dict = env, uid: int = uid, gid: int = pw.pw_gid) -> None:
             try:
-                r = subprocess.run(
-                    [
-                        "notify-send",
-                        "--app-name=KythOS",
-                        "--icon=software-update-available",
-                        "--urgency=normal",
-                        "--action=default=View Updates",
-                        "--wait",
-                        title,
-                        body,
-                    ],
-                    env=env,
-                    capture_output=True, text=True,
-                    preexec_fn=drop,
-                    timeout=65,
-                )
-                if r.stdout.strip() == "default":
-                    subprocess.Popen(
-                        ["kyth-welcome", "--page", "updates"],
+                # Avoid preexec_fn in threads (unsafe — forks with locks held).
+                # Use runuser to drop privileges without forking with locks.
+                base_cmd = [
+                    "notify-send",
+                    "--app-name=KythOS",
+                    "--icon=software-update-available",
+                    "--urgency=normal",
+                    "--action=default=View Updates",
+                    "--wait",
+                    title,
+                    body,
+                ]
+                # Prefer runuser; fall back to sudo -u for minimal images
+                for drop_cmd in (
+                    ["runuser", "-u", pw.pw_name, "--"] + base_cmd,
+                    ["sudo", "-u", pw.pw_name, "--"] + base_cmd,
+                ):
+                    try:
+                        r = subprocess.run(
+                            drop_cmd,
+                            env=env,
+                            capture_output=True, text=True,
+                            timeout=65, check=False,
+                        )
+                        break
+                    except FileNotFoundError:
+                        continue
+                else:
+                    # Last resort: try preexec_fn only if no helper available (single-threaded)
+                    r = subprocess.run(
+                        base_cmd,
                         env=env,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        preexec_fn=drop,
+                        capture_output=True, text=True,
+                        preexec_fn=lambda: (os.setgroups([]), os.setgid(gid), os.setuid(uid)),
+                        timeout=65, check=False,
                     )
+                if r.stdout.strip() == "default":
+                    for launch_cmd in (
+                        ["runuser", "-u", pw.pw_name, "--", "kyth-welcome", "--page", "updates"],
+                        ["sudo", "-u", pw.pw_name, "--", "kyth-welcome", "--page", "updates"],
+                    ):
+                        try:
+                            subprocess.Popen(
+                                launch_cmd,
+                                env=env,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
+                            break
+                        except FileNotFoundError:
+                            continue
             except Exception as exc:
                 LOG.debug("Could not notify uid: %s", exc)
 

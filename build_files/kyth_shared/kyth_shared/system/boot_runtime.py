@@ -127,7 +127,9 @@ def runtime_checks(
     def _ready() -> bool:
         if expects_graphical and not unit_active(GRAPHICAL_TARGET):
             return False
-        return bool(drm_devices())
+        if expects_graphical:
+            return bool(drm_devices())
+        return True
 
     _wait_until(
         _ready,
@@ -160,15 +162,25 @@ def runtime_checks(
         )
 
     devices = tuple(drm_devices())
-    checks.append(
-        RuntimeCheck(
-            "Display device",
-            bool(devices),
-            f"/dev/dri: {', '.join(devices)}"
-            if devices
-            else "no DRM card device — GPU driver did not load",
+    # Headless deployments intentionally have no DRM device; don't fail them.
+    if expects_graphical:
+        checks.append(
+            RuntimeCheck(
+                "Display device",
+                bool(devices),
+                f"/dev/dri: {', '.join(devices)}"
+                if devices
+                else "no DRM card device — GPU driver did not load",
+            )
         )
-    )
+    else:
+        checks.append(
+            RuntimeCheck(
+                "Display device",
+                True,
+                f"skipped: default target is {target or 'unknown'}",
+            )
+        )
 
     failed = frozenset(failed_units()) & CRITICAL_UNITS
     checks.append(

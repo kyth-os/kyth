@@ -395,19 +395,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    state = read_state(args.state)
+    # Use UpdateCoordinator for all state mutations to prevent lost-update races
+    # between concurrent Hub pages, safe-upgrade, and greenboot hooks.
     if args.command == "check":
         checks = required_checks()
         for check in checks:
             print(f"{'PASS' if check.passed else 'FAIL'} {check.name}: {check.detail}")
         return 0 if all(check.passed for check in checks) else 1
     if args.command == "status":
+        # Read-only — no lock needed
+        state = read_state(args.state)
         print(json.dumps(state.to_dict(), indent=2, sort_keys=True) if args.json else _state_summary(state))
         return 0
     if args.command == "clear-quarantine":
-        was_quarantined = args.digest in state.quarantined
+        from .update_coordinator import UpdateCoordinator
+
+        coord = UpdateCoordinator(args.state)
+        before = coord.read()
+        was_quarantined = args.digest in before.quarantined
         try:
-            write_state(clear_quarantine(state, args.digest), args.state)
+            coord.clear_quarantine(args.digest)
         except ValueError as exc:
             print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
             return 1
@@ -421,18 +428,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Could not determine booted image digest")
         return 1
     if args.command == "mark-healthy":
+        from .update_coordinator import UpdateCoordinator
+
         try:
-            write_state(mark_healthy(state, digest), args.state)
+            UpdateCoordinator(args.state).mark_healthy(digest)
         except ValueError as exc:
             print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
             return 1
         print(f"Marked {digest} healthy")
         return 0
-    updated = record_failure(
-        state, digest, current_boot_id(), args.reason, threshold=max(1, args.threshold)
-    )
+    # record-failure — atomic via coordinator (dedupes on boot_id internally)
+    from .update_coordinator import UpdateCoordinator
+
     try:
-        write_state(updated, args.state)
+        updated = UpdateCoordinator(args.state).record_failure(
+            digest, current_boot_id(), args.reason, threshold=max(1, args.threshold)
+        )
     except ValueError as exc:
         print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
         return 1

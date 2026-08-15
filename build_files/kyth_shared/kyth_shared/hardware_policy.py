@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import tomllib
 from dataclasses import asdict, dataclass
 from datetime import date
@@ -490,13 +491,49 @@ def _apply_policy_config(policy: dict[str, Any]) -> dict[str, Any]:
 
 def _atomic_write(path: Path, content: str, mode: int = 0o600) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    # Use mkstemp + O_NOFOLLOW to avoid TOCTOU symlink overwrite when running as root.
+    # The legacy dotfile-in-same-dir approach followed symlinks via write_text.
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    tmp_path = Path(tmp_name)
     try:
-        temporary.write_text(content, encoding="utf-8")
-        os.chmod(temporary, mode)
-        os.replace(temporary, path)
+        # Ensure we didn't race a symlink at the tmp path itself
+        try:
+            if tmp_path.is_symlink() or path.is_symlink():
+                raise OSError(f"refusing to write through symlink: {path}")
+        except OSError:
+            raise
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        # Verify target is still not a symlink at replace time
+        if path.is_symlink():
+            raise OSError(f"refusing to replace symlink: {path}")
+        os.replace(tmp_name, path)
+        # fsync parent dir for durability (matches boot_health.write_state)
+        try:
+            dir_fd = os.open(path.parent, os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        # Also try to close fd if it wasn't fdopen'd (e.g. symlink check failed)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
     finally:
-        temporary.unlink(missing_ok=True)
+        # tmp_name already replaced or unlinked above
+        pass
 
 
 def render_modprobe_config(evaluation: Evaluation) -> str:

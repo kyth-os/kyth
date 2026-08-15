@@ -63,7 +63,11 @@ def upgrade(
     if not remote_digest:
         print("Could not resolve the remote image digest; update not staged", file=sys.stderr)
         return 4
-    state = read_state(state_path)
+    # Use UpdateCoordinator to avoid lost-update race with concurrent Hub/greenboot
+    from .update_coordinator import UpdateCoordinator
+
+    coord = UpdateCoordinator(state_path)
+    state = coord.read()
     blocked = quarantine_reason(state, remote_digest)
     if blocked:
         print(f"Update blocked: {blocked}", file=sys.stderr)
@@ -92,13 +96,8 @@ def upgrade(
         return 127
     if result.returncode:
         return result.returncode
-    new_state = record_staged(
-        state,
-        remote_digest,
-        rollout_ring=image_ring(reference) or ring,
-    )
     try:
-        write_state(new_state, state_path)
+        coord.record_staged(remote_digest, rollout_ring=image_ring(reference) or ring)
     except ValueError as exc:
         print(f"Refusing to persist corrupt boot health state: {exc}", file=sys.stderr)
         return 1

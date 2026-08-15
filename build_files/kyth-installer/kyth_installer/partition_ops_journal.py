@@ -588,40 +588,50 @@ class Journal:
                 # commit that is already mid-flight on the real disk.
                 pass
 
+        from .storage_guard import PartitionTableGuard
+
         with DiskLease(self.disk, log, exclusive=True):
+            # Snapshot is now handled by PartitionTableGuard (backed up with fsync);
+            # keep _save_snapshot for rollback() compatibility but guard owns restore.
             self._save_snapshot()
+            with PartitionTableGuard(self.disk, log, disk_service=self._disk_service):
+                for op in self.ops:
+                    kind = op["kind"]
+                    p = op["params"]
 
-            for op in self.ops:
-                kind = op["kind"]
-                p = op["params"]
+                    # "set_mountpoint" ops are pure journal metadata (consumed by
+                    # _find_root_partition() below) — no disk operation of their
+                    # own, so they are not bracketed as destructive steps.
+                    if kind == "set_mountpoint":
+                        continue
 
-                # "set_mountpoint" ops are pure journal metadata (consumed by
-                # _find_root_partition() below) — no disk operation of their
-                # own, so they are not bracketed as destructive steps.
-                if kind == "set_mountpoint":
-                    continue
+                    target = str(p.get("partition") or self.disk)
+                    _note(kind, "started", target)
+                    try:
+                        if kind == "new_table":
+                            self._commit_new_table(p, log)
+                        elif kind == "create":
+                            self._commit_create(p, log)
+                        elif kind == "delete":
+                            self._commit_delete(p, log)
+                        elif kind == "resize":
+                            self._commit_resize(p, log)
+                        elif kind == "format":
+                            self._commit_format(p, log)
+                    except Exception:
+                        # PartitionTableGuard will restore table on exception;
+                        # clear committed flag and propagate.
+                        self._committed = False
+                        raise
+                    # _commit_create resolves the real device name onto the op, so
+                    # re-read it rather than reporting the pre-commit placeholder.
+                    _note(kind, "completed", str(p.get("partition") or self.disk))
 
-                target = str(p.get("partition") or self.disk)
-                _note(kind, "started", target)
-                if kind == "new_table":
-                    self._commit_new_table(p, log)
-                elif kind == "create":
-                    self._commit_create(p, log)
-                elif kind == "delete":
-                    self._commit_delete(p, log)
-                elif kind == "resize":
-                    self._commit_resize(p, log)
-                elif kind == "format":
-                    self._commit_format(p, log)
-                # _commit_create resolves the real device name onto the op, so
-                # re-read it rather than reporting the pre-commit placeholder.
-                _note(kind, "completed", str(p.get("partition") or self.disk))
-
-            self._root_partition = self._find_root_partition()
-            self._committed = True
-            log("Partition changes committed successfully.")
-            root = self._root_partition or ""
-            return root
+                self._root_partition = self._find_root_partition()
+                self._committed = True
+                log("Partition changes committed successfully.")
+                root = self._root_partition or ""
+                return root
 
     def rollback(self, log) -> None:
         if not self._snapshot_saved:

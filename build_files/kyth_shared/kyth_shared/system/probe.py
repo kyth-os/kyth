@@ -156,6 +156,7 @@ def load_cache_file(path: Path) -> dict[str, Any] | None:
 
 def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Serialize first so we don't hold any lock during JSON encoding
     try:
         payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
     except TypeError:
@@ -164,28 +165,54 @@ def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
         # crashing kyth-probe.service and poisoning the on-disk cache.
         payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False, default=str)
         _logger.warning("write_cache_file: fell back to default=str for %s", path)
-    fd, tmp_name = tempfile.mkstemp(prefix=".probe-", suffix=".json", dir=str(path.parent))
+    # Use a sibling lock file to prevent concurrent read-modify-write races
+    # between kyth-probe.service, Hub, and kyth-update-watcher.
+    import fcntl
+
+    lock_path = path.with_suffix(path.suffix + ".lock")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(payload)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_name, path)
-        with _FILE_CACHE_LOCK:
-            try:
-                mtime = path.stat().st_mtime
-            except OSError:
-                mtime = time.time()
-            if len(_FILE_CACHE) >= 16 and path not in _FILE_CACHE:
-                oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
-                _FILE_CACHE.pop(oldest, None)
-            _FILE_CACHE[path] = (mtime, doc)
-    except Exception:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.touch(exist_ok=True)
+    except OSError:
+        pass
+    lock_fd = None
+    try:
         try:
-            os.unlink(tmp_name)
+            lock_fd = os.open(str(lock_path), os.O_RDWR)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
         except OSError:
-            pass
+            lock_fd = None
+        fd, tmp_name = tempfile.mkstemp(prefix=".probe-", suffix=".json", dir=str(path.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_name, path)
+            with _FILE_CACHE_LOCK:
+                try:
+                    mtime = path.stat().st_mtime
+                except OSError:
+                    mtime = time.time()
+                if len(_FILE_CACHE) >= 16 and path not in _FILE_CACHE:
+                    oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
+                    _FILE_CACHE.pop(oldest, None)
+                _FILE_CACHE[path] = (mtime, doc)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
+    except Exception:
         raise
+    finally:
+        if lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
+            except OSError:
+                pass
 
 
 def read_section(

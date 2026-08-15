@@ -227,13 +227,16 @@ def collect_symptoms() -> list[Symptom]:
     if flatpak and flatpak.returncode != 0:
         symptoms.append(Symptom("flatpak", f"Flatpak query failed: {flatpak.stderr.strip()}",
                                 ("flatpak.refresh-metadata", "flatpak.repair-user")))
-    try:
-        usage = shutil.disk_usage(Path.home())
-        percent = int(100 * usage.used / usage.total)
-        if percent >= 90 or usage.free < 5 * 1024**3:
-            symptoms.append(Symptom("storage", f"Home filesystem is {percent}% full", ("disk.review",), "error"))
-    except OSError:
-        pass
+    # Check both home and root — home may be separate partition, root fill (ostree, flatpak) otherwise invisible
+    for check_path, label in ((Path.home(), "Home"), (Path("/"), "Root")):
+        try:
+            usage = shutil.disk_usage(check_path)
+            percent = int(100 * usage.used / usage.total)
+            if percent >= 90 or usage.free < 5 * 1024**3:
+                symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("disk.review",), "error"))
+                break
+        except OSError:
+            continue
     try:
         from .boot_health import read_state as read_boot_health
         health = read_boot_health()
@@ -336,9 +339,13 @@ def install_model(manifest_path: Path = MODEL_MANIFEST) -> Path:
     fd, temporary = tempfile.mkstemp(prefix=".model-", dir=destination.parent)
     digest = hashlib.sha256()
     total = 0
+    # Overall deadline for large ~1GiB model on slow links; urlopen timeout is per-socket op.
+    deadline = time.monotonic() + 600
     try:
         with urllib.request.urlopen(str(manifest["url"]), timeout=30) as response, os.fdopen(fd, "wb") as output:  # nosec B310 -- load_manifest() above already rejects any non-https:// URL
             while chunk := response.read(1024 * 1024):
+                if time.monotonic() > deadline:
+                    raise TimeoutError("model download exceeded 600s deadline")
                 total += len(chunk)
                 if total > int(manifest["size"]):
                     raise ValueError("model download exceeds manifest size")
