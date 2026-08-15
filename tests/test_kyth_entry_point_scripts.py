@@ -6,24 +6,38 @@ suite. kyth-update-notifier shipped with two import-time defects that way — a
 `QMenu`/`QSystemTrayIcon` pair missing from the kyth_shared.qt shim, and a
 dropped `from pathlib import Path` — and only surfaced as a crash-loop in the
 journal on real hardware.
+
+Each script is imported in its own subprocess. Importing a full Qt application
+into the shared test process leaks module state (and a QApplication) into every
+test that runs afterwards, which is both order-dependent and a real source of
+false failures.
 """
 from __future__ import annotations
 
 import os
 import pathlib
+import subprocess
 import sys
 import unittest
-from importlib.machinery import SourceFileLoader
-from importlib.util import module_from_spec, spec_from_loader
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 WELCOME = ROOT / "build_files" / "kyth-welcome"
+SHARED = ROOT / "build_files" / "kyth_shared"
 
-for path in (ROOT / "build_files" / "kyth_shared", WELCOME):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+# Import only — never run main(). runpy would execute the script body under
+# __main__, starting real event loops.
+_IMPORT_ONLY = """
+import sys
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+name, path = sys.argv[1], sys.argv[2]
+loader = SourceFileLoader(name, path)
+try:
+    loader.exec_module(module_from_spec(spec_from_loader(name, loader)))
+except SystemExit:
+    pass
+"""
 
 
 def python_entry_points() -> list[pathlib.Path]:
@@ -41,6 +55,23 @@ def python_entry_points() -> list[pathlib.Path]:
     return found
 
 
+def import_in_subprocess(script: pathlib.Path) -> subprocess.CompletedProcess:
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [str(WELCOME), str(SHARED), environment.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    environment["QT_QPA_PLATFORM"] = "offscreen"
+    return subprocess.run(  # noqa: S603 — fixed interpreter, repo-local paths
+        [sys.executable, "-c", _IMPORT_ONLY, script.stem.replace("-", "_"), str(script)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=environment,
+        cwd=str(ROOT),
+        check=False,
+    )
+
+
 class EntryPointImportTests(unittest.TestCase):
     def test_at_least_one_entry_point_is_discovered(self):
         """Guard the guard: a discovery regression must not silently pass."""
@@ -49,15 +80,12 @@ class EntryPointImportTests(unittest.TestCase):
     def test_every_python_entry_point_imports(self):
         for script in python_entry_points():
             with self.subTest(script=script.name):
-                name = f"entrypoint_{script.name.replace('-', '_')}"
-                loader = SourceFileLoader(name, str(script))
-                try:
-                    loader.exec_module(module_from_spec(spec_from_loader(name, loader)))
-                except SystemExit:
-                    # A module-level main() guard exiting is a successful import.
-                    pass
-                except Exception as exc:  # noqa: BLE001 — any import-time error is the bug
-                    self.fail(f"{script.name} failed at import: {type(exc).__name__}: {exc}")
+                result = import_in_subprocess(script)
+                self.assertEqual(
+                    0,
+                    result.returncode,
+                    f"{script.name} failed at import:\n{result.stderr}",
+                )
 
 
 class QtShimExportTests(unittest.TestCase):
