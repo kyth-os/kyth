@@ -401,6 +401,14 @@ audio-preset profile="gaming":
     echo "  # gaming: easyeffects --load-preset Gaming; work: easyeffects --load-preset Work"
 
 # Latest Arch distrobox cutting edge (Endeavour AUR freshness, base lean) (N47)
+# Flathub beta cutting edge (Aurora stable + beta opt-in) (N48)
+[group('Utility')]
+enable-flathub-beta:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cutting Flathub beta (stable default, opt-in beta):"
+    echo "  flatpak remote-add --if-not-exists flathub-beta https://flathub.org/beta-repo/flathub-beta.flatpakrepo"
+
 [group('Utility')]
 create-arch-latest:
     #!/usr/bin/env bash
