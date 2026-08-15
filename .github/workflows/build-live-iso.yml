@@ -194,11 +194,14 @@ jobs:
           SOURCE_TAG: ${{ inputs.source_tag }}
           SOURCE_IMAGE_PINNED: ${{ steps.source_image.outputs.pinned }}
         run: |
+          # registry cache for payload — same output, faster on no-op installer/** changes
           sudo podman build \
             --cap-add SYS_ADMIN \
             --security-opt label=disable \
             --build-arg "BASE_IMAGE=${SOURCE_IMAGE_PINNED}" \
             --build-arg "SOURCE_TAG=${SOURCE_TAG}" \
+            --cache-from ghcr.io/mrtrick37/kyth:payloadcache-${{ inputs.source_tag }} \
+            --cache-to ghcr.io/mrtrick37/kyth:payloadcache-${{ inputs.source_tag }} \
             --tag localhost/payload:latest \
             -f installer/Containerfile \
             .
