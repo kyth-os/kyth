@@ -12,6 +12,7 @@ def make_display_card(page: "HardwarePage"):
     from .qt import QDesktopServices, QHBoxLayout, QLabel, QPushButton, QUrl
     from .widgets import _make_card
     from .services.launch import kcmshell
+    from kyth_shared.system.plasma_hdr import apply_preset, available_presets
     import pathlib
 
     card, layout = _make_card()
@@ -65,4 +66,27 @@ def make_display_card(page: "HardwarePage"):
     btns.addWidget(color_btn)
     btns.addStretch()
     layout.addLayout(btns)
+
+    # N17 HDR/VRR presets (transactional kwinrc, safe rollback) — gated, opt-in
+    preset_row = QHBoxLayout()
+    preset_row.setSpacing(8)
+    preset_status = QLabel("")
+    preset_status.setObjectName("card-copy")
+    preset_status.setWordWrap(True)
+
+    def _apply(name: str):
+        ok, msg = apply_preset(name)
+        preset_status.setText(msg)
+        preset_status.setObjectName("status-ok" if ok else "status-err")
+        preset_status.show()
+
+    for name, label in [("hdr", "Enable HDR preset"), ("sdr", "Disable HDR preset"), ("vrr", "Enable VRR"), ("vrr_off", "Disable VRR")]:
+        if name not in available_presets():
+            continue
+        b = QPushButton(label)
+        b.clicked.connect(lambda _=False, n=name: _apply(n))
+        preset_row.addWidget(b)
+    preset_row.addStretch()
+    layout.addLayout(preset_row)
+    layout.addWidget(preset_status)
     return card
