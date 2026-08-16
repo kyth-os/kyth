@@ -38,6 +38,11 @@ write_config /usr/lib/systemd/system/kyth-system-accounts.service <<'SYSACCOUNTU
 [Unit]
 Description=Ensure KythOS system accounts are visible in /etc
 DefaultDependencies=no
+# mkdir -p /var/lib/sddm needs /var writable; without this, the unit races
+# ostree-remount.service on every boot and fails with "Read-only file system"
+# (it self-heals via a second, later pull-in, but that transiently fails the
+# Requires= dependent kyth-dbus-runtime-dir.service too).
+After=local-fs.target ostree-remount.service
 Before=dbus.socket dbus-broker.service sockets.target sddm.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
 
 [Service]
@@ -76,8 +81,12 @@ write_config /usr/lib/systemd/system/kyth-dbus-runtime-dir.service <<'DBUSRUNDIR
 Description=Create D-Bus runtime directory
 DefaultDependencies=no
 Before=sockets.target dbus.socket
+# Ordered after, not Requires=: this unit only mkdirs a tmpfs path and does not
+# itself need kyth-system-accounts.service to succeed. A hard Requires= meant a
+# transient failure there (see kyth-system-accounts.service) permanently failed
+# this unit for the boot even though the later retry succeeded.
 After=kyth-system-accounts.service local-fs.target
-Requires=kyth-system-accounts.service
+Wants=kyth-system-accounts.service
 
 [Service]
 Type=oneshot

@@ -92,8 +92,8 @@ value = "1"
 comment = "1 vs 2 — MangoHud accurate, safe vs 0 exposing kaddrs"
 
 [keys."kernel.sched_rt_runtime_us"]
-value = "980000"
-comment = "98% RT throttle (default 95%) — audio/render deadlines"
+value = "950000"
+comment = "95% RT throttle (kernel default). Was 980000 (98%) — GameMode's softrealtime=auto promotes game threads to SCHED_FIFO, and 98% left only 20ms/s per CPU for non-RT work, which could starve watchdog-petting under sustained RT load and trigger hard reboots. 95% restores the 50ms/s headroom while still giving RT threads priority."
 
 [keys."kernel.timer_migration"]
 value = "0"

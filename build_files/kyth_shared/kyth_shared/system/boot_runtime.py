@@ -31,6 +31,7 @@ DRM_DEVICE_DIR = Path("/dev/dri")
 GRAPHICAL_TARGET = "graphical.target"
 # sddm.service carries the display-manager.service alias; `list-units` reports
 # the concrete name, so both spellings are matched.
+DISPLAY_MANAGER_UNITS = ("sddm.service", "display-manager.service")
 CRITICAL_UNITS = frozenset({
     "dbus-broker.service",
     "dbus.service",
@@ -71,6 +72,10 @@ def _failed_units() -> frozenset[str]:
     return frozenset(
         fields[0] for fields in (line.split() for line in result.stdout.splitlines()) if fields
     )
+
+
+def _display_manager_active(unit_active: Callable[[str], bool]) -> bool:
+    return any(unit_active(unit) for unit in DISPLAY_MANAGER_UNITS)
 
 
 def _drm_devices() -> tuple[str, ...]:
@@ -115,6 +120,17 @@ def runtime_checks(
     greenboot runs its required checks well before ``graphical.target`` would
     normally settle, so the display assertions poll up to *deadline* seconds
     rather than sampling once and declaring the boot dead.
+
+    This deliberately never asserts on ``graphical.target`` itself being
+    active. greenboot-healthcheck.service is ``WantedBy=multi-user.target``,
+    and systemd gives target units an implicit ``After=`` on everything they
+    ``Wants=``/``Requires=`` — so ``multi-user.target`` (and therefore
+    ``graphical.target``, which requires it) cannot go active until *this
+    service's own job* finishes. Polling for graphical.target here would wait
+    on a state this process's own execution blocks, timing out and failing
+    every healthy boot regardless of how fast the desktop actually came up.
+    Display-manager activation is not behind that ordering, so it is used as
+    the non-circular proxy for "the display stack came up".
     """
     if not systemd_booted():
         # Image build, container, or test context: there is no boot to assess,
@@ -125,11 +141,7 @@ def runtime_checks(
     expects_graphical = target == GRAPHICAL_TARGET
 
     def _ready() -> bool:
-        if expects_graphical and not unit_active(GRAPHICAL_TARGET):
-            return False
-        if expects_graphical and not (
-            unit_active("sddm.service") or unit_active("display-manager.service")
-        ):
+        if expects_graphical and not _display_manager_active(unit_active):
             return False
         if expects_graphical:
             return bool(drm_devices())
@@ -145,14 +157,14 @@ def runtime_checks(
 
     checks: list[RuntimeCheck] = []
     if expects_graphical:
-        reached = unit_active(GRAPHICAL_TARGET)
+        reached = _display_manager_active(unit_active)
         checks.append(
             RuntimeCheck(
                 "Graphical session",
                 reached,
-                f"{GRAPHICAL_TARGET} active"
+                "display manager active"
                 if reached
-                else f"{GRAPHICAL_TARGET} not reached within {deadline:.0f}s",
+                else f"display manager not reached within {deadline:.0f}s",
             )
         )
     else:

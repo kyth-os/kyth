@@ -144,6 +144,34 @@ class LateReadinessTests(unittest.TestCase):
         self.assertLess(clock.now, 120.0)
 
 
+class GraphicalTargetOrderingTests(unittest.TestCase):
+    """greenboot-healthcheck.service is WantedBy=multi-user.target, and systemd
+    gives target units an implicit After= on everything they Wants=/Requires=.
+    That means graphical.target (which Requires=multi-user.target) cannot go
+    active until *this check's own service* finishes — so asserting on
+    graphical.target's activation state deadlocks every healthy boot. Regression
+    for that: the check must pass promptly on display-manager + DRM alone, even
+    when graphical.target itself never reports active.
+    """
+
+    def test_passes_without_waiting_when_graphical_target_never_reports_active(self):
+        clock = FakeClock()
+
+        checks = probe(
+            active_units=("sddm.service",),  # graphical.target deliberately absent
+            clock=clock,
+        )
+
+        session = by_name(checks, "Graphical session")
+        self.assertTrue(session.passed, checks)
+        self.assertEqual(0.0, clock.now)
+
+    def test_display_manager_service_name_also_satisfies_the_check(self):
+        checks = probe(active_units=("display-manager.service",))
+
+        self.assertTrue(by_name(checks, "Graphical session").passed)
+
+
 class NonRollbackContextTests(unittest.TestCase):
     def test_non_systemd_context_is_skipped(self):
         """Image build/container: no boot to assess, so nothing to quarantine."""
