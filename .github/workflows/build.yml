@@ -633,7 +633,7 @@ jobs:
   finalize:
     name: Attest and dispatch (${{ matrix.branch }}, ${{ matrix.kernel_flavor }})
     needs: [plan, build_push]
-    if: needs.build_push.result == 'success'
+    if: ${{ always() && !cancelled() && needs.build_push.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -731,3 +731,24 @@ jobs:
             --field "source_github_sha=${SOURCE_GITHUB_SHA}" \
             --field "original_event=${ORIGINAL_EVENT}" \
             --field "original_actor=${ORIGINAL_ACTOR}"
+
+      # Live ISO is dispatched explicitly with the pinned Fedora digest so it
+      # runs automatically after the Fedora container build succeeds — independent
+      # of the cachy flavor outcome (workflow_run overall success would otherwise
+      # block ISO when cachy fails due to fail-fast: false + aggregate result).
+      - name: Dispatch Live ISO
+        if: matrix.kernel_flavor == 'fedora'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          MATRIX_BRANCH: ${{ matrix.branch }}
+          SOURCE_TAG: ${{ steps.prep.outputs.tag }}
+          SOURCE_DIGEST: ${{ steps.image.outputs.digest }}
+          SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
+        run: |
+          gh workflow run build-live-iso.yml \
+            --ref "${MATRIX_BRANCH}" \
+            --field "source_tag=${SOURCE_TAG}" \
+            --field "source_digest=${SOURCE_DIGEST}" \
+            --field "source_sha=${SOURCE_SHA}" \
+            --field "run_acceptance=true"
