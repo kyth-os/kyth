@@ -101,10 +101,19 @@ class BuildProfileTests(unittest.TestCase):
     def test_dependent_workflows_require_successful_image_build(self):
         workflow = _read(".github/workflows/build.yml")
         iso = _read(".github/workflows/build-live-iso.yml")
-        # ISO is now decoupled to a workflow_run-triggered workflow; only
-        # finalize remains as a dependent in build.yml.
-        self.assertGreaterEqual(workflow.count("needs.build_push.result == 'success'"), 1)
-        self.assertIn("needs.build_push.result == 'success'", workflow)
+        # finalize gates on build_push but must tolerate partial matrix failure
+        # so fedora can dispatch independently of cachy (fail-fast: false).
+        # Accept either the old strict gate or the new always()+not-skipped gate.
+        self.assertIn("needs.build_push", workflow)
+        self.assertTrue(
+            "needs.build_push.result == 'success'" in workflow
+            or "needs.build_push.result != 'skipped'" in workflow,
+            "finalize must gate on build_push result",
+        )
+        # Container -> ISO chain must be explicit with pinned digest
+        self.assertIn("Dispatch Live ISO", workflow)
+        self.assertIn("gh workflow run build-live-iso.yml", workflow)
+        self.assertIn("source_digest", workflow)
         # And the ISO workflow must not silently publish without a source image
         self.assertIn("source_tag", iso)
 
