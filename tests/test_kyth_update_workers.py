@@ -46,14 +46,17 @@ class UpdateCheckWorkerTests(unittest.TestCase):
         return worker
 
     def test_background_check_uses_valid_snapshot(self):
-        snapshot = Mock(system_state="uptodate")
+        snapshot = Mock(system_state="uptodate", booted_digest="sha256:aaa", reason="already up to date", output="")
         worker = self._worker()
 
         with (
             patch.object(updates, "read_update_snapshot", return_value=snapshot) as read_snapshot,
+            patch.object(updates, "bootc_status_data", return_value={"status": {"booted": {"image": {"imageDigest": "sha256:aaa"}}}}),
             patch.object(updates, "check_registry_update") as registry_check,
         ):
-            worker.run()
+            # Mock image_digest_from_status to return matching digest
+            with patch("kyth_shared.system.bootc_query.image_digest_from_status", return_value="sha256:aaa"):
+                worker.run()
 
         read_snapshot.assert_called_once_with(max_age=300)
         registry_check.assert_not_called()

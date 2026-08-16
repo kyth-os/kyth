@@ -169,8 +169,13 @@ def update_availability_view(
             "card-accent-ok", "✓", "avail-icon-ok", "Up to date",
             f"Running the latest image{built}.{ts_hint}", False, False,
         )
+    detail = (check_ts_details or "").strip()
+    if detail and detail.lower() not in {"checking timed out after 15 s. click check now to retry (skopeo/flatpak may be slow offline).".lower()}:
+        body = f"{detail}{ts_hint}"
+    else:
+        body = f"Could not reach the update server — check your network connection.{ts_hint}"
     return UpdateAvailabilityView(
         "card", "⚠", "avail-icon-dim", "Check unavailable",
-        f"Could not reach the update server — check your network connection.{ts_hint}",
+        body,
         False, False,
     )

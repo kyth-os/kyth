@@ -35,6 +35,10 @@ class UpdateCheckWorker(TrackedThread):
                     # a stale snapshot (e.g. booted image changed or snapshot
                     # was written before the registry moved) would make the Hub
                     # say "no updates" when an update is actually available.
+                    # Only use cached snapshot when we can validate it against
+                    # the current booted digest; otherwise the cache may be
+                    # stale (e.g. booted image changed) and would make
+                    # Check Now appear to do nothing.
                     try:
                         cur_digest = None
                         data = bootc_status_data()
@@ -43,18 +47,19 @@ class UpdateCheckWorker(TrackedThread):
 
                             cur_digest = image_digest_from_status(data, "booted")
                         snap_digest = getattr(snapshot, "booted_digest", "")
+                        if not isinstance(cur_digest, str) or not cur_digest:
+                            raise ValueError("no current booted digest to validate snapshot")
                         if (
                             isinstance(snap_digest, str)
                             and snap_digest
-                            and isinstance(cur_digest, str)
-                            and cur_digest
                             and snap_digest != cur_digest
                         ):
                             raise ValueError("booted digest changed since snapshot")
                     except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
                         pass
                     else:
-                        self.result.emit(UpdateProbeResult.success("system", snapshot.system_state))
+                        detail = getattr(snapshot, "reason", "") or getattr(snapshot, "output", "")
+                        self.result.emit(UpdateProbeResult.success("system", snapshot.system_state, detail=str(detail)[:200]))
                         return
             result = check_registry_update(
                 status_data=bootc_status_data() or {},
