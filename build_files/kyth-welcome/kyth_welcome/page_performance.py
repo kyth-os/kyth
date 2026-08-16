@@ -1,6 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
-from .services.runtime import DataWorker
+from .services.runtime import DataWorker, guard_disposed
 from .services.sched import (
     apply_scheduler,
     is_sched_daemon_active,
@@ -188,7 +188,7 @@ class PerformancePage(Page):
             return
         worker = DataWorker("scheduler-list", list_schedulers)
         self._scheduler_list_worker = worker
-        worker.result.connect(lambda _key, schedulers: self._apply_scheduler_list(schedulers))
+        worker.result.connect(guard_disposed(lambda _key, schedulers: self._apply_scheduler_list(schedulers)))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_scheduler_list_worker", None))
         worker.finished.connect(worker.deleteLater)
@@ -215,8 +215,8 @@ class PerformancePage(Page):
                 pass
         worker = DataWorker("sched-status", read_sched_status)
         self._sched_status_worker = worker
-        worker.result.connect(lambda _k, status: self._apply_sched_status(status))
-        worker.failed.connect(lambda _k, msg: self._perf_profile_lbl.setText(f"check failed: {msg}"))
+        worker.result.connect(guard_disposed(lambda _k, status: self._apply_sched_status(status)))
+        worker.failed.connect(guard_disposed(lambda _k, msg: self._perf_profile_lbl.setText(f"check failed: {msg}")))
         worker.finished.connect(lambda: setattr(self, "_sched_status_worker", None))
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -254,7 +254,7 @@ class PerformancePage(Page):
             return
         worker = DataWorker("sched-daemon-active", is_sched_daemon_active)
         self._sched_daemon_worker = worker
-        worker.result.connect(lambda _key, active: self._apply_sched_daemon_state(bool(active)))
+        worker.result.connect(guard_disposed(lambda _key, active: self._apply_sched_daemon_state(bool(active))))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_sched_daemon_worker", None))
         worker.finished.connect(worker.deleteLater)
@@ -340,7 +340,7 @@ class PerformancePage(Page):
     def _toggle_ai_perf(self, state: int) -> None:
         # Must not block the GUI thread — systemctl --user can stall up to 10 s
         # under polkit or if the user service manager is busy.
-        from .services.runtime import DataWorker
+        from .services.runtime import DataWorker, release_worker_when_finished
 
         action = "enable" if state else "disable"
         desired = "enabled" if state else "disabled"
@@ -354,8 +354,9 @@ class PerformancePage(Page):
         self._ai_status_lbl.setText(f"AI: {desired}…")
         restyle(self._ai_status_lbl)
         w = DataWorker("ai-perf-toggle", _run)
-        w.result.connect(lambda _k, val: (self._ai_status_lbl.setText(f"AI: {val}"), restyle(self._ai_status_lbl)))
-        w.failed.connect(lambda _k, msg: (self._ai_status_lbl.setText(f"AI: failed — {msg}"), restyle(self._ai_status_lbl)))
+        w.result.connect(guard_disposed(lambda _k, val: (self._ai_status_lbl.setText(f"AI: {val}"), restyle(self._ai_status_lbl))))
+        w.failed.connect(guard_disposed(lambda _k, msg: (self._ai_status_lbl.setText(f"AI: failed — {msg}"), restyle(self._ai_status_lbl))))
+        release_worker_when_finished(self, "_ai_perf_toggle_worker", w)
         w.start()
 
     def _apply_ai_now(self) -> None:

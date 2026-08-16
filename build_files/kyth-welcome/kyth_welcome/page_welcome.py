@@ -174,9 +174,10 @@ class WelcomePage(Page):
         if self._ntfs_library_worker is not None:
             return
         from .services.gaming import DataWorker, _steam_libraries_on_ntfs
+        from .services.runtime import guard_disposed
 
         self._ntfs_library_worker = DataWorker("ntfs-libraries", _steam_libraries_on_ntfs)
-        self._ntfs_library_worker.result.connect(self._on_ntfs_library_warning_ready)
+        self._ntfs_library_worker.result.connect(guard_disposed(self._on_ntfs_library_warning_ready))
         self._ntfs_library_worker.failed.connect(lambda _k, _m: None)
         self._ntfs_library_worker.finished.connect(lambda: setattr(self, "_ntfs_library_worker", None))
         self._ntfs_library_worker.finished.connect(self._ntfs_library_worker.deleteLater)
@@ -244,10 +245,11 @@ class WelcomePage(Page):
         if self._status_worker is not None:
             return
         from .services.gaming import DataWorker
+        from .services.runtime import guard_disposed
 
         self._status_worker = DataWorker("welcome-status", self._gather_status_facts)
-        self._status_worker.result.connect(self._on_status_facts_ready)
-        self._status_worker.failed.connect(self._on_status_facts_failed)
+        self._status_worker.result.connect(guard_disposed(self._on_status_facts_ready))
+        self._status_worker.failed.connect(guard_disposed(self._on_status_facts_failed))
         self._status_worker.finished.connect(lambda: setattr(self, "_status_worker", None))
         self._status_worker.finished.connect(self._status_worker.deleteLater)
         self._status_worker.start()
@@ -265,10 +267,11 @@ class WelcomePage(Page):
         if self._ai_worker is not None:
             return
         from .services.gaming import DataWorker
+        from .services.runtime import guard_disposed
 
         self._ai_worker = DataWorker("welcome-ai-plan", self._gather_ai_plan)
-        self._ai_worker.result.connect(self._on_ai_plan_ready)
-        self._ai_worker.failed.connect(lambda _k, _m: self._ai_desc.setText("AI check failed"))
+        self._ai_worker.result.connect(guard_disposed(self._on_ai_plan_ready))
+        self._ai_worker.failed.connect(guard_disposed(lambda _k, _m: self._ai_desc.setText("AI check failed")))
         self._ai_worker.finished.connect(lambda: setattr(self, "_ai_worker", None))
         self._ai_worker.finished.connect(self._ai_worker.deleteLater)
         self._ai_worker.start()
@@ -491,14 +494,14 @@ class WelcomePage(Page):
         # Kick off NTFS scan off GUI thread (probe_cached 30s, never auto-mounts BitLocker)
         try:
             from .services.migration import _ntfs_user_dirs
-            from .services.runtime import DataWorker
+            from .services.runtime import DataWorker, guard_disposed
             # False positive: the hasattr() guard short-circuits before this
             # attribute read on the first call, when it doesn't exist yet.
             # pylint: disable-next=access-member-before-definition
             if not hasattr(self, "_win_dirs_worker") or self._win_dirs_worker is None:
                 w = DataWorker("win-user-dirs", _ntfs_user_dirs)
                 self._win_dirs_worker = w
-                w.result.connect(lambda _k, dirs: self._on_win_dirs_ready(dirs))
+                w.result.connect(guard_disposed(lambda _k, dirs: self._on_win_dirs_ready(dirs)))
                 w.failed.connect(lambda _k, _m: None)
                 w.finished.connect(lambda: setattr(self, "_win_dirs_worker", None))
                 w.finished.connect(w.deleteLater)
@@ -564,14 +567,15 @@ class WelcomePage(Page):
 
         from .services.gaming import DataWorker
         from .services.process import run_command
+        from .services.runtime import guard_disposed
 
         worker = DataWorker(
             "apply-role-preset",
             lambda: run_command(["/usr/bin/kyth-apply-role-preset", profile], timeout=20),
         )
         self._apply_preset_worker = worker
-        worker.result.connect(lambda _key, result: self._on_role_preset_result(result, profile))
-        worker.failed.connect(lambda _key, message: self._on_role_preset_result(None, profile, message))
+        worker.result.connect(guard_disposed(lambda _key, result: self._on_role_preset_result(result, profile)))
+        worker.failed.connect(guard_disposed(lambda _key, message: self._on_role_preset_result(None, profile, message)))
         worker.finished.connect(lambda: setattr(self, "_apply_preset_worker", None))
         worker.finished.connect(worker.deleteLater)
         worker.start()

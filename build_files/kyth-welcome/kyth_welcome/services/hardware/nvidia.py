@@ -44,15 +44,18 @@ def detect_nvidia_async(owner, on_result, *, attr: str = "_nvidia_probe_worker")
     _detect_nvidia() is already probe_cached, so this is about not blocking
     the *first* call — not about avoiding redundant subprocess calls.
     """
-    from ..runtime import DataWorker  # local: keep this module Qt-import-free at module scope
+    from ..runtime import DataWorker, guard_disposed  # local: keep this module Qt-import-free at module scope
 
     if getattr(owner, attr, None) is not None:
         return
     worker = DataWorker("detect-nvidia-async", _detect_nvidia)
     setattr(owner, attr, worker)
-    worker.result.connect(lambda _key, has_nvidia: on_result(bool(has_nvidia)))
+    # Guard on_result here, once, rather than trusting every caller to do it —
+    # this helper exists precisely so pages don't hand-roll DataWorker wiring.
+    worker.result.connect(guard_disposed(lambda _key, has_nvidia: on_result(bool(has_nvidia))))
     worker.failed.connect(lambda _key, _message: None)
     worker.finished.connect(lambda: setattr(owner, attr, None))
+    worker.finished.connect(worker.deleteLater)
     worker.start()
  # detect_nvidia_async
 

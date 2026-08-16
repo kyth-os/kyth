@@ -2,7 +2,7 @@ import os
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.plasma import _run_text, gpu_lspci_summary, kscreen_doctor_output
-from ..services.runtime import DataWorker
+from ..services.runtime import DataWorker, guard_disposed
 from ..qt import (
     QFrame, QHBoxLayout, QLabel, Qt,
 )
@@ -287,8 +287,8 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
             return
         worker = DataWorker("wayland-readiness", self._fetch_wayland_readiness_facts)
         self._wayland_readiness_worker = worker
-        worker.result.connect(lambda _key, facts: self._apply_wayland_readiness_facts(facts))
-        worker.failed.connect(lambda _k, msg: self._apply_wayland_readiness_facts({"Status": f"check failed: {msg}"}))
+        worker.result.connect(guard_disposed(lambda _key, facts: self._apply_wayland_readiness_facts(facts)))
+        worker.failed.connect(guard_disposed(lambda _k, msg: self._apply_wayland_readiness_facts({"Status": f"check failed: {msg}"})))
         worker.finished.connect(lambda: setattr(self, "_wayland_readiness_worker", None))
         worker.finished.connect(worker.deleteLater)
         worker.start()

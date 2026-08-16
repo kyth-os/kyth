@@ -10,7 +10,7 @@ from .services.hardware import detect_nvidia_async
 from .services.repair import _read_sys_text, quick_fixes, sleep_mode_label
 from .services.flatpak import _is_flatpak_installed
 from .services.privileged import systemctl_action
-from .services.runtime import DataWorker
+from .services.runtime import DataWorker, guard_disposed
 from .page_repair_assist import _AssistMixin
 from .page_repair_quick import _QuickFixMixin
 from .page_repair_reset import _ResetMixin
@@ -118,8 +118,10 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         if self._rollback_state_worker is not None:
             return
         self._rollback_state_worker = DataWorker("repair-rollback-state", self._fetch_rollback_state)
-        self._rollback_state_worker.result.connect(self._on_rollback_state_ready)
-        self._rollback_state_worker.failed.connect(lambda _k, _m: self._rollback_status_lbl.setText(f"Rollback check failed: {_m}") if hasattr(self, "_rollback_status_lbl") and self._rollback_status_lbl else None)
+        self._rollback_state_worker.result.connect(guard_disposed(self._on_rollback_state_ready))
+        self._rollback_state_worker.failed.connect(guard_disposed(
+            lambda _k, _m: self._rollback_status_lbl.setText(f"Rollback check failed: {_m}") if hasattr(self, "_rollback_status_lbl") and self._rollback_status_lbl else None
+        ))
         self._rollback_state_worker.finished.connect(lambda: setattr(self, "_rollback_state_worker", None))
         self._rollback_state_worker.finished.connect(self._rollback_state_worker.deleteLater)
         self._rollback_state_worker.start()
@@ -448,8 +450,8 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         try:
             from .services.backup import _pika_backup_summary
             w = DataWorker("pika-summary", _pika_backup_summary)
-            w.result.connect(lambda _k, data: self._on_backup_summary_ready(data))
-            w.failed.connect(lambda _k, _m: self._backup_status_lbl.setText("Backup status unavailable."))
+            w.result.connect(guard_disposed(lambda _k, data: self._on_backup_summary_ready(data)))
+            w.failed.connect(guard_disposed(lambda _k, _m: self._backup_status_lbl.setText("Backup status unavailable.")))
             w.finished.connect(lambda: setattr(self, "_backup_worker", None))
             w.finished.connect(w.deleteLater)
             w.start()

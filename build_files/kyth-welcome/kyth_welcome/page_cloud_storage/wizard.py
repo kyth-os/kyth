@@ -10,7 +10,7 @@ from ..services.cloud_sync import (
     rclone_usage_hints,
     rclone_verify_remote,
 )
-from ..services.runtime import DataWorker
+from ..services.runtime import DataWorker, guard_disposed
 from ..qt import (
     QDesktopServices, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QTextEdit, QUrl, QVBoxLayout, QWidget, Qt, Signal,
 )
@@ -402,8 +402,8 @@ class RcloneSetupWizard(QDialog):
         restyle(self._auth_status_lbl)
 
         self._auth_worker = RcloneAuthorizeWorker(self._selected_service)
-        self._auth_worker.token_ready.connect(self._on_auth_success)
-        self._auth_worker.failed.connect(self._on_auth_failed)
+        self._auth_worker.token_ready.connect(guard_disposed(self._on_auth_success))
+        self._auth_worker.failed.connect(guard_disposed(self._on_auth_failed))
         self._auth_worker.start()
 
     def _cancel_auth(self):
@@ -481,8 +481,8 @@ class RcloneSetupWizard(QDialog):
             "rclone-apply-config",
             lambda: _apply_rclone_config(name, svc, self._token, folder, extra_params),
         )
-        self._apply_worker.result.connect(self._on_apply_config_ready)
-        self._apply_worker.failed.connect(self._on_apply_config_failed)
+        self._apply_worker.result.connect(guard_disposed(self._on_apply_config_ready))
+        self._apply_worker.failed.connect(guard_disposed(self._on_apply_config_failed))
         self._apply_worker.finished.connect(lambda: setattr(self, "_apply_worker", None))
         self._apply_worker.finished.connect(self._apply_worker.deleteLater)
         self._apply_worker.start()

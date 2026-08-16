@@ -9,6 +9,7 @@ from .services.gaming import (
     _mangohud_installed, _proton_cachyos_version, _vkbasalt_installed
 )
 from .services.flatpak import _is_flatpak_installed
+from .services.runtime import guard_disposed
 from .services.workers.windows_migration import WindowsLibraryWorker
 from .qt import (
     QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget, Qt, single_shot
@@ -253,8 +254,8 @@ class GamingPage(Page):
             return
         worker = DataWorker(key, fn)
         self._data_workers[key] = worker
-        worker.result.connect(self._on_data_result)
-        worker.failed.connect(self._on_data_failed)
+        worker.result.connect(guard_disposed(self._on_data_result))
+        worker.failed.connect(guard_disposed(self._on_data_failed))
         worker.finished.connect(lambda k=key, w=worker: self._finish_data_worker(k, w))
         worker.start()
 
@@ -407,8 +408,8 @@ class GamingPage(Page):
             return
         worker = DataWorker("gaming-scx-status", lambda: command_stdout(["kyth-scx", "status"], timeout=5))
         self._scx_status_worker = worker
-        worker.result.connect(lambda _key, scx_status: self._apply_scx_status(scx_status))
-        worker.failed.connect(lambda _key, _message: self._apply_scx_status(""))
+        worker.result.connect(guard_disposed(lambda _key, scx_status: self._apply_scx_status(scx_status)))
+        worker.failed.connect(guard_disposed(lambda _key, _message: self._apply_scx_status("")))
         worker.finished.connect(lambda: setattr(self, "_scx_status_worker", None))
         worker.finished.connect(worker.deleteLater)
         worker.start()

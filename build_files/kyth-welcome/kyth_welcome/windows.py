@@ -186,7 +186,7 @@ class MainWindow(QMainWindow):
     def _refresh_mission_bar(self):
         if self._mission_worker is not None:
             return
-        from .services.runtime import DataWorker
+        from .services.runtime import DataWorker, guard_disposed
 
         def _gather():
             from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
@@ -212,7 +212,7 @@ class MainWindow(QMainWindow):
             return {"branch": branch, "staged": staged, "rollback": rollback, "portal": portal}
 
         self._mission_worker = DataWorker("mission-bar", _gather)
-        self._mission_worker.result.connect(self._on_mission_bar_ready)
+        self._mission_worker.result.connect(guard_disposed(self._on_mission_bar_ready))
         self._mission_worker.failed.connect(lambda _k, _m: None)
         self._mission_worker.finished.connect(lambda: setattr(self, "_mission_worker", None))
         self._mission_worker.finished.connect(self._mission_worker.deleteLater)
@@ -592,10 +592,10 @@ class MainWindow(QMainWindow):
         # _refresh_mission_bar, instead of blocking startup on the main thread.
         if self._sidebar_channel_worker is not None:
             return
-        from .services.runtime import DataWorker
+        from .services.runtime import DataWorker, guard_disposed
 
         self._sidebar_channel_worker = DataWorker("sidebar-channel", current_branch)
-        self._sidebar_channel_worker.result.connect(self._on_sidebar_channel_ready)
+        self._sidebar_channel_worker.result.connect(guard_disposed(self._on_sidebar_channel_ready))
         self._sidebar_channel_worker.failed.connect(lambda _k, _m: None)
         self._sidebar_channel_worker.finished.connect(lambda: setattr(self, "_sidebar_channel_worker", None))
         self._sidebar_channel_worker.finished.connect(self._sidebar_channel_worker.deleteLater)

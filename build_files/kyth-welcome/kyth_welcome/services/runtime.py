@@ -5,6 +5,7 @@ Domain services should not own thread base classes — import them from here.
 from __future__ import annotations
 
 import atexit
+import functools
 import logging
 import os
 import signal
@@ -12,6 +13,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from typing import Callable, TypeVar
 from weakref import ref
 
 from ..qt import QThread, Signal
@@ -497,6 +499,37 @@ def release_worker_when_finished(owner: object, attr: str, worker: QThread) -> N
 # S11: lifecycle standard — every DataWorker must pair
 # finished->setattr(None) + finished->deleteLater OR use release_worker_when_finished.
 # TelemetryWorker fixed in S5; audit grep: setAttr.*None.*deleteLater
+# S11b: that only prevents the worker from leaking — its result/failed slot
+# must separately be wrapped in guard_disposed() (below) if it touches a
+# widget, or a signal delivered after page teardown crashes on an
+# already-deleted Qt object. Audited/fixed across the app; grep for
+# ".result.connect(" / ".failed.connect(" without guard_disposed to check
+# any new call site follows this.
+
+_SlotT = TypeVar("_SlotT", bound=Callable)
+
+
+def guard_disposed(slot: _SlotT) -> _SlotT:
+    """Wrap a Qt slot connected to a background-worker signal (result/failed/
+    done) so a signal delivered after the receiving page was torn down —
+    window closed while the worker was still in flight, its queued signal
+    landing after close()/deleteLater() — no-ops instead of crashing on an
+    already-deleted wrapped Qt widget.
+
+    Every DataWorker/Worker result and failed handler that touches a widget
+    must connect through this (or otherwise guard against RuntimeError);
+    release_worker_when_finished only stops the *worker* from leaking, it
+    does not protect its callback from firing after teardown.
+    """
+
+    @functools.wraps(slot)
+    def _wrapped(*args, **kwargs):
+        try:
+            return slot(*args, **kwargs)
+        except RuntimeError:
+            return None
+
+    return _wrapped  # type: ignore[return-value]
 
 
 # R2: single ProbeWorker factory so callers don't hand-roll probe_cached

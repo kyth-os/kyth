@@ -23,7 +23,7 @@ from __future__ import annotations
 from ..core_base import IS_LIVE
 from ..services.process import command_stdout
 from ..services.bootc import current_branch, has_rollback_deployment, has_staged_update
-from ..services.runtime import DataWorker
+from ..services.runtime import DataWorker, guard_disposed
 from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives, _proton_cachyos_version
 from ..services.hardware import _detect_nvidia
@@ -239,7 +239,7 @@ class _MachineStepMixin:
             return
         worker = DataWorker("wizard-machine-facts", self._fetch_machine_facts)
         self._machine_facts_worker = worker
-        worker.result.connect(self._on_machine_facts_ready)
+        worker.result.connect(guard_disposed(self._on_machine_facts_ready))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_machine_facts_worker", None))
         worker.finished.connect(worker.deleteLater)
