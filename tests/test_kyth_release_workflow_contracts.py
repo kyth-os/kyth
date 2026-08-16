@@ -39,7 +39,14 @@ class ReleaseIdentityTests(unittest.TestCase):
 
 
 class WorkflowArtifactContracts(unittest.TestCase):
-    def test_iso_artifact_has_one_producer_and_matching_consumer(self):
+    def test_iso_artifact_has_one_producer_and_matching_consumers(self):
+        """One upload in build; every download resolves it from build's output.
+
+        Two consumers by design: the acceptance job boots the ISO, and publish
+        signs and ships it. Both must name the artifact through
+        needs.build.outputs so neither can drift onto a hardcoded name and
+        publish or accept a different ISO than the one that was built.
+        """
         workflow = (
             ROOT / ".github/workflows/build-live-iso.yml"
         ).read_text(encoding="utf-8")
@@ -47,9 +54,21 @@ class WorkflowArtifactContracts(unittest.TestCase):
         consumer = "\n          name: ${{ needs.build.outputs.artifact_name }}"
 
         self.assertEqual(workflow.count(producer), 1)
-        self.assertEqual(workflow.count(consumer), 1)
+        self.assertEqual(workflow.count(consumer), 2)
         self.assertIn("if-no-files-found: error", workflow)
         self.assertIn("retention-days: 7", workflow)
+
+    def test_publication_is_gated_on_acceptance(self):
+        """A failed VM acceptance must never reach the publish job."""
+        workflow = (
+            ROOT / ".github/workflows/build-live-iso.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("needs: [build, acceptance]", workflow)
+        self.assertIn("needs.acceptance.result == 'success'", workflow)
+        # Skipped is tolerated (emergency dispatch); failure never is.
+        self.assertIn("needs.acceptance.result == 'skipped'", workflow)
+        self.assertNotIn("needs.acceptance.result != 'failure'", workflow)
 
     def test_release_identity_is_generated_by_shared_script(self):
         workflow = (
