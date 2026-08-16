@@ -35,7 +35,7 @@ jobs:
     steps:
       - name: Verify Validation and CodeQL succeeded for SHA
         id: check
-        uses: actions/github-script@60a0d83039c74a4aee543a265c85639665335554 # v7.0.1
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             const eventName = context.eventName;
