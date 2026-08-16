@@ -44,6 +44,11 @@ class BootHealthState:
     rollout_ring: str = "follow-image"
     updated_at: int = 0
     quarantined: Mapping[str, QuarantineRecord] = field(default_factory=dict)
+    # Digest a rollback was already attempted for — set unconditionally
+    # (success or failure) the first time a digest crosses the quarantine
+    # threshold, so a rollback target that's itself unhealthy can never
+    # ping-pong back and forth with the digest that triggered it.
+    rollback_attempted_for: str = ""
 
     def invariants(self) -> list[str]:
         """S7: return list of violated invariants, [] if ok."""
@@ -262,6 +267,19 @@ def mark_healthy(
     )
 
 
+def note_rollback_attempted(
+    state: BootHealthState,
+    digest: str,
+    *,
+    now: int | None = None,
+) -> BootHealthState:
+    return replace(
+        state,
+        rollback_attempted_for=digest,
+        updated_at=int(time.time()) if now is None else now,
+    )
+
+
 def clear_quarantine(
     state: BootHealthState,
     digest: str,
@@ -374,6 +392,56 @@ def _state_summary(state: BootHealthState) -> str:
     )
 
 
+def _default_rollback_runner() -> tuple[int, str]:
+    import subprocess  # nosec B404 -- static argv below, no shell
+
+    result = subprocess.run(  # nosec B603 B607
+        ["/usr/bin/bootc", "rollback"], capture_output=True, text=True, timeout=60, check=False,
+    )
+    return result.returncode, (result.stderr or result.stdout or "").strip()
+
+
+def trigger_rollback_if_newly_quarantined(
+    coordinator,
+    before: BootHealthState,
+    updated: BootHealthState,
+    digest: str,
+    *,
+    run: Callable[[], tuple[int, str]] = _default_rollback_runner,
+) -> None:
+    """kyth-boot-health's own docstring promises "greenboot's retry and bootc
+    rollback machinery" handle a required check failing — but that promise
+    is grub2 boot_counter/grubenv specific. This image boots via
+    systemd-boot + composefs/UKI loader entries with no boot-counter suffix
+    and no grubenv, so nothing actually falls back to the previous
+    deployment; a digest that keeps failing its required checks just
+    reboots into itself forever (observed directly: 9 consecutive ~3min
+    boots with no self-recovery). Implement the fallback in software instead
+    of depending on bootloader-level counting this image doesn't have.
+
+    Fires at most once per digest (recorded via rollback_attempted_for
+    regardless of outcome) so a rollback target that's itself unhealthy can
+    bounce back to the digest that triggered this exactly once, never loop.
+    *coordinator* is a kyth_shared.update_coordinator.UpdateCoordinator,
+    untyped here to avoid importing it at module scope (it imports this
+    module too).
+    """
+    if digest not in updated.quarantined or digest in before.quarantined:
+        return  # not newly quarantined this call — already handled or n/a
+    if updated.rollback_attempted_for == digest:
+        return
+    coordinator.note_rollback_attempted(digest)
+    try:
+        returncode, detail = run()
+    except Exception as exc:
+        print(f"bootc rollback errored for quarantined digest {digest}: {exc}", file=sys.stderr)
+        return
+    if returncode == 0:
+        print(f"Rolled back from quarantined digest {digest} — takes effect next boot")
+    else:
+        print(f"bootc rollback failed for quarantined digest {digest}: {detail}", file=sys.stderr)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kyth-boot-health",
@@ -440,14 +508,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     # record-failure — atomic via coordinator (dedupes on boot_id internally)
     from .update_coordinator import UpdateCoordinator
 
+    coordinator = UpdateCoordinator(args.state)
+    before = coordinator.read()
     try:
-        updated = UpdateCoordinator(args.state).record_failure(
+        updated = coordinator.record_failure(
             digest, current_boot_id(), args.reason, threshold=max(1, args.threshold)
         )
     except ValueError as exc:
         print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
         return 1
     print(_state_summary(updated))
+    trigger_rollback_if_newly_quarantined(coordinator, before, updated, digest)
     return 0
 
 

@@ -18,6 +18,7 @@ from kyth_shared.boot_health import (  # noqa: E402
     clear_quarantine,
     image_ring,
     mark_healthy,
+    note_rollback_attempted,
     quarantine_reason,
     QuarantineRecord,
     read_state,
@@ -25,9 +26,11 @@ from kyth_shared.boot_health import (  # noqa: E402
     record_staged,
     required_checks,
     rollout_policy_reason,
+    trigger_rollback_if_newly_quarantined,
     write_state,
 )
 from kyth_shared.system.boot_runtime import RuntimeCheck  # noqa: E402
+from kyth_shared.update_coordinator import UpdateCoordinator  # noqa: E402
 from kyth_shared import safe_upgrade  # noqa: E402
 
 
@@ -112,6 +115,100 @@ class BootHealthStateTests(unittest.TestCase):
 
         self.assertNotIn(DIGEST, cleared.quarantined)
         self.assertEqual(cleared.status, "unhealthy")
+
+    def test_note_rollback_attempted_records_the_digest(self):
+        state = note_rollback_attempted(BootHealthState(), DIGEST, now=5)
+
+        self.assertEqual(state.rollback_attempted_for, DIGEST)
+        self.assertEqual(state.updated_at, 5)
+
+
+class RollbackTriggerTests(unittest.TestCase):
+    """No boot-counter/grubenv on this image's systemd-boot loader entries
+    means greenboot's own retry-then-rollback promise needs a software-side
+    implementation — see trigger_rollback_if_newly_quarantined's docstring.
+    """
+
+    def _quarantine(self, temp_dir: str) -> tuple[UpdateCoordinator, BootHealthState, BootHealthState]:
+        coordinator = UpdateCoordinator(pathlib.Path(temp_dir) / "boot-health.json")
+        before = coordinator.read()
+        for index in range(3):
+            updated = coordinator.record_failure(DIGEST, f"boot-{index}", "failed")
+        return coordinator, before, updated
+
+    def test_fires_exactly_once_when_newly_quarantined(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            coordinator, before, updated = self._quarantine(temp_dir)
+            self.assertIn(DIGEST, updated.quarantined)
+            calls = []
+
+            trigger_rollback_if_newly_quarantined(
+                coordinator, before, updated, DIGEST, run=lambda: calls.append(1) or (0, "")
+            )
+
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(coordinator.read().rollback_attempted_for, DIGEST)
+
+    def test_does_not_fire_when_already_quarantined_before_this_call(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            coordinator, _, updated = self._quarantine(temp_dir)
+            calls = []
+
+            # before == updated: digest was already quarantined, not new this call
+            trigger_rollback_if_newly_quarantined(
+                coordinator, updated, updated, DIGEST, run=lambda: calls.append(1) or (0, "")
+            )
+
+            self.assertEqual(calls, [])
+
+    def test_never_retries_the_same_digest_even_across_separate_calls(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            coordinator, before, updated = self._quarantine(temp_dir)
+            calls = []
+            run = lambda: calls.append(1) or (0, "")  # noqa: E731
+
+            trigger_rollback_if_newly_quarantined(coordinator, before, updated, DIGEST, run=run)
+            # Simulate a second red.d invocation for the same already-attempted
+            # digest (e.g. the rollback target is itself unhealthy and boots
+            # back into this digest) — must not ping-pong.
+            after_second = coordinator.read()
+            trigger_rollback_if_newly_quarantined(coordinator, before, after_second, DIGEST, run=run)
+
+            self.assertEqual(len(calls), 1)
+
+    def test_a_failing_rollback_is_still_recorded_and_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            coordinator, before, updated = self._quarantine(temp_dir)
+
+            trigger_rollback_if_newly_quarantined(
+                coordinator, before, updated, DIGEST, run=lambda: (1, "no rollback deployment")
+            )
+
+            self.assertEqual(coordinator.read().rollback_attempted_for, DIGEST)
+
+    def test_a_crashing_runner_is_still_recorded_and_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            coordinator, before, updated = self._quarantine(temp_dir)
+
+            def _boom():
+                raise OSError("bootc not found")
+
+            trigger_rollback_if_newly_quarantined(coordinator, before, updated, DIGEST, run=_boom)
+
+            self.assertEqual(coordinator.read().rollback_attempted_for, DIGEST)
+
+    def test_does_not_fire_for_a_digest_that_never_quarantined(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            coordinator = UpdateCoordinator(pathlib.Path(temp_dir) / "boot-health.json")
+            before = coordinator.read()
+            updated = coordinator.record_failure(DIGEST, "boot-1", "failed")
+            calls = []
+
+            trigger_rollback_if_newly_quarantined(
+                coordinator, before, updated, DIGEST, run=lambda: calls.append(1) or (0, "")
+            )
+
+            self.assertEqual(calls, [])
 
 
 class RolloutPolicyTests(unittest.TestCase):
@@ -336,6 +433,7 @@ class BootHealthPackagingTests(unittest.TestCase):
         states.append(record_failure(states[-1], DIGEST, "boot-1", "failed", now=2))
         states.append(record_failure(states[-1], DIGEST, "boot-2", "failed", now=3))
         states.append(record_failure(states[-1], DIGEST, "boot-3", "failed", now=4))  # quarantined
+        states.append(note_rollback_attempted(states[-1], DIGEST, now=5))
         states.append(mark_healthy(states[-1], DIGEST, now=5))
         states.append(clear_quarantine(states[-1], DIGEST, now=6))
         states.append(record_failure(states[-1], OTHER_DIGEST, "boot-9", "failed", now=7))
