@@ -35,7 +35,10 @@ class QualityContractsTests(unittest.TestCase):
         self.assertIn('download_and_verify "shellcheck"', installer)
 
     def test_critical_modules_have_explicit_thresholds(self):
-        gate = (ROOT / "build_files/scripts/check-critical-coverage.py").read_text()
+        # Floors are data (coverage-floors.json), not inline in the gate
+        # script — see check-critical-coverage.py's --update-floors, which
+        # ratchets them mechanically instead of requiring a hand-edit here.
+        gate = (ROOT / "build_files/config/coverage-floors.json").read_text()
         for module in (
             "installer_service.py",
             "recovery.py",
