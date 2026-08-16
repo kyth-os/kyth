@@ -1,5 +1,5 @@
 name: Build Live ISO
-run-name: "Build Live ISO - ${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }}"
+run-name: "Build Live ISO - ${{ inputs.source_tag || github.ref_name || 'testing' }}"
 
 on:
   # Separate from container build — ISO failures no longer hide successful
@@ -86,7 +86,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-live-iso-${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }}
+  group: build-live-iso-${{ inputs.source_tag || github.ref_name || 'testing' }}
   cancel-in-progress: true
 
 env:
@@ -94,7 +94,7 @@ env:
 
 jobs:
   build:
-    name: Build ISO (${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }})
+    name: Build ISO (${{ inputs.source_tag || github.ref_name || 'testing' }})
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -113,35 +113,21 @@ jobs:
       effective_tag: ${{ steps.effective.outputs.tag }}
 
     steps:
+      # workflow_call and workflow_dispatch both declare a defaulted
+      # source_tag, so inputs.source_tag is always set — there is no third
+      # trigger left that could leave it empty (the workflow_run listener
+      # that used to fall back to the triggering run's branch/sha is gone).
       - name: Resolve effective source tag
         id: effective
         env:
           INPUT_TAG: ${{ inputs.source_tag }}
           INPUT_SHA: ${{ inputs.source_sha }}
           INPUT_DIGEST: ${{ inputs.source_digest }}
-          WR_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          WR_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
-          if [[ -n "${INPUT_TAG}" ]]; then
-            TAG="${INPUT_TAG}"
-            SHA="${INPUT_SHA}"
-            DIGEST="${INPUT_DIGEST}"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
-            BRANCH="${WR_HEAD_BRANCH}"
-            if [[ "${BRANCH}" == "main" ]]; then TAG="latest"; else TAG="testing"; fi
-            SHA="${WR_HEAD_SHA}"
-            DIGEST=""
-          elif [[ -n "${REF_NAME}" && "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            if [[ "${REF_NAME}" == "main" ]]; then TAG="latest"; else TAG="testing"; fi
-            SHA=""
-            DIGEST=""
-          else
-            TAG="${INPUT_TAG:-testing}"
-            SHA="${INPUT_SHA}"
-            DIGEST="${INPUT_DIGEST}"
-          fi
+          TAG="${INPUT_TAG:-testing}"
+          SHA="${INPUT_SHA}"
+          DIGEST="${INPUT_DIGEST}"
           echo "tag=${TAG}" >&3
           echo "sha=${SHA}" >&3
           echo "digest=${DIGEST}" >&3
@@ -191,11 +177,11 @@ jobs:
       - name: Mount compressed Podman storage
         uses: ./.github/actions/setup-compressed-storage
 
-      # When called from build.yml, this run already carries the immutable
-      # build metadata artifact — use its digest so the ISO is built from the
-      # exact image this run published, not whatever the moving tag points to.
-      # Standalone workflow_dispatch/workflow_run/push runs have no such artifact
-      # and fall back to resolving the tag (workflow_run tries the triggering run first).
+      # finalize dispatches this workflow with an explicit source_digest, so
+      # in practice this step only ever runs for a manual workflow_dispatch
+      # that left source_digest blank — fall back to this run's own artifact
+      # (present when called via workflow_call) before resolving the moving
+      # tag downstream.
       - name: Load build metadata from this run
         id: build_metadata
         if: steps.effective.outputs.digest == ''
@@ -204,7 +190,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
           SOURCE_TAG: ${{ steps.effective.outputs.tag }}
           EFFECTIVE_DIGEST: ${{ steps.effective.outputs.digest }}
-          WR_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
           # Prefer an explicitly supplied digest (workflow_call)
@@ -223,20 +208,6 @@ jobs:
             echo "Pinned source digest from build metadata: ${DIGEST}"
             echo "digest=${DIGEST}" >&3
             exit 0
-          fi
-          # For workflow_run, try the triggering run's artifact (pinned digest)
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" && -n "${WR_RUN_ID:-}" ]]; then
-            if gh run download "${WR_RUN_ID}" \
-              -n "image-build-metadata-${SOURCE_TAG}" \
-              -D "${RUNNER_TEMP}/build-metadata-wr" 2>/dev/null; then
-              METADATA="${RUNNER_TEMP}/build-metadata-wr/image.json"
-              jq -e . "${METADATA}" >/dev/null
-              DIGEST="$(jq -r .digest "${METADATA}")"
-              build_files/scripts/validate-digest.sh "${DIGEST}"
-              echo "Pinned source digest from workflow_run ${WR_RUN_ID}: ${DIGEST}"
-              echo "digest=${DIGEST}" >&3
-              exit 0
-            fi
           fi
           echo "::notice::No image-build-metadata-${SOURCE_TAG} artifact in this run; the moving ${SOURCE_TAG} tag will be resolved instead"
 
