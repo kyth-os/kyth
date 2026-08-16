@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -256,6 +257,20 @@ class HardwarePolicySafetyTests(unittest.TestCase):
         self.assertIn("hardware-profiles.toml", install)
         self.assertNotIn("hw-setup-done", service)
         self.assertIn("kyth-hardware-policy apply --force", retry)
+
+    def test_service_timeout_survives_a_real_akmods_build(self):
+        """_configure_nvidia() shells out to `akmods --force` synchronously when
+        the module isn't already built for the running kernel -- exactly the
+        case right after a kernel bump, which the code/Hub UI both document as
+        5-15 minutes. TimeoutStartSec must clear that with real headroom or
+        systemd kills the build mid-way every time, silently skipping the
+        nvidia-suspend/resume/hibernate enablement that follows it and leaving
+        Wayland suspend broken until the user notices the failed unit.
+        """
+        service = (ROOT / "build_files/kyth-hw-setup.service").read_text()
+        match = re.search(r"^TimeoutStartSec=(\d+)$", service, re.MULTILINE)
+        self.assertIsNotNone(match, "kyth-hw-setup.service must set an explicit TimeoutStartSec")
+        self.assertGreaterEqual(int(match.group(1)), 900, "must clear the documented 15-minute akmods build")
 
     def test_blanket_power_and_driver_options_are_removed(self):
         migration = (ROOT / "build_files/scripts/branding/28-bootc-kernel-arguments-and-boot-splash.sh").read_text()

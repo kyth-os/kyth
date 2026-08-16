@@ -2,7 +2,9 @@
 Description=KythOS declarative hardware policy
 Documentation=https://github.com/mrtrick37/kyth
 # Run after filesystems and PCI devices are enumerated, but don't block SDDM —
-# akmods can take 5-15 min and we don't want to stall the first login screen.
+# WantedBy=multi-user.target (not Before=/Requires= on graphical.target) plus
+# Nice=10 + IOSchedulingClass=idle below already keep this off the login
+# screen's critical path, so the timeout only bounds this unit's own job.
 After=sysinit.target local-fs.target
 
 [Service]
@@ -19,7 +21,16 @@ ProtectClock=yes
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
-TimeoutStartSec=90
+# akmods can take 5-15 min to build the NVIDIA module on a fresh kernel (see
+# hardware_policy.py:_configure_nvidia and the Hub's own "5-15 minutes"
+# message in services/hardware/nvidia.py) — this used to be 90s, which
+# guaranteed systemd SIGTERM/SIGKILLed the build in exactly the one case
+# this unit exists to handle: a kernel bump. That silently skipped the
+# nvidia-suspend/resume/hibernate service-enable + grubby kernel-args steps
+# that run *after* the akmods call, leaving Wayland suspend broken until the
+# user noticed the failed unit and clicked "Retry Build" in the Hub by hand.
+# 20 min gives real headroom above the documented worst case.
+TimeoutStartSec=1200
 Nice=10
 IOSchedulingClass=idle
 
