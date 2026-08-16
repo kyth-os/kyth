@@ -1,5 +1,7 @@
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from kyth_shared.system.firmware import (
@@ -9,8 +11,11 @@ from kyth_shared.system.firmware import (
     firmware_updates_command,
     run_firmware_refresh,
     run_firmware_update,
+    stage_firmware_batch,
     stage_firmware_updates,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class FirmwareCommandsTests(unittest.TestCase):
@@ -105,6 +110,66 @@ class StageFirmwareUpdatesTests(unittest.TestCase):
             self.assertFalse(updated)
             self.assertEqual(count, 0)
             ru.assert_not_called()
+
+
+class StageFirmwareBatchTests(unittest.TestCase):
+    """stage_firmware_batch() is the thundering-herd guard: kyth-update-watcher,
+    kyth-full-update (via flock), and the Hub's firmware button all need to
+    agree on one /run/kyth-fwupd.lock so two callers never fwupdmgr-write the
+    same device concurrently.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self._lock_path = str(Path(self._tmpdir.name) / "fwupd.lock")
+
+    def test_contended_lock_skips_without_running_batch(self):
+        with patch("kyth_shared.system.firmware.stage_firmware_updates") as su, \
+             patch("fcntl.flock", side_effect=OSError):
+            updated, count, out = stage_firmware_batch(lock_path=self._lock_path)
+            self.assertFalse(updated)
+            self.assertEqual(count, 0)
+            self.assertEqual(out, "")
+            su.assert_not_called()
+
+    def test_acquired_lock_runs_batch(self):
+        with patch("kyth_shared.system.firmware.stage_firmware_updates", return_value=(True, 1, "queued")) as su:
+            updated, count, out = stage_firmware_batch(lock_path=self._lock_path)
+            self.assertTrue(updated)
+            self.assertEqual(count, 1)
+            self.assertEqual(out, "queued")
+            su.assert_called_once()
+
+    def test_default_lock_path_is_the_shared_run_path(self):
+        # Every caller (kyth-update-watcher, kyth-full-update, the Hub button)
+        # must resolve to this exact path or the lock does not actually
+        # serialize them against each other.
+        source = (ROOT / "build_files" / "kyth_shared" / "kyth_shared" / "system" / "firmware.py").read_text(encoding="utf-8")
+        self.assertIn('"/run/kyth-fwupd.lock"', source)
+
+
+class FwupdLockPreCreationTests(unittest.TestCase):
+    def test_tmpfiles_precreates_the_lock_world_readable(self):
+        """flock(2) only needs an open fd, not write access, but /run itself
+        is not world-writable for *creating* new files — so an unprivileged
+        caller (Hub button, kyth-full-update) can only flock the shared lock
+        if it already exists. Must be recreated every boot since /run is tmpfs.
+        """
+        source = (ROOT / "build_files" / "scripts" / "branding" / "27-performance-daemons.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/lib/tmpfiles.d/kyth-fwupd-lock.conf", source)
+        self.assertIn("f /run/kyth-fwupd.lock 0644 root root -", source)
+
+
+class FullUpdateAndHubUseTheSharedLockTests(unittest.TestCase):
+    def test_kyth_full_update_flocks_before_sudo_fwupdmgr(self):
+        source = (ROOT / "build_files" / "kyth-full-update").read_text(encoding="utf-8")
+        self.assertIn("flock -w 60 /run/kyth-fwupd.lock sudo -n /usr/bin/fwupdmgr refresh --force", source)
+        self.assertIn("flock -w 60 /run/kyth-fwupd.lock sudo -n /usr/bin/fwupdmgr update --assume-yes --no-reboot-check", source)
+
+    def test_hub_firmware_button_flocks_before_fwupdmgr_upgrade(self):
+        source = (ROOT / "build_files" / "kyth-welcome" / "kyth_welcome" / "page_update_firmware.py").read_text(encoding="utf-8")
+        self.assertIn('["flock", "-w", "60", "/run/kyth-fwupd.lock", "fwupdmgr", "upgrade", "--no-reboot-check"]', source)
 
 
 if __name__ == "__main__":

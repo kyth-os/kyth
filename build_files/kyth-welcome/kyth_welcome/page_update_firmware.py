@@ -108,9 +108,15 @@ class _FirmwareUpdateMixin:
                 self._fw_btn.show()
 
     def _run_firmware_update(self) -> None:
+        # flock around /run/kyth-fwupd.lock — the same lock
+        # kyth_shared.system.firmware.stage_firmware_batch() and
+        # kyth-full-update take — so a user clicking this button can't launch
+        # a second fwupdmgr write while kyth-update-watcher's timer is
+        # mid-flash on the same device. -w 60: wait for the watcher's own
+        # (usually sub-minute) run rather than silently racing it.
         self._start_operation(
             "firmware",
             "Updating firmware…",
-            ["fwupdmgr", "upgrade", "--no-reboot-check"],
+            ["flock", "-w", "60", "/run/kyth-fwupd.lock", "fwupdmgr", "upgrade", "--no-reboot-check"],
             "Firmware Update",
         )

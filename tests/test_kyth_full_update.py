@@ -28,6 +28,19 @@ class FullUpdateTests(unittest.TestCase):
         self.assertIn('run_step optional "Firmware upgrades"', source)
         self.assertIn('run_step optional "KythOS rclone"', source)
 
+    def test_firmware_steps_flock_the_shared_fwupd_lock(self):
+        """kyth-update-watcher's stage_firmware_batch() and the Hub's firmware
+        button both take /run/kyth-fwupd.lock — a manual `kyth-full-update`
+        run must take the same lock or it can fire a concurrent fwupdmgr
+        write against a device the watcher is mid-flashing on.
+        """
+        source = SCRIPT.read_text(encoding="utf-8")
+        for expected in (
+            'run_step optional "Firmware metadata" flock -w 60 /run/kyth-fwupd.lock sudo -n /usr/bin/fwupdmgr refresh --force',
+            'run_step optional "Firmware upgrades" flock -w 60 /run/kyth-fwupd.lock sudo -n /usr/bin/fwupdmgr update --assume-yes --no-reboot-check',
+        ):
+            self.assertIn(expected, source)
+
 
 if __name__ == "__main__":
     unittest.main()

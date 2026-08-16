@@ -39,8 +39,15 @@ run_step() {
 
 if command -v fwupdmgr >/dev/null 2>&1; then
 	# Shared fwupd commands — keep in sync with kyth_shared/system/firmware.py
-	run_step optional "Firmware metadata" sudo -n /usr/bin/fwupdmgr refresh --force
-	run_step optional "Firmware upgrades" sudo -n /usr/bin/fwupdmgr update --assume-yes --no-reboot-check
+	# flock around /run/kyth-fwupd.lock (same lock kyth-update-watcher's
+	# stage_firmware_batch() and the Hub's firmware-update button use) so a
+	# manual `kyth-full-update` run can't race the watcher timer and fire two
+	# concurrent fwupdmgr writes against the same device. -w 60: wait rather
+	# than fail outright, since the watcher's own steps are usually done well
+	# under a minute; if still contended after 60s, skip rather than block
+	# the rest of the update (this step is already "optional").
+	run_step optional "Firmware metadata" flock -w 60 /run/kyth-fwupd.lock sudo -n /usr/bin/fwupdmgr refresh --force
+	run_step optional "Firmware upgrades" flock -w 60 /run/kyth-fwupd.lock sudo -n /usr/bin/fwupdmgr update --assume-yes --no-reboot-check
 fi
 
 if command -v flatpak >/dev/null 2>&1; then

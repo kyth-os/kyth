@@ -13,6 +13,16 @@ install -m 0755 /ctx/kyth-update-watcher /usr/bin/kyth-update-watcher
 install -m 0644 /ctx/kyth-update-watcher.service /usr/lib/systemd/system/kyth-update-watcher.service
 install -m 0644 /ctx/kyth-update-watcher.timer /usr/lib/systemd/system/kyth-update-watcher.timer
 
+# Pre-create the fwupd cross-process lock (kyth_shared/system/firmware.py:
+# stage_firmware_batch, kyth-full-update, Hub's page_update_firmware flock
+# around it) so an unprivileged caller can flock(2) it too: flock only needs
+# an open fd, not write access, but /run itself is not world-writable for
+# *creating* new files, so the path must already exist before a non-root
+# process can open it. Recreated every boot since /run is tmpfs.
+install -m 0644 /dev/stdin /usr/lib/tmpfiles.d/kyth-fwupd-lock.conf <<'FWUPDLOCKEOF'
+f /run/kyth-fwupd.lock 0644 root root -
+FWUPDLOCKEOF
+
 # Declarative cgroup gaming slice — hash-gated, offline
 install -m 0644 /ctx/gaming.slice /usr/lib/systemd/system/gaming.slice
 
