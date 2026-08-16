@@ -3,7 +3,7 @@ from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QVBoxLayout,
 )
 from ..services.appstream import load_appstream_catalog
-from ..services.runtime import DataWorker
+from ..services.runtime import DataWorker, release_worker_when_finished
 from ..widgets import _make_card
 
 
@@ -55,6 +55,10 @@ class _StoreLandingMixin:
             worker = DataWorker("flatpak-appstream", load_appstream_catalog)
             worker.result.connect(lambda _k, cat: self._on_appstream_loaded(cat))
             worker.failed.connect(lambda _k, _e: self._on_appstream_loaded({}))
+            # S11: pair every DataWorker with release_worker_when_finished so
+            # the thread is tracked and released once done, not leaked past
+            # this call's scope.
+            release_worker_when_finished(self, "_fp_appstream_worker", worker)
             worker.start()
             # Render trending with fallback names immediately so user sees something
             catalog = {}
@@ -101,8 +105,14 @@ class _StoreLandingMixin:
     def _on_appstream_loaded(self, catalog: dict):
         self._fp_appstream_cache = catalog
         self._fp_catalog_loading = False
-        # Re-render landing with rich names now that catalog is cached
-        self._render_store_landing()
+        # Re-render landing with rich names now that catalog is cached. This
+        # is a queued signal from a background thread — the page can already
+        # be torn down (window closed while the catalog load was in flight)
+        # by the time it's delivered, leaving the wrapped Qt widgets deleted.
+        try:
+            self._render_store_landing()
+        except RuntimeError:
+            pass
 
     def _make_store_app_card(self, entry: dict) -> QFrame:
         app_id = entry.get("application_id", "").strip()

@@ -37,7 +37,8 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write # zizmor: ignore[excessive-permissions]
+  packages: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

@@ -2,48 +2,15 @@ name: Build container image
 on:
   schedule:
     - cron: '05 10 * * 0' # 10:05am UTC weekly on Sundays — rebuilds both :latest and :testing with fresh upstream packages
-  push:
-    branches:
-      - main
-      - testing
-    paths-ignore:
-      # Documentation and metadata — never land in the OCI image
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.gitignore'
-      # Tests and fuzzing — CI-only, not shipped in image
-      - 'tests/**'
-      - 'fuzz/**'
-      - '.clusterfuzzlite/**'
-      # Disk/ISO tooling — used by other workflows, not the OCI build
-      - 'disk_config/**'
-      - 'installer/**'
-      - 'Justfile'
-      # Agent/IDE — never land in OCI image, docs-only pushes shouldn't rebuild
-      - '.agents/**'
-      - '.vscode/**'
-      - '.tmp/**'
-      # GitHub metadata
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/pull_request_template.md'
-      - '.github/CODEOWNERS'
-      - '.github/renovate.json5'
-      - '.github/scripts/**'
-      # Sibling workflows — changes here don't affect image content.
-      # build.yml is intentionally excluded so workflow changes still trigger
-      # a build to validate the updated pipeline.
-      - '.github/workflows/build-live-iso.yml'
-      - '.github/workflows/codeql.yml'
-      - '.github/workflows/cve-scan.yml'
-      - '.github/workflows/fuzzing.yml'
-      - '.github/workflows/scorecard.yml'
-      - '.github/workflows/supply-chain.yml'
-      - '.github/workflows/validation.yml'
   workflow_dispatch:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["Validation", "CodeQL"]
+    types: [completed]
+    branches: [main, testing]
 
 permissions:
   contents: read
+  actions: read
 
 env:
   IMAGE_DESC: "Kyth — atomic gaming and dev workstation built on Fedora Kinoite"
@@ -53,12 +20,85 @@ env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"  # do not edit
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
+  gate:
+    name: Gate on Validation + CodeQL
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+      head_sha: ${{ steps.check.outputs.head_sha }}
+      head_branch: ${{ steps.check.outputs.head_branch }}
+    steps:
+      - name: Verify Validation and CodeQL succeeded for SHA
+        id: check
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const eventName = context.eventName;
+            // schedule / manual dispatch bypass the gate
+            if (eventName === 'schedule' || eventName === 'workflow_dispatch') {
+              core.setOutput('ok', 'true');
+              core.setOutput('head_sha', context.sha);
+              core.setOutput('head_branch', context.ref.replace('refs/heads/', ''));
+              return;
+            }
+            if (eventName !== 'workflow_run') {
+              core.setOutput('ok', 'false');
+              return;
+            }
+            const run = context.payload.workflow_run;
+            // Only branches we care about already filtered by on.branches,
+            // but ignore schedule-triggered runs to avoid duplicate scheduled builds
+            if (run.event === 'schedule') {
+              core.info(`Ignoring schedule-triggered ${run.name} run`);
+              core.setOutput('ok', 'false');
+              return;
+            }
+            if (run.conclusion !== 'success') {
+              core.info(`${run.name} concluded ${run.conclusion} — gating build`);
+              core.setOutput('ok', 'false');
+              return;
+            }
+            const headSha = run.head_sha;
+            const headBranch = run.head_branch;
+            core.setOutput('head_sha', headSha);
+            core.setOutput('head_branch', headBranch);
+            // Require both Validation and CodeQL to be successful for this SHA.
+            // The build is triggered twice (once per workflow); only the second
+            // to complete will see both as success and proceed.
+            const required = ['Validation', 'CodeQL'];
+            for (const wfName of required) {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: wfName === 'Validation' ? 'validation.yml' : 'codeql.yml',
+                head_sha: headSha,
+                per_page: 5,
+              });
+              const ok = runs.data.workflow_runs.some(r => r.conclusion === 'success' && r.head_branch === headBranch);
+              if (!ok) {
+                core.info(`Waiting for ${wfName} success on ${headSha} (${headBranch}) — not yet`);
+                core.setOutput('ok', 'false');
+                return;
+              }
+            }
+            core.info(`Both Validation and CodeQL succeeded for ${headSha} — proceeding`);
+            core.setOutput('ok', 'true');
+
   plan:
     name: Plan build matrix
+    needs: [gate]
+    if: needs.gate.outputs.ok == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       branches: ${{ steps.branches.outputs.branches }}
+      head_sha: ${{ needs.gate.outputs.head_sha }}
+      head_branch: ${{ needs.gate.outputs.head_branch }}
     steps:
       # Single source of truth for the schedule-builds-both-branches rule,
       # consumed by every job below that matrixes on branch. Previously this
@@ -69,10 +109,17 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          HEAD_BRANCH: ${{ needs.gate.outputs.head_branch }}
+          HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
           if [[ "${EVENT_NAME}" == schedule ]]; then
             echo 'branches=["main","testing"]' >&3
+          elif [[ "${EVENT_NAME}" == workflow_run && -n "${HEAD_BRANCH}" ]]; then
+            # Gated via Validation/CodeQL — build the exact branch that was validated
+            # (workflow_run's head_branch, not the default branch)
+            echo "branches=[\"${HEAD_BRANCH}\"]" >&3
+            echo "head_sha=${HEAD_SHA}" >&3 || true
           else
             echo "branches=[\"${REF_NAME}\"]" >&3
           fi
@@ -91,7 +138,7 @@ jobs:
     # One slot per branch — prevents a scheduled run and a push from racing on the same tag.
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.branch }}-${{ matrix.kernel_flavor }}
-      cancel-in-progress: ${{ github.event_name == 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
     strategy:
       fail-fast: false
@@ -108,7 +155,7 @@ jobs:
         id: prep
         env:
           MATRIX_BRANCH: ${{ matrix.branch }}
-        run: |
+        run: | # zizmor: ignore[github-env]
           exec 3>>"${GITHUB_OUTPUT}"
           exec 4>>"${GITHUB_ENV}"
           [[ "${MATRIX_BRANCH}" == main || "${MATRIX_BRANCH}" == testing ]]
@@ -121,7 +168,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ matrix.branch }}
+          # For gated workflow_run, check out the exact SHA that Validation/CodeQL
+          # approved; otherwise fall back to the branch tip (schedule/dispatch)
+          ref: ${{ needs.plan.outputs.head_sha || matrix.branch }}
           persist-credentials: false
 
       # Local composite actions resolve from the checked-out working tree, so
@@ -249,7 +298,9 @@ jobs:
             --build-arg BASE_IMAGE="${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}" \
             --build-arg KYTH_KERNEL_FLAVOR="${MATRIX_KERNEL_FLAVOR}" \
             --build-arg CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VERSION}" \
+            --cache-from "type=gha,scope=base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}" \
             --cache-from "type=registry,ref=${BASE_CACHE_REF}" \
+            --cache-to "type=gha,scope=base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR},mode=max" \
             --cache-to "type=registry,ref=${BASE_CACHE_REF},mode=max" \
             --tag "${BASE_IMAGE_REF}" \
             --metadata-file "${RUNNER_TEMP}/base-build-metadata.json" \
@@ -334,7 +385,9 @@ jobs:
             --build-arg ENABLE_KSM=0 \
             --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
             --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
+            --cache-from "type=gha,scope=final-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}" \
             --cache-from "type=registry,ref=${FINAL_CACHE_REF}" \
+            --cache-to "type=gha,scope=final-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR},mode=max" \
             --cache-to "type=registry,ref=${FINAL_CACHE_REF},mode=max" \
             --tag "${RAW_IMAGE_REF}" \
             "${LABEL_ARGS[@]}" \
@@ -473,9 +526,10 @@ jobs:
           set -euo pipefail
           PRIMARY_REF="${IMAGE_FULL}:${PRIMARY_TAG}"
           SKOPEO_COMPRESSION_ARGS=(
-            --dest-compress-format zstd
+            --dest-compress-format zstd:chunked
             --dest-compress-level 3
           )
+          export ZSTD_NBTHREADS="$(nproc)"
           SKOPEO_COPY_HELP="$(skopeo copy --help)"
           if [[ "${SKOPEO_COPY_HELP}" == *"--dest-force-compress-format"* ]]; then
             SKOPEO_COMPRESSION_ARGS+=(--dest-force-compress-format)
@@ -576,38 +630,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  build_live_iso:
-    name: Build Live ISO (${{ matrix.branch == 'main' && 'latest' || matrix.branch }})
-    needs: [plan, build_push]
-    if: ${{ github.event_name != 'pull_request' && needs.build_push.result == 'success' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        branch: ${{ fromJSON(needs.plan.outputs.branches) }}
-    uses: ./.github/workflows/build-live-iso.yml
-    with:
-      # The live ISO is built from the Fedora variant only — it must boot the
-      # signed Fedora kernel for Secure Boot. CachyOS is an opt-in bootc switch
-      # on the installed system, not in the live environment.
-      source_tag: ${{ matrix.branch == 'main' && 'latest' || matrix.branch }}
-      source_digest: ""
-      source_sha: ${{ github.event_name != 'schedule' && github.sha || '' }}
-    secrets:
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
-    permissions:
-      actions: read
-      contents: write
-      packages: read
-      id-token: write
-      attestations: write
-
   finalize:
     name: Attest and dispatch (${{ matrix.branch }}, ${{ matrix.kernel_flavor }})
     needs: [plan, build_push]
-    if: needs.build_push.result == 'success'
+    if: ${{ always() && !cancelled() && needs.build_push.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -705,3 +731,24 @@ jobs:
             --field "source_github_sha=${SOURCE_GITHUB_SHA}" \
             --field "original_event=${ORIGINAL_EVENT}" \
             --field "original_actor=${ORIGINAL_ACTOR}"
+
+      # Live ISO is dispatched explicitly with the pinned Fedora digest so it
+      # runs automatically after the Fedora container build succeeds — independent
+      # of the cachy flavor outcome (workflow_run overall success would otherwise
+      # block ISO when cachy fails due to fail-fast: false + aggregate result).
+      - name: Dispatch Live ISO
+        if: matrix.kernel_flavor == 'fedora'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          MATRIX_BRANCH: ${{ matrix.branch }}
+          SOURCE_TAG: ${{ steps.prep.outputs.tag }}
+          SOURCE_DIGEST: ${{ steps.image.outputs.digest }}
+          SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
+        run: |
+          gh workflow run build-live-iso.yml \
+            --ref "${MATRIX_BRANCH}" \
+            --field "source_tag=${SOURCE_TAG}" \
+            --field "source_digest=${SOURCE_DIGEST}" \
+            --field "source_sha=${SOURCE_SHA}" \
+            --field "run_acceptance=true"

@@ -1,6 +1,6 @@
 import shlex
 from kyth_shared.commands import ujust_command
-from .core_base import restyle
+from .core_base import replace_clicked_handler, restyle
 from .actions import _install_flatpak_inline, _open_chromium_webapp
 from .services.flatpak import _is_flatpak_installed
 from .services.software import find_familiar_app_match
@@ -408,11 +408,8 @@ class _StarterPackTabMixin:
         self._familiar_result.setText(f"{name}: {desc}")
         if app_id:
             self._familiar_install_btn.setText(f"Install {name.split('/')[0].strip()}")
-            try:
-                self._familiar_install_btn.clicked.disconnect()
-            except (RuntimeError, TypeError):
-                pass
-            self._familiar_install_btn.clicked.connect(
+            replace_clicked_handler(
+                self._familiar_install_btn,
                 lambda _=False, aid=app_id, n=name: self._install_familiar_app(aid, n)
             )
             self._familiar_install_btn.show()

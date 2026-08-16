@@ -86,7 +86,8 @@ def recent_sessions(limit: int = 15) -> list[SessionRow]:
         return []
     latency_map = _load_latency_map()
     try:
-        with sqlite3.connect(str(db_path), timeout=3) as conn:
+        conn = sqlite3.connect(str(db_path), timeout=3)
+        try:
             # Try extended schema first, fallback to legacy
             try:
                 rows = conn.execute(
@@ -104,6 +105,8 @@ def recent_sessions(limit: int = 15) -> list[SessionRow]:
                     (limit,),
                 ).fetchall()
                 has_lat = False
+        finally:
+            conn.close()
     except Exception:
         return []
 

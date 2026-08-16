@@ -1,7 +1,14 @@
 name: Build Live ISO
-run-name: "Build Live ISO - ${{ inputs.source_tag }}"
+run-name: "Build Live ISO - ${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }}"
 
 on:
+  # Separate from container build — ISO failures no longer hide successful
+  # container publishes. Container workflow calls this via workflow_call with
+  # a pinned digest; workflow_run provides the independent retry path.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["Build container image"]
+    types: [completed]
+    branches: [main, testing]
   workflow_call:
     inputs:
       source_tag:
@@ -21,6 +28,14 @@ on:
         required: false
         type: string
         default: ""
+      run_acceptance:
+        description: >
+          Gate publication on the unattended VM acceptance run (live boot →
+          install → installed boot). Leave enabled; disabling publishes an ISO
+          that has never been proven to boot.
+        required: false
+        type: boolean
+        default: true
     secrets:
       R2_ACCESS_KEY_ID:
         required: true
@@ -51,12 +66,23 @@ on:
         description: Source commit matching source_digest
         required: false
         type: string
+      run_acceptance:
+        description: Gate publication on the unattended VM acceptance run
+        required: false
+        type: boolean
+        default: true
+      update_ref:
+        description: >
+          Optional second image ref. When set, acceptance also proves staged
+          update activation and rollback across reboots.
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-live-iso-${{ inputs.source_tag }}
+  group: build-live-iso-${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }}
   cancel-in-progress: true
 
 env:
@@ -64,7 +90,13 @@ env:
 
 jobs:
   build:
-    name: Build ISO (${{ inputs.source_tag }})
+    name: Build ISO (${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }})
+    # The primary trigger is the explicit workflow_dispatch fired by build.yml's
+    # finalize job once the Fedora image actually publishes (pinned digest).
+    # workflow_run is only a best-effort retry path for that dispatch failing —
+    # without this gate it fires unconditionally, including when the container
+    # build itself failed, and tries to build an ISO with no image to source.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -80,18 +112,53 @@ jobs:
       immutable_tag: ${{ steps.release.outputs.immutable_tag }}
       source_image: ${{ steps.source_image.outputs.name }}
       source_digest: ${{ steps.source_image.outputs.digest }}
+      effective_tag: ${{ steps.effective.outputs.tag }}
 
     steps:
+      - name: Resolve effective source tag
+        id: effective
+        env:
+          INPUT_TAG: ${{ inputs.source_tag }}
+          INPUT_SHA: ${{ inputs.source_sha }}
+          INPUT_DIGEST: ${{ inputs.source_digest }}
+          WR_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WR_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          exec 3>>"${GITHUB_OUTPUT}"
+          if [[ -n "${INPUT_TAG}" ]]; then
+            TAG="${INPUT_TAG}"
+            SHA="${INPUT_SHA}"
+            DIGEST="${INPUT_DIGEST}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+            BRANCH="${WR_HEAD_BRANCH}"
+            if [[ "${BRANCH}" == "main" ]]; then TAG="latest"; else TAG="testing"; fi
+            SHA="${WR_HEAD_SHA}"
+            DIGEST=""
+          elif [[ -n "${REF_NAME}" && "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            if [[ "${REF_NAME}" == "main" ]]; then TAG="latest"; else TAG="testing"; fi
+            SHA=""
+            DIGEST=""
+          else
+            TAG="${INPUT_TAG:-testing}"
+            SHA="${INPUT_SHA}"
+            DIGEST="${INPUT_DIGEST}"
+          fi
+          echo "tag=${TAG}" >&3
+          echo "sha=${SHA}" >&3
+          echo "digest=${DIGEST}" >&3
+          echo "Effective source tag=${TAG} sha=${SHA:0:8} digest=${DIGEST:0:12}" >&2
+
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ inputs.source_sha || (startsWith(inputs.source_tag, 'testing') && 'testing' || 'main') }}
+          ref: ${{ steps.effective.outputs.sha || (startsWith(steps.effective.outputs.tag, 'testing') && 'testing' || 'main') }}
           persist-credentials: false
 
       - name: Prepare immutable release identity
         id: release
         env:
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
         run: |
           python3 build_files/scripts/release_identity.py \
             --source-tag "${SOURCE_TAG}" \
@@ -129,36 +196,58 @@ jobs:
       # When called from build.yml, this run already carries the immutable
       # build metadata artifact — use its digest so the ISO is built from the
       # exact image this run published, not whatever the moving tag points to.
-      # Standalone workflow_dispatch runs have no such artifact and fall back
-      # to resolving the tag.
+      # Standalone workflow_dispatch/workflow_run/push runs have no such artifact
+      # and fall back to resolving the tag (workflow_run tries the triggering run first).
       - name: Load build metadata from this run
         id: build_metadata
-        if: inputs.source_digest == ''
+        if: steps.effective.outputs.digest == ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
+          EFFECTIVE_DIGEST: ${{ steps.effective.outputs.digest }}
+          WR_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
-          if ! gh run download "${GITHUB_RUN_ID}" \
-            -n "image-build-metadata-${SOURCE_TAG}" \
-            -D "${RUNNER_TEMP}/build-metadata" 2>/dev/null; then
-            echo "::notice::No image-build-metadata-${SOURCE_TAG} artifact in this run; the moving ${SOURCE_TAG} tag will be resolved instead"
+          # Prefer an explicitly supplied digest (workflow_call)
+          if [[ -n "${EFFECTIVE_DIGEST}" ]]; then
+            echo "digest=${EFFECTIVE_DIGEST}" >&3
             exit 0
           fi
-          METADATA="${RUNNER_TEMP}/build-metadata/image.json"
-          jq -e . "${METADATA}" >/dev/null
-          DIGEST="$(jq -r .digest "${METADATA}")"
-          build_files/scripts/validate-digest.sh "${DIGEST}"
-          echo "Pinned source digest from build metadata: ${DIGEST}"
-          echo "digest=${DIGEST}" >&3
+          # Try current run's artifact (workflow_call from build.yml)
+          if gh run download "${GITHUB_RUN_ID}" \
+            -n "image-build-metadata-${SOURCE_TAG}" \
+            -D "${RUNNER_TEMP}/build-metadata" 2>/dev/null; then
+            METADATA="${RUNNER_TEMP}/build-metadata/image.json"
+            jq -e . "${METADATA}" >/dev/null
+            DIGEST="$(jq -r .digest "${METADATA}")"
+            build_files/scripts/validate-digest.sh "${DIGEST}"
+            echo "Pinned source digest from build metadata: ${DIGEST}"
+            echo "digest=${DIGEST}" >&3
+            exit 0
+          fi
+          # For workflow_run, try the triggering run's artifact (pinned digest)
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" && -n "${WR_RUN_ID:-}" ]]; then
+            if gh run download "${WR_RUN_ID}" \
+              -n "image-build-metadata-${SOURCE_TAG}" \
+              -D "${RUNNER_TEMP}/build-metadata-wr" 2>/dev/null; then
+              METADATA="${RUNNER_TEMP}/build-metadata-wr/image.json"
+              jq -e . "${METADATA}" >/dev/null
+              DIGEST="$(jq -r .digest "${METADATA}")"
+              build_files/scripts/validate-digest.sh "${DIGEST}"
+              echo "Pinned source digest from workflow_run ${WR_RUN_ID}: ${DIGEST}"
+              echo "digest=${DIGEST}" >&3
+              exit 0
+            fi
+          fi
+          echo "::notice::No image-build-metadata-${SOURCE_TAG} artifact in this run; the moving ${SOURCE_TAG} tag will be resolved instead"
 
       - name: Resolve source image digest
         id: source_image
         uses: ./.github/actions/fetch-image-metadata
         with:
-          image-tag: ${{ inputs.source_tag }}
-          expected-digest: ${{ inputs.source_digest || steps.build_metadata.outputs.digest }}
+          image-tag: ${{ steps.effective.outputs.tag }}
+          expected-digest: ${{ steps.effective.outputs.digest || steps.build_metadata.outputs.digest }}
 
       - name: Verify source image revision matches checkout
         env:
@@ -172,9 +261,14 @@ jobs:
 
       - name: Build live payload container
         env:
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
           SOURCE_IMAGE_PINNED: ${{ steps.source_image.outputs.pinned }}
         run: |
+          # No registry cache — podman/buildah cache syntax is incompatible
+          # with buildx type=registry (and bare tagged refs are rejected by
+          # newer podman as "must contain neither tag nor digest"). Keep the
+          # build hermetic; re-add cache only with --layers + untagged cache
+          # repo or a docker-buildx payload step.
           sudo podman build \
             --cap-add SYS_ADMIN \
             --security-opt label=disable \
@@ -198,7 +292,7 @@ jobs:
         uses: Zeglius/titanoboa@7737f4748458252ac827dca14b3d6dd09298472a
         with:
           image-ref: localhost/payload:latest
-          iso-dest: ${{ runner.temp }}/kyth-live-${{ inputs.source_tag }}.iso
+          iso-dest: ${{ runner.temp }}/kyth-live-${{ steps.effective.outputs.tag }}.iso
 
       - name: Report disk usage after ISO build
         run: |
@@ -207,7 +301,7 @@ jobs:
           du -h "${RUNNER_TEMP}/kyth-live-${SOURCE_TAG}.iso"
         env:
           RUNNER_TEMP: ${{ runner.temp }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
 
       - name: Move and verify ISO
         run: |
@@ -220,7 +314,7 @@ jobs:
           echo "==> Built $(du -h "${ISO}" | cut -f1) ISO: ${ISO}"
         env:
           RUNNER_TEMP: ${{ runner.temp }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
           STEPS_RELEASE_OUTPUTS_ISO_BASENAME: ${{ steps.release.outputs.iso_basename }}
 
       - name: Generate ISO checksums
@@ -243,16 +337,148 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  publish:
-    name: Publish ISO (${{ inputs.source_tag }})
+  acceptance:
+    name: VM acceptance (${{ inputs.source_tag || needs.build.outputs.effective_tag }})
     needs: build
+    # Default true from both entry points. A maintainer can dispatch with this
+    # off to ship an emergency ISO, which is why publish tolerates a *skipped*
+    # acceptance but never a failed one.
+    if: ${{ inputs.run_acceptance }}
+    runs-on: ubuntu-latest
+    # The script's own budget is 90m; the extra headroom covers artifact
+    # download, QEMU install, and log upload on a cold runner.
+    timeout-minutes: 150
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.build.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Free disk space
+        # The installed guest writes into a 64 GiB qcow2 alongside a ~7 GiB
+        # ISO, and /, /mnt and the container stores all share /dev/root here.
+        uses: ./.github/actions/free-disk-space
+        with:
+          report: 'true'
+          extra-docker-cleanup: 'true'
+
+      - name: Cache apt (acceptance)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-acceptance-${{ hashFiles('.github/workflows/build-live-iso.yml') }}
+
+      - name: Install QEMU acceptance dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            qemu-system-x86 qemu-utils ovmf socat
+
+      - name: Grant runner access to /dev/kvm
+        # Hosted Linux runners expose KVM but leave the node owned by root:kvm
+        # with no runner membership; the static_node rule is what makes it
+        # usable without a re-login. vm-acceptance.sh hard-refuses TCG because
+        # a full desktop install never finishes under emulation.
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            echo "::error::/dev/kvm is not usable on this runner; acceptance cannot run" >&2
+            exit 1
+          fi
+          echo "KVM available: $(ls -l /dev/kvm)"
+
+      - name: Prepare acceptance workspace
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /mnt/kyth-acceptance/iso /mnt/kyth-acceptance/artifacts
+          sudo chown -R "$(id -u):$(id -g)" /mnt/kyth-acceptance
+          df -h / /mnt
+
+      - name: Download built ISO
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: /mnt/kyth-acceptance/iso
+
+      - name: Verify transferred ISO
+        env:
+          ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
+        run: |
+          set -euo pipefail
+          cd /mnt/kyth-acceptance/iso
+          test -s "${ISO_BASENAME}"
+          sha256sum --check --strict "${ISO_BASENAME}-CHECKSUM"
+
+      - name: Run unattended VM acceptance
+        env:
+          ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
+          UPDATE_REF: ${{ inputs.update_ref }}
+        run: |
+          set -euo pipefail
+          args=(
+            --iso "/mnt/kyth-acceptance/iso/${ISO_BASENAME}"
+            --artifacts /mnt/kyth-acceptance/artifacts
+            --timeout-minutes 90
+          )
+          if [[ -n "${UPDATE_REF}" ]]; then
+            args+=(--update-ref "${UPDATE_REF}")
+          fi
+          build_files/scripts/vm-acceptance.sh "${args[@]}"
+
+      - name: Upload acceptance artifacts
+        # Uploaded on failure too — the serial log and phase screendumps are
+        # the only forensics for a guest that never reached a sentinel.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vm-acceptance-${{ inputs.source_tag || needs.build.outputs.effective_tag }}-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            /mnt/kyth-acceptance/artifacts/serial.log
+            /mnt/kyth-acceptance/artifacts/qemu.log
+            /mnt/kyth-acceptance/artifacts/qualification.json
+            /mnt/kyth-acceptance/artifacts/qualification.md
+            /mnt/kyth-acceptance/artifacts/*.ppm
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Publish acceptance summary
+        if: always()
+        run: |
+          set -euo pipefail
+          REPORT=/mnt/kyth-acceptance/artifacts/qualification.md
+          if [[ -s "${REPORT}" ]]; then
+            cat "${REPORT}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "No qualification report produced; see uploaded serial.log." \
+              >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+  publish:
+    name: Publish ISO (${{ inputs.source_tag || needs.build.outputs.effective_tag }})
+    needs: [build, acceptance]
+    # A skipped acceptance (emergency dispatch) still publishes; a failed or
+    # cancelled one must not.
+    if: >-
+      ${{ !cancelled()
+      && needs.build.result == 'success'
+      && (needs.acceptance.result == 'success' || needs.acceptance.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # As a reusable workflow this sees the caller's github context: stable
     # publishes from scheduled rebuilds or the repository owner (push or
     # manual dispatch) skip the approval gate via stable-release-auto; only
     # builds triggered by anyone else keep the manual gate on stable-release.
-    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || (github.event_name == 'schedule' || github.actor == github.repository_owner) && 'stable-release-auto' || 'stable-release' }}
+    environment: ${{ (inputs.source_tag || needs.build.outputs.effective_tag) == 'testing' && 'testing-release' || (github.event_name == 'schedule' || github.actor == github.repository_owner) && 'stable-release-auto' || 'stable-release' }}
     permissions:
       actions: read
       contents: write
@@ -308,7 +534,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
           IMMUTABLE_TAG: ${{ needs.build.outputs.immutable_tag }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
@@ -359,7 +585,7 @@ jobs:
         id: iso_changelog
         env:
           GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
           SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
           SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
           SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
@@ -414,7 +640,7 @@ jobs:
 
       - name: Generate signed release metadata
         env:
-          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
           ATTESTATION_URL: ${{ steps.attest_iso.outputs.attestation-url }}
           ATTESTATION_BUNDLE_PATH: ${{ steps.attest_iso.outputs.bundle-path }}
           ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
@@ -465,8 +691,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
-          CHANNEL_TAG: ${{ inputs.source_tag == 'testing' && 'iso-testing' || 'iso-latest' }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
+          CHANNEL_TAG: ${{ (inputs.source_tag || needs.build.outputs.effective_tag) == 'testing' && 'iso-testing' || 'iso-latest' }}
           IMMUTABLE_TAG: ${{ needs.build.outputs.immutable_tag }}
           RELEASE_ID: ${{ needs.build.outputs.release_id }}
           SOURCE_SHA: ${{ needs.build.outputs.source_sha }}

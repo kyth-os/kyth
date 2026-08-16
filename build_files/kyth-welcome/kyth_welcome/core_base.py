@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections.abc import Callable
+from typing import Any
 
 from kyth_welcome.services.command import run_sync
 from kyth_welcome.services.process import is_live_session, run_command
@@ -27,6 +29,18 @@ SMB_CREDS_DIR = "/etc/kyth-smb-creds"
 
 
 IS_LIVE = is_live_session()
+
+
+def replace_clicked_handler(button: Any, handler: Callable[..., Any]) -> None:
+    """Replace only the click handler previously installed through this helper."""
+    previous = getattr(button, "_kyth_clicked_handler", None)
+    if previous is not None:
+        try:
+            button.clicked.disconnect(previous)
+        except (RuntimeError, TypeError):
+            pass
+    button.clicked.connect(handler)
+    button._kyth_clicked_handler = handler
 
 
 def prefer_xwayland_if_wayland_plugin_missing() -> None:
