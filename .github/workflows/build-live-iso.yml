@@ -91,6 +91,12 @@ env:
 jobs:
   build:
     name: Build ISO (${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }})
+    # The primary trigger is the explicit workflow_dispatch fired by build.yml's
+    # finalize job once the Fedora image actually publishes (pinned digest).
+    # workflow_run is only a best-effort retry path for that dispatch failing —
+    # without this gate it fires unconditionally, including when the container
+    # build itself failed, and tries to build an ISO with no image to source.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
