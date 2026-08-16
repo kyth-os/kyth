@@ -144,6 +144,19 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn("check_firstboot_app_status", body)
         self.assertTrue(body.rstrip().endswith("main()"))
 
+    def test_coredump_size_is_capped(self):
+        """Nothing else bounds systemd-coredump — a crash-looping game/Proton
+        process under gaming.slice can otherwise dump unbounded cores until
+        /var fills, cascading into unrelated journald/D-Bus/sddm failures
+        that look like random instability rather than a full disk.
+        """
+        path = FRAG_DIR / "systemd" / "29-coredump-size-cap.sh"
+        self.assertTrue(path.is_file())
+        body = path.read_text(encoding="utf-8")
+        self.assertIn("/etc/systemd/coredump.conf.d/99-kyth.conf", body)
+        for expected in ("ProcessSizeMax=", "ExternalSizeMax=", "MaxUse=", "KeepFree="):
+            self.assertIn(expected, body)
+
 
 class ConfigHelperTests(unittest.TestCase):
     HELPER = SCRIPTS / "lib" / "config-helpers.sh"
