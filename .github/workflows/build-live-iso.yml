@@ -4,21 +4,11 @@ run-name: "Build Live ISO - ${{ inputs.source_tag || github.event.workflow_run.h
 on:
   # Separate from container build — ISO failures no longer hide successful
   # container publishes. Container workflow calls this via workflow_call with
-  # a pinned digest; workflow_run provides the independent retry path and
-  # push covers installer/**-only changes.
+  # a pinned digest; workflow_run provides the independent retry path.
   workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: ["Build container image"]
     types: [completed]
     branches: [main, testing]
-  push:
-    branches: [main, testing]
-    paths:
-      - 'installer/**'
-      - 'disk_config/**'
-      - '.github/workflows/build-live-iso.yml'
-      - '.github/actions/setup-compressed-storage/**'
-      - '.github/actions/free-disk-space/**'
-      - '.github/actions/fetch-image-metadata/**'
   workflow_call:
     inputs:
       source_tag:
