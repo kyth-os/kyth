@@ -3,12 +3,16 @@ run-name: "Build Live ISO - ${{ inputs.source_tag || github.event.workflow_run.h
 
 on:
   # Separate from container build — ISO failures no longer hide successful
-  # container publishes. Container workflow calls this via workflow_call with
-  # a pinned digest; workflow_run provides the independent retry path.
-  workflow_run: # zizmor: ignore[dangerous-triggers]
-    workflows: ["Build container image"]
-    types: [completed]
-    branches: [main, testing]
+  # container publishes. build.yml's finalize job dispatches this explicitly
+  # (workflow_dispatch, pinned digest) once the Fedora image actually
+  # publishes. There is deliberately no workflow_run trigger here: build.yml's
+  # own Validation+CodeQL gate fires "Build container image" twice per push
+  # (once per watched workflow) and the first of the two — before both checks
+  # have reported in — completes with every job skipped, which GitHub still
+  # reports as an overall success. A workflow_run listener can't tell that
+  # apart from a real publish, so it fired a doomed ISO build racing the
+  # actual one on every push. The explicit dispatch only ever fires from the
+  # leg that did real work.
   workflow_call:
     inputs:
       source_tag:
@@ -91,12 +95,6 @@ env:
 jobs:
   build:
     name: Build ISO (${{ inputs.source_tag || github.event.workflow_run.head_branch || github.ref_name || 'testing' }})
-    # The primary trigger is the explicit workflow_dispatch fired by build.yml's
-    # finalize job once the Fedora image actually publishes (pinned digest).
-    # workflow_run is only a best-effort retry path for that dispatch failing —
-    # without this gate it fires unconditionally, including when the container
-    # build itself failed, and tries to build an ISO with no image to source.
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
