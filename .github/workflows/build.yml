@@ -2,48 +2,15 @@ name: Build container image
 on:
   schedule:
     - cron: '05 10 * * 0' # 10:05am UTC weekly on Sundays — rebuilds both :latest and :testing with fresh upstream packages
-  push:
-    branches:
-      - main
-      - testing
-    paths-ignore:
-      # Documentation and metadata — never land in the OCI image
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.gitignore'
-      # Tests and fuzzing — CI-only, not shipped in image
-      - 'tests/**'
-      - 'fuzz/**'
-      - '.clusterfuzzlite/**'
-      # Disk/ISO tooling — used by other workflows, not the OCI build
-      - 'disk_config/**'
-      - 'installer/**'
-      - 'Justfile'
-      # Agent/IDE — never land in OCI image, docs-only pushes shouldn't rebuild
-      - '.agents/**'
-      - '.vscode/**'
-      - '.tmp/**'
-      # GitHub metadata
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/pull_request_template.md'
-      - '.github/CODEOWNERS'
-      - '.github/renovate.json5'
-      - '.github/scripts/**'
-      # Sibling workflows — changes here don't affect image content.
-      # build.yml is intentionally excluded so workflow changes still trigger
-      # a build to validate the updated pipeline.
-      - '.github/workflows/build-live-iso.yml'
-      - '.github/workflows/codeql.yml'
-      - '.github/workflows/cve-scan.yml'
-      - '.github/workflows/fuzzing.yml'
-      - '.github/workflows/scorecard.yml'
-      - '.github/workflows/supply-chain.yml'
-      - '.github/workflows/validation.yml'
   workflow_dispatch:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["Validation", "CodeQL"]
+    types: [completed]
+    branches: [main, testing]
 
 permissions:
   contents: read
+  actions: read
 
 env:
   IMAGE_DESC: "Kyth — atomic gaming and dev workstation built on Fedora Kinoite"
@@ -53,12 +20,85 @@ env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"  # do not edit
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
+  gate:
+    name: Gate on Validation + CodeQL
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+      head_sha: ${{ steps.check.outputs.head_sha }}
+      head_branch: ${{ steps.check.outputs.head_branch }}
+    steps:
+      - name: Verify Validation and CodeQL succeeded for SHA
+        id: check
+        uses: actions/github-script@60a0d83039c74a4aee543a265c85639665335554 # v7.0.1
+        with:
+          script: |
+            const eventName = context.eventName;
+            // schedule / manual dispatch bypass the gate
+            if (eventName === 'schedule' || eventName === 'workflow_dispatch') {
+              core.setOutput('ok', 'true');
+              core.setOutput('head_sha', context.sha);
+              core.setOutput('head_branch', context.ref.replace('refs/heads/', ''));
+              return;
+            }
+            if (eventName !== 'workflow_run') {
+              core.setOutput('ok', 'false');
+              return;
+            }
+            const run = context.payload.workflow_run;
+            // Only branches we care about already filtered by on.branches,
+            // but ignore schedule-triggered runs to avoid duplicate scheduled builds
+            if (run.event === 'schedule') {
+              core.info(`Ignoring schedule-triggered ${run.name} run`);
+              core.setOutput('ok', 'false');
+              return;
+            }
+            if (run.conclusion !== 'success') {
+              core.info(`${run.name} concluded ${run.conclusion} — gating build`);
+              core.setOutput('ok', 'false');
+              return;
+            }
+            const headSha = run.head_sha;
+            const headBranch = run.head_branch;
+            core.setOutput('head_sha', headSha);
+            core.setOutput('head_branch', headBranch);
+            // Require both Validation and CodeQL to be successful for this SHA.
+            // The build is triggered twice (once per workflow); only the second
+            // to complete will see both as success and proceed.
+            const required = ['Validation', 'CodeQL'];
+            for (const wfName of required) {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: wfName === 'Validation' ? 'validation.yml' : 'codeql.yml',
+                head_sha: headSha,
+                per_page: 5,
+              });
+              const ok = runs.data.workflow_runs.some(r => r.conclusion === 'success' && r.head_branch === headBranch);
+              if (!ok) {
+                core.info(`Waiting for ${wfName} success on ${headSha} (${headBranch}) — not yet`);
+                core.setOutput('ok', 'false');
+                return;
+              }
+            }
+            core.info(`Both Validation and CodeQL succeeded for ${headSha} — proceeding`);
+            core.setOutput('ok', 'true');
+
   plan:
     name: Plan build matrix
+    needs: [gate]
+    if: needs.gate.outputs.ok == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       branches: ${{ steps.branches.outputs.branches }}
+      head_sha: ${{ needs.gate.outputs.head_sha }}
+      head_branch: ${{ needs.gate.outputs.head_branch }}
     steps:
       # Single source of truth for the schedule-builds-both-branches rule,
       # consumed by every job below that matrixes on branch. Previously this
@@ -69,10 +109,17 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          HEAD_BRANCH: ${{ needs.gate.outputs.head_branch }}
+          HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
         run: |
           exec 3>>"${GITHUB_OUTPUT}"
           if [[ "${EVENT_NAME}" == schedule ]]; then
             echo 'branches=["main","testing"]' >&3
+          elif [[ "${EVENT_NAME}" == workflow_run && -n "${HEAD_BRANCH}" ]]; then
+            # Gated via Validation/CodeQL — build the exact branch that was validated
+            # (workflow_run's head_branch, not the default branch)
+            echo "branches=[\"${HEAD_BRANCH}\"]" >&3
+            echo "head_sha=${HEAD_SHA}" >&3 || true
           else
             echo "branches=[\"${REF_NAME}\"]" >&3
           fi
@@ -91,7 +138,7 @@ jobs:
     # One slot per branch — prevents a scheduled run and a push from racing on the same tag.
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.branch }}-${{ matrix.kernel_flavor }}
-      cancel-in-progress: ${{ github.event_name == 'push' }}
+      cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
     strategy:
       fail-fast: false
@@ -108,7 +155,7 @@ jobs:
         id: prep
         env:
           MATRIX_BRANCH: ${{ matrix.branch }}
-        run: |
+        run: | # zizmor: ignore[github-env]
           exec 3>>"${GITHUB_OUTPUT}"
           exec 4>>"${GITHUB_ENV}"
           [[ "${MATRIX_BRANCH}" == main || "${MATRIX_BRANCH}" == testing ]]
@@ -121,7 +168,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ matrix.branch }}
+          # For gated workflow_run, check out the exact SHA that Validation/CodeQL
+          # approved; otherwise fall back to the branch tip (schedule/dispatch)
+          ref: ${{ needs.plan.outputs.head_sha || matrix.branch }}
           persist-credentials: false
 
       # Local composite actions resolve from the checked-out working tree, so
