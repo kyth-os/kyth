@@ -1,4 +1,5 @@
 name: Build container image
+run-name: "Build container image - ${{ github.event_name == 'schedule' && 'main+testing' || github.event.workflow_run.head_branch || github.ref_name }}"
 on:
   schedule:
     - cron: '05 10 * * 0' # 10:05am UTC weekly on Sundays — rebuilds both :latest and :testing with fresh upstream packages
