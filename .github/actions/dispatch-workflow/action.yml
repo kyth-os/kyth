@@ -1,0 +1,43 @@
+name: Dispatch Workflow
+description: >
+  Trigger a workflow_dispatch run via gh CLI with an arbitrary set of
+  --field values. Single source of truth for the "kick off a dependent
+  workflow with pinned inputs" pattern used by finalize's supply-chain
+  and Live ISO dispatches — one place to fix instead of two copies that
+  can drift out of sync.
+inputs:
+  workflow:
+    description: Workflow file name to dispatch (e.g. build-live-iso.yml).
+    required: true
+  ref:
+    description: Branch to dispatch the workflow against.
+    required: true
+  fields-json:
+    description: >
+      JSON object mapping workflow_dispatch input name -> value. Values are
+      passed through as-is via --field (all workflow_dispatch inputs are
+      strings/booleans on the receiving end, so numbers/booleans should
+      already be stringified here).
+    required: true
+  github-token:
+    description: Token with actions:write on this repository.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Dispatch
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        WORKFLOW: ${{ inputs.workflow }}
+        REF: ${{ inputs.ref }}
+        FIELDS_JSON: ${{ inputs.fields-json }}
+      run: |
+        set -euo pipefail
+        jq -e . <<<"${FIELDS_JSON}" >/dev/null
+        args=(--ref "${REF}")
+        while IFS=$'\t' read -r key value; do
+          args+=(--field "${key}=${value}")
+        done < <(jq -r 'to_entries[] | [.key, (.value | tostring)] | @tsv' <<<"${FIELDS_JSON}")
+        gh workflow run "${WORKFLOW}" "${args[@]}"

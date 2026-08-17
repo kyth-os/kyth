@@ -1,4 +1,5 @@
 name: Build container image
+run-name: "Build container image - ${{ github.event_name == 'schedule' && 'main+testing' || github.event.workflow_run.head_branch || github.ref_name }}"
 on:
   schedule:
     - cron: '05 10 * * 0' # 10:05am UTC weekly on Sundays — rebuilds both :latest and :testing with fresh upstream packages
@@ -712,25 +713,20 @@ jobs:
       # trigger — workflow_run events carry no inputs and cannot pin the digest.
       - name: Dispatch supply chain metadata
         if: matrix.kernel_flavor == 'fedora'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          MATRIX_BRANCH: ${{ matrix.branch }}
-          SOURCE_TAG: ${{ steps.prep.outputs.tag }}
-          SOURCE_DIGEST: ${{ steps.image.outputs.digest }}
-          SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
-          SOURCE_GITHUB_SHA: ${{ steps.image.outputs.github_sha }}
-          ORIGINAL_EVENT: ${{ github.event_name }}
-          ORIGINAL_ACTOR: ${{ github.actor }}
-        run: |
-          gh workflow run supply-chain.yml \
-            --ref "${MATRIX_BRANCH}" \
-            --field "source_tag=${SOURCE_TAG}" \
-            --field "source_digest=${SOURCE_DIGEST}" \
-            --field "source_sha=${SOURCE_SHA}" \
-            --field "source_github_sha=${SOURCE_GITHUB_SHA}" \
-            --field "original_event=${ORIGINAL_EVENT}" \
-            --field "original_actor=${ORIGINAL_ACTOR}"
+        uses: ./.github/actions/dispatch-workflow
+        with:
+          workflow: supply-chain.yml
+          ref: ${{ matrix.branch }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fields-json: |
+            {
+              "source_tag": ${{ toJSON(steps.prep.outputs.tag) }},
+              "source_digest": ${{ toJSON(steps.image.outputs.digest) }},
+              "source_sha": ${{ toJSON(steps.image.outputs.source_sha) }},
+              "source_github_sha": ${{ toJSON(steps.image.outputs.github_sha) }},
+              "original_event": ${{ toJSON(github.event_name) }},
+              "original_actor": ${{ toJSON(github.actor) }}
+            }
 
       # Live ISO is dispatched explicitly with the pinned Fedora digest so it
       # runs automatically after the Fedora container build succeeds — independent
@@ -738,17 +734,19 @@ jobs:
       # block ISO when cachy fails due to fail-fast: false + aggregate result).
       - name: Dispatch Live ISO
         if: matrix.kernel_flavor == 'fedora'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          MATRIX_BRANCH: ${{ matrix.branch }}
-          SOURCE_TAG: ${{ steps.prep.outputs.tag }}
-          SOURCE_DIGEST: ${{ steps.image.outputs.digest }}
-          SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
-        run: |
-          gh workflow run build-live-iso.yml \
-            --ref "${MATRIX_BRANCH}" \
-            --field "source_tag=${SOURCE_TAG}" \
-            --field "source_digest=${SOURCE_DIGEST}" \
-            --field "source_sha=${SOURCE_SHA}" \
-            --field "run_acceptance=true"
+        uses: ./.github/actions/dispatch-workflow
+        with:
+          workflow: build-live-iso.yml
+          ref: ${{ matrix.branch }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fields-json: |
+            {
+              "source_tag": ${{ toJSON(steps.prep.outputs.tag) }},
+              "source_digest": ${{ toJSON(steps.image.outputs.digest) }},
+              "source_sha": ${{ toJSON(steps.image.outputs.source_sha) }},
+              "run_acceptance": "${{ matrix.branch == 'main' && 'true' || 'false' }}"
+            }
+        # Branch-scoped, not a blanket "false": stable (main) keeps requiring
+        # a proven boot before publish, since guest-side acceptance produces
+        # no signal on testing (never emits a KYTH_ACCEPTANCE sentinel) and
+        # would otherwise fail every scheduled/promoted testing ISO build.
