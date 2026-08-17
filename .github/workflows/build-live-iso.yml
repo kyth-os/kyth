@@ -318,7 +318,11 @@ jobs:
     # Off by default from both entry points (see run_acceptance above) — a
     # maintainer opts in for a higher-confidence run, which is why publish
     # tolerates a *skipped* acceptance but never a failed one.
-    if: ${{ inputs.run_acceptance }}
+    # workflow_dispatch delivers even boolean-typed inputs as strings on the
+    # runtime `inputs` context (a long-standing GitHub Actions quirk), so a
+    # bare truthiness check here was true for the *string* "false" too --
+    # this job ran unconditionally regardless of the caller's intent.
+    if: ${{ inputs.run_acceptance == true || inputs.run_acceptance == 'true' }}
     runs-on: ubuntu-latest
     # The script's own budget is 90m; the extra headroom covers artifact
     # download, QEMU install, and log upload on a cold runner.
