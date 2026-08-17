@@ -393,11 +393,11 @@ def _state_summary(state: BootHealthState) -> str:
 
 
 def _default_rollback_runner() -> tuple[int, str]:
-    import subprocess  # nosec B404 -- static argv below, no shell
+    from .commands import run_text  # local: keep this module import-light for read_state() callers
 
-    result = subprocess.run(  # nosec B603 B607
-        ["/usr/bin/bootc", "rollback"], capture_output=True, text=True, timeout=60, check=False,
-    )
+    result = run_text(["/usr/bin/bootc", "rollback"], timeout=60)
+    if result is None:
+        return 1, "bootc rollback could not execute"
     return result.returncode, (result.stderr or result.stdout or "").strip()
 
 
