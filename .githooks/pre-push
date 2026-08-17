@@ -8,7 +8,19 @@ fi
 
 repo_root="$(git rev-parse --show-toplevel)"
 echo "[pre-push] Running GitHub/Codacy preflight..."
-"${repo_root}/build_files/scripts/ci-preflight.sh"
+# Deprioritized (not paused) relative to the interactive session: this box is
+# a live desktop, not a dedicated CI runner, and the full validate+coverage
+# pipeline pegging every core alongside a running compositor/browser/IDE has
+# made the desktop unresponsive enough to force a hard power-off. cgroup
+# CPU/IO weight only bites under actual contention — idle, this still runs
+# at full speed; it only yields once something else needs the cycles.
+if command -v systemd-run >/dev/null 2>&1; then
+	systemd-run --user --scope --collect --quiet \
+		-p CPUWeight=20 -p IOWeight=10 -- \
+		"${repo_root}/build_files/scripts/ci-preflight.sh"
+else
+	"${repo_root}/build_files/scripts/ci-preflight.sh"
+fi
 
 # P1-3: also catch System Hub F821/QSS regressions that ci-preflight's ruff doesn't cover alone
 echo "[pre-push] Running Hub headless smoke (MainWindow 20/20)..."
