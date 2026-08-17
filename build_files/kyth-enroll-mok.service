@@ -23,6 +23,11 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 StandardOutput=journal
 StandardError=journal
+# Runs once ever (marker-gated), at boot — deprioritized so it never
+# competes with early login/session startup for cycles.
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=384M
 
 [Install]
 WantedBy=multi-user.target

@@ -9,6 +9,13 @@ Type=simple
 ExecStart=/usr/bin/kyth-dynamic-lock
 Restart=on-failure
 RestartSec=5
+# Event-driven daemon, idle almost all the time — deprioritized so it never
+# competes with the desktop session for cycles.
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=25%
+MemoryHigh=384M
+MemoryMax=512M
 
 [Install]
 WantedBy=default.target

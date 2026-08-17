@@ -18,5 +18,14 @@ SyslogIdentifier=kyth-sched
 KillSignal=SIGTERM
 TimeoutStopSec=5
 
+# Control-plane daemon (decides *which* scheduler profile applies) — not the
+# scheduler itself (scx_loader/scx_*, kept unconstrained), so it's safe to
+# deprioritize like any other background monitor.
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=25%
+MemoryHigh=384M
+MemoryMax=512M
+
 [Install]
 WantedBy=graphical-session.target

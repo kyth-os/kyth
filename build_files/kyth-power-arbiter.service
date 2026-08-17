@@ -6,3 +6,8 @@ After=multi-user.target
 Type=oneshot
 ExecStart=/usr/bin/kyth-power-arbiter
 RemainAfterExit=no
+# Brief, debounced trigger (may fire often on power-state changes) —
+# deprioritized so it never competes with the desktop session for cycles.
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=384M

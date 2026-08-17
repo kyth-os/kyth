@@ -6,6 +6,13 @@ After=multi-user.target
 Type=simple
 ExecStart=/usr/bin/kyth-batteryd
 Restart=on-failure
+# Long-running background daemon — mostly idle between charge-limit checks;
+# deprioritized so it never competes with the desktop session for cycles.
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=25%
+MemoryHigh=384M
+MemoryMax=512M
 CacheDirectory=kyth
 CacheDirectoryMode=0700
 UMask=0077

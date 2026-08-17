@@ -20,6 +20,11 @@ RemainAfterExit=yes
 # Restart= is not allowed on oneshot units with RemainAfterExit=yes.
 ExecStart=/bin/sh -c 'for i in $(seq 1 18); do flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo && exit 0; sleep 10; done; exit 1'
 TimeoutStartSec=300
+# Mostly sleeping in the retry loop above, but can span minutes at boot —
+# deprioritized so it never competes with early login for cycles.
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=384M
 
 [Install]
 WantedBy=multi-user.target

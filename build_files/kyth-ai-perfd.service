@@ -11,6 +11,14 @@ Restart=on-failure
 RestartSec=10
 # User service — reads system probe cache, writes /etc via pkexec/sysctl where needed
 Environment=PYTHONPATH=/usr/lib/kyth_shared:/usr/lib/kyth-welcome
+# Long-running background daemon alongside the desktop session — deprioritized
+# so a bug/leak here degrades itself, not the interactive session it's meant
+# to be tuning for (matches kyth-guardian.service's pattern).
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=25%
+MemoryHigh=384M
+MemoryMax=512M
 
 [Install]
 WantedBy=graphical-session.target

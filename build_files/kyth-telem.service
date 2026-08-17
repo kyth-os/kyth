@@ -16,5 +16,13 @@ SyslogIdentifier=kyth-telem
 KillSignal=SIGTERM
 TimeoutStopSec=5
 
+# Runs alongside whatever the user is doing, often a game — a frame-time
+# collector must never compete with the thing it's measuring for cycles.
+Nice=15
+IOSchedulingClass=idle
+CPUQuota=15%
+MemoryHigh=384M
+MemoryMax=512M
+
 [Install]
 WantedBy=graphical-session.target

@@ -11,6 +11,12 @@ Type=simple
 ExecStart=/usr/bin/scx_loader
 Restart=on-failure
 RestartSec=5
+# This loads/manages the sched_ext scheduler itself, unlike the plain
+# monitor daemons elsewhere in this repo — deliberately not deprioritized
+# or CPU-throttled, since that's a different risk for a scheduler
+# subsystem's own control process. Memory ceiling only, as a leak safety net.
+MemoryHigh=384M
+MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target

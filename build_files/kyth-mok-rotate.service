@@ -5,3 +5,8 @@ After=network.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-mok-rotate
+# Brief periodic check — deprioritized so it never competes with the
+# desktop session for cycles.
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=384M
