@@ -7,20 +7,36 @@ if [[ "${KYTH_SKIP_PRE_PUSH_VALIDATION:-0}" == "1" ]]; then
 fi
 
 repo_root="$(git rev-parse --show-toplevel)"
-echo "[pre-push] Running GitHub/Codacy preflight..."
+
+# Fast local gate, not a full CI mirror: validate.sh (lint, actionlint,
+# zizmor, a shellcheck pass, syntax/secrets/systemd checks, and the full test
+# suite run once, plain) plus run-quality.sh --fast (ruff/BLE001 only — skips
+# the coverage-instrumented second full suite run and json/xml/html
+# generation, which is pure local-only duplication since CI runs validate.sh
+# and run-quality.sh as separate parallel jobs on separate runners; coverage
+# floors are still enforced there on every push). Codacy preflight and the
+# full CI-mirror double run are `just ci-preflight` if you want them locally —
+# this hook no longer runs them automatically.
+echo "[pre-push] Running fast local validation (full CI gate runs in parallel on push)..."
 # Deprioritized (not paused) relative to the interactive session: this box is
-# a live desktop, not a dedicated CI runner, and the full validate+coverage
-# pipeline pegging every core alongside a running compositor/browser/IDE has
-# made the desktop unresponsive enough to force a hard power-off. cgroup
+# a live desktop, not a dedicated CI runner, and the old validate+coverage-
+# twice pipeline pegging every core alongside a running compositor/browser/
+# IDE made the desktop unresponsive enough to force a hard power-off. cgroup
 # CPU/IO weight only bites under actual contention — idle, this still runs
 # at full speed; it only yields once something else needs the cycles.
+scope=()
 if command -v systemd-run >/dev/null 2>&1; then
-	systemd-run --user --scope --collect --quiet \
-		-p CPUWeight=20 -p IOWeight=10 -- \
-		"${repo_root}/build_files/scripts/ci-preflight.sh"
-else
-	"${repo_root}/build_files/scripts/ci-preflight.sh"
+	# Array, not a string handed to `bash -c`: systemd-run performs its own
+	# ${VAR}-style substitution on the literal command line it's given
+	# (before bash ever sees it), so a positional-parameter string like
+	# '${1}/foo' gets mangled ("Invalid environment variable name... 1").
+	# Every word below is fully expanded by *this* shell first, so
+	# systemd-run only ever receives concrete paths — no $ or ${} tokens
+	# reach it at all.
+	scope=(systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 --)
 fi
+"${scope[@]}" "${repo_root}/build_files/scripts/validate.sh"
+"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh" --fast
 
 # P1-3: also catch System Hub F821/QSS regressions that ci-preflight's ruff doesn't cover alone
 echo "[pre-push] Running Hub headless smoke (MainWindow 20/20)..."

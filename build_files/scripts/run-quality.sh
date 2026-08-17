@@ -41,17 +41,28 @@ if ((${#_top_level_py[@]})); then
 fi
 shopt -u nullglob
 
-echo "==> Python coverage"
-PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage erase
-PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage run -m unittest discover -s tests -b
-"${quality_python}" -m coverage report -m
-"${quality_python}" -m coverage json
-if [[ "${1:-}" == "--changed-only" ]]; then
-  "${quality_python}" build_files/scripts/check-critical-coverage.py --changed-only
+if [[ "${1:-}" == "--fast" ]]; then
+  # Local pre-push path: validate.sh already ran the full suite once, plain.
+  # Re-running it a second time under coverage instrumentation plus
+  # json/xml/html generation is real, measurable local-only cost (CI runs
+  # this and validate.sh as separate parallel jobs, so neither pays for the
+  # other there) for a check whose actual gate — the coverage floors — CI
+  # already enforces reliably on every push. Skip it locally; ruff/BLE001
+  # above are the fast, high-signal part worth running before every push.
+  echo "==> Python coverage skipped (--fast) — measured + gated by CI instead"
 else
-  "${quality_python}" build_files/scripts/check-critical-coverage.py
+  echo "==> Python coverage"
+  PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage erase
+  PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage run -m unittest discover -s tests -b
+  "${quality_python}" -m coverage report -m
+  "${quality_python}" -m coverage json
+  if [[ "${1:-}" == "--changed-only" ]]; then
+    "${quality_python}" build_files/scripts/check-critical-coverage.py --changed-only
+  else
+    "${quality_python}" build_files/scripts/check-critical-coverage.py
+  fi
+  "${quality_python}" -m coverage xml
+  "${quality_python}" -m coverage html
 fi
-"${quality_python}" -m coverage xml
-"${quality_python}" -m coverage html
 
 echo "==> Quality gates passed"
