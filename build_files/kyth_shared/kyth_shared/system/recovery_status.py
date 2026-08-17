@@ -11,12 +11,15 @@ and `clear-quarantine --digest` retry commands are never out of sync.
 """
 
 from __future__ import annotations
+import logging
 
 from dataclasses import dataclass
 
 from kyth_shared.boot_health import read_state as read_boot_health, quarantine_reason
 from kyth_shared.system.bootc import has_rollback_deployment, has_staged_update
 from kyth_shared.update_status import read_update_snapshot
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +79,7 @@ def get_recovery_status() -> RecoveryStatus:
             if quarantined:
                 clear_cmd = f"sudo kyth-boot-health clear-quarantine --digest {quarantined}"
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     try:

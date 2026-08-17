@@ -1,8 +1,11 @@
 """Diagnostics scrub — central scrub before upload."""
 
+import logging
 import ipaddress
 import os
 import re
+
+logger = logging.getLogger(__name__)
 
 
 _PRIVATE_KEY_RE = re.compile(
@@ -90,5 +93,6 @@ def scrub_logs(text: str) -> str:
             # Avoid double-redacting already handled /home path
             text = re.sub(rf"\b{re.escape(user)}\b", "redacted", text)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return text

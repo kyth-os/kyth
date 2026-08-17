@@ -5,6 +5,7 @@ picks scx + sysctl + GPU perf level. Ollama is optional local enhancer;
 deterministic rules win when absent. Mirrors ai_assist fallback style.
 """
 from __future__ import annotations
+import logging
 
 import os
 import time
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 # TTL for daemon-applied policy — auto-revert if p95 worsens or daemon stops
 POLICY_TTL_S = 30
@@ -63,6 +66,7 @@ def _power_profile() -> str:
             if res.returncode == 0 and res.stdout.strip():
                 return res.stdout.strip().lower()
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return "unknown"
 
@@ -100,6 +104,7 @@ def _detect_gaming() -> bool:
         if proc_gaming_active():
             return True
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         # fallback: if gamescope session lock exists
@@ -109,6 +114,7 @@ def _detect_gaming() -> bool:
             if gamescope_session_active(uid):
                 return True
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return False
 
@@ -130,6 +136,7 @@ def _hardware_caps() -> tuple[bool, bool]:
 
             has_nvidia = bool(read_section("nvidia-detect", max_age=300))
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return has_nvidia, has_amd
 
@@ -228,6 +235,7 @@ def apply_policy(policy: PerfPolicy, ttl: int = POLICY_TTL_S) -> bool:
             try:
                 run(["sysctl", "-w", f"{k}={v}"], capture_output=True, timeout=3)
             except Exception:
+                logger.debug("handled expected exception", exc_info=True)
                 pass
         # GPU power — best-effort (may need root)
         if policy.gpu_power in ("high", "auto", "low"):
@@ -236,6 +244,7 @@ def apply_policy(policy: PerfPolicy, ttl: int = POLICY_TTL_S) -> bool:
                 try:
                     card.write_text(level, encoding="utf-8")
                 except Exception:
+                    logger.debug("handled expected exception", exc_info=True)
                     pass
         # Record TTL marker for rollback
         marker = Path("/run/kyth-ai-perfd-ttl")
@@ -243,11 +252,13 @@ def apply_policy(policy: PerfPolicy, ttl: int = POLICY_TTL_S) -> bool:
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.write_text(str(int(time.time()) + ttl), encoding="utf-8")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
         # Also expose current SCX for gamescope env merge (KYTH_AI_SCX)
         try:
             Path("/run/kyth-ai-perfd-scx").write_text(policy.scx, encoding="utf-8")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
         # Push to HUB_STATE so Welcome/Performance cards show it without extra probe
         try:
@@ -255,6 +266,7 @@ def apply_policy(policy: PerfPolicy, ttl: int = POLICY_TTL_S) -> bool:
 
             HUB_STATE.set("ai_perf", policy.as_dict())
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
         return True
     except Exception:

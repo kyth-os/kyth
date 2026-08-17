@@ -8,6 +8,7 @@ the core logic is rule-based so it works offline and is unit-testable.
 Design mirrors `hardware_policy.evaluate_system()` — data in, actions out.
 """
 from __future__ import annotations
+import logging
 
 import json
 import os
@@ -15,6 +16,8 @@ from .commands import run as _run_cmd
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +89,7 @@ def _should_offer_rollback(
         staged = bool(has_staged_update())
         rollback = bool(has_rollback_deployment())
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     # Fallback/OR with snapshot so offline plan works without live probe cache
     if not staged:
@@ -118,6 +122,7 @@ def _latency_actions(evaluation: Any) -> list[AiAction]:
                     priority=40,
                 ))
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return actions
 
@@ -327,6 +332,7 @@ def build_repair_plan(
 
         HUB_STATE.set_repair_plan(as_dict)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return as_dict
 

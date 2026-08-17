@@ -1,5 +1,6 @@
 """Shared utilities for KythOS's read-only runtime diagnostic scripts."""
 from __future__ import annotations
+import logging
 
 import shutil
 import subprocess
@@ -7,6 +8,8 @@ import subprocess
 from .commands import run_quiet
 import sys
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class DiagnosticReporter:
@@ -90,6 +93,7 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
         try:
             ntsync_loaded = "ntsync" in Path("/proc/modules").read_text(encoding="utf-8")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     if ntsync_loaded:
@@ -112,8 +116,10 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
                         has_pw = True
                         break
                 except Exception:
+                    logger.debug("handled expected exception", exc_info=True)
                     pass
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     if has_pw:

@@ -1,10 +1,13 @@
 """Network preset — network.toml declarative DoT + firewalld, offline."""
 from __future__ import annotations
+import logging
 
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_NETWORK_PATH = Path("/etc/kyth/network.toml")
 
@@ -84,5 +87,6 @@ def apply_network_preset(cfg: dict[str, Any] | None = None, root: Path = Path("/
         import time
         Path("/run/kyth-network-ttl").write_text(str(int(time.time())+30), encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return written

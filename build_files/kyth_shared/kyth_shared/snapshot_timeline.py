@@ -3,11 +3,14 @@
 Parses `snapper list --json` / `btrfs subvolume list` + `bootc status --json` into timeline rows for Hub.
 """
 from __future__ import annotations
+import logging
 
 import json
 from dataclasses import dataclass
 
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +32,7 @@ def _snapper_rows() -> list[SnapshotRow]:
                 rows.append(SnapshotRow(id=str(s.get("number", "")), timestamp=str(s.get("date", "")), type="snapshot", description=str(s.get("description", ""))))
             return rows
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     # btrfs fallback
     try:
@@ -39,6 +43,7 @@ def _snapper_rows() -> list[SnapshotRow]:
                 rows.append(SnapshotRow(id=line.split()[1] if len(line.split())>1 else "", timestamp="", type="snapshot", description=line[:80]))
             return rows
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return []
 
@@ -57,6 +62,7 @@ def _bootc_rows() -> list[SnapshotRow]:
                 rows.append(SnapshotRow(id=digest[:12] if digest else k, timestamp="", type="deployment" if k=="booted" else "rollback", description=f"{k}: {digest[:40]}"))
             return rows
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return []
 

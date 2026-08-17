@@ -331,6 +331,7 @@ def flatpak_updates_cached(*, system: bool = False) -> int:
         try:
             update_sections({"flatpak-updates": val}, system=system)
         except Exception:
+            _logger.debug("handled expected exception", exc_info=True)
             pass
         return val
     return 0

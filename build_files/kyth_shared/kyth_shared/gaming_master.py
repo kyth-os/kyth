@@ -7,11 +7,14 @@ all-or-none (dry_run gate, per-module try/except preserves prior state,
 no half-applied sysctl — S16 verified).
 """
 from __future__ import annotations
+import logging
 
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MASTER_PATH = Path("/etc/kyth/gaming-performance.toml")
 
@@ -59,6 +62,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
 
             ensure_snapshot_before_master()
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     out: dict[str, str] = {}
     # dynamic imports to avoid cycles
@@ -91,6 +95,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             # Use generic load_*
             # Instead directly handle per module types
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     # Explicit per-profile applies via helpers (avoid import complexity, use generate funcs directly)
     try:
@@ -232,6 +237,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
 
         pass
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     out["profile"] = profile
     return out

@@ -4,9 +4,12 @@ Nobara ships low-latency pipewire; KythOS exposes 128/256 toggle via
 tmp→apply without global env.d, rollback on fail. No daemon.
 """
 from __future__ import annotations
+import logging
 
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _PRESETS = {"gaming": "128", "work": "256", "balanced": "256"}
 
@@ -40,6 +43,7 @@ def apply_pipewire_quantum(preset: str, dry_run: bool = False) -> tuple[bool, st
             finally:
                 os.close(fd)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
         tmp.replace(target)
         try:
@@ -49,6 +53,7 @@ def apply_pipewire_quantum(preset: str, dry_run: bool = False) -> tuple[bool, st
             finally:
                 os.close(fd2)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
         return True, f"pipewire quantum {q} ({preset}) applied — restart pipewire"
     except Exception as exc:

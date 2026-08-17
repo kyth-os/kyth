@@ -4,6 +4,7 @@ Uses ProbeService + hardware_policy Evaluation → HealPlan(actions=[clear-quara
 Offline, hash-gated, idempotency via /run/kyth-heal-* markers.
 """
 from __future__ import annotations
+import logging
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any
 import time
 
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,10 +73,12 @@ def apply_heal_plan(plan: HealPlan) -> list[str]:
                 # extract digest if in detail
                 run(["kyth-boot-health", "clear-quarantine", "--digest", a.detail.split()[-1]], capture_output=True, timeout=5)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     try:
         from kyth_welcome.services.hub_state import HUB_STATE
         HUB_STATE.set("heal_plan", plan.as_dict())
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return applied

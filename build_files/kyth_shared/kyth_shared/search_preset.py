@@ -1,10 +1,13 @@
 """Search parity — search.toml baloo + krunner + kickoff weights, offline."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SEARCH_PATH = Path.home() / ".config" / "kyth" / "search.toml"
 
@@ -43,9 +46,11 @@ def apply_search(cfg: dict[str, Any] | None = None) -> list[str]:
         run(["kwriteconfig5","--file","baloofilerc","--group","General","--key","Indexing-Enabled", str(cfg["baloo"]).lower()], capture_output=True, timeout=5)
         applied.append("baloofilerc")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         run(["kwriteconfig5","--file","krunnerrc","--group","General","--key","RecentFiles", str(cfg["recent"])], capture_output=True, timeout=5)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return applied

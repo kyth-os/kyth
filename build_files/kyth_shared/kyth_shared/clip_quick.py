@@ -1,10 +1,13 @@
 """Clip + Quick Settings — quick.toml klipper + quicksettings, offline."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_QUICK_PATH = Path.home() / ".config" / "kyth" / "quick.toml"
 
@@ -43,5 +46,6 @@ def apply_quick(cfg: dict[str, Any] | None = None) -> list[str]:
         run(["kwriteconfig5","--file","klipperrc","--group","General","--key","MaxClipItems", str(cfg["clip_history"])], capture_output=True, timeout=5)
         applied.append("klipperrc")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return applied

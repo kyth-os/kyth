@@ -1,10 +1,13 @@
 """Work cache — work-cache.toml, tmpfs for Code/cargo."""
 from __future__ import annotations
+import logging
 
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_WORK_CACHE_PATH = Path("/etc/kyth/work-cache.toml")
 DEFAULT_TMPFILES = Path("/etc/tmpfiles.d/99-kyth-work-cache.conf")
@@ -64,6 +67,7 @@ def generate_work_cache(cfg: dict[str, Any] | None = None, tmpfiles: Path | None
         if req_gb > max_gb:
             size = f"{max_gb}G"
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         tmpfiles.parent.mkdir(parents=True, exist_ok=True)

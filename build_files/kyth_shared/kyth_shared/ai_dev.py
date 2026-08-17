@@ -1,5 +1,6 @@
 """Manage KythOS's opt-in developer and local-AI Distrobox."""
 from __future__ import annotations
+import logging
 
 import argparse
 import os
@@ -12,6 +13,8 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from .commands import run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BOX = "kyth-ai-dev"
 DEFAULT_IMAGE = "registry.fedoraproject.org/fedora-toolbox:44"
@@ -154,6 +157,7 @@ class AiDev:
             if res.returncode == 0 and res.stdout.strip():
                 candidates.append(Path(res.stdout.strip()) / ".git")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
         canonical = home / "git" / "kyth" / ".git"
         if canonical not in candidates:

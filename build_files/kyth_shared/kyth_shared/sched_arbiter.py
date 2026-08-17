@@ -13,6 +13,7 @@ Generated flag is /run/kyth/sched-arbiter.json for launchers to consult without 
 """
 
 from __future__ import annotations
+import logging
 
 import json
 import os
@@ -22,6 +23,8 @@ from pathlib import Path
 from typing import Any
 
 from .commands import run as run_command
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PATH = Path("/etc/kyth/sched-arbiter.toml")
 DEFAULT_FLAG = Path("/run/kyth/sched-arbiter.json")
@@ -60,6 +63,7 @@ def detect_scx_active() -> bool:
             if r and r.returncode == 0:
                 return True
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     # pgrep fallback
     if shutil.which("pgrep"):
@@ -68,6 +72,7 @@ def detect_scx_active() -> bool:
             if r and r.returncode == 0 and getattr(r, "stdout", b"").strip():
                 return True
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     # binary present but not active => not active
     return False
@@ -123,6 +128,7 @@ def arbiter_status(flag: Path | None = None) -> str:
             data = json.loads(fp.read_text(encoding="utf-8"))
             return str(data.get("active", "unknown"))
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     # fallback to config
     cfg = load_arbiter()
@@ -189,6 +195,7 @@ def generate_arbiter(cfg: dict[str, Any] | None = None, dest: Path | None = None
             if new_text != text:
                 ini.write_text(new_text, encoding="utf-8")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return dest
 

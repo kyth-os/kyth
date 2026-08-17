@@ -6,11 +6,14 @@ explicit-sync availability. Safe to re-run (idempotent) and never writes
 directly — tmp→fsync→replace pattern.
 """
 from __future__ import annotations
+import logging
 
 import os
 from pathlib import Path
 
 from kyth_shared.commands import run as _run
+
+logger = logging.getLogger(__name__)
 
 _PRESETS = {
     "hdr": {"Compositing": {"HDR": "true"}, "Wayland": {"ExplicitSync": "true"}},
@@ -74,6 +77,7 @@ def apply_preset(name: str, dry_run: bool = False) -> tuple[bool, str]:
         try:
             _run(["kwin_wayland", "--help"], capture_output=True, timeout=3, check=False)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
         return True, f"applied {name}"
     except Exception as exc:  # noqa: BLE001

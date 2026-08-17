@@ -1,10 +1,13 @@
 """Battery health + charge limit — battery.toml, offline."""
 from __future__ import annotations
+import logging
 
 import os, tomllib, json
 from pathlib import Path
 from typing import Any
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BATTERY_PATH = Path.home() / ".config" / "kyth" / "battery.toml"
 LEDGER_PATH = Path("/var/cache/kyth/battery.jsonl")
@@ -44,6 +47,7 @@ def read_battery_health() -> dict[str, Any]:
             cycles=Path(bat/"cycle_count").read_text().strip() if (bat/"cycle_count").exists() else "?"
             health[bat.name]={"capacity":cap, "cycles":cycles}
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return health
 

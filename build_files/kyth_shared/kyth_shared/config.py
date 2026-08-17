@@ -1,8 +1,11 @@
 """Shared configuration loading utilities for KythOS daemons/services."""
 from __future__ import annotations
+import logging
 
 import tomllib
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def load_toml_config(
@@ -36,5 +39,6 @@ def load_toml_config(
                     res.update(config_data)
                 return res
             except Exception:
+                logger.debug("handled expected exception", exc_info=True)
                 pass
     return default_config.copy()

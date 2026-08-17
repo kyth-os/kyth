@@ -1,9 +1,12 @@
 """Steam deadzone calibrate — 5% gaming vs balanced, per-controller."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_STEAM_DEADZONE_PATH = Path("/etc/kyth/steam-deadzone.toml")
 
@@ -60,5 +63,6 @@ def apply_steam_deadzone(cfg: dict[str, Any] | None = None) -> bool:
             games[app]["deadzone"] = dz
         save_steam_input(games)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return True

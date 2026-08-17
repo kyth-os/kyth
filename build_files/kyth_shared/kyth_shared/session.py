@@ -1,5 +1,6 @@
 """Shared utilities for user login session configuration, first-boot apps, and autostart tasks."""
 from __future__ import annotations
+import logging
 
 import json
 import shutil
@@ -8,12 +9,15 @@ from .commands import run as run_command
 import time
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 
 def write_code_argv(path: Path) -> None:
     """Disable keyring prompt in VS Code argv.json."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     data = {}
     if path.is_file():
@@ -22,11 +26,13 @@ def write_code_argv(path: Path) -> None:
             if not isinstance(data, dict):
                 data = {}
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     data["password-store"] = "basic"
     try:
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
 
@@ -35,12 +41,14 @@ def write_chromium_flags(path: Path) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     lines = []
     if path.is_file():
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     updated = []
@@ -60,6 +68,7 @@ def write_chromium_flags(path: Path) -> None:
     try:
         path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
 
@@ -95,6 +104,7 @@ def mark_run(name: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
 
@@ -110,6 +120,7 @@ def write_app_status(status_file: Path, state: str, message: str) -> None:
     try:
         status_file.write_text(content, encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
 
@@ -136,6 +147,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
         if "kyth.live" in cmdline.split():
             return 0
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     if not force and already_run("firstboot-app-status-v1") and default_done.is_file():
@@ -223,6 +235,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -233,6 +246,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
             with out.open("a", encoding="utf-8") as f:
                 f.write(f"\n== {title} ==\n")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     def run_cmd(args: list[str]) -> None:
@@ -252,6 +266,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
                 with out.open("a", encoding="utf-8") as f:
                     f.write(f"Execution failed: {e}\n")
             except Exception:
+                logger.debug("handled expected exception", exc_info=True)
                 pass
 
     # Header
@@ -269,6 +284,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
             f.write(f"User: {user}\n")
             f.write(f"Host: {host}\n")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     # System Section
@@ -301,6 +317,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
                 if p.exists():
                     f.write(f"{p}\n")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     # KythOS Checks Section
@@ -321,6 +338,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
         with out.open("a", encoding="utf-8") as f:
             f.write(notes)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     return out

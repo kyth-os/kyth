@@ -3,11 +3,14 @@
 Ported from bash helpers (kyth-apply-desktop-layout, kyth-refresh-taskbar-pins, kyth-apply-role-preset).
 """
 from __future__ import annotations
+import logging
 
 import shutil
 
 from ..commands import run as run_command
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 LAYOUT_VERSION = "kyth-comfort-v4"
 CONFIG_FILE = "plasma-org.kde.plasma.desktop-appletsrc"
@@ -107,6 +110,7 @@ def kreadconfig(file: str, group: str, key: str) -> str | None:
         if res.returncode == 0:
             return res.stdout.strip()
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return None
 
@@ -318,6 +322,7 @@ def refresh_taskbar_pins() -> int:
         if state_file.is_file() and state_file.read_text(encoding="utf-8").strip() == launcher_csv:
             return 0
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     qdbus = get_qdbus_command()
@@ -349,6 +354,7 @@ for (var i = 0; i < panelIds.length; ++i) {{
             state_dir.mkdir(parents=True, exist_ok=True)
             state_file.write_text(launcher_csv + "\n", encoding="utf-8")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
         return 0
     return 1
@@ -385,6 +391,7 @@ def apply_role_preset(profile: str) -> int:
         profile_dir.mkdir(parents=True, exist_ok=True)
         (profile_dir / "profile").write_text(profile + "\n", encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     available_launchers = filter_available_launchers(launchers)
@@ -457,6 +464,7 @@ for (var p = 0; p < panelIds.length; ++p) {{
         try:
             run_command([kbuildsycoca, "--noincremental"], capture_output=True, timeout=10)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     return 0

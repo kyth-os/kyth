@@ -1,10 +1,13 @@
 """Podman btrfs — podman-btrfs.toml, driver btrfs when on btrfs."""
 from __future__ import annotations
+import logging
 
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PODMAN_BTRFS_PATH = Path("/etc/kyth/podman-btrfs.toml")
 DEFAULT_CONF = Path("/etc/containers/storage.conf.d/99-kyth-btrfs.conf")
@@ -49,6 +52,7 @@ def _on_btrfs() -> bool:
         r = _run(["findmnt", "-no", "FSTYPE", "-T", "/var"], capture_output=True, text=True, timeout=5)
         return bool(r and "btrfs" in r.stdout)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         return "btrfs" in Path("/proc/mounts").read_text(encoding="utf-8")

@@ -1,5 +1,6 @@
 """Shared utilities for desktop shortcuts, menus, and flatpak exports."""
 from __future__ import annotations
+import logging
 
 import os
 import re
@@ -7,6 +8,8 @@ import shutil
 
 from ..commands import run as run_command
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def safe_id(name: str) -> str:
@@ -34,6 +37,7 @@ def copy_steam_icon(icon_name: str, src_icons_root: Path, dst_icons_root: Path) 
                 shutil.copy2(path, dest_path)
                 copied = True
             except Exception:
+                logger.debug("handled expected exception", exc_info=True)
                 pass
     return copied
 
@@ -44,6 +48,7 @@ def refresh_desktop_database(desktop_dir: Path | str) -> None:
         try:
             run_command(["update-desktop-database", str(desktop_dir)], capture_output=True, check=False)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
 
@@ -53,6 +58,7 @@ def refresh_icon_cache(icons_dir: Path | str) -> None:
         try:
             run_command(["gtk-update-icon-cache", "-q", "-t", str(icons_dir)], capture_output=True, check=False)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
 
@@ -62,6 +68,7 @@ def refresh_kde_sycoca() -> None:
         try:
             run_command(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
 
@@ -231,6 +238,7 @@ def categorize_web_apps() -> bool:
                 desktop_file.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
                 changed = True
             except Exception:
+                logger.debug("handled expected exception", exc_info=True)
                 pass
 
     if changed:
@@ -283,6 +291,7 @@ def fixup_kali_desktop_launchers() -> bool:
                 desktop_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
                 changed = True
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     # Zenmap specific fixups
@@ -311,6 +320,7 @@ def fixup_kali_desktop_launchers() -> bool:
             desktop_file.write_text(content, encoding="utf-8")
             changed = True
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     if changed:

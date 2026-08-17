@@ -1,10 +1,13 @@
 """Plasma drift reconciler — plasma.toml declarative, offline."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PLASMA_PATH = Path.home() / ".config" / "kyth" / "plasma.toml"
 
@@ -60,9 +63,11 @@ def apply_plasma(sections: dict[str, dict[str, Any]] | None = None) -> list[str]
     try:
         run(["qdbus","org.kde.KWin","/KWin","reconfigure"], capture_output=True, timeout=5)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         import time; Path("/run/kyth-plasma-ttl").write_text(str(int(time.time())+30), encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return applied

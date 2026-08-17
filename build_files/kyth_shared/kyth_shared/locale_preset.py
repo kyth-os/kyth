@@ -1,10 +1,13 @@
 """Locale + IME preset — locale.toml, offline."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_LOCALE_PATH = Path("/etc/kyth/locale.toml")
 
@@ -42,10 +45,12 @@ def apply_locale(cfg: dict[str, Any] | None = None) -> list[str]:
         run(["localectl","set-locale", f"LANG={cfg['lang']}"], capture_output=True, timeout=5)
         applied.append(f"LANG={cfg['lang']}")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     if cfg["ime"]!="none":
         try:
             run(["kwriteconfig5","--file","kcminputrc","--group","Input","--key","ime", cfg["ime"]], capture_output=True, timeout=5)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return applied

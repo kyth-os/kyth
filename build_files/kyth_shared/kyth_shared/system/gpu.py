@@ -1,7 +1,10 @@
 """Shared GPU detection helpers: lspci parsing, loaded kernel modules, installed RPM packages."""
 from __future__ import annotations
+import logging
 
 from kyth_shared.commands import run_optional, run_text
+
+logger = logging.getLogger(__name__)
 
 
 def run_lspci_nn() -> list[str]:
@@ -30,6 +33,7 @@ def loaded_kernel_modules() -> set[str]:
                 if parts:
                     modules.add(parts[0])
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return modules
 

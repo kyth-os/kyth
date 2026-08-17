@@ -1,10 +1,13 @@
 """Perf audit — collects 46-140 status + systemd-analyze + probe (consolidated base for system_audit)."""
 from __future__ import annotations
+import logging
 
 import time
 from typing import Any
 
 from .commands import run as _run
+
+logger = logging.getLogger(__name__)
 
 # Pre-warm these modules into sys.modules so the fresh `from .x import y`
 # re-imports done deeper in this file (avoiding 50 dynamic imports per Hub
@@ -18,6 +21,7 @@ try:
     from .shader_tmpfs import load_shader_tmpfs, shader_tmpfs_status  # noqa: F401  # pylint: disable=unused-import
     from .gaming_cfs import load_gaming_cfs, gaming_cfs_status  # noqa: F401  # pylint: disable=unused-import
 except Exception:
+    logger.debug("handled expected exception", exc_info=True)
     pass
 
 
@@ -35,6 +39,7 @@ def _audit_from_disk_cache() -> dict[str, Any] | None:
         if isinstance(cached, dict) and cached:
             return cached
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return None
 
@@ -45,6 +50,7 @@ def _audit_to_disk_cache(data: dict[str, Any]) -> None:
 
         update_sections({"audit-cache": data})
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
 

@@ -1,5 +1,6 @@
 """kyth-user-polish — User comfort configuration utility for KythOS."""
 
+import logging
 import argparse
 import glob
 import os
@@ -48,6 +49,8 @@ from kyth_shared.desktop.plasma import kreadconfig, kwriteconfig  # noqa: E402
 from kyth_shared.desktop.shortcut import refresh_kde_sycoca  # noqa: E402
 from kyth_shared.session import already_run, mark_run  # noqa: E402
 from kyth_shared.commands import run as run_command  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 class OperationStatus(str, Enum):
@@ -472,6 +475,7 @@ def main() -> None:
             with open(brave_desktop_dst, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     if shutil.which("/usr/bin/kyth-set-kickoff-icon"):
@@ -502,6 +506,7 @@ def main() -> None:
                 with open(profile_path, "r", encoding="utf-8") as f:
                     role_profile = f.readline().strip() or "everyday"
             except Exception:
+                logger.debug("handled expected exception", exc_info=True)
                 pass
         run_command(["/usr/bin/kyth-apply-role-preset", role_profile], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

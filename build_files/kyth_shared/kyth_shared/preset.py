@@ -7,6 +7,7 @@ reads it and installs only what is missing — second run is a no-op.
 Progressive vs Mint's dotfile drift and Bazzite's one-image.
 """
 from __future__ import annotations
+import logging
 
 import argparse
 import os
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 PRESETS: dict[str, dict[str, list[str]]] = {
     "everyday": {
@@ -113,6 +116,7 @@ def _installed_flatpaks() -> set[str]:
         if res.returncode == 0:
             return {ln.strip() for ln in res.stdout.splitlines() if ln.strip()}
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return set()
 
@@ -123,6 +127,7 @@ def _installed_distroboxes() -> set[str]:
         if res.returncode == 0:
             return {parts[2] for line in res.stdout.splitlines() if len(parts := line.split()) >= 3}
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return set()
 
@@ -175,6 +180,7 @@ def apply_preset(
                 try:
                     run(["flatpak", "install", "-y", "flathub", app], capture_output=True, timeout=300)
                 except Exception:
+                    logger.debug("handled expected exception", exc_info=True)
                     pass
 
     have_boxes = _installed_distroboxes()
@@ -187,6 +193,7 @@ def apply_preset(
                 try:
                     run(["distrobox", "create", "--yes", "--name", box, "--image", "registry.fedoraproject.org/fedora-toolbox:44"], capture_output=True, timeout=300)
                 except Exception:
+                    logger.debug("handled expected exception", exc_info=True)
                     pass
 
     have_exts = _installed_vscode_extensions()

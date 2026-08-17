@@ -1,10 +1,13 @@
 """Explorer parity — explorer.toml Dolphin double-click + preview + drives."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_EXPLORER_PATH = Path.home() / ".config" / "kyth" / "explorer.toml"
 
@@ -45,14 +48,17 @@ def apply_explorer(cfg: dict[str, Any] | None = None) -> list[str]:
         run(["kwriteconfig5","--file","kdeglobals","--group","KDE","--key","SingleClick", single], capture_output=True, timeout=5)
         applied.append(f"SingleClick={single}")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         run(["kwriteconfig5","--file","dolphinrc","--group","General","--key","ShowPreview", str(cfg["preview"]).lower()], capture_output=True, timeout=5)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     # Drives on desktop via Desktop .desktop already via NTFS D: — no extra
     try:
         import time; Path("/run/kyth-explorer-ttl").write_text(str(int(time.time())+30), encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return applied

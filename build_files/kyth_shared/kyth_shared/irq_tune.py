@@ -4,11 +4,14 @@ Pins GPU/NVMe/NIC IRQs off X3D CCD0 / isolated cores when enabled.
 Balanced leaves irqbalance defaults.
 """
 from __future__ import annotations
+import logging
 
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_IRQ_PATH = Path("/etc/kyth/irq.toml")
 DEFAULT_CONF = Path("/etc/systemd/system/irqbalance.service.d/99-kyth-irq.conf")
@@ -72,6 +75,7 @@ def generate_irq_conf(cfg: dict[str, Any] | None = None, dest: Path | None = Non
             if c:
                 cpus = c
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     banned = cpus or "1"
     content = (

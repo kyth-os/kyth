@@ -1,10 +1,13 @@
 """QuickSettings deep — quicksettings.toml brightness + tiles, offline."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_QS_PATH = Path.home() / ".config" / "kyth" / "quicksettings.toml"
 
@@ -42,9 +45,11 @@ def apply_qs(cfg: dict[str, Any] | None = None) -> list[str]:
         run(["qdbus","org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/BrightnessControl","setBrightness", str(cfg["brightness"])], capture_output=True, timeout=5)
         applied.append("brightness")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         import time; Path("/run/kyth-qs-ttl").write_text(str(int(time.time())+30), encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return applied

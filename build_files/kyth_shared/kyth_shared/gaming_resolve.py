@@ -12,11 +12,14 @@ This module is the canonical re-export: build scripts `python3 -c
 """
 
 from __future__ import annotations
+import logging
 
 import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Re-export the canonical COPR list — `repos.py` is the only place that
 # enumerates them; `packages-static.sh` must not duplicate the list.
@@ -63,6 +66,7 @@ def gaming_versions() -> GamingVersions:
             if isinstance(cache_vals, dict):
                 file_vals = {str(k): str(v) for k, v in cache_vals.items()}
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     gv = GamingVersions(
         umu_version=os.environ.get("UMU_VERSION") or file_vals.get("umu_version", ""),
@@ -76,6 +80,7 @@ def gaming_versions() -> GamingVersions:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps({"umu_version": gv.umu_version, "proton_cachyos_version": gv.proton_cachyos_version}, indent=2), encoding="utf-8")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return gv
 

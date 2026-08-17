@@ -1,9 +1,12 @@
 """HDR per-game — hdr-per-game.toml, peak per steam-appid."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_HDR_PER_GAME_PATH = Path.home() / ".config/kyth/hdr-per-game.toml"
 
@@ -57,6 +60,7 @@ def _driver_version() -> str:
         if r and "OpenGL version" in r.stdout:
             return r.stdout.split("OpenGL version")[1].splitlines()[0].strip()[:32]
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         v = Path("/proc/driver/nvidia/version").read_text(errors="replace").splitlines()[0].strip()[:32]

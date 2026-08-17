@@ -1,11 +1,14 @@
 """Shared utilities for KythOS gaming and performance tuning."""
 from __future__ import annotations
+import logging
 
 import os
 import shutil
 
 from .commands import run as run_command
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def get_cpu_topology() -> tuple[str, str]:
@@ -20,6 +23,7 @@ def get_cpu_topology() -> tuple[str, str]:
                 elif line.startswith("model name"):
                     model = line.split(":", 1)[1].strip()
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return vendor, model
 
@@ -33,6 +37,7 @@ def has_3d_vcache() -> bool:
                 if "3d" in line.lower():
                     return True
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     if shutil.which("lscpu"):
@@ -41,6 +46,7 @@ def has_3d_vcache() -> bool:
             if "3d" in res.stdout.lower():
                 return True
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return False
 
@@ -52,6 +58,7 @@ def get_amd_ccd0_cpus() -> str | None:
         try:
             return path.read_text(encoding="utf-8").strip()
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return None
 
@@ -80,6 +87,7 @@ def get_intel_pcores() -> str | None:
         if pcores:
             return ",".join(str(c) for c in sorted(pcores))
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return None
 
@@ -97,6 +105,7 @@ def set_epp(epp_value: str) -> bool:
             if res.returncode == 0:
                 return True
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     # Fallback to writing directly
@@ -107,6 +116,7 @@ def set_epp(epp_value: str) -> bool:
             epp_file.write_text(epp_value, encoding="utf-8")
             success = True
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return success
 
@@ -118,6 +128,7 @@ def get_current_epp() -> str:
         try:
             return epp_file.read_text(encoding="utf-8").strip()
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return "n/a"
 
@@ -129,6 +140,7 @@ def set_power_profile(profile: str) -> bool:
             res = run_command(["powerprofilesctl", "set", profile], capture_output=True, check=False)
             return res.returncode == 0
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return False
 
@@ -140,6 +152,7 @@ def get_power_profile() -> str:
             res = run_command(["powerprofilesctl", "get"], capture_output=True, text=True, check=False)
             return res.stdout.strip()
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return "n/a"
 
@@ -152,6 +165,7 @@ def flush_page_caches() -> None:
             os.sync()
             drop_caches.write_text("3\n", encoding="utf-8")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
 
@@ -162,6 +176,7 @@ def set_transparent_hugepages(setting: str) -> None:
         try:
             thp.write_text(f"{setting}\n", encoding="utf-8")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
 
@@ -171,6 +186,7 @@ def switch_sched_ext_profile(profile: str) -> None:
         try:
             run_command(["sudo", "-n", "/usr/bin/kyth-scx", "set", profile], capture_output=True, check=False)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
 
@@ -195,6 +211,7 @@ def apply_nvme_tuning() -> bool:
                 nvme_queue.write_text("none\n", encoding="utf-8")
                 tuned_count += 1
             except Exception:
+                logger.debug("handled expected exception", exc_info=True)
                 pass
     return tuned_count > 0
 

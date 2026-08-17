@@ -13,12 +13,15 @@ services — this is read/merge only.
 """
 
 from __future__ import annotations
+import logging
 
 import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from kyth_shared.system.probe import probe_cached
+
+logger = logging.getLogger(__name__)
 
 _VPN_STATUS_TTL = 30.0
 _SMB_STATUS_TTL = 30.0
@@ -49,6 +52,7 @@ def _vpn_status() -> tuple[bool, str]:
                     name = line.split()[0] if line.split() else "VPN"
                     return True, name
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return False, ""
 
@@ -73,6 +77,7 @@ def _cloud_providers() -> tuple[str, ...]:
         if isinstance(data.get("dropbox"), dict):
             providers.append("dropbox")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return tuple(providers)
 

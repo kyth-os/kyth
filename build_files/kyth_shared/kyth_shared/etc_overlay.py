@@ -3,10 +3,13 @@
 Like preset.toml, declarative overlay under /usr/etc → /etc via tmpfiles, atomic apply + rollback marker.
 """
 from __future__ import annotations
+import logging
 
 import os
 import tomllib
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_OVERLAY_PATH = Path("/etc/kyth/etc-overlay.toml")
 
@@ -70,5 +73,6 @@ def apply_overlay(files: dict[str, str] | None = None, root: Path = Path("/")) -
         import time
         Path("/run/kyth-etc-overlay-ttl").write_text(str(int(time.time()) + 30), encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return written

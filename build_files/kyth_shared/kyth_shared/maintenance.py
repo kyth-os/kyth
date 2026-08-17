@@ -1,5 +1,6 @@
 """Shared utilities for KythOS system maintenance and cleanups."""
 from __future__ import annotations
+import logging
 
 import hashlib
 import os
@@ -10,6 +11,8 @@ import subprocess
 from .commands import run as run_command
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 _DUPE_HASH_DIR = Path("/var/lib/kyth/duperemove")
@@ -62,6 +65,7 @@ def prune_trash(days: int = 30) -> None:
                         target_path.unlink(missing_ok=True)
                 info_file.unlink(missing_ok=True)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
 
@@ -76,6 +80,7 @@ def cleanup_flatpaks() -> None:
                 stderr=subprocess.DEVNULL,
             )
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
 
@@ -90,6 +95,7 @@ def vacuum_user_journals(days: int = 30) -> None:
                 stderr=subprocess.DEVNULL,
             )
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
 
@@ -128,6 +134,7 @@ def find_dedupe_targets(root_path: str = "/var/home") -> list[str]:
                             continue
                     walk_depth(Path(epath), depth + 1)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
 
     root = Path(root_path)
@@ -183,4 +190,5 @@ def dedupe_directory(dir_path: str, *, state_dir: Path = _DUPE_HASH_DIR) -> None
     try:
         run_command(cmd, check=False)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass

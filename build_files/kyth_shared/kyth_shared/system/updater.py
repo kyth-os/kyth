@@ -1,5 +1,6 @@
 """Shared utilities for downloading, verifying, and extracting third-party system components."""
 from __future__ import annotations
+import logging
 
 import hashlib
 import json
@@ -13,6 +14,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from pathlib import PurePosixPath
+
+logger = logging.getLogger(__name__)
 
 
 _MAX_ARCHIVE_MEMBERS = 100_000
@@ -85,6 +88,7 @@ def get_github_headers() -> dict[str, str]:
         try:
             token = secret_path.read_text(encoding="utf-8").strip()
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     if not token:
         token = os.environ.get("GITHUB_TOKEN")

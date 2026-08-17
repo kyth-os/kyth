@@ -1,5 +1,6 @@
 """Shared utilities for managing system storage drives and NTFS compatibility links."""
 from __future__ import annotations
+import logging
 
 import os
 import shutil
@@ -8,6 +9,8 @@ from ..commands import run as run_command
 from ..runtime_output import parse_ntfs_devices
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def get_ntfs_devices() -> list[dict]:
@@ -36,6 +39,7 @@ def repair_ntfs_drives() -> None:
         if (home / ".var/app/com.valvesoftware.Steam").is_dir():
             flatpak_compatdata.mkdir(parents=True, exist_ok=True)
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
 
     print("[kyth-ntfs-repair] Scanning for connected NTFS storage partitions...")
@@ -104,6 +108,7 @@ def repair_ntfs_drives() -> None:
                                         if p3.name.lower() == "steamapps":
                                             steam_dirs.append(p3)
             except Exception:
+                logger.debug("handled expected exception", exc_info=True)
                 pass
 
         if steam_dirs:
@@ -116,6 +121,7 @@ def repair_ntfs_drives() -> None:
                         resolved = target_cd.resolve()
                         print(f"  Compatdata is already symlinked to native storage: {resolved}")
                     except Exception:
+                        logger.debug("handled expected exception", exc_info=True)
                         pass
                 else:
                     backup_path = None
@@ -151,6 +157,7 @@ def repair_ntfs_drives() -> None:
                             try:
                                 target_cd.unlink()
                             except Exception:
+                                logger.debug("handled expected exception", exc_info=True)
                                 pass
                         tmp_link.symlink_to(native_compatdata)
                         os.replace(str(tmp_link), str(target_cd))
@@ -168,6 +175,7 @@ def repair_ntfs_drives() -> None:
                         try:
                             tmp_link.unlink()
                         except Exception:
+                            logger.debug("handled expected exception", exc_info=True)
                             pass
                         # Restore backup if we moved it
                         if backup_path is not None and backup_path.exists():
@@ -175,6 +183,7 @@ def repair_ntfs_drives() -> None:
                                 if target_cd.is_symlink() or target_cd.exists():
                                     target_cd.unlink()
                             except Exception:
+                                logger.debug("handled expected exception", exc_info=True)
                                 pass
                             try:
                                 backup_path.rename(target_cd)
@@ -182,6 +191,7 @@ def repair_ntfs_drives() -> None:
                                 try:
                                     shutil.move(str(backup_path), str(target_cd))
                                 except Exception:
+                                    logger.debug("handled expected exception", exc_info=True)
                                     pass
         else:
             print(f"[kyth-ntfs-repair] No steamapps folder found on {mount}.")

@@ -1,11 +1,14 @@
 """Deployment history for System Restore timeline (pure)."""
 from __future__ import annotations
+import logging
 
 from typing import Any
 from urllib.parse import urlparse
 
 from .bootc_query import image_digest_from_status, image_timestamp, nested_get, status_data
 from .bootc_policy import branch_from_ref
+
+logger = logging.getLogger(__name__)
 
 
 def _deployment_info(data: dict, section: str, label: str, status_text: str) -> dict[str, Any]:
@@ -80,6 +83,7 @@ def deployment_history() -> list[dict[str, Any]]:
         from .process import command_stdout
         status_text = command_stdout(["bootc", "status"], timeout=5) or ""
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     history: list[dict[str, Any]] = []
     for section, label in (("booted", "Current (booted)"), ("staged", "Staged (next boot)"), ("rollback", "Previous (rollback)")):

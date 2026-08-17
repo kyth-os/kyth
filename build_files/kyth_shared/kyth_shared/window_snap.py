@@ -1,10 +1,13 @@
 """Window snap parity — window-snap.toml Win+Arrow, offline."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SNAP_PATH = Path.home() / ".config" / "kyth" / "window-snap.toml"
 
@@ -43,15 +46,18 @@ def apply_snap(cfg: dict[str, Any] | None = None) -> list[str]:
         run(["kwriteconfig5","--file","kwinrc","--group","Windows","--key","ElectricBorder","--type","bool", str(cfg["electric"]).lower()], capture_output=True, timeout=5)
         applied.append("kwinrc ElectricBorder")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     # Win+Arrow shortcuts: quick tile left/right via kglobalshortcutsrc (best-effort)
     for act, key in [("Window Quick Tile Left","Meta+Left"),("Window Quick Tile Right","Meta+Right"),("Window Maximize","Meta+Up")]:
         try:
             run(["kwriteconfig5","--file","kglobalshortcutsrc","--group","kwin","--key", act, f"{key},none,{act}"], capture_output=True, timeout=5)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     try:
         import time; Path("/run/kyth-snap-ttl").write_text(str(int(time.time())+30), encoding="utf-8")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     return applied

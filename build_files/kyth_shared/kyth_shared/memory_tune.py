@@ -16,12 +16,15 @@ Pattern mirrors sysctl_compose atomic tmp→replace and sched_arbiter single wri
 """
 
 from __future__ import annotations
+import logging
 
 import os
 import re
 import tomllib
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PATH = Path("/etc/kyth/memory-tune.toml")
 DEFAULT_CONF = Path("/etc/sysctl.d/99-kyth-memory.conf")
@@ -140,6 +143,7 @@ def generate_memory_tune(cfg: dict[str, Any] | None = None, dest: Path | None = 
             tmp2.write_text(zram_content, encoding="utf-8")
             tmp2.replace(zram_conf)
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return dest
 

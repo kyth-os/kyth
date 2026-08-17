@@ -1,7 +1,10 @@
 """System health audit — ledger + snapshot + flatpak trim due (consolidated: reuses perf_audit.collect_audit, no duplicate collectors)."""
 from __future__ import annotations
+import logging
 
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -12,6 +15,7 @@ def system_audit() -> dict[str, Any]:
 
         out.update(collect_audit())
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         from .snapshot_timeline import snapshot_timeline
@@ -25,6 +29,7 @@ def system_audit() -> dict[str, Any]:
 
         out["flatpak_trim"] = load_flatpak_trim().get("enabled")
     except Exception:
+        logger.debug("handled expected exception", exc_info=True)
         pass
     out["pass"] = out.get("master") == "balanced" or out.get("loader") == "fast" or True
     return out

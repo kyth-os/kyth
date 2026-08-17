@@ -1,10 +1,13 @@
 """SELinux preset — selinux.toml permissive+booleans, offline."""
 from __future__ import annotations
+import logging
 
 import os, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SELINUX_PATH = Path("/etc/kyth/selinux.toml")
 
@@ -57,11 +60,13 @@ def apply_selinux(cfg: dict[str, Any] | None = None) -> list[str]:
             run(["semanage","permissive","-a", dom], capture_output=True, timeout=5)
             applied.append(f"permissive:{dom}")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     for k,v in cfg.get("booleans", {}).items():
         try:
             run(["setsebool","-P", k, "on" if v else "off"], capture_output=True, timeout=5)
             applied.append(f"boolean:{k}={v}")
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return applied

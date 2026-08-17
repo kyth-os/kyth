@@ -1,5 +1,6 @@
 """Guard manual bootc upgrades with rollout and digest-quarantine policy."""
 from __future__ import annotations
+import logging
 
 import os
 import sys
@@ -24,6 +25,8 @@ from .commands import run
 from .system.bootc import image_digest_from_status, image_reference_from_status
 from .system.bootc_query import fetch_status_data
 from .system.registry import remote_digest_for_ref
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path("/etc/kyth/auto-update.toml")
 
@@ -109,8 +112,10 @@ def upgrade(
 
                 _HUB_STATE.set_rollback_available(bool(has_rollback_deployment()))
             except Exception:
+                logger.debug("handled expected exception", exc_info=True)
                 pass
         except Exception:
+            logger.debug("handled expected exception", exc_info=True)
             pass
     return 0
 
