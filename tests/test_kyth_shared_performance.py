@@ -66,6 +66,7 @@ class PerformanceTests(unittest.TestCase):
             ["sudo", "-n", "/usr/bin/kyth-set-epp", "performance"],
             capture_output=True,
             check=False,
+            timeout=30,
         )
 
     @mock.patch("pathlib.Path.is_file")
@@ -114,6 +115,7 @@ class PerformanceTests(unittest.TestCase):
             ["sudo", "-n", "/usr/bin/kyth-scx", "set", "rusty"],
             capture_output=True,
             check=False,
+            timeout=30,
         )
 
     @mock.patch("shutil.which")

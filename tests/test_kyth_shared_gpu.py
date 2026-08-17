@@ -24,7 +24,7 @@ class GpuTests(unittest.TestCase):
         mock_run.return_value = mock.Mock(stdout="00:02.0 VGA compatible controller [0300]: Intel Corp\n")
         lines = run_lspci_nn()
         self.assertEqual(lines, ["00:02.0 VGA compatible controller [0300]: Intel Corp"])
-        mock_run.assert_called_once_with(["lspci", "-nn"], capture_output=True, text=True, check=False)
+        mock_run.assert_called_once_with(["lspci", "-nn"], capture_output=True, text=True, check=False, timeout=30)
 
     @mock.patch("subprocess.run")
     def test_run_lspci_nn_missing_binary(self, mock_run) -> None:
@@ -66,7 +66,7 @@ class GpuTests(unittest.TestCase):
     def test_rpm_package_installed(self, mock_run) -> None:
         mock_run.return_value = mock.Mock(returncode=0)
         self.assertTrue(rpm_package_installed("akmod-nvidia"))
-        mock_run.assert_called_once_with(["rpm", "-q", "akmod-nvidia"], capture_output=True, check=False)
+        mock_run.assert_called_once_with(["rpm", "-q", "akmod-nvidia"], capture_output=True, check=False, timeout=30)
 
     @mock.patch("subprocess.run")
     def test_rpm_package_installed_missing(self, mock_run) -> None:

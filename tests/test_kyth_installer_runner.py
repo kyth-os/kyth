@@ -101,7 +101,7 @@ class InstallerRunnerTests(unittest.TestCase):
         result = run_command(["false"])
 
         self.assertEqual(result.returncode, 1)
-        mock_run.assert_called_once_with(["false"], timeout=None, shell=False, check=False)
+        mock_run.assert_called_once_with(["false"], timeout=30, shell=False, check=False)
 
     @mock.patch("kyth_installer.runner.subprocess.run")
     def test_timeout_gets_context(self, mock_run):

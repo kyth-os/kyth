@@ -57,6 +57,7 @@ class MaintenanceTests(unittest.TestCase):
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=30,
         )
 
     @mock.patch("subprocess.run")
@@ -69,6 +70,7 @@ class MaintenanceTests(unittest.TestCase):
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=30,
         )
 
     @mock.patch("subprocess.run")
