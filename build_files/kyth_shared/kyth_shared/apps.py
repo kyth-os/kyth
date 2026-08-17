@@ -94,7 +94,7 @@ def load_app_db(path: str = _DB_PATH) -> list[tuple[str, str, str, str | None]]:
                 if len(item) == 4:
                     res.append((item[0], item[1], item[2], item[3]))
             return res
-    except Exception:
+    except (OSError, json.JSONDecodeError, ValueError, UnicodeError, AttributeError):
         return _DEFAULT_APP_DB
 
 

@@ -4,9 +4,9 @@ Mint Timeshift parity: readable btrfs health without new daemon.
 Uses existing kyth-btrfs-maint maint.jsonl 1M rotation.
 """
 from __future__ import annotations
-import logging
-
 import json
+import logging
+import subprocess
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ def btrfs_health_summary() -> tuple[str, str]:
         r = _run(["btrfs", "scrub", "status", "/"], capture_output=True, text=True, timeout=5, check=False)
         if r.returncode == 0 and "running" in getattr(r, "stdout", "").lower():
             return "warn", "btrfs scrub running"
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
         logger.debug("handled expected exception", exc_info=True)
         pass
     try:
@@ -31,7 +31,7 @@ def btrfs_health_summary() -> tuple[str, str]:
             line = _MAINT.read_text(errors="ignore").strip().splitlines()[-1]
             data = json.loads(line)
             return str(data.get("status", "ok")), str(data.get("msg", "btrfs maint idle"))
-    except Exception:
+    except (OSError, json.JSONDecodeError, ValueError, IndexError, UnicodeError):
         logger.debug("handled expected exception", exc_info=True)
         pass
     return "ok", "btrfs maint idle (PSI/AC gated)"

@@ -16,7 +16,7 @@ def get_loaded_kernel_modules() -> set[str]:
                 parts = line.split()
                 if parts:
                     modules.add(parts[0])
-    except Exception:
+    except (OSError, UnicodeError, ValueError):
         logger.debug("handled expected exception", exc_info=True)
         pass
     return modules

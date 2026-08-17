@@ -9,6 +9,8 @@ aren't re-defined here — import them from ``bootc_policy``/``bootc_query``
 """
 from __future__ import annotations
 
+import subprocess
+
 from ..commands import run as run_command
 from kyth_shared.system.process import BOOTC_CACHE_TTL, command_stdout, probe_cached
 from kyth_shared.system import bootc_query as query
@@ -67,7 +69,7 @@ def bootc_proxy_running() -> bool:
             capture_output=True, timeout=2, check=False,
         )
         return result.returncode == 0
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return False
 
 

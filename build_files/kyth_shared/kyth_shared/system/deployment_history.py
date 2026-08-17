@@ -1,6 +1,7 @@
 """Deployment history for System Restore timeline (pure)."""
 from __future__ import annotations
 import logging
+import subprocess
 
 from typing import Any
 from urllib.parse import urlparse
@@ -82,7 +83,7 @@ def deployment_history() -> list[dict[str, Any]]:
     try:
         from .process import command_stdout
         status_text = command_stdout(["bootc", "status"], timeout=5) or ""
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError, ImportError):
         logger.debug("handled expected exception", exc_info=True)
         pass
     history: list[dict[str, Any]] = []

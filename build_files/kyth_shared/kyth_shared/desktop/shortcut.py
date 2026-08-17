@@ -1,6 +1,7 @@
 """Shared utilities for desktop shortcuts, menus, and flatpak exports."""
 from __future__ import annotations
 import logging
+import subprocess
 
 import os
 import re
@@ -36,7 +37,7 @@ def copy_steam_icon(icon_name: str, src_icons_root: Path, dst_icons_root: Path) 
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(path, dest_path)
                 copied = True
-            except Exception:
+            except (OSError, ValueError, AttributeError, TypeError):
                 logger.debug("handled expected exception", exc_info=True)
                 pass
     return copied
@@ -47,7 +48,7 @@ def refresh_desktop_database(desktop_dir: Path | str) -> None:
     if shutil.which("update-desktop-database"):
         try:
             run_command(["update-desktop-database", str(desktop_dir)], capture_output=True, check=False)
-        except Exception:
+        except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -57,7 +58,7 @@ def refresh_icon_cache(icons_dir: Path | str) -> None:
     if shutil.which("gtk-update-icon-cache"):
         try:
             run_command(["gtk-update-icon-cache", "-q", "-t", str(icons_dir)], capture_output=True, check=False)
-        except Exception:
+        except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -67,7 +68,7 @@ def refresh_kde_sycoca() -> None:
     if shutil.which("kbuildsycoca6"):
         try:
             run_command(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False)
-        except Exception:
+        except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -182,7 +183,8 @@ def export_steam_games() -> tuple[int, int]:
 
             exported += 1
             print(f"Exported {name}")
-        except Exception:
+        except (OSError, ValueError, UnicodeError, AttributeError, KeyError):
+            logger.debug("handled expected exception", exc_info=True)
             skipped += 1
 
     # Update database and caches
@@ -237,7 +239,7 @@ def categorize_web_apps() -> bool:
 
                 desktop_file.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
                 changed = True
-            except Exception:
+            except (OSError, ValueError, UnicodeError, AttributeError, re.error):
                 logger.debug("handled expected exception", exc_info=True)
                 pass
 
@@ -290,7 +292,7 @@ def fixup_kali_desktop_launchers() -> bool:
             if file_changed:
                 desktop_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
                 changed = True
-        except Exception:
+        except (OSError, ValueError, UnicodeError, AttributeError, re.error):
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -319,7 +321,7 @@ def fixup_kali_desktop_launchers() -> bool:
                 )
             desktop_file.write_text(content, encoding="utf-8")
             changed = True
-        except Exception:
+        except (OSError, ValueError, UnicodeError, AttributeError, re.error):
             logger.debug("handled expected exception", exc_info=True)
             pass
 

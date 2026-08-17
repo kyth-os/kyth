@@ -24,6 +24,11 @@ from kyth_shared.system.bootc import bootc_status_data, has_staged_update
 from kyth_shared.system.bootc_policy import REGISTRY, UpdateAvailabilityView, update_availability_view
 from kyth_shared.system.registry import check_registry_update
 from kyth_shared.system.probe import probe_cached
+import json
+import logging
+import subprocess
+
+logger = logging.getLogger(__name__)
 
 FLATPAK_CACHE_TTL = 10.0
 BOOTC_CACHE_TTL = 5.0
@@ -78,7 +83,8 @@ def collect_availability(*, branch: str | None = None, use_cached: bool = True) 
     # staged takes precedence — no registry call needed
     try:
         staged = bool(has_staged_update())
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError, json.JSONDecodeError):
+        logger.debug("handled expected exception", exc_info=True)
         staged = False
     if staged:
         # staged image already pending reboot — no need to check remote
@@ -119,7 +125,8 @@ def collect_availability(*, branch: str | None = None, use_cached: bool = True) 
         flatpak = _flatpak_count_cached()
         flatpak_count = max(0, int(flatpak)) if flatpak is not None else 0
         flatpak_detail = ""
-    except Exception as exc:
+    except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError) as exc:
+        logger.debug("handled expected exception", exc_info=True)
         flatpak_count = 0
         flatpak_detail = str(exc)
 

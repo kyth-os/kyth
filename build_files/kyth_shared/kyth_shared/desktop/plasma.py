@@ -4,6 +4,7 @@ Ported from bash helpers (kyth-apply-desktop-layout, kyth-refresh-taskbar-pins, 
 """
 from __future__ import annotations
 import logging
+import subprocess
 
 import shutil
 
@@ -90,7 +91,8 @@ def evaluate_plasma_script(script: str) -> bool:
             check=False,
         )
         return res.returncode == 0
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
+        logger.debug("handled expected exception", exc_info=True)
         return False
 
 
@@ -109,7 +111,7 @@ def kreadconfig(file: str, group: str, key: str) -> str | None:
         )
         if res.returncode == 0:
             return res.stdout.strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
         logger.debug("handled expected exception", exc_info=True)
         pass
     return None
@@ -136,7 +138,8 @@ def kwriteconfig(file: str, group: str | list[str], key: str, value: str, value_
             check=False,
         )
         return res.returncode == 0
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
+        logger.debug("handled expected exception", exc_info=True)
         return False
 
 
@@ -321,7 +324,7 @@ def refresh_taskbar_pins() -> int:
     try:
         if state_file.is_file() and state_file.read_text(encoding="utf-8").strip() == launcher_csv:
             return 0
-    except Exception:
+    except (OSError, ValueError, UnicodeError):
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -353,7 +356,7 @@ for (var i = 0; i < panelIds.length; ++i) {{
         try:
             state_dir.mkdir(parents=True, exist_ok=True)
             state_file.write_text(launcher_csv + "\n", encoding="utf-8")
-        except Exception:
+        except (OSError, ValueError, UnicodeError):
             logger.debug("handled expected exception", exc_info=True)
             pass
         return 0
@@ -390,7 +393,7 @@ def apply_role_preset(profile: str) -> int:
     try:
         profile_dir.mkdir(parents=True, exist_ok=True)
         (profile_dir / "profile").write_text(profile + "\n", encoding="utf-8")
-    except Exception:
+    except (OSError, ValueError, UnicodeError):
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -463,7 +466,7 @@ for (var p = 0; p < panelIds.length; ++p) {{
     if kbuildsycoca:
         try:
             run_command([kbuildsycoca, "--noincremental"], capture_output=True, timeout=10)
-        except Exception:
+        except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
             logger.debug("handled expected exception", exc_info=True)
             pass
 

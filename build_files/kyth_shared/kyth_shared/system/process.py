@@ -94,7 +94,7 @@ def get_disk_write_bytes() -> int:
                 if len(parts) >= 10:
                     total += int(parts[9])
         return total * 512
-    except Exception:
+    except (OSError, ValueError, IndexError, UnicodeError):
         return 0
 
 

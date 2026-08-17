@@ -24,7 +24,7 @@ def parse_size_bytes(size_str: str) -> int:
         unit = unit.replace("I", "")  # GiB/MiB → GB/MB
         mult = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
         return int(value * mult.get(unit, 0))
-    except Exception:
+    except (ValueError, IndexError, AttributeError, TypeError, KeyError):
         return 0
 
 
@@ -45,7 +45,7 @@ def get_rx_bytes() -> int:
                     continue
                 total += int(data.split()[0])
         return total
-    except Exception:
+    except (OSError, ValueError, IndexError, UnicodeError):
         return 0
 
 

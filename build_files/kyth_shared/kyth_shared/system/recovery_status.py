@@ -19,6 +19,9 @@ from kyth_shared.boot_health import read_state as read_boot_health, quarantine_r
 from kyth_shared.system.bootc import has_rollback_deployment, has_staged_update
 from kyth_shared.update_status import read_update_snapshot
 
+import json
+import subprocess
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,11 +61,13 @@ def recovery_banner(status: RecoveryStatus) -> str:
 def get_recovery_status() -> RecoveryStatus:
     try:
         has_staged = bool(has_staged_update())
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError, json.JSONDecodeError):
+        logger.debug("handled expected exception", exc_info=True)
         has_staged = False
     try:
         has_rollback = bool(has_rollback_deployment())
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError, json.JSONDecodeError):
+        logger.debug("handled expected exception", exc_info=True)
         has_rollback = False
 
     quarantined = ""
@@ -78,14 +83,15 @@ def get_recovery_status() -> RecoveryStatus:
             detail = quarantine_reason(state, newest.digest) or newest.reason
             if quarantined:
                 clear_cmd = f"sudo kyth-boot-health clear-quarantine --digest {quarantined}"
-    except Exception:
+    except (OSError, ValueError, AttributeError, KeyError, json.JSONDecodeError, subprocess.SubprocessError):
         logger.debug("handled expected exception", exc_info=True)
         pass
 
     try:
         snap = read_update_snapshot(max_age=600)
         watcher_staged = bool(snap and snap.staged_digest)
-    except Exception:
+    except (OSError, ValueError, AttributeError, json.JSONDecodeError):
+        logger.debug("handled expected exception", exc_info=True)
         watcher_staged = False
 
     return RecoveryStatus(

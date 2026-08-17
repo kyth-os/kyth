@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import subprocess
 
 from ..commands import run as run_command
@@ -14,6 +15,8 @@ from datetime import datetime
 from typing import Any, Callable
 
 from kyth_shared.system.bootc_query import image_digest_from_status, nested_get
+
+logger = logging.getLogger(__name__)
 
 InspectRunner = Callable[[str], subprocess.CompletedProcess[bytes]]
 
@@ -115,13 +118,15 @@ def remote_digest_for_ref(
 ) -> str | None:
     try:
         result = inspect_runner(ref)
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
+        logger.debug("handled expected exception", exc_info=True)
         return None
     if result.returncode != 0:
         return None
     try:
         remote_digest, _ = remote_digest_and_timestamp(result.stdout)
-    except Exception:
+    except (OSError, ValueError, AttributeError, KeyError, json.JSONDecodeError, UnicodeError):
+        logger.debug("handled expected exception", exc_info=True)
         remote_digest = None
     if remote_digest is None:
         # Unknown manifest type — don't fabricate a digest that would falsely
@@ -145,11 +150,14 @@ def check_registry_update(
     try:
         result = inspect_runner(ref)
     except FileNotFoundError:
+        logger.debug("handled expected exception", exc_info=True)
         return UpdateCheckResult("error", "skopeo is not installed.")
     except subprocess.TimeoutExpired:
+        logger.debug("handled expected exception", exc_info=True)
         return UpdateCheckResult("error", f"Timed out checking {ref}.")
-    except Exception:
-        return UpdateCheckResult("error", f"Could not check {ref}.")
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError) as exc:
+        logger.debug("handled expected exception", exc_info=True)
+        return UpdateCheckResult("error", f"Could not check {ref}: {exc}")
 
     if result.returncode != 0:
         stderr = (result.stderr or b"").decode(errors="replace").strip()
@@ -157,7 +165,8 @@ def check_registry_update(
 
     try:
         remote_digest, remote_ts = remote_digest_and_timestamp(result.stdout)
-    except Exception:
+    except (OSError, ValueError, AttributeError, KeyError, json.JSONDecodeError, UnicodeError) as exc:
+        logger.debug("handled expected exception", exc_info=True)
         remote_digest, remote_ts = None, ""
 
     if remote_digest is None:
