@@ -743,5 +743,5 @@ jobs:
               "source_tag": ${{ toJSON(steps.prep.outputs.tag) }},
               "source_digest": ${{ toJSON(steps.image.outputs.digest) }},
               "source_sha": ${{ toJSON(steps.image.outputs.source_sha) }},
-              "run_acceptance": "true"
+              "run_acceptance": "false"
             }

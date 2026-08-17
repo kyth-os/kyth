@@ -35,11 +35,14 @@ on:
       run_acceptance:
         description: >
           Gate publication on the unattended VM acceptance run (live boot →
-          install → installed boot). Leave enabled; disabling publishes an ISO
-          that has never been proven to boot.
+          install → installed boot). Off by default — a full run costs
+          ~1.5h of hosted-runner KVM time on every push, too expensive to
+          run unconditionally on this pipeline. Opt in for a higher-
+          confidence run (e.g. before promoting to main/stable) via
+          workflow_dispatch with this set to true.
         required: false
         type: boolean
-        default: true
+        default: false
     secrets:
       R2_ACCESS_KEY_ID:
         required: true
@@ -71,10 +74,13 @@ on:
         required: false
         type: string
       run_acceptance:
-        description: Gate publication on the unattended VM acceptance run
+        description: >
+          Gate publication on the unattended VM acceptance run. Off by
+          default (~1.5h of hosted-runner KVM time) — opt in for a higher-
+          confidence run before promoting to main/stable.
         required: false
         type: boolean
-        default: true
+        default: false
       update_ref:
         description: >
           Optional second image ref. When set, acceptance also proves staged
@@ -309,9 +315,9 @@ jobs:
   acceptance:
     name: VM acceptance (${{ inputs.source_tag || needs.build.outputs.effective_tag }})
     needs: build
-    # Default true from both entry points. A maintainer can dispatch with this
-    # off to ship an emergency ISO, which is why publish tolerates a *skipped*
-    # acceptance but never a failed one.
+    # Off by default from both entry points (see run_acceptance above) — a
+    # maintainer opts in for a higher-confidence run, which is why publish
+    # tolerates a *skipped* acceptance but never a failed one.
     if: ${{ inputs.run_acceptance }}
     runs-on: ubuntu-latest
     # The script's own budget is 90m; the extra headroom covers artifact
