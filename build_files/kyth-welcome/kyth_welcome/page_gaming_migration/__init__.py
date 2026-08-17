@@ -36,6 +36,6 @@ class _MigrationMixin(_LibraryMixin, _SavesMixin, _ModsMixin, _ScanMixin, _WinLi
             self._win_lib_probed = True
             worker = WindowsLibraryWorker()
             self._win_lib_worker = worker
-            worker.result.connect(guard_disposed(self, self._on_win_lib_result))
+            worker.result.connect(guard_disposed(self._on_win_lib_result))
             release_worker_when_finished(self, "_win_lib_worker", worker)
             worker.start()

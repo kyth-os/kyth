@@ -31,8 +31,8 @@ class _ScanMixin:
         self._drive_combo.addItem("Checking for NTFS partitions\u2026")
         worker = DataWorker("migration-ntfs-drives", _find_ntfs_drives)
         self._ntfs_drives_worker = worker
-        worker.result.connect(guard_disposed(self, lambda _key, drives: self._on_ntfs_drives_ready(drives)))
-        worker.failed.connect(guard_disposed(self, lambda _key, _message: self._on_ntfs_drives_ready([])))
+        worker.result.connect(guard_disposed(lambda _key, drives: self._on_ntfs_drives_ready(drives)))
+        worker.failed.connect(guard_disposed(lambda _key, _message: self._on_ntfs_drives_ready([])))
         worker.finished.connect(lambda: setattr(self, "_ntfs_drives_worker", None))
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -68,8 +68,8 @@ class _ScanMixin:
         # whichever outcome it reports to the widgets below.
         worker = DataWorker("migration-steam-scan", lambda: self._fetch_steam_scan(drive))
         self._steam_scan_worker = worker
-        worker.result.connect(guard_disposed(self, lambda _key, result: self._on_steam_scan_ready(result)))
-        worker.failed.connect(guard_disposed(self, lambda _key, message: self._on_steam_scan_ready({"error_kind": "worker", "detail": message})))
+        worker.result.connect(guard_disposed(lambda _key, result: self._on_steam_scan_ready(result)))
+        worker.failed.connect(guard_disposed(lambda _key, message: self._on_steam_scan_ready({"error_kind": "worker", "detail": message})))
         worker.finished.connect(lambda: setattr(self, "_steam_scan_worker", None))
         worker.finished.connect(worker.deleteLater)
         worker.start()
