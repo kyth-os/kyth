@@ -161,7 +161,7 @@ def run_command(
     *,
     log: LogFn | None = None,
     description: str | None = None,
-    timeout: int | None = None,
+    timeout: int | None = 30,
     **kwargs,
 ):
     command = prepare_command(argv)

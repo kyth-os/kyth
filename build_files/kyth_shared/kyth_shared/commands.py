@@ -231,7 +231,7 @@ class CommandRunner:
         return result.stdout.strip() if strip else result.stdout
 
 
-DEFAULT_RUNNER = CommandRunner()
+DEFAULT_RUNNER = CommandRunner(policy=ExecutionPolicy(timeout=30, sanitize_env=False, enforce_no_shell=False))
 APPLICATION_RUNNER = CommandRunner(policy=ExecutionPolicy())
 
 
@@ -251,7 +251,7 @@ def run_optional(
 def run_text(
     command: Command,
     *,
-    timeout: float | None = None,
+    timeout: float | None = 30,
     env: Mapping[str, str] | None = None,
 ) -> CompletedTextCommand | None:
     """Capture text output from *command* through the default runner."""
@@ -261,7 +261,7 @@ def run_text(
 def command_stdout(
     command: Command,
     *,
-    timeout: float | None = None,
+    timeout: float | None = 30,
     env: Mapping[str, str] | None = None,
     strip: bool = True,
 ) -> str:
