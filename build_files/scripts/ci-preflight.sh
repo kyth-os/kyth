@@ -8,8 +8,11 @@ cd "${repo_root}"
 echo "==> GitHub Validation parity"
 ./build_files/scripts/validate.sh
 
-echo "==> Perf gate ledger + snapshot dry-run (release gate)"
-PYTHONPATH=build_files/kyth_shared python3 -c "from kyth_shared.perf_gate import check_perf_gate; r=check_perf_gate(current_ms=None); print(f\"perf_gate ledger dry-run: {r}\")"
+echo "==> Snapshot dry-run (release gate)"
+# The perf gate itself already ran for real inside validate.sh above
+# (build_files/scripts/check-perf-gate.py) — this used to be a second,
+# separate call that passed current_ms=None and could only ever print a
+# trivial dry-run, never actually check anything.
 PYTHONPATH=build_files/kyth_shared python3 -c "from kyth_shared.snapshot_timeline import snapshot_timeline; snaps=snapshot_timeline(limit=3); print(f\"snapshot dry-run: {len(snaps)} entries\")" 2>&1 | head -n 5 || echo "snapshot dry-run: no timeline"
 
 echo "==> GitHub quality parity"
