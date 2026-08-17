@@ -22,7 +22,7 @@
   "build_files/kyth-installer/kyth_installer/phases/preflight.py": 95.0,
   "build_files/kyth-installer/kyth_installer/phases/run.py": 95.0,
   "build_files/kyth-installer/kyth_installer/phases/storage.py": 88.0,
-  "build_files/kyth-installer/kyth_installer/plan.py": 85.0,
+  "build_files/kyth-installer/kyth_installer/plan.py": 99.0,
   "build_files/kyth-installer/kyth_installer/plan_commit.py": 95.0,
   "build_files/kyth-installer/kyth_installer/plan_query.py": 98.0,
   "build_files/kyth-installer/kyth_installer/plan_request.py": 95.0,
