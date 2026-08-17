@@ -4,7 +4,7 @@ from .core_base import replace_clicked_handler, restyle
 from .actions import _install_flatpak_inline, _open_chromium_webapp
 from .services.flatpak import _is_flatpak_installed
 from .services.software import find_familiar_app_match
-from .services.runtime import DataWorker, Worker, finish_worker, release_worker_when_finished
+from .services.runtime import DataWorker, Worker, finish_worker, guard_disposed, release_worker_when_finished
 from .qt import (
     QCheckBox, QComboBox, QDesktopServices, QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar,
     QPushButton, QUrl, QVBoxLayout, QWidget, Qt,
@@ -300,8 +300,8 @@ class _StarterPackTabMixin:
                 return {"error": str(exc)}
 
         w = DataWorker("win-app-scan", _scan)
-        w.result.connect(self._on_windows_app_scan)
-        w.failed.connect(lambda _k, m: self._win_app_status.setText(f"Scan failed: {m}"))
+        w.result.connect(guard_disposed(self._on_windows_app_scan))
+        w.failed.connect(guard_disposed(lambda _k, m: self._win_app_status.setText(f"Scan failed: {m}")))
         self._win_app_worker = w
         release_worker_when_finished(self, "_win_app_worker", w)
         w.start()

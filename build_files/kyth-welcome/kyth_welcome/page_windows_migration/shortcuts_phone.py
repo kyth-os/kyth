@@ -12,7 +12,7 @@ from ..services.phone_link import (
     _save_dynamic_lock_config,
     _send_kdeconnect_sms,
 )
-from ..services.runtime import DataWorker, release_worker_when_finished
+from ..services.runtime import DataWorker, guard_disposed, release_worker_when_finished
 from ..services.launch import popen, systemsettings, kcmshell
 from ..qt import (
     QCheckBox, QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QUrl, single_shot,
@@ -211,11 +211,11 @@ class _ShortcutsPhoneMixin:
         restyle(self._phone_status)
         self._phone_status.setText("Looking for paired devices…")
         worker = DataWorker("kdeconnect-devices", _kdeconnect_devices)
-        worker.result.connect(self._on_phone_devices)
+        worker.result.connect(guard_disposed(self._on_phone_devices))
         worker.failed.connect(
-            lambda _key, message: self._phone_status.setText(
+            guard_disposed(lambda _key, message: self._phone_status.setText(
                 f"Could not query KDE Connect: {message}"
-            )
+            ))
         )
         self._phone_worker = worker
         release_worker_when_finished(self, "_phone_worker", worker)
@@ -309,10 +309,8 @@ class _ShortcutsPhoneMixin:
         else:
             fn = lambda: _run_kdeconnect_action(device["id"], action)
         worker = DataWorker(f"phone-action:{action}", fn)
-        worker.result.connect(self._on_phone_action)
-        worker.failed.connect(
-            lambda _key, message: self._phone_status.setText(f"Device action failed: {message}")
-        )
+        worker.result.connect(guard_disposed(self._on_phone_action))
+        worker.failed.connect(guard_disposed(lambda _key, message: self._phone_status.setText(f"Device action failed: {message}")))
         self._phone_action_worker = worker
         release_worker_when_finished(self, "_phone_action_worker", worker)
         worker.start()
@@ -359,12 +357,8 @@ class _ShortcutsPhoneMixin:
         worker = DataWorker(
             "dynamic-lock", lambda: _configure_dynamic_lock_service(enabled)
         )
-        worker.result.connect(self._on_dynamic_lock_saved)
-        worker.failed.connect(
-            lambda _key, message: self._phone_status.setText(
-                f"Could not update Dynamic Lock: {message}"
-            )
-        )
+        worker.result.connect(guard_disposed(self._on_dynamic_lock_saved))
+        worker.failed.connect(guard_disposed(lambda _key, message: self._phone_status.setText(f"Could not update Dynamic Lock: {message}")))
         self._dynamic_lock_worker = worker
         release_worker_when_finished(self, "_dynamic_lock_worker", worker)
         worker.start()

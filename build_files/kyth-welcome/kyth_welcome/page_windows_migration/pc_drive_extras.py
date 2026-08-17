@@ -8,7 +8,7 @@ import os
 import shutil
 from ..services.process import human_bytes, run_command
 from ..services.runtime import (
-    DataWorker, release_worker_when_finished,
+    DataWorker, guard_disposed, release_worker_when_finished,
 )
 from ..services.launch import popen
 from ..services.windows_migration import (
@@ -218,10 +218,10 @@ class _PcDriveExtrasMixin:
                     self._sticky_status, self._rdp_status):
             lbl.setText("Looking on the PC drive…")
         worker = DataWorker("win-extras", lambda: _scan_windows_extras(usable))
-        worker.result.connect(self._on_extras)
+        worker.result.connect(guard_disposed(self._on_extras))
         worker.failed.connect(
-            lambda _key, message: self._wp_status.setText(
-                f"Could not read the PC drive: {message}"))
+            guard_disposed(lambda _key, message: self._wp_status.setText(
+                f"Could not read the PC drive: {message}")))
         self._extras_worker = worker
         release_worker_when_finished(self, "_extras_worker", worker)
         worker.start()
@@ -356,12 +356,12 @@ class _PcDriveExtrasMixin:
                 f"✓ Installed {copied} fonts{extra}. Apps pick them up immediately; "
                 "documents now render with their original fonts."
             )
-        worker.result.connect(_done)
+        worker.result.connect(guard_disposed(_done))
         worker.failed.connect(
-            lambda _key, message: (
+            guard_disposed(lambda _key, message: (
                 self._fonts_btn.setEnabled(True),
                 self._fonts_status.setText(f"Could not copy fonts: {message}"),
-            ))
+            )))
         self._fonts_copy_worker = worker
         release_worker_when_finished(self, "_fonts_copy_worker", worker)
         worker.start()
@@ -385,12 +385,12 @@ class _PcDriveExtrasMixin:
                 text += f" {failed} could not be read — if the other system wasn't fully shut down, boot it once and retry."
             self._saves_status.setText(text)
             self._saves_show_btn.show()
-        worker.result.connect(_done)
+        worker.result.connect(guard_disposed(_done))
         worker.failed.connect(
-            lambda _key, message: (
+            guard_disposed(lambda _key, message: (
                 self._saves_btn.setEnabled(True),
                 self._saves_status.setText(f"Could not copy saves: {message}"),
-            ))
+            )))
         self._saves_copy_worker = worker
         release_worker_when_finished(self, "_saves_copy_worker", worker)
         worker.start()

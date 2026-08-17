@@ -3,7 +3,7 @@ import shutil
 from .services.launch import flatpak_run, popen
 from .core_base import apply_install_badge, restyle
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, finish_worker
+from .services.runtime import Worker, finish_worker, guard_disposed
 from .services.creator import (
     davinci_download_dir, davinci_flatpak_app_id, davinci_zip_candidates,
 )
@@ -355,8 +355,8 @@ class _CreatorTabMixin:
                 return {"error": str(exc)}
 
         w = DataWorker("capture-scan", _scan)
-        w.result.connect(self._on_capture_result)
-        w.failed.connect(lambda _k, m: self._capture_status.setText(f"Scan failed: {m}"))
+        w.result.connect(guard_disposed(self._on_capture_result))
+        w.failed.connect(guard_disposed(lambda _k, m: self._capture_status.setText(f"Scan failed: {m}")))
         self._capture_worker = w
         release_worker_when_finished(self, "_capture_worker", w)
         w.start()

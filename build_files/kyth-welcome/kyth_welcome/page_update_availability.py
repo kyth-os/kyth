@@ -3,7 +3,7 @@ from datetime import datetime
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
 from .services.bootc import bootc_image_timestamp, has_staged_update, update_availability_view
-from .services.runtime import release_worker_when_finished
+from .services.runtime import guard_disposed,  release_worker_when_finished
 from .services.launch import reboot
 from .services.updates import AvailabilityCheckResult, UpdateProbeResult
 from .services.workers.updates import FlatpakCheckWorker, UpdateCheckWorker
@@ -104,13 +104,13 @@ class _UpdateAvailabilityMixin:
         # so neither blocks the other behind the 15 s deadline; coordinator merges.
         # Start system update check
         self._check_worker = UpdateCheckWorker(use_cached_snapshot=not force_refresh)
-        self._check_worker.result.connect(self._on_system_check_result)
+        self._check_worker.result.connect(guard_disposed(self._on_system_check_result))
         release_worker_when_finished(self, "_check_worker", self._check_worker)
         self._check_worker.start()
 
         # Start flatpak update check
         self._flatpak_check_worker = FlatpakCheckWorker()
-        self._flatpak_check_worker.result.connect(self._on_flatpak_check_result)
+        self._flatpak_check_worker.result.connect(guard_disposed(self._on_flatpak_check_result))
         release_worker_when_finished(self, "_flatpak_check_worker", self._flatpak_check_worker)
         self._flatpak_check_worker.start()
 

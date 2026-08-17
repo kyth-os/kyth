@@ -9,7 +9,7 @@ from .services.appimages import (
 from .services.desktop import REFRESH_DESKTOP_DATABASE_SH
 from .services.launch import popen
 from .core_base import restyle
-from .services.runtime import DataWorker, Worker, finish_worker
+from .services.runtime import DataWorker, Worker, finish_worker, guard_disposed
 from .qt import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
@@ -161,10 +161,8 @@ class _InstalledTabMixin:
 
         worker = DataWorker("installed-apps", fetch)
         self._installed_list_worker = worker
-        worker.result.connect(
-            lambda _key, data, st=status_text, so=status_object: self._on_installed_list_ready(data, st, so)
-        )
-        worker.failed.connect(lambda _key, _message: self._on_installed_list_failed())
+        worker.result.connect(guard_disposed(lambda _key, data, st=status_text, so=status_object: self._on_installed_list_ready(data, st, so)))
+        worker.failed.connect(guard_disposed(lambda _key, _message: self._on_installed_list_failed()))
         worker.finished.connect(lambda: setattr(self, "_installed_list_worker", None))
         worker.finished.connect(worker.deleteLater)
         worker.start()

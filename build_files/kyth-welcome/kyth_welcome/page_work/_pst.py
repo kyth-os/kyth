@@ -1,7 +1,7 @@
 import os
 
 # __KYTH_GENERATED_IMPORTS__
-from ..services.runtime import release_worker_when_finished
+from ..services.runtime import release_worker_when_finished, guard_disposed
 from ..services.gaming import DataWorker
 from ..services.work import _convert_pst, _scan_for_pst_files
 from ..qt import QFileDialog, QHBoxLayout, QLabel, QPushButton
@@ -57,7 +57,7 @@ class _PstMixin:
         self._pst_scan_btn.setEnabled(False)
         self._set_pst_status("Scanning for Outlook archives\u2026")
         worker = DataWorker("pst-scan", _scan_for_pst_files)
-        worker.result.connect(self._on_pst_found)
+        worker.result.connect(guard_disposed(self._on_pst_found))
         self._pst_worker = worker
         release_worker_when_finished(self, "_pst_worker", worker)
         worker.start()
@@ -96,7 +96,7 @@ class _PstMixin:
             return
         self._set_pst_status(f"Converting {os.path.basename(path)} \u2014 large archives can take a while\u2026")
         worker = DataWorker("pst-convert", lambda: _convert_pst(path))
-        worker.result.connect(self._on_pst_converted)
+        worker.result.connect(guard_disposed(self._on_pst_converted))
         self._pst_worker = worker
         release_worker_when_finished(self, "_pst_worker", worker)
         worker.start()

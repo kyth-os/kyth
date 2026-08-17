@@ -3,7 +3,7 @@ from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QPushButton, QVBoxLayout,
 )
 from ..services.appstream import load_appstream_catalog
-from ..services.runtime import DataWorker, release_worker_when_finished
+from ..services.runtime import DataWorker, guard_disposed, release_worker_when_finished
 from ..widgets import _make_card
 
 
@@ -53,8 +53,8 @@ class _StoreLandingMixin:
             placeholder.setObjectName("card-copy")
             self._fp_results_layout.addWidget(placeholder)
             worker = DataWorker("flatpak-appstream", load_appstream_catalog)
-            worker.result.connect(lambda _k, cat: self._on_appstream_loaded(cat))
-            worker.failed.connect(lambda _k, _e: self._on_appstream_loaded({}))
+            worker.result.connect(guard_disposed(lambda _k, cat: self._on_appstream_loaded(cat)))
+            worker.failed.connect(guard_disposed(lambda _k, _e: self._on_appstream_loaded({})))
             # S11: pair every DataWorker with release_worker_when_finished so
             # the thread is tracked and released once done, not leaked past
             # this call's scope.

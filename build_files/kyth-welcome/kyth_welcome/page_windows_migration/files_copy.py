@@ -6,7 +6,7 @@ import os
 import shutil
 from ..core_base import restyle
 from ..services.process import human_bytes
-from ..services.runtime import DataWorker, release_worker_when_finished
+from ..services.runtime import DataWorker, release_worker_when_finished, guard_disposed
 from ..services.windows_migration import (
     UserFilesCopyWorker,
     _folder_sizes_calc,
@@ -157,7 +157,7 @@ class _FilesCopyMixin:
             return
         paths = {folder: src for _, folder, src, _ in self._files_checks}
         worker = DataWorker(key, _folder_sizes_calc(paths))
-        worker.result.connect(self._on_folder_sizes)
+        worker.result.connect(guard_disposed(self._on_folder_sizes))
         self._files_sizes_workers[key] = worker
         worker.finished.connect(lambda w=worker, k=key: (self._files_sizes_workers.pop(k, None), w.deleteLater()))
         worker.start()

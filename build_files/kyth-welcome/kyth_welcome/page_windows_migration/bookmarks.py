@@ -10,7 +10,7 @@ cards — it has moved there so the scan sits next to what it drives.
 from __future__ import annotations
 
 import os
-from ..services.runtime import DataWorker, release_worker_when_finished
+from ..services.runtime import DataWorker, guard_disposed, release_worker_when_finished
 from ..actions import _install_flatpak_inline
 from ..services.windows_migration import (
     _scan_windows_bookmarks,
@@ -95,7 +95,7 @@ class _BookmarksMixin:
             return
         self._bm_status.setText("Looking for browser bookmarks…")
         worker = DataWorker("bookmarks", lambda: _scan_windows_bookmarks(profiles))
-        worker.result.connect(self._on_bookmarks_found)
+        worker.result.connect(guard_disposed(self._on_bookmarks_found))
         self._bm_worker = worker
         release_worker_when_finished(self, "_bm_worker", worker)
         worker.start()

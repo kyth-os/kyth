@@ -23,6 +23,18 @@ from kyth_shared.qt import (
     QThread, QTimer, Signal as pyqtSignal, QIcon, QApplication, QMenu, QSystemTrayIcon, single_shot
 )
 
+import functools
+
+
+def _guard_disposed(slot):  # local guard — mirrors kyth_welcome.services.runtime.guard_disposed
+    @functools.wraps(slot)
+    def _wrapped(*args, **kwargs):
+        try:
+            return slot(*args, **kwargs)
+        except RuntimeError:
+            return None
+    return _wrapped
+
 REGISTRY = "ghcr.io/mrtrick37/kyth"
 CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000   # 4 hours
 _LOCK_FILE = Path.home() / ".cache" / "kyth" / "kyth-update-notifier.lock"
@@ -355,7 +367,7 @@ class UpdateNotifier(QSystemTrayIcon):
         if self._flatpak_worker and self._flatpak_worker.isRunning():
             return
         self._flatpak_worker = FlatpakUpdateCheckWorker()
-        self._flatpak_worker.result.connect(self._on_flatpak_result)
+        self._flatpak_worker.result.connect(_guard_disposed(self._on_flatpak_result))
         self._flatpak_worker.start()
 
     def _on_flatpak_result(self, count: int):
@@ -390,7 +402,7 @@ class UpdateNotifier(QSystemTrayIcon):
         if self._worker and self._worker.isRunning():
             return
         self._worker = UpdateCheckWorker()
-        self._worker.result.connect(self._on_result)
+        self._worker.result.connect(_guard_disposed(self._on_result))
         self._worker.start()
 
     def _on_result(self, state: str, digest: str):

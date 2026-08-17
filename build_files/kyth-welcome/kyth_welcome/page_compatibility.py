@@ -384,7 +384,7 @@ class CompatibilityPage(Page):
         return card
 
     def _run_truth_scan(self):
-        from .services.runtime import DataWorker, release_worker_when_finished
+        from .services.runtime import DataWorker, guard_disposed, release_worker_when_finished
         self._truth_status.setText("Scanning Steam libraries…")
         restyle(self._truth_status)
         while self._truth_rows.count():
@@ -417,8 +417,8 @@ class CompatibilityPage(Page):
                 return {"error": str(exc), "total": 0, "buckets": {}}
 
         worker = DataWorker("truth-engine", _scan)
-        worker.result.connect(self._on_truth_result)
-        worker.failed.connect(lambda _k, msg: self._truth_status.setText(f"Scan failed: {msg}"))
+        worker.result.connect(guard_disposed(self._on_truth_result))
+        worker.failed.connect(guard_disposed(lambda _k, msg: self._truth_status.setText(f"Scan failed: {msg}")))
         self._truth_worker = worker
         release_worker_when_finished(self, "_truth_worker", worker)
         worker.start()

@@ -5,7 +5,7 @@ import shutil
 from .core_base import restyle
 from .services.workers import ControllerProbeWorker
 from .services.hardware import controller_status_view
-from .services.runtime import Worker, release_worker_when_finished
+from .services.runtime import guard_disposed,  Worker, release_worker_when_finished
 from .services.privileged import AuthFrontend, helper_action
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QPushButton,
@@ -225,7 +225,7 @@ class ControllerPage(Page):
         self._refresh_btn.setEnabled(False)
         worker = ControllerProbeWorker()
         self._probe_worker = worker
-        worker.result.connect(self._on_probe_result)
+        worker.result.connect(guard_disposed(self._on_probe_result))
         release_worker_when_finished(self, "_probe_worker", worker)
         worker.start()
 

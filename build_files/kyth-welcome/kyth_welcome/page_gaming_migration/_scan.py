@@ -2,7 +2,7 @@ import re
 
 # __KYTH_GENERATED_IMPORTS__
 from ..core_base import restyle
-from ..services.runtime import DataWorker, release_worker_when_finished
+from ..services.runtime import DataWorker, guard_disposed, release_worker_when_finished
 from ..services.process import run_command
 from ..services.gaming import (
     _PROTONDB_TIER_STYLE, _ProtonDbBatchWorker, _find_ntfs_drives, _find_steam_libraries,
@@ -31,8 +31,8 @@ class _ScanMixin:
         self._drive_combo.addItem("Checking for NTFS partitions\u2026")
         worker = DataWorker("migration-ntfs-drives", _find_ntfs_drives)
         self._ntfs_drives_worker = worker
-        worker.result.connect(lambda _key, drives: self._on_ntfs_drives_ready(drives))
-        worker.failed.connect(lambda _key, _message: self._on_ntfs_drives_ready([]))
+        worker.result.connect(guard_disposed(self, lambda _key, drives: self._on_ntfs_drives_ready(drives)))
+        worker.failed.connect(guard_disposed(self, lambda _key, _message: self._on_ntfs_drives_ready([])))
         worker.finished.connect(lambda: setattr(self, "_ntfs_drives_worker", None))
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -68,8 +68,8 @@ class _ScanMixin:
         # whichever outcome it reports to the widgets below.
         worker = DataWorker("migration-steam-scan", lambda: self._fetch_steam_scan(drive))
         self._steam_scan_worker = worker
-        worker.result.connect(lambda _key, result: self._on_steam_scan_ready(result))
-        worker.failed.connect(lambda _key, message: self._on_steam_scan_ready({"error_kind": "worker", "detail": message}))
+        worker.result.connect(guard_disposed(self, lambda _key, result: self._on_steam_scan_ready(result)))
+        worker.failed.connect(guard_disposed(self, lambda _key, message: self._on_steam_scan_ready({"error_kind": "worker", "detail": message})))
         worker.finished.connect(lambda: setattr(self, "_steam_scan_worker", None))
         worker.finished.connect(worker.deleteLater)
         worker.start()

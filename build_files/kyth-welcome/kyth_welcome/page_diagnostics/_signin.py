@@ -1,7 +1,7 @@
 import shutil
 
 # __KYTH_GENERATED_IMPORTS__
-from ..services.runtime import release_worker_when_finished
+from ..services.runtime import guard_disposed, release_worker_when_finished
 from ..services.diagnostics import _collect_signin_status, fingerprint_enroll_shell_command
 from ..services.gaming import DataWorker
 from ..services.launch import open_first, open_settings_module, open_terminal_command
@@ -71,7 +71,7 @@ class _SigninMixin:
         self._signin_status.setText("Checking sign-in options\u2026")
         self._clear_signin_rows()
         worker = DataWorker("signin", _collect_signin_status)
-        worker.result.connect(self._on_signin_status)
+        worker.result.connect(guard_disposed(self._on_signin_status))
         self._signin_worker = worker
         release_worker_when_finished(self, "_signin_worker", worker)
         worker.start()

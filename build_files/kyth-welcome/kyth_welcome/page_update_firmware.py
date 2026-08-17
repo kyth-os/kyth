@@ -1,6 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
-from .services.runtime import release_worker_when_finished
+from .services.runtime import release_worker_when_finished, guard_disposed
 from .services.workers.updates import FirmwareCheckWorker
 from .services.updates import UpdateProbeResult
 from .qt import QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout
@@ -62,7 +62,7 @@ class _FirmwareUpdateMixin:
         self._fw_deadline_timer.timeout.connect(self._on_firmware_timeout)
         self._fw_deadline_timer.start(30000)
         self._fw_check_worker = FirmwareCheckWorker()
-        self._fw_check_worker.result.connect(self._on_firmware_check_result)
+        self._fw_check_worker.result.connect(guard_disposed(self._on_firmware_check_result))
         release_worker_when_finished(self, "_fw_check_worker", self._fw_check_worker)
         self._fw_check_worker.start()
 

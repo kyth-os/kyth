@@ -12,7 +12,7 @@ from ..services.diagnostics import (
 from ..services.gaming import DataWorker
 from ..services.hardware import HardwareProbeWorker
 from ..services.launch import popen
-from ..services.runtime import finish_worker
+from ..services.runtime import finish_worker, guard_disposed
 from ..qt import QApplication, QFileDialog
 from ..widgets import HardwareCard
 
@@ -81,8 +81,8 @@ class _HealthMixin:
         self._clear_cards()
 
         self._worker = HardwareProbeWorker()
-        self._worker.done.connect(self._on_done)
-        self._worker.failed.connect(self._on_failed)
+        self._worker.done.connect(guard_disposed(self._on_done))
+        self._worker.failed.connect(guard_disposed(self._on_failed))
         self._worker.start()
 
     def _on_done(self, probes: list):
@@ -132,8 +132,8 @@ class _HealthMixin:
             self._ai_card.hide()
 
         self._health_worker = DataWorker("health", _health_command_report)
-        self._health_worker.result.connect(self._on_health_done)
-        self._health_worker.failed.connect(self._on_health_failed)
+        self._health_worker.result.connect(guard_disposed(self._on_health_done))
+        self._health_worker.failed.connect(guard_disposed(self._on_health_failed))
         self._health_worker.start()
 
     def _on_health_done(self, _key: str, report: str):

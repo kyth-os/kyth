@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..core_base import restyle
 from ..services.runtime import (
-    DataWorker,
+    DataWorker, guard_disposed
 )
 from ..services.runtime import finish_worker, release_worker_when_finished
 from ..services.windows_migration import (
@@ -115,7 +115,7 @@ class _DrivesMixin:
         self._drive_status.setObjectName("subheading")
         restyle(self._drive_status)
         self._worker = WindowsLibraryWorker()
-        self._worker.result.connect(self._on_windows_drives)
+        self._worker.result.connect(guard_disposed(self._on_windows_drives))
         self._worker.start()
 
 
@@ -265,7 +265,7 @@ class _DrivesMixin:
         self._drive_status.setObjectName("subheading")
         restyle(self._drive_status)
         worker = DataWorker("bitlocker", lambda: _unlock_bitlocker_drive(dev, key))
-        worker.result.connect(self._on_bitlocker_unlock)
+        worker.result.connect(guard_disposed(self._on_bitlocker_unlock))
         self._bitlocker_worker = worker
         release_worker_when_finished(self, "_bitlocker_worker", worker)
         worker.start()
@@ -288,9 +288,9 @@ class _DrivesMixin:
     def _on_windows_drives_requery(self):
         """Rebuild drive rows without resetting status (after failed unlock)."""
         worker = WindowsLibraryWorker()
-        worker.result.connect(lambda parts: [
+        worker.result.connect(guard_disposed(lambda parts: [
             self._drive_rows.addWidget(self._make_drive_row(p)) for p in parts
-        ])
+        ]))
         self._requery_worker = worker
         release_worker_when_finished(self, "_requery_worker", worker)
         worker.start()

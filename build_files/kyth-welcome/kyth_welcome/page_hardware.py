@@ -14,7 +14,7 @@ from .services.hardware import (
     switch_to_bt_audio_output,
 )
 from .services.launch import popen
-from .services.runtime import finish_worker
+from .services.runtime import finish_worker, guard_disposed
 from .qt import (
     QFrame,
     QGridLayout,
@@ -146,8 +146,8 @@ class HardwarePage(Page):
             "display",
             lambda: command_stdout(["kscreen-doctor", "-o"], timeout=6),
         )
-        self._display_worker.result.connect(self._on_display_status_ready)
-        self._display_worker.failed.connect(self._on_display_status_failed)
+        self._display_worker.result.connect(guard_disposed(self._on_display_status_ready))
+        self._display_worker.failed.connect(guard_disposed(self._on_display_status_failed))
         self._display_worker.finished.connect(lambda: setattr(self, "_display_worker", None))
         self._display_worker.finished.connect(self._display_worker.deleteLater)
         self._display_worker.start()
@@ -199,7 +199,7 @@ class HardwarePage(Page):
     def _start_bt_worker(self, key: str, fn, on_result, on_failed=None):
         # H8/M7: ensure worker is cleaned up and label is still alive when callback fires
         self._bt_worker = DataWorker(key, fn)
-        self._bt_worker.result.connect(on_result)
+        self._bt_worker.result.connect(guard_disposed(on_result))
 
         def _safe_failed(_k, err):
             try:
@@ -210,7 +210,7 @@ class HardwarePage(Page):
                 pass
 
         if on_failed:
-            self._bt_worker.failed.connect(on_failed)
+            self._bt_worker.failed.connect(guard_disposed(on_failed))
         else:
             self._bt_worker.failed.connect(_safe_failed)
         self._bt_worker.finished.connect(lambda: setattr(self, "_bt_worker", None))
@@ -252,7 +252,7 @@ class HardwarePage(Page):
 
         self._worker = HardwareProbeWorker()
         self._worker.done.connect(self._on_done)
-        self._worker.failed.connect(self._on_failed)
+        self._worker.failed.connect(guard_disposed(self._on_failed))
         self._worker.start()
 
     def _replace_cards(self, probes: list[HardwareProbe]):
@@ -375,8 +375,8 @@ class HardwarePage(Page):
                 return {"error": str(exc)}
 
         worker = DataWorker("peripherals-scan", _scan)
-        worker.result.connect(self._on_peripherals_result)
-        worker.failed.connect(lambda _k, msg: self._peri_status.setText(f"Scan failed: {msg}"))
+        worker.result.connect(guard_disposed(self._on_peripherals_result))
+        worker.failed.connect(guard_disposed(lambda _k, msg: self._peri_status.setText(f"Scan failed: {msg}")))
         self._peri_worker = worker
         release_worker_when_finished(self, "_peri_worker", worker)
         worker.start()

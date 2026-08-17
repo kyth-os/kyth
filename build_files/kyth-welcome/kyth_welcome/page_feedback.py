@@ -3,7 +3,7 @@ from kyth_shared.system.gpu import lspci_gpu_lines
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, restyle
 from .services.bootc import bootc_image_digest, current_branch
-from .services.runtime import release_worker_when_finished
+from .services.runtime import release_worker_when_finished, guard_disposed
 from .services.diagnostics import command_stdout
 from .services.workers import GitHubIssueWorker
 from .qt import (
@@ -173,8 +173,8 @@ class FeedbackPage(Page):
             self._submit_btn.setEnabled(False)
             self._set_status("Submitting…")
             self._worker = GitHubIssueWorker(title, body, labels, token)
-            self._worker.success.connect(self._on_success)
-            self._worker.failed.connect(self._on_fail)
+            self._worker.success.connect(guard_disposed(self._on_success))
+            self._worker.failed.connect(guard_disposed(self._on_fail))
             release_worker_when_finished(self, "_worker", self._worker)
             self._worker.start()
         else:

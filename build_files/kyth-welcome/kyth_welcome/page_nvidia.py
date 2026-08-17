@@ -8,7 +8,7 @@ from .services.hardware import (
     _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
     _nvidia_module_loaded, _secureboot_state, nvidia_status_view,
 )
-from .services.runtime import DataWorker, finish_worker
+from .services.runtime import guard_disposed,  DataWorker, finish_worker
 from .services.privileged import helper_action
 from .qt import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer,
@@ -106,7 +106,7 @@ class NvidiaPage(Page):
             return
         worker = DataWorker("nvidia-status-facts", self._fetch_status_facts)
         self._status_worker = worker
-        worker.result.connect(lambda _key, facts: self._apply_status_facts(facts))
+        worker.result.connect(guard_disposed(lambda _key, facts: self._apply_status_facts(facts)))
         worker.failed.connect(lambda _key, _message: None)
         worker.finished.connect(lambda: setattr(self, "_status_worker", None))
         worker.finished.connect(worker.deleteLater)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..services.runtime import DataWorker, release_worker_when_finished
+from ..services.runtime import DataWorker, release_worker_when_finished, guard_disposed
 from ..services.windows_migration import (
     _collect_hw_sanity,
 )
@@ -63,7 +63,7 @@ class _HwSanityMixin:
         self._hw_status.setText("Checking…")
         self._hw_status.show()
         worker = DataWorker("hw-sanity", _collect_hw_sanity)
-        worker.result.connect(self._on_hw_sanity)
+        worker.result.connect(guard_disposed(self._on_hw_sanity))
         self._hw_worker = worker
         release_worker_when_finished(self, "_hw_worker", worker)
         worker.start()
