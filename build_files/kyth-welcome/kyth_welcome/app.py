@@ -25,7 +25,8 @@ def _acquire_lock() -> bool:
     except OSError:
         return True  # can't lock → allow launch
 
-# __KYTH_GENERATED_IMPORTS__
+# Hub windows are lazy-imported inside main() to keep cold import cheap
+# (windows.py is 709 LOC and pulls heavy page deps). See optimization-budgets.
 from .core_base import IS_LIVE, is_first_run, prefer_xwayland_if_wayland_plugin_missing, remove_autostart, wait_for_display_setup
 from .services.runtime import shutdown_threads
 from .qt import (
@@ -34,8 +35,6 @@ from .qt import (
 from .theme import (
     QSS,
 )
-from .windows import MainWindow
-from .wizard import WizardWindow
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -83,15 +82,19 @@ def main():
     app.setWindowIcon(QIcon.fromTheme("kyth"))
     app.setStyleSheet(QSS)
 
+    # Lazy-import windows so `import kyth_welcome.app` stays cheap for probe/cache checks
+    from .windows import MainWindow as _MainWindow
+    from .wizard import WizardWindow as _WizardWindow
+
     if IS_LIVE:
-        win = MainWindow()
+        win = _MainWindow()
     elif is_first_run():
-        win = WizardWindow()
+        win = _WizardWindow()
     else:
-        win = MainWindow()
+        win = _MainWindow()
     win.setWindowIcon(QIcon.fromTheme("kyth"))
     win.showMaximized()
-    if start_page and isinstance(win, MainWindow):
+    if start_page and isinstance(win, _MainWindow):
         win._navigate_to(start_page)
     remove_autostart()
     sys.exit(app.exec())

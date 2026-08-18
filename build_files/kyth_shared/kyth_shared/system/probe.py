@@ -179,7 +179,26 @@ def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
     try:
         try:
             lock_fd = os.open(str(lock_path), os.O_RDWR)
-            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            # Try non-blocking lock with 2s retry window to avoid boot thunder-herd blocking
+            import errno as _errno
+
+            deadline = time.monotonic() + 2.0
+            while True:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError as e:
+                    if e.errno not in (_errno.EAGAIN, _errno.EACCES):
+                        raise
+                    if time.monotonic() >= deadline:
+                        _logger.warning("write_cache_file: lock timeout for %s, proceeding without lock", path)
+                        try:
+                            os.close(lock_fd)
+                        except OSError:
+                            pass
+                        lock_fd = None
+                        break
+                    time.sleep(0.05)
         except OSError:
             lock_fd = None
         fd, tmp_name = tempfile.mkstemp(prefix=".probe-", suffix=".json", dir=str(path.parent))
@@ -516,7 +535,16 @@ def collect_probe_results(
     # Cap workers to 4 to avoid oversubscription on 4-core tiny systems; selected is at most 7
     workers = min(len(selected), 4) if selected else 1
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="kyth-probe") as pool:
-        for group in pool.map(_run_collector, selected):
+        futures = {pool.submit(_run_collector, c): c for c in selected}
+        for fut in futures:
+            collector = futures[fut]
+            try:
+                group = fut.result(timeout=15)
+            except Exception as exc:
+                group = {
+                    key: ProbeResult(key, ProbeStatus.FAILED, error=f"timeout/error: {exc}")
+                    for key in collector.keys
+                }
             results.update(group)
     return results
 

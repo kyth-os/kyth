@@ -12,4 +12,6 @@ ExecCondition=/usr/libexec/kyth-storage-gate
 ExecStart=/usr/bin/kyth-duperemove
 Nice=19
 IOSchedulingClass=idle
+MemoryHigh=384M
 MemoryMax=512M
+TimeoutStartSec=1800

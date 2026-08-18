@@ -6,7 +6,11 @@ Wants=network-online.target
 Type=oneshot
 ExecCondition=/usr/libexec/kyth-vm-acceptance-guest enabled
 ExecStart=/usr/libexec/kyth-vm-acceptance-guest run
-TimeoutStartSec=infinity
+TimeoutStartSec=1800
+MemoryMax=512M
+CPUQuota=50%
+Nice=10
+IOSchedulingClass=idle
 StandardOutput=journal+console
 StandardError=journal+console
 

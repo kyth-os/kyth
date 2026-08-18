@@ -33,6 +33,9 @@ RestrictSUIDSGID=yes
 TimeoutStartSec=1200
 Nice=10
 IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=768M
+MemoryMax=1024M
 
 MemoryMax=512M
 

@@ -12,6 +12,9 @@ StandardError=journal
 SyslogIdentifier=kyth-probe
 Nice=10
 IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=384M
+MemoryMax=512M
 TimeoutStartSec=120
 
 MemoryMax=384M

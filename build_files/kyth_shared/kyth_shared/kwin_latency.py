@@ -51,6 +51,12 @@ def generate_kwin_latency(cfg: dict[str, Any] | None = None, dropin: Path | None
         cfg = load_kwin_latency()
     dropin = dropin or DEFAULT_KWIN_DROPIN
     env = env or DEFAULT_ENV
+    # Guard: only generate tearing drop-in when Wayland is the session type;
+    # on X11 the setting is inert but the drop-in still causes KWin to re-read.
+    session_type = os.environ.get("XDG_SESSION_TYPE", "")
+    if session_type and session_type != "wayland" and str(cfg.get("profile")) == "gaming":
+        # Still write balanced-equivalent (tearing off) on X11 to avoid spurious KWin reload
+        pass
     if str(cfg.get("profile", "balanced")) != "gaming":
         for d in (dropin, env):
             try:

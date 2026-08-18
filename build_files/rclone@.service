@@ -6,6 +6,11 @@ After=network.target
 Type=simple
 ExecStart=/usr/bin/rclone mount %i: %h/Cloud/%i --vfs-cache-mode writes
 Restart=on-failure
+Nice=10
+IOSchedulingClass=idle
+MemoryHigh=256M
+MemoryMax=384M
+CPUQuota=50%
 
 MemoryMax=512M
 

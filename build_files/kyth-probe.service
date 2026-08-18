@@ -26,6 +26,9 @@ SyslogIdentifier=kyth-probe
 # Read-only probes; keep impact low.
 Nice=10
 IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=384M
+MemoryMax=512M
 # bootc/flatpak can be slow on cold cache
 TimeoutStartSec=120
 

@@ -8,6 +8,7 @@ PartOf=graphical-session.target
 OnStartupSec=20s
 OnUnitActiveSec=3min
 AccuracySec=15s
+RandomizedDelaySec=30s
 Persistent=false
 
 [Install]

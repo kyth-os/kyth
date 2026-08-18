@@ -22,6 +22,9 @@ ExecStart=/usr/bin/kyth-btrfs-maint
 ExecStart=/usr/bin/kyth-duperemove
 Nice=19
 IOSchedulingClass=idle
+MemoryHigh=384M
+MemoryMax=768M
+TimeoutStartSec=3600
 
 MemoryMax=512M
 

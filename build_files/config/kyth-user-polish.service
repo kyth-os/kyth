@@ -7,6 +7,10 @@ After=graphical-session.target
 Type=oneshot
 ExecStart=/usr/bin/kyth-user-polish
 RemainAfterExit=yes
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=384M
+TimeoutStartSec=60
 
 MemoryMax=384M
 

@@ -10,6 +10,7 @@ RemainAfterExit=yes
 TimeoutStartSec=30
 Nice=10
 IOSchedulingClass=idle
+MemoryMax=384M
 
 MemoryMax=256M
 

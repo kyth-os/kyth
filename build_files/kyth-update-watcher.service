@@ -30,4 +30,6 @@ TimeoutStartSec=2400
 # Keep automatic staging from competing with the foreground desktop.
 Nice=10
 IOSchedulingClass=idle
-MemoryMax=512M
+CPUQuota=50%
+MemoryHigh=512M
+MemoryMax=768M

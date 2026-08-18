@@ -12,7 +12,10 @@ RemainAfterExit=yes
 # competes with early session startup for cycles.
 Nice=15
 IOSchedulingClass=idle
+CPUQuota=25%
 MemoryMax=384M
+Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

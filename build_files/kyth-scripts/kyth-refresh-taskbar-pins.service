@@ -4,4 +4,7 @@ Description=Re-sync KythOS taskbar pins with installed applications
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-refresh-taskbar-pins
-MemoryMax=256M
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=384M
+TimeoutStartSec=30
