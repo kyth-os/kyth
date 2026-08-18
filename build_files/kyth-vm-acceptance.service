@@ -10,5 +10,7 @@ TimeoutStartSec=infinity
 StandardOutput=journal+console
 StandardError=journal+console
 
+MemoryMax=512M
+
 [Install]
 WantedBy=graphical.target

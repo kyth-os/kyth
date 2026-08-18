@@ -18,7 +18,9 @@ def _probe_windows_partitions() -> list[dict]:
             capture_output=True, text=True, timeout=8, check=True,
         )
         data = _json.loads(result.stdout)
-    except Exception:
+    except (OSError, ValueError, _json.JSONDecodeError) as exc:
+        import logging
+        logging.getLogger(__name__).debug("windows partitions json parse failed: %s", exc, exc_info=True)
         return []
 
     ntfs_devs: list[dict] = []
@@ -83,8 +85,8 @@ def _probe_windows_partitions() -> list[dict]:
         except FileNotFoundError:
             # ntfsfix not present — fall back to mount-attempt heuristic below
             pass
-        except Exception:
-            _logger.debug("_probe_windows_partitions: ntfsfix check of %s failed", path, exc_info=True)
+        except (OSError, ValueError, _json.JSONDecodeError) as exc:
+            _logger.debug("_probe_windows_partitions: ntfsfix check of %s failed: %s", path, exc, exc_info=True)
 
         # Resolve mountpoint from lsblk JSON
         raw_mounts: list = dev.get("mountpoints") or []

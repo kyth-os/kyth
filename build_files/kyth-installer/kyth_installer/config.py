@@ -64,3 +64,36 @@ FILESYSTEM_OPTIONS = [
     {"id": k, "name": v["name"], "root_ok": v["root_ok"], "efi_ok": v["efi_ok"]}
     for k, v in _FILESYSTEM.items()
 ]
+
+def _validate_installer_paths() -> None:
+    """Fail closed if TRANSACTION_FILE/LOG_FILE would be world-writable outside /tmp sticky."""
+    import stat
+    for label, path in (("TRANSACTION_FILE", TRANSACTION_FILE), ("LOG_FILE", LOG_FILE), ("FAILURE_SUMMARY_FILE", FAILURE_SUMMARY_FILE)):
+        try:
+            p = Path(path)
+            # Only validate if file or parent exists
+            target = p if p.exists() else p.parent
+            if not target.exists():
+                continue
+            st = target.stat()
+            # World-writable check: others have write (0o002) and not sticky-based /tmp
+            if bool(st.st_mode & stat.S_IWOTH):
+                # Allow world-writable only if parent is /tmp or /run with sticky bit (1777/1773 style)
+                # /run/kyth-installer is 0700, safe; /tmp is sticky (0o1000)
+                # Outside /tmp sticky, world-writable is unsafe
+                parent = target if target.is_dir() else target.parent
+                # Check if path is under /tmp
+                try:
+                    is_tmp = str(parent.resolve()).startswith("/tmp")
+                except Exception:
+                    is_tmp = str(parent).startswith("/tmp")
+                if not is_tmp:
+                    # Also check sticky bit
+                    parent_mode = parent.stat().st_mode if parent.exists() else 0
+                    if not bool(parent_mode & stat.S_ISVTX):
+                        raise RuntimeError(f"{label} path {path} is world-writable outside sticky /tmp: {oct(st.st_mode)}")
+        except RuntimeError:
+            raise
+        except Exception:
+            continue
+

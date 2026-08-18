@@ -156,7 +156,7 @@ class AiDev:
             )
             if res.returncode == 0 and res.stdout.strip():
                 candidates.append(Path(res.stdout.strip()) / ".git")
-        except Exception:
+        except (OSError, subprocess.SubprocessError, RuntimeError):
             logger.debug("handled expected exception", exc_info=True)
             pass
         canonical = home / "git" / "kyth" / ".git"

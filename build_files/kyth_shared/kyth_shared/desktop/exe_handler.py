@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import configparser
+import logging
 import os
 import re
 import shlex
 import shutil
 import subprocess
+
+_logger = logging.getLogger(__name__)
 
 from ..apps import suggest_app
 
@@ -128,8 +131,8 @@ def open_system_hub_page(page: str) -> None:
     launcher = shutil.which("kyth-welcome-launch") or "/usr/bin/kyth-welcome-launch"
     try:
         subprocess.Popen([launcher, "--page", page])  # noqa: S603 -- fixed launcher argv
-    except OSError:
-        pass
+    except OSError as exc:
+        _logger.debug("open_system_hub_page failed: %s", exc, exc_info=True)
 
 
 def is_flatpak_installed(flatpak_id: str) -> bool:
@@ -162,8 +165,8 @@ def launch_flatpak_install(flatpak_id: str) -> None:
             subprocess.Popen(["xterm", "-e"] + cmd)  # noqa: S603
         else:
             subprocess.Popen(cmd)  # noqa: S603 -- fixed bash -lc wrapper
-    except OSError:
-        pass
+    except OSError as exc:
+        _logger.debug("launch_flatpak_install failed for %s: %s", flatpak_id, exc, exc_info=True)
 
 
 class _InstallerWorker(QThread):

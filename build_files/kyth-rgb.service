@@ -11,5 +11,7 @@ TimeoutStartSec=30
 Nice=10
 IOSchedulingClass=idle
 
+MemoryMax=256M
+
 [Install]
 WantedBy=graphical-session.target

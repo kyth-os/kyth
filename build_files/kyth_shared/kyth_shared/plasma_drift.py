@@ -2,10 +2,26 @@
 from __future__ import annotations
 import logging
 
-import os, tomllib
+import os, tempfile, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
+
+
+def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    try:
+        with open(fd, "w", encoding=encoding) as f:
+            f.write(content)
+        Path(tmp).replace(path)
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +57,7 @@ def save_plasma(sections: dict[str, dict[str, Any]], path: Path | None = None) -
         for k,v in sorted(sections[sec].items()):
             lines.append(f'{k} = "{v}"')
         lines.append("")
-    p.write_text("\n".join(lines), encoding="utf-8")
+    _atomic_write_text(p, "\n".join(lines), encoding="utf-8")
     return p
 
 def apply_plasma(sections: dict[str, dict[str, Any]] | None = None) -> list[str]:
@@ -66,7 +82,7 @@ def apply_plasma(sections: dict[str, dict[str, Any]] | None = None) -> list[str]
         logger.debug("handled expected exception", exc_info=True)
         pass
     try:
-        import time; Path("/run/kyth-plasma-ttl").write_text(str(int(time.time())+30), encoding="utf-8")
+        import time; _atomic_write_text(Path("/run/kyth-plasma-ttl"), str(int(time.time())+30), encoding="utf-8")
     except Exception:
         logger.debug("handled expected exception", exc_info=True)
         pass

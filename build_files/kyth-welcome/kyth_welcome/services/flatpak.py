@@ -135,3 +135,20 @@ list_installed_flatpak_apps = list_installed_apps
 _pending_flatpak_update_count = pending_update_count
 _is_flatpak_installed = is_installed
 flatpak_install_shell_command = install_shell_command
+
+
+def validate_flatpak_remotes(data) -> None:
+    """Strict schema for flatpak_remotes.json."""
+    if not isinstance(data, list):
+        raise ValueError("flatpak remotes must be a list")
+    allowed = {"name","title","url","subset"}
+    for e in data:
+        if not isinstance(e, dict): raise ValueError(f"remote must be object: {e!r}")
+        unk=set(e)-allowed
+        if unk: raise ValueError(f"remote {e.get('name')} unknown keys: {unk}")
+        for k in ("name","url"):
+            if not isinstance(e.get(k), str) or not e.get(k): raise ValueError(f"remote missing {k}: {e!r}")
+        url=e["url"]
+        if not url.startswith("https://") or not url.endswith(".flatpakrepo"): raise ValueError(f"invalid url {url!r}")
+        s=e.get("subset")
+        if s is not None and not isinstance(s, str): raise ValueError("subset must be str or null")

@@ -10,7 +10,9 @@ from .constants import _PROC_MOUNT_ESCAPE_RE, _STEAM_NON_GAME_PATTERNS
 
 try:
     from ..hardware.drives import _find_ntfs_drives as _ntfs_drives_provider
-except Exception:
+except (ImportError, AttributeError, OSError) as exc:  # pragma: no cover - import fallback
+    import logging
+    logging.getLogger(__name__).debug("NTFS drives provider import failed: %s", exc, exc_info=True)
     _ntfs_drives_provider = None  # type: ignore[assignment]
 
 
@@ -243,7 +245,10 @@ def _detect_ntfs_steam_games() -> list[dict]:
         return []
     try:
         drives = _ntfs_drives_provider()
-    except Exception:
+    except (OSError, ImportError, AttributeError) as exc:
+        import logging
+
+        logging.getLogger(__name__).debug("NTFS drives probe failed: %s", exc, exc_info=True)
         return []
     seen: set[str] = set()
     games: list[dict] = []

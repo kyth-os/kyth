@@ -57,4 +57,5 @@ def apply_pipewire_quantum(preset: str, dry_run: bool = False) -> tuple[bool, st
             pass
         return True, f"pipewire quantum {q} ({preset}) applied — restart pipewire"
     except Exception as exc:
+        logger.warning("pipewire quantum apply failed, fallback not available: %s", exc)
         return False, str(exc)

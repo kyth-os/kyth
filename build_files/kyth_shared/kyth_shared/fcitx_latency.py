@@ -1,9 +1,25 @@
 """Fcitx5 latency — 10ms gaming vs 50ms balanced."""
 from __future__ import annotations
 
-import os, tomllib
+import os, tempfile, tomllib
 from pathlib import Path
 from typing import Any
+
+
+def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    try:
+        with open(fd, "w", encoding=encoding) as f:
+            f.write(content)
+        Path(tmp).replace(path)
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 DEFAULT_FCITX_LATENCY_PATH = Path("/etc/kyth/fcitx-latency.toml")
 
@@ -41,7 +57,7 @@ def save_fcitx_latency(cfg: dict[str, Any], path: Path | None = None) -> Path:
     if prof not in ("balanced", "gaming"):
         prof = "balanced"
     lat = int(cfg.get("latency_ms", 10 if prof == "gaming" else 50))
-    p.write_text(f"# Kyth fcitx5 latency — offline\nprofile = \"{prof}\"\nlatency_ms = {lat}\n", encoding="utf-8")
+    _atomic_write_text(p, f"# Kyth fcitx5 latency — offline\nprofile = \"{prof}\"\nlatency_ms = {lat}\n", encoding="utf-8")
     return p
 
 
@@ -58,7 +74,7 @@ def apply_fcitx_latency(cfg: dict[str, Any] | None = None) -> bool:
             import re
 
             t = re.sub(r"Latency=\\d+", f"Latency={lat}", t)
-            conf.write_text(t, encoding="utf-8")
+            _atomic_write_text(conf, t, encoding="utf-8")
             return True
     except OSError:
         pass

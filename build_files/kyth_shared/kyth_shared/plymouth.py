@@ -119,7 +119,23 @@ def ensure_dracut_config(path: Path = Path("/etc/dracut.conf.d/99-kyth.conf")) -
         text += '\nadd_dracutmodules+=" kyth-plymouth "\n'
     if "force_add_dracutmodules" not in text or "kyth-plymouth" not in text.partition("force_add_dracutmodules")[2]:
         text += 'force_add_dracutmodules+=" kyth-plymouth "\n'
-    path.write_text(text, encoding="utf-8")
+    # Atomic tmp+fsync+replace
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        with open(tmp, "rb") as fh:
+            os.fsync(fh.fileno())
+    except OSError:
+        pass
+    tmp.replace(path)
+    try:
+        dfd = os.open(str(path.parent), os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
 
 
 def _prepare_include(root: Path) -> None:

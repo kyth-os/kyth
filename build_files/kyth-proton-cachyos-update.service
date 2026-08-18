@@ -25,3 +25,4 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=
 Nice=10
 IOSchedulingClass=idle
+MemoryMax=512M

@@ -4,6 +4,7 @@ ARG BASE_IMAGE=localhost/kyth-base:stable
 # Base Image
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Override upstream OCI labels so downstream tooling (lorax/bootc) sees KythOS product metadata
 LABEL org.opencontainers.image.title="KythOS"
 LABEL org.opencontainers.image.version="44"

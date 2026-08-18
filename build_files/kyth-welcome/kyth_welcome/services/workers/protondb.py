@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+_logger = logging.getLogger(__name__)
 
 from ...qt import Signal
 from ..runtime import TrackedThread
@@ -34,7 +38,8 @@ class ProtonDbBatchWorker(TrackedThread):
                     tier = data.get("tier") or "pending"
                     result[appid] = tier
                     self.tier_fetched.emit(appid, tier)
-            except Exception:
+            except (OSError, ValueError, KeyError, json.JSONDecodeError, HTTPError, URLError) as exc:
+                _logger.debug("ProtonDB fetch failed for %s: %s", appid, exc, exc_info=True)
                 result[appid] = "pending"
             time.sleep(0.06)
         self.finished_all.emit(result)

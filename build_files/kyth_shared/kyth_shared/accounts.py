@@ -52,7 +52,9 @@ def _write_lines(path: Path, lines: list[str], mode: int, run: RunFn) -> None:
     """
     path_str = str(path)
     content = "\n".join(lines) + "\n"
-    run(["mkdir", "-p", str(path.parent)], check=True)
+    # Idempotent: only mkdir if parent missing (avoids unnecessary writes)
+    if run(["test", "-d", str(path.parent)], check=False, capture_output=True).returncode != 0:
+        run(["mkdir", "-p", str(path.parent)], check=True)
     run(["tee", path_str], input=content, text=True, stdout=subprocess.DEVNULL, check=True)
     # mode is an integer permission (e.g. 0o644); chmod wants octal digits.
     run(["chmod", f"{mode:o}", path_str], check=True)

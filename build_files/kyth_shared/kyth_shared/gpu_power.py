@@ -5,9 +5,26 @@ Gaming → DPM high + power profile, balanced → auto. No daemon.
 from __future__ import annotations
 
 import os
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any
+
+
+def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    try:
+        with open(fd, "w", encoding=encoding) as f:
+            f.write(content)
+        Path(tmp).replace(path)
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 DEFAULT_GPU_POWER_PATH = Path("/etc/kyth/gpu-power.toml")
 
@@ -44,7 +61,7 @@ def save_gpu_power(cfg: dict[str, Any], path: Path | None = None) -> Path:
         prof = "balanced"
     dpm = str(cfg.get("dpm", "auto"))
     lines = ["# Kyth GPU power — offline\n", f'profile = "{prof}"\n', f'dpm = "{dpm}"\n']
-    p.write_text("".join(lines), encoding="utf-8")
+    _atomic_write_text(p, "".join(lines), encoding="utf-8")
     return p
 
 

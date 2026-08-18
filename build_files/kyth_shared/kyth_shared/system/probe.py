@@ -675,4 +675,5 @@ def probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
 
 def invalidate_probe_caches(keys: Iterable[str] | None = None) -> None:
     """Invalidate both mem and disk caches — drop-in replacement for process.invalidate_probe_caches."""
+    _logger.info("invalidate_probe_caches: clearing %s", list(keys) if keys is not None else "all")
     _service.invalidate(keys)

@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+set -euo pipefail
 # Shared helper for KythOS read-only diagnostic-dump scripts
 # (kyth-device-info, kyth-creator-check). Sourced, not executed directly.
 #

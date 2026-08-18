@@ -47,3 +47,17 @@ def get_hardware_view() -> HardwareView:
         return HardwareView(evaluation, applied, has_nvidia, is_hybrid)
 
     return probe_cached("hardware-view", _HARDWARE_VIEW_TTL, _fetch)
+
+
+def invalidate_hardware_view() -> None:
+    """Invalidate the cached hardware view so the next get_hardware_view() re-probes."""
+    from kyth_shared.system.probe import invalidate_probe_caches
+
+    invalidate_probe_caches(["hardware-view", "hardware-summary"])
+    # Also clear inventory cache so sysfs is re-scanned
+    try:
+        from kyth_shared.hardware_policy import invalidate_inventory_cache
+
+        invalidate_inventory_cache()
+    except Exception:
+        pass

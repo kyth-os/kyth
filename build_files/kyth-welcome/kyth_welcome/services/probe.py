@@ -43,3 +43,12 @@ from kyth_shared.system.probe import (  # noqa: F401 — re-export pure API for 
     write_cache_file,
 )
 # pylint: enable=unused-import
+
+import logging as _probe_logging
+
+_logger = _probe_logging.getLogger(__name__)
+
+def invalidate_probe_caches_with_log(keys=None):
+    _logger.info("invalidate_probe_caches: clearing %s", list(keys) if keys is not None else "all")
+    from kyth_shared.system.probe import invalidate_probe_caches as _real
+    return _real(keys)

@@ -1,6 +1,8 @@
 """NTFS/BitLocker drive listing and controller detection snapshot."""
 from __future__ import annotations
 
+import subprocess
+
 from kyth_shared.runtime_output import parse_lsblk_devices
 from kyth_shared.system.controllers import detect_controllers
 from kyth_welcome.services.command import run_sync
@@ -27,7 +29,9 @@ def _fetch_ntfs_drives() -> list[dict]:
             capture_output=True, text=True, timeout=10, check=False,
         )
         devices = parse_lsblk_devices(r.stdout)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        import logging
+        logging.getLogger(__name__).debug("lsblk parse failed: %s", exc, exc_info=True)
         return []
 
     results: list[dict] = []

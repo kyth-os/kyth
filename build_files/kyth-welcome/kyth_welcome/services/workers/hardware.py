@@ -24,5 +24,5 @@ class ControllerProbeWorker(TrackedThread):
     def run(self) -> None:
         try:
             self.result.emit(_detect_controllers())
-        except Exception:
+        except (OSError, RuntimeError):
             self.result.emit({})

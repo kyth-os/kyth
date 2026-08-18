@@ -19,5 +19,5 @@ class TelemetryWorker(TrackedThread):
         try:
             sessions = recent_sessions(limit=self.limit)
             self.loaded.emit(sessions)
-        except Exception:
+        except (OSError, ValueError):
             self.loaded.emit([])

@@ -23,5 +23,7 @@ ExecStart=/usr/bin/kyth-duperemove
 Nice=19
 IOSchedulingClass=idle
 
+MemoryMax=512M
+
 [Install]
 WantedBy=multi-user.target

@@ -11,6 +11,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import logging
 import re
 import shutil
 import sys
@@ -24,6 +25,8 @@ from typing import Any
 from .commands import run_optional, run_text
 
 import time as _time
+
+_policy_logger = logging.getLogger(__name__)
 
 # Inventory cache — avoid re-scanning /sys on every hw-setup/guardian/probe tick (60s TTL, host paths only, aligns with probe/gaming)
 _INVENTORY_CACHE: tuple[float, Inventory] | None = None
@@ -428,7 +431,14 @@ def evaluate(
 
 def evaluate_system(path: Path = DEFAULT_POLICY_PATH) -> Evaluation:
     policy, digest = load_policy(path)
-    return evaluate(policy, digest, collect_inventory())
+    evaluation = evaluate(policy, digest, collect_inventory())
+    for warning in evaluation.warnings:
+        _policy_logger.warning("hardware policy warning: %s", warning)
+    if evaluation.warnings:
+        _policy_logger.info(
+            "hardware policy %s evaluated with %d warning(s)", evaluation.policy_revision, len(evaluation.warnings)
+        )
+    return evaluation
 
 
 def booted_image_identity() -> tuple[str, str]:

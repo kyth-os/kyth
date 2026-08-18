@@ -22,9 +22,8 @@ def get_cpu_topology() -> tuple[str, str]:
                     vendor = line.split(":", 1)[1].strip()
                 elif line.startswith("model name"):
                     model = line.split(":", 1)[1].strip()
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
-        pass
+    except (OSError, ValueError) as exc:
+        logger.debug("get_cpu_topology failed: %s", exc, exc_info=True)
     return vendor, model
 
 
@@ -36,9 +35,8 @@ def has_3d_vcache() -> bool:
             for line in f:
                 if "3d" in line.lower():
                     return True
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
-        pass
+    except (OSError, ValueError) as exc:
+        logger.debug("has_3d_vcache cpuinfo read failed: %s", exc, exc_info=True)
 
     if shutil.which("lscpu"):
         try:

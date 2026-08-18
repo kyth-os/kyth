@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+set -euo pipefail
 # Shared helper for KythOS performance/benchmark reporting scripts
 # (kyth-kerver, kyth-snappy-bench). Sourced, not executed directly.
 #

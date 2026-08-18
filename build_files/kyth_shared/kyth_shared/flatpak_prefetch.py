@@ -1,10 +1,13 @@
 """Flatpak prefetch — flatpak-prefetch.toml, timer daily prefetch."""
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 DEFAULT_FLATPAK_PREFETCH_PATH = Path("/etc/kyth/flatpak-prefetch.toml")
 DEFAULT_TIMER_DROPIN = Path("/etc/systemd/system/flatpak-prefetch.timer.d/99-kyth.conf")
@@ -24,7 +27,8 @@ def load_flatpak_prefetch(path: Path | None = None) -> dict[str, Any]:
     p = flatpak_prefetch_config_path(path)
     try:
         data = tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        _logger.debug("load_flatpak_prefetch failed for %s: %s", p, exc, exc_info=True)
         return {"enabled": False, "time": "02:00"}
     en = bool(data.get("enabled", False))
     t = str(data.get("time", "02:00"))
@@ -38,7 +42,9 @@ def save_flatpak_prefetch(cfg: dict[str, Any], path: Path | None = None) -> Path
     p.parent.mkdir(parents=True, exist_ok=True)
     en = bool(cfg.get("enabled", False))
     t = str(cfg.get("time", "02:00"))
-    p.write_text(f"# Kyth flatpak prefetch — offline\nenabled = {str(en).lower()}\ntime = \"{t}\"\n", encoding="utf-8")
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(f"# Kyth flatpak prefetch — offline\nenabled = {str(en).lower()}\ntime = \"{t}\"\n", encoding="utf-8")
+    tmp.replace(p)
     return p
 
 
@@ -51,12 +57,13 @@ def generate_flatpak_prefetch(cfg: dict[str, Any] | None = None, service: Path |
             try:
                 if d.exists():
                     d.unlink()
-            except OSError:
-                pass
+            except OSError as exc:
+                _logger.debug("flatpak prefetch cleanup failed for %s: %s", d, exc, exc_info=True)
         return None
     t = str(cfg.get("time", "02:00"))
     service.parent.mkdir(parents=True, exist_ok=True)
-    service.write_text(
+    tmp = service.with_suffix(".tmp")
+    tmp.write_text(
         f"""[Unit]
 Description=Kyth flatpak prefetch — off-peak
 [Service]
@@ -68,10 +75,12 @@ IOSchedulingPriority=7
 """,
         encoding="utf-8",
     )
+    tmp.replace(service)
     timer = Path("/etc/systemd/system/flatpak-prefetch.timer")
     timer.parent.mkdir(parents=True, exist_ok=True)
     hour, minute = (t.split(":") + ["00"])[:2]
-    timer.write_text(
+    tmp = timer.with_suffix(".tmp")
+    tmp.write_text(
         f"""[Unit]
 Description=Kyth flatpak prefetch timer
 [Timer]
@@ -82,6 +91,7 @@ WantedBy=timers.target
 """,
         encoding="utf-8",
     )
+    tmp.replace(timer)
     return service
 
 

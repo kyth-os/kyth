@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+_logger = logging.getLogger(__name__)
 
 from ...qt import Signal
 from ..gaming import compat_data
@@ -34,5 +38,6 @@ class CompatRefreshWorker(TrackedThread):
             with open(_COMPAT_CACHE_PATH, "w", encoding="utf-8") as fh:
                 fh.write(raw)
             self.refreshed.emit(updated, games)
-        except Exception:
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError, HTTPError, URLError) as exc:
+            _logger.debug("Compat refresh failed: %s", exc, exc_info=True)
             self.unchanged.emit()

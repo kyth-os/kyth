@@ -16,6 +16,13 @@ Rectangle {
             }
         }
         Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"
+            // Guard for stale snapshot on page re-entry: reload model if probe cache invalidated
+            property bool staleGuard: false
+            Connections {
+                target: typeof QmlBridge !== "undefined" ? QmlBridge : null
+                function onProbeCacheInvalidated() { staleGuard = true }
+            }
+            onVisibleChanged: if (visible && staleGuard) { staleGuard = false; if (typeof QmlBridge !== "undefined" && QmlBridge.reloadHardwareSnapshot) QmlBridge.reloadHardwareSnapshot() }
             Text { anchors.centerIn: parent; text: "QML shell stub — Python services stay in control"; color: "#93a1bd"; font.pixelSize: 13 }
         }
     }

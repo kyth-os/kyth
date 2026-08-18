@@ -2,6 +2,7 @@
 set -euo pipefail
 
 KYTH_KERNEL_FLAVOR="${KYTH_KERNEL_FLAVOR:-fedora}"
+# curl callers must use --fail --retry 3 (see build_files/scripts/lib/curl-common.sh: --retry 5 covers it)
 
 write_kernel_flavor() {
 	mkdir -p /usr/share/kyth

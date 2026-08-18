@@ -33,7 +33,9 @@ def save_btrfs_autotune(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     en = bool(cfg.get("enabled", True))
     thr = max(50, min(95, int(cfg.get("threshold", 80))))
-    p.write_text(f"# Kyth btrfs autotune — offline\nenabled = {str(en).lower()}\nthreshold = {thr}\n", encoding="utf-8")
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(f"# Kyth btrfs autotune — offline\nenabled = {str(en).lower()}\nthreshold = {thr}\n", encoding="utf-8")
+    tmp.replace(p)
     return p
 
 

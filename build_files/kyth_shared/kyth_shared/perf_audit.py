@@ -132,11 +132,12 @@ def collect_audit(force: bool = False) -> dict[str, Any]:
             out[name] = getattr(m, fn)()
         except Exception:
             out[name] = "unknown"
-    # systemd-analyze
+    # systemd-analyze (timeout 5s)
     try:
         r = _run(["systemd-analyze"], capture_output=True, text=True, timeout=5)
         out["systemd_analyze"] = r.stdout.strip().splitlines()[0] if r and r.stdout else ""
     except Exception:
+        logger.debug("systemd-analyze failed", exc_info=True)
         out["systemd_analyze"] = "unavailable (not booted with systemd)"
     # probe count
     try:

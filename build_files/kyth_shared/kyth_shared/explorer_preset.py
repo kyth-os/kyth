@@ -2,12 +2,28 @@
 from __future__ import annotations
 import logging
 
-import os, tomllib
+import os, tempfile, tomllib
 from pathlib import Path
 from typing import Any
 from kyth_shared.commands import run
 
 logger = logging.getLogger(__name__)
+
+
+def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    try:
+        with open(fd, "w", encoding=encoding) as f:
+            f.write(content)
+        Path(tmp).replace(path)
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 DEFAULT_EXPLORER_PATH = Path.home() / ".config" / "kyth" / "explorer.toml"
 
@@ -36,7 +52,7 @@ def save_explorer(cfg: dict[str, Any], path: Path | None = None) -> Path:
     lines.append(f'preview = {str(bool(cfg.get("preview",True))).lower()}')
     lines.append(f'preview_pane = {str(bool(cfg.get("preview_pane",True))).lower()}')
     lines.append(f'drives_on_desktop = {str(bool(cfg.get("drives_on_desktop",True))).lower()}')
-    p.write_text("\n".join(lines)+"\n", encoding="utf-8")
+    _atomic_write_text(p, "\n".join(lines)+"\n", encoding="utf-8")
     return p
 
 def apply_explorer(cfg: dict[str, Any] | None = None) -> list[str]:
@@ -57,7 +73,7 @@ def apply_explorer(cfg: dict[str, Any] | None = None) -> list[str]:
         pass
     # Drives on desktop via Desktop .desktop already via NTFS D: — no extra
     try:
-        import time; Path("/run/kyth-explorer-ttl").write_text(str(int(time.time())+30), encoding="utf-8")
+        import time; _atomic_write_text(Path("/run/kyth-explorer-ttl"), str(int(time.time())+30), encoding="utf-8")
     except Exception:
         logger.debug("handled expected exception", exc_info=True)
         pass

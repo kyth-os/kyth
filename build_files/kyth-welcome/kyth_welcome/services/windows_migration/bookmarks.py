@@ -91,8 +91,8 @@ def scan_windows_bookmarks(profiles: list[dict]) -> list[dict]:
         for browser, path in candidates:
             try:
                 entries = read_chromium_bookmarks(path)
-            except Exception:
-                _logger.debug("scan_windows_bookmarks: reading %s failed", path, exc_info=True)
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                _logger.debug("scan_windows_bookmarks: reading %s failed: %s", path, exc, exc_info=True)
                 continue
             if not entries:
                 continue
@@ -102,8 +102,8 @@ def scan_windows_bookmarks(profiles: list[dict]) -> list[dict]:
         for places in glob.glob(os.path.join(base, "AppData/Roaming/Mozilla/Firefox/Profiles", "*", "places.sqlite")):
             try:
                 entries = read_firefox_bookmarks(places)
-            except Exception:
-                _logger.debug("scan_windows_bookmarks: reading %s failed", places, exc_info=True)
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                _logger.debug("scan_windows_bookmarks: reading %s failed: %s", places, exc, exc_info=True)
                 continue
             if entries:
                 sources.append({"browser": "Firefox", "user": user, "entries": entries})

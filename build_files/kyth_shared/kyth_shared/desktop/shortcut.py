@@ -9,6 +9,23 @@ import shutil
 
 from ..commands import run as run_command
 from pathlib import Path
+import tempfile
+
+
+def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    try:
+        with open(fd, "w", encoding=encoding) as f:
+            f.write(content)
+        Path(tmp).replace(path)
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +254,7 @@ def categorize_web_apps() -> bool:
                         updated_lines.append("Categories=X-KythWebApp;")
                         inserted = True
 
-                desktop_file.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+                _atomic_write_text(desktop_file, "\n".join(updated_lines) + "\n", encoding="utf-8")
                 changed = True
             except (OSError, ValueError, UnicodeError, AttributeError, re.error):
                 logger.debug("handled expected exception", exc_info=True)
@@ -290,7 +307,7 @@ def fixup_kali_desktop_launchers() -> bool:
                 file_changed = True
 
             if file_changed:
-                desktop_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+                _atomic_write_text(desktop_file, "\n".join(new_lines) + "\n", encoding="utf-8")
                 changed = True
         except (OSError, ValueError, UnicodeError, AttributeError, re.error):
             logger.debug("handled expected exception", exc_info=True)
@@ -319,7 +336,7 @@ def fixup_kali_desktop_launchers() -> bool:
                     content,
                     flags=re.MULTILINE,
                 )
-            desktop_file.write_text(content, encoding="utf-8")
+            _atomic_write_text(desktop_file, content, encoding="utf-8")
             changed = True
         except (OSError, ValueError, UnicodeError, AttributeError, re.error):
             logger.debug("handled expected exception", exc_info=True)

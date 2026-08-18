@@ -334,11 +334,42 @@ def local_report(*, include_gaming: bool = False) -> QualificationReport:
 
 
 def _write_report(report: QualificationReport, output: Path, markdown: Path | None) -> None:
+    import os
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(report.to_json(), encoding="utf-8")
+    tmp = output.with_suffix(".tmp")
+    tmp.write_text(report.to_json(), encoding="utf-8")
+    try:
+        with open(tmp, "rb") as fh:
+            os.fsync(fh.fileno())
+    except OSError:
+        pass
+    tmp.replace(output)
+    try:
+        dfd = os.open(str(output.parent), os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
     if markdown:
         markdown.parent.mkdir(parents=True, exist_ok=True)
-        markdown.write_text(report.to_markdown(), encoding="utf-8")
+        tmp = markdown.with_suffix(".tmp")
+        tmp.write_text(report.to_markdown(), encoding="utf-8")
+        try:
+            with open(tmp, "rb") as fh:
+                os.fsync(fh.fileno())
+        except OSError:
+            pass
+        tmp.replace(markdown)
+        try:
+            dfd = os.open(str(markdown.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except OSError:
+            pass
 
 
 def build_parser() -> argparse.ArgumentParser:

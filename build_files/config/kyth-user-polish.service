@@ -8,5 +8,7 @@ Type=oneshot
 ExecStart=/usr/bin/kyth-user-polish
 RemainAfterExit=yes
 
+MemoryMax=384M
+
 [Install]
 WantedBy=graphical-session.target

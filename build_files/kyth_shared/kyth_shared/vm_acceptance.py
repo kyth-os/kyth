@@ -22,6 +22,12 @@ INSTALLER_ENV_FILE = Path("/etc/kyth-installer.env")
 UPDATE_REF_PATTERN = re.compile(r"^[A-Za-z0-9._/@:+-]+$")
 
 
+def _atomic_write(path: Path, content: str) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(path)
+
+
 def _read_fw_cfg(path: Path) -> str:
     try:
         return path.read_bytes().replace(b"\0", b"").decode().strip()
@@ -213,12 +219,12 @@ def run_installed_lifecycle() -> None:
         initial = booted_digest()
         if not initial:
             fail("could not read initial booted digest")
-        (STATE_DIR / "initial-digest").write_text(initial + "\n", encoding="utf-8")
+        _atomic_write(STATE_DIR / "initial-digest", initial + "\n")
         if not update_ref:
             emit("COMPLETE", "install-only")
             power("poweroff")
             return
-        STATE_FILE.write_text("update-staged\n", encoding="utf-8")
+        _atomic_write(STATE_FILE, "update-staged\n")
         emit("UPDATE_STARTED", update_ref)
         _logged(["bootc", "switch", update_ref], "bootc switch failed")
         emit("UPDATE_STAGED", update_ref)
@@ -231,7 +237,7 @@ def run_installed_lifecycle() -> None:
             fail("updated system does not expose a rollback deployment")
         emit("UPDATE_BOOTED", current)
         run_smoke_check("UPDATE")
-        STATE_FILE.write_text("rollback-staged\n", encoding="utf-8")
+        _atomic_write(STATE_FILE, "rollback-staged\n")
         _logged(["bootc", "rollback"], "bootc rollback failed")
         emit("ROLLBACK_STAGED", initial)
         power("reboot")

@@ -87,7 +87,7 @@ def folder_sizes_calc(paths: dict[str, str]):
                     stderr=subprocess.DEVNULL,
                 )
                 sizes[name] = int(result.stdout.split()[0])
-            except Exception:
+            except (OSError, ValueError):
                 sizes[name] = -1
         return sizes
     return _calc

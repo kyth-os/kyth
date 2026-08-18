@@ -4,3 +4,4 @@ Description=Re-sync KythOS taskbar pins with installed applications
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-refresh-taskbar-pins
+MemoryMax=256M

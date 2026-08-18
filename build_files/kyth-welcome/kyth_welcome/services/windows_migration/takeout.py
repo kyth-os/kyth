@@ -111,7 +111,7 @@ def enrich_with_extras(summary: dict, extras_results: list[dict]) -> dict:
         summary["saves_count"] = saves
         summary["wallpapers_count"] = wallpapers
         summary["fonts_count"] = fonts
-    except Exception:
+    except (OSError, ValueError, KeyError):
         pass
     return summary
 

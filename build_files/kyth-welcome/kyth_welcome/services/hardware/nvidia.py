@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
+import subprocess
 from kyth_welcome.services.command import run_sync
 from dataclasses import dataclass
 
 from .types import HardwareProbe
+
+_logger = logging.getLogger(__name__)
 from ..process import probe_cached
 
 
@@ -20,12 +24,14 @@ def _detect_nvidia() -> bool:
 
             view = get_hardware_view()
             return bool(view.has_nvidia)
-        except Exception:
+        except (OSError, subprocess.SubprocessError) as exc:
+            _logger.debug("nvidia detect via hardware_view failed: %s", exc)
             pass
         try:
             r = run_sync(["lspci"], capture_output=True, text=True, timeout=5, check=False)
             return "nvidia" in r.stdout.lower()
-        except Exception:
+        except (OSError, subprocess.SubprocessError) as exc:
+            _logger.debug("nvidia lspci probe failed: %s", exc)
             return False
     return probe_cached("nvidia-detect", 300.0, fetch)
  # _detect_nvidia
@@ -63,7 +69,8 @@ def _nvidia_module_loaded() -> bool:
     try:
         r = run_sync(["lsmod"], capture_output=True, text=True, timeout=5, check=False)
         return "nvidia" in r.stdout.lower()
-    except Exception:
+    except (OSError, subprocess.SubprocessError) as exc:
+        _logger.debug("lsmod probe failed: %s", exc)
         return False
  # _nvidia_module_loaded
 
@@ -71,7 +78,8 @@ def _akmod_nvidia_built() -> bool:
     try:
         r = run_sync(["modinfo", "nvidia"], capture_output=True, text=True, timeout=5, check=False)
         return r.returncode == 0
-    except Exception:
+    except (OSError, subprocess.SubprocessError) as exc:
+        _logger.debug("modinfo probe failed: %s", exc)
         return False
  # _akmod_nvidia_built
 
@@ -79,7 +87,8 @@ def _akmod_nvidia_installed() -> bool:
     try:
         r = run_sync(["rpm", "-q", "akmod-nvidia"], capture_output=True, text=True, timeout=5, check=False)
         return r.returncode == 0
-    except Exception:
+    except (OSError, subprocess.SubprocessError) as exc:
+        _logger.debug("rpm probe failed: %s", exc)
         return False
  # _akmod_nvidia_installed
 
@@ -92,7 +101,8 @@ def _hw_setup_service_state() -> str:
             capture_output=True, text=True, timeout=5, check=False,
         )
         return r.stdout.strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError) as exc:
+        _logger.debug("systemctl probe failed: %s", exc)
         return ""
  # _hw_setup_service_state
 
@@ -121,7 +131,8 @@ def _secureboot_state() -> str:
                 return "disabled"
             else:
                 return "unknown"
-        except Exception:
+        except (OSError, subprocess.SubprocessError) as exc:
+            _logger.debug("mokutil sb-state probe failed: %s", exc)
             return "unknown"
         if not enabled:
             return "disabled"
@@ -131,7 +142,8 @@ def _secureboot_state() -> str:
             if "kyth" in hay:
                 return "enabled:enrolled"
             return "enabled:not-enrolled"
-        except Exception:
+        except (OSError, subprocess.SubprocessError) as exc:
+            _logger.debug("mokutil list-enrolled probe failed: %s", exc)
             return "enabled:unknown"
     return probe_cached("secureboot-state", 300.0, fetch)
  # _secureboot_state

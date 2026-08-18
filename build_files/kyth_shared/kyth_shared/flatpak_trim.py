@@ -65,3 +65,15 @@ def generate_flatpak_trim(cfg: dict[str, Any] | None = None, service: Path | Non
 
 def flatpak_trim_status(service: Path = DEFAULT_SERVICE) -> str:
     return "enabled" if service.exists() else "off"
+
+
+def validate_remotes(data) -> None:
+    if not isinstance(data, list): raise ValueError("must be list")
+    allowed={"name","title","url","subset"}
+    for e in data:
+        if not isinstance(e, dict): raise ValueError(f"bad {e!r}")
+        unk=set(e)-allowed
+        if unk: raise ValueError(f"unknown {unk}")
+        if not e.get("name") or not e.get("url"): raise ValueError(f"missing name/url {e!r}")
+        url=e["url"]
+        if not url.startswith("https://") or not url.endswith(".flatpakrepo"): raise ValueError(f"bad url {url!r}")

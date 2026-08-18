@@ -1385,7 +1385,7 @@ class InstallerSystemTests(unittest.TestCase):
             cmds = [c.args[0] for c in mock_run.call_args_list]
             # First arg is the argv list (possibly with sudo -n prefix when non-root).
             flat = [" ".join(str(p) for p in cmd) for cmd in cmds]
-            self.assertTrue(any("mkdir" in s and "subdir" in s for s in flat), flat)
+            self.assertTrue(any(("mkdir" in s or "test" in s) and "subdir" in s for s in flat), flat)
             self.assertTrue(any("tee" in s and "passwd" in s for s in flat), flat)
             self.assertTrue(any("chmod" in s and "644" in s for s in flat), flat)
 

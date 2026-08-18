@@ -34,5 +34,7 @@ TimeoutStartSec=1200
 Nice=10
 IOSchedulingClass=idle
 
+MemoryMax=512M
+
 [Install]
 WantedBy=multi-user.target

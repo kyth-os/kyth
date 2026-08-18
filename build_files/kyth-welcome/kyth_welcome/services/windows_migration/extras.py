@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import re
 import shutil
 import sqlite3
-from kyth_welcome.services.command import run_sync
 import tempfile
+
+from kyth_welcome.services.command import run_sync
+
+_logger = logging.getLogger(__name__)
 
 from .storage import windows_folder_dest
 
@@ -166,7 +170,8 @@ def read_sticky_notes(profile_path: str) -> list[str]:
             clean = re.sub(r"\\id=[0-9a-fA-F-]{36}\s?", "", str(text)).strip()
             if clean:
                 notes.append(clean)
-    except Exception:
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        _logger.debug("read_sticky_notes failed for %s: %s", profile_path, exc, exc_info=True)
         return []
     return notes
 
@@ -319,7 +324,8 @@ def copy_game_saves(saves: list[dict]) -> tuple[int, int, str]:
         try:
             shutil.copytree(item["src"], target, dirs_exist_ok=True)
             ok += 1
-        except Exception:
+        except (OSError, ValueError) as exc:
+            _logger.debug("copy_game_saves failed for %s: %s", item.get("src"), exc, exc_info=True)
             failed += 1
     return ok, failed, base
 
