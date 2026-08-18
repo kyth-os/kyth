@@ -19,6 +19,7 @@ install -m 0440 /dev/stdin /etc/sudoers.d/kyth-upgrade <<'SUDOEOF'
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard switch-latest-cachy
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard switch-testing-cachy
 %wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr refresh
+%wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr refresh --force
 %wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr update
 %wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr update --assume-yes --no-reboot-check
 %wheel ALL=(root) NOPASSWD: /usr/bin/fwupdmgr get-updates

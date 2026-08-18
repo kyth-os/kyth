@@ -37,6 +37,19 @@ run_step() {
 	return 0
 }
 
+flatpak_update_retry() {
+	local scope="$1"
+	if flatpak update "${scope}" --assumeyes --noninteractive; then
+		return 0
+	fi
+	# A remote's static delta can exceed flatpak's decompression size guard
+	# (seen with large Electron apps like Vesktop), which fails the whole
+	# scope even though a plain, delta-free pull would succeed. Retry once
+	# without static deltas before giving up.
+	printf 'flatpak update %s failed; retrying without static deltas.\n' "${scope}" >&2
+	flatpak update "${scope}" --assumeyes --noninteractive --no-static-deltas
+}
+
 if command -v fwupdmgr >/dev/null 2>&1; then
 	# Shared fwupd commands — keep in sync with kyth_shared/system/firmware.py
 	# flock around /run/kyth-fwupd.lock (same lock kyth-update-watcher's
@@ -51,8 +64,8 @@ if command -v fwupdmgr >/dev/null 2>&1; then
 fi
 
 if command -v flatpak >/dev/null 2>&1; then
-	run_step critical "Flatpak user packages" flatpak update --user --assumeyes --noninteractive
-	run_step critical "Flatpak system packages" flatpak update --system --assumeyes --noninteractive
+	run_step critical "Flatpak user packages" flatpak_update_retry --user
+	run_step critical "Flatpak system packages" flatpak_update_retry --system
 fi
 
 run_step critical "KythOS system image" sudo -n /usr/bin/kyth-safe-upgrade

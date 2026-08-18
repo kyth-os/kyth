@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -10,6 +11,8 @@ FRAG_DIR = SCRIPTS / "sysconfig"
 RUNNER = SCRIPTS / "sysconfig-static.sh"
 SYSCTL_DATA = ROOT / "build_files" / "data" / "sysctl.d" / "99-kyth.conf"
 BRANDING_FRAG_DIR = SCRIPTS / "branding"
+FULL_UPDATE = ROOT / "build_files" / "kyth-full-update"
+UPGRADE_SUDOERS = FRAG_DIR / "systemd/35-sudoers-passwordless-safe-upgrade-firmware-operati.sh"
 
 
 class SysconfigFragmentTests(unittest.TestCase):
@@ -123,6 +126,22 @@ class SysconfigFragmentTests(unittest.TestCase):
             FRAG_DIR / "systemd/35-sudoers-passwordless-safe-upgrade-firmware-operati.sh"
         ).read_text(encoding="utf-8")
         self.assertNotIn("NOPASSWD: /usr/bin/podman", fragment)
+
+    def test_full_updaters_sudo_calls_have_a_matching_nopasswd_rule(self):
+        """kyth-full-update runs everything through `sudo -n`, which fails
+        silently (non-interactive, no prompt) the moment its argv drifts
+        from the exact NOPASSWD line in the sudoers fragment — this is what
+        broke `fwupdmgr refresh --force` when `--force` was added to the
+        call but not to the sudoers rule. Every `sudo -n /usr/bin/...`
+        invocation must have a byte-exact NOPASSWD counterpart.
+        """
+        update_body = FULL_UPDATE.read_text(encoding="utf-8")
+        sudoers_body = UPGRADE_SUDOERS.read_text(encoding="utf-8")
+        commands = re.findall(r"sudo -n (/usr/bin/\S.*)$", update_body, flags=re.MULTILINE)
+        self.assertTrue(commands, "expected at least one `sudo -n` call in kyth-full-update")
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertIn(f"NOPASSWD: {command}", sudoers_body)
 
     def test_passwordless_sudo_rules_do_not_use_argument_globs(self):
         for path in (ROOT / "build_files").rglob("*"):
