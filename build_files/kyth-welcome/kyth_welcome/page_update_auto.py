@@ -9,7 +9,7 @@ from .core_base import restyle
 from .services.dbus_utils import is_systemd_unit_enabled
 from .services.launch import popen_privileged, reboot
 from .services.privileged import AuthFrontend, systemctl_action
-from .qt import QCheckBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt
+from .qt import QCheckBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, Qt
 from .widgets import _make_card
 
 _logger = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ class _AutoUpdateMixin:
         reboot_now = QPushButton("Reboot Now")
         reboot_now.setObjectName("primary")
         reboot_now.setToolTip("Reboot to the staged image now (if one is staged)")
-        reboot_now.clicked.connect(lambda _=False: reboot())
+        reboot_now.clicked.connect(lambda _=False: self._reboot_now_click())
         btns.addWidget(reboot_now)
         defer_btn = QPushButton("Defer Automatic Updates 3 Days")
         defer_btn.setToolTip("Stops the watcher timer for 72h — stops the watcher timer via systemctl stop")
@@ -231,6 +231,32 @@ class _AutoUpdateMixin:
         except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
         self._add(card)
+
+    def _reboot_now_click(self):
+        # H8: the button previously fired systemctl reboot unconditionally —
+        # no confirmation, and no check that anything was actually staged.
+        # Check staged state at click time (not construction time): this
+        # page is composed once and can sit alive for hours before a click,
+        # long enough for a background update to stage in the meantime.
+        from .services.bootc import has_staged_update
+
+        if not has_staged_update():
+            QMessageBox.information(
+                self,
+                "Nothing Staged",
+                "No update is staged right now — rebooting would just restart the current system.",
+            )
+            return
+        reply = QMessageBox.question(
+            self,
+            "Reboot Now?",
+            "This closes all open apps and reboots immediately to apply the staged update.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        reboot()
 
     def _refresh_wu_staged_label(self):
         """H7: keep staged label in sync with canonical bootc state."""

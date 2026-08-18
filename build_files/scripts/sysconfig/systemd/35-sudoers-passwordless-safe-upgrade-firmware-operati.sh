@@ -14,6 +14,7 @@ install -m 0440 /dev/stdin /etc/sudoers.d/kyth-upgrade <<'SUDOEOF'
 # KythOS: wheel group may run safe update/firmware commands without a password.
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-safe-upgrade
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard status
+%wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard status-json
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard switch-latest
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard switch-testing
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard switch-latest-cachy

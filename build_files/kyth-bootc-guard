@@ -6,13 +6,16 @@
 set -euo pipefail
 
 [[ $# -eq 1 ]] || {
-    echo "Usage: kyth-bootc-guard <status|switch-latest|switch-testing|switch-latest-cachy|switch-testing-cachy>" >&2
+    echo "Usage: kyth-bootc-guard <status|status-json|switch-latest|switch-testing|switch-latest-cachy|switch-testing-cachy>" >&2
     exit 2
 }
 
 case "$1" in
     status)
         exec /usr/bin/bootc status
+        ;;
+    status-json)
+        exec /usr/bin/bootc status --json
         ;;
     switch-latest)
         ref="ghcr.io/mrtrick37/kyth:latest"

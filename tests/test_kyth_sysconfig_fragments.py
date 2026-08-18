@@ -111,6 +111,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for operation in (
             "status",
+            "status-json",
             "switch-latest",
             "switch-testing",
             "switch-latest-cachy",

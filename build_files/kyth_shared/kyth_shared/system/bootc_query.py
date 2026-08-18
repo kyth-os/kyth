@@ -41,7 +41,14 @@ def walk_strings(data: object):
 
 
 def fetch_status_text() -> str:
-    for cmd in (["sudo", "-n", "bootc", "status"], ["bootc", "status"]):
+    # `bootc status` requires root even for a read (bootc 1.16+ takes a
+    # sysroot write-lock while querying privilege) — there is no NOPASSWD
+    # rule for raw `bootc status` (only the fixed kyth-bootc-guard
+    # operations), so a bare `sudo -n bootc status` always fails and just
+    # spams an auth-failure audit line on every probe. Route through the
+    # guard, which does have a NOPASSWD rule. Keep the unprivileged
+    # fallback only in case the guard binary itself is ever missing.
+    for cmd in (["sudo", "-n", "/usr/bin/kyth-bootc-guard", "status"], ["bootc", "status"]):
         result = run_command(cmd, timeout=10)
         if result is not None and result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -53,8 +60,11 @@ def status_text() -> str:
 
 
 def fetch_status_data() -> dict | None:
+    # See fetch_status_text() above: route through kyth-bootc-guard's
+    # NOPASSWD status-json operation instead of a bare `sudo -n bootc
+    # status --json`, which has no matching sudoers rule and always fails.
     for cmd in (
-        ["sudo", "-n", "bootc", "status", "--json"],
+        ["sudo", "-n", "/usr/bin/kyth-bootc-guard", "status-json"],
         ["bootc", "status", "--json"],
     ):
         result = run_command(cmd, timeout=10)
