@@ -75,7 +75,7 @@ class UpdateCheckWorker(TrackedThread):
                         "system", result.state, detail=result.detail, manifest_raw=manifest_raw,
                     )
                 )
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError) as exc:
             _logger.warning("System update probe failed: %s", exc)
             self.result.emit(UpdateProbeResult.error("system", str(exc)))
 

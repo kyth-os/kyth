@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import fcntl
 import logging
+import subprocess
 import os
 import re
 import shutil
@@ -46,7 +47,7 @@ def _firmware_probe() -> HardwareProbe:
                 try:
                     try:
                         run_firmware_refresh(timeout=60)
-                    except Exception:
+                    except (OSError, subprocess.SubprocessError, ValueError) as exc:
                         logger.debug("firmware refresh failed", exc_info=True)
                     try:
                         fw_count = check_firmware_updates(timeout=20)

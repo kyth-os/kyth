@@ -14,7 +14,7 @@ class HardwareProbeWorker(TrackedThread):
     def run(self):
         try:
             self.done.emit(_collect_hardware_probes())
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             self.failed.emit(str(exc))
 
 

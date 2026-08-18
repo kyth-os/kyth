@@ -198,13 +198,14 @@ def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
                     oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
                     _FILE_CACHE.pop(oldest, None)
                 _FILE_CACHE[path] = (mtime, doc)
-        except Exception:
+        except (OSError, ValueError) as exc:
+            import logging; logging.getLogger(__name__).debug("handled %s: %s", "probe.py", exc, exc_info=True)
             try:
                 os.unlink(tmp_name)
             except OSError:
                 pass
             raise
-    except Exception:
+    except (OSError, ValueError) as exc:
         raise
     finally:
         if lock_fd is not None:
@@ -323,7 +324,8 @@ def flatpak_updates_cached(*, system: bool = False) -> int:
         try:
             # probe stores int directly; handle str/int
             return int(cached)  # type: ignore[arg-type]
-        except Exception:
+        except (OSError, ValueError) as exc:
+            import logging; logging.getLogger(__name__).debug("handled %s", exc, exc_info=True)
             if isinstance(cached, int):
                 return cached
     val = _count_flatpak_updates()

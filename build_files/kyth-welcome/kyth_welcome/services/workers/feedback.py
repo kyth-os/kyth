@@ -43,5 +43,5 @@ class GitHubIssueWorker(TrackedThread):
             with urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.success.emit(data.get("html_url", ""))
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError) as exc:
             self.failed.emit(str(exc))

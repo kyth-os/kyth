@@ -67,7 +67,7 @@ class GameNightManager:
             try:
                 cls._inhibit_proc.terminate()
                 cls._inhibit_proc.wait(timeout=5)
-            except Exception:
+            except (OSError, subprocess.SubprocessError) as exc:
                 _logger.debug("stop: terminating the idle-inhibit process failed", exc_info=True)
             cls._inhibit_proc = None
         if cls._started:
@@ -82,7 +82,7 @@ class GameNightManager:
 def _cleanup_game_night():
     try:
         GameNightManager.stop()
-    except Exception:
+    except (OSError, RuntimeError) as exc:
         _logger.debug("_cleanup_game_night: GameNightManager.stop failed", exc_info=True)
     finally:
         for proc in list(GameNightManager._action_procs):

@@ -114,7 +114,7 @@ class BaseDaemon(ABC):
         self.logger.info("Starting %s...", self.name)
         try:
             self.on_start()
-        except Exception as exc:
+        except (OSError, RuntimeError) as exc:
             self.logger.exception("Failed during daemon startup: %s", exc)
             return 1
 
@@ -123,7 +123,7 @@ class BaseDaemon(ABC):
             self.should_poll = False
             try:
                 self.poll()
-            except Exception as exc:
+            except (OSError, RuntimeError) as exc:
                 self.logger.exception("Exception in poll loop: %s", exc)
 
             if self.oneshot:
@@ -139,7 +139,7 @@ class BaseDaemon(ABC):
 
         try:
             self.on_stop()
-        except Exception as exc:
+        except (OSError, RuntimeError) as exc:
             self.logger.exception("Failed during daemon shutdown: %s", exc)
 
         self.logger.info("%s stopped.", self.name)

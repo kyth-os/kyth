@@ -14,5 +14,5 @@ def cloud_oauth_status() -> tuple[bool, str]:
         return (False, "rclone not configured — use Hub Cloud Storage OAuth")
     except FileNotFoundError:
         return (False, "rclone not installed")
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         return (False, str(exc))

@@ -45,7 +45,8 @@ def main() -> int:
     # Read changelog notes
     try:
         changelog_content = args.iso_changelog.read_text(encoding="utf-8")
-    except Exception:
+    except (OSError, ValueError) as exc:
+        import logging; logging.getLogger(__name__).debug("handled in publish-release.py", exc_info=True)
         changelog_content = ""
 
     # 1. Generate Immutable Release Notes

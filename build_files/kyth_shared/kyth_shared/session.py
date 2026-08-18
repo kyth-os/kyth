@@ -16,7 +16,8 @@ def write_code_argv(path: Path) -> None:
     """Disable keyring prompt in VS Code argv.json."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
+    except (OSError, ValueError, KeyError) as exc:
+        import logging; logging.getLogger(__name__).debug("handled %s: %s", "session.py", exc, exc_info=True)
         logger.debug("handled expected exception", exc_info=True)
         pass
     data = {}
@@ -342,4 +343,3 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
         pass
 
     return out
-

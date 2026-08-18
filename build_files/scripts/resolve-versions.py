@@ -23,7 +23,8 @@ def get_github_headers() -> dict[str, str]:
             secret_path = Path("/run/secrets/github_token")
             if secret_path.is_file():
                 token = secret_path.read_text(encoding="utf-8").strip()
-        except Exception:
+        except (OSError, ValueError) as exc:
+            import logging; logging.getLogger(__name__).debug("handled in resolve-versions.py", exc_info=True)
             pass
     if token:
         headers["Authorization"] = f"Bearer {token}"

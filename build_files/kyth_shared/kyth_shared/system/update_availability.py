@@ -102,7 +102,7 @@ def collect_availability(*, branch: str | None = None, use_cached: bool = True) 
 
         b = branch or current_branch() or "latest"
         status_data = bootc_status_data() or {}
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         return AvailabilityStatus(state="error", detail=str(exc))
 
     # Registry check — the slow path (skopeo, 45 s inner timeout)

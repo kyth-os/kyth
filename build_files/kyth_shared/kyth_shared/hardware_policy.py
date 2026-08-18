@@ -35,7 +35,7 @@ _INVENTORY_TTL = 60.0
 # Progressive: per-quirk modules under hardware_quirks/ for testable catalog
 try:
     from .hardware_quirks import __all__ as _QUIRK_MODULES  # noqa: F401
-except Exception:
+except (OSError, ValueError) as exc:
     _QUIRK_MODULES = []  # type: ignore[assignment]
 
 DEFAULT_POLICY_PATH = Path("/usr/share/kyth/hardware-profiles.toml")
@@ -454,7 +454,8 @@ def booted_image_identity() -> tuple[str, str]:
             image_reference_from_status(status) or "unknown",
             image_digest_from_status(status, "booted") or "unknown",
         )
-    except Exception:
+    except (OSError, ValueError) as exc:
+        import logging; logging.getLogger(__name__).debug("handled %s", exc, exc_info=True)
         return "unknown", "unknown"
 
 

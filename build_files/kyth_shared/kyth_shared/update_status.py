@@ -87,7 +87,7 @@ def write_update_snapshot(
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, destination)
-    except Exception:
+    except (OSError, ValueError) as exc:
         try:
             os.unlink(temporary)
         except OSError:

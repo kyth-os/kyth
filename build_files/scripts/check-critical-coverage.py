@@ -109,7 +109,8 @@ def main() -> int:
                 ["git", "diff", "--name-only", "--cached"], text=True, stderr=subprocess.DEVNULL
             )
             changed.update(line.strip() for line in out2.splitlines() if line.strip())
-        except Exception:
+        except (OSError, ValueError) as exc:
+            import logging; logging.getLogger(__name__).debug("handled in check-critical-coverage.py", exc_info=True)
             changed = None
         if changed is not None and not changed:
             print("changed-only: no changed files vs HEAD, skipping")

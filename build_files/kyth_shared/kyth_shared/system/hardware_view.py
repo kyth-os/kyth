@@ -59,5 +59,6 @@ def invalidate_hardware_view() -> None:
         from kyth_shared.hardware_policy import invalidate_inventory_cache
 
         invalidate_inventory_cache()
-    except Exception:
+    except (OSError, ValueError, RuntimeError) as exc:
+        import logging; logging.getLogger(__name__).debug("handled %s: %s", "hardware_view.py", exc, exc_info=True)
         pass

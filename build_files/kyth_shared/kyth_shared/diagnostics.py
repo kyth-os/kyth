@@ -92,7 +92,7 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
     if not ntsync_loaded and Path("/proc/modules").is_file():
         try:
             ntsync_loaded = "ntsync" in Path("/proc/modules").read_text(encoding="utf-8")
-        except Exception:
+        except (OSError, RuntimeError) as exc:
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -211,5 +211,4 @@ def create_github_issue_draft(
             )
 
     return draft_path, url
-
 

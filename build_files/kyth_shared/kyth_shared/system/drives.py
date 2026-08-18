@@ -22,7 +22,7 @@ def get_ntfs_devices() -> list[dict]:
             text=True,
             check=True,
         )
-    except Exception:
+    except (OSError, ValueError) as exc:
         return []
     return parse_ntfs_devices(res.stdout)
 
@@ -38,7 +38,7 @@ def repair_ntfs_drives() -> None:
         native_compatdata.mkdir(parents=True, exist_ok=True)
         if (home / ".var/app/com.valvesoftware.Steam").is_dir():
             flatpak_compatdata.mkdir(parents=True, exist_ok=True)
-    except Exception:
+    except (OSError, ValueError) as exc:
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -84,8 +84,8 @@ def repair_ntfs_drives() -> None:
                         capture_output=True,
                         check=False,
                     )
-            except Exception as e:
-                print(f"[kyth-ntfs-repair] Failed to mount {dev_path}: {e}")
+            except (OSError, ValueError) as exc:
+                print(f"[kyth-ntfs-repair] Failed to mount {dev_path}: {exc}")
                 continue
 
         # Find Steam libraries up to 3 levels deep
@@ -107,7 +107,7 @@ def repair_ntfs_drives() -> None:
                                     if p3.is_dir():
                                         if p3.name.lower() == "steamapps":
                                             steam_dirs.append(p3)
-            except Exception:
+            except (OSError, ValueError) as exc:
                 logger.debug("handled expected exception", exc_info=True)
                 pass
 
@@ -120,7 +120,7 @@ def repair_ntfs_drives() -> None:
                     try:
                         resolved = target_cd.resolve()
                         print(f"  Compatdata is already symlinked to native storage: {resolved}")
-                    except Exception:
+                    except (OSError, ValueError) as exc:
                         logger.debug("handled expected exception", exc_info=True)
                         pass
                 else:

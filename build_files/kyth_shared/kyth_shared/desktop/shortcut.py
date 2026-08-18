@@ -23,7 +23,8 @@ def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Non
     except BaseException:
         try:
             Path(tmp).unlink(missing_ok=True)
-        except Exception:
+        except (OSError, ValueError) as exc:
+            import logging; logging.getLogger(__name__).debug("handled %s: %s", "shortcut.py", exc, exc_info=True)
             pass
         raise
 
@@ -347,4 +348,3 @@ def fixup_kali_desktop_launchers() -> bool:
         refresh_kde_sycoca()
 
     return changed
-

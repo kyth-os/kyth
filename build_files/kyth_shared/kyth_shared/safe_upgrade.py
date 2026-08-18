@@ -1,6 +1,7 @@
 """Guard manual bootc upgrades with rollout and digest-quarantine policy."""
 from __future__ import annotations
 import logging
+import subprocess
 
 import os
 import sys
@@ -19,7 +20,7 @@ from .boot_health import (
 # so UpdatePage and RepairPage share one source without per-page bootc spawns
 try:
     from kyth_welcome.services.hub_state import HUB_STATE as _HUB_STATE  # type: ignore[import-not-found]
-except Exception:
+except (OSError, subprocess.SubprocessError) as exc:
     _HUB_STATE = None  # type: ignore[assignment]
 from .commands import run
 from .system.bootc import image_digest_from_status, image_reference_from_status
