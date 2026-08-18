@@ -169,6 +169,41 @@ class PhaseCommonTests(unittest.TestCase):
     def test_record_transaction_failure_without_logger_is_nonfatal(self, _write):
         common._record_transaction(object(), "failed")
 
+    @mock.patch("kyth_installer.phases.common.os.close")
+    @mock.patch("kyth_installer.phases.common.os.fsync")
+    @mock.patch("kyth_installer.phases.common.os.open", return_value=99)
+    @mock.patch("kyth_installer.phases.common.write_transaction_state")
+    def test_record_transaction_success_fsyncs_parent_dir(self, write, mock_open, mock_fsync, mock_close):
+        context = object()
+        common._record_transaction(context, "started")
+        mock_open.assert_called_once_with(str(common.TRANSACTION_FILE.parent), mock.ANY)
+        mock_fsync.assert_called_once_with(99)
+        mock_close.assert_called_once_with(99)
+
+    @mock.patch("kyth_installer.phases.common.os.open", side_effect=OSError("no dir"))
+    @mock.patch("kyth_installer.phases.common.write_transaction_state")
+    def test_record_transaction_inner_os_error_is_suppressed(self, write, mock_open):
+        log = mock.Mock()
+        common._record_transaction(object(), "started", log=log)
+        log.assert_not_called()
+        mock_open.assert_called_once()
+
+    @mock.patch(
+        "kyth_installer.phases.common.write_transaction_state",
+        side_effect=RuntimeError("boom"),
+    )
+    def test_record_transaction_generic_exception_is_logged(self, _write):
+        log = mock.Mock()
+        common._record_transaction(object(), "failed", log=log)
+        self.assertIn("could not update installer transaction report", log.call_args.args[0])
+
+    @mock.patch(
+        "kyth_installer.phases.common.write_transaction_state",
+        side_effect=RuntimeError("boom"),
+    )
+    def test_record_transaction_generic_exception_without_logger_is_nonfatal(self, _write):
+        common._record_transaction(object(), "failed")
+
 
 class InstallRunEntryPointTests(unittest.TestCase):
     def test_setup_failure_transitions_to_failed_and_publishes_error(self):
