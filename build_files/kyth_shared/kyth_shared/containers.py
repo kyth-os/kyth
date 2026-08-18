@@ -41,6 +41,8 @@ def write_distrobox_wrapper(
     """Write an executable wrapper script for a containerized tool."""
     target_path.parent.mkdir(parents=True, exist_ok=True)
     content = render_distrobox_wrapper(tool, description, box)
-    target_path.write_text(content, encoding="utf-8")
-    target_path.chmod(0o755)
+    tmp = target_path.with_suffix(".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.chmod(0o755)
+    tmp.replace(target_path)
     return target_path

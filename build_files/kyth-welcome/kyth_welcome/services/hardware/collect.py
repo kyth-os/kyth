@@ -1,7 +1,10 @@
 """Aggregate hardware probes (pure). Qt worker: services.workers.hardware."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+
+_logger = logging.getLogger(__name__)
 
 from kyth_shared.hardware_policy import evaluate_system, read_applied_state
 from kyth_shared.system.hardware_view import get_hardware_view
@@ -35,22 +38,25 @@ def _hardware_policy_probe(view=None) -> HardwareProbe:  # type: ignore[no-untyp
         try:
             evaluation = view.evaluation
             applied = view.applied
-        except Exception:
+        except (OSError, ValueError, RuntimeError) as exc:
+            _logger.debug("hardware_policy view access failed: %s", exc, exc_info=True)
             view = None
     if view is None:
         try:
             view = get_hardware_view()
             evaluation = view.evaluation
             applied = view.applied
-        except Exception:
+        except (OSError, ValueError, RuntimeError) as exc:
+            _logger.debug("get_hardware_view failed, falling back to evaluate_system: %s", exc, exc_info=True)
             try:
                 evaluation = evaluate_system()
                 applied = read_applied_state()
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError) as exc2:
+                _logger.debug("hardware policy evaluation failed: %s", exc2, exc_info=True)
                 return HardwareProbe(
                     "Hardware policy", "warn",
                     "Hardware policy could not be evaluated.",
-                    str(exc),
+                    str(exc2),
                     "Run kyth-hardware-policy validate and review the service journal.",
                 )
     profiles = [profile["title"] for profile in evaluation.profiles]

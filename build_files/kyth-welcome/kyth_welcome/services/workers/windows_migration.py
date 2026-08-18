@@ -41,8 +41,25 @@ class UserFilesCopyWorker(TrackedThread):
     def stop(self):
         self._stop = True
         proc = self._proc
-        if proc and proc.poll() is None:
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            import os, signal
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
             proc.terminate()
+        except Exception:
+            pass
+        try:
+            import time
+            time.sleep(0.05)
+            if proc.poll() is None:
+                proc.kill()
+        except Exception:
+            pass
+        self._proc = None
 
     def run(self):
         ok = failed = 0

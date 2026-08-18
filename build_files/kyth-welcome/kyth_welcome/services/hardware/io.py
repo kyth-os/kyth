@@ -1,11 +1,15 @@
 """I/O probes: firmware, connectivity, audio, controllers, peripherals, DisplayLink."""
 from __future__ import annotations
 
+import fcntl
+import logging
 import os
 import re
 import shutil
 
 from .types import HardwareProbe
+
+logger = logging.getLogger(__name__)
 from ..process import command_stdout, run_command
 from kyth_shared.system.firmware import (
     check_firmware_updates,
@@ -28,12 +32,34 @@ def _firmware_probe() -> HardwareProbe:
             devices_out.strip() or " ".join(firmware_devices_command()) + " exited with an error.",
         )
 
-    # Optional refresh (batched, non-fatal) — keep probe fast
+    # Optional refresh (batched, non-fatal) — keep probe fast, flocked to avoid thundering herd
+    fw_count = 0
     try:
-        run_firmware_refresh(timeout=60)
-    except Exception:
-        pass
-    fw_count = check_firmware_updates(timeout=20)
+        with open("/tmp/kyth-fwupd.lock", "a+", encoding="utf-8") as _lf:  # noqa: S108 -- well-known tmp lock
+            try:
+                fcntl.flock(_lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                logger.debug("firmware probe skipped — fwupd lock contended")
+            except OSError:
+                logger.debug("firmware flock failed", exc_info=True)
+            else:
+                try:
+                    try:
+                        run_firmware_refresh(timeout=60)
+                    except Exception:
+                        logger.debug("firmware refresh failed", exc_info=True)
+                    try:
+                        fw_count = check_firmware_updates(timeout=20)
+                    except Exception:
+                        logger.debug("firmware check failed", exc_info=True)
+                        fw_count = 0
+                finally:
+                    try:
+                        fcntl.flock(_lf.fileno(), fcntl.LOCK_UN)
+                    except OSError:
+                        logger.debug("firmware unlock failed", exc_info=True)
+    except OSError:
+        logger.debug("firmware lock file unavailable", exc_info=True)
     if fw_count > 0:
         return HardwareProbe(
             "Firmware", "warn",

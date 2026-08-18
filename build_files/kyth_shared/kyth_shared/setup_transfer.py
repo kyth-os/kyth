@@ -287,7 +287,7 @@ def _restore_flatpaks(apps: list[dict[str, str]]) -> tuple[int, int]:
             origin = "flathub"
         print(f"Restoring app: {app_id}", flush=True)
         try:
-            proc = subprocess.Popen(
+            proc = subprocess.Popen(  # noqa: S603 -- fixed flatpak argv
                 ["flatpak", "install", "-y", "--or-update", origin, app_id],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -298,7 +298,11 @@ def _restore_flatpaks(apps: list[dict[str, str]]) -> tuple[int, int]:
                 line = line.strip()
                 if line:
                     print(line, flush=True)
-            code = proc.wait()
+            try:
+                code = proc.wait(timeout=600)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                code = 1
         except OSError:
             code = 1
         if code == 0:

@@ -58,8 +58,27 @@ class VpnConnectWorker(TrackedThread):
             self.done.emit(1)
 
     def stop(self) -> None:
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+        proc = self._proc
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            import os, signal
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        # ensure dead
+        try:
+            import time
+            time.sleep(0.05)
+            if proc.poll() is None:
+                proc.kill()
+        except Exception:
+            pass
+        self._proc = None
 
 
 _VpnConnectWorker = VpnConnectWorker

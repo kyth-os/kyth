@@ -126,7 +126,10 @@ def save_auto_bottles(enabled: bool, conf_path: str = _CONF_PATH) -> None:
 def open_system_hub_page(page: str) -> None:
     """Launch KythOS System Hub focused on a given page."""
     launcher = shutil.which("kyth-welcome-launch") or "/usr/bin/kyth-welcome-launch"
-    subprocess.Popen([launcher, "--page", page])
+    try:
+        subprocess.Popen([launcher, "--page", page])  # noqa: S603 -- fixed launcher argv
+    except OSError:
+        pass
 
 
 def is_flatpak_installed(flatpak_id: str) -> bool:
@@ -150,14 +153,17 @@ def launch_flatpak_install(flatpak_id: str) -> None:
         "flatpak install -y --noninteractive --user flathub "
         + shlex.quote(flatpak_id),
     ]
-    if terminal == "konsole":
-        subprocess.Popen(["konsole", "-e"] + cmd)
-    elif terminal == "gnome-terminal":
-        subprocess.Popen(["gnome-terminal", "--"] + cmd)
-    elif terminal == "xterm":
-        subprocess.Popen(["xterm", "-e"] + cmd)
-    else:
-        subprocess.Popen(cmd)
+    try:
+        if terminal == "konsole":
+            subprocess.Popen(["konsole", "-e"] + cmd)  # noqa: S603 -- fixed terminal argv
+        elif terminal == "gnome-terminal":
+            subprocess.Popen(["gnome-terminal", "--"] + cmd)  # noqa: S603
+        elif terminal == "xterm":
+            subprocess.Popen(["xterm", "-e"] + cmd)  # noqa: S603
+        else:
+            subprocess.Popen(cmd)  # noqa: S603 -- fixed bash -lc wrapper
+    except OSError:
+        pass
 
 
 class _InstallerWorker(QThread):

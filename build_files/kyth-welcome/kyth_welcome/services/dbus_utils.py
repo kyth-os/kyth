@@ -1,4 +1,9 @@
+import logging
+
 from ..qt import QDBusConnection, QDBusInterface
+
+_logger = logging.getLogger(__name__)
+
 
 def is_systemd_unit_enabled(unit_name: str) -> bool:
     """Instantly checks if a systemd unit is enabled via DBus."""
@@ -17,7 +22,8 @@ def is_systemd_unit_enabled(unit_name: str) -> bool:
             return True
         state = reply.arguments()[0]
         return state in ("enabled", "static")
-    except Exception:
+    except (OSError, RuntimeError) as exc:
+        _logger.debug("is_systemd_unit_enabled(%s) failed: %s", unit_name, exc, exc_info=True)
         return True
 
 def is_systemd_unit_active(unit_name: str) -> bool:
@@ -48,5 +54,6 @@ def is_systemd_unit_active(unit_name: str) -> bool:
             return False
         state = unit_interface.property("ActiveState")
         return state == "active"
-    except Exception:
+    except (OSError, RuntimeError) as exc:
+        _logger.debug("is_systemd_unit_active(%s) failed: %s", unit_name, exc, exc_info=True)
         return False

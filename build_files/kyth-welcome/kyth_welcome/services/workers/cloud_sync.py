@@ -43,6 +43,27 @@ class RcloneAuthorizeWorker(TrackedThread):
         self._remote_type = remote_type
         self._proc = None
 
+    def stop(self):
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            try:
+                import os, signal
+                os.killpg(proc.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            try:
+                import time
+                time.sleep(0.05)
+                if proc.poll() is None:
+                    proc.kill()
+            except Exception:
+                pass
+            self._proc = None
+
     def run(self):
         try:
             self._proc = APPLICATION_RUNNER.spawn(

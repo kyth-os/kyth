@@ -393,12 +393,17 @@ def _state_summary(state: BootHealthState) -> str:
 
 
 def _default_rollback_runner() -> tuple[int, str]:
-    from .commands import run_text  # local: keep this module import-light for read_state() callers
+    from .commands import CommandRunner, CommandSpec  # local: keep this module import-light
 
-    result = run_text(["/usr/bin/bootc", "rollback"], timeout=60)
+    runner = CommandRunner()
+    spec = CommandSpec(argv=("/usr/bin/bootc", "rollback"), timeout=60, name="bootc rollback")
+    try:
+        result = runner.run(spec, capture_output=True, text=True)
+    except Exception:
+        return 1, "bootc rollback could not execute"
     if result is None:
         return 1, "bootc rollback could not execute"
-    return result.returncode, (result.stderr or result.stdout or "").strip()
+    return result.returncode, ((result.stderr or result.stdout) or "").strip()
 
 
 def trigger_rollback_if_newly_quarantined(
@@ -430,16 +435,25 @@ def trigger_rollback_if_newly_quarantined(
         return  # not newly quarantined this call — already handled or n/a
     if updated.rollback_attempted_for == digest:
         return
-    coordinator.note_rollback_attempted(digest)
     try:
         returncode, detail = run()
     except Exception as exc:
         print(f"bootc rollback errored for quarantined digest {digest}: {exc}", file=sys.stderr)
+        try:
+            coordinator.note_rollback_attempted(digest)
+        except Exception as exc2:  # nosec B110 -- best-effort persistence of rollback marker
+            print(f"Failed to persist rollback marker for {digest}: {exc2}", file=sys.stderr)
         return
+    # Record attempt regardless of success so we never loop on a bad rollback target;
+    # returncode is still logged for diagnostics.
     if returncode == 0:
         print(f"Rolled back from quarantined digest {digest} — takes effect next boot")
     else:
         print(f"bootc rollback failed for quarantined digest {digest}: {detail}", file=sys.stderr)
+    try:
+        coordinator.note_rollback_attempted(digest)
+    except Exception as exc:  # nosec B110 -- best-effort persistence of rollback marker
+        print(f"Failed to persist rollback marker for {digest}: {exc}", file=sys.stderr)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -45,8 +45,10 @@ def gaming_env_for_per_game(appid: str, hdr: bool = False, profile: str = "balan
         # Persisted should not override explicit env, but ensure HDR lingers
         for k, v in persisted.items():
             env.setdefault(k, v)
-    except Exception:
-        pass
+    except (OSError, KeyError, TypeError) as exc:
+        import logging
+
+        logging.getLogger(__name__).debug("gaming_env_for_per_game(%s) persisted merge failed: %s", appid, exc, exc_info=True)
     return env
 from ..bootc import has_staged_update
 from ..hardware import _detect_controllers, _find_ntfs_drives
