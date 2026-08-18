@@ -38,24 +38,25 @@ fi
 "${scope[@]}" "${repo_root}/build_files/scripts/validate.sh"
 "${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh" --fast
 
-# P1-3: also catch System Hub F821/QSS regressions that ci-preflight's ruff doesn't cover alone
-echo "[pre-push] Running Hub headless smoke (MainWindow 20/20)..."
-PYTHONPATH=build_files/kyth-welcome:build_files/kyth_shared QT_QPA_PLATFORM=offscreen python3 -c "
-from PySide6.QtWidgets import QApplication
-import sys
-app = QApplication.instance() or QApplication(sys.argv)
-from kyth_welcome.windows import MainWindow
-w = MainWindow()
-ok = 0
-for k in list(w._page_index_by_key.keys()):
-    try:
-        w._ensure_page(w._page_index_by_key[k])
-        w._navigate_to(k)
-        ok += 1
-    except Exception as e:
-        print(f'[pre-push] Hub smoke FAIL {k}: {e}')
-        sys.exit(1)
-print(f'[pre-push] Hub smoke {ok}/20 OK')
-app.quit()
-" 2>&1 | grep -E "pre-push.*Hub smoke"
+# P1-3: also catch System Hub regressions the CI gui-smoke job checks. Run
+# the same canonical module CI runs (tests/test_kyth_welcome_hub_smoke.py)
+# instead of a hand-rolled reimplementation that had drifted from it (stale
+# page count, no search/lifecycle coverage, hardcoded bare PySide6 import
+# that hard-fails on this host where only PyQt6 is installed system-wide).
+echo "[pre-push] Running Hub headless smoke (tests.test_kyth_welcome_hub_smoke)..."
+if [[ -x "${repo_root}/.venv-gui/bin/python" ]]; then
+	gui_python="${repo_root}/.venv-gui/bin/python"
+else
+	gui_python="python3"
+fi
+# The test module itself skips (exit 0) when PySide6 can't be imported, so a
+# missing interpreter would otherwise look like a green, unchecked gate.
+# Fail loudly instead of trusting a silent skip.
+if ! "${gui_python}" -c "import PySide6" >/dev/null 2>&1; then
+	echo "[pre-push] PySide6 not importable via ${gui_python} — Hub smoke would silently skip, not pass." >&2
+	echo "[pre-push] Fix: python3 -m venv .venv-gui && .venv-gui/bin/pip install PySide6==6.11.1" >&2
+	exit 1
+fi
+PYTHONPATH="build_files/kyth-welcome:build_files/kyth_shared" QT_QPA_PLATFORM=offscreen \
+	"${scope[@]}" "${gui_python}" -W error -m unittest tests.test_kyth_welcome_hub_smoke
 echo "[pre-push] Hub smoke passed"
