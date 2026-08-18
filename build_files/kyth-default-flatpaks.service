@@ -41,10 +41,8 @@ ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v12-done
 RemainAfterExit=yes
 Nice=10
 IOSchedulingClass=idle
-MemoryMax=512M
-TimeoutStartSec=3600
-
 MemoryMax=1G
+TimeoutStartSec=3600
 
 [Install]
 WantedBy=multi-user.target

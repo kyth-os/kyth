@@ -12,7 +12,5 @@ MemoryHigh=256M
 MemoryMax=384M
 CPUQuota=50%
 
-MemoryMax=512M
-
 [Install]
 WantedBy=default.target

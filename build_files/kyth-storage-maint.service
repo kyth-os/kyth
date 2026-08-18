@@ -26,7 +26,5 @@ MemoryHigh=384M
 MemoryMax=768M
 TimeoutStartSec=3600
 
-MemoryMax=512M
-
 [Install]
 WantedBy=multi-user.target

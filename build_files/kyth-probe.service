@@ -32,7 +32,5 @@ MemoryMax=512M
 # bootc/flatpak can be slow on cold cache
 TimeoutStartSec=120
 
-MemoryMax=512M
-
 [Install]
 WantedBy=multi-user.target

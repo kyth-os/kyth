@@ -37,7 +37,5 @@ CPUQuota=50%
 MemoryHigh=768M
 MemoryMax=1024M
 
-MemoryMax=512M
-
 [Install]
 WantedBy=multi-user.target

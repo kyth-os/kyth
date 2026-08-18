@@ -17,7 +17,5 @@ MemoryHigh=384M
 MemoryMax=512M
 TimeoutStartSec=120
 
-MemoryMax=384M
-
 [Install]
 WantedBy=graphical-session.target
