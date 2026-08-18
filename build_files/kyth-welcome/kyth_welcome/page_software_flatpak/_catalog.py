@@ -3,7 +3,7 @@ import os
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.appstream import load_appstream_catalog
-from ..services.runtime import Worker, finish_worker
+from ..services.runtime import Worker, finish_worker, guard_disposed
 
 
 class _CatalogMixin:
@@ -20,8 +20,8 @@ class _CatalogMixin:
             "--columns=application,name,description,version,download-size,installed-size",
             "-j", "flathub",
         ])
-        self._fp_catalog_worker.line.connect(self._on_fp_catalog_line)
-        self._fp_catalog_worker.done.connect(self._on_fp_catalog_done)
+        self._fp_catalog_worker.line.connect(guard_disposed(self._on_fp_catalog_line))
+        self._fp_catalog_worker.done.connect(guard_disposed(self._on_fp_catalog_done))
         self._fp_catalog_worker.start()
 
     def _on_fp_catalog_line(self, ln: str):
@@ -33,16 +33,36 @@ class _CatalogMixin:
         self._fp_catalog_btn.setEnabled(True)
         output = "\n".join(self._fp_catalog_lines).strip()
         entries = []
-        if output.startswith("["):
+        # Flatpak --cached -j output may be truncated or split across lines
+        # when pipe races; try full JSON first, then line-delimited fallback.
+        if output:
             try:
-                for item in json.loads(output):
-                    app_id = (item.get("application_id") or item.get("application") or "").strip()
-                    if app_id:
-                        item["application_id"] = app_id
-                        item["remote"] = "flathub"
-                        entries.append(item)
+                data = json.loads(output)
+                if isinstance(data, list):
+                    for item in data:
+                        if not isinstance(item, dict):
+                            continue
+                        app_id = (item.get("application_id") or item.get("application") or "").strip()
+                        if app_id:
+                            item["application_id"] = app_id
+                            item["remote"] = "flathub"
+                            entries.append(item)
             except (json.JSONDecodeError, TypeError):
-                entries = []
+                # Try line-delimited JSON objects (one per line) as fallback
+                for line in self._fp_catalog_lines:
+                    line = line.strip()
+                    if not line or line in ("[", "]", ","):
+                        continue
+                    try:
+                        item = json.loads(line.rstrip(","))
+                        if isinstance(item, dict):
+                            app_id = (item.get("application_id") or item.get("application") or "").strip()
+                            if app_id:
+                                item["application_id"] = app_id
+                                item["remote"] = "flathub"
+                                entries.append(item)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
         if code != 0 or not entries:
             detail = next((line.strip() for line in self._fp_catalog_lines if line.strip()), "")
             self._set_fp_task_state(detail or "Cached Flathub catalog could not be loaded.", "warn")
@@ -103,8 +123,8 @@ class _CatalogMixin:
         self._set_fp_task_state("Refreshing Flathub metadata...", "running")
         self._fp_refresh_btn.setEnabled(False)
         self._fp_refresh_worker = Worker(["flatpak", "update", "--appstream"])
-        self._fp_refresh_worker.line.connect(self._on_fp_search_line)
-        self._fp_refresh_worker.done.connect(self._on_fp_refresh_done)
+        self._fp_refresh_worker.line.connect(guard_disposed(self._on_fp_search_line))
+        self._fp_refresh_worker.done.connect(guard_disposed(self._on_fp_refresh_done))
         self._fp_refresh_worker.start()
 
     def _on_fp_refresh_done(self, code: int):

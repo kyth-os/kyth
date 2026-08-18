@@ -97,7 +97,7 @@ class _StarterPackTabMixin:
         self._ms_fonts_status.setText("Downloading Microsoft fonts from SourceForge…")
         self._ms_fonts_status.show()
         self._ms_fonts_worker = Worker(ujust_command("install-ms-fonts"))
-        self._ms_fonts_worker.done.connect(self._on_ms_fonts_done)
+        self._ms_fonts_worker.done.connect(guard_disposed(self._on_ms_fonts_done))
         self._ms_fonts_worker.start()
 
     def _on_ms_fonts_done(self, code: int):
@@ -586,9 +586,9 @@ class _StarterPackTabMixin:
         restyle(self._starter_status)
         self._set_starter_pack_controls_enabled(False)
         self._starter_worker = Worker(cmd)
-        self._starter_worker.line.connect(self._on_starter_line)
+        self._starter_worker.line.connect(guard_disposed(self._on_starter_line))
         self._starter_worker.done.connect(
-            lambda code, n=name, ids=missing: self._on_starter_done(code, n, ids)
+            guard_disposed(lambda code, n=name, ids=missing: self._on_starter_done(code, n, ids))
         )
         self._starter_worker.start()
 

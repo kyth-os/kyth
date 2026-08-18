@@ -15,7 +15,7 @@ from typing import Any
 
 from kyth_welcome.services.command import run_sync
 from kyth_welcome.services.process import is_live_session, run_command
-from kyth_welcome.services.runtime import TASK_SUPERVISOR, Worker
+from kyth_welcome.services.runtime import TASK_SUPERVISOR, Worker, guard_disposed
 
 from .qt import (
     QLabel, QPushButton, QTextEdit, QWidget,
@@ -185,7 +185,7 @@ def run_worker(
     Collapses the ubiquitous ``self._worker = Worker(cmd);
     self._worker.finished.connect(lambda: setattr(self, "_worker", None))
     self._worker.finished.connect(self._worker.deleteLater)
-    self._worker.line.connect(on_line); self._worker.done.connect(on_done);
+    self._worker.line.connect(guard_disposed(on_line)); self._worker.done.connect(guard_disposed(on_done));
     self._worker.start()`` sequence — optionally preceded by a session-inhibit
     call, in the same order pages already issue it — repeated across pages.
     """
@@ -194,8 +194,8 @@ def run_worker(
     TASK_SUPERVISOR.attach(worker, owner, attr, task_id=attr.removeprefix("_"))
     if session_inhibit_reason is not None:
         set_session_inhibit(owner, session_inhibit_reason)
-    worker.line.connect(on_line)
-    worker.done.connect(on_done)
+    worker.line.connect(guard_disposed(on_line))
+    worker.done.connect(guard_disposed(on_done))
     worker.start()
     return worker
 

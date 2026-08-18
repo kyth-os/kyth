@@ -251,7 +251,7 @@ class HardwarePage(Page):
         self._progress.show()
 
         self._worker = HardwareProbeWorker()
-        self._worker.done.connect(self._on_done)
+        self._worker.done.connect(guard_disposed(self._on_done))
         self._worker.failed.connect(guard_disposed(self._on_failed))
         self._worker.start()
 

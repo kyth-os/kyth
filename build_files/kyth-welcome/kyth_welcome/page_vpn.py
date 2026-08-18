@@ -15,6 +15,7 @@ from .services.vpn import (
     _vpn_line_is_connected,
     vpn_status_view,
 )
+from .services.runtime import guard_disposed
 from .services.workers.vpn import VpnConnectWorker as _VpnConnectWorker
 from .qt import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, _WEBENGINE_AVAILABLE, single_shot,
@@ -234,8 +235,8 @@ class VpnPage(Page):
     def _start_vpn_worker(self, cmd: list[str], stdin_text: str = "") -> None:
         worker = _VpnConnectWorker(cmd, stdin_text)
         self._worker = worker
-        worker.line.connect(self._on_vpn_line)
-        worker.done.connect(lambda code, w=worker: self._on_vpn_done(w, code))
+        worker.line.connect(guard_disposed(self._on_vpn_line))
+        worker.done.connect(guard_disposed(lambda code, w=worker: self._on_vpn_done(w, code)))
         worker.saml_required.connect(self._on_saml_required)
         worker.start()
 

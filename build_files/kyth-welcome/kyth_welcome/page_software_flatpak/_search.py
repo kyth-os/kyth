@@ -4,7 +4,7 @@ import pathlib
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from ..services.runtime import Worker, finish_worker
+from ..services.runtime import Worker, finish_worker, guard_disposed
 
 _FLATHUB_CACHE = os.path.expanduser("~/.cache/kyth/flathub-search.json")
 _FLATHUB_TTL = 3600
@@ -48,8 +48,8 @@ class _SearchMixin:
         self._fp_search_worker = Worker(
             ["flatpak", "search", "-j", query]
         )
-        self._fp_search_worker.line.connect(self._on_fp_search_line)
-        self._fp_search_worker.done.connect(self._on_fp_search_done)
+        self._fp_search_worker.line.connect(guard_disposed(self._on_fp_search_line))
+        self._fp_search_worker.done.connect(guard_disposed(self._on_fp_search_done))
         self._fp_search_worker.start()
 
     def _on_fp_search_line(self, ln: str):

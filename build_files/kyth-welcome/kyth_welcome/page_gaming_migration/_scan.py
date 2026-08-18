@@ -267,11 +267,11 @@ class _ScanMixin:
         self._migrate_worker = SteamCopyWorker(src, dst)
         self._migrate_worker.finished.connect(lambda: setattr(self, "_migrate_worker", None))
         self._migrate_worker.finished.connect(self._migrate_worker.deleteLater)
-        self._migrate_worker.line.connect(lambda ln: (
+        self._migrate_worker.line.connect(guard_disposed(lambda ln: (
             self._migrate_log.append(ln),
             self._migrate_log.ensureCursorVisible(),
-        ))
-        self._migrate_worker.done.connect(self._on_steam_copy_done)
+        )))
+        self._migrate_worker.done.connect(guard_disposed(self._on_steam_copy_done))
         self._migrate_worker.start()
 
     def _cancel_steam_copy(self):

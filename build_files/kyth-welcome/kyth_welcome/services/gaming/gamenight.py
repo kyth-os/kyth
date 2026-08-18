@@ -82,15 +82,22 @@ class GameNightManager:
 def _cleanup_game_night():
     try:
         GameNightManager.stop()
-        for proc in GameNightManager._action_procs:
+    except Exception:
+        _logger.debug("_cleanup_game_night: GameNightManager.stop failed", exc_info=True)
+    finally:
+        for proc in list(GameNightManager._action_procs):
             try:
                 proc.wait(timeout=15)
             except Exception:
-                proc.kill()
-                proc.wait()
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
         GameNightManager._action_procs.clear()
-    except Exception:
-        _logger.debug("_cleanup_game_night: cleanup at exit failed", exc_info=True)
 
 
 atexit.register(_cleanup_game_night)

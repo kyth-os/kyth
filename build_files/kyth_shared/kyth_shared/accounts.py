@@ -31,6 +31,7 @@ SYSTEM_PASSWD_FALLBACKS = {
 
 
 def _default_run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+    kwargs.setdefault("timeout", 30)
     return subprocess.run(argv, **kwargs)
 
 

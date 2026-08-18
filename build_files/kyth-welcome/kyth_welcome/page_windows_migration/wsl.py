@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from ..services.runtime import Worker, release_worker_when_finished
+from ..services.runtime import Worker, guard_disposed, release_worker_when_finished
 from ..services.launch import popen
 from ..qt import (
     QHBoxLayout, QLabel, QPushButton,
@@ -75,7 +75,7 @@ class _WslMixin:
                 self._wsl_status.setText(
                     "Could not create the Ubuntu box. Check the network connection and try again."
                 )
-        worker.done.connect(_done)
+        worker.done.connect(guard_disposed(_done))
         self._wsl_worker = worker
         release_worker_when_finished(self, "_wsl_worker", worker)
         worker.start()

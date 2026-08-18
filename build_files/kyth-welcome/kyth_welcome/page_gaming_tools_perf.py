@@ -1,7 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
 from .services.gaming import scx_scheduler_command
-from .services.runtime import Worker, finish_worker
+from .services.runtime import Worker, guard_disposed, finish_worker, guard_disposed
 from .qt import QHBoxLayout, QLabel, QComboBox, QProgressBar, QPushButton, Qt
 from .widgets import CollapsibleLogPanel, _copy_text, _launch_opt_label, _launch_opt_value, _make_card
 
@@ -288,8 +288,8 @@ class _PerfTuningMixin:
         restyle(self._scx_status_lbl)
 
         self._scx_worker = Worker(cmd)
-        self._scx_worker.line.connect(self._scx_log_panel.append)
-        self._scx_worker.done.connect(self._on_scx_done)
+        self._scx_worker.line.connect(guard_disposed(self._scx_log_panel.append))
+        self._scx_worker.done.connect(guard_disposed(self._on_scx_done))
         self._scx_worker.start()
 
     def _on_scx_done(self, code: int):

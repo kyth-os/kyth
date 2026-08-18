@@ -87,8 +87,12 @@ def _run_install(context: InstallerContext) -> None:
     def log(msg: str) -> None:
         _push({"type": "log", "text": msg}, context)
         try:
-            with LOG_FILE.open("a") as f:
-                f.write(msg + "\n")
+            fd = os.open(str(LOG_FILE), os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+            try:
+                os.write(fd, (msg + "\n").encode("utf-8", errors="replace"))
+                os.fsync(fd)
+            finally:
+                os.close(fd)
         except OSError as exc:
             # Still surface progress over SSE even if the log file is unusable.
             _push({

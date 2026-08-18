@@ -125,8 +125,8 @@ class _InstalledTabMixin:
         self._perm_status.setObjectName("subheading")
         restyle(self._perm_status)
         w = Worker(cmd)
-        w.line.connect(lambda _ln: None)
-        w.done.connect(lambda code: self._on_perm_done(code, app_id, filesystem, allow))
+        w.line.connect(guard_disposed(lambda _ln: None))
+        w.done.connect(guard_disposed(lambda code: self._on_perm_done(code, app_id, filesystem, allow)))
         w.start()
         self._perm_worker = w
 
@@ -268,9 +268,9 @@ class _InstalledTabMixin:
         self._uninstall_worker = Worker(cmd)
         self._uninstall_worker.finished.connect(lambda: setattr(self, "_uninstall_worker", None))
         self._uninstall_worker.finished.connect(self._uninstall_worker.deleteLater)
-        self._uninstall_worker.line.connect(self._on_uninstall_line)
+        self._uninstall_worker.line.connect(guard_disposed(self._on_uninstall_line))
         self._uninstall_worker.done.connect(
-            lambda code, name=app["name"]: self._on_uninstall_done(code, name)
+            guard_disposed(lambda code, name=app["name"]: self._on_uninstall_done(code, name))
         )
         self._uninstall_worker.start()
 
@@ -317,9 +317,9 @@ class _InstalledTabMixin:
         self._uninstall_status.setObjectName("subheading")
         restyle(self._uninstall_status)
         self._uninstall_worker = Worker(cmd)
-        self._uninstall_worker.line.connect(self._on_uninstall_line)
+        self._uninstall_worker.line.connect(guard_disposed(self._on_uninstall_line))
         self._uninstall_worker.done.connect(
-            lambda code, name=app["name"]: self._on_uninstall_done(code, name)
+            guard_disposed(lambda code, name=app["name"]: self._on_uninstall_done(code, name))
         )
         self._uninstall_worker.start()
 

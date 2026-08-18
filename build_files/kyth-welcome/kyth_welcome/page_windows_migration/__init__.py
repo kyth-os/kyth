@@ -7,7 +7,7 @@ from kyth_shared.commands import ujust_command
 from ..services.runtime import (
     DataWorker,
 )
-from ..services.runtime import Worker
+from ..services.runtime import Worker, guard_disposed
 from ..services.launch import popen
 from ..services.windows_migration import (
     UserFilesCopyWorker,
@@ -154,14 +154,14 @@ class WindowsMigrationPage(
         def _import_win():
             part = "/dev/sda2"
             try:
-                from ..services.runtime import Worker as _W
+                from ..services.runtime import Worker, guard_disposed as _W
 
                 w = _W(["/usr/bin/kyth-windows-import", part])
-                w.line.connect(self._win_import_status.setText)
+                w.line.connect(guard_disposed(self._win_import_status.setText))
                 w.done.connect(
-                    lambda code: self._win_import_status.setText(
+                    guard_disposed(lambda code: self._win_import_status.setText(
                         f"Import done exit {code} → ~/WindowsImport"
-                    )
+                    ))
                 )
                 w.start()
             except Exception as exc:
@@ -353,6 +353,6 @@ class WindowsMigrationPage(
         def _done(code: int, b=btn, o=orig):
             b.setEnabled(True)
             b.setText("✓ Done" if code == 0 else o)
-        worker.done.connect(_done)
+        worker.done.connect(guard_disposed(_done))
         worker.start()
         self._worker = worker

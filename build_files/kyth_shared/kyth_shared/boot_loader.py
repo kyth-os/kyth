@@ -43,7 +43,14 @@ def save_loader(cfg: dict[str, Any], path: Path | None = None) -> Path:
     except (TypeError, ValueError):
         to = 0 if fast else 2
     to = max(0, min(10, to))
-    p.write_text(f"# Kyth loader — offline\nfast = {str(fast).lower()}\ntimeout = {to}\n", encoding="utf-8")
+    content = f"# Kyth loader — offline\nfast = {str(fast).lower()}\ntimeout = {to}\n"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    try:
+        tmp.replace(p)
+    except OSError:
+        # Fallback: ensure parent fsync on failure path already exists
+        p.write_text(content, encoding="utf-8")
     return p
 
 

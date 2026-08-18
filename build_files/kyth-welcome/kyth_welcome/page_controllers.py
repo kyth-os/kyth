@@ -280,7 +280,7 @@ class ControllerPage(Page):
             helper,
             frontend=AuthFrontend.PKEXEC,
         ).command())
-        worker.done.connect(self._on_xone_done)
+        worker.done.connect(guard_disposed(self._on_xone_done))
         worker.start()
         self._xone_worker = worker
 

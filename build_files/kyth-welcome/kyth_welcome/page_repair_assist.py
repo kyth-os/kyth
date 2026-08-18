@@ -15,7 +15,7 @@ from .services.repair import (
 )
 from .actions import _install_flatpak_inline
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, finish_worker
+from .services.runtime import Worker, guard_disposed, finish_worker, guard_disposed
 from .qt import QFileDialog, QMessageBox
 
 
@@ -64,8 +64,8 @@ class _AssistMixin:
             return
         self._assist_status.setText("Creating a support snapshot…")
         worker = Worker(session_snapshot_command())
-        worker.line.connect(lambda line: self._assist_status.setText(line.strip() or "Snapshot created."))
-        worker.done.connect(self._on_assist_snapshot_done)
+        worker.line.connect(guard_disposed(lambda line: self._assist_status.setText(line.strip() or "Snapshot created.")))
+        worker.done.connect(guard_disposed(self._on_assist_snapshot_done))
         self._assist_worker = worker
         worker.start()
 
@@ -98,8 +98,8 @@ class _AssistMixin:
         self._set_setup_busy(True)
         self._setup_status.setText("Collecting apps and preferences…")
         worker = Worker(setup_export_command(destination))
-        worker.line.connect(lambda line: self._setup_status.setText(line.strip() or "Exporting setup…"))
-        worker.done.connect(self._on_setup_transfer_done)
+        worker.line.connect(guard_disposed(lambda line: self._setup_status.setText(line.strip() or "Exporting setup…")))
+        worker.done.connect(guard_disposed(self._on_setup_transfer_done))
         self._setup_worker = worker
         worker.start()
 
@@ -137,8 +137,8 @@ class _AssistMixin:
         self._set_setup_busy(True)
         self._setup_status.setText("Restoring preferences and applications…")
         worker = Worker(setup_restore_command(archive))
-        worker.line.connect(lambda line: self._setup_status.setText(line.strip() or "Restoring setup…"))
-        worker.done.connect(self._on_setup_transfer_done)
+        worker.line.connect(guard_disposed(lambda line: self._setup_status.setText(line.strip() or "Restoring setup…")))
+        worker.done.connect(guard_disposed(self._on_setup_transfer_done))
         self._setup_worker = worker
         worker.start()
 
@@ -160,8 +160,8 @@ class _AssistMixin:
         self._snapshot_btn.setEnabled(False)
         self._snapshot_status.setText("Creating snapshot…")
         self._snapshot_worker = Worker(session_snapshot_command())
-        self._snapshot_worker.line.connect(lambda ln: self._snapshot_status.setText(ln.strip() or "Snapshot created."))
-        self._snapshot_worker.done.connect(self._on_snapshot_done)
+        self._snapshot_worker.line.connect(guard_disposed(lambda ln: self._snapshot_status.setText(ln.strip() or "Snapshot created.")))
+        self._snapshot_worker.done.connect(guard_disposed(self._on_snapshot_done))
         self._snapshot_worker.start()
 
     def _on_snapshot_done(self, code: int):
@@ -169,4 +169,3 @@ class _AssistMixin:
         self._snapshot_btn.setEnabled(True)
         if code != 0:
             self._snapshot_status.setText(f"Snapshot failed (exit {code}).")
-

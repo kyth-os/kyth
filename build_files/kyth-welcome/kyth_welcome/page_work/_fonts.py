@@ -1,5 +1,5 @@
 from kyth_shared.commands import ujust_command
-from ..services.runtime import Worker
+from ..services.runtime import Worker, guard_disposed
 from ..services.work import _ms_fonts_installed
 from ..qt import QHBoxLayout, QLabel, QPushButton
 from ..widgets import _make_card
@@ -49,7 +49,7 @@ class _FontsMixin:
         self._ms_fonts_worker = Worker(ujust_command("install-ms-fonts"))
         self._ms_fonts_worker.finished.connect(lambda: setattr(self, "_ms_fonts_worker", None))
         self._ms_fonts_worker.finished.connect(self._ms_fonts_worker.deleteLater)
-        self._ms_fonts_worker.done.connect(self._on_fonts_done)
+        self._ms_fonts_worker.done.connect(guard_disposed(self._on_fonts_done))
         self._ms_fonts_worker.start()
 
     def _on_fonts_done(self, code: int):

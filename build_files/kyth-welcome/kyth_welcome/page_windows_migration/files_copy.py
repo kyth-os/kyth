@@ -203,7 +203,7 @@ class _FilesCopyMixin:
         worker = UserFilesCopyWorker(jobs)
         worker.status.connect(self._files_status.setText)
         worker.overall.connect(self._files_progress.setValue)
-        worker.done.connect(self._on_files_copy_done)
+        worker.done.connect(guard_disposed(self._on_files_copy_done))
         self._files_copy_worker = worker
         release_worker_when_finished(self, "_files_copy_worker", worker)
         worker.start()

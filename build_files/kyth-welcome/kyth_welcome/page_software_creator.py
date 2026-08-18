@@ -206,9 +206,9 @@ class _CreatorTabMixin:
             f"flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
             f" && flatpak install -y flathub {tool['flatpak']}",
         ])
-        self._cr_tool_worker.line.connect(log_panel.append)
+        self._cr_tool_worker.line.connect(guard_disposed(log_panel.append))
         self._cr_tool_worker.done.connect(
-            lambda code, name=tool["name"]: self._on_cr_tool_install_done(code, name)
+            guard_disposed(lambda code, name=tool["name"]: self._on_cr_tool_install_done(code, name))
         )
         self._cr_tool_worker.start()
 
@@ -258,9 +258,9 @@ class _CreatorTabMixin:
         self._cr_tool_worker = Worker(
             ["flatpak", "uninstall", "-y", tool["flatpak"]]
         )
-        self._cr_tool_worker.line.connect(log_panel.append)
+        self._cr_tool_worker.line.connect(guard_disposed(log_panel.append))
         self._cr_tool_worker.done.connect(
-            lambda code, name=tool["name"]: self._on_cr_tool_uninstall_done(code, name)
+            guard_disposed(lambda code, name=tool["name"]: self._on_cr_tool_uninstall_done(code, name))
         )
         self._cr_tool_worker.start()
 
@@ -490,8 +490,8 @@ class _CreatorTabMixin:
         self._dv_op_status.show()
         restyle(self._dv_op_status)
         self._dv_worker = Worker(["/usr/bin/kyth-davinci-install", zip_path])
-        self._dv_worker.line.connect(self._dv_log_panel.append)
-        self._dv_worker.done.connect(self._on_davinci_install_done)
+        self._dv_worker.line.connect(guard_disposed(self._dv_log_panel.append))
+        self._dv_worker.done.connect(guard_disposed(self._on_davinci_install_done))
         self._dv_worker.start()
 
     def _on_davinci_install_done(self, code: int):

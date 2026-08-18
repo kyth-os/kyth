@@ -1,6 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from .services.launch import popen
-from .services.runtime import Worker
+from .services.runtime import Worker, guard_disposed
 from .qt import (
     QHBoxLayout,
     QLabel,
@@ -62,8 +62,8 @@ class JustPage(Page):
                 pass
         self._just_lines.clear()
         self._just_worker = Worker(["just", "--list"])
-        self._just_worker.line.connect(self._just_lines.append)
-        self._just_worker.done.connect(self._on_just_list_done)
+        self._just_worker.line.connect(guard_disposed(self._just_lines.append))
+        self._just_worker.done.connect(guard_disposed(self._on_just_list_done))
         try:
             self._just_worker.finished.connect(lambda: setattr(self, "_just_worker", None))
         except Exception:

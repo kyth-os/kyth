@@ -1,6 +1,7 @@
 """Filesystem finalization (fstab, hostname, user) — Phase 2 verbatim."""
 from __future__ import annotations
 
+import os
 import subprocess  # pylint: disable=unused-import
 import traceback
 
@@ -141,9 +142,13 @@ def _handle_install_failure(exc: Exception, log, context: InstallerContext) -> N
     try/excepts around the log write and failure-summary write."""
     message = format_install_error(exc)
     try:
-        with LOG_FILE.open("a") as f:
-            f.write(traceback.format_exc())
-            f.write(f"\n# install error: {message}\n")
+        fd = os.open(str(LOG_FILE), os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        try:
+            os.write(fd, traceback.format_exc().encode("utf-8", errors="replace"))
+            os.write(fd, f"\n# install error: {message}\n".encode("utf-8", errors="replace"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
     except OSError as log_exc:
         message = (
             f"{message} "

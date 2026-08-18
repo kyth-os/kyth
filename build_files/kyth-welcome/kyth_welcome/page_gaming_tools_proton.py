@@ -3,7 +3,7 @@ from .core_base import restyle
 from .services.launch import flatpak_run
 from .actions import _install_flatpak_inline
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, finish_worker
+from .services.runtime import Worker, guard_disposed, finish_worker, guard_disposed
 from .qt import QDesktopServices, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QUrl, Qt
 from .widgets import CollapsibleLogPanel, _copy_text, _launch_opt_label, _launch_opt_value, _make_card
 
@@ -177,8 +177,8 @@ class _ProtonToolsMixin:
         self._pc_op_status.show()
         restyle(self._pc_op_status)
         self._pc_worker = Worker(["/usr/bin/kyth-proton-cachyos-update"])
-        self._pc_worker.line.connect(self._pc_log_panel.append)
-        self._pc_worker.done.connect(self._on_pc_update_done)
+        self._pc_worker.line.connect(guard_disposed(self._pc_log_panel.append))
+        self._pc_worker.done.connect(guard_disposed(self._on_pc_update_done))
         self._pc_worker.start()
 
     def _on_pc_update_done(self, code: int):

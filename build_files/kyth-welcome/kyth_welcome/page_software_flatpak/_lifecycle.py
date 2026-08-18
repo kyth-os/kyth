@@ -2,7 +2,7 @@ import shlex
 
 # __KYTH_GENERATED_IMPORTS__
 from ..services.launch import flatpak_run
-from ..services.runtime import Worker, finish_worker
+from ..services.runtime import Worker, finish_worker, guard_disposed
 from ..qt import QMessageBox, QPushButton
 from ..widgets import _set_log_panel
 
@@ -29,9 +29,9 @@ class _LifecycleMixin:
             f" && flatpak install -y flathub {shlex.quote(app_id)}",
         ]
         self._fp_install_worker = Worker(cmd)
-        self._fp_install_worker.line.connect(self._on_fp_install_line)
+        self._fp_install_worker.line.connect(guard_disposed(self._on_fp_install_line))
         self._fp_install_worker.done.connect(
-            lambda code, aid=app_id, n=name, b=btn, ob=open_btn: self._on_fp_install_done(code, aid, n, b, ob)
+            guard_disposed(lambda code, aid=app_id, n=name, b=btn, ob=open_btn: self._on_fp_install_done(code, aid, n, b, ob))
         )
         self._fp_install_worker.start()
 
@@ -73,9 +73,9 @@ class _LifecycleMixin:
         self._fp_progress.show()
         self._set_fp_task_state(f"Uninstalling {name or app_id}\u2026", "running")
         self._fp_uninstall_worker = Worker(["flatpak", "uninstall", "-y", app_id])
-        self._fp_uninstall_worker.line.connect(self._on_fp_uninstall_line)
+        self._fp_uninstall_worker.line.connect(guard_disposed(self._on_fp_uninstall_line))
         self._fp_uninstall_worker.done.connect(
-            lambda code, aid=app_id, n=name, b=btn, ob=open_btn: self._on_fp_store_uninstall_done(code, aid, n, b, ob)
+            guard_disposed(lambda code, aid=app_id, n=name, b=btn, ob=open_btn: self._on_fp_store_uninstall_done(code, aid, n, b, ob))
         )
         self._fp_uninstall_worker.start()
 

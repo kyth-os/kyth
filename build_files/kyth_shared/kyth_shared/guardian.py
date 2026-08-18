@@ -359,10 +359,9 @@ def install_model(manifest_path: Path = MODEL_MANIFEST) -> Path:
         os.replace(temporary, destination)
         return destination
     finally:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+        # fd is owned by os.fdopen above; closing the file object already
+        # closes the fd. Attempting os.close(fd) here would double-close and
+        # potentially close an unrelated fd reused after the with-block.
         try:
             os.unlink(temporary)
         except OSError:

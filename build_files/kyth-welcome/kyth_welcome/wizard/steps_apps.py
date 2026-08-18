@@ -5,7 +5,7 @@ import shlex
 
 from ..core_base import cancel_worker, restyle
 from ..services.flatpak import _is_flatpak_installed
-from ..services.runtime import Worker, finish_worker
+from ..services.runtime import Worker, finish_worker, guard_disposed
 from ..qt import (
     QCheckBox, QDesktopServices, QFrame, QHBoxLayout, QLabel, QMessageBox,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QUrl,
@@ -270,9 +270,9 @@ class _AppsStepMixin:
         self._wizard_extra_worker = Worker(cmd)
         self._wizard_extra_worker.finished.connect(lambda: setattr(self, "_wizard_extra_worker", None))
         self._wizard_extra_worker.finished.connect(self._wizard_extra_worker.deleteLater)
-        self._wizard_extra_worker.line.connect(self._on_wizard_extra_install_line)
+        self._wizard_extra_worker.line.connect(guard_disposed(self._on_wizard_extra_install_line))
         self._wizard_extra_worker.done.connect(
-            lambda code, installed=selected: self._on_wizard_extra_install_done(code, installed)
+            guard_disposed(lambda code, installed=selected: self._on_wizard_extra_install_done(code, installed))
         )
         self._wizard_extra_worker.start()
         self._update_nav()

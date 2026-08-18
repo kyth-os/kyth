@@ -12,7 +12,7 @@ from .services.security import (
 from .services.security_container import (
     is_socket_capable_kali_box as _is_socket_capable_kali_box,
 )
-from .services.runtime import Worker, finish_worker
+from .services.runtime import Worker, guard_disposed, finish_worker, guard_disposed
 from .qt import (
     QButtonGroup, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QRadioButton,
     Qt,
@@ -170,8 +170,8 @@ class _KaliContainerMixin:
 
         cmd = build_kali_create_command(self._SEC_BOX_NAME, self._SEC_BOX_IMAGE, meta, has_gui)
         self._sec_worker = Worker(cmd)
-        self._sec_worker.line.connect(self._sec_on_create_line)
-        self._sec_worker.done.connect(self._sec_on_create_done)
+        self._sec_worker.line.connect(guard_disposed(self._sec_on_create_line))
+        self._sec_worker.done.connect(guard_disposed(self._sec_on_create_done))
         self._sec_worker.start()
 
     def _sec_on_create_line(self, ln: str):
@@ -243,8 +243,8 @@ class _KaliContainerMixin:
 
         cmd = build_kali_export_command(self._SEC_BOX_NAME)
         self._sec_worker = Worker(cmd)
-        self._sec_worker.line.connect(self._sec_on_export_line)
-        self._sec_worker.done.connect(self._sec_on_export_done)
+        self._sec_worker.line.connect(guard_disposed(self._sec_on_export_line))
+        self._sec_worker.done.connect(guard_disposed(self._sec_on_export_done))
         self._sec_worker.start()
 
     def _sec_on_export_line(self, ln: str):
@@ -320,8 +320,8 @@ class _KaliContainerMixin:
         restyle(self._sec_status_lbl)
 
         self._sec_worker = Worker(build_kali_remove_command(self._SEC_BOX_NAME))
-        self._sec_worker.line.connect(self._sec_log_panel.append)
-        self._sec_worker.done.connect(self._sec_on_remove_done)
+        self._sec_worker.line.connect(guard_disposed(self._sec_log_panel.append))
+        self._sec_worker.done.connect(guard_disposed(self._sec_on_remove_done))
         self._sec_worker.start()
 
     def _sec_on_remove_done(self, code: int):

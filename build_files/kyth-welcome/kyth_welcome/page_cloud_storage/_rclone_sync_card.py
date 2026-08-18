@@ -26,7 +26,7 @@ from datetime import datetime
 from ..core_base import restyle
 from ..services.cloud_sync import RcloneSyncWorker
 from ..services.network import _save_sync_config
-from ..services.runtime import finish_worker
+from ..services.runtime import finish_worker, guard_disposed
 from ..qt import QComboBox, QHBoxLayout, QLabel, QPushButton, QTextEdit, QTimer
 from ..widgets import _make_card
 
@@ -240,8 +240,8 @@ class _RcloneSyncCard:
             sync_log.show()
 
         worker = self._set("sync_worker", RcloneSyncWorker(remote, folder))
-        worker.line.connect(self._on_sync_line)
-        worker.done.connect(lambda code: self._on_sync_done(remote, code))
+        worker.line.connect(guard_disposed(self._on_sync_line))
+        worker.done.connect(guard_disposed(lambda code: self._on_sync_done(remote, code)))
         worker.start()
 
     def _on_sync_line(self, line: str):

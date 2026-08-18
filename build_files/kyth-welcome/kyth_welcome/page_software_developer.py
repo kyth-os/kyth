@@ -1,7 +1,7 @@
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
 from .services.launch import popen
-from .services.runtime import Worker
+from .services.runtime import Worker, guard_disposed
 from .qt import (
     QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
     QVBoxLayout, QWidget,
@@ -136,8 +136,8 @@ class _DeveloperTabMixin:
         self._ai_worker = Worker(command)
         self._ai_worker.finished.connect(lambda: setattr(self, "_ai_worker", None))
         self._ai_worker.finished.connect(self._ai_worker.deleteLater)
-        self._ai_worker.line.connect(self._ai_on_line)
-        self._ai_worker.done.connect(lambda code: self._ai_on_done(action, code))
+        self._ai_worker.line.connect(guard_disposed(self._ai_on_line))
+        self._ai_worker.done.connect(guard_disposed(lambda code: self._ai_on_done(action, code)))
         self._ai_worker.start()
 
     def _ai_on_line(self, line: str):

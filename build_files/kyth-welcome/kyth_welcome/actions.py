@@ -9,7 +9,7 @@ import re
 from .qt import QMessageBox, QPushButton
 from .services.browser_apps import _chromium_app_window_cmd
 from .services.launch import popen
-from .services.runtime import Worker, finish_worker
+from .services.runtime import Worker, guard_disposed, finish_worker, guard_disposed
 from .services.flatpak import flatpak_install_shell_command
 
 
@@ -46,7 +46,7 @@ def _install_flatpak_inline(owner: object, btn: QPushButton, app_id: str, name: 
         if done_cb:
             done_cb(code)
 
-    worker.done.connect(_done)
+    worker.done.connect(guard_disposed(_done))
     setattr(owner, attr, worker)
     worker.start()
 

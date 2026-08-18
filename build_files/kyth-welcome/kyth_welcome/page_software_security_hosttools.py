@@ -2,7 +2,7 @@
 from .core_base import restyle
 from .services.launch import popen
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, finish_worker
+from .services.runtime import Worker, guard_disposed, finish_worker, guard_disposed
 from .qt import QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QWidget
 from .widgets import CollapsibleLogPanel, _make_card
 
@@ -121,9 +121,9 @@ class _HostSecurityToolsMixin:
             f"flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
             f" && flatpak install -y flathub {tool['flatpak']}",
         ])
-        self._sec_host_tool_worker.line.connect(log_panel.append)
+        self._sec_host_tool_worker.line.connect(guard_disposed(log_panel.append))
         self._sec_host_tool_worker.done.connect(
-            lambda code, name=tool["name"]: self._sec_on_host_tool_install_done(code, name)
+            guard_disposed(lambda code, name=tool["name"]: self._sec_on_host_tool_install_done(code, name))
         )
         self._sec_host_tool_worker.start()
 
@@ -169,9 +169,9 @@ class _HostSecurityToolsMixin:
         status_lbl.show()
         restyle(status_lbl)
         self._sec_host_tool_worker = Worker(["flatpak", "uninstall", "-y", tool["flatpak"]])
-        self._sec_host_tool_worker.line.connect(log_panel.append)
+        self._sec_host_tool_worker.line.connect(guard_disposed(log_panel.append))
         self._sec_host_tool_worker.done.connect(
-            lambda code, name=tool["name"]: self._sec_on_host_tool_uninstall_done(code, name)
+            guard_disposed(lambda code, name=tool["name"]: self._sec_on_host_tool_uninstall_done(code, name))
         )
         self._sec_host_tool_worker.start()
 

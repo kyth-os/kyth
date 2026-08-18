@@ -7,7 +7,7 @@ from .core_base import cancel_worker, restyle
 from .services.gaming import heroic_epic_launcher_command, lutris_installer_command
 from .services.launch import popen
 from .services.flatpak import _is_flatpak_installed
-from .services.runtime import Worker, finish_worker
+from .services.runtime import Worker, guard_disposed, finish_worker, guard_disposed
 from .qt import QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton
 from .widgets import CollapsibleLogPanel, _make_card
 
@@ -202,9 +202,9 @@ class _LauncherToolsMixin:
             self._tool_worker = Worker(["ujust", "install-umu"])
             self._tool_worker.finished.connect(lambda: setattr(self, "_tool_worker", None))
             self._tool_worker.finished.connect(self._tool_worker.deleteLater)
-            self._tool_worker.line.connect(self._tool_log_panel.append)
+            self._tool_worker.line.connect(guard_disposed(self._tool_log_panel.append))
             self._tool_worker.done.connect(
-                lambda code, t=target, n=name: self._on_umu_install_done(code, t, n)
+            guard_disposed(lambda code, t=target, n=name: self._on_umu_install_done(code, t, n))
             )
             self._tool_worker.start()
             return

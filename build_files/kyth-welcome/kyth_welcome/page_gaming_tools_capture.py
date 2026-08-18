@@ -6,7 +6,7 @@ from .core_base import restyle
 from .services.gaming import opticscaler_deploy_command
 from .services.launch import popen
 from .actions import _install_flatpak_inline
-from .services.runtime import Worker, finish_worker
+from .services.runtime import Worker, guard_disposed, finish_worker, guard_disposed
 from .qt import (
     QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, Qt, single_shot,
 )
@@ -197,11 +197,11 @@ class _CaptureToolsMixin:
         restyle(self._opti_status_lbl)
         cmd = opticscaler_deploy_command(game_dir)
         self._opticscaler_worker = Worker(cmd)
-        self._opticscaler_worker.line.connect(lambda ln: (
+        self._opticscaler_worker.line.connect(guard_disposed(lambda ln: (
             self._opti_log.append(ln),
             self._opti_log.ensureCursorVisible(),
-        ))
-        self._opticscaler_worker.done.connect(lambda code: self._on_opticscaler_done(code, btn))
+        )))
+        self._opticscaler_worker.done.connect(guard_disposed(lambda code: self._on_opticscaler_done(code, btn)))
         self._opticscaler_worker.start()
 
     def _on_opticscaler_done(self, code: int, btn: QPushButton):
