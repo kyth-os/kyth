@@ -20,7 +20,7 @@ def load_app_presets(path: Path | None = None) -> dict[str, dict[str, Any]]:
     p=app_presets_path(path)
     try:
         data=tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {}
     apps=data.get("apps",{})
     if not isinstance(apps, dict):
@@ -29,7 +29,10 @@ def load_app_presets(path: Path | None = None) -> dict[str, dict[str, Any]]:
     for app, entry in apps.items():
         if not isinstance(entry, dict):
             continue
-        out[str(app)]={"cpu_weight": int(entry.get("cpu_weight", 100)), "memory_max": str(entry.get("memory_max","80%")), "latency": str(entry.get("latency","balanced"))}
+        try:
+            out[str(app)]={"cpu_weight": int(entry.get("cpu_weight", 100)), "memory_max": str(entry.get("memory_max","80%")), "latency": str(entry.get("latency","balanced"))}
+        except (OSError, ValueError, TypeError):
+            continue
     return out
 
 def save_app_presets(apps: dict[str, dict[str, Any]], path: Path | None = None) -> Path:
@@ -43,7 +46,29 @@ def save_app_presets(apps: dict[str, dict[str, Any]], path: Path | None = None) 
         lines.append(f'memory_max = "{e.get("memory_max","80%")}"')
         lines.append(f'latency = "{e.get("latency","balanced")}"')
         lines.append("")
-    p.write_text("\n".join(lines), encoding="utf-8")
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=f".{p.name}.")
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+            f.flush()
+            os.fsync(f.fileno())
+        Path(tmp).replace(p)
+        try:
+            dfd = os.open(str(p.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        raise
     return p
 
 def cgroup_for_app(app_id: str, path: Path | None = None) -> dict[str, Any]:

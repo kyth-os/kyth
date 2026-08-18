@@ -1,10 +1,40 @@
 """Flatpak trim — flatpak-trim.toml, weekly unused removal."""
 from __future__ import annotations
 
+import logging
 import os
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any
+
+_logger = logging.getLogger(__name__)
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        Path(tmp).replace(path)
+        try:
+            dfd = os.open(str(path.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        raise
+
 
 DEFAULT_FLATPAK_TRIM_PATH = Path("/etc/kyth/flatpak-trim.toml")
 DEFAULT_SERVICE = Path("/etc/systemd/system/kyth-flatpak-trim.service")
@@ -24,7 +54,7 @@ def load_flatpak_trim(path: Path | None = None) -> dict[str, Any]:
     p = flatpak_trim_config_path(path)
     try:
         data = tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"enabled": True}
     return {"enabled": bool(data.get("enabled", True))}
 
@@ -33,7 +63,11 @@ def save_flatpak_trim(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p = flatpak_trim_config_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     en = bool(cfg.get("enabled", True))
-    p.write_text(f"# Kyth flatpak trim — offline\nenabled = {str(en).lower()}\n", encoding="utf-8")
+    try:
+        _atomic_write_text(p, f"# Kyth flatpak trim — offline\nenabled = {str(en).lower()}\n")
+    except (OSError, ValueError) as exc:
+        _logger.debug("save_flatpak_trim failed for %s: %s", p, exc, exc_info=True)
+        raise
     return p
 
 
@@ -47,19 +81,27 @@ def generate_flatpak_trim(cfg: dict[str, Any] | None = None, service: Path | Non
             try:
                 if d.exists():
                     d.unlink()
-            except OSError:
+            except (OSError, ValueError):
                 pass
         return None
     service.parent.mkdir(parents=True, exist_ok=True)
-    service.write_text(
-        "[Unit]\nDescription=Kyth flatpak trim — remove unused runtimes\n[Service]\nType=oneshot\nExecStart=/usr/bin/flatpak uninstall --unused -y --noninteractive\nNice=19\nIOSchedulingClass=best-effort\nIOSchedulingPriority=7\n",
-        encoding="utf-8",
-    )
+    try:
+        _atomic_write_text(
+            service,
+            "[Unit]\nDescription=Kyth flatpak trim — remove unused runtimes\n[Service]\nType=oneshot\nExecStart=/usr/bin/flatpak uninstall --unused -y --noninteractive\nNice=19\nIOSchedulingClass=best-effort\nIOSchedulingPriority=7\n",
+        )
+    except (OSError, ValueError) as exc:
+        _logger.debug("generate_flatpak_trim service failed: %s", exc, exc_info=True)
+        raise
     timer.parent.mkdir(parents=True, exist_ok=True)
-    timer.write_text(
-        "[Unit]\nDescription=Kyth flatpak trim timer\n[Timer]\nOnCalendar=weekly\nPersistent=true\n[Install]\nWantedBy=timers.target\n",
-        encoding="utf-8",
-    )
+    try:
+        _atomic_write_text(
+            timer,
+            "[Unit]\nDescription=Kyth flatpak trim timer\n[Timer]\nOnCalendar=weekly\nPersistent=true\n[Install]\nWantedBy=timers.target\n",
+        )
+    except (OSError, ValueError) as exc:
+        _logger.debug("generate_flatpak_trim timer failed: %s", exc, exc_info=True)
+        raise
     return service
 
 

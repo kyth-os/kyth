@@ -15,11 +15,21 @@ def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Non
     try:
         with open(fd, "w", encoding=encoding) as f:
             f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
         Path(tmp).replace(path)
+        try:
+            dfd = os.open(str(path.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
     except BaseException:
         try:
             Path(tmp).unlink(missing_ok=True)
-        except Exception:
+        except (OSError, ValueError):
             pass
         raise
 
@@ -39,7 +49,7 @@ def load_plasma(path: Path | None = None) -> dict[str, dict[str, Any]]:
     p=plasma_config_path(path)
     try:
         data=tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {}
     out={}
     for sec, kv in data.items():
@@ -73,17 +83,17 @@ def apply_plasma(sections: dict[str, dict[str, Any]] | None = None) -> list[str]
                     if r.returncode==0:
                         applied.append(f"{sec}:{k}={v}")
                         break
-                except Exception:
+                except (OSError, ValueError):
                     continue
     # reconfigure KWin best-effort
     try:
         run(["qdbus","org.kde.KWin","/KWin","reconfigure"], capture_output=True, timeout=5)
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError) as exc:
+        logger.debug("plasma reconfigure failed: %s", exc, exc_info=True)
         pass
     try:
         import time; _atomic_write_text(Path("/run/kyth-plasma-ttl"), str(int(time.time())+30), encoding="utf-8")
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError) as exc:
+        logger.debug("plasma ttl write failed: %s", exc, exc_info=True)
         pass
     return applied

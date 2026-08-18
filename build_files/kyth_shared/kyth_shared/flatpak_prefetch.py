@@ -3,11 +3,39 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any
 
 _logger = logging.getLogger(__name__)
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        Path(tmp).replace(path)
+        try:
+            dfd = os.open(str(path.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        raise
+
 
 DEFAULT_FLATPAK_PREFETCH_PATH = Path("/etc/kyth/flatpak-prefetch.toml")
 DEFAULT_TIMER_DROPIN = Path("/etc/systemd/system/flatpak-prefetch.timer.d/99-kyth.conf")
@@ -27,7 +55,7 @@ def load_flatpak_prefetch(path: Path | None = None) -> dict[str, Any]:
     p = flatpak_prefetch_config_path(path)
     try:
         data = tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
         _logger.debug("load_flatpak_prefetch failed for %s: %s", p, exc, exc_info=True)
         return {"enabled": False, "time": "02:00"}
     en = bool(data.get("enabled", False))
@@ -42,9 +70,11 @@ def save_flatpak_prefetch(cfg: dict[str, Any], path: Path | None = None) -> Path
     p.parent.mkdir(parents=True, exist_ok=True)
     en = bool(cfg.get("enabled", False))
     t = str(cfg.get("time", "02:00"))
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(f"# Kyth flatpak prefetch — offline\nenabled = {str(en).lower()}\ntime = \"{t}\"\n", encoding="utf-8")
-    tmp.replace(p)
+    try:
+        _atomic_write_text(p, f"# Kyth flatpak prefetch — offline\nenabled = {str(en).lower()}\ntime = \"{t}\"\n")
+    except (OSError, ValueError) as exc:
+        _logger.debug("save_flatpak_prefetch failed for %s: %s", p, exc, exc_info=True)
+        raise
     return p
 
 
@@ -62,9 +92,10 @@ def generate_flatpak_prefetch(cfg: dict[str, Any] | None = None, service: Path |
         return None
     t = str(cfg.get("time", "02:00"))
     service.parent.mkdir(parents=True, exist_ok=True)
-    tmp = service.with_suffix(".tmp")
-    tmp.write_text(
-        f"""[Unit]
+    try:
+        _atomic_write_text(
+            service,
+            f"""[Unit]
 Description=Kyth flatpak prefetch — off-peak
 [Service]
 Type=oneshot
@@ -73,15 +104,17 @@ Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 """,
-        encoding="utf-8",
-    )
-    tmp.replace(service)
+        )
+    except (OSError, ValueError) as exc:
+        _logger.debug("generate_flatpak_prefetch service failed: %s", exc, exc_info=True)
+        raise
     timer = Path("/etc/systemd/system/flatpak-prefetch.timer")
     timer.parent.mkdir(parents=True, exist_ok=True)
     hour, minute = (t.split(":") + ["00"])[:2]
-    tmp = timer.with_suffix(".tmp")
-    tmp.write_text(
-        f"""[Unit]
+    try:
+        _atomic_write_text(
+            timer,
+            f"""[Unit]
 Description=Kyth flatpak prefetch timer
 [Timer]
 OnCalendar=*-*-* {hour}:{minute}:00
@@ -89,9 +122,10 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 """,
-        encoding="utf-8",
-    )
-    tmp.replace(timer)
+        )
+    except (OSError, ValueError) as exc:
+        _logger.debug("generate_flatpak_prefetch timer failed: %s", exc, exc_info=True)
+        raise
     return service
 
 

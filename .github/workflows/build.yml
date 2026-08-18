@@ -107,12 +107,14 @@ jobs:
       # blocks and could drift out of sync.
       - name: Resolve branch matrix
         id: branches
+        shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           HEAD_BRANCH: ${{ needs.gate.outputs.head_branch }}
           HEAD_SHA: ${{ needs.gate.outputs.head_sha }}
         run: |
+          set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
           if [[ "${EVENT_NAME}" == schedule ]]; then
             echo 'branches=["main","testing"]' >&3
@@ -157,6 +159,7 @@ jobs:
         env:
           MATRIX_BRANCH: ${{ matrix.branch }}
         run: | # zizmor: ignore[github-env]
+          set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
           exec 4>>"${GITHUB_ENV}"
           [[ "${MATRIX_BRANCH}" == main || "${MATRIX_BRANCH}" == testing ]]
@@ -187,6 +190,7 @@ jobs:
       - name: Capture checked-out commit
         id: checkout_sha
         run: |
+          set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
           SHA="$(git rev-parse HEAD)"
           echo "sha=${SHA}" >&3
@@ -204,12 +208,14 @@ jobs:
 
       - name: Prepare Docker auth config
         run: |
+          set -euo pipefail
           mkdir -p "${DOCKER_CONFIG}"
           printf '{"auths":{}}\n' > "${DOCKER_CONFIG}/config.json"
 
       - name: Get current date
         id: date
         run: |
+          set -euo pipefail
           # This generates a timestamp like what is defined on the ArtifactHub documentation
           # E.G: 2022-02-08T15:38:15Z'
           # https://artifacthub.io/docs/topics/repositories/container-images/
@@ -279,6 +285,7 @@ jobs:
       - name: Resolve upstream base image digest
         id: upstream_base
         run: |
+          set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
           IMAGE="ghcr.io/ublue-os/kinoite-main:44"
           DIGEST="$(docker buildx imagetools inspect "${IMAGE}" --format '{{ .Manifest.Digest }}')"
@@ -290,6 +297,7 @@ jobs:
       - name: Build base image
         id: build_base
         run: |
+          set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
           IMAGE_FULL="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
           BASE_CACHE_REF="${IMAGE_FULL}:buildcache-base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}"
@@ -325,6 +333,7 @@ jobs:
       # down need this exact set, and previously typed it out twice.
       - name: Compose build-provenance labels
         id: build_labels
+        shell: bash
         env:
           BASE_IMAGE: ${{ steps.build_base.outputs.image }}
           BASE_DIGEST: ${{ steps.build_base.outputs.digest }}
@@ -335,6 +344,7 @@ jobs:
           KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           CACHYOS_KERNEL_VERSION: ${{ steps.cachyos_kernel.outputs.version || 'unused' }}
         run: |
+          set -euo pipefail
           {
             echo "labels<<KYTH_BUILD_LABELS_EOF"
             echo "org.opencontainers.image.base.name=${BASE_IMAGE}"
@@ -351,6 +361,7 @@ jobs:
       - name: Build final image
         id: build_final
         run: |
+          set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
           IMAGE_FULL="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
           FINAL_CACHE_REF="${IMAGE_FULL}:buildcache-final-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}"
@@ -431,6 +442,7 @@ jobs:
 
       - name: Free disk space before rechunking (conditional)
         run: |
+          set -euo pipefail
           USED_PCT="$(df --output=pcent / | tail -1 | tr -d ' %')"
           if [ "${USED_PCT:-0}" -gt 80 ]; then
             echo "::notice::Disk ${USED_PCT}% used on /, pruning buildx cache"
@@ -446,6 +458,7 @@ jobs:
       # in 7e31fbd, so this now runs for every kernel flavor.
       - name: Relocate containers storage for rechunk
         run: |
+          set -euo pipefail
           sudo mkdir -p /mnt/containers-storage /mnt/containers-runroot
           sudo tee /etc/containers/storage.conf >/dev/null <<'EOF'
           [storage]
@@ -508,6 +521,7 @@ jobs:
         env:
           RAW_REF: ${{ steps.build_final.outputs.raw_ref }}
         run: |
+          set -euo pipefail
           skopeo delete \
             --authfile "${DOCKER_CONFIG}/config.json" \
             --retry-times 3 \
@@ -592,6 +606,7 @@ jobs:
           echo "layers=${LAYERS}" >&3
 
       - name: Publish immutable build metadata
+        shell: bash
         env:
           IMAGE: ${{ steps.publish_final.outputs.image }}
           DIGEST: ${{ steps.publish_final.outputs.digest }}
@@ -606,6 +621,7 @@ jobs:
           KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
           WORKFLOW_GITHUB_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           python3 build_files/scripts/generate-metadata.py \
             --image "${IMAGE}" \
             --digest "${DIGEST}" \
@@ -674,9 +690,9 @@ jobs:
 
       - name: Read publication identity
         id: image
-        env:
-          EXPECTED_FLAVOR: ${{ matrix.kernel_flavor }}
+        shell: bash
         run: |
+          set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
           METADATA=output/build-metadata/image.json
           jq -e . "${METADATA}" >/dev/null

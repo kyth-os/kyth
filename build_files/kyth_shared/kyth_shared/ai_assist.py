@@ -88,8 +88,8 @@ def _should_offer_rollback(
 
         staged = bool(has_staged_update())
         rollback = bool(has_rollback_deployment())
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError, ImportError, RuntimeError) as exc:
+        logger.debug("bootc probe failed: %s", exc, exc_info=True)
         pass
     # Fallback/OR with snapshot so offline plan works without live probe cache
     if not staged:
@@ -121,8 +121,8 @@ def _latency_actions(evaluation: Any) -> list[AiAction]:
                     reason="System supports low-latency Vulkan layer (gaming.lowlatency / GPU detected).",
                     priority=40,
                 ))
-        except Exception:
-            logger.debug("handled expected exception", exc_info=True)
+        except (OSError, ValueError, ImportError, RuntimeError) as exc:
+            logger.debug("latency profile lookup failed: %s", exc, exc_info=True)
             pass
     return actions
 
@@ -286,7 +286,8 @@ def try_ollama_enhance(plan: AiPlan, prompt: str | None = None) -> AiPlan:
         # If local ollama exists but we want to keep fully offline deterministic,
         # skip network call as well — preserve GHCR-signed / offline story.
         return plan
-    except Exception:
+    except (OSError, ValueError) as exc:
+        logger.debug("try_ollama_enhance failed: %s", exc, exc_info=True)
         return plan
 
 
@@ -305,7 +306,8 @@ def build_repair_plan(
                 # Unwrap probe-cache.json sections wrapper
                 secs = snapshot.get("sections", {})
                 snapshot = {k: v.get("data", v) if isinstance(v, dict) and "data" in v and "ts" in v else v for k, v in secs.items()}
-        except Exception:
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            logger.debug("snapshot load failed: %s", exc, exc_info=True)
             snapshot = {}
     if snapshot is None:
         snapshot = {}
@@ -314,14 +316,16 @@ def build_repair_plan(
             from kyth_shared.boot_health import read_state
 
             boot_state = read_state()
-        except Exception:
+        except (OSError, ValueError, ImportError, RuntimeError) as exc:
+            logger.debug("read_state failed: %s", exc, exc_info=True)
             boot_state = None
     if evaluation is None:
         try:
             from kyth_shared.hardware_policy import evaluate_system
 
             evaluation = evaluate_system()
-        except Exception:
+        except (OSError, ValueError, ImportError, RuntimeError) as exc:
+            logger.debug("evaluate_system failed: %s", exc, exc_info=True)
             evaluation = None
     plan = generate_plan(snapshot, boot_state, evaluation)
     enhanced = try_ollama_enhance(plan)
@@ -331,8 +335,8 @@ def build_repair_plan(
         from kyth_welcome.services.hub_state import HUB_STATE  # type: ignore
 
         HUB_STATE.set_repair_plan(as_dict)
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError, ImportError, RuntimeError) as exc:
+        logger.debug("HUB_STATE push failed: %s", exc, exc_info=True)
         pass
     return as_dict
 

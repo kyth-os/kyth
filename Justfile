@@ -13,10 +13,11 @@ default:
 # Check Just Syntax
 [group('Just')]
 check:
-    #!/usr/bin/bash
+    #!/usr/bin/env bash
+    set -euo pipefail
     find . -type f -name "*.just" | while read -r file; do
     	echo "Checking syntax: $file"
-    	just --unstable --fmt --check -f $file
+    	just --unstable --fmt --check -f "$file"
     done
     echo "Checking syntax: Justfile"
     just --unstable --fmt --check -f Justfile
@@ -44,7 +45,7 @@ verify-codecs image="localhost/kyth:latest":
     #!/usr/bin/env bash
     set -euo pipefail
     for pkg in gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly gstreamer1-libav gstreamer1-vaapi; do
-        podman run --rm {{ image }} rpm -q $pkg >/dev/null && echo "OK $pkg" || (echo "MISSING $pkg" >&2; exit 1)
+        podman run --rm {{ image }} rpm -q "$pkg" >/dev/null && echo "OK $pkg" || (echo "MISSING $pkg" >&2; exit 1)
     done
     echo "Codecs baked — no post-install dnf needed"
 
@@ -90,10 +91,11 @@ ci-preflight:
 # Fix Just Syntax
 [group('Just')]
 fix:
-    #!/usr/bin/bash
+    #!/usr/bin/env bash
+    set -euo pipefail
     find . -type f -name "*.just" | while read -r file; do
     	echo "Checking syntax: $file"
-    	just --unstable --fmt -f $file
+    	just --unstable --fmt -f "$file"
     done
     echo "Checking syntax: Justfile"
     just --unstable --fmt -f Justfile || { exit 1; }
@@ -101,7 +103,7 @@ fix:
 # Clean local build temp dirs and fix output/ ownership.
 [group('Utility')]
 clean:
-    #!/usr/bin/bash
+    #!/usr/bin/env bash
     set -eoux pipefail
     rm -rf _build* *_build*
     rm -f previous.manifest.json

@@ -65,8 +65,8 @@ def _power_profile() -> str:
             res = run(cmd, capture_output=True, text=True, timeout=2)
             if res.returncode == 0 and res.stdout.strip():
                 return res.stdout.strip().lower()
-        except Exception:
-            logger.debug("handled expected exception", exc_info=True)
+        except (OSError, ValueError) as exc:
+            logger.debug("_power_profile %s failed: %s", cmd, exc, exc_info=True)
             pass
     return "unknown"
 
@@ -79,7 +79,8 @@ def _battery_percent() -> int | None:
         try:
             txt = path.read_text(encoding="utf-8").strip()
             return int(txt)
-        except Exception:
+        except (OSError, ValueError) as exc:
+            logger.debug("_battery_percent read %s failed: %s", path, exc, exc_info=True)
             continue
     return None
 
@@ -92,7 +93,8 @@ def _pressure_avg10() -> float:
             for part in txt.split():
                 if part.startswith("avg10="):
                     return float(part.split("=")[1])
-        except Exception:
+        except (OSError, ValueError) as exc:
+            logger.debug("_pressure_avg10 read %s failed: %s", path, exc, exc_info=True)
             continue
     return 0.0
 
@@ -103,8 +105,8 @@ def _detect_gaming() -> bool:
 
         if proc_gaming_active():
             return True
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError, ImportError, RuntimeError) as exc:
+        logger.debug("proc_gaming_active failed: %s", exc, exc_info=True)
         pass
     try:
         # fallback: if gamescope session lock exists
@@ -113,8 +115,8 @@ def _detect_gaming() -> bool:
         for uid in _active_uids():
             if gamescope_session_active(uid):
                 return True
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError, ImportError, RuntimeError) as exc:
+        logger.debug("gamescope_session_active failed: %s", exc, exc_info=True)
         pass
     return False
 
@@ -129,14 +131,15 @@ def _hardware_caps() -> tuple[bool, bool]:
         caps = set(ev.capabilities)
         has_nvidia = "gpu.nvidia" in caps
         has_amd = "gpu.amd" in caps
-    except Exception:
+    except (OSError, ValueError, ImportError, RuntimeError) as exc:
+        logger.debug("evaluate_system failed: %s", exc, exc_info=True)
         # Fallback to probe
         try:
             from kyth_shared.system.probe import read_section
 
             has_nvidia = bool(read_section("nvidia-detect", max_age=300))
-        except Exception:
-            logger.debug("handled expected exception", exc_info=True)
+        except (OSError, ValueError, ImportError, RuntimeError) as exc:
+            logger.debug("probe fallback failed: %s", exc, exc_info=True)
             pass
     return has_nvidia, has_amd
 
@@ -176,7 +179,8 @@ def _ollama_choose(sample: PerfSample, evaluation: Any | None) -> PerfPolicy | N
         # Real call would be: ollama run <model> "<prompt>" with 4s timeout
         # Keeping offline to avoid network/flake in daemon loop
         return None
-    except Exception:
+    except (OSError, ValueError) as exc:
+        logger.debug("_ollama_choose failed: %s", exc, exc_info=True)
         return None
 
 
@@ -234,8 +238,8 @@ def apply_policy(policy: PerfPolicy, ttl: int = POLICY_TTL_S) -> bool:
         for k, v in policy.sysctl.items():
             try:
                 run(["sysctl", "-w", f"{k}={v}"], capture_output=True, timeout=3)
-            except Exception:
-                logger.debug("handled expected exception", exc_info=True)
+            except (OSError, ValueError) as exc:
+                logger.debug("sysctl %s failed: %s", k, exc, exc_info=True)
                 pass
         # GPU power — best-effort (may need root)
         if policy.gpu_power in ("high", "auto", "low"):
@@ -243,33 +247,34 @@ def apply_policy(policy: PerfPolicy, ttl: int = POLICY_TTL_S) -> bool:
             for card in Path("/sys/class/drm").glob("card*/device/power_dpm_force_performance_level"):
                 try:
                     card.write_text(level, encoding="utf-8")
-                except Exception:
-                    logger.debug("handled expected exception", exc_info=True)
+                except (OSError, ValueError) as exc:
+                    logger.debug("gpu power write failed: %s", exc, exc_info=True)
                     pass
         # Record TTL marker for rollback
         marker = Path("/run/kyth-ai-perfd-ttl")
         try:
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.write_text(str(int(time.time()) + ttl), encoding="utf-8")
-        except Exception:
-            logger.debug("handled expected exception", exc_info=True)
+        except (OSError, ValueError) as exc:
+            logger.debug("ttl marker write failed: %s", exc, exc_info=True)
             pass
         # Also expose current SCX for gamescope env merge (KYTH_AI_SCX)
         try:
             Path("/run/kyth-ai-perfd-scx").write_text(policy.scx, encoding="utf-8")
-        except Exception:
-            logger.debug("handled expected exception", exc_info=True)
+        except (OSError, ValueError) as exc:
+            logger.debug("scx marker write failed: %s", exc, exc_info=True)
             pass
         # Push to HUB_STATE so Welcome/Performance cards show it without extra probe
         try:
             from kyth_welcome.services.hub_state import HUB_STATE
 
             HUB_STATE.set("ai_perf", policy.as_dict())
-        except Exception:
-            logger.debug("handled expected exception", exc_info=True)
+        except (OSError, ValueError, ImportError, RuntimeError) as exc:
+            logger.debug("HUB_STATE push failed: %s", exc, exc_info=True)
             pass
         return True
-    except Exception:
+    except (OSError, ValueError) as exc:
+        logger.debug("apply_policy failed: %s", exc, exc_info=True)
         return False
 
 

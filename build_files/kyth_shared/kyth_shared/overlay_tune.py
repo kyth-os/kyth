@@ -13,20 +13,43 @@ def overlay_config_path(path: Path|None=None) -> Path:
 def load_overlay(path: Path|None=None) -> dict[str,Any]:
     p=overlay_config_path(path)
     try: data=tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError): return {"metacopy":"auto"}
+    except (OSError, ValueError, tomllib.TOMLDecodeError): return {"metacopy":"auto"}
     v=str(data.get("metacopy","auto")).lower()
     if v not in ("auto","on","off"): v="auto"
     return {"metacopy":v}
 def save_overlay(cfg: dict[str,Any], path: Path|None=None) -> Path:
     p=overlay_config_path(path); p.parent.mkdir(parents=True, exist_ok=True)
     v=str(cfg.get("metacopy","auto")).lower()
-    p.write_text(f"# Kyth overlay — offline\nmetacopy = \"{v}\"\n",encoding="utf-8"); return p
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=f".{p.name}.")
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(f"# Kyth overlay — offline\nmetacopy = \"{v}\"\n")
+            f.flush()
+            os.fsync(f.fileno())
+        Path(tmp).replace(p)
+        try:
+            dfd = os.open(str(p.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        raise
+    return p
 def _on_btrfs() -> bool:
     try:
         from .commands import run
         r=run(["findmnt","-no","FSTYPE","-T","/var"],capture_output=True,text=True,timeout=5)
         return bool(r and "btrfs" in r.stdout)
-    except Exception: return False
+    except (OSError, ValueError): return False
 def generate_overlay(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Path|None:
     if cfg is None: cfg=load_overlay()
     v=str(cfg.get("metacopy","auto"))
@@ -34,8 +57,30 @@ def generate_overlay(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Path
     dest=dest or DEFAULT_CONF
     if v=="off":
         try: dest.exists() and dest.unlink()
-        except OSError: pass
+        except (OSError, ValueError): pass
         return None
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp=dest.with_suffix(".tmp")
-    tmp.write_text('# Kyth overlay metacopy — generated\n[storage.options.overlay]\nmountopt = "metacopy=on"\n',encoding="utf-8"); tmp.replace(dest); return dest
+    import tempfile as _tf
+
+    _fd, _tmp = _tf.mkstemp(dir=str(dest.parent), prefix=f".{dest.name}.")
+    try:
+        with open(_fd, "w", encoding="utf-8") as _f:
+            _f.write('# Kyth overlay metacopy — generated\n[storage.options.overlay]\nmountopt = "metacopy=on"\n')
+            _f.flush()
+            os.fsync(_f.fileno())
+        Path(_tmp).replace(dest)
+        try:
+            _dfd = os.open(str(dest.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(_dfd)
+            finally:
+                os.close(_dfd)
+        except (OSError, ValueError):
+            pass
+    except BaseException:
+        try:
+            Path(_tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        raise
+    return dest

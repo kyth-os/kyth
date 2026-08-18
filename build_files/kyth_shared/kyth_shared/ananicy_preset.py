@@ -27,7 +27,7 @@ def load_ananicy(path: Path | None = None) -> dict[str, Any]:
     p = ananicy_config_path(path)
     try:
         data = tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"profile": "balanced", "nice": -12, "ioclass": "realtime"}
     prof = str(data.get("profile", "balanced")).lower()
     if prof not in ("balanced", "kyth"):
@@ -56,7 +56,29 @@ def save_ananicy(cfg: dict[str, Any], path: Path | None = None) -> Path:
     nice = max(-20, min(0, nice))
     ioc = str(cfg.get("ioclass", "realtime"))
     lines = ["# Kyth ananicy — offline\n", f'profile = "{prof}"\n', f"nice = {nice}\n", f'ioclass = "{ioc}"\n']
-    p.write_text("".join(lines), encoding="utf-8")
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=f".{p.name}.")
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write("".join(lines))
+            f.flush()
+            os.fsync(f.fileno())
+        Path(tmp).replace(p)
+        try:
+            dfd = os.open(str(p.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        raise
     return p
 
 
@@ -68,7 +90,7 @@ def generate_ananicy(cfg: dict[str, Any] | None = None, dest: Path | None = None
         try:
             if dest.exists():
                 dest.unlink()
-        except OSError:
+        except (OSError, ValueError):
             pass
         return None
     nice = int(cfg.get("nice", -12))
@@ -79,9 +101,29 @@ def generate_ananicy(cfg: dict[str, Any] | None = None, dest: Path | None = None
         '{"name":"gaming.slice","type":"cgroup","nice":' + str(nice) + ',"ioclass":"' + ioc + '","sched":"batch"}\n'
     )
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(dest)
+    import tempfile as _tf
+
+    _fd, _tmp = _tf.mkstemp(dir=str(dest.parent), prefix=f".{dest.name}.")
+    try:
+        with open(_fd, "w", encoding="utf-8") as _f:
+            _f.write(content)
+            _f.flush()
+            os.fsync(_f.fileno())
+        Path(_tmp).replace(dest)
+        try:
+            _dfd = os.open(str(dest.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(_dfd)
+            finally:
+                os.close(_dfd)
+        except (OSError, ValueError):
+            pass
+    except BaseException:
+        try:
+            Path(_tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        raise
     return dest
 
 

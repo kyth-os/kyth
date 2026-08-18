@@ -106,6 +106,19 @@ def _record_transaction(
             status=status,
             message=message,
         )
-    except Exception as exc:
+        # write_transaction_state already fsyncs file + parent via _atomic_write_json,
+        # but ensure parent dir is durable even if future impl changes.
+        try:
+            dfd = os.open(str(TRANSACTION_FILE.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
+    except (OSError, ValueError) as exc:
+        if log is not None:
+            log(f"Warning: could not update installer transaction report: {exc}")
+    except Exception as exc:  # fallback for unexpected
         if log is not None:
             log(f"Warning: could not update installer transaction report: {exc}")

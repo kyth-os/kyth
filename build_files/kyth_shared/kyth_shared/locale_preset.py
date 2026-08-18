@@ -23,7 +23,7 @@ def load_locale(path: Path | None = None) -> dict[str, Any]:
     p=locale_path(path)
     try:
         data=tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"lang": "en_US.UTF-8", "ime": "fcitx5", "keymap": "us"}
     return {"lang": str(data.get("lang","en_US.UTF-8")), "ime": str(data.get("ime","fcitx5")) if str(data.get("ime","fcitx5")) in ("fcitx5","ibus","none") else "fcitx5", "keymap": str(data.get("keymap","us"))}
 
@@ -34,7 +34,29 @@ def save_locale(cfg: dict[str, Any], path: Path | None = None) -> Path:
     lines.append(f'lang = "{cfg.get("lang","en_US.UTF-8")}"')
     lines.append(f'ime = "{cfg.get("ime","fcitx5")}"')
     lines.append(f'keymap = "{cfg.get("keymap","us")}"')
-    p.write_text("\n".join(lines)+"\n", encoding="utf-8")
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=f".{p.name}.")
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        Path(tmp).replace(p)
+        try:
+            dfd = os.open(str(p.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        raise
     return p
 
 def apply_locale(cfg: dict[str, Any] | None = None) -> list[str]:
@@ -44,13 +66,13 @@ def apply_locale(cfg: dict[str, Any] | None = None) -> list[str]:
     try:
         run(["localectl","set-locale", f"LANG={cfg['lang']}"], capture_output=True, timeout=5)
         applied.append(f"LANG={cfg['lang']}")
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError) as exc:
+        logger.debug("apply_locale localectl failed: %s", exc, exc_info=True)
         pass
     if cfg["ime"]!="none":
         try:
             run(["kwriteconfig5","--file","kcminputrc","--group","Input","--key","ime", cfg["ime"]], capture_output=True, timeout=5)
-        except Exception:
-            logger.debug("handled expected exception", exc_info=True)
+        except (OSError, ValueError) as exc:
+            logger.debug("apply_locale ime failed: %s", exc, exc_info=True)
             pass
     return applied

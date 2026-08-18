@@ -29,7 +29,7 @@ def load_btrfs_perf(path: Path | None = None) -> dict[str, Any]:
     p = btrfs_perf_config_path(path)
     try:
         data = tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"profile": "balanced", "compress": "zstd:1"}
     prof = str(data.get("profile", "balanced")).lower()
     if prof not in ("balanced", "kyth"):
@@ -48,7 +48,29 @@ def save_btrfs_perf(cfg: dict[str, Any], path: Path | None = None) -> Path:
         prof = "balanced"
     comp = str(cfg.get("compress", "zstd:1"))
     lines = ["# Kyth btrfs perf — offline\n", f'profile = "{prof}"\n', f'compress = "{comp}"\n']
-    p.write_text("".join(lines), encoding="utf-8")
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=f".{p.name}.")
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write("".join(lines))
+            f.flush()
+            os.fsync(f.fileno())
+        Path(tmp).replace(p)
+        try:
+            dfd = os.open(str(p.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
+    except BaseException:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+        raise
     return p
 
 
@@ -73,7 +95,7 @@ def generate_btrfs_dropin(cfg: dict[str, Any] | None = None, dest: Path | None =
             try:
                 if d.exists():
                     d.unlink()
-            except OSError:
+            except (OSError, ValueError):
                 pass
         return None
     opts = _btrfs_opts(str(cfg.get("compress", "zstd:1")))
@@ -82,10 +104,23 @@ def generate_btrfs_dropin(cfg: dict[str, Any] | None = None, dest: Path | None =
     for d in targets:
         try:
             d.parent.mkdir(parents=True, exist_ok=True)
-            tmp = d.with_suffix(".tmp")
-            tmp.write_text(content, encoding="utf-8")
-            tmp.replace(d)
-        except OSError:
+            import tempfile as _tf
+
+            _fd, _tmp = _tf.mkstemp(dir=str(d.parent), prefix=f".{d.name}.")
+            with open(_fd, "w", encoding="utf-8") as _f:
+                _f.write(content)
+                _f.flush()
+                os.fsync(_f.fileno())
+            Path(_tmp).replace(d)
+            try:
+                _dfd = os.open(str(d.parent), os.O_DIRECTORY)
+                try:
+                    os.fsync(_dfd)
+                finally:
+                    os.close(_dfd)
+            except (OSError, ValueError):
+                pass
+        except (OSError, ValueError):
             pass
     return dest
 

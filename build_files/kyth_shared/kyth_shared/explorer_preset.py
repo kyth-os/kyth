@@ -17,11 +17,21 @@ def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Non
     try:
         with open(fd, "w", encoding=encoding) as f:
             f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
         Path(tmp).replace(path)
+        try:
+            dfd = os.open(str(path.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except (OSError, ValueError):
+            pass
     except BaseException:
         try:
             Path(tmp).unlink(missing_ok=True)
-        except Exception:
+        except (OSError, ValueError):
             pass
         raise
 
@@ -39,7 +49,7 @@ def load_explorer(path: Path | None = None) -> dict[str, Any]:
     p=explorer_path(path)
     try:
         data=tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"click": "double", "preview": True, "drives_on_desktop": True}
     click=str(data.get("click","double")) if str(data.get("click","double")) in ("single","double") else "double"
     return {"click": click, "preview": bool(data.get("preview", True)), "preview_pane": bool(data.get("preview_pane", True)), "drives_on_desktop": bool(data.get("drives_on_desktop", True))}
@@ -63,18 +73,18 @@ def apply_explorer(cfg: dict[str, Any] | None = None) -> list[str]:
     try:
         run(["kwriteconfig5","--file","kdeglobals","--group","KDE","--key","SingleClick", single], capture_output=True, timeout=5)
         applied.append(f"SingleClick={single}")
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError) as exc:
+        logger.debug("apply_explorer SingleClick failed: %s", exc, exc_info=True)
         pass
     try:
         run(["kwriteconfig5","--file","dolphinrc","--group","General","--key","ShowPreview", str(cfg["preview"]).lower()], capture_output=True, timeout=5)
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError) as exc:
+        logger.debug("apply_explorer ShowPreview failed: %s", exc, exc_info=True)
         pass
     # Drives on desktop via Desktop .desktop already via NTFS D: — no extra
     try:
         import time; _atomic_write_text(Path("/run/kyth-explorer-ttl"), str(int(time.time())+30), encoding="utf-8")
-    except Exception:
-        logger.debug("handled expected exception", exc_info=True)
+    except (OSError, ValueError) as exc:
+        logger.debug("apply_explorer ttl write failed: %s", exc, exc_info=True)
         pass
     return applied

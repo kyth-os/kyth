@@ -22,7 +22,7 @@ def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Non
     except BaseException:
         try:
             Path(tmp).unlink(missing_ok=True)
-        except Exception:
+        except (OSError, ValueError):
             pass
         raise
 
@@ -42,7 +42,7 @@ def load_gpu_power(path: Path | None = None) -> dict[str, Any]:
     p = gpu_power_config_path(path)
     try:
         data = tomllib.load(p.open("rb"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"profile": "balanced", "dpm": "auto"}
     prof = str(data.get("profile", "balanced")).lower()
     if prof not in ("balanced", "kyth"):
@@ -76,7 +76,7 @@ def apply_gpu_power(cfg: dict[str, Any] | None = None) -> bool:
         try:
             g.write_text(target, encoding="utf-8")
             ok = True
-        except OSError:
+        except (OSError, ValueError):
             pass
     # also try pp_power_profile_mode via copy?
     return ok
