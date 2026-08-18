@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,10 @@ def load_attest(path: Path | None = None) -> dict[str, Any]:
     p=attest_path(path)
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        import logging
+
+        logging.getLogger(__name__).debug("load_attest failed: %s", exc, exc_info=True)
         return {"bundle": None, "verified": False}
 
 def verify_attest(path: Path | None = None) -> dict[str, Any]:
@@ -32,7 +36,10 @@ def verify_attest(path: Path | None = None) -> dict[str, Any]:
             if r.returncode==0:
                 return {"verified": True, "reason": "cosign offline ok"}
             return {"verified": False, "reason": r.stderr[:200] if r.stderr else "cosign failed"}
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as e:
+        import logging
+
+        logging.getLogger(__name__).debug("verify_attest cosign failed: %s", e, exc_info=True)
         return {"verified": False, "reason": str(e)}
     # Fallback: check bundle hash present
     return {"verified": bool(data.get("verified")), "reason": data.get("reason","offline cached")}

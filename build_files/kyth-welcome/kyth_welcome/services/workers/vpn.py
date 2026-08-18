@@ -53,7 +53,10 @@ class VpnConnectWorker(TrackedThread):
                     self.saml_required.emit(url)
             self._proc.wait()
             self.done.emit(self._proc.returncode)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            import logging
+
+            logging.getLogger(__name__).debug("VpnConnectWorker.run failed: %s", exc, exc_info=True)
             self.line.emit(f"Error: {exc}")
             self.done.emit(1)
 
@@ -68,16 +71,21 @@ class VpnConnectWorker(TrackedThread):
             pass
         try:
             proc.terminate()
-        except Exception:
-            pass
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            import logging
+
+            logging.getLogger(__name__).debug("VpnConnectWorker.stop terminate failed: %s", exc, exc_info=True)
         # ensure dead
         try:
             import time
+
             time.sleep(0.05)
             if proc.poll() is None:
                 proc.kill()
-        except Exception:
-            pass
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            import logging
+
+            logging.getLogger(__name__).debug("VpnConnectWorker.stop kill failed: %s", exc, exc_info=True)
         self._proc = None
 
 

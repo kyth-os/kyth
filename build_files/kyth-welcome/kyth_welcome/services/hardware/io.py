@@ -51,8 +51,8 @@ def _firmware_probe() -> HardwareProbe:
                         logger.debug("firmware refresh failed", exc_info=True)
                     try:
                         fw_count = check_firmware_updates(timeout=20)
-                    except Exception:
-                        logger.debug("firmware check failed", exc_info=True)
+                    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
+                        logger.debug("firmware check failed: %s", exc, exc_info=True)
                         fw_count = 0
                 finally:
                     try:

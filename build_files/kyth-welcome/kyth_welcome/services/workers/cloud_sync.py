@@ -53,15 +53,20 @@ class RcloneAuthorizeWorker(TrackedThread):
                 pass
             try:
                 proc.terminate()
-            except Exception:
-                pass
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                import logging
+
+                logging.getLogger(__name__).debug("RcloneAuthorizeWorker.stop terminate failed: %s", exc, exc_info=True)
             try:
                 import time
+
                 time.sleep(0.05)
                 if proc.poll() is None:
                     proc.kill()
-            except Exception:
-                pass
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                import logging
+
+                logging.getLogger(__name__).debug("RcloneAuthorizeWorker.stop kill failed: %s", exc, exc_info=True)
             self._proc = None
 
     def run(self):
@@ -94,12 +99,17 @@ class RcloneAuthorizeWorker(TrackedThread):
                 self._proc.kill()
                 self._proc.wait()
             self.failed.emit("Authorization timed out after 5 minutes.")
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             self.failed.emit(str(exc))
 
     def cancel(self):
         if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+            try:
+                self._proc.terminate()
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                import logging
+
+                logging.getLogger(__name__).debug("RcloneAuthorizeWorker.cancel failed: %s", exc, exc_info=True)
 
 
 class RcloneSyncWorker(StreamingProcessWorker):

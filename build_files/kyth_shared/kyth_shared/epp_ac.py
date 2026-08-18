@@ -18,7 +18,10 @@ def load_epp_ac(path: Path|None=None) -> dict[str,Any]:
 def save_epp_ac(cfg: dict[str,Any], path: Path|None=None) -> Path:
     p=epp_ac_config_path(path); p.parent.mkdir(parents=True, exist_ok=True)
     en=bool(cfg.get("enabled",True))
-    p.write_text(f"# Kyth EPP AC — offline\nenabled = {str(en).lower()}\n",encoding="utf-8"); return p
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(f"# Kyth EPP AC — offline\nenabled = {str(en).lower()}\n",encoding="utf-8")
+    tmp.replace(p)
+    return p
 def generate_epp_ac(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Path|None:
     if cfg is None: cfg=load_epp_ac()
     dest=dest or DEFAULT_RULE

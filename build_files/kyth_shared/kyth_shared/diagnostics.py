@@ -115,12 +115,10 @@ def run_health_checks(reporter: DiagnosticReporter) -> None:
                     if comm == "pipewire":
                         has_pw = True
                         break
-                except Exception:
-                    logger.debug("handled expected exception", exc_info=True)
-                    pass
-        except Exception:
-            logger.debug("handled expected exception", exc_info=True)
-            pass
+                except (OSError, ValueError, RuntimeError) as exc:
+                    logger.debug("pipewire comm read failed for %s: %s", p_dir, exc, exc_info=True)
+        except (OSError, RuntimeError) as exc:
+            logger.debug("pipewire proc scan failed: %s", exc, exc_info=True)
 
     if has_pw:
         reporter.pass_check("Audio Stack", "PipeWire low-latency daemon running")

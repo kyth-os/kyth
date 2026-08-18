@@ -35,7 +35,9 @@ def save_battery(cfg: dict[str, Any], path: Path | None = None) -> Path:
     lines.append(f'charge_start = {int(cfg.get("charge_start",40))}')
     lines.append(f'charge_stop = {int(cfg.get("charge_stop",80))}')
     lines.append(f'health_check = {str(bool(cfg.get("health_check",True))).lower()}')
-    p.write_text("\n".join(lines)+"\n", encoding="utf-8")
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines)+"\n", encoding="utf-8")
+    tmp.replace(p)
     return p
 
 def read_battery_health() -> dict[str, Any]:
@@ -46,8 +48,8 @@ def read_battery_health() -> dict[str, Any]:
             cap=Path(bat/"capacity").read_text().strip() if (bat/"capacity").exists() else "?"
             cycles=Path(bat/"cycle_count").read_text().strip() if (bat/"cycle_count").exists() else "?"
             health[bat.name]={"capacity":cap, "cycles":cycles}
-        except Exception:
-            logger.debug("handled expected exception", exc_info=True)
+        except (OSError, ValueError, RuntimeError) as exc:
+            logger.debug("read_battery_health %s failed: %s", bat.name, exc, exc_info=True)
             pass
     return health
 

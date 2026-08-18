@@ -48,7 +48,9 @@ def save_cgroup_config(cfg: dict[str, Any], path: Path | None = None) -> Path:
     lines.append(f'memory_max = "{cfg.get("memory_max", "80%")}"')
     lines.append(f'io_weight = {int(cfg.get("io_weight", 200))}')
     lines.append(f'allowed_cpus = "{cfg.get("allowed_cpus", "")}"')
-    cfg_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp = cfg_path.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp.replace(cfg_path)
     return cfg_path
 
 

@@ -37,7 +37,9 @@ def save_gaming_cfs(cfg: dict[str, Any], path: Path | None = None) -> Path:
     prof = str(cfg.get("profile", "balanced")).lower()
     if prof not in ("balanced", "gaming"):
         prof = "balanced"
-    p.write_text(f"# Kyth gaming CFS — offline\nprofile = \"{prof}\"\n", encoding="utf-8")
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(f"# Kyth gaming CFS — offline\nprofile = \"{prof}\"\n", encoding="utf-8")
+    tmp.replace(p)
     return p
 
 

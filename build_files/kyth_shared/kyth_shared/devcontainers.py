@@ -38,5 +38,7 @@ def save_devcontainers(containers: dict[str, dict[str, Any]], path: Path | None 
         lines.append(f'image = "{e.get("image","quay.io/toolbx/ubuntu-toolbox:24.04")}"')
         lines.append(f'init = {str(bool(e.get("init", False))).lower()}')
         lines.append("")
-    p.write_text("\n".join(lines), encoding="utf-8")
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines), encoding="utf-8")
+    tmp.replace(p)
     return p

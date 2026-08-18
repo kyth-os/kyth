@@ -21,7 +21,10 @@ def save_inotify_watches(cfg: dict[str,Any], path: Path|None=None) -> Path:
     p=config_path(path); p.parent.mkdir(parents=True, exist_ok=True)
     prof=str(cfg.get("profile","balanced")).lower()
     if prof not in ("balanced","gaming"): prof="balanced"
-    p.write_text(f"# Kyth inotify watches — offline\nprofile = \"{prof}\"\n",encoding="utf-8"); return p
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(f"# Kyth inotify watches — offline\nprofile = \"{prof}\"\n",encoding="utf-8")
+    tmp.replace(p)
+    return p
 def generate_inotify_watches(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Path|None:
     if cfg is None: cfg=load_inotify_watches()
     dest=dest or DEFAULT_CONF

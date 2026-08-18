@@ -19,7 +19,10 @@ class WindowsLibraryWorker(TrackedThread):
     def run(self) -> None:
         try:
             partitions = _probe_windows_partitions()
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            import logging
+
+            logging.getLogger(__name__).debug("WindowsLibraryWorker probe failed: %s", exc, exc_info=True)
             print(f"game library probe failed: {exc}", file=sys.stderr)
             partitions = []
         self.result.emit(partitions)
@@ -50,15 +53,20 @@ class UserFilesCopyWorker(TrackedThread):
             pass
         try:
             proc.terminate()
-        except Exception:
-            pass
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            import logging
+
+            logging.getLogger(__name__).debug("UserFilesCopyWorker.stop terminate failed: %s", exc, exc_info=True)
         try:
             import time
+
             time.sleep(0.05)
             if proc.poll() is None:
                 proc.kill()
-        except Exception:
-            pass
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            import logging
+
+            logging.getLogger(__name__).debug("UserFilesCopyWorker.stop kill failed: %s", exc, exc_info=True)
         self._proc = None
 
     def run(self):

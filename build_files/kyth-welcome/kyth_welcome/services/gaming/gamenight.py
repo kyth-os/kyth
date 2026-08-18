@@ -88,15 +88,16 @@ def _cleanup_game_night():
         for proc in list(GameNightManager._action_procs):
             try:
                 proc.wait(timeout=15)
-            except Exception:
+            except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError) as exc:
+                _logger.debug("_cleanup_game_night: wait(15) failed %s", exc, exc_info=True)
                 try:
                     proc.kill()
-                except Exception:
-                    pass
+                except (OSError, subprocess.SubprocessError) as exc2:
+                    _logger.debug("_cleanup_game_night: kill failed %s", exc2, exc_info=True)
                 try:
                     proc.wait(timeout=5)
-                except Exception:
-                    pass
+                except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError) as exc3:
+                    _logger.debug("_cleanup_game_night: wait(5) failed %s", exc3, exc_info=True)
         GameNightManager._action_procs.clear()
 
 

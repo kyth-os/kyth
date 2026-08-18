@@ -19,7 +19,10 @@ def load_fscache(path: Path|None=None) -> dict[str,Any]:
 def save_fscache(cfg: dict[str,Any], path: Path|None=None) -> Path:
     p=fscache_config_path(path); p.parent.mkdir(parents=True, exist_ok=True)
     en=bool(cfg.get("enabled",False))
-    p.write_text(f"# Kyth fscache — offline\nenabled = {str(en).lower()}\n",encoding="utf-8"); return p
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(f"# Kyth fscache — offline\nenabled = {str(en).lower()}\n", encoding="utf-8")
+    tmp.replace(p)
+    return p
 def generate_fscache(cfg: dict[str,Any]|None=None, conf: Path|None=None) -> Path|None:
     if cfg is None: cfg=load_fscache()
     conf=conf or DEFAULT_CONF
