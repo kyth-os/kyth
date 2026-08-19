@@ -95,7 +95,9 @@ def _encryption_check(disk: str | None = None, snapshot=None) -> AssuranceCheck 
     return None
 
 
-def run_preflight(source: ImageSource, *, power_root: Path = Path("/sys/class/power_supply")) -> list[AssuranceCheck]:
+def run_preflight(
+    source: ImageSource, *, power_root: Path = Path("/sys/class/power_supply"), disk: str = "",
+) -> list[AssuranceCheck]:
     checks = []
     if source.kind == "embedded":
         if not source.verified or not source.digest:
@@ -108,10 +110,13 @@ def run_preflight(source: ImageSource, *, power_root: Path = Path("/sys/class/po
     else:
         checks.append(AssuranceCheck("image", "pass", "Local installation source selected"))
     checks.append(_battery_check(power_root))
-    # Bonus: surface encryption blockers early so user gets actionable remediation before disk step
+    # Surface encryption blockers early so the user gets actionable remediation
+    # before the disk step, not only when the later resize-specific check in
+    # plan.py blocks the actual operation. `disk` is best-effort — the caller
+    # may not have a target selected yet (e.g. before a guided flow's first
+    # disk pick), and _encryption_check() itself already no-ops cleanly on ""/None.
     try:
-        # Try to infer disk from source target — best-effort, non-blocking
-        enc = _encryption_check(None)
+        enc = _encryption_check(disk or None)
         if enc is not None:
             checks.append(enc)
     except (OSError, ValueError, AttributeError, RuntimeError) as exc:

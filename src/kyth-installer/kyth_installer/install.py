@@ -64,7 +64,7 @@ def _prepare_install_context(log, context: InstallerContext) -> ResolvedInstallP
         net_err = _network_preflight(src_ref)
         if net_err:
             raise RuntimeError(net_err)
-    checks = run_preflight(source)
+    checks = run_preflight(source, disk=request.disk)
     context.assurance_checks = [check.as_dict() for check in checks]
     for check in checks:
         log(f"Preflight [{check.status}]: {check.name} — {check.detail}")

@@ -83,6 +83,30 @@ class InstallerAssuranceCoverageTests(unittest.TestCase):
     def test_disk_probe_failure_is_nonfatal(self, _list_partitions):
         self.assertIsNone(_encryption_check("/dev/sda"))
 
+    @patch("kyth_installer.disk.list_partitions")
+    def test_preflight_surfaces_encryption_warning_when_a_disk_is_given(self, list_partitions):
+        # run_preflight() previously always called _encryption_check(None),
+        # so its own disk/LUKS/BitLocker scan branch (covered above via
+        # direct _encryption_check() calls) was unreachable through the
+        # preflight path — the comment claimed "infer disk from source
+        # target" but nothing ever did. Now the caller's target disk is
+        # threaded through.
+        list_partitions.return_value = [{"name": "/dev/sda2", "fstype": "crypto_luks"}]
+        source = ImageSource("oci:/local", "target", "local")
+        with tempfile.TemporaryDirectory() as tmp:
+            checks = run_preflight(source, power_root=Path(tmp) / "missing", disk="/dev/sda")
+        encryption_checks = [c for c in checks if c.name == "encryption"]
+        self.assertEqual(len(encryption_checks), 1)
+        self.assertIn("LUKS-encrypted", encryption_checks[0].detail)
+
+    def test_preflight_without_a_disk_omits_encryption_check(self):
+        # No target selected yet (e.g. before a guided flow's first disk
+        # pick) — must stay a clean no-op, not raise or probe anything.
+        source = ImageSource("oci:/local", "target", "local")
+        with tempfile.TemporaryDirectory() as tmp:
+            checks = run_preflight(source, power_root=Path(tmp) / "missing")
+        self.assertFalse([c for c in checks if c.name == "encryption"])
+
     def test_preflight_rejects_unverified_embedded_source(self):
         source = ImageSource("oci:/image", "target", "embedded")
         with self.assertRaisesRegex(RuntimeError, "could not be verified"):
