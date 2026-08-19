@@ -168,7 +168,20 @@ class InstallerService:
             return {"ok": True, "root_partition": root_part}
         except RuntimeError as exc:
             journal.rollback(lambda _msg: None)
-            self.context.transition(context_module.InstallLifecycle.FAILED)
+            # IDLE, not FAILED: journal.rollback() has already restored the
+            # partition table, so the disk is back to a known-good state and
+            # there is nothing unsafe about trying again. FAILED is a strict
+            # terminal state (see _LIFECYCLE_TRANSITIONS) shared with the
+            # much more serious full-OS-install failure paths in
+            # phases/finalize.py and phases/run.py, where forcing a session
+            # restart is appropriate — but here it silently broke retry: the
+            # WebUI's partition editor re-enables its Commit button and shows
+            # the error inline expecting the user to just try again (e.g.
+            # after a transient sgdisk hiccup), yet the next commit_partitions()
+            # call hit "Invalid installer lifecycle transition: failed ->
+            # partitioning" instead of retrying, with no way back to IDLE
+            # short of resubmitting an entirely new install request.
+            self.context.transition(context_module.InstallLifecycle.IDLE)
             return {"ok": False, "message": str(exc)}
 
     def rollback_partitions(self, body: dict) -> dict:

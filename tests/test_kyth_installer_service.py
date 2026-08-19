@@ -353,7 +353,29 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("message"), "sgdisk failed")
         mock_rollback.assert_called_once()
-        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.FAILED)
+        # IDLE, not FAILED: journal.rollback() already restored the partition
+        # table, so nothing unsafe remains and the WebUI's Commit button (which
+        # the frontend re-enables on this exact error path) must be able to
+        # retry — see test_commit_partitions_can_be_retried_after_a_failure.
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_can_be_retried_after_a_failure(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "commit", side_effect=RuntimeError("sgdisk failed")), \
+             patch.object(journal, "rollback"):
+            failed = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertFalse(failed.get("ok"))
+
+        # The frontend re-enables its Commit button on exactly this failure
+        # and expects a retry (e.g. of a transient sgdisk hiccup) to actually
+        # attempt the commit again, not bounce off an internal FSM error.
+        with patch.object(journal, "commit", return_value="/dev/sda1") as mock_commit:
+            retried = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertTrue(retried.get("ok"), retried.get("message"))
+        self.assertEqual(retried.get("root_partition"), "/dev/sda1")
+        mock_commit.assert_called_once()
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
 
     @patch("kyth_installer.disk.list_disks")
     def test_rollback_partitions_success_resets_the_journal(self, mock_list_disks):
