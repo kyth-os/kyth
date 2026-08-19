@@ -3,23 +3,41 @@
 # /ctx is a read-only BuildKit bind mount. Setuptools creates build metadata
 # beside a local project, so stage the package in the writable build tmpfs.
 welcome_package_dir="$(mktemp -d /tmp/kyth-welcome-package.XXXXXX)"
-# /ctx/kyth-welcome and /ctx/kyth-installer may be dangling symlinks when
-# build_files is bind-mounted as /ctx (they point to ../src/...). Prefer
-# /ctx when it is a real directory, fall back to /src or /ctx/src.
+# /ctx/kyth-welcome and /ctx/kyth-installer are symlinks to ../src/... inside
+# build_files. When build_files is bind-mounted as /ctx, those symlinks dangle
+# and BuildKit overlay mounts do not reliably hide them. Use /src fallback.
 _resolve_ctx_src() {
     local name="$1"
-    if [[ -d "/ctx/${name}" && -f "/ctx/${name}/pyproject.toml" ]]; then
-        echo "/ctx/${name}"
-    elif [[ -d "/src/${name}" && -f "/src/${name}/pyproject.toml" ]]; then
+    # Check /src first (explicit mount of repo src), then /ctx if it is a real dir
+    if [[ -d "/src/${name}" ]]; then
         echo "/src/${name}"
-    elif [[ -d "/ctx/src/${name}" && -f "/ctx/src/${name}/pyproject.toml" ]]; then
-        echo "/ctx/src/${name}"
-    else
-        echo "/ctx/${name}"
+        return
     fi
+    if [[ -d "/ctx/src/${name}" ]]; then
+        echo "/ctx/src/${name}"
+        return
+    fi
+    # /ctx/${name} may be a dangling symlink; check if it is a real directory with content
+    if [[ -d "/ctx/${name}" ]] && [[ ! -L "/ctx/${name}" || -e "/ctx/${name}/pyproject.toml" ]]; then
+        # If it's a symlink, verify it resolves
+        if [[ -L "/ctx/${name}" ]]; then
+            if [[ -f "/ctx/${name}/pyproject.toml" ]]; then
+                echo "/ctx/${name}"
+                return
+            fi
+        else
+            echo "/ctx/${name}"
+            return
+        fi
+    fi
+    # Fallback to /ctx even if dangling - will fail with clear error
+    echo "/ctx/${name}"
 }
 _welcome_src="$(_resolve_ctx_src kyth-welcome)"
 _installer_src="$(_resolve_ctx_src kyth-installer)"
+echo "branding: welcome_src=${_welcome_src} installer_src=${_installer_src} (ctx_welcome_exists=$(test -d /ctx/kyth-welcome && echo yes || echo no) src_exists=$(test -d /src/kyth-welcome && echo yes || echo no) ctx_islink=$(test -L /ctx/kyth-welcome && echo yes || echo no))" >&2
+ls -ld "/ctx/kyth-welcome" "/src/kyth-welcome" 2>&1 | head -n 5 >&2 || true
+ls -ld "/ctx/kyth-installer" "/src/kyth-installer" 2>&1 | head -n 5 >&2 || true
 cp -a "${_welcome_src}/." "${welcome_package_dir}/"
 cp -a "${_installer_src}" "${welcome_package_dir}/kyth-installer"
 python3 -m pip install \
