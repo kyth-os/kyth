@@ -1,9 +1,1 @@
-#!/usr/bin/env bash
-# kyth-hdr-per-game — hdr-per-game.toml per-app peak
-set -euo pipefail
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.hdr_per_game import load_hdr_per_game; print(load_hdr_per_game())" ;;
-    off) python3 -c "from kyth_shared.hdr_per_game import save_hdr_per_game; save_hdr_per_game({}); print('HDR per-game: cleared (off)')" ;;
-    verify) kscreen-doctor -o 2>/dev/null | head -n 20 || echo "kscreen-doctor not available (fallback: HDR off is idempotent)" ;;
-    *) echo "Usage: kyth-hdr-per-game [status|off|verify]" >&2; exit 1 ;;
-esac
+kyth-tunable

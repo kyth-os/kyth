@@ -1,9 +1,1 @@
-#!/usr/bin/env bash
-# kyth-podman-overlay — overlay metacopy on btrfs
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-podman-overlay "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.overlay_tune import load_overlay; c=load_overlay(); print(f\"metacopy={c['metacopy']}\")" ;;
-    auto) need_root "$@"; python3 -c "from kyth_shared.overlay_tune import load_overlay,save_overlay,generate_overlay; c=load_overlay(); c['metacopy']='auto'; save_overlay(c); generate_overlay(c)"; echo "overlay auto" ;;
-    *) echo "Usage: kyth-podman-overlay [status|auto]" >&2; exit 1 ;;
-esac
+kyth-tunable

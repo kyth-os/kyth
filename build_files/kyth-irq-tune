@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-irq-tune — irq.toml → irqbalance drop-in
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-irq-tune "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.irq_tune import load_irq,irq_status; c=load_irq(); print(f"profile={c[\"profile\"]} isolated={c[\"isolated_cpus\"] or \"auto\"} active={irq_status()}")' ;;
-    kyth) need_root "$@"; python3 -c 'from kyth_shared.irq_tune import load_irq,save_irq,generate_irq_conf; c=load_irq(); c["profile"]="kyth"; save_irq(c); generate_irq_conf(c)'; systemctl daemon-reload 2>/dev/null || true; systemctl try-restart irqbalance 2>/dev/null || true; echo "IRQ kyth enabled" ;;
-    balanced|default) need_root "$@"; python3 -c 'from kyth_shared.irq_tune import load_irq,save_irq,generate_irq_conf; c=load_irq(); c["profile"]="balanced"; save_irq(c); generate_irq_conf(c)'; systemctl daemon-reload 2>/dev/null || true; systemctl try-restart irqbalance 2>/dev/null || true; echo "IRQ balanced" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.irq_tune import load_irq,generate_irq_conf; generate_irq_conf(load_irq())';;
-    *) echo "Usage: kyth-irq-tune [status|kyth|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

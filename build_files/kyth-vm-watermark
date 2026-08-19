@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-vm-watermark — vm.watermark_scale_factor 500 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-vm-watermark "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.vm_watermark import load_watermark, watermark_status; c=load_watermark(); print(f\"profile={c['profile']} active={watermark_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.vm_watermark import load_watermark,save_watermark,generate_watermark; c=load_watermark(); c['profile']='gaming'; save_watermark(c); generate_watermark(c)"; sysctl --system >/dev/null 2>&1 || true; echo "vm watermark gaming 500" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.vm_watermark import load_watermark,save_watermark,generate_watermark; c=load_watermark(); c['profile']='balanced'; save_watermark(c); generate_watermark(c)"; echo "vm watermark balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.vm_watermark import load_watermark,generate_watermark; generate_watermark(load_watermark())" ;;
-    *) echo "Usage: kyth-vm-watermark [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

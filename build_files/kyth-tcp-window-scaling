@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-tcp-window-scaling — 1 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-window-scaling "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.tcp_window_scaling import load_tcp_window_scaling, tcp_window_scaling_status; c=load_tcp_window_scaling(); print(f\"profile={c['profile']} active={tcp_window_scaling_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_window_scaling import load_tcp_window_scaling,save_tcp_window_scaling,generate_tcp_window_scaling; c=load_tcp_window_scaling(); c['profile']='gaming'; save_tcp_window_scaling(c); generate_tcp_window_scaling(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp window scaling gaming 1" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_window_scaling import load_tcp_window_scaling,save_tcp_window_scaling,generate_tcp_window_scaling; c=load_tcp_window_scaling(); c['profile']='balanced'; save_tcp_window_scaling(c); generate_tcp_window_scaling(c)"; echo "tcp window scaling balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_window_scaling import load_tcp_window_scaling,generate_tcp_window_scaling; generate_tcp_window_scaling(load_tcp_window_scaling())" ;;
-    *) echo "Usage: kyth-tcp-window-scaling [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

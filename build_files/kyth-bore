@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-bore — bore.toml
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-bore "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.bore_tune import load_bore,bore_status; c=load_bore(); print(f\"profile={c['profile']} active={bore_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.bore_tune import load_bore,save_bore,generate_bore; c=load_bore(); c['profile']='gaming'; save_bore(c); generate_bore(c)"; sysctl --system >/dev/null 2>&1 || true; echo "bore gaming" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.bore_tune import load_bore,save_bore,generate_bore; c=load_bore(); c['profile']='balanced'; save_bore(c); generate_bore(c)"; echo "bore balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.bore_tune import load_bore,generate_bore; generate_bore(load_bore())" ;;
-    *) echo "Usage: kyth-bore [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

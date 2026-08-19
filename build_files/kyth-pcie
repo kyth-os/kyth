@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-pcie — pcie.toml ASPM 0 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-pcie "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.pcie_aspm import load_pcie, pcie_status; c=load_pcie(); print(f\"profile={c['profile']} active={pcie_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.pcie_aspm import load_pcie,save_pcie,generate_pcie; c=load_pcie(); c['profile']='gaming'; save_pcie(c); generate_pcie(c)"; udevadm control --reload-rules 2>/dev/null || true; echo "pcie gaming L1 off" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.pcie_aspm import load_pcie,save_pcie,generate_pcie; c=load_pcie(); c['profile']='balanced'; save_pcie(c); generate_pcie(c)"; udevadm control --reload-rules 2>/dev/null || true; echo "pcie balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.pcie_aspm import load_pcie,generate_pcie; generate_pcie(load_pcie())" ;;
-    *) echo "Usage: kyth-pcie [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

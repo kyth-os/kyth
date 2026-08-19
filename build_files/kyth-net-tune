@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-net-tune — net-latency.toml → 99-kyth-net-latency.conf
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-net-tune "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.net_latency import load_net_latency,net_latency_status; c=load_net_latency(); print(f"enabled={c[\"enabled\"]} tfo={c[\"tcp_fastopen\"]} bbr={c[\"bbr\"]} active={net_latency_status()}")' ;;
-    on|enable) need_root "$@"; python3 -c 'from kyth_shared.net_latency import load_net_latency,save_net_latency,generate_net_latency_conf; c=load_net_latency(); c["enabled"]=True; save_net_latency(c); generate_net_latency_conf(c)'; sysctl --system >/dev/null 2>&1 || sysctl -p /etc/sysctl.d/99-kyth-net-latency.conf >/dev/null 2>&1 || true; echo "net latency enabled" ;;
-    off|disable) need_root "$@"; python3 -c 'from kyth_shared.net_latency import load_net_latency,save_net_latency,generate_net_latency_conf; c=load_net_latency(); c["enabled"]=False; save_net_latency(c); generate_net_latency_conf(c)'; echo "net latency disabled (remove drop-in)" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.net_latency import load_net_latency,generate_net_latency_conf; generate_net_latency_conf(load_net_latency())'; sysctl --system >/dev/null 2>&1 || true ;;
-    *) echo "Usage: kyth-net-tune [status|on|off|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

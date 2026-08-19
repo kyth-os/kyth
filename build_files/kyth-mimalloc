@@ -1,12 +1,1 @@
-#!/usr/bin/env bash
-# kyth-mimalloc — manage mimalloc.toml
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-mimalloc "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.mimalloc_preset import load_mimalloc,mimalloc_status; c=load_mimalloc(); print(f"enabled={c[\"enabled\"]} global={c[\"global\"]} per_game={c[\"per_game\"]} active={mimalloc_status()}")' ;;
-    on) need_root "$@"; python3 -c 'from kyth_shared.mimalloc_preset import load_mimalloc,save_mimalloc; c=load_mimalloc(); c["enabled"]=True; save_mimalloc(c)'; echo "mimalloc per-game enabled (use mimalloc-run -- <game>)" ;;
-    off) need_root "$@"; python3 -c 'from kyth_shared.mimalloc_preset import load_mimalloc,save_mimalloc,generate_mimalloc_env; c=load_mimalloc(); c["enabled"]=False; c["global"]=False; save_mimalloc(c); generate_mimalloc_env(c)'; echo "mimalloc disabled" ;;
-    global) need_root "$@"; python3 -c 'from kyth_shared.mimalloc_preset import load_mimalloc,save_mimalloc,generate_mimalloc_env; c=load_mimalloc(); c["enabled"]=True; c["global"]=True; save_mimalloc(c); generate_mimalloc_env(c)'; echo "mimalloc global enabled (re-login)" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.mimalloc_preset import load_mimalloc,generate_mimalloc_env; generate_mimalloc_env(load_mimalloc())';;
-    *) echo "Usage: kyth-mimalloc [status|on|off|global|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-btrfs-autotune — btrfs-autotune.toml weekly balance/defrag if >threshold
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-btrfs-autotune "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.btrfs_autotune import load_btrfs_autotune; c=load_btrfs_autotune(); print(f"enabled={c[\"enabled\"]} threshold={c[\"threshold\"]} script={__import__(\"pathlib\").Path(\"/usr/libexec/kyth-btrfs-autotune\").exists()}")' ;;
-    on) need_root "$@"; python3 -c 'from kyth_shared.btrfs_autotune import load_btrfs_autotune,save_btrfs_autotune,generate_btrfs_autotune; c=load_btrfs_autotune(); c["enabled"]=True; save_btrfs_autotune(c); generate_btrfs_autotune(c)'; echo "btrfs autotune on" ;;
-    off) need_root "$@"; python3 -c 'from kyth_shared.btrfs_autotune import load_btrfs_autotune,save_btrfs_autotune,generate_btrfs_autotune; c=load_btrfs_autotune(); c["enabled"]=False; save_btrfs_autotune(c); generate_btrfs_autotune(c)'; echo "btrfs autotune off" ;;
-    apply|run) need_root "$@"; python3 -c 'from kyth_shared.btrfs_autotune import load_btrfs_autotune,generate_btrfs_autotune; generate_btrfs_autotune(load_btrfs_autotune())'; /usr/libexec/kyth-btrfs-autotune 2>&1 | tail -n 20 || true ;;
-    *) echo "Usage: kyth-btrfs-autotune [status|on|off|apply|run]" >&2; exit 1 ;;
-esac
+kyth-tunable

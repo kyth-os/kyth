@@ -11,6 +11,39 @@ rm -f /etc/sysctl.d/99-kyth.conf \
       /etc/sysctl.d/99-kyth-vm-compaction.conf \
       /etc/sysctl.d/99-kyth-network-qdisc.conf 2>/dev/null || true
 
+# Remove stale per-tunable 99-kyth-*.conf that are now consolidated in base/gaming/network tiers
+# (Slice 5: 94 thin wrappers -> dispatcher; per-tunable sysctl files are superseded by sysctl_compose)
+# Keep only the 3 composed files; remove any other 99-kyth-*.conf that matches a tunable name.
+if [[ -f /ctx/config/tunables.toml ]]; then
+    while IFS= read -r tunable; do
+        rm -f "/etc/sysctl.d/99-kyth-${tunable}.conf" 2>/dev/null || true
+    done < <(python3 -c '
+import tomllib
+from pathlib import Path
+p=Path("/ctx/config/tunables.toml")
+if p.is_file():
+    data=tomllib.load(p.open("rb"))
+    for name, spec in data.get("tunables", {}).items():
+        if spec.get("kind")=="sysctl":
+            print(name)
+')
+fi
+# Also handle bare-metal fallback when /ctx not mounted (local host apply)
+if [[ -f build_files/config/tunables.toml ]]; then
+    while IFS= read -r tunable; do
+        rm -f "/etc/sysctl.d/99-kyth-${tunable}.conf" 2>/dev/null || true
+    done < <(python3 -c '
+import tomllib
+from pathlib import Path
+p=Path("build_files/config/tunables.toml")
+if p.is_file():
+    data=tomllib.load(p.open("rb"))
+    for name, spec in data.get("tunables", {}).items():
+        if spec.get("kind")=="sysctl":
+            print(name)
+')
+fi
+
 # Modules that were previously loaded by retired fragments — still needed.
 mkdir -p /etc/modules-load.d
 printf '%s\n' 'tcp_bbr' > /etc/modules-load.d/bbr.conf
@@ -21,4 +54,5 @@ if [[ -f /ctx/config/sysctl.conf ]]; then
     exit 1
 fi
 
+# shellcheck disable=SC2012
 echo "00-sysctl-compose: emitted $(ls -1 /etc/sysctl.d/99-kyth-*.conf 2>/dev/null | tr '\n' ' ')"

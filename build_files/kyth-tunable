@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# kyth-tunable dispatcher — single entry for 94 tunables (Slice 5)
+# Symlinks: kyth-foo -> kyth-tunable, basename foo dispatches via kyth_shared.tunable
+# Usage: kyth-<tunable> [status|gaming|balanced|apply]  or  kyth-tunable <tunable> [status|...]
+set -euo pipefail
+
+# Resolve tunable name from invocation
+name="$(basename "$0")"
+if [[ "$name" == "kyth-tunable" ]]; then
+    if [[ $# -lt 1 ]]; then
+        echo "Usage: kyth-tunable <tunable> [status|gaming|balanced|apply]" >&2
+        echo "Available: $(python3 -c 'from kyth_shared.tunable import list_tunables; print(" ".join(s.name for s in list_tunables()))')" >&2
+        exit 1
+    fi
+    name="kyth-$1"
+    shift
+fi
+tunable="${name#kyth-}"
+
+need_root() { [[ $EUID -eq 0 ]] || exec sudo -A "/usr/bin/$name" "$@"; }
+
+# Validate tunable exists early for better error
+if ! python3 -c 'import sys; from kyth_shared.tunable import get_spec; get_spec(sys.argv[1])' "$tunable" 2>/dev/null; then
+    echo "Unknown tunable: $tunable (try kyth-tunable --list)" >&2
+    exit 1
+fi
+
+case "${1:-status}" in
+    status)
+        python3 -c '
+import sys
+from kyth_shared.tunable import load_tunable, tunable_status, tunable_kind
+n=sys.argv[1]
+try:
+    c=load_tunable(n)
+    prof=c.get("profile","balanced")
+except Exception:
+    prof="balanced"
+try:
+    active=tunable_status(n)
+except Exception:
+    active="unknown"
+kind="sysctl" if tunable_kind(n)=="sysctl" else "other"
+print(f"profile={prof} active={active} kind={kind}")
+' "$tunable"
+        ;;
+    gaming)
+        need_root "$@"
+        python3 -c '
+import sys
+from kyth_shared.tunable import load_tunable, save_tunable, generate_tunable
+n=sys.argv[1]
+c=load_tunable(n)
+# Try gaming first, fall back to kyth for modules that use kyth profile
+c["profile"]="gaming"
+save_tunable(n, c)
+c2=load_tunable(n)
+if c2.get("profile")=="balanced" and c.get("profile")=="gaming":
+    # Module expects kyth (e.g. sched_latency, thp, irq)
+    c["profile"]="kyth"
+    save_tunable(n, c)
+    c=c2 if False else c
+generate_tunable(n, c)
+' "$tunable"
+        # Only sysctl kinds need sysctl --system
+        if python3 -c 'import sys; from kyth_shared.tunable import tunable_kind; sys.exit(0 if tunable_kind(sys.argv[1])=="sysctl" else 1)' "$tunable"; then
+            sysctl --system >/dev/null 2>&1 || true
+        fi
+        echo "$tunable gaming"
+        ;;
+    balanced)
+        need_root "$@"
+        python3 -c '
+import sys
+from kyth_shared.tunable import load_tunable, save_tunable, generate_tunable
+n=sys.argv[1]
+c=load_tunable(n)
+c["profile"]="balanced"
+save_tunable(n, c)
+generate_tunable(n, c)
+' "$tunable"
+        if python3 -c 'import sys; from kyth_shared.tunable import tunable_kind; sys.exit(0 if tunable_kind(sys.argv[1])=="sysctl" else 1)' "$tunable"; then
+            # For sysctl, removing the file is enough; sysctl --system refreshes
+            sysctl --system >/dev/null 2>&1 || true
+        fi
+        echo "$tunable balanced"
+        ;;
+    apply)
+        need_root "$@"
+        python3 -c '
+import sys
+from kyth_shared.tunable import load_tunable, generate_tunable
+n=sys.argv[1]
+c=load_tunable(n)
+generate_tunable(n, c)
+' "$tunable"
+        if python3 -c 'import sys; from kyth_shared.tunable import tunable_kind; sys.exit(0 if tunable_kind(sys.argv[1])=="sysctl" else 1)' "$tunable"; then
+            sysctl --system >/dev/null 2>&1 || true
+        fi
+        ;;
+    *)
+        echo "Usage: $name [status|gaming|balanced|apply]" >&2
+        exit 1
+        ;;
+esac

@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-readahead — ephemeral readahead on game dir
-set -euo pipefail
-if [[ "${1:-}" == "--help" ]]; then echo "Usage: kyth-readahead <path> [--size-mb N] | kyth-readahead --status"; exit 0; fi
-if [[ "${1:-}" == "--status" ]]; then python3 -c 'from kyth_shared.readahead_preset import load_readahead; c=load_readahead(); print(f"enabled={c[\"enabled\"]} size_mb={c[\"size_mb\"]}")'; exit 0; fi
-path="${1:-}"
-size="${2:-512}"
-if [[ "$size" == "--size-mb" ]]; then size="${3:-512}"; fi
-if [[ -z "$path" ]]; then echo "Usage: kyth-readahead <game-path>" >&2; exit 1; fi
-python3 -c "from pathlib import Path; from kyth_shared.readahead_preset import readahead_for_path, load_readahead; c=load_readahead(); sz=int('${size}') if '${size}'.isdigit() else c['size_mb']; print(readahead_for_path(Path('${path}'), sz))"
-# also wrapper mode: kyth-readahead-run -- <cmd>
+kyth-tunable

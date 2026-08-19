@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-tcp-fin-timeout — 30 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-fin-timeout "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.tcp_fin_timeout import load_tcp_fin_timeout, tcp_fin_timeout_status; c=load_tcp_fin_timeout(); print(f\"profile={c['profile']} active={tcp_fin_timeout_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_fin_timeout import load_tcp_fin_timeout,save_tcp_fin_timeout,generate_tcp_fin_timeout; c=load_tcp_fin_timeout(); c['profile']='gaming'; save_tcp_fin_timeout(c); generate_tcp_fin_timeout(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp fin timeout gaming 30" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_fin_timeout import load_tcp_fin_timeout,save_tcp_fin_timeout,generate_tcp_fin_timeout; c=load_tcp_fin_timeout(); c['profile']='balanced'; save_tcp_fin_timeout(c); generate_tcp_fin_timeout(c)"; echo "tcp fin timeout balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_fin_timeout import load_tcp_fin_timeout,generate_tcp_fin_timeout; generate_tcp_fin_timeout(load_tcp_fin_timeout())" ;;
-    *) echo "Usage: kyth-tcp-fin-timeout [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

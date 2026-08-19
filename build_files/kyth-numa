@@ -1,9 +1,1 @@
-#!/usr/bin/env bash
-# kyth-numa — numa.toml X3D CCD0
-set -euo pipefail
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.numa_tune import load_numa, numa_cpus; c=load_numa(); print(f\"profile={c['profile']} cpus={numa_cpus(c) or 'auto'}\")" ;;
-    gaming) python3 -c "from kyth_shared.numa_tune import load_numa,save_numa; c=load_numa(); c['profile']='gaming'; save_numa(c)"; echo "numa gaming $(python3 -c "from kyth_shared.numa_tune import load_numa, numa_cpus; print(numa_cpus() or 'auto')")" ;;
-    balanced) python3 -c "from kyth_shared.numa_tune import load_numa,save_numa; c=load_numa(); c['profile']='balanced'; save_numa(c)"; echo "numa balanced" ;;
-    *) echo "Usage: kyth-numa [status|gaming|balanced]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-rmem-max — 16777216 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-rmem-max "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.rmem_max import load_rmem_max, rmem_max_status; c=load_rmem_max(); print(f\"profile={c['profile']} active={rmem_max_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.rmem_max import load_rmem_max,save_rmem_max,generate_rmem_max; c=load_rmem_max(); c['profile']='gaming'; save_rmem_max(c); generate_rmem_max(c)"; sysctl --system >/dev/null 2>&1 || true; echo "rmem max gaming 16777216" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.rmem_max import load_rmem_max,save_rmem_max,generate_rmem_max; c=load_rmem_max(); c['profile']='balanced'; save_rmem_max(c); generate_rmem_max(c)"; echo "rmem max balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.rmem_max import load_rmem_max,generate_rmem_max; generate_rmem_max(load_rmem_max())" ;;
-    *) echo "Usage: kyth-rmem-max [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

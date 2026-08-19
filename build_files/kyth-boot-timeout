@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-boot-timeout — loader.toml fast vs balanced
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-boot-timeout "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.boot_loader import load_loader,loader_status; c=load_loader(); print(f"fast={c[\"fast\"]} timeout={c[\"timeout\"]} active={loader_status()}")' ;;
-    fast) need_root "$@"; python3 -c 'from kyth_shared.boot_loader import load_loader,save_loader,generate_loader_conf; c=load_loader(); c["fast"]=True; c["timeout"]=0; save_loader(c); generate_loader_conf(c)'; echo "boot fast-path 0s (greenboot restores 2s on failure)" ;;
-    balanced|default) need_root "$@"; python3 -c 'from kyth_shared.boot_loader import load_loader,save_loader,generate_loader_conf; c=load_loader(); c["fast"]=False; save_loader(c); generate_loader_conf(c)'; echo "boot balanced 2s" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.boot_loader import load_loader,generate_loader_conf; generate_loader_conf(load_loader())';;
-    *) echo "Usage: kyth-boot-timeout [status|fast|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-dirty-ratio — vm.dirty 5/5 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-dirty-ratio "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.dirty_ratio import load_dirty_ratio, dirty_ratio_status; c=load_dirty_ratio(); print(f\"profile={c['profile']} active={dirty_ratio_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.dirty_ratio import load_dirty_ratio,save_dirty_ratio,generate_dirty_ratio; c=load_dirty_ratio(); c['profile']='gaming'; save_dirty_ratio(c); generate_dirty_ratio(c)"; sysctl --system >/dev/null 2>&1 || true; echo "dirty ratio gaming 5/5" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.dirty_ratio import load_dirty_ratio,save_dirty_ratio,generate_dirty_ratio; c=load_dirty_ratio(); c['profile']='balanced'; save_dirty_ratio(c); generate_dirty_ratio(c)"; echo "dirty ratio balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.dirty_ratio import load_dirty_ratio,generate_dirty_ratio; generate_dirty_ratio(load_dirty_ratio())" ;;
-    *) echo "Usage: kyth-dirty-ratio [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable
