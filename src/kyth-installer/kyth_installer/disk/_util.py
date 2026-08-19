@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 
+import logging
+
 from kyth_shared.disk_utils import _normal_device_path as _pure_normal_path
 from kyth_shared.disk_utils import _safe_int as _pure_safe_int
 from kyth_shared.runtime_output import parse_lsblk_devices
 
 import kyth_installer.disk as _disk
+
+_logger = logging.getLogger(__name__)
 
 # Re-export pure helpers via the patchable seam — tests patch disk._safe_int etc.
 def _safe_int(value, default: int = 0) -> int:
@@ -25,7 +29,8 @@ def _lsblk_text(args: list[str], timeout: int = 5) -> str:
             ["lsblk", *args], capture_output=True, text=True, check=True, timeout=timeout,
         )
         return result.stdout.strip()
-    except Exception:
+    except (OSError, ValueError, RuntimeError) as exc:
+        _logger.debug("lsblk probe failed for %s: %s", args, exc, exc_info=True)
         return ""
 
 
@@ -75,7 +80,8 @@ def _lsblk_tree() -> dict[str, dict]:
     tree: dict[str, dict] = {}
     try:
         devices = _disk._lsblk_blockdevices(["--paths", "-o", "NAME,PKNAME,TYPE"])
-    except Exception:
+    except (OSError, ValueError, RuntimeError) as exc:
+        _logger.debug("lsblk tree probe failed: %s", exc, exc_info=True)
         return tree
 
     def walk(items):
@@ -108,7 +114,8 @@ def _block_size_bytes(device: str) -> int:
         )
         out = result.stdout.strip()
         return max(512, _disk._safe_int(out, 512))
-    except Exception:
+    except (OSError, ValueError, RuntimeError) as exc:
+        _logger.debug("blockdev probe failed for %s: %s", device, exc, exc_info=True)
         return 512
 
 

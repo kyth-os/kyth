@@ -1,8 +1,11 @@
 """Installer preflight and installed-target assurance checks."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+_logger = logging.getLogger(__name__)
 
 from .context import InstallRequest
 from .imagesrc import ImageSource
@@ -64,8 +67,8 @@ def _encryption_check(disk: str | None = None, snapshot=None) -> AssuranceCheck 
             for part in snapshot.partitions_by_name.values() if hasattr(snapshot, "partitions_by_name") else []:
                 if part.get("in_use") and (part.get("fstype") or "").lower() in ("ntfs", "ntfs3"):
                     return AssuranceCheck("encryption", "warn", f"Partition {part.get('name')} appears BitLocker-locked — suspend BitLocker in Windows before resizing.")
-        except Exception:
-            pass
+        except (OSError, ValueError, AttributeError, RuntimeError) as exc:
+            _logger.debug("encryption snapshot probe failed: %s", exc, exc_info=True)
     if not disk:
         return None
     try:
@@ -85,10 +88,10 @@ def _encryption_check(disk: str | None = None, snapshot=None) -> AssuranceCheck 
                     r = run_command(_as_root(["blkid", "-o", "value", "-s", "TYPE", part["name"]]), capture_output=True, text=True, timeout=5)
                     if "BitLocker" in (r.stdout or ""):
                         return AssuranceCheck("encryption", "warn", f"Partition {part['name']} appears BitLocker-locked — suspend BitLocker in Windows (manage-bde -off) before resizing.")
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except (OSError, ValueError, AttributeError, RuntimeError) as exc:
+                    _logger.debug("blkid probe failed for %s: %s", part.get("name"), exc, exc_info=True)
+    except (OSError, ValueError, AttributeError, RuntimeError) as exc:
+        _logger.debug("encryption disk probe failed for %s: %s", disk, exc, exc_info=True)
     return None
 
 
@@ -111,8 +114,8 @@ def run_preflight(source: ImageSource, *, power_root: Path = Path("/sys/class/po
         enc = _encryption_check(None)
         if enc is not None:
             checks.append(enc)
-    except Exception:
-        pass
+    except (OSError, ValueError, AttributeError, RuntimeError) as exc:
+        _logger.debug("preflight encryption probe failed: %s", exc, exc_info=True)
     return checks
 
 

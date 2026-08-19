@@ -55,7 +55,8 @@ def suggest_windows_resize_target(*, list_disks, probe_storage, snapshot=None) -
                 snapshot if snapshot and snapshot.disks_by_name.get(name)
                 else probe_storage(name, disks=all_disks)
             )
-        except Exception:
+        except (OSError, ValueError, RuntimeError) as exc:
+            _logger.debug("NTFS partition scan failed for disk %s: %s", name, exc, exc_info=True)
             continue
         for partition, info in current.partitions_by_name.items():
             if info.get("fstype", "").lower() != "ntfs":

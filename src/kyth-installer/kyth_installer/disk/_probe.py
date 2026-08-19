@@ -19,7 +19,8 @@ def _running_system_disk() -> str:
     # device-mapper indirection rather than assuming a single PKNAME hop.
     try:
         return _disk._findmnt_source("/")
-    except Exception:
+    except (OSError, ValueError, RuntimeError) as exc:
+        _logger.debug("_running_system_disk probe failed: %s", exc, exc_info=True)
         return ""
 
 
@@ -119,7 +120,8 @@ def _mount_sources(path: str, recursive: bool = False) -> set[str]:
             cmd, capture_output=True, text=True, check=True, timeout=5,
         )
         out = result.stdout
-    except Exception:
+    except (OSError, ValueError, RuntimeError) as exc:
+        _logger.debug("_mount_sources probe failed for %s: %s", path, exc, exc_info=True)
         out = ""
     for line in out.splitlines():
         source = line.strip()
@@ -177,7 +179,8 @@ def partition_has_active_mount(partition: str) -> bool:
         )
         out = result.stdout
         return bool(out.strip())
-    except Exception:
+    except (OSError, ValueError, RuntimeError) as exc:
+        _logger.debug("partition mount probe failed for %s: %s", partition, exc, exc_info=True)
         return False
 
 

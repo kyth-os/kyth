@@ -183,20 +183,7 @@ def save_state(state: dict[str, Any]) -> None:
     _atomic_json(target, state)
 
 
-def _atomic_json(path: Path, value: Any) -> None:
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, indent=2, sort_keys=True, ensure_ascii=False)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
+from .atomic_io import atomic_write_json as _atomic_json
 
 
 def _run(argv: Iterable[str], timeout: float = 8) -> subprocess.CompletedProcess[str] | None:

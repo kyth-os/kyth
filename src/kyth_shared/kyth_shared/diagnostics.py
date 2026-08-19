@@ -183,8 +183,9 @@ def create_github_issue_draft(
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     draft_path = os.path.join(draft_dir, f"github-issue-{timestamp}.md")
 
-    with open(draft_path, "w", encoding="utf-8") as fh:
-        fh.write(f"# {title}\n\n{body}\n")
+    from .atomic_io import atomic_write_text
+
+    atomic_write_text(draft_path, f"# {title}\n\n{body}\n", encoding="utf-8")
 
     max_body = 5500
     encoded_body = body

@@ -9,24 +9,8 @@ import shutil
 
 from ..commands import run as run_command
 from pathlib import Path
-import tempfile
 
-
-def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
-    try:
-        with open(fd, "w", encoding=encoding) as f:
-            f.write(content)
-        Path(tmp).replace(path)
-    except BaseException:
-        try:
-            Path(tmp).unlink(missing_ok=True)
-        except (OSError, ValueError) as exc:
-            import logging; logging.getLogger(__name__).debug("handled %s: %s", "shortcut.py", exc, exc_info=True)
-            pass
-        raise
+from ..atomic_io import atomic_write_text as _atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -192,8 +176,7 @@ def export_steam_games() -> tuple[int, int]:
             new_lines.append("X-Flatpak=com.valvesoftware.Steam\n")
 
             # Write out
-            with open(dst_file, "w", encoding="utf-8") as f:
-                f.writelines(new_lines)
+            _atomic_write_text(dst_file, "".join(new_lines), encoding="utf-8")
 
             # Copy icon
             if icon:

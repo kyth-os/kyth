@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 
 import kyth_installer.disk as _disk
 
 from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES
 from kyth_shared import human_bytes as _human_size
+
+_logger = logging.getLogger(__name__)
 
 def _partition_mountpoints(child: dict) -> list[str]:
     mounts = child.get("mountpoints")
@@ -174,7 +177,8 @@ def list_free_space(disk: str) -> list[dict]:
             size = (size // sector) * sector
             if size <= 0:
                 return []
-        except Exception:
+        except (OSError, ValueError, RuntimeError) as exc:
+            _logger.debug("free-space region computation failed for %s: %s", disk, exc, exc_info=True)
             return []
         if start < 0 or start + size > disk_size:
             return []
@@ -207,7 +211,8 @@ def list_free_space(disk: str) -> list[dict]:
         _is_gpt = _check_gpt(disk)
         _has_bios = _check_bios(disk) if _is_gpt else True
         required = MIN_KYTHOS_BYTES + (BIOS_BOOT_BYTES if _is_gpt and not _has_bios else 0)
-    except Exception:
+    except (OSError, ValueError, AttributeError, RuntimeError) as exc:
+        _logger.debug("min-required-bytes fallback for %s: %s", disk, exc, exc_info=True)
         required = MIN_KYTHOS_BYTES
 
     regions = []

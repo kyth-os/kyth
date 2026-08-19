@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+_logger = logging.getLogger(__name__)
 
 from .config import BIOS_BOOT_BYTES
 from .plan_types import InstallPlan
@@ -172,8 +175,8 @@ def shrink_ntfs_filesystem_guarded(
         marker_root.mkdir(parents=True, exist_ok=True)
         marker = marker_root / f"ntfs-shrunk-{partition.replace('/', '_')}"
         marker.write_text(f"{new_size}\n")
-    except Exception:
-        pass
+    except (OSError, ValueError) as exc:
+        _logger.debug("ntfs marker write failed for %s: %s", partition, exc, exc_info=True)
 
 
 def prepare_free_space_target(
@@ -222,8 +225,11 @@ def prepare_ntfs_resize_target(
                 )
     except RuntimeError:
         raise
-    except Exception:
-        pass
+    except (OSError, ValueError) as exc:
+        _logger.debug("ntfs marker probe failed for %s: %s", preliminary if 'preliminary' in locals() else "unknown", exc, exc_info=True)
+    except Exception as exc:
+        _logger.debug("ntfs marker probe unexpected error, failing closed: %s", exc, exc_info=True)
+        raise
 
     disk, partition, shrink_bytes = validate_target(config)
     selected_target = (disk, partition)

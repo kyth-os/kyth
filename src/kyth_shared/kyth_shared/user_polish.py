@@ -15,6 +15,8 @@ from enum import Enum
 
 # Pure data lives in desktop/polish_manifest.py so Hub welcome checks and
 # tests can import USER_FOLDERS/MIME_DEFAULTS without pulling in ET/glob.
+from kyth_shared.atomic_io import atomic_write_text
+
 from kyth_shared.desktop.polish_manifest import (  # noqa: E402 — re-export for compat  # pylint: disable=unused-import
     AUTOSTART_VERSION,
     FOLDER_METADATA,
@@ -80,8 +82,7 @@ def _ensure_user_folders(home: str) -> OperationResult:
     for relative, content in FOLDER_METADATA.items():
         path = os.path.join(home, relative)
         if not os.path.exists(path):
-            with open(path, "w", encoding="utf-8") as stream:
-                stream.write(content)
+            atomic_write_text(path, content, encoding="utf-8")
     return OperationResult("user-folders", OperationStatus.APPLIED)
 
 
@@ -94,8 +95,7 @@ def _enable_bluetooth(home: str, run: Callable[..., object]) -> OperationResult:
             line for line in lines
             if not re.match(r"^[0-9a-fA-F:]+_powered=false$", line.strip())
         ]
-        with open(config, "w", encoding="utf-8") as stream:
-            stream.writelines(lines)
+        atomic_write_text(config, "".join(lines), encoding="utf-8")
     if not shutil.which("bluetoothctl"):
         return OperationResult("bluetooth", OperationStatus.UNAVAILABLE, "bluetoothctl not installed")
     run(["bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -472,8 +472,7 @@ def main() -> None:
                         if "flatpak run" not in line:
                             line = re.sub(r"(brave-browser|brave)(\s|$)", r"\1 --password-store=basic\2", line)
                 new_lines.append(line)
-            with open(brave_desktop_dst, "w", encoding="utf-8") as f:
-                f.writelines(new_lines)
+            atomic_write_text(brave_desktop_dst, "".join(new_lines), encoding="utf-8")
         except Exception:
             logger.debug("handled expected exception", exc_info=True)
             pass

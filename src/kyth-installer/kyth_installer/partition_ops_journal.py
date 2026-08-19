@@ -4,10 +4,13 @@ Canonical after partition_ops 571 split; partition_ops.py re-exports for compat.
 """
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional
+
+_logger = logging.getLogger(__name__)
 
 # pylint: disable-next=unused-import
 from .config import BIOS_BOOT_BYTES, FILESYSTEM_OPTIONS, _FILESYSTEM  # noqa: F401 — re-exported for server.py
@@ -23,8 +26,8 @@ def _patched_parent_disk(partition: str) -> str | None:
         fn = getattr(_facade, "_parent_disk", None)
         if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.disk":
             return fn(partition)  # type: ignore
-    except Exception:
-        pass
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim _parent_disk fallback: %s", exc, exc_info=True)
     from .disk import _parent_disk as _orig
     return _orig(partition)
 
@@ -34,8 +37,8 @@ def _patched_list_disks():
         fn = getattr(_facade, "list_disks", None)
         if fn is not None and fn.__module__ != "kyth_installer.disk":
             return fn()
-    except Exception:
-        pass
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim list_disks fallback: %s", exc, exc_info=True)
     from .disk import list_disks as _orig
     return _orig()
 
@@ -45,8 +48,8 @@ def _patched_list_partitions(disk: str):
         fn = getattr(_facade, "list_partitions", None)
         if fn is not None and fn.__module__ != "kyth_installer.disk":
             return fn(disk)
-    except Exception:
-        pass
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim list_partitions fallback for %s: %s", disk, exc, exc_info=True)
     from .disk import list_partitions as _orig
     return _orig(disk)
 
@@ -61,8 +64,8 @@ def _patched_partition_number(partition: str) -> int:
         fn = getattr(_facade, "_partition_number", None)
         if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.disk":
             return fn(partition)  # type: ignore
-    except Exception:
-        pass
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim _partition_number fallback for %s: %s", partition, exc, exc_info=True)
     from .disk import _partition_number as _orig
     return _orig(partition)
 
@@ -72,8 +75,8 @@ def _patched_partition_start_bytes(partition: str) -> int:
         fn = getattr(_facade, "_partition_start_bytes", None)
         if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.disk":
             return fn(partition)  # type: ignore
-    except Exception:
-        pass
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim _partition_start_bytes fallback for %s: %s", partition, exc, exc_info=True)
     from .disk import _partition_start_bytes as _orig
     return _orig(partition)
 
@@ -83,8 +86,8 @@ def _patched_shrink_filesystem(partition: str, fstype: str, new_size: int, log=N
         fn = getattr(_facade, "shrink_filesystem", None)
         if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.fsresize":
             return fn(partition, fstype, new_size, log)  # type: ignore
-    except Exception:
-        pass
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim shrink_filesystem fallback for %s: %s", partition, exc, exc_info=True)
     from .fsresize import shrink_filesystem as _orig
     return _orig(partition, fstype, new_size, log)
 
@@ -583,10 +586,10 @@ class Journal:
                 return
             try:
                 record(kind, status, target)
-            except Exception:
+            except Exception as exc:
                 # A failed bookkeeping write must never abort a partition
                 # commit that is already mid-flight on the real disk.
-                pass
+                _logger.debug("journal bookkeeping write failed for %s %s: %s", kind, target, exc, exc_info=True)
 
         from .storage_guard import PartitionTableGuard
 

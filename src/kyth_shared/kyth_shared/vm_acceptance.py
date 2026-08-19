@@ -22,10 +22,7 @@ INSTALLER_ENV_FILE = Path("/etc/kyth-installer.env")
 UPDATE_REF_PATTERN = re.compile(r"^[A-Za-z0-9._/@:+-]+$")
 
 
-def _atomic_write(path: Path, content: str) -> None:
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)
+from .atomic_io import atomic_write_text as _atomic_write
 
 
 def _read_fw_cfg(path: Path) -> str:

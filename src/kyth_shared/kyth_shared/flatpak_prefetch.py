@@ -3,38 +3,13 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text as _atomic_write_text
+
 _logger = logging.getLogger(__name__)
-
-
-def _atomic_write_text(path: Path, content: str) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
-    try:
-        with open(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        Path(tmp).replace(path)
-        try:
-            dfd = os.open(str(path.parent), os.O_DIRECTORY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-        except (OSError, ValueError):
-            pass
-    except BaseException:
-        try:
-            Path(tmp).unlink(missing_ok=True)
-        except (OSError, ValueError):
-            pass
-        raise
 
 
 DEFAULT_FLATPAK_PREFETCH_PATH = Path("/etc/kyth/flatpak-prefetch.toml")
