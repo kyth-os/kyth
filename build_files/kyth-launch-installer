@@ -5,7 +5,7 @@
 # kyth-installer as root. The installer hands GUI apps back to the desktop user
 # when needed, so the live session does not need blanket sudo or Polkit access.
 
-set -u
+set -euo pipefail
 
 LAUNCH_LOG="/tmp/kyth-installer-launch.log"
 {

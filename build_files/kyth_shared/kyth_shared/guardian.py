@@ -228,9 +228,14 @@ def collect_symptoms() -> list[Symptom]:
         symptoms.append(Symptom("flatpak", f"Flatpak query failed: {flatpak.stderr.strip()}",
                                 ("flatpak.refresh-metadata", "flatpak.repair-user")))
     # Check both home and root — home may be separate partition, root fill (ostree, flatpak) otherwise invisible
+    # Ignore tiny read-only images (composefs 46M at /run/host, always 100% by design on bootc)
+    # that would otherwise flood guardian and hit the .path trigger limit.
     for check_path, label in ((Path.home(), "Home"), (Path("/"), "Root")):
         try:
             usage = shutil.disk_usage(check_path)
+            # Skip small filesystems — real desktops have >>10GiB; composefs is 46M.
+            if usage.total < 2 * 1024**3:
+                continue
             percent = int(100 * usage.used / usage.total)
             if percent >= 90 or usage.free < 5 * 1024**3:
                 symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("disk.review",), "error"))

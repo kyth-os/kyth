@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
+# Sourced library fragment — caller owns `set -euo pipefail`; do not set here.
 # Coordinated latest Fedora kernel transaction shared by package assembly and
 # the daily upgrade layer. Call only for the Fedora kernel flavor.
 

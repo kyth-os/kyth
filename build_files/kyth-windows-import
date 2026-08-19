@@ -8,6 +8,8 @@ if [[ -z "$SRC" ]]; then
   exit 2
 fi
 MNT=$(mktemp -d /tmp/kyth-win-XXXX)
+cleanup() { umount "$MNT" 2>/dev/null || true; rmdir "$MNT" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
 echo "Mounting $SRC read-only at $MNT (dry-run check)..."
 if ! mount -o ro "$SRC" "$MNT" 2>/dev/null; then
   echo "Failed to mount $SRC ro — is ntfs-3g installed? Try: ntfs-3g -o ro $SRC $MNT"

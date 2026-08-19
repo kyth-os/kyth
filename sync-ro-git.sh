@@ -6,7 +6,7 @@
 # RO host .git so plain `git status` is clean. Works inside toolbox via host-spawn
 # (host sees /var/home as rw, no sudo needed, and /tmp is shared). On host directly,
 # the same rsync works without host-spawn.
-set -e
+set -euo pipefail
 if command -v host-spawn >/dev/null 2>&1; then
   echo "Syncing via host-spawn (toolbox) ..."
   host-spawn bash -c "rsync -a /tmp/kyth-git-writable/ /var/home/mrtrick/git/kyth/.git/"

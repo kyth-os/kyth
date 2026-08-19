@@ -1,5 +1,7 @@
 """Fonts ready helper — Nobara msttcorefonts parity (N35)."""
 from __future__ import annotations
+import subprocess
+
 from kyth_shared.commands import run
 
 def fonts_ready() -> tuple[bool, str]:
@@ -13,5 +15,5 @@ def fonts_ready() -> tuple[bool, str]:
         if has_noto:
             return False, "Noto ready, MS via ujust install-ms-fonts"
         return False, "fonts check pending"
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         return False, str(exc)

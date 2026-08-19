@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -u
+set -euo pipefail
 
 log_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/kyth"
 if ! mkdir -p "${log_dir}" 2>/dev/null; then

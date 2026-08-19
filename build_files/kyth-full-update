@@ -2,7 +2,7 @@
 # Update the KythOS-owned system surfaces without traversing arbitrary
 # language-package managers or user development environments.
 
-set -uo pipefail
+set -euo pipefail
 
 declare -a STEP_NAMES=()
 declare -a STEP_RESULTS=()
