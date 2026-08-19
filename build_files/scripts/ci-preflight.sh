@@ -2,6 +2,16 @@
 # Local PR gate: exact GitHub Validation plus changed-file Codacy analysis.
 set -euo pipefail
 
+# Heaviest local gate (validate + quality + Codacy + CodeQL). Must not starve
+# the desktop compositor — same deprioritization as validate.sh/pre-push.
+# Falls back gracefully on CI where --user is unavailable.
+if [[ -z "${KYTH_VALIDATION_SCOPE:-}" ]] && command -v systemd-run >/dev/null 2>&1 && [[ -z "${INVOCATION_ID:-}" ]]; then
+	export KYTH_VALIDATION_SCOPE=1
+	if systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 -- "$0" "$@" 2>/dev/null; then
+		exit $?
+	fi
+fi
+
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
 

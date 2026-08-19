@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# See validate.sh: deprioritize on a live desktop so coverage's second full
+# suite run doesn't starve kwin/Plasma. CI is unaffected (no user manager).
+if [[ -z "${KYTH_VALIDATION_SCOPE:-}" ]] && command -v systemd-run >/dev/null 2>&1 && [[ -z "${INVOCATION_ID:-}" ]]; then
+	export KYTH_VALIDATION_SCOPE=1
+	if systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 -- "$0" "$@" 2>/dev/null; then
+		exit $?
+	fi
+fi
+
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
 quality_python="python3"

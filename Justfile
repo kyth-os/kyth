@@ -79,11 +79,14 @@ setup-quality:
     .venv-quality/bin/ruff --version
 
 # Run the complete validation suite used by GitHub Actions and pre-push.
+# Wrapped via the scripts' own systemd-run --scope deprioritization so direct
+# `just validate` on a live desktop doesn't starve kwin/Plasma.
 [group('Quality')]
 validate:
     ./build_files/scripts/validate.sh
 
 # Run Validation plus changed-file Codacy and pinned CodeQL security checks.
+# Same deprioritization as validate — this is the heaviest local gate.
 [group('Quality')]
 ci-preflight:
     ./build_files/scripts/ci-preflight.sh

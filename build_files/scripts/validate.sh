@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Full validation pegging every core alongside Plasma/Browser/IDE starves
+# kwin_wayland and forces a session kill (ping timeout → SDDM). Deprioritize
+# when run directly on a live desktop; cgroup weight only bites under
+# contention — idle, this still runs at full speed. Gracefully fall back
+# if systemd-run --user is unavailable (e.g. CI).
+if [[ -z "${KYTH_VALIDATION_SCOPE:-}" ]] && command -v systemd-run >/dev/null 2>&1 && [[ -z "${INVOCATION_ID:-}" ]]; then
+	export KYTH_VALIDATION_SCOPE=1
+	if systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 -- "$0" "$@" 2>/dev/null; then
+		exit $?
+	fi
+	# systemd-run --user failed (no user manager) — continue at normal priority
+fi
+
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
 
@@ -77,8 +90,10 @@ export XDG_CONFIG_HOME="${test_home}/config"
 export XDG_DATA_HOME="${test_home}/data"
 export XDG_STATE_HOME="${test_home}/state"
 mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}"
-# Use pytest -q for speed/parity with Justfile:test; guard with timeout so CI doesn't hang on slow network/hardware probes.
-PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer timeout 90 python3 -m unittest discover -s tests -b
+# Guard with timeout so CI doesn't hang on slow network/hardware probes; --foreground
+# lets the suite read from TTY and avoids timeout's process-group SIGTERM
+# killing the caller's session. 600s matches CI's 10m job timeout.
+PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer timeout --foreground 600 python3 -m unittest discover -s tests -b
 
 echo "==> Structured configuration"
 while IFS= read -r -d '' file; do
