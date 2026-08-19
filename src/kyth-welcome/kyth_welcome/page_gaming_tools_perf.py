@@ -9,6 +9,82 @@ from .widgets import CollapsibleLogPanel, _copy_text, _launch_opt_label, _launch
 class _PerfTuningMixin:
     """MangoHud, Gamescope, sched-ext, and the per-game launch-option profile builder."""
 
+    def _build_advanced_kernel_card(self):
+        """Advanced — Kernel switch hidden here. Fedora default (Secure Boot zero-touch), Cachy opt-in via MOK."""
+        from .services.bootc import REGISTRY, branch_display_name, current_branch, current_kernel_flavor, image_tag_for_kernel
+        from .services.diagnostics import command_stdout
+        from .services.privileged import bootc_action
+        from .core_base import run_worker
+        from .services.process import with_idle_inhibit
+
+        card, layout = _make_card("card-accent-warn")
+        title = QLabel("Advanced — Kernel")
+        title.setObjectName("card-title-warn")
+        layout.addWidget(title)
+        desc = QLabel(
+            "Fedora is the default — Secure Boot works with no extra steps. "
+            "CachyOS is an opt-in gaming kernel (BORE). Switching downloads a different image, needs one reboot and, if Secure Boot is on, a one-time blue MokManager enroll (<b>ujust enroll-secureboot</b>)."
+        )
+        desc.setObjectName("card-copy")
+        desc.setWordWrap(True)
+        desc.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(desc)
+        cur = QLabel()
+        cur.setObjectName("card-copy")
+        cur.setWordWrap(True)
+        layout.addWidget(cur)
+
+        status = QLabel()
+        status.setObjectName("card-copy")
+        status.setWordWrap(True)
+        status.hide()
+        layout.addWidget(status)
+
+        def do_switch(flavor: str):
+            tag = image_tag_for_kernel(flavor)
+            ref = f"{REGISTRY}:{tag}"
+            status.setText(f"Switching to {flavor} ({ref}) — downloading… Reboot to apply. For Cachy + Secure Boot: ujust secureboot-status")
+            status.show()
+            run_worker(
+                self,
+                with_idle_inhibit(bootc_action("switch", ref).command(), "KythOS is switching kernel image"),
+                session_inhibit_reason="KythOS is switching kernel image",
+                on_line=lambda t: status.setText(t.strip()[-120:]),
+                on_done=lambda ok: status.setText("Done — reboot to apply. If Secure Boot: ujust enroll-secureboot before reboot." if ok else "Switch failed — see log."),
+            )
+
+        row = QHBoxLayout()
+        btns: dict[str, QPushButton] = {}
+        for flavor in ("fedora", "cachy"):
+            btn = QPushButton("Use Fedora" if flavor == "fedora" else "Switch to CachyOS")
+            btn.clicked.connect(lambda _=False, f=flavor: do_switch(f))
+            row.addWidget(btn)
+            btns[flavor] = btn
+        layout.addLayout(row)
+        hint = QLabel("Rollback stays available from Updates page and boot menu if a custom kernel misbehaves.")
+        hint.setObjectName("card-copy")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        def refresh():
+            flavor = current_kernel_flavor()
+            kernel = command_stdout(["uname", "-r"]) or "unknown"
+            channel = branch_display_name(current_branch())
+            names = {"fedora": "Fedora", "cachy": "CachyOS"}
+            cur.setText(f"Current: {names.get(flavor, flavor)} · {kernel} · {channel}")
+            for k, b in btns.items():
+                if k == flavor:
+                    b.setText("Current")
+                    b.setEnabled(False)
+                else:
+                    b.setText("Use Fedora" if k == "fedora" else "Switch to CachyOS")
+                    b.setEnabled(True)
+                restyle(b)
+
+        self._advanced_kernel_refresh = refresh
+        refresh()
+        self._add(card)
+
     def _build_overlays_bulk_card(self):
         """One-tap MangoHud + Gamescope + vkBasalt — what Windows switcher expects as 'overlays'."""
         card, layout = _make_card()

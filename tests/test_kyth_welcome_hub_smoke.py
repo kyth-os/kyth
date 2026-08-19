@@ -1,4 +1,4 @@
-"""Headless System Hub smoke — 21 pages, search, legacy aliases, grab.
+"""Headless System Hub smoke — 20 pages, search, legacy aliases, grab.
 
 Guards W4 regression (rank tie-break) and _setup_search lower-normalize.
 Runs offscreen (QT_QPA_PLATFORM=offscreen) so CI and local gates catch
@@ -54,7 +54,7 @@ class TestHubSmoke(unittest.TestCase):
 
     def test_navigate_all_20_pages(self):
         keys = [d.key for d in self.window._page_descriptors]
-        self.assertEqual(len(keys), 21)
+        self.assertEqual(len(keys), 20)
         for key in keys:
             with self.subTest(page=key):
                 self.window._navigate_to(key)

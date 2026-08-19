@@ -54,3 +54,4 @@ class _ToolsMixin(
             self._build_ge_proton_card()
             self._build_vkbasalt_card()
             self._build_combos_reference()
+            self._build_advanced_kernel_card()
