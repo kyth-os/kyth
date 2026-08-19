@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 # Pure data lives in desktop/polish_manifest.py so Hub welcome checks and
 # tests can import USER_FOLDERS/MIME_DEFAULTS without pulling in ET/glob.
@@ -49,7 +50,7 @@ from kyth_shared.desktop.polish_manifest import (  # noqa: E402 — re-export fo
 
 from kyth_shared.desktop.plasma import kreadconfig, kwriteconfig  # noqa: E402
 from kyth_shared.desktop.shortcut import refresh_kde_sycoca  # noqa: E402
-from kyth_shared.session import already_run, mark_run  # noqa: E402
+from kyth_shared.session import acquire_run_lock, already_run, mark_run  # noqa: E402
 from kyth_shared.commands import run as run_command  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -288,6 +289,20 @@ def main() -> None:
         return
 
     os.makedirs(stamp_dir, exist_ok=True)
+
+    # Serialize concurrent invocations. The systemd user unit is the sole launcher
+    # now, but an upgraded system can still have a stale ~/.config/autostart entry
+    # that races the unit on the first post-upgrade login. Hold an exclusive lock
+    # for this process's lifetime so only one instance ever writes KDE config; the
+    # loser exits without touching anything. Re-check the stamp under the lock to
+    # close the window where the winner finished between our check and our lock.
+    polish_lock = acquire_run_lock(Path(stamp_dir) / ".user-polish.lock")
+    if polish_lock is None or (already_run(stamp_name) and not args.force):
+        _run_operation(
+            f"autostart-{AUTOSTART_VERSION}",
+            lambda: cleanup_autostart(os.path.expanduser("~")),
+        )
+        return
 
     if shutil.which("xdg-user-dirs-update"):
         run_command(["xdg-user-dirs-update"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

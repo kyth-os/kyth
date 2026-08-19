@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 
+import fcntl
 import json
 import shutil
 
@@ -10,6 +11,31 @@ import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def acquire_run_lock(lock_path: Path):
+    """Take a best-effort exclusive, non-blocking lock at ``lock_path``.
+
+    Returns the open file object on success — the caller MUST keep it alive for
+    as long as the lock should be held (closing the file, or the process exiting,
+    releases it). Returns ``None`` if another process already holds the lock or
+    the lock file cannot be created. Never raises.
+
+    Unlike the ``already_run``/``mark_run`` marker pair (a non-atomic
+    check-then-touch), this gives real mutual exclusion between concurrent
+    invocations racing the same first-login work.
+    """
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(lock_path, "w")  # noqa: SIM115 — held open intentionally
+    except OSError:
+        return None
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
 
 
 def write_code_argv(path: Path) -> None:
