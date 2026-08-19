@@ -155,6 +155,26 @@ class PerformancePage(Page):
 
         self._stretch()
 
+        # Advanced — keep 94 tunables behind single toggle for most users
+        adv_card, adv_layout = _make_card()
+        adv_title = QLabel("Advanced — Individual Tunables")
+        adv_title.setObjectName("card-title")
+        adv_layout.addWidget(adv_title)
+        adv_body = QLabel(
+            "Most users only need Everyday vs Gaming Rig above — atomic, productivity-safe, with instant rollback. "
+            "Power users can inspect or tweak any of the 94 tunables via <b>kyth-tunable &lt;name&gt; status</b> "
+            "in a terminal; the Gaming Rig toggle composes them correctly and keeps work safe."
+        )
+        adv_body.setObjectName("card-copy")
+        adv_body.setWordWrap(True)
+        adv_body.setTextFormat(Qt.TextFormat.RichText)
+        adv_layout.addWidget(adv_body)
+        adv_btn = QPushButton("List tunables in terminal")
+        adv_btn.setToolTip("Runs: kyth-tunable --help")
+        adv_btn.clicked.connect(lambda _=False: __import__("subprocess").Popen(["x-terminal-emulator", "-e", "bash -c 'kyth-tunable --help; echo —; echo Use: kyth-tunable <name> status; read -p \"Press Enter\"'"], stdout=__import__("subprocess").DEVNULL, stderr=__import__("subprocess").DEVNULL))
+        adv_layout.addWidget(adv_btn)
+        self._add(adv_card)
+
         self._perf_timer = QTimer(self)
         self._perf_timer.setInterval(5000)
         self._perf_timer.timeout.connect(self._perf_refresh)

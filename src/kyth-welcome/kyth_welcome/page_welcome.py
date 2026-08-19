@@ -325,12 +325,13 @@ class WelcomePage(Page):
             f"<b>Audio Engine:</b> PipeWire ({self._facts['pipewire'].strip()})<br>"
             f"<b>Desktop Portal:</b> {self._facts['portal'].strip()}"
         )
-        rollback_status = "Available" if rollback else "None"
-        dual_boot_status = "Detected" if windows_found else "Not Detected"
+        rollback_text = "Available — one reboot to previous system (bootc)" if rollback else "None — fresh install, rollback will appear after first update"
+        staged_text = " — staged update ready" if self._facts["staged"] else ""
+        dual_boot_text = "Detected — use Transfer card above" if windows_found else "Not Detected"
         self._hud3_desc.setText(
-            f"<b>Previous State:</b> {rollback_status}<br>"
-            f"<b>Windows Disk:</b> {dual_boot_status}<br>"
-            f"<b>Fallback Theme:</b> Verified"
+            f"<b>Previous State:</b> {rollback_text}{staged_text}<br>"
+            f"<b>Windows Disk:</b> {dual_boot_text}<br>"
+            f"<b>Atomic:</b> bootc — instant rollback, no reinstall"
         )
         self._hud4_desc.setText(self._hero_view.rec_text)
         self._hud4_btn.setText(self._hero_view.rec_btn_label)

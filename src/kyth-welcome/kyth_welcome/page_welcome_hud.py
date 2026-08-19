@@ -84,11 +84,14 @@ class _WelcomeHudMixin:
             0,
             1,
         )
+        # Recovery card now explicit bootc affordance — shows atomic safety promise
+        rollback_text = "Available — one reboot to previous system (bootc)" if self._facts["rollback"] else "None — fresh install, rollback will appear after first update"
+        staged_text = " — staged update ready" if self._facts["staged"] else ""
         self._hud3_desc = self._make_hud_card(
             "RECOVERY & DUAL-BOOT",
-            f"<b>Previous State:</b> {'Available' if self._facts['rollback'] else 'None'}<br>"
-            f"<b>Windows Disk:</b> {'Detected' if self._facts['windows_found'] else 'Not Detected'}<br>"
-            f"<b>Fallback Theme:</b> Verified",
+            f"<b>Previous State:</b> {rollback_text}{staged_text}<br>"
+            f"<b>Windows Disk:</b> {'Detected — use Transfer card above' if self._facts['windows_found'] else 'Not Detected'}<br>"
+            f"<b>Atomic:</b> bootc — instant rollback, no reinstall",
             grid,
             1,
             0,
