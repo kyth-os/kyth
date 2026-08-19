@@ -609,6 +609,7 @@ class InstallerPlanTests(unittest.TestCase):
                 })
 
     def test_prepare_ntfs_resize_creates_btrfs_target_after_dry_run(self):
+        import tempfile
         partition = "/dev/nvme0n1p3"
         commands = []
         run_kwargs = []
@@ -647,10 +648,16 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(disk, "list_partitions", list_partitions_mock), \
              patch.object(self.plan, "_settle"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
-             patch.object(self.plan, "run_command", side_effect=fake_run):
+             patch.object(self.plan, "run_command", side_effect=fake_run), \
+             tempfile.TemporaryDirectory() as marker_dir:
+            # marker_root MUST be a throwaway temp dir: the real default
+            # (/run/kyth-installer) is a live system path, and a shrink
+            # exercised here would otherwise leave a real "already shrunk"
+            # marker on the host that falsely blocks every later run.
             created = self.plan._prepare_ntfs_resize_target(
                 {"disk": "/dev/nvme0n1", "resize_partition": partition, "resize_gib": 64},
                 lambda _msg: None,
+                marker_root=Path(marker_dir),
             )
 
         mock_unmount.assert_called_once_with("/dev/nvme0n1", unittest.mock.ANY)
@@ -682,6 +689,12 @@ class InstallerPlanTests(unittest.TestCase):
         # fsresize.py's job) — this test is specifically about the partition-
         # table backup/restore safety net around the parted/mkfs steps that
         # run *after* a real, successful filesystem shrink.
+        #
+        # Only the low-level shrink_filesystem primitive is mocked below; the
+        # real shrink_ntfs_filesystem_guarded wrapper still runs and writes an
+        # "already shrunk" marker on success — so marker_root must point at a
+        # throwaway temp dir, not the real /run/kyth-installer default.
+        import tempfile
         partition = "/dev/nvme0n1p3"
 
         def fake_run(cmd, **kwargs):
@@ -712,11 +725,13 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(disk, "list_partitions", list_partitions_mock), \
              patch.object(self.plan, "_settle"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
-             patch.object(self.plan, "run_command", side_effect=fake_run):
+             patch.object(self.plan, "run_command", side_effect=fake_run), \
+             tempfile.TemporaryDirectory() as marker_dir:
             with self.assertRaisesRegex(RuntimeError, "mkfs.btrfs exploded"):
                 self.plan._prepare_ntfs_resize_target(
                     {"disk": "/dev/nvme0n1", "resize_partition": partition, "resize_gib": 64},
                     lambda _msg: None,
+                    marker_root=Path(marker_dir),
                 )
 
         mock_disk_service.backup_table.assert_called_once()

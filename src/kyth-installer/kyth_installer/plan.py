@@ -38,6 +38,7 @@ whatever protections/flags apply to "alongside" (see above) apply to them too.
 
 import shutil
 import subprocess  # noqa: F401  # pylint: disable=unused-import  # compatibility surface for storage tests/callers
+from pathlib import Path
 from typing import Callable
 
 from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_GIB, MIN_KYTHOS_BYTES  # pylint: disable=unused-import
@@ -249,7 +250,8 @@ def _validate_resize_ntfs_target(
 
 
 def _shrink_ntfs_filesystem_guarded(
-    partition: str, new_ntfs_size: int, shrink_bytes: int, log
+    partition: str, new_ntfs_size: int, shrink_bytes: int, log,
+    *, marker_root: Path = Path("/run/kyth-installer"),
 ) -> None:
     """Shrink the NTFS filesystem in place, with explicit non-atomic warning.
 
@@ -261,14 +263,24 @@ def _shrink_ntfs_filesystem_guarded(
     ``ntfsresize`` can regrow), but not automatically rolled back. Log that
     explicitly so the failure path can surface accurate remediation and so
     tests can assert the boundary between the two durability domains.
+
+    ``marker_root`` defaults to the real runtime state directory; tests must
+    override it (e.g. with a ``tempfile.TemporaryDirectory()``) so a shrink
+    exercised in-process never writes a real marker to the host's /run —
+    that marker persists past the test and falsely "already shrunk"-blocks
+    every later run against the same fake device name.
     """
     _plan_commit.shrink_ntfs_filesystem_guarded(
         partition, new_ntfs_size, shrink_bytes, log,
         shrink_filesystem=shrink_filesystem, human_size=_human_size,
+        marker_root=marker_root,
     )
 
 
-def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
+def _prepare_ntfs_resize_target(
+    config: dict, log, *, marker_root: Path = Path("/run/kyth-installer"),
+) -> tuple[str, str]:
+    """See ``_shrink_ntfs_filesystem_guarded`` for why ``marker_root`` is injectable."""
     return _plan_commit.prepare_ntfs_resize_target(
         config, log,
         normal_device_path=_normal_device_path,
@@ -282,11 +294,16 @@ def _prepare_ntfs_resize_target(config: dict, log) -> tuple[str, str]:
         partition_number=_partition_number,
         block_size=_block_size_bytes,
         partition_start=_partition_start_bytes,
-        shrink_filesystem_guarded=_shrink_ntfs_filesystem_guarded,
+        shrink_filesystem_guarded=lambda partition, new_size, shrink_bytes, log: (
+            _shrink_ntfs_filesystem_guarded(
+                partition, new_size, shrink_bytes, log, marker_root=marker_root,
+            )
+        ),
         run_command=run_command,
         as_root=_as_root,
         settle=_settle,
         commit_partition=_commit_new_kythos_partition,
+        marker_root=marker_root,
     )
 
 def _validate_free_space_target(

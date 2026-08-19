@@ -128,11 +128,20 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
             patch.object(self.watcher, "check_gaming", return_value=None),
             patch.object(self.watcher, "check_metered", return_value=None),
             patch.object(self.watcher, "check_flatpak_updates", return_value=0),
+            # poll() consults this 90s on-disk cache BEFORE get_bootc_status(), and
+            # a fresh entry left by an earlier test/run would make it win over the
+            # fixture below — force a miss so get_bootc_status() is what's exercised.
+            patch.object(self.watcher, "bootc_status_data_cached", return_value=None),
+            patch.object(self.watcher, "flatpak_updates_cached", return_value=0),
             patch.object(self.watcher, "get_bootc_status", return_value=status),
             patch.object(self.watcher, "get_remote_digest", return_value=remote_digest),
             patch.object(self.watcher, "read_boot_health_state", return_value=quarantine),
             patch.object(self.watcher, "write_status") as write_status,
             patch.object(self.watcher, "run_bootc_upgrade") as upgrade,
+            # poll() also WRITES this status back to the real, shared, on-disk
+            # cache (/var/cache/kyth/probe-cache.json when run as root) — block
+            # that too, or this run leaves state that poisons the next one.
+            patch("kyth_shared.system.probe.update_sections"),
         ):
             result = self.watcher.UpdateWatcherDaemon().run()
 
@@ -162,7 +171,9 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
              patch.object(self.watcher, "_notify_updates") as mock_notify, \
              patch.object(self.watcher, "check_startup_grace", return_value=None), \
              patch.object(self.watcher, "check_quiet_hours", return_value=None), \
-             patch.object(self.watcher, "os") as mock_os:
+             patch.object(self.watcher, "os") as mock_os, \
+             patch.object(self.watcher, "bootc_status_data_cached", return_value=None), \
+             patch("kyth_shared.system.probe.update_sections"):
             mock_os.geteuid.return_value = 0
             with self.assertRaises(SystemExit):
                 self.watcher.main()
@@ -199,7 +210,9 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
              patch.object(self.watcher, "_notify_updates") as mock_notify, \
              patch.object(self.watcher, "check_startup_grace", return_value=None), \
              patch.object(self.watcher, "check_quiet_hours", return_value=None), \
-             patch.object(self.watcher, "os") as mock_os:
+             patch.object(self.watcher, "os") as mock_os, \
+             patch.object(self.watcher, "bootc_status_data_cached", return_value=None), \
+             patch("kyth_shared.system.probe.update_sections"):
             mock_os.geteuid.return_value = 0
             with self.assertRaises(SystemExit):
                 self.watcher.main()

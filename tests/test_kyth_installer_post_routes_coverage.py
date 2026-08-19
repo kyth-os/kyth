@@ -1,7 +1,7 @@
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PosixPath
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,16 +99,29 @@ class PostRouteCoverageTests(unittest.TestCase):
             mount.mkdir()
             log_file = Path(tmp) / "install.log"
             log_file.write_text("log")
+            # Computed before pathlib.Path is patched below: pathlib.Path.__new__ on
+            # 3.11 dispatches on `cls is Path` against the *live* pathlib.Path global,
+            # so constructing a real Path while that name is monkeypatched raises
+            # "type object 'Path' has no attribute '_flavour'".
+            missing_transaction_file = Path(tmp) / "missing"
+            missing_failure_summary_file = Path(tmp) / "missing"
             fake_usb = mock.MagicMock(spec=Path)
             fake_usb.__str__.return_value = "/run/media/user/USB"
             fake_usb.is_dir.return_value = True
             mock_path_instance = mock.MagicMock()
             mock_path_instance.rglob.return_value = [fake_usb]
             # pathlib.Path("/run/media") returns mock_path_instance
+            #
+            # The fallback constructs PosixPath, not Path: while pathlib.Path is
+            # patched below, Path(arg) recurses into Path.__new__'s `cls is Path`
+            # OS-dispatch check, which compares against the now-patched module
+            # global and raises "type object 'Path' has no attribute '_flavour'".
+            # PosixPath(arg) is already the concrete class, so that dispatch is
+            # never consulted. This suite only runs on Linux.
             def fake_path(arg):
                 if arg == "/run/media":
                     return mock_path_instance
-                return Path(arg)
+                return PosixPath(arg)
 
             mock_run = mock.Mock(return_value=mock.Mock(returncode=0))
             with (
@@ -116,8 +129,8 @@ class PostRouteCoverageTests(unittest.TestCase):
                 mock.patch("kyth_installer.runner.run_command", mock_run),
                 mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
                 mock.patch("kyth_installer.config.LOG_FILE", log_file),
-                mock.patch("kyth_installer.config.TRANSACTION_FILE", Path(tmp) / "missing"),
-                mock.patch("kyth_installer.config.FAILURE_SUMMARY_FILE", Path(tmp) / "missing"),
+                mock.patch("kyth_installer.config.TRANSACTION_FILE", missing_transaction_file),
+                mock.patch("kyth_installer.config.FAILURE_SUMMARY_FILE", missing_failure_summary_file),
                 mock.patch("os.path.isdir", return_value=True),
             ):
                 # need to also patch the local Path import inside function - pathlib.Path is already patched
@@ -141,7 +154,7 @@ class PostRouteCoverageTests(unittest.TestCase):
             def fake_path2(arg):
                 if arg == "/run/media":
                     return mock_path_instance
-                return Path(arg)
+                return PosixPath(arg)  # see fake_path's comment above
 
             calls = []
 
@@ -155,13 +168,16 @@ class PostRouteCoverageTests(unittest.TestCase):
 
             log_file = Path(tmp) / "install.log"
             log_file.write_text("log")
+            # See the note in the first block above: compute before pathlib.Path is patched.
+            missing_transaction_file = Path(tmp) / "missing"
+            missing_failure_summary_file = Path(tmp) / "missing"
             with (
                 mock.patch("pathlib.Path", side_effect=fake_path2),
                 mock.patch("kyth_installer.runner.run_command", side_effect=run_side_effect),
                 mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
                 mock.patch("kyth_installer.config.LOG_FILE", log_file),
-                mock.patch("kyth_installer.config.TRANSACTION_FILE", Path(tmp) / "missing"),
-                mock.patch("kyth_installer.config.FAILURE_SUMMARY_FILE", Path(tmp) / "missing"),
+                mock.patch("kyth_installer.config.TRANSACTION_FILE", missing_transaction_file),
+                mock.patch("kyth_installer.config.FAILURE_SUMMARY_FILE", missing_failure_summary_file),
                 mock.patch("os.path.isdir", return_value=True),
             ):
                 response = self.routes.rescue_logs_to_usb({})
@@ -174,7 +190,7 @@ class PostRouteCoverageTests(unittest.TestCase):
         def fake_path3(arg):
             if arg == "/run/media":
                 return mock_path_instance
-            return Path(arg)
+            return PosixPath(arg)  # see fake_path's comment above
 
         with mock.patch("pathlib.Path", side_effect=fake_path3), mock.patch("os.path.isdir", return_value=False):
             response = self.routes.rescue_logs_to_usb({})
@@ -191,7 +207,7 @@ class PostRouteCoverageTests(unittest.TestCase):
         def fake_path4(arg):
             if arg == "/run/media":
                 return mock_path_instance
-            return Path(arg)
+            return PosixPath(arg)  # see fake_path's comment above
 
         with (
             mock.patch("pathlib.Path", side_effect=fake_path4),
