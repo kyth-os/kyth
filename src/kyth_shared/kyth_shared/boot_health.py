@@ -114,44 +114,16 @@ def read_state(path: str | Path = DEFAULT_STATE_PATH) -> BootHealthState:
 
 
 def write_state(state: BootHealthState, path: str | Path = DEFAULT_STATE_PATH) -> None:
+    from .atomic import atomic_write_json
+
     # W1: fail-closed — don't persist corrupt state that S16 banner would mis-render
-    errs = state.invariants()
-    if errs:
-        raise ValueError(f"refusing to write BootHealthState with invariant violations: {errs}")
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(
-        prefix=f".{destination.name}.", dir=destination.parent, text=True
-    )
-    try:
-        os.fchmod(fd, 0o644)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(state.to_dict(), handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, destination)
-        # S1: fsync parent dir so quarantine+healthy_digest survive power-loss
+    atomic_write_json(path, state.to_dict(), invariants=state.invariants)
+    if state.quarantined:
         try:
-            dir_fd = os.open(destination.parent, os.O_DIRECTORY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError:
+            from kyth_shared.system.probe import invalidate_bootc
+            invalidate_bootc()
+        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
-        if state.quarantined:
-            try:
-                from kyth_shared.system.probe import invalidate_bootc
-                invalidate_bootc()
-            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
-                pass
-    except Exception:
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
-        raise
 
 
 def image_ring(reference: str) -> str | None:
