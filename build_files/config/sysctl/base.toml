@@ -4,8 +4,8 @@
 # See build_files/kyth_shared/kyth_shared/sysctl_compose.py
 
 [keys."vm.swappiness"]
-value = "180"
-comment = "with zram: aggressively use fast compressed swap; Fedora/CachyOS/Bazzite 180"
+value = "120"
+comment = "with zram: moderate for 16GB APU productivity; gaming tier raises to 180 on 32GB+ via sysctl_compose tier"
 
 [keys."vm.watermark_scale_factor"]
 value = "125"

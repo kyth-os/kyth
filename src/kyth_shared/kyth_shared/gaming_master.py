@@ -50,11 +50,50 @@ def save_master(cfg: dict[str, Any], path: Path | None = None) -> Path:
     return p
 
 
+def _thermal_high(threshold_c: int = 85) -> bool:
+    """Return True if any thermal zone exceeds threshold (throttle gaming)."""
+    try:
+        for zone in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
+            try:
+                temp_millic = int(zone.read_text().strip())
+                if temp_millic > threshold_c * 1000:
+                    return True
+            except (OSError, ValueError):
+                continue
+    except OSError:
+        pass
+    return False
+
+
+def _battery_low(threshold_pct: int = 30) -> bool:
+    """Return True if on battery and charge below threshold."""
+    try:
+        for cap_path in Path("/sys/class/power_supply").glob("BAT*/capacity"):
+            try:
+                cap = int(cap_path.read_text().strip())
+                status = (cap_path.parent / "status").read_text().strip().lower()
+                if status in ("discharging", "not charging") and cap < threshold_pct:
+                    return True
+            except (OSError, ValueError):
+                continue
+    except OSError:
+        pass
+    return False
+
+
 def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str, str]:
     """Apply composed presets. Returns map name->status."""
     if profile is None:
         profile = load_master().get("profile", "balanced")
     gaming = profile == "gaming"
+    throttled_reason = ""
+    if gaming:
+        if _thermal_high():
+            throttled_reason = "thermal >85C — staying balanced to avoid trip"
+            gaming = False
+        elif _battery_low():
+            throttled_reason = "battery <30% discharging — staying balanced"
+            gaming = False
     # snapshot before gaming master (77)
     if gaming and not dry_run:
         try:
@@ -240,6 +279,9 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
         logger.debug("handled expected exception", exc_info=True)
         pass
     out["profile"] = profile
+    if throttled_reason:
+        out["throttled"] = throttled_reason
+        out["profile"] = f"{profile} (throttled: {throttled_reason})"
     return out
 
 

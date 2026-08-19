@@ -136,6 +136,44 @@ def emit_all(config_dir: Path | None = None, dest_root: Path | None = None) -> l
             LEGACY.unlink()
     except OSError:
         pass
+    # Remove legacy per-tunable 99-kyth-*.conf files now covered by tiers (Slice 6)
+    # These shadow the composed base/network/gaming files via lexical sort.
+    legacy_globs = [
+        "99-kyth-swappiness.conf",
+        "99-kyth-compaction.conf",
+        "99-kyth-dirty-expire.conf",
+        "99-kyth-dirty-ratio.conf",
+        "99-kyth-inotify-watches.conf",
+        "99-kyth-max-map-count.conf",
+        "99-kyth-sched-autogroup.conf",
+        "99-kyth-vfs-cache.conf",
+        "99-kyth-vm-stat.conf",
+        "99-kyth-vm-watermark.conf",
+        "99-kyth-vm-compaction.conf",
+        "99-kyth-net-tune.conf",
+        "99-kyth-net-backlog.conf",
+        "99-kyth-rmem-max.conf",
+        "99-kyth-wmem-max.conf",
+        "99-kyth-busy-poll.conf",
+        "99-kyth-busy-read.conf",
+        "99-kyth-sched-child.conf",
+        "99-kyth-sched-nr-migrate.conf",
+        "99-kyth-tcp-*.conf",
+        "99-kyth-psi-poll.conf",
+        "99-kyth-page-cluster.conf",
+    ]
+    import fnmatch
+
+    dest_dir = dest_root if dest_root else Path("/etc/sysctl.d")
+    for pat in legacy_globs:
+        for p in dest_dir.glob(pat):
+            # never delete the three tier files themselves
+            if p.name in ("99-kyth-base.conf", "99-kyth-gaming.conf", "99-kyth-network.conf"):
+                continue
+            try:
+                p.unlink()
+            except OSError:
+                pass
     # Guard: fail if dead config/sysctl.conf still exists in image context
     dead = Path("/ctx/config/sysctl.conf")
     if dead.is_file():

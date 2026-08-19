@@ -49,6 +49,7 @@ comment = "rmem-default gaming — from rmem_default"
 
 # Slice 4: 16 wrappers / 20 keys (remaining non-duplicate sysctls). Total gaming 31 keys.
 # Excludes 22 wrappers that duplicate base/network (see docs/tunables-inventory.md) — those become compat aliases via tunable registry.
+# Note: vm.swappiness intentionally stays base-only (120 for productivity/APU); gaming_master may raise to 180 on 32GB+ via transient sysctl, not via tier duplicate.
 
 [keys."vm.pressure_poll"]
 value = "500"
