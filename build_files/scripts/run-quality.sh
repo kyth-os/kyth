@@ -61,8 +61,8 @@ if [[ "${1:-}" == "--fast" ]]; then
   echo "==> Python coverage skipped (--fast) — measured + gated by CI instead"
 else
   echo "==> Python coverage"
-  PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage erase
-  PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage run -m unittest discover -s tests -b
+  PYTHONPATH=src/kyth_shared:src/kyth-welcome:src/kyth-installer:build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage erase
+  PYTHONPATH=src/kyth_shared:src/kyth-welcome:src/kyth-installer:build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage run -m unittest discover -s tests -b
   "${quality_python}" -m coverage report -m
   "${quality_python}" -m coverage json
   if [[ "${1:-}" == "--changed-only" ]]; then
