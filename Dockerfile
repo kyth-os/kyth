@@ -132,6 +132,8 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx
     --mount=type=bind,source=build_files/scripts/sysconfig,target=/ctx/sysconfig \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/data,target=/ctx/data \
+    --mount=type=bind,source=build_files/config,target=/ctx/config \
+    --mount=type=bind,source=build_files/kyth-tunable,target=/ctx/kyth-tunable \
     --mount=type=tmpfs,dst=/tmp \
     : "cache-bust:sysconfig=${SYSCONFIG_HASH}" && \
     bash /ctx/sysconfig-static.sh
@@ -184,6 +186,9 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/syscon
 # Pass the private key via: --secret id=mok_key,env=MOK_KEY
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \
+    --mount=type=bind,source=src/kyth-welcome,target=/ctx/kyth-welcome \
+    --mount=type=bind,source=src/kyth-installer,target=/ctx/kyth-installer \
+    --mount=type=bind,source=src/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=tmpfs,dst=/tmp \
     --mount=type=secret,id=mok_key \
     if [ -d /usr/share/factory/var/cache/libdnf5 ]; then \

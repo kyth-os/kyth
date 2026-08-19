@@ -16,7 +16,8 @@ from pathlib import Path
 p=Path("/ctx/config/tunables.toml")
 if not p.is_file():
     p=Path("build_files/config/tunables.toml")
-data=tomllib.load(p.open("rb"))
+with p.open("rb") as f:
+    data=tomllib.load(f)
 for name in sorted(data.get("tunables", {})):
     print(name)
 ')

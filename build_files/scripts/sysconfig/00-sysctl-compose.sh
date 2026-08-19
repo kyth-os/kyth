@@ -22,7 +22,8 @@ import tomllib
 from pathlib import Path
 p=Path("/ctx/config/tunables.toml")
 if p.is_file():
-    data=tomllib.load(p.open("rb"))
+    with p.open("rb") as f:
+        data=tomllib.load(f)
     for name, spec in data.get("tunables", {}).items():
         if spec.get("kind")=="sysctl":
             print(name)
@@ -37,7 +38,8 @@ import tomllib
 from pathlib import Path
 p=Path("build_files/config/tunables.toml")
 if p.is_file():
-    data=tomllib.load(p.open("rb"))
+    with p.open("rb") as f:
+        data=tomllib.load(f)
     for name, spec in data.get("tunables", {}).items():
         if spec.get("kind")=="sysctl":
             print(name)
