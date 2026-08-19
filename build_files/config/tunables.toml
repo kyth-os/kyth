@@ -1,0 +1,474 @@
+# Kyth tunable registry — source of truth for kyth-tunable dispatcher
+# Each entry maps wrapper suffix (kyth-<name>) to its Python module.
+# kind = "sysctl" means it emits /etc/sysctl.d/99-kyth-*.conf (migrates to sysctl_compose).
+# kind = "other" means bespoke destination (kargs, toml, systemd, etc.).
+
+[tunables."aio-max"]
+module = "aio_max"
+wrapper = "kyth-aio-max"
+kind = "sysctl"
+
+[tunables."ananicy"]
+module = "ananicy_preset"
+wrapper = "kyth-ananicy"
+kind = "other"
+
+[tunables."boot-timeout"]
+module = "boot_loader"
+wrapper = "kyth-boot-timeout"
+kind = "other"
+
+[tunables."bore"]
+module = "bore_tune"
+wrapper = "kyth-bore"
+kind = "sysctl"
+
+[tunables."btrfs-autotune"]
+module = "btrfs_autotune"
+wrapper = "kyth-btrfs-autotune"
+kind = "other"
+
+[tunables."btrfs-tune"]
+module = "btrfs_perf"
+wrapper = "kyth-btrfs-tune"
+kind = "other"
+
+[tunables."busy-poll"]
+module = "busy_poll"
+wrapper = "kyth-busy-poll"
+kind = "sysctl"
+
+[tunables."busy-read"]
+module = "busy_read"
+wrapper = "kyth-busy-read"
+kind = "sysctl"
+
+[tunables."compaction"]
+module = "compaction_tune"
+wrapper = "kyth-compaction"
+kind = "sysctl"
+
+[tunables."dirty-expire"]
+module = "dirty_expire"
+wrapper = "kyth-dirty-expire"
+kind = "sysctl"
+
+[tunables."dirty-ratio"]
+module = "dirty_ratio"
+wrapper = "kyth-dirty-ratio"
+kind = "sysctl"
+
+[tunables."distrobox-cache"]
+module = "distrobox_cache"
+wrapper = "kyth-distrobox-cache"
+kind = "other"
+
+[tunables."epp-ac"]
+module = "epp_ac"
+wrapper = "kyth-epp-ac"
+kind = "other"
+
+[tunables."fcitx-latency"]
+module = "fcitx_latency"
+wrapper = "kyth-fcitx-latency"
+kind = "other"
+
+[tunables."file-max"]
+module = "file_max"
+wrapper = "kyth-file-max"
+kind = "sysctl"
+
+[tunables."flatpak-prefetch"]
+module = "flatpak_prefetch"
+wrapper = "kyth-flatpak-prefetch"
+kind = "other"
+
+[tunables."flatpak-trim"]
+module = "flatpak_trim"
+wrapper = "kyth-flatpak-trim"
+kind = "other"
+
+[tunables."fscache"]
+module = "fscache_tune"
+wrapper = "kyth-fscache"
+kind = "other"
+
+[tunables."gaming-audit"]
+module = "perf_audit"
+wrapper = "kyth-gaming-audit"
+kind = "other"
+
+[tunables."gaming-cfs"]
+module = "gaming_cfs"
+wrapper = "kyth-gaming-cfs"
+kind = "other"
+
+[tunables."gaming-master"]
+module = "gaming_master"
+wrapper = "kyth-gaming-master"
+kind = "other"
+
+[tunables."gpu-power"]
+module = "gpu_power"
+wrapper = "kyth-gpu-power"
+kind = "other"
+
+[tunables."hdr-per-game"]
+module = "hdr_per_game"
+wrapper = "kyth-hdr-per-game"
+kind = "other"
+
+[tunables."hdr-store"]
+module = "hdr_store"
+wrapper = "kyth-hdr-store"
+kind = "other"
+
+[tunables."inotify-watches"]
+module = "inotify_watches"
+wrapper = "kyth-inotify-watches"
+kind = "sysctl"
+
+[tunables."io-tune"]
+module = "io_tune"
+wrapper = "kyth-io-tune"
+kind = "other"
+
+[tunables."irq-tune"]
+module = "irq_tune"
+wrapper = "kyth-irq-tune"
+kind = "other"
+
+[tunables."journal-tune"]
+module = "journal_tune"
+wrapper = "kyth-journal-tune"
+kind = "other"
+
+[tunables."kargs-apply"]
+module = "kargs_preset"
+wrapper = "kyth-kargs-apply"
+kind = "other"
+
+[tunables."kwin-latency"]
+module = "kwin_latency"
+wrapper = "kyth-kwin-latency"
+kind = "other"
+
+[tunables."max-map-count"]
+module = "max_map_count"
+wrapper = "kyth-max-map-count"
+kind = "sysctl"
+
+[tunables."mimalloc"]
+module = "mimalloc_preset"
+wrapper = "kyth-mimalloc"
+kind = "other"
+
+[tunables."mimalloc-run"]
+module = "mimalloc_preset"
+wrapper = "kyth-mimalloc-run"
+kind = "other"
+
+[tunables."min-free-kbytes"]
+module = "min_free_kbytes"
+wrapper = "kyth-min-free-kbytes"
+kind = "sysctl"
+
+[tunables."net-backlog"]
+module = "net_backlog"
+wrapper = "kyth-net-backlog"
+kind = "sysctl"
+
+[tunables."net-tune"]
+module = "net_latency"
+wrapper = "kyth-net-tune"
+kind = "sysctl"
+
+[tunables."netdev-budget"]
+module = "netdev_budget"
+wrapper = "kyth-netdev-budget"
+kind = "sysctl"
+
+[tunables."numa"]
+module = "numa_tune"
+wrapper = "kyth-numa"
+kind = "other"
+
+[tunables."numa-balancing"]
+module = "numa_balancing"
+wrapper = "kyth-numa-balancing"
+kind = "sysctl"
+
+[tunables."oom-gaming"]
+module = "oom_gaming"
+wrapper = "kyth-oom-gaming"
+kind = "other"
+
+[tunables."overcommit-memory"]
+module = "overcommit_memory"
+wrapper = "kyth-overcommit-memory"
+kind = "sysctl"
+
+[tunables."page-cluster"]
+module = "page_cluster"
+wrapper = "kyth-page-cluster"
+kind = "sysctl"
+
+[tunables."pcie"]
+module = "pcie_aspm"
+wrapper = "kyth-pcie"
+kind = "other"
+
+[tunables."perf-cpu"]
+module = "perf_cpu"
+wrapper = "kyth-perf-cpu"
+kind = "sysctl"
+
+[tunables."perf-gate"]
+module = "perf_gate"
+wrapper = "kyth-perf-gate"
+kind = "other"
+
+[tunables."pipewire-gaming"]
+module = "pipewire_gaming"
+wrapper = "kyth-pipewire-gaming"
+kind = "other"
+
+[tunables."podman-btrfs"]
+module = "podman_btrfs"
+wrapper = "kyth-podman-btrfs"
+kind = "other"
+
+[tunables."podman-overlay"]
+module = "overlay_tune"
+wrapper = "kyth-podman-overlay"
+kind = "other"
+
+[tunables."psi-gaming"]
+module = "psi_gaming"
+wrapper = "kyth-psi-gaming"
+kind = "other"
+
+[tunables."psi-poll"]
+module = "psi_poll"
+wrapper = "kyth-psi-poll"
+kind = "sysctl"
+
+[tunables."readahead"]
+module = "readahead_preset"
+wrapper = "kyth-readahead"
+kind = "other"
+
+[tunables."rmem-default"]
+module = "rmem_default"
+wrapper = "kyth-rmem-default"
+kind = "sysctl"
+
+[tunables."rmem-max"]
+module = "rmem_max"
+wrapper = "kyth-rmem-max"
+kind = "sysctl"
+
+[tunables."sccache"]
+module = "sccache_preset"
+wrapper = "kyth-sccache"
+kind = "other"
+
+[tunables."sched-arbiter"]
+module = "sched_arbiter"
+wrapper = "kyth-sched-arbiter"
+kind = "other"
+
+[tunables."sched-autogroup"]
+module = "sched_autogroup"
+wrapper = "kyth-sched-autogroup"
+kind = "sysctl"
+
+[tunables."sched-child"]
+module = "sched_child"
+wrapper = "kyth-sched-child"
+kind = "sysctl"
+
+[tunables."sched-latency"]
+module = "sched_latency"
+wrapper = "kyth-sched-latency"
+kind = "sysctl"
+
+[tunables."sched-nr-migrate"]
+module = "sched_nr_migrate"
+wrapper = "kyth-sched-nr-migrate"
+kind = "sysctl"
+
+[tunables."selinux-gaming"]
+module = "selinux_gaming"
+wrapper = "kyth-selinux-gaming"
+kind = "other"
+
+[tunables."shader-cache-size"]
+module = "shader_cache_size"
+wrapper = "kyth-shader-cache-size"
+kind = "other"
+
+[tunables."shader-tmpfs"]
+module = "shader_tmpfs"
+wrapper = "kyth-shader-tmpfs"
+kind = "other"
+
+[tunables."somaxconn"]
+module = "somaxconn"
+wrapper = "kyth-somaxconn"
+kind = "sysctl"
+
+[tunables."steam-deadzone"]
+module = "steam_deadzone"
+wrapper = "kyth-steam-deadzone"
+kind = "other"
+
+[tunables."swappiness"]
+module = "swappiness"
+wrapper = "kyth-swappiness"
+kind = "sysctl"
+
+[tunables."system-audit"]
+module = "system_audit"
+wrapper = "kyth-system-audit"
+kind = "other"
+
+[tunables."tcp-ecn"]
+module = "tcp_ecn"
+wrapper = "kyth-tcp-ecn"
+kind = "sysctl"
+
+[tunables."tcp-fastopen"]
+module = "tcp_fastopen"
+wrapper = "kyth-tcp-fastopen"
+kind = "sysctl"
+
+[tunables."tcp-fin-timeout"]
+module = "tcp_fin_timeout"
+wrapper = "kyth-tcp-fin-timeout"
+kind = "sysctl"
+
+[tunables."tcp-keepalive"]
+module = "tcp_keepalive"
+wrapper = "kyth-tcp-keepalive"
+kind = "sysctl"
+
+[tunables."tcp-mtu-probing"]
+module = "tcp_mtu_probing"
+wrapper = "kyth-tcp-mtu-probing"
+kind = "sysctl"
+
+[tunables."tcp-no-metrics-save"]
+module = "tcp_no_metrics_save"
+wrapper = "kyth-tcp-no-metrics-save"
+kind = "sysctl"
+
+[tunables."tcp-notsent"]
+module = "tcp_notsent"
+wrapper = "kyth-tcp-notsent"
+kind = "sysctl"
+
+[tunables."tcp-orphan-retries"]
+module = "tcp_orphan_retries"
+wrapper = "kyth-tcp-orphan-retries"
+kind = "sysctl"
+
+[tunables."tcp-retries1"]
+module = "tcp_retries1"
+wrapper = "kyth-tcp-retries1"
+kind = "sysctl"
+
+[tunables."tcp-retries2"]
+module = "tcp_retries2"
+wrapper = "kyth-tcp-retries2"
+kind = "sysctl"
+
+[tunables."tcp-sack"]
+module = "tcp_sack"
+wrapper = "kyth-tcp-sack"
+kind = "sysctl"
+
+[tunables."tcp-slow-start"]
+module = "tcp_slow_start"
+wrapper = "kyth-tcp-slow-start"
+kind = "sysctl"
+
+[tunables."tcp-timestamps"]
+module = "tcp_timestamps"
+wrapper = "kyth-tcp-timestamps"
+kind = "sysctl"
+
+[tunables."tcp-window-scaling"]
+module = "tcp_window_scaling"
+wrapper = "kyth-tcp-window-scaling"
+kind = "sysctl"
+
+[tunables."telemetry-opt"]
+module = "telemetry_opt"
+wrapper = "kyth-telemetry-opt"
+kind = "other"
+
+[tunables."thp-collapse"]
+module = "thp_collapse"
+wrapper = "kyth-thp-collapse"
+kind = "sysctl"
+
+[tunables."thp-tune"]
+module = "thp_tune"
+wrapper = "kyth-thp-tune"
+kind = "sysctl"
+
+[tunables."trim-tune"]
+module = "trim_preset"
+wrapper = "kyth-trim-tune"
+kind = "other"
+
+[tunables."uksmd"]
+module = "uksmd_preset"
+wrapper = "kyth-uksmd"
+kind = "other"
+
+[tunables."vfs-cache"]
+module = "vfs_cache_pressure"
+wrapper = "kyth-vfs-cache"
+kind = "sysctl"
+
+[tunables."vm-stat"]
+module = "vm_stat"
+wrapper = "kyth-vm-stat"
+kind = "sysctl"
+
+[tunables."vm-watermark"]
+module = "vm_watermark"
+wrapper = "kyth-vm-watermark"
+kind = "sysctl"
+
+[tunables."windows-verify"]
+module = "windows_verify"
+wrapper = "kyth-windows-verify"
+kind = "other"
+
+[tunables."wine-sync"]
+module = "wine_sync"
+wrapper = "kyth-wine-sync"
+kind = "other"
+
+[tunables."wmem-default"]
+module = "wmem_default"
+wrapper = "kyth-wmem-default"
+kind = "sysctl"
+
+[tunables."wmem-max"]
+module = "wmem_max"
+wrapper = "kyth-wmem-max"
+kind = "sysctl"
+
+[tunables."work-cache"]
+module = "work_cache"
+wrapper = "kyth-work-cache"
+kind = "other"
+
+[tunables."zswap"]
+module = "zswap_preset"
+wrapper = "kyth-zswap"
+kind = "sysctl"
