@@ -112,13 +112,18 @@ class BaseDaemon(ABC):
         self.setup_signals()
 
         self.logger.info("Starting %s...", self.name)
+        # Set before on_start() runs, not after: a subclass's on_start() may
+        # set self.running = False to abort before poll() ever executes (e.g.
+        # a privilege check that also sets _exit_code). Setting it back to
+        # True unconditionally here would silently discard that decision and
+        # run poll() once anyway.
+        self.running = True
         try:
             self.on_start()
         except (OSError, RuntimeError) as exc:
             self.logger.exception("Failed during daemon startup: %s", exc)
             return 1
 
-        self.running = True
         while self.running:
             self.should_poll = False
             try:
