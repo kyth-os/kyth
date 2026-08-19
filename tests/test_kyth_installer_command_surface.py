@@ -1,5 +1,7 @@
 import ast
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -10,6 +12,7 @@ INSTALLER = ROOT / "build_files" / "kyth-installer" / "kyth_installer"
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
 from kyth_installer import install, post_routes  # noqa: E402
+from kyth_installer.phases import common as phases_common  # noqa: E402
 from kyth_installer.phases import finalize as phases_finalize  # noqa: E402
 from kyth_installer.phases import storage as phases_storage  # noqa: E402
 from kyth_installer.phases import run as phases_run  # noqa: E402  # noqa: E402
@@ -200,7 +203,14 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             "username": "user",
         })
 
+        # A successful worker run still calls _record_transaction (phases/common.py),
+        # which writes to its own module-bound TRANSACTION_FILE — redirect it so
+        # this test doesn't write real state to /run/kyth-installer.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         with mock.patch.object(
+            phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+        ), mock.patch.object(
             install,
             "_prepare_install_plan",
             return_value=InstallPlan(mode="wipe", disk="/dev/sda"),
@@ -292,7 +302,20 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             "username": "user",
         })
 
+        # _run_cmd raises below, so this exercises _handle_install_failure
+        # (writes LOG_FILE/FAILURE_SUMMARY_FILE/TRANSACTION_FILE for real —
+        # see the note in test_worker_fails_closed_when_not_root above).
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         with mock.patch.object(
+            phases_finalize, "LOG_FILE", Path(tmp) / "log",
+        ), mock.patch.object(
+            phases_finalize, "FAILURE_SUMMARY_FILE", Path(tmp) / "failure.json",
+        ), mock.patch.object(
+            phases_finalize, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+        ), mock.patch.object(
+            phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+        ), mock.patch.object(
             install,
             "_prepare_install_plan",
             return_value=InstallPlan(
@@ -398,7 +421,20 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 captured_cmd["argv"] = cmd
                 raise RuntimeError("stop after capturing the install command")
 
+        # fake_run_cmd raises above, so this exercises _handle_install_failure
+        # (writes LOG_FILE/FAILURE_SUMMARY_FILE/TRANSACTION_FILE for real —
+        # see the note in test_worker_fails_closed_when_not_root above).
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         with mock.patch.object(
+            phases_finalize, "LOG_FILE", Path(tmp) / "log",
+        ), mock.patch.object(
+            phases_finalize, "FAILURE_SUMMARY_FILE", Path(tmp) / "failure.json",
+        ), mock.patch.object(
+            phases_finalize, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+        ), mock.patch.object(
+            phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+        ), mock.patch.object(
             install,
             "_prepare_install_plan",
             return_value=InstallPlan(
@@ -519,7 +555,19 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
 
     def test_worker_fails_closed_when_not_root(self):
         context = InstallerContext()
-        with mock.patch.object(install, "require_root", side_effect=RuntimeError("must run as root")):
+        # The require_root() failure below is handled by _handle_install_failure,
+        # which writes a real log/failure-summary/transaction file — LOG_FILE,
+        # FAILURE_SUMMARY_FILE and TRANSACTION_FILE are each `from ..config
+        # import ...`-bound locally in phases/finalize.py and phases/common.py,
+        # so redirecting kyth_installer.config's copies wouldn't reach these
+        # already-bound names. Left unpatched, this test writes for real to the
+        # live /run/kyth-installer default, with no cleanup.
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(install, "require_root", side_effect=RuntimeError("must run as root")), \
+             mock.patch.object(phases_finalize, "LOG_FILE", Path(tmp) / "log"), \
+             mock.patch.object(phases_finalize, "FAILURE_SUMMARY_FILE", Path(tmp) / "failure.json"), \
+             mock.patch.object(phases_finalize, "TRANSACTION_FILE", Path(tmp) / "transaction.json"), \
+             mock.patch.object(phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json"):
             install._run_install_worker(lambda _msg: None, lambda _pct: None, "", context)
         errors = [e for e in context.events.events if e.get("type") == "error"]
         self.assertTrue(errors)
