@@ -6,7 +6,7 @@ QUIRK = {
     "reason": "Disable Display Core PSR on Navi 33 (RX 7600-class, 7480) DCN 3.2.1 and Rembrandt (1681) DCN 3.1.2 to avoid Pageflip timed out on eDP under Wayland/VRR",
     "expires_on": "2027-08-01",
     "provenance": "https://gitlab.freedesktop.org/drm/amd/-/issues and journalctl amdgpu Pageflip timed out (DCN 3.2.1 on 7480, DCN 3.1.2 eDP-2 PSR 1)",
-    "match": {"pci": [{"vendor": "1002", "devices": ["7480", "1681"], "classes": ["0300", "0302", "0380"], "drivers": ["amdgpu"]}]},
+    "match": {"pci": [{"vendor": "1002", "devices": ["7480", "1681", "15bf", "15b9"], "classes": ["0300", "0302", "0380"], "drivers": ["amdgpu"]}]},
     "actions": [
         {"kind": "modprobe", "module": "amdgpu", "options": {"dcdebugmask": "0x10"}},
     ],

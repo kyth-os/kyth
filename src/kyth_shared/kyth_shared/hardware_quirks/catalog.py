@@ -15,6 +15,7 @@ from typing import Any
 QUIRK_MODULES: tuple[str, ...] = (
     "amdgpu_gaming_memory",
     "amdgpu_psr_disable",
+    "asus_tuf_amd_cachy_stability",
     "intel_i915_media",
     "nvidia_wayland_suspend",
     "mediatek_pcie_wifi_aspm",
