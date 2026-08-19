@@ -1,6 +1,7 @@
 """Shared utilities for managing system storage drives and NTFS compatibility links."""
 from __future__ import annotations
 import logging
+import re
 
 import os
 import shutil
@@ -11,6 +12,39 @@ import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Allow only real block devices under /dev — prevents lsblk-injected
+# traversal (e.g. "../../../etc/passwd") from reaching `sudo mount`.
+_DEV_RE = re.compile(r"^/dev/(sd[a-z][0-9]*|nvme\d+n\d+p?[0-9]*|vd[a-z][0-9]*|mmcblk\d+p?[0-9]*|sda\d*)$")
+_MNT_PREFIX = "/var/mnt/ntfs_"
+
+
+def _sanitize_dev_path(raw: str) -> str | None:
+    """Return canonical /dev/ path if it matches allow-list, else None."""
+    if not raw:
+        return None
+    # Canonicalize before regex so /dev/disk/by-id/foo -> /dev/sda fails closed
+    # unless the resolved target itself matches.
+    try:
+        c = str(Path(raw).resolve())
+    except (OSError, ValueError, RuntimeError):
+        return None
+    if _DEV_RE.match(c):
+        return c
+    return None
+
+
+def _sanitize_mount(raw: str) -> str | None:
+    if not raw or not raw.startswith(_MNT_PREFIX):
+        return None
+    try:
+        c = str(Path(raw).resolve())
+    except (OSError, ValueError, RuntimeError):
+        return None
+    # After resolve, must still be under /var/mnt/ and not escape via symlink
+    if c.startswith(_MNT_PREFIX) or c == "/var/mnt":
+        return c
+    return None
 
 
 def get_ntfs_devices() -> list[dict]:
@@ -60,14 +94,22 @@ def repair_ntfs_drives() -> None:
         label = dev.get("label") or "NTFS_Drive"
         uuid = dev.get("uuid") or ""
         mount = dev.get("mountpoint") or ""
-        dev_path = f"/dev/{name}" if not name.startswith("/") else name
+        raw_dev = f"/dev/{name}" if not name.startswith("/") else name
+        dev_path = _sanitize_dev_path(raw_dev)
+        if dev_path is None:
+            logger.warning("drives: rejecting unexpected device path %r", raw_dev)
+            continue
 
         print(f"[kyth-ntfs-repair] Processing partition: {dev_path} (UUID: {uuid or 'unknown'}, Label: {label})")
 
         # Mount if not already mounted
         if not mount:
-            uuid_safe = uuid or name.replace("/", "_")
-            mount = f"/var/mnt/ntfs_{uuid_safe}"
+            uuid_safe = re.sub(r"[^A-Za-z0-9_-]", "_", uuid or name.replace("/", "_"))[:64]
+            raw_mount = f"/var/mnt/ntfs_{uuid_safe}"
+            mount = _sanitize_mount(raw_mount) or raw_mount
+            if not mount.startswith(_MNT_PREFIX):
+                logger.warning("drives: rejecting mount path %r", raw_mount)
+                continue
             print(f"[kyth-ntfs-repair] Drive not mounted. Mounting to {mount}...")
             try:
                 run_command(["sudo", "mkdir", "-p", mount], check=False)
@@ -132,17 +174,17 @@ def repair_ntfs_drives() -> None:
                         try:
                             # Atomic move via rename; backup restores on cancel/fail
                             target_cd.rename(backup_path)
-                        except Exception:
+                        except (OSError, ValueError, shutil.Error, RuntimeError):
                             try:
                                 shutil.move(str(target_cd), str(backup_path))
-                            except Exception as e:
+                            except (OSError, ValueError, shutil.Error, RuntimeError) as e:
                                 print(f"  Failed to backup existing compatdata: {e}")
                                 backup_path = None
 
                     # Check if native compatdata already has contents
                     try:
                         has_contents = any(native_compatdata.iterdir())
-                    except Exception:
+                    except (OSError, ValueError, shutil.Error, RuntimeError):
                         has_contents = False
 
                     if has_contents:
@@ -156,7 +198,7 @@ def repair_ntfs_drives() -> None:
                         if target_cd.exists() or target_cd.is_symlink():
                             try:
                                 target_cd.unlink()
-                            except Exception:
+                            except (OSError, ValueError, shutil.Error, RuntimeError):
                                 logger.debug("handled expected exception", exc_info=True)
                                 pass
                         tmp_link.symlink_to(native_compatdata)
@@ -170,11 +212,11 @@ def repair_ntfs_drives() -> None:
                                 os.close(dfd)
                         except OSError:
                             pass
-                    except Exception as e:
+                    except (OSError, ValueError, shutil.Error, RuntimeError) as e:
                         print(f"  Failed to create symlink: {e}")
                         try:
                             tmp_link.unlink()
-                        except Exception:
+                        except (OSError, ValueError, shutil.Error, RuntimeError):
                             logger.debug("handled expected exception", exc_info=True)
                             pass
                         # Restore backup if we moved it
@@ -182,15 +224,15 @@ def repair_ntfs_drives() -> None:
                             try:
                                 if target_cd.is_symlink() or target_cd.exists():
                                     target_cd.unlink()
-                            except Exception:
+                            except (OSError, ValueError, shutil.Error, RuntimeError):
                                 logger.debug("handled expected exception", exc_info=True)
                                 pass
                             try:
                                 backup_path.rename(target_cd)
-                            except Exception:
+                            except (OSError, ValueError, shutil.Error, RuntimeError):
                                 try:
                                     shutil.move(str(backup_path), str(target_cd))
-                                except Exception:
+                                except (OSError, ValueError, shutil.Error, RuntimeError):
                                     logger.debug("handled expected exception", exc_info=True)
                                     pass
         else:
