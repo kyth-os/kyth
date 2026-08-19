@@ -1,9 +1,48 @@
 # KythOS consolidated sysctl — tier: gaming (gated, only when gaming_master active)
-# Source of truth for /etc/sysctl.d/99-kyth-gaming.conf (generated only when gaming profile enabled)
-# Initially empty — gaming-gated overrides land here (e.g., watermarks, autogroup 0, latency ns).
-# Keeping the tier explicit prevents base/network churn when gaming toggles.
+# Source of truth for /etc/sysctl.d/99-kyth-gaming.conf
+# Slice 3: 10 wrappers / 11 keys consolidated from per-tunable emitters (all non-duplicate vs base/network).
+# Per-tunable shims remain until Slice 5 dispatcher removes 99-kyth-*.conf emitters.
 
-# Example (inactive):
-# [keys."kernel.sched_autogroup_enabled"]
-# value = "0"
-# comment = "gaming — disable autogroup for direct placement"
+[keys."fs.aio-max-nr"]
+value = "1048576"
+comment = "aio-max gaming — consolidated from aio_max (was 99-kyth-aio-max.conf)"
+
+[keys."kernel.sched_bore"]
+value = "1"
+comment = "bore gaming — from bore_tune"
+
+[keys."kernel.sched_bore_burst_penalty_offset"]
+value = "12"
+comment = "bore gaming — from bore_tune"
+
+[keys."net.core.busy_poll"]
+value = "50"
+comment = "busy-poll gaming — from busy_poll"
+
+[keys."net.core.busy_read"]
+value = "50"
+comment = "busy-read gaming — from busy_read"
+
+[keys."vm.min_free_kbytes"]
+value = "131072"
+comment = "min-free-kbytes gaming — from min_free_kbytes"
+
+[keys."net.core.netdev_budget"]
+value = "600"
+comment = "netdev-budget gaming — from netdev_budget"
+
+[keys."kernel.numa_balancing"]
+value = "0"
+comment = "numa-balancing gaming — from numa_balancing"
+
+[keys."vm.overcommit_memory"]
+value = "1"
+comment = "overcommit-memory gaming — from overcommit_memory"
+
+[keys."kernel.perf_cpu_time_max_percent"]
+value = "5"
+comment = "perf-cpu gaming — from perf_cpu"
+
+[keys."net.core.rmem_default"]
+value = "262144"
+comment = "rmem-default gaming — from rmem_default"
