@@ -46,3 +46,86 @@ comment = "perf-cpu gaming — from perf_cpu"
 [keys."net.core.rmem_default"]
 value = "262144"
 comment = "rmem-default gaming — from rmem_default"
+
+# Slice 4: 16 wrappers / 20 keys (remaining non-duplicate sysctls). Total gaming 31 keys.
+# Excludes 22 wrappers that duplicate base/network (see docs/tunables-inventory.md) — those become compat aliases via tunable registry.
+
+[keys."vm.pressure_poll"]
+value = "500"
+comment = "psi-poll gaming — from psi_poll"
+
+[keys."kernel.sched_child_runs_first"]
+value = "0"
+comment = "sched-child gaming — from sched_child"
+
+[keys."kernel.sched_latency_ns"]
+value = "6000000"
+comment = "sched-latency gaming — from sched_latency"
+
+[keys."kernel.sched_min_granularity_ns"]
+value = "1000000"
+comment = "sched-latency gaming — from sched_latency"
+
+[keys."kernel.sched_wakeup_granularity_ns"]
+value = "1000000"
+comment = "sched-latency gaming — from sched_latency"
+
+[keys."kernel.sched_migration_cost_ns"]
+value = "500000"
+comment = "sched-latency gaming — from sched_latency"
+
+[keys."kernel.sched_nr_migrate"]
+value = "32"
+comment = "sched-latency gaming — from sched_latency (sched-nr-migrate=64 is superseded, latency tier is canonical)"
+
+[keys."net.core.somaxconn"]
+value = "8192"
+comment = "somaxconn gaming — from somaxconn"
+
+[keys."net.ipv4.tcp_fin_timeout"]
+value = "30"
+comment = "tcp-fin-timeout gaming — from tcp_fin_timeout"
+
+[keys."net.ipv4.tcp_keepalive_time"]
+value = "120"
+comment = "tcp-keepalive gaming — from tcp_keepalive"
+
+[keys."net.ipv4.tcp_no_metrics_save"]
+value = "1"
+comment = "tcp-no-metrics-save gaming — from tcp_no_metrics_save"
+
+[keys."net.ipv4.tcp_notsent_lowat"]
+value = "16384"
+comment = "tcp-notsent gaming — from tcp_notsent"
+
+[keys."net.ipv4.tcp_orphan_retries"]
+value = "0"
+comment = "tcp-orphan-retries gaming — from tcp_orphan_retries"
+
+[keys."net.ipv4.tcp_retries1"]
+value = "3"
+comment = "tcp-retries1 gaming — from tcp_retries1"
+
+[keys."net.ipv4.tcp_retries2"]
+value = "8"
+comment = "tcp-retries2 gaming — from tcp_retries2"
+
+[keys."net.ipv4.tcp_sack"]
+value = "1"
+comment = "tcp-sack gaming — from tcp_sack"
+
+[keys."net.ipv4.tcp_timestamps"]
+value = "1"
+comment = "tcp-timestamps gaming — from tcp_timestamps"
+
+[keys."net.ipv4.tcp_window_scaling"]
+value = "1"
+comment = "tcp-window-scaling gaming — from tcp_window_scaling"
+
+[keys."kernel.khugepaged_defrag"]
+value = "0"
+comment = "thp-collapse gaming — from thp_collapse"
+
+[keys."net.core.wmem_default"]
+value = "262144"
+comment = "wmem-default gaming — from wmem_default"

@@ -109,7 +109,7 @@ class TestSysctlCompose(unittest.TestCase):
     def test_gaming_slice3_keys(self):
         rendered = compose(Path("build_files/config/sysctl"))
         gaming = rendered["gaming"]
-        # Slice 3: 10 wrappers → 11 keys (bore has 2)
+        # Slice 3+4: 26 wrappers → 31 keys (bore 2, sched-latency 5)
         expected = {
             "fs.aio-max-nr": "1048576",
             "kernel.sched_bore": "1",
@@ -122,10 +122,31 @@ class TestSysctlCompose(unittest.TestCase):
             "vm.overcommit_memory": "1",
             "kernel.perf_cpu_time_max_percent": "5",
             "net.core.rmem_default": "262144",
+            # Slice 4: 16 wrappers / 20 keys
+            "vm.pressure_poll": "500",
+            "kernel.sched_child_runs_first": "0",
+            "kernel.sched_latency_ns": "6000000",
+            "kernel.sched_min_granularity_ns": "1000000",
+            "kernel.sched_wakeup_granularity_ns": "1000000",
+            "kernel.sched_migration_cost_ns": "500000",
+            "kernel.sched_nr_migrate": "32",
+            "net.core.somaxconn": "8192",
+            "net.ipv4.tcp_fin_timeout": "30",
+            "net.ipv4.tcp_keepalive_time": "120",
+            "net.ipv4.tcp_no_metrics_save": "1",
+            "net.ipv4.tcp_notsent_lowat": "16384",
+            "net.ipv4.tcp_orphan_retries": "0",
+            "net.ipv4.tcp_retries1": "3",
+            "net.ipv4.tcp_retries2": "8",
+            "net.ipv4.tcp_sack": "1",
+            "net.ipv4.tcp_timestamps": "1",
+            "net.ipv4.tcp_window_scaling": "1",
+            "kernel.khugepaged_defrag": "0",
+            "net.core.wmem_default": "262144",
         }
         for k, v in expected.items():
             self.assertIn(f"{k} = {v}", gaming, f"missing {k}")
-        # exactly 11 key lines
+        # exactly 31 key lines
         key_lines = [l for l in gaming.splitlines() if "=" in l and not l.startswith("#")]
         self.assertEqual(len(key_lines), len(expected))
         # no duplicates across tiers
