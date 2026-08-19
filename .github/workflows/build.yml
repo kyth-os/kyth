@@ -691,6 +691,8 @@ jobs:
       - name: Read publication identity
         id: image
         shell: bash
+        env:
+          EXPECTED_FLAVOR: ${{ matrix.kernel_flavor }}
         run: |
           set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
