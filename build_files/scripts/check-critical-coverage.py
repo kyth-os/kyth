@@ -123,6 +123,10 @@ def main() -> int:
             skipped += 1
             continue
         summary = report["files"].get(filename, {}).get("summary")
+        # Compat: report may use src/... while floors use build_files/... or vice versa after packaging refactor
+        if summary is None:
+            alt = filename.replace("build_files/", "src/", 1) if filename.startswith("build_files/") else filename.replace("src/", "build_files/", 1)
+            summary = report["files"].get(alt, {}).get("summary")
         if summary is None:
             failures.append(f"{filename}: absent from coverage report")
             continue
