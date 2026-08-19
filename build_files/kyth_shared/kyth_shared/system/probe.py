@@ -208,6 +208,15 @@ def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp_name, path)
+            # S1: fsync parent dir so rename survives power-loss (matches boot_health.write_state)
+            try:
+                dir_fd = os.open(path.parent, os.O_DIRECTORY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
             with _FILE_CACHE_LOCK:
                 try:
                     mtime = path.stat().st_mtime
