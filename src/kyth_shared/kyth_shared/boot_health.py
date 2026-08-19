@@ -207,6 +207,16 @@ def record_failure(
         rollout_ring=state.rollout_ring,
         updated_at=timestamp,
         quarantined=quarantined,
+        # BootHealthState's own field comment: rollback_attempted_for is set
+        # unconditionally the first time a digest crosses the quarantine
+        # threshold so a rollback target that's itself unhealthy can never
+        # ping-pong with the digest that triggered it. This is a from-scratch
+        # constructor call, not replace(state, ...), so every field the
+        # dataclass defines has to be carried forward explicitly here or it
+        # silently reverts to its default ("") — discarding that memory on
+        # the very next failure recorded for *any* digest, including ones
+        # unrelated to the rollback this field is tracking.
+        rollback_attempted_for=state.rollback_attempted_for,
     )
 
 

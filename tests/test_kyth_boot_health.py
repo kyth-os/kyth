@@ -65,6 +65,29 @@ class BootHealthStateTests(unittest.TestCase):
         self.assertEqual(third.status, "quarantined")
         self.assertIn("3 unhealthy boots", quarantine_reason(third, DIGEST))
 
+    def test_record_failure_preserves_rollback_attempted_for(self):
+        # record_failure builds its return value with BootHealthState(...), not
+        # replace(state, ...), so every field has to be carried forward
+        # explicitly or it silently reverts to its dataclass default. This is
+        # the field a rollback was already attempted for (see
+        # note_rollback_attempted) — dropping it here would let a digest that
+        # was previously rolled back from, then cleared and re-quarantined,
+        # trigger a second rollback attempt the field exists to prevent.
+        state = note_rollback_attempted(BootHealthState(), DIGEST, now=1)
+        self.assertEqual(state.rollback_attempted_for, DIGEST)
+
+        # A failure recorded for an unrelated digest must not erase it.
+        after_other_failure = record_failure(
+            state, OTHER_DIGEST, "boot-1", "unrelated failure", now=2
+        )
+        self.assertEqual(after_other_failure.rollback_attempted_for, DIGEST)
+
+        # Nor must a failure recorded for the same digest the marker refers to.
+        after_same_failure = record_failure(
+            state, DIGEST, "boot-2", "failed again", now=3
+        )
+        self.assertEqual(after_same_failure.rollback_attempted_for, DIGEST)
+
     def test_healthy_boot_resets_failures_and_clears_its_quarantine(self):
         state = BootHealthState()
         for index in range(3):
