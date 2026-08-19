@@ -468,7 +468,8 @@ class WelcomePage(Page):
         layout.addWidget(title)
         body = QLabel(
             "KythOS found a Windows partition. Copy your Documents, Desktop, Downloads, "
-            "browser bookmarks, and Steam saves to your new home — originals stay untouched. "
+            "browser bookmarks, and Steam saves to your new home — originals stay untouched "
+            "(bootc keeps the system atomic, so you can try Kyth and rollback instantly). "
             "OneDrive/Dropbox can be re-connected on the next page."
         )
         body.setObjectName("card-copy")
