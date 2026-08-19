@@ -21,8 +21,9 @@ class _WelcomeHeroMixin:
         title.setObjectName("genz-hero-title")
         hero_text_col.addWidget(title)
 
-        subtitle = QLabel("Atomic immutable workstation. Zero bloat, maximum performance.")
+        subtitle = QLabel("Atomic immutable (bootc) — instant updates & one-click rollback. Gaming + productivity, ready for Windows switchers.")
         subtitle.setObjectName("genz-hero-subtitle")
+        subtitle.setWordWrap(True)
         hero_text_col.addWidget(subtitle)
 
         layout.addLayout(hero_text_col, 1)
@@ -47,8 +48,8 @@ class _WelcomeHeroMixin:
 
         self._focus_buttons = {}
         for key, text, tip in (
-            ("everyday", "💻 Everyday Use", "Browser, office, files, and media."),
-            ("gaming", "🎮 Gaming Rig", "Steam, launchers, performance, and controls."),
+            ("everyday", "💻 Everyday — office, browser & creators. Atomic updates with instant rollback if an update misbehaves.", "Browser, office, files, and media. Bootc keeps work safe."),
+            ("gaming", "🎮 Gaming Rig — Bazzite-beating performance, one toggle. Same bootc safety, plus Steam/Proton.", "Steam, launchers, performance, and controls. One-click Windows game save import."),
         ):
             button = QPushButton(text)
             button.setObjectName("segmented-tab")
