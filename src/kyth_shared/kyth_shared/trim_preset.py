@@ -25,7 +25,8 @@ def trim_config_path(path: Path | None = None) -> Path:
 def load_trim(path: Path | None = None) -> dict[str, Any]:
     p = trim_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"profile": "balanced", "weekly": True}
     prof = str(data.get("profile", "balanced")).lower()

@@ -22,7 +22,8 @@ def locale_path(path: Path | None = None) -> Path:
 def load_locale(path: Path | None = None) -> dict[str, Any]:
     p=locale_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"lang": "en_US.UTF-8", "ime": "fcitx5", "keymap": "us"}
     return {"lang": str(data.get("lang","en_US.UTF-8")), "ime": str(data.get("ime","fcitx5")) if str(data.get("ime","fcitx5")) in ("fcitx5","ibus","none") else "fcitx5", "keymap": str(data.get("keymap","us"))}

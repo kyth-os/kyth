@@ -26,7 +26,8 @@ def gpu_power_config_path(path: Path | None = None) -> Path:
 def load_gpu_power(path: Path | None = None) -> dict[str, Any]:
     p = gpu_power_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"profile": "balanced", "dpm": "auto"}
     prof = str(data.get("profile", "balanced")).lower()

@@ -17,7 +17,8 @@ def polkit_path(path: Path | None = None) -> Path:
 def load_polkit(path: Path | None = None) -> dict[str, bool]:
     p=polkit_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"flatpak": True, "btrfs": True}
     rules=data.get("rules",{})

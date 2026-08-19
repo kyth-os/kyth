@@ -12,7 +12,9 @@ def tcp_slow_start_config_path(path: Path|None=None) -> Path:
     return DEFAULT_TCP_SLOW_PATH
 def load_tcp_slow_start(path: Path|None=None) -> dict[str,Any]:
     p=tcp_slow_start_config_path(path)
-    try: data=tomllib.load(p.open("rb"))
+    try:
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError): return {"profile":"balanced"}
     prof=str(data.get("profile","balanced")).lower()
     if prof not in ("balanced","gaming"): prof="balanced"

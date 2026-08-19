@@ -25,7 +25,8 @@ def overrides_path(path: Path | None = None) -> Path:
 def load_overrides(path: Path | None = None) -> dict[str, dict[str, Any]]:
     cfg_path = overrides_path(path)
     try:
-        data = tomllib.load(cfg_path.open("rb"))
+        with cfg_path.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
     raw = data.get("overrides", {})

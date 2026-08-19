@@ -23,7 +23,8 @@ def battery_config_path(path: Path | None = None) -> Path:
 def load_battery(path: Path | None = None) -> dict[str, Any]:
     p=battery_config_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"charge_start": 40, "charge_stop": 80, "health_check": True}
     return {"charge_start": max(20, min(50, int(data.get("charge_start",40)))), "charge_stop": max(60, min(100, int(data.get("charge_stop",80)))), "health_check": bool(data.get("health_check", True))}

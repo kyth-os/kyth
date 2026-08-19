@@ -13,7 +13,9 @@ def fscache_config_path(path: Path|None=None) -> Path:
     return DEFAULT_FSCACHE_PATH
 def load_fscache(path: Path|None=None) -> dict[str,Any]:
     p=fscache_config_path(path)
-    try: data=tomllib.load(p.open("rb"))
+    try:
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError): return {"enabled":False}
     return {"enabled": bool(data.get("enabled",False))}
 def save_fscache(cfg: dict[str,Any], path: Path|None=None) -> Path:

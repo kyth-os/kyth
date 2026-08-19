@@ -22,7 +22,8 @@ def quick_path(path: Path | None = None) -> Path:
 def load_quick(path: Path | None = None) -> dict[str, Any]:
     p=quick_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"clip_history": 20, "tiles": ["wifi","bt","night"]}
     return {"clip_history": max(5, min(100, int(data.get("clip_history",20)))), "tiles": [str(x) for x in data.get("tiles", ["wifi","bt","night"]) if str(x) in ("wifi","bt","night","plane")] or ["wifi","bt","night"]}

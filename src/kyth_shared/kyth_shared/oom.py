@@ -18,7 +18,8 @@ def oom_config_path(path: Path | None = None) -> Path:
 def load_oom(path: Path | None = None) -> dict[str, Any]:
     p=oom_config_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"default_mem_pressure_limit": "50%", "gaming_preference": "avoid"}
     return {"default_mem_pressure_limit": str(data.get("default_mem_pressure_limit","50%")), "gaming_preference": str(data.get("gaming_preference","avoid"))}

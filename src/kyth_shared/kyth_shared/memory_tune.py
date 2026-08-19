@@ -92,7 +92,8 @@ def _values_for(tier: str) -> dict[str, Any]:
 def load_memory_tune(path: Path | None = None, mem_kb: int | None = None) -> dict[str, Any]:
     p = memory_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
         # allow override tier for testing
         tier = str(data.get("tier", "")).lower()
         if tier in ("low", "mid", "high", "auto"):

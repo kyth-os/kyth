@@ -20,7 +20,8 @@ def scx_config_path(path: Path | None = None) -> Path:
 def load_scx_preset(path: Path | None = None) -> dict[str, str]:
     p=scx_config_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
     out={}

@@ -18,7 +18,8 @@ def plymouth_preset_path(path: Path | None = None) -> Path:
 def load_plymouth_preset(path: Path | None = None) -> dict[str, Any]:
     p=plymouth_preset_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"theme": "kyth", "duration": 5}
     return {"theme": str(data.get("theme","kyth")), "duration": max(1, min(30, int(data.get("duration",5))))}

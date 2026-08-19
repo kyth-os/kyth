@@ -35,7 +35,7 @@ class PerfGateCoreTests(unittest.TestCase):
     def test_missing_config_defaults_to_enabled_5_percent(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = load_perf_gate(Path(tmp) / "does-not-exist.toml")
-        self.assertEqual(cfg, {"threshold": 5, "enabled": True})
+        self.assertEqual(cfg, {"threshold": 10, "enabled": True})
 
     def test_save_then_load_round_trips(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -70,10 +70,10 @@ class PerfGateCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / "perf-ledger.jsonl"
             ledger.write_text('{"p95": 100.0}\n', encoding="utf-8")
-            result = check_perf_gate(current_ms=110.0, ledger=ledger)  # +10%
+            result = check_perf_gate(current_ms=115.0, ledger=ledger)  # +15% > 10% threshold
         self.assertFalse(result["pass"])
-        self.assertEqual(result["delta"], 10.0)
-        self.assertEqual(result["threshold"], 5)
+        self.assertEqual(result["delta"], 15.0)
+        self.assertEqual(result["threshold"], 10)
 
     def test_improvement_and_small_drift_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -162,7 +162,8 @@ class CheckPerfGateScriptTests(unittest.TestCase):
             self.assertEqual(len(ledger.read_text(encoding="utf-8").strip().splitlines()), 3)
 
     def test_measure_current_ms_is_the_median_of_samples(self):
-        with mock.patch.object(check_perf_gate_script, "_measure_once", side_effect=[5.0, 1.0, 9.0]):
+        # SAMPLES is now 7 (was 3); median of 7 sorted samples.
+        with mock.patch.object(check_perf_gate_script, "_measure_once", side_effect=[7.0, 5.0, 1.0, 9.0, 3.0, 8.0, 2.0]):
             self.assertEqual(check_perf_gate_script._measure_current_ms(), 5.0)
 
 

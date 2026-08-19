@@ -22,7 +22,8 @@ def search_path(path: Path | None = None) -> Path:
 def load_search(path: Path | None = None) -> dict[str, Any]:
     p=search_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"baloo": True, "recent": 20, "apps_weight": 3, "files_weight": 1}
     return {"baloo": bool(data.get("baloo", True)), "recent": max(5, min(100, int(data.get("recent",20)))), "apps_weight": max(1, min(5, int(data.get("apps_weight",3)))), "files_weight": max(1, min(5, int(data.get("files_weight",1))))}

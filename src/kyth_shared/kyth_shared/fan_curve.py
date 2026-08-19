@@ -25,7 +25,8 @@ def fan_config_path(path: Path | None = None) -> Path:
 def load_fan_curve(path: Path | None = None) -> dict[str, Any]:
     cfg_path = fan_config_path(path)
     try:
-        data = tomllib.load(cfg_path.open("rb"))
+        with cfg_path.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"points": [[40, 30], [70, 80], [85, 100]], "power_cap_w": 0}
     pts = data.get("points", [[40, 30], [70, 80], [85, 100]])

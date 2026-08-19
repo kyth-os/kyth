@@ -28,7 +28,8 @@ def per_game_config_path(path: Path | None = None) -> Path:
 def load_per_game_config(path: Path | None = None) -> dict[str, dict[str, Any]]:
     cfg_path = per_game_config_path(path)
     try:
-        data = tomllib.load(cfg_path.open("rb"))
+        with cfg_path.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
     games = data.get("games", {})

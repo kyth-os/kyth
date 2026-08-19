@@ -12,7 +12,9 @@ def overlay_config_path(path: Path|None=None) -> Path:
     return DEFAULT_OVERLAY_PATH
 def load_overlay(path: Path|None=None) -> dict[str,Any]:
     p=overlay_config_path(path)
-    try: data=tomllib.load(p.open("rb"))
+    try:
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, ValueError, tomllib.TOMLDecodeError): return {"metacopy":"auto"}
     v=str(data.get("metacopy","auto")).lower()
     if v not in ("auto","on","off"): v="auto"

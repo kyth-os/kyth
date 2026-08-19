@@ -25,7 +25,8 @@ def explorer_path(path: Path | None = None) -> Path:
 def load_explorer(path: Path | None = None) -> dict[str, Any]:
     p=explorer_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"click": "double", "preview": True, "drives_on_desktop": True}
     click=str(data.get("click","double")) if str(data.get("click","double")) in ("single","double") else "double"

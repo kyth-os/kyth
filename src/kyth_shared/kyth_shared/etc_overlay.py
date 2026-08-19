@@ -26,7 +26,8 @@ def overlay_path(path: Path | None = None) -> Path:
 def load_overlay(path: Path | None = None) -> dict[str, str]:
     cfg_path = overlay_path(path)
     try:
-        data = tomllib.load(cfg_path.open("rb"))
+        with cfg_path.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
     files = data.get("files", {})

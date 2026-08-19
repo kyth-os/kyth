@@ -88,7 +88,8 @@ def bore_available(flavor_path: Path = KERNEL_FLAVOR_PATH) -> bool:
 def load_arbiter(path: Path | None = None) -> dict[str, Any]:
     p = arbiter_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"chosen": "auto", "allow_ananicy_pin": False, "gamemode_pin": False}
     chosen = str(data.get("chosen", "auto")).lower()

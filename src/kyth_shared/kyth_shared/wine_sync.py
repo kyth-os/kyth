@@ -35,7 +35,8 @@ def probe_wine_sync() -> dict[str, bool]:
 def load_wine_sync(path: Path | None = None) -> dict[str, Any]:
     p = wine_sync_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"mode": "auto"}
     mode = str(data.get("mode", "auto")).lower()

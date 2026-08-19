@@ -45,7 +45,8 @@ def kargs_config_path(path: Path | None = None) -> Path:
 def load_kargs(path: Path | None = None) -> dict[str, Any]:
     p = kargs_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"profile": "balanced", "custom_add": [], "custom_remove": []}
     prof = str(data.get("profile", "balanced")).lower()

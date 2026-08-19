@@ -18,7 +18,8 @@ def save_cloud_path(path: Path | None = None) -> Path:
 def load_save_cloud(path: Path | None = None) -> dict[str, Any]:
     p=save_cloud_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"repo": "/var/cache/kyth/saves", "remote": "", "on_battery": False}
     return {"repo": str(data.get("repo","/var/cache/kyth/saves")), "remote": str(data.get("remote","")), "on_battery": bool(data.get("on_battery", False))}

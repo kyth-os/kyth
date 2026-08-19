@@ -18,7 +18,8 @@ def privacy_path(path: Path | None = None) -> Path:
 def load_privacy(path: Path | None = None) -> dict[str, Any]:
     p=privacy_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"geoclue": False, "fingerprint": False, "telem_opt_out": True}
     return {"geoclue": bool(data.get("geoclue", False)), "fingerprint": bool(data.get("fingerprint", False)), "telem_opt_out": bool(data.get("telem_opt_out", True))}

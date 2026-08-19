@@ -29,7 +29,8 @@ def flatpak_trim_config_path(path: Path | None = None) -> Path:
 def load_flatpak_trim(path: Path | None = None) -> dict[str, Any]:
     p = flatpak_trim_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"enabled": True}
     return {"enabled": bool(data.get("enabled", True))}

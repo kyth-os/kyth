@@ -12,7 +12,9 @@ def max_map_count_config_path(path: Path|None=None) -> Path:
     return DEFAULT_MAXMAP_PATH
 def load_max_map_count(path: Path|None=None) -> dict[str,Any]:
     p=max_map_count_config_path(path)
-    try: data=tomllib.load(p.open("rb"))
+    try:
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError): return {"profile":"balanced"}
     prof=str(data.get("profile","balanced")).lower()
     if prof not in ("balanced","gaming"): prof="balanced"

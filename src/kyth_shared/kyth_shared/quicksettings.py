@@ -25,7 +25,8 @@ def qs_path(path: Path | None = None) -> Path:
 def load_qs(path: Path | None = None) -> dict[str, Any]:
     p=qs_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, ValueError, tomllib.TOMLDecodeError):
         return {"brightness": 80, "tiles": ["wifi","bt","night","plane"]}
     return {"brightness": max(10, min(100, int(data.get("brightness",80)))), "tiles": [str(x) for x in data.get("tiles", ["wifi","bt","night"]) if str(x) in ("wifi","bt","night","plane","battery")] or ["wifi","bt","night"]}

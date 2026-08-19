@@ -22,7 +22,8 @@ def snap_path(path: Path | None = None) -> Path:
 def load_snap(path: Path | None = None) -> dict[str, Any]:
     p=snap_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"layout": "2x2", "win_z": True, "electric": True}
     layout=str(data.get("layout","2x2")) if str(data.get("layout","2x2")) in ("2x2","3col","off") else "2x2"

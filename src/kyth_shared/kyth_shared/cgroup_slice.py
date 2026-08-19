@@ -26,7 +26,8 @@ def cgroup_config_path(path: Path | None = None) -> Path:
 def load_cgroup_config(path: Path | None = None) -> dict[str, Any]:
     cfg_path = cgroup_config_path(path)
     try:
-        data = tomllib.load(cfg_path.open("rb"))
+        with cfg_path.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"cpu_weight": 300, "memory_max": "80%", "io_weight": 200, "allowed_cpus": ""}
     out = {

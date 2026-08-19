@@ -22,7 +22,8 @@ def btrfs_autotune_config_path(path: Path | None = None) -> Path:
 def load_btrfs_autotune(path: Path | None = None) -> dict[str, Any]:
     p = btrfs_autotune_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"enabled": True, "threshold": 80}
     return {"enabled": bool(data.get("enabled", True)), "threshold": max(50, min(95, int(data.get("threshold", 80))))}

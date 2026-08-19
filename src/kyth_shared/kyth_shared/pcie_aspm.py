@@ -21,7 +21,8 @@ def pcie_config_path(path: Path | None = None) -> Path:
 def load_pcie(path: Path | None = None) -> dict[str,Any]:
     p=pcie_config_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"profile":"balanced"}
     prof=str(data.get("profile","balanced")).lower()

@@ -12,7 +12,9 @@ def epp_ac_config_path(path: Path|None=None) -> Path:
     return DEFAULT_EPP_AC_PATH
 def load_epp_ac(path: Path|None=None) -> dict[str,Any]:
     p=epp_ac_config_path(path)
-    try: data=tomllib.load(p.open("rb"))
+    try:
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError): return {"enabled":True}
     return {"enabled": bool(data.get("enabled",True))}
 def save_epp_ac(cfg: dict[str,Any], path: Path|None=None) -> Path:

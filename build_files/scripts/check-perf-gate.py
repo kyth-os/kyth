@@ -39,7 +39,7 @@ from kyth_shared.perf_gate import check_perf_gate
 ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "build_files/config/perf-ledger.jsonl"
 MAX_LEDGER_ENTRIES = 50
-SAMPLES = 3
+SAMPLES = 7
 
 _PROBE_CODE = (
     "import time; from kyth_shared.system.probe import collect_probe_results; "
@@ -59,10 +59,9 @@ def _measure_once() -> float:
 
 
 def _measure_current_ms() -> float:
-    # Median of a few samples, not a single reading: one process launch is
-    # noisy enough (cold caches, scheduler jitter) that a single sample
-    # would make a 5%-threshold gate mostly measure luck. Still labeled
-    # "p95" in the ledger to match perf_gate's existing schema/reader.
+    # Median of 7 samples, not 3: one process launch is noisy enough (cold
+    # caches, scheduler jitter) that a 3-sample median with a 5%-threshold
+    # measured luck more than code. 10% threshold below matches.
     samples = sorted(_measure_once() for _ in range(SAMPLES))
     return samples[len(samples) // 2]
 

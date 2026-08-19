@@ -1,5 +1,9 @@
 
 ARG BASE_IMAGE=localhost/kyth-base:stable
+# CI pins this to a digest-qualified ref (ghcr.io/...@sha256:...) via
+# --build-arg BASE_IMAGE="${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}" in
+# .github/workflows/build.yml; local `localhost` alias is intentional for
+# developer builds. validate.sh warns if a release build lacks a digest.
 
 # Base Image
 ARG BASE_IMAGE

@@ -18,7 +18,8 @@ def backup_path(path: Path | None = None) -> Path:
 def load_backup(path: Path | None = None) -> dict[str, Any]:
     p=backup_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"repo": "/var/cache/kyth/backup", "btrfs_send": False, "on_battery": False, "remote": ""}
     return {"repo": str(data.get("repo","/var/cache/kyth/backup")), "btrfs_send": bool(data.get("btrfs_send", False)), "on_battery": bool(data.get("on_battery", False)), "remote": str(data.get("remote",""))}

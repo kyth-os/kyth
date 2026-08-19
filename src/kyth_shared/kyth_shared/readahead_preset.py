@@ -24,7 +24,8 @@ def readahead_config_path(path: Path | None = None) -> Path:
 def load_readahead(path: Path | None = None) -> dict[str, Any]:
     p = readahead_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"enabled": True, "size_mb": 512}
     return {"enabled": bool(data.get("enabled", True)), "size_mb": max(64, min(4096, int(data.get("size_mb", 512))))}

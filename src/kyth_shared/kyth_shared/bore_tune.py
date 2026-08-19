@@ -12,7 +12,9 @@ def bore_config_path(path: Path|None=None) -> Path:
     return DEFAULT_BORE_PATH
 def load_bore(path: Path|None=None) -> dict[str,Any]:
     p=bore_config_path(path)
-    try: data=tomllib.load(p.open("rb"))
+    try:
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError): return {"profile":"balanced"}
     prof=str(data.get("profile","balanced")).lower()
     if prof not in ("balanced","gaming"): prof="balanced"

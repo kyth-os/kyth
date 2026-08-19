@@ -13,7 +13,9 @@ def shader_size_config_path(path: Path|None=None) -> Path:
     return DEFAULT_SHADER_SIZE_PATH
 def load_shader_size(path: Path|None=None) -> dict[str,Any]:
     p=shader_size_config_path(path)
-    try: data=tomllib.load(p.open("rb"))
+    try:
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError): return {"mode":"auto","size":"2G"}
     mode=str(data.get("mode","auto")).lower()
     if mode not in ("auto","manual"): mode="auto"

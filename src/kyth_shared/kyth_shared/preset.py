@@ -86,7 +86,8 @@ def preset_path(path: Path | None = None) -> Path:
 def load_preset(path: Path | None = None) -> Preset:
     p = preset_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         # Default to everyday if no file
         return Preset("everyday", tuple(PRESETS["everyday"]["flatpaks"]), (), ())

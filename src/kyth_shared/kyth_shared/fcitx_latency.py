@@ -23,7 +23,8 @@ def fcitx_latency_path(path: Path | None = None) -> Path:
 def load_fcitx_latency(path: Path | None = None) -> dict[str, Any]:
     p = fcitx_latency_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"profile": "balanced", "latency_ms": 50}
     prof = str(data.get("profile", "balanced")).lower()

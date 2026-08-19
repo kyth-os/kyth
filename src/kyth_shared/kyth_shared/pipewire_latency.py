@@ -20,7 +20,8 @@ def pipewire_config_path(path: Path | None = None) -> Path:
 def load_pipewire_latency(path: Path | None = None) -> dict[str, int]:
     p=pipewire_config_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
     apps=data.get("apps",{})

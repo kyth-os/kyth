@@ -29,7 +29,8 @@ def flatpak_prefetch_config_path(path: Path | None = None) -> Path:
 def load_flatpak_prefetch(path: Path | None = None) -> dict[str, Any]:
     p = flatpak_prefetch_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
         _logger.debug("load_flatpak_prefetch failed for %s: %s", p, exc, exc_info=True)
         return {"enabled": False, "time": "02:00"}

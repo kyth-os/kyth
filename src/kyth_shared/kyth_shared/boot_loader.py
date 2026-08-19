@@ -22,7 +22,8 @@ def loader_config_path(path: Path | None = None) -> Path:
 def load_loader(path: Path | None = None) -> dict[str, Any]:
     p = loader_config_path(path)
     try:
-        data = tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"fast": False, "timeout": 2}
     fast = bool(data.get("fast", False))

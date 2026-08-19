@@ -24,7 +24,8 @@ def hdr_config_path(path: Path | None = None) -> Path:
 def load_hdr_config(path: Path | None = None) -> dict[str, dict[str, Any]]:
     cfg_path = hdr_config_path(path)
     try:
-        data = tomllib.load(cfg_path.open("rb"))
+        with cfg_path.open("rb") as _f:
+            data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
     displays = data.get("displays", {})

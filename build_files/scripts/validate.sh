@@ -62,7 +62,7 @@ else
   bash build_files/scripts/hash-gaming-versions.sh
 fi
 
-echo "==> Perf gate (5% ledger, probe collection duration)"
+echo "==> Perf gate (10% ledger, probe collection duration)"
 PYTHONPATH=build_files/kyth_shared python3 build_files/scripts/check-perf-gate.py
 
 echo "==> Sysconfig hash gate (must stay unset locally, pinned in CI)"

@@ -18,7 +18,8 @@ def tailscale_path(path: Path | None = None) -> Path:
 def load_tailscale(path: Path | None = None) -> dict[str, Any]:
     p=tailscale_path(path)
     try:
-        data=tomllib.load(p.open("rb"))
+        with p.open("rb") as _f:
+            data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"tailnet": "", "exit_node": "", "accept_routes": False}
     return {"tailnet": str(data.get("tailnet","")), "exit_node": str(data.get("exit_node","")), "accept_routes": bool(data.get("accept_routes", False))}

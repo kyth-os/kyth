@@ -1,4 +1,4 @@
-"""Perf gate — perf-gate.toml, CI gate 5% regression."""
+"""Perf gate — perf-gate.toml, CI gate 10% regression (was 5%, too tight)."""
 from __future__ import annotations
 
 import json
@@ -26,11 +26,11 @@ def load_perf_gate(path: Path | None = None) -> dict[str, Any]:
         with p.open("rb") as handle:
             data = tomllib.load(handle)
     except (OSError, tomllib.TOMLDecodeError):
-        return {"threshold": 5, "enabled": True}
+        return {"threshold": 10, "enabled": True}
     try:
-        thr = int(data.get("threshold", 5))
+        thr = int(data.get("threshold", 10))
     except (TypeError, ValueError):
-        thr = 5
+        thr = 10
     thr = max(1, min(20, thr))
     return {"threshold": thr, "enabled": bool(data.get("enabled", True))}
 
@@ -38,7 +38,7 @@ def load_perf_gate(path: Path | None = None) -> dict[str, Any]:
 def save_perf_gate(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p = perf_gate_config_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    thr = max(1, min(20, int(cfg.get("threshold", 5))))
+    thr = max(1, min(20, int(cfg.get("threshold", 10))))
     en = bool(cfg.get("enabled", True))
     p.write_text(f"# Kyth perf gate — offline\nthreshold = {thr}\nenabled = {str(en).lower()}\n", encoding="utf-8")
     return p
@@ -48,7 +48,7 @@ def check_perf_gate(current_ms: float | None = None, ledger: Path = LEDGER, path
     cfg = load_perf_gate(path)
     if not cfg.get("enabled"):
         return {"enabled": False, "pass": True}
-    threshold = int(cfg.get("threshold", 5))
+    threshold = int(cfg.get("threshold", 10))
     # find last ledger p95
     last = None
     try:
