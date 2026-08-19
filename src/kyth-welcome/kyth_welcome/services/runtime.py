@@ -85,28 +85,7 @@ class TaskSupervisor:
         # clean up synchronously; otherwise defer cleanup to the finished
         # signal (non-blocking). Called from `done` slots where the worker
         # has just emitted `done` but may still be unwinding.
-        try:
-            finished = worker.isFinished()
-        except RuntimeError:
-            try:
-                setattr(owner, attr, None)
-            except RuntimeError:
-                pass
-            self._records.pop(worker, None)
-            return
-        if finished:
-            try:
-                worker.deleteLater()
-            except RuntimeError:
-                pass
-            try:
-                setattr(owner, attr, None)
-            except RuntimeError:
-                pass
-            self._records.pop(worker, None)
-            return
-        # Defer — will re-enter this method when finished
-        def _deferred_finish():
+        def _cleanup():
             try:
                 worker.deleteLater()
             except RuntimeError:
@@ -118,15 +97,31 @@ class TaskSupervisor:
                 pass
             self._records.pop(worker, None)
 
+        # Connect BEFORE checking isFinished(): if the worker finishes and
+        # emits `finished` in the gap between an isFinished() check and
+        # connecting a handler to catch it, that emission is missed forever
+        # (Qt doesn't replay signals to late subscribers) and this task's
+        # record and owner reference leak permanently. Connecting first
+        # closes that window — any emission from this point on is
+        # guaranteed delivered to _cleanup(). The isFinished() check below
+        # then only has to catch the case where the worker had ALREADY
+        # finished (and its signal already delivered to nobody) before we
+        # even connected; every step in _cleanup() is a no-op on a repeat
+        # call, so it's safe if both the signal and this check end up
+        # invoking it.
         try:
-            worker.finished.connect(_deferred_finish)
+            worker.finished.connect(_cleanup)
         except RuntimeError:
-            # Worker already deleted — just clear
-            try:
-                setattr(owner, attr, None)
-            except RuntimeError:
-                pass
-            self._records.pop(worker, None)
+            # Worker already deleted — nothing left to defer to.
+            _cleanup()
+            return
+        try:
+            finished = worker.isFinished()
+        except RuntimeError:
+            _cleanup()
+            return
+        if finished:
+            _cleanup()
 
     def release_when_finished(self, owner: object, attr: str, worker: QThread) -> None:
         self.attach(worker, owner, attr)
