@@ -221,6 +221,30 @@ class Journal:
     def pending(self) -> list[dict]:
         return list(self.ops)
 
+    def _last_mountpoint_op_index(self) -> dict[str, int]:
+        """Map partition -> index of the LAST set_mountpoint op targeting it.
+
+        add_op() always appends (see its docstring-equivalent comment there);
+        it never replaces an earlier pending set_mountpoint for the same
+        partition when the user changes a mountpoint choice before
+        committing — a completely normal flow the WebUI's "Set mount point"
+        control supports by calling this endpoint again. Both validate() and
+        _find_root_partition() must treat every set_mountpoint op except the
+        last one per partition as stale and ignore it entirely, or a
+        superseded choice (e.g. an earlier "/" that was changed to "/home")
+        still counts toward root-partition detection and validation —
+        letting a perfectly valid final layout fail validation, or worse,
+        letting commit() report the WRONG partition as root after the disk
+        has already been repartitioned.
+        """
+        last_index: dict[str, int] = {}
+        for op in self.ops:
+            if op["kind"] == "set_mountpoint":
+                partition = op["params"].get("partition")
+                if partition:
+                    last_index[partition] = op["index"]
+        return last_index
+
     def _find_root_partition(self) -> Optional[str]:
         # A partition created with mountpoint="/" in the same journal (the
         # normal "Create Partition" dialog flow) records its resolved device
@@ -232,12 +256,22 @@ class Journal:
                 name = op["params"].get("partition")
                 if name:
                     return name
+        # Only each partition's LAST set_mountpoint op counts — see
+        # _last_mountpoint_op_index()'s docstring. This runs after commit()
+        # has already repartitioned the real disk, so getting this wrong
+        # doesn't just fail validation: it reports the WRONG partition as
+        # root to the caller that decides where the OS gets installed.
+        last_mountpoint_op_index = self._last_mountpoint_op_index()
         for part in list_partitions(self.disk):
             name = part.get("name")
             for op in self.ops:
-                if op["kind"] == "set_mountpoint" and op["params"].get("mountpoint") == "/":
-                    if op["params"].get("partition") == name:
-                        return name
+                if op["kind"] != "set_mountpoint" or op["params"].get("mountpoint") != "/":
+                    continue
+                if op["params"].get("partition") != name:
+                    continue
+                if last_mountpoint_op_index.get(name) != op["index"]:
+                    continue
+                return name
         return None
 
     def _initial_table_state(self, current_parts: list[dict]) -> tuple[str, int, int]:
@@ -271,6 +305,7 @@ class Journal:
         eventual reformat at install time even without an explicit
         format/delete/resize op staged for it here."""
         errors = []
+        last_mountpoint_op_index = self._last_mountpoint_op_index()
         for part in current_parts:
             name = part.get("name")
             if not (part.get("current") or part.get("in_use")):
@@ -281,7 +316,11 @@ class Journal:
                 if kind in ("delete", "format", "resize") and params.get("partition") == name:
                     errors.append(f"Cannot modify {name} — it is currently mounted or in use.")
                     break
-                if kind == "set_mountpoint" and params.get("partition") == name and params.get("mountpoint") == "/":
+                if (
+                    kind == "set_mountpoint" and params.get("partition") == name
+                    and params.get("mountpoint") == "/"
+                    and last_mountpoint_op_index.get(name) == op["index"]
+                ):
                     errors.append(f"Cannot set {name} as the root partition — it is currently mounted or in use.")
                     break
         return errors
@@ -297,6 +336,7 @@ class Journal:
         mountpoints: set[str] = set()
         current_parts = list_partitions(self.disk)
         allocated: dict[str, tuple[int, int, str]] = {}
+        last_mountpoint_op_index = self._last_mountpoint_op_index()
         for part in current_parts:
             name = part.get("name")
             start = _safe_int(part.get("start_bytes"), -1)
@@ -312,6 +352,11 @@ class Journal:
         for op in self.ops:
             kind = op["kind"]
             p = op["params"]
+
+            if kind == "set_mountpoint":
+                partition_key = p.get("partition")
+                if partition_key and last_mountpoint_op_index.get(partition_key) != op["index"]:
+                    continue  # superseded by a later set_mountpoint for the same partition
 
             if kind == "new_table":
                 allocated.clear()

@@ -87,6 +87,96 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda2"}]):
             self.assertEqual(journal._find_root_partition(), "/dev/sda2")
 
+    def test_superseded_set_mountpoint_is_ignored_everywhere(self):
+        # add_op() always appends — it never replaces an earlier pending
+        # set_mountpoint for the same partition when the user changes a
+        # mountpoint choice before committing (a completely normal WebUI
+        # flow: pick a mountpoint, then pick a different one). Every reader
+        # of self.ops must treat everything but each partition's LAST
+        # set_mountpoint op as stale, or a user who reconsiders can get
+        # blocked by a mountpoint they no longer have — or worse, commit()
+        # can report the wrong partition as root after already repartitioning
+        # the real disk (see _find_root_partition below).
+        parts = [
+            {"name": "/dev/sda1", "fstype": "ext4"},
+            {"name": "/dev/sda2", "fstype": "btrfs"},
+        ]
+        journal = self._journal()
+        # sda1 was first picked as root (ext4 — invalid for root), then
+        # reconsidered to /home; sda2 (valid btrfs) is the REAL final root.
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/home"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            self.assertEqual(journal.validate(), [])
+            self.assertEqual(journal._find_root_partition(), "/dev/sda2")
+
+    def test_superseded_set_mountpoint_does_not_double_count_root(self):
+        # Isolates the root-count/duplicate-mountpoint bookkeeping from the
+        # btrfs-fstype check above by using two partitions of the same
+        # filesystem — a stale "/" assignment must not make a later,
+        # genuinely different partition's "/" look like a duplicate.
+        parts = [
+            {"name": "/dev/sda1", "fstype": "btrfs"},
+            {"name": "/dev/sda2", "fstype": "btrfs"},
+        ]
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/home"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            self.assertEqual(journal.validate(), [])
+            self.assertEqual(journal._find_root_partition(), "/dev/sda2")
+
+    def test_genuine_duplicate_root_assignment_is_still_rejected(self):
+        # A real conflict (two partitions BOTH finally assigned "/") must
+        # still be caught — the fix above must not weaken this check.
+        parts = [
+            {"name": "/dev/sda1", "fstype": "btrfs"},
+            {"name": "/dev/sda2", "fstype": "btrfs"},
+        ]
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errors = journal.validate()
+        self.assertTrue(any("assigned more than once" in error for error in errors))
+
+    def test_reconsidered_in_use_root_assignment_is_not_blocked(self):
+        # _validate_not_in_use has the same stale-op class of bug: briefly
+        # assigning "/" to a mounted/in-use partition, then reconsidering,
+        # must not permanently block the commit over a choice that no
+        # longer applies.
+        parts = [
+            {"name": "/dev/sda1", "fstype": "btrfs", "current": True},
+            {"name": "/dev/sda2", "fstype": "btrfs"},
+        ]
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/data"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errors = journal.validate()
+        self.assertEqual(errors, [])
+
+    def test_in_use_partition_still_rejected_when_root_assignment_is_final(self):
+        parts = [{"name": "/dev/sda1", "fstype": "btrfs", "current": True}]
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errors = journal.validate()
+        self.assertTrue(any("currently mounted or in use" in error for error in errors))
+
     def test_commit_create_dry_run_records_root_and_skips_swap_format(self):
         journal = self._journal()
         params = {
