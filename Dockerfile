@@ -105,7 +105,7 @@ RUN : "cache-bust:plymouth=${PLYMOUTH_HASH}" && \
 # sysconfig-static and sysconfig layers. COPY once so neither layer needs a
 # redundant bind-mount. sysconfig.sh removes these from /ctx once installed
 # (see its tail) so they don't linger as duplicate content in the final image.
-COPY build_files/kyth-vscode-wallet build_files/kyth-game-boost build_files/game-performance build_files/kyth-ntfs-repair build_files/kyth-shader-preheat build_files/kyth-health-check build_files/kyth-sched-arbiter build_files/kyth-power-arbiter build_files/kyth-power-arbiter.service build_files/kyth-storage-gate build_files/kyth-readahead-hint build_files/kyth-game-launch build_files/kyth-shader-prune /ctx/
+COPY build_files/kyth-vscode-wallet build_files/kyth-game-boost build_files/game-performance build_files/kyth-ntfs-repair build_files/kyth-shader-preheat build_files/kyth-health-check build_files/kyth-sched-arbiter build_files/kyth-power-arbiter build_files/kyth-power-arbiter.service build_files/kyth-storage-gate build_files/kyth-readahead-hint build_files/kyth-game-launch build_files/kyth-shader-prune build_files/kyth-tunable /ctx/
 
 # Install the shared Python distribution for runtime scripts.
 COPY build_files/kyth_shared /tmp/kyth-shared-package
