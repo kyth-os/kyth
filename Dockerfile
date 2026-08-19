@@ -189,6 +189,7 @@ RUN --mount=type=bind,source=build_files,target=/ctx \
     --mount=type=bind,source=src/kyth-welcome,target=/ctx/kyth-welcome \
     --mount=type=bind,source=src/kyth-installer,target=/ctx/kyth-installer \
     --mount=type=bind,source=src/kyth_shared,target=/ctx/kyth_shared \
+    --mount=type=bind,source=src,target=/src \
     --mount=type=tmpfs,dst=/tmp \
     --mount=type=secret,id=mok_key \
     if [ -d /usr/share/factory/var/cache/libdnf5 ]; then \

@@ -3,8 +3,25 @@
 # /ctx is a read-only BuildKit bind mount. Setuptools creates build metadata
 # beside a local project, so stage the package in the writable build tmpfs.
 welcome_package_dir="$(mktemp -d /tmp/kyth-welcome-package.XXXXXX)"
-cp -a /ctx/kyth-welcome/. "${welcome_package_dir}/"
-cp -a /ctx/kyth-installer "${welcome_package_dir}/kyth-installer"
+# /ctx/kyth-welcome and /ctx/kyth-installer may be dangling symlinks when
+# build_files is bind-mounted as /ctx (they point to ../src/...). Prefer
+# /ctx when it is a real directory, fall back to /src or /ctx/src.
+_resolve_ctx_src() {
+    local name="$1"
+    if [[ -d "/ctx/${name}" && -f "/ctx/${name}/pyproject.toml" ]]; then
+        echo "/ctx/${name}"
+    elif [[ -d "/src/${name}" && -f "/src/${name}/pyproject.toml" ]]; then
+        echo "/src/${name}"
+    elif [[ -d "/ctx/src/${name}" && -f "/ctx/src/${name}/pyproject.toml" ]]; then
+        echo "/ctx/src/${name}"
+    else
+        echo "/ctx/${name}"
+    fi
+}
+_welcome_src="$(_resolve_ctx_src kyth-welcome)"
+_installer_src="$(_resolve_ctx_src kyth-installer)"
+cp -a "${_welcome_src}/." "${welcome_package_dir}/"
+cp -a "${_installer_src}" "${welcome_package_dir}/kyth-installer"
 python3 -m pip install \
 	--no-cache-dir \
 	--no-deps \
@@ -13,10 +30,10 @@ python3 -m pip install \
 	"${welcome_package_dir}" \
 	"${welcome_package_dir}/kyth-installer"
 rm -rf "${welcome_package_dir}"
-unset welcome_package_dir
-install -m 0755 /ctx/kyth-welcome/kyth-welcome-launch /usr/bin/kyth-welcome-launch
-install -m 0644 /ctx/kyth-welcome/kyth-welcome.desktop \
+install -m 0755 "${_welcome_src}/kyth-welcome-launch" /usr/bin/kyth-welcome-launch
+install -m 0644 "${_welcome_src}/kyth-welcome.desktop" \
 	/usr/share/applications/kyth-welcome.desktop
+unset _welcome_src _installer_src welcome_package_dir
 write_config /usr/share/applications/kyth-app-store.desktop <<'APPSTOREEOF'
 [Desktop Entry]
 Type=Application
@@ -38,8 +55,17 @@ install -m 0755 /ctx/kyth-retry-hardware-setup /usr/libexec/kyth-retry-hardware-
 # Place System Hub on the desktop for all new users. The executable bit is
 # required so KDE Plasma 6 treats it as trusted without prompting the user.
 mkdir -p /etc/skel/Desktop
-install -m 0755 /ctx/kyth-welcome/kyth-welcome.desktop \
+# _welcome_src was unset above; re-resolve for desktop seeding
+if [[ -d "/ctx/kyth-welcome" && -f "/ctx/kyth-welcome/pyproject.toml" ]]; then
+    _welcome_src="/ctx/kyth-welcome"
+elif [[ -d "/src/kyth-welcome" ]]; then
+    _welcome_src="/src/kyth-welcome"
+else
+    _welcome_src="/ctx/kyth-welcome"
+fi
+install -m 0755 "${_welcome_src}/kyth-welcome.desktop" \
 	/etc/skel/Desktop/kyth-welcome.desktop
+unset _welcome_src
 
 # Recycle Bin on the desktop keeps deletion recovery visible. Type=Link entries
 # open in Dolphin and need no executable/trust bit. Kept in /usr/share/kyth so
