@@ -122,6 +122,7 @@ class GuardianPage(Page):
 
         self._build_status_card()
         self._build_health_card()
+        self._build_dashboard_card()
         self._build_history_card()
         self._build_recipes_card()
         self._build_model_card()
@@ -221,6 +222,43 @@ class GuardianPage(Page):
         self._decisions_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self._decisions_lbl)
 
+        self._add(card)
+
+    # -- health dashboard --------------------------------------------------
+
+    def _build_dashboard_card(self) -> None:
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Health dashboard — super-app at a glance")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        intro = QLabel(
+            "All Guardian healing plus StarTER packs, Installed, and updates live in this one System Hub — no store hop. "
+            "This dashboard surfaces what auto-healed, what needs you, and when gaming/battery paused it."
+        )
+        intro.setObjectName("card-copy")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        self._dash_health = QLabel("Loading dashboard…")
+        self._dash_health.setObjectName("card-copy")
+        self._dash_health.setWordWrap(True)
+        self._dash_health.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self._dash_health)
+        self._dash_chain = QLabel("")
+        self._dash_chain.setObjectName("card-copy")
+        self._dash_chain.setWordWrap(True)
+        self._dash_chain.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self._dash_chain)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        hub_btn = QPushButton("Open Software → Starter Packs")
+        hub_btn.setToolTip("Opt-in apps and starter packs — all in this same Hub")
+        hub_btn.clicked.connect(lambda _=False: self._navigate("Software"))
+        row.addWidget(hub_btn)
+        upd_btn = QPushButton("Open System → Updates")
+        upd_btn.clicked.connect(lambda _=False: self._navigate("Updates"))
+        row.addWidget(upd_btn)
+        row.addStretch()
+        layout.addLayout(row)
         self._add(card)
 
     # -- history -----------------------------------------------------------
@@ -532,6 +570,11 @@ class GuardianPage(Page):
         else:
             self._decisions_lbl.setText("No repair queued — checks will re-run on the next timer tick or when system probes change.")
         restyle(self._decisions_lbl)
+        # update dashboard mirror
+        try:
+            self._update_dashboard_preview(data, symptoms)
+        except Exception:
+            pass
 
     def _refresh_history(self) -> None:
         if self._history_worker is not None:
@@ -542,6 +585,44 @@ class GuardianPage(Page):
         self._history_worker.finished.connect(lambda: setattr(self, "_history_worker", None))
         self._history_worker.finished.connect(self._history_worker.deleteLater)
         self._history_worker.start()
+
+    def _update_dashboard_preview(self, check_data: dict, symptoms: list) -> None:
+        if not hasattr(self, "_dash_health"):
+            return
+        suppressed = check_data.get("suppression_reason", "")
+        if suppressed:
+            self._dash_health.setText(f"Guardian paused — {suppressed} (gaming/battery/thermal) · checks resume automatically")
+            self._dash_health.setObjectName("status-warn")
+        elif not symptoms:
+            self._dash_health.setText("Healthy — all probes ok · Storage ok · Firmware ok · Audio/Network ok")
+            self._dash_health.setObjectName("status-ok")
+        else:
+            comps = ", ".join(sorted({s.get("component","?") for s in symptoms if isinstance(s, dict)}))
+            self._dash_health.setText(f"Needs attention: {comps} — see Live health below. Heap: Starter Packs + Opt-in apps stay in System Hub.")
+            self._dash_health.setObjectName("status-warn")
+        restyle(self._dash_health)
+        # chain timeline from history if available
+        try:
+            from kyth_shared.guardian import load_state
+            hist = load_state().get("history", [])
+            chains = [h for h in hist if isinstance(h, dict) and "chain" in h]
+            if chains:
+                last = chains[-1]
+                ts = _fmt_ts(last.get("timestamp"))
+                chain_ids = last.get("chain", [])
+                results = last.get("results", [])
+                ok_n = sum(1 for r in results if r.get("verified"))
+                self._dash_chain.setText(f"Last healing chain {ts}: {' → '.join(chain_ids)} · verified {ok_n}/{len(results)} · see History")
+            else:
+                # show last 2 single actions
+                hist2 = [h for h in hist if isinstance(h, dict) and h.get("recipe_id")][-2:]
+                if hist2:
+                    self._dash_chain.setText("Recent: " + " · ".join(f"{h.get('recipe_id')} @ {_fmt_ts(h.get('timestamp'))}" for h in hist2))
+                else:
+                    self._dash_chain.setText("No healing chains yet — Guardian stays quiet until two consecutive failures + cooldown.")
+            restyle(self._dash_chain)
+        except Exception:
+            pass
 
     def _on_history_ready(self, _key: str, data: object) -> None:
         if not isinstance(data, dict):
