@@ -128,6 +128,12 @@ if [[ -n "${unexpected}" ]]; then
 	printf 'Unexpected systemd verification errors:\n%s\n' "${unexpected}" >&2
 	exit 1
 fi
+# Non-blocking security audit — warn, don't fail (thresholds are advisory while
+# the demonolith is being split). Surfaces hardening regressions early.
+if command -v systemd-analyze >/dev/null 2>&1; then
+	output_sec="$(systemd-analyze security build_files/kyth-ai-perfd.service build_files/kyth-guardian.service build_files/kyth-sched.service build_files/kyth-sched-arbiter.service build_files/kyth-batteryd.service build_files/kyth-probe.service 2>&1 || true)"
+	printf '%s\n' "${output_sec}" | grep -E "^(build_files|Overall exposure)" || true
+fi
 
 echo "==> Just recipes"
 just --list >/dev/null

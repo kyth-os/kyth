@@ -13,6 +13,18 @@ TimeoutStartSec=90
 MemoryHigh=1536M
 MemoryMax=1792M
 CPUQuota=50%
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CacheDirectory=kyth
+CacheDirectoryMode=0755
 
 [Install]
 WantedBy=default.target

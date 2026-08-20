@@ -3,6 +3,8 @@ Description=Lock KythOS when a trusted KDE Connect device leaves
 After=graphical-session.target
 PartOf=graphical-session.target
 ConditionPathExists=%h/.config/kyth-dynamic-lock.json
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -16,6 +18,18 @@ IOSchedulingClass=idle
 CPUQuota=25%
 MemoryHigh=384M
 MemoryMax=512M
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CacheDirectory=kyth
+CacheDirectoryMode=0755
 
 [Install]
 WantedBy=default.target
