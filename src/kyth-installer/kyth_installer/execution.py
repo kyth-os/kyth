@@ -47,7 +47,7 @@ def start_installation(
             context.events.publish({"type": "error", "message": str(exc)})
             try:
                 write_failure_summary(FAILURE_SUMMARY_FILE, context=context, message=str(exc))
-            except Exception:
+            except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: failure summary persistence is best-effort
                 pass
         finally:
             context.install_lock.release()

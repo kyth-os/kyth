@@ -37,7 +37,9 @@ check-dockerfile check_base_image=default_base_image:
 # Run Python unit tests.
 [group('Quality')]
 test:
-    PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer python3 -m unittest discover -s tests -b
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 -m pytest -q
 
 # Verify codecs/drivers are baked (Nobara-style one-click, no post-install dnf)
 [group('Quality')]

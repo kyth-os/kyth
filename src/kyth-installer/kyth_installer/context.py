@@ -258,7 +258,7 @@ class InstallerContext:
             # Publish phase as first-class SSE event (R-05) — keep pct for bar, phase for label
             try:
                 self.events.publish({"type": "phase", "phase": phase.value})
-            except Exception:
+            except (RuntimeError, ValueError, AttributeError):  # noqa: BLE001 -- narrow: event publish failures are non-fatal
                 pass
 
     def record_partition_step(self, kind: str, status: str, target: str = "") -> dict[str, str]:

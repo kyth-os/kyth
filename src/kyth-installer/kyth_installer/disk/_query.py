@@ -70,7 +70,8 @@ def list_disks():
                 "partition_table": (d.get("pttype") or "").lower(),
                 "current": bool(current_disk) and name == current_disk,
             })
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError) as exc:  # noqa: BLE001 -- narrow: lsblk/subprocess failures are OSError/RuntimeError
+        _logger.debug("disk scan failed: %s", exc, exc_info=True)
         print(f"disk scan failed: {exc}", file=sys.stderr)
     return disks
 
@@ -128,7 +129,8 @@ def list_partitions(disk: str, *, strict: bool = False):
                 walk(child.get("children"))
 
         walk(devices)
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError) as exc:  # noqa: BLE001 -- narrow: lsblk JSON/subprocess failures
+        _logger.debug("partition scan failed for %s: %s", disk, exc, exc_info=True)
         print(f"partition scan failed for {disk}: {exc}", file=sys.stderr)
         if strict:
             raise RuntimeError(
@@ -146,7 +148,8 @@ def list_free_space(disk: str) -> list[dict]:
     try:
         disk_size = _disk._partition_size_bytes(disk)
         sector = _disk._block_size_bytes(disk)
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError) as exc:  # noqa: BLE001 -- narrow: block-size probe failures
+        _logger.debug("free space scan failed for %s: %s", disk, exc, exc_info=True)
         print(f"free space scan failed for {disk}: {exc}", file=sys.stderr)
         return []
 

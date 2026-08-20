@@ -154,9 +154,9 @@ def _network_preflight(imgref: str) -> str | None:
         )
         if route.returncode != 0 or not route.stdout.strip():
             return _friendly_network_error("No active default network route was found.")
-    except Exception:
+    except (OSError, ValueError, RuntimeError) as exc:  # noqa: BLE001 -- narrow: ip route probe failures
         # Keep going: DNS/connect checks below are a better user-facing signal.
-        _logger.debug("_network_preflight: default-route check failed", exc_info=True)
+        _logger.debug("_network_preflight: default-route check failed: %s", exc, exc_info=True)
 
     try:
         socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
@@ -164,7 +164,7 @@ def _network_preflight(imgref: str) -> str | None:
         return _friendly_network_error(
             f"The live session is not resolving {host}. Wi-Fi may not be connected yet."
         )
-    except Exception as exc:
+    except OSError as exc:  # noqa: BLE001 -- narrow: DNS check failures are OSError subclasses
         return _friendly_network_error(f"DNS check for {host} failed: {exc}")
 
     try:

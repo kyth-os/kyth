@@ -360,7 +360,7 @@ def flatpak_updates_cached(*, system: bool = False) -> int:
     if val is not None:
         try:
             update_sections({"flatpak-updates": val}, system=system)
-        except Exception:
+        except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
             _logger.debug("handled expected exception", exc_info=True)
             pass
         return val
@@ -388,7 +388,7 @@ def _collect_bootc() -> dict[str, Any]:
     ref = image_reference_from_status(data or {}, status_text=text)
     try:
         kernel = current_kernel_flavor()
-    except Exception:
+    except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
         kernel = "fedora"
     return {
         "bootc-status-data": data,
@@ -421,7 +421,7 @@ def _collect_nvidia() -> dict[str, Any]:
         from kyth_shared.system.hardware_view import get_hardware_view
 
         value = bool(get_hardware_view().has_nvidia)
-    except Exception:
+    except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: hardware view probe is best-effort
         value = False
     return {"nvidia-detect": value}
 
@@ -438,7 +438,7 @@ def _collect_display() -> dict[str, Any]:
 
         ev = evaluate_system()
         return {"display-detect": {"capabilities": ev.capabilities[:8], "profiles": [p.id for p in ev.profiles[:3]]}}
-    except Exception:
+    except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: display probe is best-effort
         return {"display-detect": None}
 
 
@@ -458,7 +458,7 @@ def _collect_hardware_view() -> dict[str, Any]:
                 "profiles": [profile.id for profile in view.evaluation.profiles[:3]],
             }
         }
-    except Exception:
+    except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
         return {"hardware-summary": None}
 
 
@@ -498,7 +498,7 @@ def _collect_network_identity() -> dict[str, Any]:
                 "detail": str(ident_obj.detail),
             }
         }
-    except Exception:
+    except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
         return {"network-summary": None}
 
 
@@ -520,7 +520,7 @@ def default_collectors() -> tuple[ProbeCollector, ...]:
 def _run_collector(collector: ProbeCollector) -> dict[str, ProbeResult]:
     try:
         values = collector.collect()
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError) as exc:  # noqa: BLE001 -- narrow: probe best-effort
         return {
             key: ProbeResult(key, ProbeStatus.FAILED, error=str(exc))
             for key in collector.keys
@@ -549,7 +549,7 @@ def collect_probe_results(
             collector = futures[fut]
             try:
                 group = fut.result(timeout=15)
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError) as exc:  # noqa: BLE001 -- narrow: probe best-effort
                 group = {
                     key: ProbeResult(key, ProbeStatus.FAILED, error=f"timeout/error: {exc}")
                     for key in collector.keys
@@ -575,7 +575,7 @@ def invalidate_after_flatpak_change() -> None:
     for cb in list(_FLATPAK_INVALIDATE_CBS):
         try:
             cb()
-        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+        except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
 
 
@@ -652,7 +652,7 @@ class ProbeService:
                             self._mem.pop(oldest, None)
                         self._mem[key] = (time.monotonic(), disk_hit)
                     return disk_hit  # type: ignore[return-value]
-            except Exception:
+            except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
                 _logger.debug("ProbeService.cached: disk read for %r failed", key, exc_info=True)
 
         value = fetch()
@@ -675,7 +675,7 @@ class ProbeService:
         if key in DISK_BACKED_KEYS:
             try:
                 update_sections({key: value})
-            except Exception:
+            except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
                 _logger.debug("ProbeService.cached: disk write for %r failed", key, exc_info=True)
         return value
 
@@ -685,7 +685,7 @@ class ProbeService:
                 self._mem.clear()
             try:
                 invalidate_disk_sections()
-            except Exception:
+            except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
                 _logger.warning("ProbeService.invalidate: disk invalidation failed", exc_info=True)
             return
         drop = set(keys)
@@ -695,7 +695,7 @@ class ProbeService:
                     self._mem.pop(key, None)
         try:
             invalidate_disk_sections(drop)
-        except Exception:
+        except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
             _logger.warning("ProbeService.invalidate: disk invalidation failed", exc_info=True)
 
     def clear_mem(self) -> None:

@@ -44,7 +44,7 @@ class MountRegistry:
                     from .system import _safe_umount
 
                     _safe_umount(run, path, check=True)
-                except Exception as exc:
+                except (OSError, RuntimeError, ValueError) as exc:  # noqa: BLE001 -- narrow: umount failures
                     if log:
                         log(f"Warning: could not unmount {path}: {exc}")
             self.release(path)
@@ -56,7 +56,7 @@ class MountRegistry:
                 from .system import _safe_umount
 
                 _safe_umount(run, path, check=True)
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:  # noqa: BLE001 -- narrow: umount failures
                 if log:
                     log(f"Warning: could not unmount {path}: {exc}")
             self.release(path)

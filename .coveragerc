@@ -1,6 +1,9 @@
 [run]
 branch = True
 source =
+    src/kyth-installer/kyth_installer
+    src/kyth-welcome/kyth_welcome
+    src/kyth_shared/kyth_shared
     build_files/kyth-installer/kyth_installer
     build_files/kyth-welcome/kyth_welcome
     build_files/kyth_shared/kyth_shared

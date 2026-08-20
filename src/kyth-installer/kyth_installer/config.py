@@ -85,7 +85,7 @@ def _validate_installer_paths() -> None:
                 # Check if path is under /tmp
                 try:
                     is_tmp = str(parent.resolve()).startswith("/tmp")
-                except Exception:
+                except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: path resolve failures
                     is_tmp = str(parent).startswith("/tmp")
                 if not is_tmp:
                     # Also check sticky bit
@@ -94,6 +94,6 @@ def _validate_installer_paths() -> None:
                         raise RuntimeError(f"{label} path {path} is world-writable outside sticky /tmp: {oct(st.st_mode)}")
         except RuntimeError:
             raise
-        except Exception:
+        except (OSError, ValueError, AttributeError):  # noqa: BLE001 -- narrow: stat/permission check failures
             continue
 
