@@ -37,6 +37,17 @@ def ensure_bios_boot_partition(
     disk: str, gap_start: int, log, *, dependencies: CommitDependencies,
 ) -> int:
     """Create a missing GPT BIOS helper and return the next usable byte offset."""
+    # Last-moment battery guard before destructive mkpart.
+    try:
+        from .assurance import _battery_check
+
+        _battery_check()
+    except RuntimeError:
+        raise
+    except (OSError, ValueError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort guard
+        import logging as _lg
+
+        _lg.getLogger(__name__).debug("bios-boot pre-guard probe failed: %s", exc, exc_info=True)
     if not dependencies.is_gpt(disk) or dependencies.has_bios_boot(disk):
         return gap_start
     before = {

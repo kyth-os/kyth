@@ -89,7 +89,9 @@ def _thermal_high(threshold_c: int = 85) -> bool:
         ):
             try:
                 temp_millic = int(extra.read_text().strip())
-                # hwmon temps are millidegree as well
+                # Filter placeholder sensors (0) and out-of-range spikes (>200C)
+                if temp_millic < 1000 or temp_millic > 200000:
+                    continue
                 if temp_millic > threshold_c * 1000:
                     return True
             except (OSError, ValueError):

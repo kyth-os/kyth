@@ -31,6 +31,7 @@ _policy_logger = logging.getLogger(__name__)
 # Inventory cache — avoid re-scanning /sys on every hw-setup/guardian/probe tick (60s TTL, host paths only, aligns with probe/gaming)
 _INVENTORY_CACHE: tuple[float, Inventory] | None = None
 _INVENTORY_TTL = 60.0
+_CACHED_POLICY_DIGEST: str | None = None
 
 # Progressive: per-quirk modules under hardware_quirks/ for testable catalog
 try:
@@ -431,6 +432,11 @@ def evaluate(
 
 def evaluate_system(path: Path = DEFAULT_POLICY_PATH) -> Evaluation:
     policy, digest = load_policy(path)
+    global _CACHED_POLICY_DIGEST
+    if _CACHED_POLICY_DIGEST is not None and _CACHED_POLICY_DIGEST != digest:
+        # Policy file changed (rpm-ostree update) within TTL — force rescan for dock GPU etc.
+        invalidate_inventory_cache()
+    _CACHED_POLICY_DIGEST = digest
     evaluation = evaluate(policy, digest, collect_inventory())
     for warning in evaluation.warnings:
         _policy_logger.warning("hardware policy warning: %s", warning)

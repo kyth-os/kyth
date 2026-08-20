@@ -164,6 +164,20 @@ def shrink_filesystem(partition: str, fstype: str, new_size_bytes: int, log) -> 
     Raises for any filesystem type without a safe, supported shrink path
     (fail closed rather than silently truncating an unsupported filesystem).
     """
+    # Re-check battery/encryption at the last moment before destructive
+    # filesystem shrink — user may have unplugged AC or locked BitLocker
+    # between preflight and this call.
+    try:
+        from .assurance import _battery_check, _encryption_check
+
+        _battery_check()
+        enc = _encryption_check(snapshot=None)
+        if enc is not None and enc.status == "warn":
+            raise RuntimeError(enc.detail)
+    except (OSError, ValueError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort guard
+        import logging as _lg
+
+        _lg.getLogger(__name__).debug("fsresize pre-shrink guard probe failed: %s", exc, exc_info=True)
     fstype = (fstype or "").lower()
     if fstype == "bitlocker":
         raise RuntimeError(
