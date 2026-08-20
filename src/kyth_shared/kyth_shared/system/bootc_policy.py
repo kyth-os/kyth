@@ -170,6 +170,13 @@ def update_availability_view(
             f"Running the latest image{built}.{ts_hint}", False, False,
         )
     detail = (check_ts_details or "").strip()
+    if "retryable" in detail.lower():
+        body = f"{detail}{ts_hint}"
+        return UpdateAvailabilityView(
+            "card-accent-warn", "↻", "avail-icon-warn", "Update failed — Retry available",
+            f"{body} Click Update Now to retry the download.",
+            True, False,
+        )
     if detail and detail.lower() not in {"checking timed out after 15 s. click check now to retry (skopeo/flatpak may be slow offline).".lower()}:
         body = f"{detail}{ts_hint}"
     else:
