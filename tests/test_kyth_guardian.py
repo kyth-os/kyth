@@ -131,10 +131,20 @@ class GuardianPolicyTests(unittest.TestCase):
     def test_display_and_controller_autofix_are_deterministic(self):
         kd_ok = subprocess.CompletedProcess(["kscreen-doctor", "-o"], 0, stdout="Output: 1 HDMI-A-1\n connected\n enabled\n", stderr="")
         kd_fail = subprocess.CompletedProcess(["kscreen-doctor", "-o"], 1, stdout="", stderr="failed")
+        def _fake_run(argv, timeout=8):
+            if argv[0] == "kscreen-doctor":
+                return kd_fail
+            if argv[0] == "powerprofilesctl":
+                return subprocess.CompletedProcess(argv, 0, stdout="balanced\n", stderr="")
+            if argv[0] == "pactl":
+                return subprocess.CompletedProcess(argv, 0, stdout="alsa_output.pci-0000_00_1b.0.analog-stereo\n", stderr="")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
         with (
             patch.object(guardian, "_active", return_value=False),
             patch.object(guardian.Path, "exists", return_value=True),
-            patch.object(guardian, "_run", side_effect=lambda argv, timeout=8: kd_fail if argv[0] == "kscreen-doctor" else subprocess.CompletedProcess(argv, 0, "", "")),
+            patch.object(guardian.Path, "iterdir", return_value=iter([pathlib.Path("/sys/class/bluetooth/hci0")])),
+            patch.object(guardian, "_run", side_effect=_fake_run),
         ):
             syms = guardian.collect_symptoms()
             disp = next((s for s in syms if s.component == "display"), None)
