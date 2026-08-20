@@ -147,7 +147,7 @@ notifications from repeating the same expensive checks.
 | Desktop | Plasma and Wayland profiles, layout repair, screenshots, and screen-sharing help |
 | Network | VPN, SMB shares, and rclone-backed Google Drive, OneDrive, Dropbox, and other remotes |
 | Health and Repair | Diagnostics, support snapshots, focused repairs, setup transfer, and recovery actions |
-| Guardian | Low-resource health monitoring, bounded safe fixes, and optional on-demand local AI diagnosis |
+| Guardian | Self-healing dashboard — live health, history, recipes, and optional local AI diagnosis (System → Guardian) |
 | Advanced | Channel switching, kernel image selection, NVIDIA support, and issue feedback |
 
 ### VPN

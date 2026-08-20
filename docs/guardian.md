@@ -43,7 +43,7 @@ History contains only sanitized evidence, recipe identifiers, model metadata,
 confidence, actions, and verification results; it rotates after 100 records or
 30 days.
 
-System Hub exposes controls on the Repair page. The equivalent CLI is:
+System Hub exposes controls on **System → Guardian** (self-healing dashboard). The Repair page links there. The equivalent CLI is:
 
 ```bash
 kyth-guardian --json status

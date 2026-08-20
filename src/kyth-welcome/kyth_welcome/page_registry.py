@@ -131,6 +131,7 @@ SEARCH_ITEMS: dict[str, SearchItem] = {
     "Hardware": SearchItem("Hardware", "Inspect graphics, displays, audio, Bluetooth, storage, and device health.", ("Device Manager", "Display", "Sound", "Bluetooth", "No audio", "No sound", "Speaker", "Microphone", "Wi-Fi", "Wifi", "Printer", "Monitor", "Black screen")),
     "Plasma Wayland": SearchItem("Plasma & Wayland", "Check portals, PipeWire capture, display settings, shortcuts, and Plasma session repair.", ("Plasma", "Wayland", "KDE", "Screen sharing", "PipeWire", "Portal", "xdg desktop portal", "Display settings", "VRR", "HDR", "Scale", "Shortcuts", "Window rules", "Restart Plasma", "Screenshot", "Screen shot", "Screen capture", "Blank screen share", "Black screen", "Display scale")),
     "Diagnostics": SearchItem("Health Report", "Run system checks and gather useful troubleshooting information.", ("System information", "Diagnostics", "Sign-in options", "Fingerprint", "Passkeys", "Security")),
+    "Guardian": SearchItem("Guardian", "Self-healing: automatic health checks, safe fixes, history, and optional local AI diagnosis.", ("Guardian", "Self heal", "Self-healing", "Auto repair", "Fix automatically", "Health check", "Supervisor", "AI repair", "Kyth Guardian", "no audio", "flatpak broken", "bluetooth not working", "wifi not working")),
     "Repair": SearchItem("Repair", "Rollback, restore, collect logs, and open recovery tools when something feels off.", ("Troubleshoot", "Recovery", "Reset this PC", "Rollback", "terminal", "command prompt", "PowerShell", "Quick Assist", "Remote Assistance", "RustDesk", "Remote Desktop", "Restore my apps", "Restore my setup", "PC backup", "Restore layout", "Missing apps", "Remote help", "broken")),
     "VPN": SearchItem("VPN", "Connect to VPN profiles, including GlobalProtect-style work VPNs.", ("VPN settings", "GlobalProtect")),
     "Network Shares": SearchItem("Network Shares", "Map SMB/CIFS shares and configure mount behavior.", ("Map network drive", "Shared folders")),
@@ -144,6 +145,10 @@ SEARCH_ITEMS: dict[str, SearchItem] = {
 
 
 PROBLEM_ROUTES: dict[str, str] = {
+    "guardian": "Guardian",
+    "self heal": "Guardian",
+    "auto repair": "Guardian",
+    "fix automatically": "Guardian",
     "no audio": "Hardware",
     "no sound": "Hardware",
     "microphone not working": "Hardware",
@@ -189,6 +194,7 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
             (("document-import", "drive-harddisk"), "⇄", "Move Files", "Move Files", _page_factory("page_windows_migration", "WindowsMigrationPage", navigate=navigate)),
         ]),
         ("System", [
+            (("shield", "security-high"), "⬢", "Guardian", "Guardian", _page_factory("page_guardian", "GuardianPage")),
             (("system-software-update", "update-none"), "↻", "Updates", "Update", _page_factory("page_update", "UpdatePage")),
             (("computer", "computer-laptop"), "◈", "Hardware", "Hardware", _page_factory("page_hardware", "HardwarePage", navigate=navigate)),
             (("preferences-desktop-display", "video-display"), "▣", "Plasma & Wayland", "Plasma Wayland", _page_factory("page_plasma_wayland", "PlasmaWaylandPage")),

@@ -54,7 +54,7 @@ class TestHubSmoke(unittest.TestCase):
 
     def test_navigate_all_20_pages(self):
         keys = [d.key for d in self.window._page_descriptors]
-        self.assertEqual(len(keys), 20)
+        self.assertEqual(len(keys), 21)
         for key in keys:
             with self.subTest(page=key):
                 self.window._navigate_to(key)
