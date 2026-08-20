@@ -28,13 +28,18 @@ DRACUTZRAM
 
 # Explicit early modprobe service ordered before udevd coldplug. Ensures
 # /dev/zram0 uevent is queued before systemd-udev-trigger runs, even if
-# initramfs driver was not included for a given kver.
+# initramfs driver was not included for a given kver. FA617NS host trace
+# showed real-root udevd Deactivated for 122s after switch-root; triggering
+# modprobe before udev-trigger avoids the race without dead-locking udevd
+# startup (Before=udev-trigger only, not Before=udevd).
 write_config /usr/lib/systemd/system/kyth-zram-early.service <<'ZRAM_EARLY'
 [Unit]
 Description=Kyth early zram modprobe (before udev coldplug)
 DefaultDependencies=no
-Before=systemd-udevd.service systemd-udev-trigger.service
+Before=systemd-udev-trigger.service
 Wants=systemd-udevd.service
+After=systemd-udevd.service
+ConditionPathIsDirectory=/sys/class/block
 
 [Service]
 Type=oneshot
@@ -49,8 +54,7 @@ systemctl enable kyth-zram-early.service 2>/dev/null || true
 # Fail-fast instead of hiding the race with 180s. The device should now
 # exist via initramfs/early service; if not, retry quickly rather than
 # blocking graphical.target for 2m. Keep busy-device tolerant stop path.
-mkdir -p /etc/systemd/system/systemd-zram-setup@.service.d
-cat > /etc/systemd/system/systemd-zram-setup@.service.d/10-kyth-zram.conf <<'ZRAMOVERRIDE'
+write_config /etc/systemd/system/systemd-zram-setup@.service.d/10-kyth-zram.conf <<'ZRAMOVERRIDE'
 [Unit]
 JobTimeoutSec=30
 JobRunningTimeoutSec=30

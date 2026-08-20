@@ -35,8 +35,7 @@ USERTASKSMAX
 # DefaultTasksMax=80% did not apply to the per-session app.slice (still 512
 # — compiled default for F44 user sessions). Need explicit drop-ins for
 # app.slice/session.slice/background.slice.
-mkdir -p /etc/systemd/system/user.slice.d
-cat > /etc/systemd/system/user.slice.d/10-tasksmax.conf <<'USERSLICE'
+write_config /etc/systemd/system/user.slice.d/10-tasksmax.conf <<'USERSLICE'
 [Slice]
 TasksMax=80%
 USERSLICE
@@ -45,20 +44,17 @@ USERSLICE
 # app.slice hosts all Flatpak browsers (Brave/Edge) + Code + Discover;
 # session.slice hosts KWin/plasmashell; background.slice hosts xdg-portal.
 # Without these, DefaultTasksMax from user.conf alone leaves app.slice at 512.
-mkdir -p /etc/systemd/user/app.slice.d
-cat > /etc/systemd/user/app.slice.d/10-kyth-tasksmax.conf <<'APPSLICE'
+write_config /etc/systemd/user/app.slice.d/10-kyth-tasksmax.conf <<'APPSLICE'
 [Slice]
 TasksMax=80%
 APPSLICE
 
-mkdir -p /etc/systemd/user/session.slice.d
-cat > /etc/systemd/user/session.slice.d/10-kyth-tasksmax.conf <<'SESSSLICE'
+write_config /etc/systemd/user/session.slice.d/10-kyth-tasksmax.conf <<'SESSSLICE'
 [Slice]
 TasksMax=80%
 SESSSLICE
 
-mkdir -p /etc/systemd/user/background.slice.d
-cat > /etc/systemd/user/background.slice.d/10-kyth-tasksmax.conf <<'BGSLICE'
+write_config /etc/systemd/user/background.slice.d/10-kyth-tasksmax.conf <<'BGSLICE'
 [Slice]
 TasksMax=80%
 BGSLICE
@@ -66,8 +62,7 @@ BGSLICE
 # Also cover system-level user@.service delegation: ensure the delegated
 # cgroup does not clamp app.slice via the 512 fallback on old images that
 # upgraded via ostree without user daemon-reexec.
-mkdir -p /etc/systemd/system/user@.service.d
-cat > /etc/systemd/system/user@.service.d/10-kyth-tasksmax.conf <<'USERSVC'
+write_config /etc/systemd/system/user@.service.d/10-kyth-tasksmax.conf <<'USERSVC'
 [Service]
 TasksMax=80%
 USERSVC
