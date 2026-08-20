@@ -34,6 +34,16 @@ def generate_bore(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Path|No
         try: dest.exists() and dest.unlink()
         except OSError: pass
         return None
+    # If SCX is active (scx_rusty), do not stack BORE — arbiter is single-writer.
+    try:
+        from .sched_arbiter import detect_scx_active as _detect_scx  # noqa: WPS433 -- local import to avoid cycle
+
+        if _detect_scx():
+            try: dest.exists() and dest.unlink()
+            except OSError: pass
+            return None
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort SCX probe
+        pass
     content="# Kyth Bore gaming — generated\nkernel.sched_bore=1\nkernel.sched_bore_burst_penalty_offset=12\n"
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp=dest.with_suffix(".tmp"); tmp.write_text(content,encoding="utf-8"); tmp.replace(dest); return dest

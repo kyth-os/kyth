@@ -18,6 +18,7 @@ kyth_build_initramfs() {
 	local attempt status=1
 	local stderr_log
 	stderr_log=$(mktemp)
+	trap 'rm -f "${stderr_log}"' RETURN
 
 	install -d -m 0700 /var/roothome
 
@@ -26,6 +27,7 @@ kyth_build_initramfs() {
 		if TMPDIR=/var/tmp dracut "$@" --nohardlink --force "${output}" 2>"${stderr_log}"; then
 			grep -Ev 'xattr|fail to copy' "${stderr_log}" >&2
 			if lsinitrd "${output}" >/dev/null; then
+				trap - RETURN
 				rm -f "${stderr_log}"
 				return 0
 			fi
@@ -42,6 +44,7 @@ kyth_build_initramfs() {
 		fi
 	done
 
+	trap - RETURN
 	rm -f "${output}" "${stderr_log}"
 	return "${status}"
 }

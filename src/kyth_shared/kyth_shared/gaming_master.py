@@ -51,12 +51,45 @@ def save_master(cfg: dict[str, Any], path: Path | None = None) -> Path:
     return p
 
 
+def _is_tuf_product() -> bool:
+    """Return True if DMI product matches ASUS TUF (fail closed)."""
+    try:
+        vendor = Path("/sys/class/dmi/id/sys_vendor").read_text(encoding="utf-8").strip()
+        product = Path("/sys/class/dmi/id/product_name").read_text(encoding="utf-8").strip()
+        import fnmatch as _fnm
+
+        return _fnm.fnmatchcase(vendor.casefold(), "asustek*".casefold()) and _fnm.fnmatchcase(
+            product.casefold(), "tuf*".casefold()
+        )
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort DMI probe
+        return False
+
+
 def _thermal_high(threshold_c: int = 85) -> bool:
-    """Return True if any thermal zone exceeds threshold (throttle gaming)."""
+    """Return True if any thermal zone exceeds threshold (throttle gaming).
+
+    On ASUS TUF the EC reports via asus-nb-wmi PPT and k10temp Tctl
+    rather than generic thermal_zone, so also probe those and use 80C
+    for TUF to account for shared PPT budget.
+    """
+    # TUF gets a lower trip (80C) due to shared PPT budget.
+    if _is_tuf_product():
+        threshold_c = min(threshold_c, 80)
     try:
         for zone in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
             try:
                 temp_millic = int(zone.read_text().strip())
+                if temp_millic > threshold_c * 1000:
+                    return True
+            except (OSError, ValueError):
+                continue
+        # asus-nb-wmi PPT/skin-temp and k10temp Tctl (extra sources for TUF)
+        for extra in list(Path("/sys/class/hwmon").glob("hwmon*/temp*_input")) + list(
+            Path("/sys/devices/platform").glob("asus-nb-wmi/hwmon/hwmon*/temp*_input")
+        ):
+            try:
+                temp_millic = int(extra.read_text().strip())
+                # hwmon temps are millidegree as well
                 if temp_millic > threshold_c * 1000:
                     return True
             except (OSError, ValueError):

@@ -247,14 +247,34 @@ module = "btusb"
 options = { enable_autosuspend = "0" }
 
 [[quirks]]
-id = "amdgpu-psr-disable"
-reason = "Disable Display Core PSR on Navi 33 (7480) DCN 3.2.1 and Rembrandt (1681) DCN 3.1.2 to avoid Pageflip timed out on eDP under Wayland/VRR"
+id = "asus-tuf-amd-cachy-stability"
+reason = "ASUS TUF all-AMD on CachyOS lacks asus-armoury.ko; use conservative GTT 2048 and retain recoverable faults, keep amd_pstate=active"
 expires_on = "2027-08-01"
-provenance = "https://gitlab.freedesktop.org/drm/amd/-/issues and journalctl amdgpu Pageflip timed out (DCN 3.2.1 on 7480, DCN 3.1.2 eDP-2 PSR 1)"
+provenance = "https://github.com/mrtrick37/kyth/issues — TUF all-AMD vs ZBook Intel+AMD, build.sh:83 asus-armoury.ko missing on Cachy"
+
+[quirks.match]
+dmi_vendors = ["ASUSTeK*"]
+dmi_products = ["TUF*"]
 
 [[quirks.match.pci]]
 vendor = "1002"
-devices = ["7480", "1681"]
+classes = ["0300", "0302", "0380"]
+drivers = ["amdgpu"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "amdgpu"
+options = { gttsize = "2048", noretry = "0" }
+
+[[quirks]]
+id = "amdgpu-psr-disable"
+reason = "Disable Display Core PSR on Navi 33 (7480) DCN 3.2.1, Rembrandt 780M (15b9/15bf/15be/164e) DCN 3.1.2/3.1.3 to avoid Pageflip timed out on eDP under Wayland/VRR — TUF A16 Phoenix"
+expires_on = "2027-08-01"
+provenance = "https://gitlab.freedesktop.org/drm/amd/-/issues and journalctl amdgpu Pageflip timed out (DCN 3.2.1 on 7480, DCN 3.1.2 eDP-2 PSR 1, TUF A16 15be/164e Phoenix)"
+
+[[quirks.match.pci]]
+vendor = "1002"
+devices = ["7480", "1681", "15bf", "15b9", "15be", "164e"]
 classes = ["0300", "0302", "0380"]
 drivers = ["amdgpu"]
 
