@@ -30,8 +30,8 @@ import subprocess
 
 logger = logging.getLogger(__name__)
 
-FLATPAK_CACHE_TTL = 10.0
-BOOTC_CACHE_TTL = 5.0
+FLATPAK_CACHE_TTL = 30.0
+BOOTC_CACHE_TTL = 60.0
 # Hub-side deadline for the whole availability probe. 45 s skopeo + flatpak
 # should never keep the spinner longer than this.
 AVAILABILITY_TIMEOUT_S = 15
@@ -120,8 +120,23 @@ def collect_availability(*, branch: str | None = None, use_cached: bool = True) 
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return AvailabilityStatus(state="error", detail=str(exc))
 
-    # Flatpak count — best effort, never fails the whole check
+    # Flatpak count — best effort, never fails the whole check; skip when
+    # network is clearly offline (nmcli disconnected) to avoid 15s remote-ls stall
     try:
+        nm = None
+        try:
+            from kyth_shared.commands import run as _run
+            r = _run(["nmcli", "-t", "-f", "STATE", "general"], capture_output=True, text=True, timeout=2)
+            if r and r.stdout:
+                nm = r.stdout.strip().lower()
+        except (OSError, ValueError, AttributeError):
+            nm = None
+        if nm in {"disconnected", "asleep", "unknown"}:
+            flatpak = 0
+            flatpak_detail = ""
+            return AvailabilityStatus(
+                state=system_state, detail=system_detail, flatpak_count=0, flatpak_detail=flatpak_detail, staged=False, manifest_raw=manifest_raw,
+            )
         flatpak = _flatpak_count_cached()
         flatpak_count = max(0, int(flatpak)) if flatpak is not None else 0
         flatpak_detail = ""
