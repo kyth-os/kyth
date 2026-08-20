@@ -34,19 +34,34 @@ def atomic_write_json(
             raise ValueError(f"refusing to write {path} with invariant violations: {errs}")
     dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # Best-effort per-file flock to prevent two writers racing mkstemp+rename
-    # (probe-cache, boot-health, update status). Non-blocking try — if lock
-    # contended, fall back to plain atomic write; durability still holds.
+    # Per-file flock with 2s blocking timeout + retry — prevents history
+    # loss when two writers race mkstemp+rename (probe-cache, boot-health).
+    # Falls back to unlocked atomic write only after timeout, durability still holds.
     _lock_fh = None
     try:
         import fcntl  # noqa: PLC0415 -- local import keeps non-Linux tests portable
+        import time as _time
 
         lock_path = dest.parent / f".{dest.name}.lock"
         _lock_fh = open(lock_path, "a+")  # noqa: SIM115, PTH123 -- held for duration of write
+        # fsync lock dir so lock file creation is durable
         try:
-            fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (BlockingIOError, OSError):
-            # Contended — proceed without lock; mkstemp+rename is still atomic
+            _ldir_fd = os.open(dest.parent, os.O_DIRECTORY)
+            try:
+                os.fsync(_ldir_fd)
+            finally:
+                os.close(_ldir_fd)
+        except OSError:
+            pass
+        locked = False
+        deadline = _time.monotonic() + 2.0
+        while not locked and _time.monotonic() < deadline:
+            try:
+                fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+            except (BlockingIOError, OSError):
+                _time.sleep(0.05)
+        if not locked:
             try:
                 _lock_fh.close()
             except OSError:
