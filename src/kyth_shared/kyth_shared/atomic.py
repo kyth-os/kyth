@@ -25,6 +25,8 @@ def atomic_write_json(
     - Fails closed if *invariants* returns non-empty list.
     - Uses mkstemp in parent dir, fchmod, flush+fsync, rename, fsync parent.
     - Cleans up temp file on failure.
+    - Serializes concurrent writers via per-file flock (best-effort, no-op
+      when flock unavailable — e.g. non-Linux test hosts).
     """
     if invariants is not None:
         errs = invariants()
@@ -32,6 +34,26 @@ def atomic_write_json(
             raise ValueError(f"refusing to write {path} with invariant violations: {errs}")
     dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # Best-effort per-file flock to prevent two writers racing mkstemp+rename
+    # (probe-cache, boot-health, update status). Non-blocking try — if lock
+    # contended, fall back to plain atomic write; durability still holds.
+    _lock_fh = None
+    try:
+        import fcntl  # noqa: PLC0415 -- local import keeps non-Linux tests portable
+
+        lock_path = dest.parent / f".{dest.name}.lock"
+        _lock_fh = open(lock_path, "a+")  # noqa: SIM115, PTH123 -- held for duration of write
+        try:
+            fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            # Contended — proceed without lock; mkstemp+rename is still atomic
+            try:
+                _lock_fh.close()
+            except OSError:
+                pass
+            _lock_fh = None
+    except (ImportError, OSError, AttributeError):  # noqa: BLE001 -- narrow: best-effort production path
+        _lock_fh = None
     fd, tmp = tempfile.mkstemp(prefix=f".{dest.name}.", dir=dest.parent, text=True)
     try:
         os.fchmod(fd, mode)
@@ -56,6 +78,18 @@ def atomic_write_json(
         except OSError:
             pass
         raise
+    finally:
+        if _lock_fh is not None:
+            try:
+                import fcntl  # noqa: PLC0415 -- local import keeps non-Linux tests portable
+
+                fcntl.flock(_lock_fh, fcntl.LOCK_UN)
+            except (OSError, ImportError, AttributeError):  # noqa: BLE001 -- narrow: best-effort production path
+                pass
+            try:
+                _lock_fh.close()
+            except OSError:
+                pass
 
 
 def read_json_or_default(path: str | Path, default: Any) -> Any:
