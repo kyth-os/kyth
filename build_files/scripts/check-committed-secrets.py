@@ -7,10 +7,13 @@ from pathlib import Path
 def main() -> int:
     patterns = {
         "private key block": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+        "age key": re.compile(r"AGE-SECRET-KEY-1[0-9A-Z]{58}"),
+        "cosign private key": re.compile(r"-----BEGIN ENCRYPTED COSIGN PRIVATE KEY-----"),
         "GitHub token": re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}\b"),
         "GitHub fine-grained token": re.compile(r"\bgithub_pat_[A-Za-z0-9_]{80,}\b"),
         "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
         "Slack token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
+        "generic high-entropy secret": re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b.*\b(?:secret|token|key)\b", re.IGNORECASE),
     }
     binary_suffixes = {".cer", ".png", ".jpg", ".jpeg", ".webp", ".ico"}
     

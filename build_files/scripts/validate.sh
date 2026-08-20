@@ -128,11 +128,25 @@ if [[ -n "${unexpected}" ]]; then
 	printf 'Unexpected systemd verification errors:\n%s\n' "${unexpected}" >&2
 	exit 1
 fi
+# Security audits — warn, but also enforce bash -c interpolation gate
+# Fail if any page/guardian still uses bash -c with variable interpolation (injection surface)
+if grep -rn --include="*.py" 'bash.*-c.*\$' src/kyth_shared/kyth_shared/guardian.py src/kyth-welcome 2>/dev/null | grep -v "static" | grep -q .; then
+	echo "Bash -c variable interpolation found in guardian/pages — use validated python helper instead" >&2
+	grep -rn --include="*.py" 'bash.*-c.*\$' src/kyth_shared/kyth_shared/guardian.py src/kyth-welcome 2>/dev/null | head -n 5 >&2
+	exit 1
+fi
 # Non-blocking security audit — warn, don't fail (thresholds are advisory while
 # the demonolith is being split). Surfaces hardening regressions early.
 if command -v systemd-analyze >/dev/null 2>&1; then
-	output_sec="$(systemd-analyze security build_files/kyth-ai-perfd.service build_files/kyth-guardian.service build_files/kyth-sched.service build_files/kyth-sched-arbiter.service build_files/kyth-batteryd.service build_files/kyth-probe.service 2>&1 || true)"
+	output_sec="$(systemd-analyze security build_files/kyth-ai-perfd.service build_files/kyth-guardian.service build_files/kyth-sched.service build_files/kyth-sched-arbiter.service build_files/kyth-batteryd.service build_files/kyth-probe.service build_files/kyth-probe-user.service build_files/kyth-update-watcher.service 2>&1 || true)"
 	printf '%s\n' "${output_sec}" | grep -E "^(build_files|Overall exposure)" || true
+fi
+# Supply-chain audit — non-blocking, surfaces cargo/pip advisories
+if command -v cargo >/dev/null 2>&1 && [ -f Cargo.lock ]; then
+	cargo audit 2>&1 | head -n 30 || true
+fi
+if command -v pip-audit >/dev/null 2>&1; then
+	pip-audit 2>&1 | head -n 30 || true
 fi
 
 echo "==> Just recipes"
