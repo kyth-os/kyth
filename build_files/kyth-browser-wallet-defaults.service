@@ -15,6 +15,7 @@ PrivateUsers=yes
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=%h
 ProtectClock=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
