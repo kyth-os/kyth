@@ -572,9 +572,33 @@ class UpdateWatcherDaemon(BaseDaemon):
                 except Exception as exc:
                     self.logger.debug("probe refresh after upgrade failed: %s", exc)
         else:
-            self.logger.error("bootc upgrade failed: %s", output[:500])
-            combined = "\n".join(x for x in [output, firmware_output] if x) or output
-            write_status("error", output[:500], combined, start_ts, flatpak_count)
+            from kyth_shared.boot_health import is_retryable_bootc_error
+            from kyth_shared.update_status import UpdateSnapshot, write_update_snapshot
+
+            if is_retryable_bootc_error(reason=output):
+                self.logger.warning("bootc upgrade retryable failure: %s", output[:500])
+                combined = "\n".join(x for x in [output, firmware_output] if x) or output
+                # Retryable — do not quarantine, allow next run to retry same digest
+                snap = UpdateSnapshot(
+                    result="error",
+                    reason=f"retryable: {output[:500]}",
+                    output=combined[-2000:],
+                    ts=start_ts,
+                    flatpak_updates=flatpak_count,
+                    image_ref=_STATUS_IDENTITY.get("image_ref", ""),
+                    booted_digest=_STATUS_IDENTITY.get("booted_digest", ""),
+                    staged_digest=_STATUS_IDENTITY.get("staged_digest", ""),
+                    remote_digest=_STATUS_IDENTITY.get("remote_digest", ""),
+                    retryable=True,
+                )
+                try:
+                    write_update_snapshot(snap, STATUS_PATH)
+                except OSError as exc:
+                    self.logger.warning("Could not write retryable status: %s", exc)
+            else:
+                self.logger.error("bootc upgrade failed: %s", output[:500])
+                combined = "\n".join(x for x in [output, firmware_output] if x) or output
+                write_status("error", output[:500], combined, start_ts, flatpak_count)
             self._exit_code = 1
 
 

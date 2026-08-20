@@ -1,5 +1,6 @@
 """Guard manual bootc upgrades with rollout and digest-quarantine policy."""
 from __future__ import annotations
+import json
 import logging
 import subprocess
 
@@ -84,6 +85,9 @@ def upgrade(
         return 0
     try:
         result = run(["bootc", "upgrade"], check=False, timeout=1800)
+    except subprocess.TimeoutExpired as exc:
+        print(f"bootc upgrade timed out after {exc.timeout}s — will retry on next run (not quarantined)", file=sys.stderr)
+        return 6
     except (FileNotFoundError, OSError) as exc:
         # `run` wraps subprocess.run — on hosts without bootc (e.g. testbeds,
         # wazuh nodes, or non-immutable dev VMs) the binary is missing and
@@ -96,7 +100,17 @@ def upgrade(
             print(f"Could not execute bootc: {exc}", file=sys.stderr)
         return 127
     if result.returncode:
-        return result.returncode
+        # If bootc reported failure but actually staged the digest (e.g. pull
+        # completed before post-pull hook failed), treat as staged so we don't
+        # force a retryable loop. Otherwise surface retryable pull hint.
+        try:
+            staged_after = image_digest_from_status(fetch_status_data(), "staged")
+            if staged_after == remote_digest:
+                pass  # fall through to record_staged success path
+            else:
+                return result.returncode
+        except (OSError, ValueError, TypeError, AttributeError, KeyError, json.JSONDecodeError):  # noqa: BLE001 -- narrow: best-effort production path
+            return result.returncode
     try:
         coord.record_staged(remote_digest, rollout_ring=image_ring(reference) or ring)
     except ValueError as exc:
