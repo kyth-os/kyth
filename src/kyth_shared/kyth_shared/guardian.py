@@ -142,12 +142,22 @@ RECIPES: dict[str, Recipe] = {
                "safe", False, True, 3600, "power", "Resets stuck power profile after driver update; no reboot."),
         Recipe("thermal.notify", "Thermal throttling detected", "thermal", tuple(),
                "advisory", False, False, 3600, "thermal", "System is hot — close heavy tasks and check vents; Guardian resumes after cooldown."),
+        Recipe("storage.smart-warn", "SMART disk health at risk", "storage", tuple(),
+               "advisory", False, False, 86400, "storage", "SMART reports reallocated/pending sectors — back up and check Disks."),
+        Recipe("memory.pressure-relief", "Memory pressure high", "memory", tuple(),
+               "advisory", False, False, 3600, "memory", "High PSI / low MemAvailable — close heavy apps; Guardian pauses auto-fixes until pressure drops."),
+        Recipe("network.vpn-fix", "Restart VPN connection", "network",
+               ("bash", "-c", "vpn=\"$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | grep ':vpn$' | cut -d: -f1 | head -n1)\"; [ -n \"$vpn\" ] && nmcli connection up \"$vpn\" 2>/dev/null || nmcli connection up \"$(nmcli -t -f NAME connection show 2>/dev/null | head -n1)\" 2>/dev/null || true"),
+               "safe", False, True, 1800, "network", "Re-establishes VPN after captive-portal hop; no secrets changed."),
+        Recipe("network.dns-flush", "Flush DNS cache", "network",
+               ("bash", "-c", "resolvectl flush-caches 2>/dev/null; systemd-resolve --flush-caches 2>/dev/null || true"),
+               "safe", False, True, 1800, "network", "Flushes systemd-resolved cache after portal/DNS change."),
         Recipe("update.review-health", "Review update health", "updates", tuple(),
                "advisory", False, False, 3600, "updates", "Run ujust update-health; rollback remains controlled by boot health."),
     )
 }
 
-ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates", "portal", "plasma", "firmware", "display", "controller", "power", "thermal"})
+ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates", "portal", "plasma", "firmware", "display", "controller", "power", "thermal", "memory"})
 # redact()'s input is capped at 4096 chars before any of these run, and none
 # of these patterns nest an unbounded quantifier over an overlapping
 # character class (the actual ReDoS shape) — verified empirically fast
@@ -344,6 +354,71 @@ def collect_symptoms() -> list[Symptom]:
             except (OSError, ValueError):
                 continue
     except (OSError, AttributeError):
+        pass
+    # SMART predictive — advisory, checks pending/reallocated via smartctl if present
+    try:
+        if shutil.which("smartctl"):
+            sm = _run(("smartctl", "--json", "scan"), 6)
+            if sm and sm.returncode == 0:
+                try:
+                    scan = json.loads(sm.stdout or "{}")
+                    for dev in (scan.get("devices") or [])[:2]:
+                        dname = dev.get("name", "")
+                        if not dname:
+                            continue
+                        health = _run(("smartctl", "-H", "--json", dname), 6)
+                        if health and health.returncode == 0 and "FAILED" in (health.stdout or ""):
+                            symptoms.append(Symptom("storage", f"SMART health failed on {dname}", ("storage.smart-warn",), "error"))
+                            break
+                except (ValueError, TypeError, AttributeError):
+                    pass
+    except (OSError, AttributeError):
+        pass
+    # Memory pressure — advisory, PSI or MemAvailable low but not yet suppressing
+    try:
+        low_mem = False
+        try:
+            mi = Path("/proc/meminfo").read_text(encoding="utf-8")
+            m = re.search(r"^MemAvailable:\s+(\d+)", mi, re.MULTILINE)
+            if m and int(m.group(1)) < 600_000:
+                low_mem = True
+        except OSError:
+            pass
+        try:
+            psi = Path("/proc/pressure/memory").read_text(encoding="utf-8")
+            # some avg10 > 30 indicates sustained pressure
+            if "avg10=" in psi:
+                vals = re.findall(r"avg10=([\d.]+)", psi)
+                if any(float(v) > 30 for v in vals):
+                    low_mem = True
+        except (OSError, ValueError):
+            pass
+        if low_mem:
+            # Only report if not already suppressed (suppression is <1.8M, this is <600k + PSI)
+            symptoms.append(Symptom("memory", "Memory pressure high — close heavy apps", ("memory.pressure-relief",), "warning"))
+    except (OSError, AttributeError):
+        pass
+    # VPN/DNS after portal — nmcli shows vpn disconnected or resolvectl failure
+    try:
+        vpn_state = _run(("nmcli", "-t", "-f", "TYPE,STATE", "connection", "show", "--active"), 5)
+        if vpn_state and vpn_state.returncode == 0 and "vpn:activated" not in (vpn_state.stdout or ""):
+            # Check if any VPN connection exists but not activated while network is connected
+            all_vpn = _run(("nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"), 5)
+            if all_vpn and ":vpn" in (all_vpn.stdout or ""):
+                # Network is up but VPN not active → suggest vpn-fix
+                nm2 = _run(("nmcli", "-t", "-f", "STATE", "general"), 4)
+                if nm2 and (nm2.stdout or "").strip() in {"connected", "connected (local only)"}:
+                    symptoms.append(Symptom("network", "VPN connection inactive while network is connected", ("network.vpn-fix", "network.dns-flush")))
+        # DNS stale: resolvectl status shows failed or empty
+        try:
+            dns = _run(("resolvectl", "status"), 5)
+            if dns and dns.returncode != 0:
+                # resolvectl failure after portal change → dns-flush
+                if any(s.component == "network" and "captive" in s.evidence for s in symptoms):
+                    symptoms.append(Symptom("network", "DNS cache may be stale after portal change", ("network.dns-flush",)))
+        except (OSError, ValueError, AttributeError):
+            pass
+    except (OSError, ValueError, AttributeError):
         pass
     return symptoms
 
@@ -660,6 +735,15 @@ def verify_recipe(recipe_id: str) -> bool:
                         return False
                 except (OSError, ValueError):
                     continue
+            return True
+        except (OSError, AttributeError):
+            return True
+    if recipe.verification == "memory":
+        try:
+            mi = Path("/proc/meminfo").read_text(encoding="utf-8")
+            m = re.search(r"^MemAvailable:\s+(\d+)", mi, re.MULTILINE)
+            if m and int(m.group(1)) < 600_000:
+                return False
             return True
         except (OSError, AttributeError):
             return True
