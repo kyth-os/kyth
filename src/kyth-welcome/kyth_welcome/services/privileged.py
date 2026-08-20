@@ -82,7 +82,8 @@ _PASSWORDLESS_KYTH_REFS = {
 }
 _SAFE_GATEWAY_RE = re.compile(r"^[A-Za-z0-9._:/?&=%+@\[\]-]+$")
 _SAFE_SCHEDULER_RE = re.compile(r"^scx_[A-Za-z0-9_-]+$")
-_SAFE_SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@\\-]+\.(?:service|timer|mount)$")
+_SAFE_SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@\\-]{1,80}\.(?:service|timer|mount)$")
+_SAFE_IMAGE_REF_RE = re.compile(r"^ghcr\.io/[A-Za-z0-9._/-]{1,80}:[A-Za-z0-9_.-]{1,64}$")
 _SYSTEMCTL_ACTIONS = frozenset({"start", "stop", "restart", "enable", "disable"})
 _SYSTEM_UNITS = frozenset({
     "bluetooth.service",
