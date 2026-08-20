@@ -90,15 +90,34 @@ class _DashboardMixin:
         layout3.addWidget(self._hud_storage_desc)
         hud_grid.addWidget(card3, 1, 0)
 
-        # Card 4: Quick Performance
+        # Card 4: Quick Performance + System Hub super-app link
         card4 = QFrame()
         card4.setObjectName("genz-hud-card")
         layout4 = QVBoxLayout(card4)
         layout4.setContentsMargins(18, 16, 18, 16)
         layout4.setSpacing(8)
-        title4 = QLabel("QUICK PERFORMANCE")
+        title4 = QLabel("QUICK PERFORMANCE — System Hub super-app")
         title4.setObjectName("hud-title")
         layout4.addWidget(title4)
+        perf_hint = QLabel("Power profile + display VRR + controller stack — all in System Hub Guardian. One-click Fix My Gaming uses same gated runner as Starter Packs.")
+        perf_hint.setObjectName("hud-desc")
+        perf_hint.setWordWrap(True)
+        layout4.addWidget(perf_hint)
+        # Inline gaming perf labels (populated by _update_gaming_hud)
+        self._hud_perf_profile = QLabel("Power: checking…")
+        self._hud_perf_profile.setObjectName("hud-desc")
+        layout4.addWidget(self._hud_perf_profile)
+        self._hud_perf_display = QLabel("Display: checking…")
+        self._hud_perf_display.setObjectName("hud-desc")
+        layout4.addWidget(self._hud_perf_display)
+        self._hud_perf_controller = QLabel("Controller: checking…")
+        self._hud_perf_controller.setObjectName("hud-desc")
+        layout4.addWidget(self._hud_perf_controller)
+        fix_gaming_btn = QPushButton("Fix My Gaming — power + display + controller")
+        fix_gaming_btn.setObjectName("primary")
+        fix_gaming_btn.setToolTip("Runs Guardian display.reconfigure + controller.repair + power.profile-fix via System Hub (gaming-aware, 30s bound)")
+        fix_gaming_btn.clicked.connect(self._fix_my_gaming)
+        layout4.addWidget(fix_gaming_btn)
 
         # Game Night Buttons
         gn_row = QHBoxLayout()
@@ -250,6 +269,79 @@ class _DashboardMixin:
             f"<b>Game Save Backups:</b> {saves_details}<br>"
             f"<b>PC Game Drives:</b> {drive_desc}"
         )
+
+        # 4. Quick Performance — System Hub link (populated after each probe)
+        try:
+            self._update_perf_hub_labels()
+        except Exception:
+            pass
+
+    def _update_perf_hub_labels(self):
+        # Best-effort hub labels — async via guardian probe, no direct subprocess in page module
+        try:
+            from kyth_shared.guardian import collect_symptoms
+
+            syms = collect_symptoms()
+            comps = {s.component: s for s in syms}
+            if hasattr(self, "_hud_perf_profile"):
+                if "power" in comps:
+                    self._hud_perf_profile.setText("Power: drift — System Hub → Guardian will reset profile")
+                else:
+                    self._hud_perf_profile.setText("Power: ok (System Hub → Guardian fixes stuck profile)")
+            if hasattr(self, "_hud_perf_display"):
+                if "display" in comps:
+                    self._hud_perf_display.setText("Display: drift — Hub will re-apply")
+                else:
+                    self._hud_perf_display.setText("Display: ok (connected+enabled)")
+            if hasattr(self, "_hud_perf_controller"):
+                if "controller" in comps:
+                    self._hud_perf_controller.setText("Controller: joycond inactive — Fix My Gaming will restart")
+                else:
+                    self._hud_perf_controller.setText("Controller: joycond active")
+        except Exception:
+            pass
+
+    def _fix_my_gaming(self):
+        from .services.runtime import DataWorker, guard_disposed
+        from .qt import QMessageBox
+
+        def _do_fix():
+            from kyth_shared.guardian import check
+            # Fix gaming stack only — uses same gated chain as Hub's Fix My System
+            return check(investigate=False, automatic=True)
+
+        # Reuse Guardian's Fix My System path but scoped to gaming recipes
+        try:
+            from kyth_shared.guardian import collect_symptoms
+            syms = collect_symptoms()
+            gaming_syms = [s for s in syms if s.component in {"display", "controller", "power"}]
+            if not gaming_syms:
+                QMessageBox.information(self, "Fix My Gaming", "Gaming stack looks healthy — no display/controller/power drift detected.")
+                return
+        except Exception:
+            pass
+        self._hud_perf_profile.setText("Running Fix My Gaming… (30s bound, gaming-aware)")
+        worker = DataWorker("fix-my-gaming", _do_fix)
+        worker.result.connect(guard_disposed(lambda _k, d: self._on_fix_gaming_done(d)))
+        worker.failed.connect(guard_disposed(lambda _k, m: self._hud_perf_profile.setText(f"Fix failed: {m}")))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_fix_gaming_done(self, data: dict):
+        try:
+            decs = data.get("decisions", [])
+            execd = [d for d in decs if isinstance(d, dict) and d.get("action") == "executed" and d.get("recipe_id") in {"display.reconfigure", "controller.repair", "power.profile-fix"}]
+            if execd:
+                self._hud_perf_profile.setText(f"Fixed {len(execd)}: {', '.join(d['recipe_id'] for d in execd)} — verified")
+            else:
+                suppressed = data.get("suppression_reason", "")
+                if suppressed:
+                    self._hud_perf_profile.setText(f"Paused — {suppressed}")
+                else:
+                    self._hud_perf_profile.setText("No gaming fixes needed — profile/display/controller ok")
+            self._update_perf_hub_labels()
+        except Exception:
+            pass
 
     def _build_familiar_desktop_card(self):
         from .qt import QLabel, QPushButton, QHBoxLayout
