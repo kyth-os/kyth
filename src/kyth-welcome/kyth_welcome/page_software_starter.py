@@ -37,6 +37,7 @@ class _StarterPackTabMixin:
         for pack in self._STARTER_PACKS:
             layout.addWidget(self._make_starter_pack_panel(pack))
 
+        layout.addWidget(self._make_opt_in_card())
         layout.addWidget(self._make_ms_fonts_card())
         layout.addWidget(self._make_m365_webapps_card())
 
@@ -107,6 +108,71 @@ class _StarterPackTabMixin:
             self._ms_fonts_status.setText("✓ Fonts installed. Restart LibreOffice to apply them.")
         else:
             self._ms_fonts_status.setText("✗ Installation failed. Check your network connection and try again.")
+
+    def _make_opt_in_card(self) -> QFrame:
+        """Single Hub for opt-in apps that were debloated from the base image."""
+        card, layout = _make_card("card-accent-ok")
+        title = QLabel("Opt-in apps — one click in System Hub (no store hop)")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
+            "These were removed from the base image to keep it lean, but stay one click away "
+            "here in System Hub — no separate store, no terminal. Uses the same gated install as Starter Packs."
+        )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        opts = [
+            ("Vesktop", "ujust install-vesktop", "Discord with Vencord, no Flatpak"),
+            ("OBS Studio", "ujust install-obs", "Screen recording/streaming"),
+            ("LibreOffice", "ujust install-libreoffice", "Office suite (also in packs)"),
+            ("Bitwarden", "flatpak install flathub com.bitwarden.desktop", "Password manager"),
+        ]
+        for idx, (label, cmd, tip) in enumerate(opts):
+            btn = QPushButton(label)
+            btn.setToolTip(f"{tip} — runs: {cmd}")
+            # Use the same privileged runner as Starter Packs
+            btn.clicked.connect(lambda _=False, c=cmd: self._run_opt_in(c))
+            grid.addWidget(btn, idx // 2, idx % 2)
+        layout.addLayout(grid)
+        note = QLabel("All installs are Flatpak or ujust — sandboxed, removable from Installed tab.")
+        note.setObjectName("caption-text")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self._opt_in_status = QLabel("")
+        self._opt_in_status.setObjectName("card-copy")
+        self._opt_in_status.hide()
+        layout.addWidget(self._opt_in_status)
+        return card
+
+    def _run_opt_in(self, cmd: str):
+        if hasattr(self, "_opt_in_worker") and self._opt_in_worker and self._opt_in_worker.isRunning():
+            return
+        self._opt_in_status.setText(f"Running: {cmd} …")
+        self._opt_in_status.show()
+        from .services.runtime import Worker
+        argv = ["bash", "-c", cmd] if cmd.startswith("flatpak") else ujust_command(cmd.split()[-1].replace("install-", "install-"))
+        # For ujust, use the validated wrapper; for flatpak use inline install
+        if cmd.startswith("ujust"):
+            recipe = cmd.split()[-1].replace("ujust ", "")
+            # ujust install-vesktop etc. are allowlisted recipes
+            try:
+                argv = ujust_command(recipe.replace("install-", "install-"))
+            except ValueError:
+                argv = ["bash", "-c", cmd]
+        self._opt_in_worker = Worker("opt-in", lambda: self._run_opt_in_sync(argv))
+        self._opt_in_worker.result.connect(lambda k, v: self._opt_in_status.setText(str(v)))
+        self._opt_in_worker.finished.connect(lambda: self._opt_in_worker.deleteLater())
+        self._opt_in_worker.start()
+
+    def _run_opt_in_sync(self, argv: list[str]) -> str:
+        from kyth_shared.commands import run
+        res = run(argv, capture_output=True, text=True, timeout=300)
+        if res and res.returncode == 0:
+            return "✓ Installed — find it in the Installed tab."
+        return f"✗ Failed: {(res.stderr or res.stdout or 'unknown')[:120]}"
 
     def _make_m365_webapps_card(self) -> QFrame:
         card, layout = _make_card()
