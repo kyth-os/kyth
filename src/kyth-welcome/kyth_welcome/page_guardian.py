@@ -139,7 +139,7 @@ class GuardianPage(Page):
         layout.addWidget(title)
 
         intro = QLabel(
-            "Guardian watches audio, network, Bluetooth, Flatpak, storage, and update health. "
+            "Guardian watches audio, portals, Plasma shell, network, Bluetooth, Flatpak, storage, and update health. "
             "Cheap checks run every 15 minutes and again when the system probe cache changes. "
             "The optional local model starts only when a case is ambiguous, picks one Kyth recipe, then exits."
         )

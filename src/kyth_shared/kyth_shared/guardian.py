@@ -111,6 +111,12 @@ RECIPES: dict[str, Recipe] = {
         Recipe("bluetooth.restart", "Restart Bluetooth", "bluetooth",
                ("sudo", "-A", "systemctl", "restart", "bluetooth.service"),
                "confirm", True, False, 1800, "bluetooth", "Re-open Bluetooth Settings and reconnect the device."),
+        Recipe("portal.restart-user", "Restart desktop portals", "portal",
+               ("systemctl", "--user", "restart", "xdg-desktop-portal.service", "xdg-desktop-portal-kde.service"),
+               "safe", False, True, 900, "portal", "If file pickers or screen sharing were blank, retry them now."),
+        Recipe("plasma.restart-user", "Restart Plasma shell", "plasma",
+               ("systemctl", "--user", "restart", "plasma-plasmashell.service"),
+               "safe", False, True, 900, "plasma", "If the panel or task manager vanished, it should reappear. Open windows are kept."),
         Recipe("disk.review", "Review storage usage", "storage", tuple(),
                "advisory", False, False, 3600, "storage", "Open System Hub > Hardware > Storage; Guardian never deletes files."),
         Recipe("update.review-health", "Review update health", "updates", tuple(),
@@ -118,7 +124,7 @@ RECIPES: dict[str, Recipe] = {
     )
 }
 
-ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates"})
+ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates", "portal", "plasma"})
 # redact()'s input is capped at 4096 chars before any of these run, and none
 # of these patterns nest an unbounded quantifier over an overlapping
 # character class (the actual ReDoS shape) — verified empirically fast
@@ -210,6 +216,12 @@ def collect_symptoms() -> list[Symptom]:
         symptoms.append(Symptom("network", f"NetworkManager state: {nm.stdout.strip()}", ("network.restart-user",)))
     if not _active("bluetooth.service"):
         symptoms.append(Symptom("bluetooth", "Bluetooth service is inactive", ("bluetooth.restart",)))
+    # Portals: file choosers / screen sharing break when either portal is down
+    portal_down = [unit for unit in ("xdg-desktop-portal.service", "xdg-desktop-portal-kde.service") if not _active(unit, user=True)]
+    if portal_down:
+        symptoms.append(Symptom("portal", f"Inactive portal services: {', '.join(portal_down)}", ("portal.restart-user",)))
+    if not _active("plasma-plasmashell.service", user=True):
+        symptoms.append(Symptom("plasma", "Plasma shell service is inactive", ("plasma.restart-user",)))
     flatpak = _run(("flatpak", "list", "--app", "--columns=application"), 10)
     if flatpak and flatpak.returncode != 0:
         symptoms.append(Symptom("flatpak", f"Flatpak query failed: {flatpak.stderr.strip()}",
@@ -452,6 +464,10 @@ def verify_recipe(recipe_id: str) -> bool:
     if recipe.verification == "flatpak":
         result = _run(("flatpak", "list", "--app", "--columns=application"), 10)
         return bool(result and result.returncode == 0)
+    if recipe.verification == "portal":
+        return _active("xdg-desktop-portal.service", user=True) and _active("xdg-desktop-portal-kde.service", user=True)
+    if recipe.verification == "plasma":
+        return _active("plasma-plasmashell.service", user=True)
     return False
 
 
