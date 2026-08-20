@@ -14,6 +14,7 @@ from kyth_shared.session import (
     already_run,
     check_firstboot_app_status,
     disable_vscode_brave_wallet_prompts,
+    enable_vscode_brave_wallet_prompts,
     mark_run,
     marker_path,
     write_chromium_flags,
@@ -27,13 +28,13 @@ class SessionTests(unittest.TestCase):
         launcher = ROOT / "build_files" / "kyth-vscode-wallet"
         with (
             mock.patch(
-                "kyth_shared.session.disable_vscode_brave_wallet_prompts"
-            ) as disable_prompts,
+                "kyth_shared.session.enable_vscode_brave_wallet_prompts"
+            ) as enable_prompts,
             mock.patch("builtins.print"),
         ):
             runpy.run_path(str(launcher), run_name="__main__")
 
-        disable_prompts.assert_called_once_with(pathlib.Path.home())
+        enable_prompts.assert_called_once_with(pathlib.Path.home())
 
     @mock.patch("pathlib.Path.home")
     def test_marker_path(self, mock_home) -> None:
@@ -67,7 +68,7 @@ class SessionTests(unittest.TestCase):
         p = pathlib.Path("/dummy/argv.json")
         write_code_argv(p)
         mock_write.assert_called_once()
-        self.assertIn('"password-store": "basic"', mock_write.call_args[0][0])
+        self.assertIn('"password-store": "kwallet5"', mock_write.call_args[0][0])
 
     @mock.patch("pathlib.Path.is_file")
     @mock.patch("pathlib.Path.read_text")
@@ -78,12 +79,21 @@ class SessionTests(unittest.TestCase):
         p = pathlib.Path("/dummy/flags.conf")
         write_chromium_flags(p)
         mock_write.assert_called_once()
-        self.assertIn("--password-store=basic", mock_write.call_args[0][0])
+        self.assertIn("--password-store=kwallet5", mock_write.call_args[0][0])
 
     @mock.patch("kyth_shared.session.write_chromium_flags")
     @mock.patch("kyth_shared.session.write_code_argv")
     def test_disable_vscode_brave_wallet_prompts(self, mock_argv, mock_flags) -> None:
+        # disable is kept as alias to enable for backward compatibility
         disable_vscode_brave_wallet_prompts(pathlib.Path("/dummy/home"))
+        mock_argv.assert_called_once()
+        self.assertEqual(mock_flags.call_count, 7)
+
+    @mock.patch("kyth_shared.session.write_chromium_flags")
+    @mock.patch("kyth_shared.session.write_code_argv")
+    def test_enable_vscode_brave_wallet_prompts(self, mock_argv, mock_flags) -> None:
+        from kyth_shared.session import enable_vscode_brave_wallet_prompts
+        enable_vscode_brave_wallet_prompts(pathlib.Path("/dummy/home"))
         mock_argv.assert_called_once()
         self.assertEqual(mock_flags.call_count, 7)
 

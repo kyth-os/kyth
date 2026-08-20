@@ -482,10 +482,13 @@ def main() -> None:
             new_lines = []
             for line in lines:
                 if line.startswith("Exec="):
-                    if "--password-store=basic" not in line:
-                        line = re.sub(r"(com\.brave\.Browser)(\s|$)", r"\1 --password-store=basic\2", line)
+                    # Migrate legacy basic store to kwallet5; ensure kwallet5 is present
+                    if "--password-store=basic" in line:
+                        line = line.replace("--password-store=basic", "--password-store=kwallet5")
+                    if "--password-store=kwallet5" not in line and "--password-store=kwallet" not in line:
+                        line = re.sub(r"(com\.brave\.Browser)(\s|$)", r"\1 --password-store=kwallet5\2", line)
                         if "flatpak run" not in line:
-                            line = re.sub(r"(brave-browser|brave)(\s|$)", r"\1 --password-store=basic\2", line)
+                            line = re.sub(r"(brave-browser|brave)(\s|$)", r"\1 --password-store=kwallet5\2", line)
                 new_lines.append(line)
             atomic_write_text(brave_desktop_dst, "".join(new_lines), encoding="utf-8")
         except Exception:

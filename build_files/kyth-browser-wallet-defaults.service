@@ -1,10 +1,10 @@
 [Unit]
-Description=Apply quiet VS Code and Brave wallet defaults
-ConditionPathExists=!%h/.local/state/kyth/browser-wallet-defaults-v1
+Description=Apply VS Code and Brave KWallet defaults
+ConditionPathExists=!%h/.local/state/kyth/browser-wallet-defaults-v2
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/bash -c 'set -euo pipefail; /usr/bin/kyth-vscode-wallet; mkdir -p "${HOME}/.local/state/kyth"; touch "${HOME}/.local/state/kyth/browser-wallet-defaults-v1"'
+ExecStart=/usr/bin/bash -c 'set -euo pipefail; /usr/bin/kyth-vscode-wallet; mkdir -p "${HOME}/.local/state/kyth"; touch "${HOME}/.local/state/kyth/browser-wallet-defaults-v2"'
 # Runs once ever (marker-gated), often right at first login — deprioritized
 # so it never competes with the desktop session for cycles.
 Nice=15

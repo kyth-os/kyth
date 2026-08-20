@@ -39,7 +39,7 @@ def acquire_run_lock(lock_path: Path):
 
 
 def write_code_argv(path: Path) -> None:
-    """Disable keyring prompt in VS Code argv.json."""
+    """Configure VS Code to use KWallet for credential storage."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except (OSError, ValueError, KeyError) as exc:
@@ -55,7 +55,7 @@ def write_code_argv(path: Path) -> None:
         except Exception:
             logger.debug("handled expected exception", exc_info=True)
             pass
-    data["password-store"] = "basic"
+    data["password-store"] = "kwallet5"
     try:
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except Exception:
@@ -64,7 +64,7 @@ def write_code_argv(path: Path) -> None:
 
 
 def write_chromium_flags(path: Path) -> None:
-    """Configure password store to basic in Chromium/Brave flags file."""
+    """Configure password store to kwallet5 in Chromium/Brave flags file."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
@@ -84,13 +84,13 @@ def write_chromium_flags(path: Path) -> None:
         stripped = line.strip()
         if stripped.startswith("--password-store=") or stripped.startswith("password-store="):
             if not wrote_password_store:
-                updated.append("--password-store=basic")
+                updated.append("--password-store=kwallet5")
                 wrote_password_store = True
             continue
         updated.append(line)
 
     if not wrote_password_store:
-        updated.append("--password-store=basic")
+        updated.append("--password-store=kwallet5")
 
     try:
         path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
@@ -100,7 +100,13 @@ def write_chromium_flags(path: Path) -> None:
 
 
 def disable_vscode_brave_wallet_prompts(home: Path) -> None:
-    """Disable keyring integrations for VS Code and Brave browser to stop KWallet prompts."""
+    """Configure VS Code and Brave to use KWallet (replaces legacy basic store)."""
+    # Kept for backward compatibility; now enables KWallet instead of basic.
+    return enable_vscode_brave_wallet_prompts(home)
+
+
+def enable_vscode_brave_wallet_prompts(home: Path) -> None:
+    """Enable KWallet integration for VS Code and Brave browser."""
     write_code_argv(home / ".config" / "Code" / "argv.json")
     for flags_path in (
         home / ".config" / "brave-flags.conf",
