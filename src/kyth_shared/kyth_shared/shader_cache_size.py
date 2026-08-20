@@ -32,7 +32,8 @@ def _vram_gb() -> int:
         if r and r.stdout:
             m=re.search(r"VRAM.*?(\d+)G",r.stdout)
             if m: return int(m.group(1))
-    except Exception: pass
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        pass
     try:
         for d in Path("/sys/class/drm").glob("card*/device/mem_info_vram_total"):
             try: return int(d.read_text().strip())//1024//1024//1024

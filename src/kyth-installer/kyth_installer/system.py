@@ -36,7 +36,7 @@ def list_timezones() -> list[str]:
         zones = [ln.strip() for ln in out.splitlines() if ln.strip()]
         if zones:
             return zones
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         _logger.debug("list_timezones: timedatectl probe failed", exc_info=True)
     # timedatectl unavailable or returned nothing — read zone.tab directly.
     for tab in ("/usr/share/zoneinfo/zone1970.tab", "/usr/share/zoneinfo/zone.tab"):
@@ -51,7 +51,7 @@ def list_timezones() -> list[str]:
                             zones.append(parts[2])
             if zones:
                 return sorted(set(zones))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             _logger.debug("list_timezones: reading %s failed", tab, exc_info=True)
     return ["UTC"]
 
@@ -65,7 +65,7 @@ def _list_localectl_values(kind: str, fallback: list[str]) -> list[str]:
         values = sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
         if values:
             return values
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         _logger.debug("localectl list-%s failed", kind, exc_info=True)
     return fallback
 
@@ -99,7 +99,7 @@ def _read_lines(path: Path) -> list[str]:
     """Read a target-tree file via elevated cat (never host open())."""
     try:
         return _accounts._read_lines(path, _run)
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         raise type(exc)(
             f"{format_os_error(exc, path=path) if isinstance(exc, OSError) else exc}"
         ) from exc
@@ -116,7 +116,7 @@ def _write_lines(path: Path, lines: list[str], mode: int) -> None:
         _accounts._write_lines(path, lines, mode, _run)
     except OSError as exc:
         raise OSError(format_os_error(exc, path=str(path))) from exc
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         # run_command raises RuntimeError with command detail; annotate path.
         raise RuntimeError(f"Could not write {path}: {exc}") from exc
 
@@ -137,7 +137,7 @@ def ensure_system_accounts(deploy_root: str, log) -> None:
         _accounts.ensure_system_accounts(deploy_root, log, run=_run)
     except OSError as exc:
         raise OSError(format_os_error(exc, path=deploy_root)) from exc
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         raise RuntimeError(f"Could not repair system accounts under {deploy_root}: {exc}") from exc
 
 
@@ -170,7 +170,7 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
             log("Secure Boot: not currently enabled — enrollment staging skipped")
             log("Secure Boot: if you enable it later, run 'ujust enroll-secureboot'")
             return "skipped"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Secure Boot: could not check state ({exc}) — skipping enrollment staging")
         return "skipped"
 
@@ -182,7 +182,7 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
         if "KythOS Secure Boot" in enrolled.stdout:
             log("Secure Boot: KythOS key already enrolled")
             return "enrolled"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Secure Boot: could not check enrolled keys ({exc}) — continuing")
 
     try:
@@ -193,7 +193,7 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
         if "KythOS Secure Boot" in pending.stdout:
             log("Secure Boot: enrollment already staged — confirm it on next boot")
             return "pending"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Secure Boot: could not check staged keys ({exc}) — continuing")
 
     try:
@@ -206,7 +206,7 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
             return "staged"
         log(f"Secure Boot: mokutil import failed (exit {result.returncode}): {result.stderr.strip()}")
         return "failed"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Secure Boot: enrollment staging failed: {exc}")
         return "failed"
 

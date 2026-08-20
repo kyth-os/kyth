@@ -22,7 +22,7 @@ class _HealthMixin:
         try:
             from kyth_shared.system.btrfs_status import btrfs_health_summary
             return btrfs_health_summary()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return "ok", "btrfs maint idle"
 
     def _set_status(self, state: str, text: str) -> None:
@@ -128,7 +128,7 @@ class _HealthMixin:
 
             _restyle(self._ai_card)
             self._ai_card.show()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             self._ai_card.hide()
 
         self._health_worker = DataWorker("health", _health_command_report)
@@ -212,7 +212,7 @@ class _HealthMixin:
             from kyth_shared.diagnostics_scrub import scrub_logs as _scrub
 
             report = _scrub(report)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             self._set_status("err", "Privacy scrub failed; the issue was not opened.")
             return
         report_dir = os.path.expanduser("~/.local/state/kyth")

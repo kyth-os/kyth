@@ -38,7 +38,7 @@ def load_toml_config(
                 if isinstance(config_data, dict):
                     res.update(config_data)
                 return res
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 logger.debug("handled expected exception", exc_info=True)
                 pass
     return default_config.copy()

@@ -51,9 +51,9 @@ def configure_installed_system(
             log(f"Final check [{check.status}]: {check.name} — {check.detail}")
         try:
             persist_artifacts(log, context)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             log(f"Warning: could not persist success artifacts: {exc}")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         # Rollback fstab on any failure before unmount — prevents unbootable partial write
         if fstab_path is not None:
             try:

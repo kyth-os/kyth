@@ -29,7 +29,7 @@ class SessionRow:
             return "—"
         try:
             return datetime.fromtimestamp(self.started_at).strftime("%b %d %H:%M")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return "—"
 
     @property
@@ -75,7 +75,7 @@ def _load_latency_map() -> dict[float, tuple[float, float]]:
             sa = float(obj.get("started_at", 0))
             if sa:
                 m[sa] = (float(obj.get("avg_ms", 0)), float(obj.get("p99_ms", 0)))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return m
     return m
 
@@ -97,7 +97,7 @@ def recent_sessions(limit: int = 15) -> list[SessionRow]:
                     (limit,),
                 ).fetchall()
                 has_lat = True
-            except Exception:
+            except Exception:  # noqa: BLE001 -- broad: DB schema fallback must catch sqlite3.OperationalError
                 rows = conn.execute(
                     "SELECT game_name, started_at, duration_s, avg_fps, p1_low_fps, "
                     "stutter_count, scheduler FROM sessions "
@@ -107,7 +107,7 @@ def recent_sessions(limit: int = 15) -> list[SessionRow]:
                 has_lat = False
         finally:
             conn.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 -- broad: DB connection/query must catch sqlite3.Error
         return []
 
     sessions: list[SessionRow] = []

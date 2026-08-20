@@ -13,7 +13,7 @@ def autoclean(home: Path = Path("/home"), limit_percent: int = 20) -> dict[str, 
         r=run(["btrfs","filesystem","show", str(home)], capture_output=True, timeout=5)
         if r.returncode!=0:
             return {"status":"not-btrfs"}
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return {"status":"no-btrfs"}
     # Set qgroup limit if snapper present
     try:
@@ -21,14 +21,14 @@ def autoclean(home: Path = Path("/home"), limit_percent: int = 20) -> dict[str, 
         run(["btrfs","quota","enable", str(home)], capture_output=True, timeout=5)
         # limit via qgroup (best-effort)
         run(["btrfs","qgroup","limit", f"{limit_percent}%", str(home)], capture_output=True, timeout=5)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     # Snapper cleanup
     try:
         run(["snapper","-c","root","set-config","TIMELINE_LIMIT_HOURLY=5","TIMELINE_LIMIT_DAILY=7","TIMELINE_LIMIT_MONTHLY=2"], capture_output=True, timeout=5)
         run(["snapper","cleanup","timeline"], capture_output=True, timeout=10)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return {"status":"ok", "limit": f"{limit_percent}%"}

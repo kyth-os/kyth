@@ -52,7 +52,7 @@ def _on_btrfs() -> bool:
 
         r = _run(["findmnt", "-no", "FSTYPE", "-T", "/var"], capture_output=True, text=True, timeout=5)
         return bool(r and "btrfs" in r.stdout)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     try:

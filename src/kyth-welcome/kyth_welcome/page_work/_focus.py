@@ -96,7 +96,7 @@ class _FocusMixin:
             if args:
                 self._focus_notification_cookie = int(args[0])
                 return True
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             _logger.debug("_inhibit_notifications: D-Bus Inhibit call failed", exc_info=True)
         return False
 
@@ -107,7 +107,7 @@ class _FocusMixin:
             return
         try:
             self._notifications_interface().call("UnInhibit", cookie)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             _logger.debug("_release_notification_inhibit: D-Bus UnInhibit call failed", exc_info=True)
 
     def _launch_focus_apps(self):
@@ -182,7 +182,7 @@ class _FocusMixin:
             proc.terminate()
             try:
                 proc.wait(timeout=5)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 proc.kill()
                 proc.wait()
 

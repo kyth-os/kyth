@@ -36,7 +36,7 @@ def unlock_bitlocker_drive(dev: str, key: str) -> tuple[bool, str]:
             ["udisksctl", "unlock", "-b", dev, "--key-file", "/dev/stdin"],
             input=key, capture_output=True, text=True, timeout=180, check=False,
         )
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return False, str(exc)
     if r.returncode != 0:
         return False, (r.stderr or r.stdout).strip() or "Unlock failed."
@@ -49,7 +49,7 @@ def unlock_bitlocker_drive(dev: str, key: str) -> tuple[bool, str]:
             ["udisksctl", "mount", "-b", m.group(1)],
             capture_output=True, text=True, timeout=60, check=False,
         )
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return False, str(exc)
     if rm.returncode != 0:
         return False, (rm.stderr or rm.stdout).strip() or "Mount failed."

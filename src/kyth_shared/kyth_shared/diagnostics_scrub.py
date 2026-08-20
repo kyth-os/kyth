@@ -84,7 +84,7 @@ def scrub_logs(text: str) -> str:
         host = _socket.gethostname()
         if host and len(host) > 2:
             text = text.replace(host, "[hostname]")
-    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     # XDG HOME fallback env
     try:
@@ -92,7 +92,7 @@ def scrub_logs(text: str) -> str:
         if user and len(user) > 1:
             # Avoid double-redacting already handled /home path
             text = re.sub(rf"\b{re.escape(user)}\b", "redacted", text)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return text

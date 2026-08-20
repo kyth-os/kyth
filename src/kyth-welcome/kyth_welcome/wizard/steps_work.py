@@ -16,7 +16,7 @@ def work_ready_checks() -> list[tuple[str, Callable[[], tuple[bool, str]]]]:
     try:
         from ..services.flatpak import _is_flatpak_installed  # type: ignore
         checks.append(("flatpak", lambda: (True, "flatpak ready") if _is_flatpak_installed("com.brave.Browser") else (False, "Brave not installed")) )
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     # Fonts, rclone, SMB, printer checks are best-effort; wizard shows "will apply on next online"
     checks.append(("fonts", lambda: (True, "fonts idempotent — extra fonts via ujust install-ms-fonts")))
@@ -63,7 +63,7 @@ class _WorkStepMixin:
                 try:
                     _ok, msg = fn()
                     msgs.append(f"{label}: {msg}")
-                except Exception as exc:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                     msgs.append(f"{label}: {exc}")
             status.setText("\n".join(msgs))
 

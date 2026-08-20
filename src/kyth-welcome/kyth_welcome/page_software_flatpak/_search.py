@@ -22,7 +22,7 @@ class _SearchMixin:
             # Real cache stores last results per query; for offline we return last search
             if isinstance(data, list) and data:
                 return data
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         return None
 
@@ -30,7 +30,7 @@ class _SearchMixin:
         try:
             pathlib.Path(_FLATHUB_CACHE).parent.mkdir(parents=True, exist_ok=True)
             pathlib.Path(_FLATHUB_CACHE).write_text(json.dumps(results[:20]))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
 
     def _run_fp_search(self):

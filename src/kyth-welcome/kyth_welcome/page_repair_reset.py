@@ -53,7 +53,7 @@ class _ResetMixin:
             try:
                 from kyth_shared.system.probe import invalidate_bootc
                 invalidate_bootc()
-            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
             self._status_lbl.setText("Rollback staged — rebooting into the previous system image…")
             self._status_lbl.setObjectName("status-ok")

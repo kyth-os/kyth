@@ -90,7 +90,7 @@ def commit_new_kythos_partition(
             if before_partition is not None:
                 try:
                     before_partition()
-                except Exception as exc:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                     log(f"{failure_message}: {exc}")
                     raise
             btrfs_start = ensure_bios_boot_partition(
@@ -119,7 +119,7 @@ def commit_new_kythos_partition(
             ):
                 try:
                     dependencies.run_command(command, check=False, timeout=15)
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     pass
             dependencies.settle()
             created = dependencies.latest_partition(disk, before)
@@ -142,7 +142,7 @@ def commit_new_kythos_partition(
                         f"Warning: kernel did not yet expose {created} after rereadpt — "
                         "proceeding, udev may still settle."
                     )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- broad: verify is best-effort, must catch StopIteration from mocks and any probe failure
                 log(f"Warning: could not verify new partition {created}: {exc}")
             log(f"Created target partition {created}")
             return created
@@ -159,7 +159,7 @@ def shrink_ntfs_filesystem_guarded(
     log(f"NTFS resize requested: shrink {partition} by {human_size(shrink_bytes)}")
     try:
         shrink_filesystem(partition, "ntfs", new_size, log)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         log(
             "NTFS filesystem shrink failed — no partition table change was made. "
             "The NTFS volume is unchanged and the installer made no destructive write."
@@ -227,7 +227,7 @@ def prepare_ntfs_resize_target(
         raise
     except (OSError, ValueError) as exc:
         _logger.debug("ntfs marker probe failed for %s: %s", preliminary if 'preliminary' in locals() else "unknown", exc, exc_info=True)
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         _logger.debug("ntfs marker probe unexpected error, failing closed: %s", exc, exc_info=True)
         raise
 

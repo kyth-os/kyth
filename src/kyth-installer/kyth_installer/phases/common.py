@@ -41,7 +41,7 @@ def _start_power_watch(log, context, stop_event: threading.Event) -> threading.T
                     log(msg)
                     try:
                         context._power_failed = msg  # type: ignore[attr-defined]
-                    except Exception:
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                         pass
                     # Also trigger the same abort path as user cancel — streaming loop
                     # checks a single abort_event (cancel_requested). Unifying keeps
@@ -49,10 +49,10 @@ def _start_power_watch(log, context, stop_event: threading.Event) -> threading.T
                     try:
                         context.cancel_requested.set()
                         context.events.publish({"type": "log", "text": msg})
-                    except Exception:
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                         pass
                     break
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
 
     th = threading.Thread(target=_watch, name="kyth-power-watch", daemon=True)
@@ -77,7 +77,7 @@ def _disk_image_hold(disk: str, log):
                 fd = os.open(disk, os.O_RDONLY)
                 fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
                 log(f"Holding shared lock on {disk} through image write...")
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 log(f"Warning: could not flock disk for IMAGE phase: {exc}")
                 fd = -1
             yield
@@ -86,7 +86,7 @@ def _disk_image_hold(disk: str, log):
                 try:
                     fcntl.flock(fd, fcntl.LOCK_UN)
                     os.close(fd)
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     pass
 
     return _hold()
@@ -119,6 +119,6 @@ def _record_transaction(
     except (OSError, ValueError) as exc:
         if log is not None:
             log(f"Warning: could not update installer transaction report: {exc}")
-    except Exception as exc:  # fallback for unexpected
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # fallback for unexpected
         if log is not None:
             log(f"Warning: could not update installer transaction report: {exc}")

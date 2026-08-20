@@ -14,7 +14,7 @@ def load_compat(path: Path | None = None) -> dict[str, Any]:
     p=compat_path(path)
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return {"entries": {}}
 
 def check_exe(exe_path: Path | str, compat: dict[str, Any] | None = None) -> dict[str, str]:
@@ -23,7 +23,7 @@ def check_exe(exe_path: Path | str, compat: dict[str, Any] | None = None) -> dic
     p=Path(exe_path)
     try:
         h=hashlib.sha256(p.read_bytes()[:1<<20]).hexdigest()[:12] if p.exists() else "unknown"
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         h="unknown"
     entries=compat.get("entries", {}) if isinstance(compat, dict) else {}
     # lookup by hash or by name

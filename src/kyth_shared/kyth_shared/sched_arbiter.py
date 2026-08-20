@@ -56,13 +56,13 @@ def detect_scx_active() -> bool:
             r = run_command(["systemctl", "is-active", "--quiet", "scx_loader.service"], check=False, timeout=2)
             if r and r.returncode == 0:
                 return True
-        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
         try:
             r = run_command(["systemctl", "is-active", "--quiet", "scx.service"], check=False, timeout=2)
             if r and r.returncode == 0:
                 return True
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     # pgrep fallback
@@ -71,7 +71,7 @@ def detect_scx_active() -> bool:
             r = run_command(["pgrep", "-x", "scx_rusty"], capture_output=True, check=False, timeout=2)
             if r and r.returncode == 0 and getattr(r, "stdout", b"").strip():
                 return True
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     # binary present but not active => not active
@@ -81,7 +81,7 @@ def detect_scx_active() -> bool:
 def bore_available(flavor_path: Path = KERNEL_FLAVOR_PATH) -> bool:
     try:
         return flavor_path.read_text(encoding="utf-8").strip().lower() in ("cachy", "cachyos")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return False
 
 
@@ -128,7 +128,7 @@ def arbiter_status(flag: Path | None = None) -> str:
         try:
             data = json.loads(fp.read_text(encoding="utf-8"))
             return str(data.get("active", "unknown"))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     # fallback to config
@@ -195,7 +195,7 @@ def generate_arbiter(cfg: dict[str, Any] | None = None, dest: Path | None = None
                 new_text = text.replace("[cpu]", f"[cpu]\npin_cores = {desired}", 1)
             if new_text != text:
                 ini.write_text(new_text, encoding="utf-8")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return dest

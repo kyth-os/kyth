@@ -21,7 +21,7 @@ def load_sbom(path: Path | None = None) -> dict[str, Any]:
     p = sbom_path(path)
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return {"artifacts": []}
 
 
@@ -29,7 +29,7 @@ def load_cve(path: Path | None = None) -> dict[str, Any]:
     p = cve_path(path)
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return {"results": []}
 
 

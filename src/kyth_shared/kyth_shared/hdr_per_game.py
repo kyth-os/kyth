@@ -33,7 +33,7 @@ def load_hdr_per_game(path: Path | None = None) -> dict[str,Any]:
             continue
         try:
             peak=int(e.get("peak_nits",400))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             peak=400
         peak=max(100, min(4000, peak))
         out[str(app)]={"peak_nits":peak,"itm": bool(e.get("itm", False))}
@@ -60,7 +60,7 @@ def _driver_version() -> str:
         r = _run(["glxinfo", "-B"], capture_output=True, text=True, timeout=2)
         if r and "OpenGL version" in r.stdout:
             return r.stdout.split("OpenGL version")[1].splitlines()[0].strip()[:32]
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     try:

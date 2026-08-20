@@ -26,7 +26,7 @@ class _DevMixin:
                 try:
                     w = Worker(ujust_command(r))
                     w.start()
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     pass
             btn.clicked.connect(lambda _=False, r=recipe: _run(r))
             row.addWidget(btn)

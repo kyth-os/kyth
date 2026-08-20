@@ -33,7 +33,7 @@ def installed_app_ids() -> frozenset[str] | None:
         from .appstream import warm_appstream_cache
 
         warm_appstream_cache()
-    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     if isinstance(raw, frozenset):
         return raw
@@ -57,7 +57,7 @@ def list_installed_apps() -> list[dict[str, str]]:
             check=False,
             env=env,
         )
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         _logger.debug("flatpak list failed: %s", exc, exc_info=True)
         return []
     if result.returncode != 0:
@@ -109,7 +109,7 @@ def flatpak_override_show(app_id: str) -> str:
         if r.returncode != 0:
             return ""
         return r.stdout
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return ""
  # flatpak_override_show
 

@@ -275,7 +275,7 @@ def _partitions_after(disk: str, partition: str) -> list[dict]:
                 if name and name != partition and _disk._safe_int(item.get("start"), -1) * 512 > part_start:
                     found.append(item)
             stack.extend(item.get("children") or [])
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         raise RuntimeError(
             f"Could not verify the partition order on {disk}. No storage changes were made."
         ) from exc

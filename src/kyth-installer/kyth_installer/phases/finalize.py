@@ -38,7 +38,7 @@ def _blkid_uuid(part: str, log, *, timeout: float = 5) -> str | None:
             ["blkid", "-s", "UUID", "-o", "value", part],
             capture_output=True, text=True, check=True, timeout=timeout,
         )
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Warning: could not read UUID for {part}: {exc}")
         return None
     uuid_out = result.stdout.strip()
@@ -155,17 +155,17 @@ def _handle_install_failure(exc: Exception, log, context: InstallerContext) -> N
             f"(also failed writing installer log {LOG_FILE}: "
             f"{format_os_error(log_exc, path=LOG_FILE)})"
         )
-    except Exception as log_exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as log_exc:  # noqa: BLE001 -- narrow: best-effort production path
         message = f"{message} (also failed writing installer log {LOG_FILE}: {log_exc})"
     log(f"ERROR: {message}")
     context.transition(InstallLifecycle.FAILED)
     _record_transaction(context, "failed", message=message, log=log)
     try:
         write_failure_summary(FAILURE_SUMMARY_FILE, context=context, message=message)
-    except Exception as summary_exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as summary_exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Warning: could not write failure summary: {summary_exc}")
     try:
         _persist_failure_to_target_disk(log, context, message)
-    except Exception as persist_exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as persist_exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Warning: could not persist failure to target disk: {persist_exc}")
     _push({"type": "error", "message": message}, context)

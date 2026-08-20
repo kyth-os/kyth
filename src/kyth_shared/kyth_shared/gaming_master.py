@@ -101,7 +101,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             from .gaming_snapshot import ensure_snapshot_before_master
 
             ensure_snapshot_before_master()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     out: dict[str, str] = {}
@@ -114,7 +114,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
         if not dry_run:
             save_kargs(c)
         out["kargs"] = c["profile"]
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["kargs"] = f"error {e}"
     for mod, name in [
         ("io_tune", "io"),
@@ -134,7 +134,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
                 raise AttributeError
             # Use generic load_*
             # Instead directly handle per module types
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     # Explicit per-profile applies via helpers (avoid import complexity, use generate funcs directly)
@@ -147,7 +147,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             save_thp(c)
             generate_thp_conf(c)
         out["thp"] = c["profile"]
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["thp"] = f"error {e}"
     try:
         from .irq_tune import load_irq, save_irq, generate_irq_conf
@@ -158,7 +158,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             save_irq(c)
             generate_irq_conf(c)
         out["irq"] = c["profile"]
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["irq"] = f"error {e}"
     try:
         from .btrfs_perf import load_btrfs_perf, save_btrfs_perf, generate_btrfs_dropin
@@ -169,7 +169,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             save_btrfs_perf(c)
             generate_btrfs_dropin(c)
         out["btrfs"] = c["profile"]
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["btrfs"] = f"error {e}"
     # Folded: pipewire/kwin/autogroup/watermark/oom/cfs — single transaction owner
     for _mod, _name in [
@@ -204,7 +204,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
                         getattr(m, g)(c)
                         break
             out[_name] = str(c.get("profile", c.get("enabled", gaming)))
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
             out[_name] = f"error {e}"
     try:
         from .trim_preset import load_trim, save_trim, generate_trim_state
@@ -215,7 +215,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             save_trim(c)
             generate_trim_state(c)
         out["trim"] = c["profile"]
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["trim"] = f"error {e}"
     try:
         from .ananicy_preset import load_ananicy, save_ananicy, generate_ananicy
@@ -226,7 +226,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             save_ananicy(c)
             generate_ananicy(c)
         out["ananicy"] = c["profile"]
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["ananicy"] = f"error {e}"
     try:
         from .zswap_preset import load_zswap, save_zswap, generate_zswap
@@ -238,7 +238,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             save_zswap(c)
             generate_zswap(c)
         out["zswap"] = c["profile"]
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["zswap"] = f"error {e}"
     try:
         from .sched_latency import load_sched_latency, save_sched_latency, generate_sched_latency
@@ -249,7 +249,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             save_sched_latency(c)
             generate_sched_latency(c)
         out["sched"] = c["profile"]
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["sched"] = f"error {e}"
     try:
         from .io_tune import load_io_tune, save_io_tune, generate_io_udev
@@ -260,7 +260,7 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             save_io_tune(c)
             generate_io_udev(c)
         out["io"] = c["profile"]
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["io"] = f"error {e}"
     try:
         from .net_latency import load_net_latency, save_net_latency, generate_net_latency_conf
@@ -271,12 +271,12 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
             save_net_latency(c)
             generate_net_latency_conf(c)
         out["net"] = str(c["enabled"])
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["net"] = f"error {e}"
     try:
 
         pass
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     out["profile"] = profile

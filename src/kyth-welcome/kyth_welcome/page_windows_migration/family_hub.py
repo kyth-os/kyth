@@ -42,7 +42,7 @@ class _FamilyHubMixin:
         try:
             from ..services.launch import popen
             nearby_btn.clicked.connect(lambda _=False: popen(["flatpak","run","org.localsend.localsend_app"]))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         btns.addWidget(nearby_btn)
         phone_btn = QPushButton("KDE Connect Settings")

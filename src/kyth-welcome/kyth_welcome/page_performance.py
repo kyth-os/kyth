@@ -188,7 +188,7 @@ class PerformancePage(Page):
             self._perf_sched_combo.setCurrentText("scx_bore")
             self._apply_scheduler()
             self._perf_auto_toggle.setChecked(True)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         from .services.launch import popen
         popen(["notify-send", "Gaming Preset staged — reboot to apply cachyos + scx bore"])
@@ -231,7 +231,7 @@ class PerformancePage(Page):
         if self._sched_status_worker is not None:
             try:
                 self._sched_status_worker.deleteLater()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         worker = DataWorker("sched-status", read_sched_status)
         self._sched_status_worker = worker
@@ -292,7 +292,7 @@ class PerformancePage(Page):
             # M1: clean up previous finished worker before overwriting (avoid QThread leak)
             try:
                 self._telemetry_worker.deleteLater()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
 
         from .services.workers import TelemetryWorker
@@ -388,7 +388,7 @@ class PerformancePage(Page):
             ok = apply_policy(policy)
             self._ai_status_lbl.setText(f"AI: {policy.reason} → {policy.scx} ({'ok' if ok else 'failed'})")
             restyle(self._ai_status_lbl)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._ai_status_lbl.setText(f"AI: failed — {exc}")
             restyle(self._ai_status_lbl)
 
@@ -399,7 +399,7 @@ class PerformancePage(Page):
             d = kargs_drift()
             self._clean_status.setText(f"kargs {c['profile']} missing={d['missing'] or '∅'}")
             restyle(self._clean_status)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._clean_status.setText(f"kargs failed — {exc}")
             restyle(self._clean_status)
 
@@ -502,7 +502,7 @@ class PerformancePage(Page):
                 a = collect_audit()
                 self._clean_status.setText(f"audit master={a.get('master')} {a.get('systemd_analyze','')[:40]}")
             restyle(self._clean_status)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._clean_status.setText(f"{which} failed — {exc}")
             restyle(self._clean_status)
 
@@ -520,7 +520,7 @@ class PerformancePage(Page):
             apply_scheduler(sched)
             self._boost_status.setText(f"Game Boost applied: {sched} + MangoHud {'on' if self._boost_mh_check.isChecked() else 'off'} + latency {'on' if self._boost_latency_check.isChecked() else 'off'}")
             self._boost_status.setObjectName("status-ok")
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._boost_status.setText(f"Game Boost failed: {exc}")
             self._boost_status.setObjectName("status-err")
         restyle(self._boost_status)
@@ -539,5 +539,5 @@ class PerformancePage(Page):
             finally:
                 os.close(fd)
             return True
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return False

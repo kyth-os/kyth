@@ -53,7 +53,7 @@ def _load_tier(tier: str, config_dir: Path) -> dict[str, tuple[str, str]]:
     try:
         with path.open("rb") as f:
             data = tomllib.load(f)
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         raise SystemExit(f"sysctl_compose: failed to parse {path}: {e}") from e
     keys = data.get("keys", {})
     if not isinstance(keys, dict):

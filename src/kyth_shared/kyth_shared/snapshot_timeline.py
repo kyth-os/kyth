@@ -31,7 +31,7 @@ def _snapper_rows() -> list[SnapshotRow]:
             for s in data.get("snapshots", []) if isinstance(data, dict) else []:
                 rows.append(SnapshotRow(id=str(s.get("number", "")), timestamp=str(s.get("date", "")), type="snapshot", description=str(s.get("description", ""))))
             return rows
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     # btrfs fallback
@@ -42,7 +42,7 @@ def _snapper_rows() -> list[SnapshotRow]:
             for line in r.stdout.splitlines()[:20]:
                 rows.append(SnapshotRow(id=line.split()[1] if len(line.split())>1 else "", timestamp="", type="snapshot", description=line[:80]))
             return rows
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return []
@@ -61,7 +61,7 @@ def _bootc_rows() -> list[SnapshotRow]:
                 digest = img.get("imageDigest", img.get("image", {}).get("imageDigest", "")) if isinstance(img, dict) else ""
                 rows.append(SnapshotRow(id=digest[:12] if digest else k, timestamp="", type="deployment" if k=="booted" else "rollback", description=f"{k}: {digest[:40]}"))
             return rows
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return []

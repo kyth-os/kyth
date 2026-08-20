@@ -16,11 +16,11 @@ def _ntfs_user_dirs() -> list[dict]:
     BitLocker partitions have mount=='' and are skipped."""
     try:
         from .hardware.drives import _find_ntfs_drives
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return []
     try:
         drives = _find_ntfs_drives()
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return []
     results: list[dict] = []
     for drive in drives:

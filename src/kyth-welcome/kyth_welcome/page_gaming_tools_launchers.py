@@ -96,7 +96,7 @@ class _LauncherToolsMixin:
             self._tool_op_status.setText("Heroic opened for Epic sign-in.")
             self._tool_op_status.setObjectName("status-ok")
             restyle(self._tool_op_status)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._tool_log_panel.append(f"\nFailed to start Heroic: {exc}")
             self._tool_op_status.setText("Failed to open Heroic.")
             self._tool_op_status.setObjectName("status-err")
@@ -155,7 +155,7 @@ class _LauncherToolsMixin:
             try:
                 shutil.move(path, backup)
                 self._tool_log_panel.append(f"Moved {path} → {backup}")
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 self._tool_log_panel.append(f"Failed to move {path}: {exc}")
                 self._tool_op_status.setText("Epic installer reset failed.")
                 self._tool_op_status.setObjectName("status-err")
@@ -228,7 +228,7 @@ class _LauncherToolsMixin:
             self._tool_op_status.setText(f"{name} installer opened in Lutris.")
             self._tool_op_status.setObjectName("status-ok")
             restyle(self._tool_op_status)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._tool_log_panel.append(f"\nFailed to start Lutris: {exc}")
             self._tool_op_status.setText(f"Failed to open {name} installer.")
             self._tool_op_status.setObjectName("status-err")

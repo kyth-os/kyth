@@ -64,7 +64,7 @@ def prune_trash(days: int = 30) -> None:
                     else:
                         target_path.unlink(missing_ok=True)
                 info_file.unlink(missing_ok=True)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -79,7 +79,7 @@ def cleanup_flatpaks() -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -94,7 +94,7 @@ def vacuum_user_journals(days: int = 30) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -112,7 +112,7 @@ def supports_dedupe(path: str) -> bool:
         )
         fstype = res.stdout.strip().lower()
         return fstype in ("btrfs", "xfs")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return False
 
 
@@ -133,7 +133,7 @@ def find_dedupe_targets(root_path: str = "/var/home") -> list[str]:
                             targets.append(epath)
                             continue
                     walk_depth(Path(epath), depth + 1)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -189,6 +189,6 @@ def dedupe_directory(dir_path: str, *, state_dir: Path = _DUPE_HASH_DIR) -> None
 
     try:
         run_command(cmd, check=False)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass

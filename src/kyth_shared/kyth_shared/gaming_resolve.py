@@ -50,7 +50,7 @@ def _load_file_versions() -> dict[str, str]:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     return {str(k): str(v) for k, v in data.items()}
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 continue
     return {}
 
@@ -65,7 +65,7 @@ def gaming_versions() -> GamingVersions:
             cache_vals = json.loads(cache_path.read_text(encoding="utf-8"))
             if isinstance(cache_vals, dict):
                 file_vals = {str(k): str(v) for k, v in cache_vals.items()}
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     gv = GamingVersions(
@@ -79,7 +79,7 @@ def gaming_versions() -> GamingVersions:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps({"umu_version": gv.umu_version, "proton_cachyos_version": gv.proton_cachyos_version}, indent=2), encoding="utf-8")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return gv

@@ -66,7 +66,7 @@ class _TakeoutMixin:
             try:
                 from ..services.windows_migration import enrich_with_extras
                 summary = enrich_with_extras(summary, extras)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         self._takeout_summary = summary
         self._render_takeout()

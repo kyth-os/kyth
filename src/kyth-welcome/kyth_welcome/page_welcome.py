@@ -260,7 +260,7 @@ class WelcomePage(Page):
             from kyth_shared.ai_assist import build_repair_plan
 
             return build_repair_plan()
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             return {"summary": f"AI check unavailable: {exc}", "actions": []}
 
     def _refresh_ai_plan(self):
@@ -299,7 +299,7 @@ class WelcomePage(Page):
         try:
             self._hud1_desc.setText(f"<b>Device:</b> {self._hostname}<br><b>Kernel:</b> {self._kernel}<br><b>Channel:</b> Unavailable")
             self._hud2_desc.setText(f"<b>Session Type:</b> {self._session}<br><b>Audio Engine:</b> check failed<br><b>Desktop Portal:</b> check failed")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
 
     def _on_status_facts_ready(self, _key: str, facts: object):
@@ -508,7 +508,7 @@ class WelcomePage(Page):
                 w.finished.connect(lambda: setattr(self, "_win_dirs_worker", None))
                 w.finished.connect(w.deleteLater)
                 w.start()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         return card
 

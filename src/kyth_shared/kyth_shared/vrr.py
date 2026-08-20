@@ -36,7 +36,7 @@ def load_vrr(path: Path | None = None) -> dict[str, Any]:
     enabled=bool(night.get("enabled", False))
     try:
         temp=int(night.get("temperature", 4500))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         temp=4500
     temp=max(2000, min(6500, temp))
     return {"outputs": outs, "night": {"enabled": enabled, "temperature": temp}}

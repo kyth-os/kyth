@@ -20,7 +20,7 @@ try:
     from .oom_gaming import load_oom_gaming, oom_gaming_status  # noqa: F401  # pylint: disable=unused-import
     from .shader_tmpfs import load_shader_tmpfs, shader_tmpfs_status  # noqa: F401  # pylint: disable=unused-import
     from .gaming_cfs import load_gaming_cfs, gaming_cfs_status  # noqa: F401  # pylint: disable=unused-import
-except Exception:
+except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
     logger.debug("handled expected exception", exc_info=True)
     pass
 
@@ -38,7 +38,7 @@ def _audit_from_disk_cache() -> dict[str, Any] | None:
         cached = read_section("audit-cache", max_age=_AUDIT_TTL)
         if isinstance(cached, dict) and cached:
             return cached
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return None
@@ -49,7 +49,7 @@ def _audit_to_disk_cache(data: dict[str, Any]) -> None:
         from .system.probe import update_sections
 
         update_sections({"audit-cache": data})
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -69,7 +69,7 @@ def collect_audit(force: bool = False) -> dict[str, Any]:
         from .gaming_master import load_master
 
         out["master"] = load_master().get("profile")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         out["master"] = "unknown"
     for name, mod, fn in [
         ("loader", "boot_loader", "loader_status"),
@@ -130,20 +130,20 @@ def collect_audit(force: bool = False) -> dict[str, Any]:
         try:
             m = __import__(f"kyth_shared.{mod}", fromlist=[fn])
             out[name] = getattr(m, fn)()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             out[name] = "unknown"
     # systemd-analyze (timeout 5s)
     try:
         r = _run(["systemd-analyze"], capture_output=True, text=True, timeout=5)
         out["systemd_analyze"] = r.stdout.strip().splitlines()[0] if r and r.stdout else ""
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("systemd-analyze failed", exc_info=True)
         out["systemd_analyze"] = "unavailable (not booted with systemd)"
     # probe count
     try:
         from .telemetry import load_sessions  # noqa  # pylint: disable=unused-import
         out["telemetry"] = "ok"
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         out["telemetry"] = "unknown"
     out["ts"] = int(time.time())
     _AUDIT_CACHE = dict(out)

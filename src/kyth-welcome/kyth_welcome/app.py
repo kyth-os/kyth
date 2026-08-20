@@ -61,7 +61,7 @@ def main():
         # Ensure the launcher log (stderr) is flushed for _system_hub_probe
         try:
             sys.stderr.flush()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         # Also append a concise marker to the cache error file for diagnostics
         try:
@@ -69,7 +69,7 @@ def main():
             err_path.parent.mkdir(parents=True, exist_ok=True)
             with err_path.open("a", encoding="utf-8") as fh:
                 fh.write(f"[{exc_type.__name__}] {exc_value}\n")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
     sys.excepthook = _log_uncaught
 

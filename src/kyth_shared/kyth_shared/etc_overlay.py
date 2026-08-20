@@ -73,7 +73,7 @@ def apply_overlay(files: dict[str, str] | None = None, root: Path = Path("/")) -
     try:
         import time
         Path("/run/kyth-etc-overlay-ttl").write_text(str(int(time.time()) + 30), encoding="utf-8")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return written

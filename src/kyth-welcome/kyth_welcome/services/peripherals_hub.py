@@ -10,7 +10,7 @@ def _run_text(cmd: list[str], timeout: int = 4) -> tuple[int, str]:
         from kyth_shared.commands import run as _run
         r = _run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return 127, ""
 
 
@@ -39,7 +39,7 @@ def scan_peripherals() -> dict:
             result["fan"] = {"available": True, "detail": "Fan curve available — System Hub → Hardware → Cooling" if hwmon else "fan-curve.toml present"}
         else:
             result["fan"]["detail"] = "No hwmon fan control detected on this hardware."
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
 
     # Controllers
@@ -51,7 +51,7 @@ def scan_peripherals() -> dict:
             result["controllers"] = {"available": True, "count": count, "detail": f"{count} controller device(s) detected — test via ujust controller-check"}
         else:
             result["controllers"]["detail"] = "No controllers detected — connect via USB/Bluetooth and run controller-check."
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
 
     # HDR

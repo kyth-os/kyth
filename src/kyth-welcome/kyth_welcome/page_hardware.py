@@ -176,7 +176,7 @@ class HardwarePage(Page):
                 else:
                     self._display_vrr_warn_lbl.hide()
                 restyle(self._display_vrr_warn_lbl)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 if self._display_vrr_warn_lbl is not None:
                     self._display_vrr_warn_lbl.hide()
 
@@ -371,7 +371,7 @@ class HardwarePage(Page):
             try:
                 from kyth_welcome.services.peripherals_hub import scan_peripherals as _scan_p
                 return _scan_p()
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 return {"error": str(exc)}
 
         worker = DataWorker("peripherals-scan", _scan)
@@ -447,7 +447,7 @@ class HardwarePage(Page):
             from kyth_shared.fan_curve import load_fan_curve
             cfg = load_fan_curve()
             self._cool_status.setText(f"Fan points {cfg.get('points')} power_cap {cfg.get('power_cap_w')}W")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             self._cool_status.setText("Fan curve unavailable")
         return card
 
@@ -458,7 +458,7 @@ class HardwarePage(Page):
             self._cool_status.setText(f"Fan points {cfg.get('points')} power_cap {cfg.get('power_cap_w')}W — edit /etc/kyth/fan-curve.toml")
             from .core_base import restyle
             restyle(self._cool_status)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._cool_status.setText(f"Fan curve read failed: {exc}")
 
     def _on_failed(self, message: str):

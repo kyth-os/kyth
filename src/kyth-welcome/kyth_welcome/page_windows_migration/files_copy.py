@@ -21,14 +21,14 @@ def _write_manifest(dest: str, files: list[str]) -> str:
     for f in files:
         try:
             h = hashlib.sha256(pathlib.Path(f).read_bytes()[:1<<20]).hexdigest()[:12]
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             h = "unknown"
         m["files"].append({"path": f, "sha": h})
     p = pathlib.Path(dest) / ".kyth-migration-manifest.json"
     try:
         p.write_text(json.dumps(m, indent=2), encoding="utf-8")
         return str(p)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return ""
 from ..qt import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout,

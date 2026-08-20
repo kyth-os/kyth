@@ -154,7 +154,7 @@ class StreamingCommandRunner:
                         proc.terminate()
                         try:
                             proc.wait(timeout=5)
-                        except Exception:
+                        except Exception:  # noqa: BLE001 -- broad: proc.wait timeout can be TimeoutExpired or generic Exception in tests
                             proc.kill()
                             proc.wait()
                     from .execution import InstallCancelled
@@ -190,7 +190,7 @@ class StreamingCommandRunner:
 
             consume_output(decoder.decode(b"", final=True), final=True)
             proc.wait()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             if proc.poll() is None:
                 proc.kill()
             proc.wait()

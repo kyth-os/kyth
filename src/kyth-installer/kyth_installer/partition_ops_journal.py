@@ -631,7 +631,7 @@ class Journal:
                 return
             try:
                 record(kind, status, target)
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 # A failed bookkeeping write must never abort a partition
                 # commit that is already mid-flight on the real disk.
                 _logger.debug("journal bookkeeping write failed for %s %s: %s", kind, target, exc, exc_info=True)
@@ -666,7 +666,7 @@ class Journal:
                             self._commit_resize(p, log)
                         elif kind == "format":
                             self._commit_format(p, log)
-                    except Exception:
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                         # PartitionTableGuard will restore table on exception;
                         # clear committed flag and propagate.
                         self._committed = False

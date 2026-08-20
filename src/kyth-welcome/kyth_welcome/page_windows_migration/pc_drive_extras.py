@@ -236,7 +236,7 @@ class _PcDriveExtrasMixin:
                 self._render_takeout()
             else:
                 self._update_takeout()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
 
         wallpapers = extras.get("wallpapers") or []
@@ -416,7 +416,7 @@ class _PcDriveExtrasMixin:
             return
         try:
             added, dupes = _import_rdp_bookmarks(rdp)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._rdp_status.setText(f"Could not write the KRDC bookmarks: {exc}")
             return
         text = f"✓ Added {added} connection{'s' if added != 1 else ''} to KRDC bookmarks."

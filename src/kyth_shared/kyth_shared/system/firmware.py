@@ -53,7 +53,7 @@ def run_firmware_refresh(timeout: int = 60) -> tuple[bool, str]:
         return False, f"fwupdmgr refresh timed out after {timeout}s"
     except FileNotFoundError:
         return False, "fwupdmgr not found"
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # noqa: BLE001
         return False, str(exc)
 
 
@@ -74,7 +74,7 @@ def check_firmware_updates(timeout: int = 20) -> int:
         return count_fwupd_updates(r.stdout)
     except FileNotFoundError:
         return 0
-    except Exception:  # noqa: BLE001
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # noqa: BLE001
         return 0
 
 
@@ -94,7 +94,7 @@ def run_firmware_update(timeout: int = 600) -> tuple[bool, str]:
         return False, f"fwupdmgr update timed out after {timeout}s"
     except FileNotFoundError:
         return False, "fwupdmgr not found"
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # noqa: BLE001
         return False, str(exc)
 
 
@@ -117,7 +117,7 @@ def get_firmware_devices(timeout: int = 15) -> tuple[int, str, int]:
         return 0, "fwupdmgr not found", 2
     except subprocess.TimeoutExpired:
         return 0, f"fwupdmgr get-devices timed out after {timeout}s", 1
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # noqa: BLE001
         return 0, str(exc), 1
 
 
@@ -165,5 +165,5 @@ def stage_firmware_batch(
         # Could not open/lock file (e.g. /run ro). Don't run unprotected batch
         # that would thunder-herd fwupd; just skip.
         return False, 0, ""
-    except Exception:  # noqa: BLE001
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # noqa: BLE001
         return False, 0, ""

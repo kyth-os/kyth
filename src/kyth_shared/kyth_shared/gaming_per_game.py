@@ -111,12 +111,12 @@ def gaming_launch_env_for_appid(
         from kyth_welcome.services.gaming.health import latency_env_for_profile
 
         env = dict(latency_env_for_profile(latency_profile))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         try:
             from kyth_shared.health import latency_env_for_profile as _fallback
 
             env = dict(_fallback(latency_profile))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             env = {}
     if hdr:
         env["KYTH_HDR"] = "1"

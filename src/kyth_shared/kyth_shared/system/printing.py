@@ -19,7 +19,7 @@ def ipp_discover() -> list[str]:
         return []
     except FileNotFoundError:
         return []
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return []
 
 

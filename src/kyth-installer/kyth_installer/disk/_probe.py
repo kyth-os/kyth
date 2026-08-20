@@ -59,9 +59,9 @@ def _get_live_usb_disk() -> Optional[str]:
                             if cname:
                                 return f"/dev/{cname}"
                 _logger.debug("_get_live_usb_disk: JSON lookup for %s returned no disk", source)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 _logger.debug("_get_live_usb_disk: JSON lookup for %s failed", source, exc_info=True)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             _logger.debug("_get_live_usb_disk: findmnt probe of %s failed", path, exc_info=True)
         _logger.warning("_get_live_usb_disk: all lsblk fallbacks failed for %s — live USB may be exposed as wipe candidate", source)
     return None

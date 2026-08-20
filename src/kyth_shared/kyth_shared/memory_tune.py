@@ -45,7 +45,7 @@ def _read_memtotal_kb() -> int:
         m = re.search(r"MemTotal:\s+(\d+)\s+kB", txt)
         if m:
             return int(m.group(1))
-    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     return 32 * 1024 * 1024  # fallback 32GB
 
@@ -143,7 +143,7 @@ def generate_memory_tune(cfg: dict[str, Any] | None = None, dest: Path | None = 
             tmp2 = zram_conf.with_suffix(".tmp")
             tmp2.write_text(zram_content, encoding="utf-8")
             tmp2.replace(zram_conf)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return dest
@@ -157,6 +157,6 @@ def memory_tune_status(conf: Path = DEFAULT_CONF) -> str:
             if m:
                 return m.group(1)
             return "active"
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return "active"
     return "balanced"

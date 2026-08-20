@@ -36,7 +36,7 @@ def load_fan_curve(path: Path | None = None) -> dict[str, Any]:
         if isinstance(p, (list, tuple)) and len(p) == 2:
             try:
                 out_pts.append([int(p[0]), int(p[1])])
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 continue
     if not out_pts:
         out_pts = [[40, 30], [70, 80], [85, 100]]

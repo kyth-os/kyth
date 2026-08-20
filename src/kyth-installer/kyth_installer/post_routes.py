@@ -121,9 +121,9 @@ class PostRouteService:
                         if run_command(["findmnt", "-n", str(c)], capture_output=True, timeout=3).returncode == 0:
                             target = str(c)
                             break
-                    except Exception:  # nosec B112 -- best-effort per-item skip, failure here is non-fatal by design
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B112 -- best-effort per-item skip, failure here is non-fatal by design
                         continue
-            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
         if not target or not os.path.isdir(target):
             return ApiResponse({"ok": False, "message": "No USB drive found. Insert a USB stick and try again."}, 400)
@@ -140,5 +140,5 @@ class PostRouteService:
             if not copied:
                 return ApiResponse({"ok": False, "message": "No installer logs found to copy."}, 500)
             return ApiResponse({"ok": True, "dest": str(dest), "copied": copied}, 200)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             return ApiResponse({"ok": False, "message": str(exc)}, 500)

@@ -101,7 +101,7 @@ class _ScanMixin:
                 mount = m.group(1) if m else None
                 if not mount:
                     return {"error_kind": "mount-point", "detail": ""}
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 return {"error_kind": "mount-exception", "detail": str(exc)}
 
         return {"mount": mount, "libs": _find_steam_libraries(mount)}

@@ -43,7 +43,7 @@ def has_3d_vcache() -> bool:
             res = run_command(["lscpu"], capture_output=True, text=True, check=False)
             if "3d" in res.stdout.lower():
                 return True
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return False
@@ -55,7 +55,7 @@ def get_amd_ccd0_cpus() -> str | None:
     if path.is_file():
         try:
             return path.read_text(encoding="utf-8").strip()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return None
@@ -84,7 +84,7 @@ def get_intel_pcores() -> str | None:
 
         if pcores:
             return ",".join(str(c) for c in sorted(pcores))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return None
@@ -102,7 +102,7 @@ def set_epp(epp_value: str) -> bool:
             )
             if res.returncode == 0:
                 return True
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -113,7 +113,7 @@ def set_epp(epp_value: str) -> bool:
         try:
             epp_file.write_text(epp_value, encoding="utf-8")
             success = True
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return success
@@ -125,7 +125,7 @@ def get_current_epp() -> str:
     if epp_file.is_file():
         try:
             return epp_file.read_text(encoding="utf-8").strip()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return "n/a"
@@ -137,7 +137,7 @@ def set_power_profile(profile: str) -> bool:
         try:
             res = run_command(["powerprofilesctl", "set", profile], capture_output=True, check=False)
             return res.returncode == 0
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return False
@@ -149,7 +149,7 @@ def get_power_profile() -> str:
         try:
             res = run_command(["powerprofilesctl", "get"], capture_output=True, text=True, check=False)
             return res.stdout.strip()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return "n/a"
@@ -162,7 +162,7 @@ def flush_page_caches() -> None:
         try:
             os.sync()
             drop_caches.write_text("3\n", encoding="utf-8")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -173,7 +173,7 @@ def set_transparent_hugepages(setting: str) -> None:
     if os.access(thp, os.W_OK):
         try:
             thp.write_text(f"{setting}\n", encoding="utf-8")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -183,7 +183,7 @@ def switch_sched_ext_profile(profile: str) -> None:
     if shutil.which("scx_rusty") and shutil.which("sudo"):
         try:
             run_command(["sudo", "-n", "/usr/bin/kyth-scx", "set", profile], capture_output=True, check=False)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -208,7 +208,7 @@ def apply_nvme_tuning() -> bool:
             try:
                 nvme_queue.write_text("none\n", encoding="utf-8")
                 tuned_count += 1
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 logger.debug("handled expected exception", exc_info=True)
                 pass
     return tuned_count > 0

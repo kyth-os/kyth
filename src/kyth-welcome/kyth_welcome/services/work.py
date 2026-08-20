@@ -135,7 +135,7 @@ def convert_pst(path: str) -> tuple[bool, str]:
         )
     except FileNotFoundError:
         return False, "readpst is not installed — update KythOS to the latest image."
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return False, str(exc)
     if r.returncode != 0:
         return False, (r.stderr or r.stdout).strip() or "Conversion failed."

@@ -17,7 +17,7 @@ def target_mount_candidates(context) -> list[str]:
     """Return registered and legacy target mounts without duplicates."""
     try:
         candidates = list(getattr(context, "cleanup_mounts", []) or [])
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         candidates = []
     for mountpoint in FALLBACK_TARGET_MOUNTS:
         if mountpoint not in candidates:
@@ -31,7 +31,7 @@ def mounted_target(mountpoint: str, *, run_command) -> bool:
         return False
     try:
         result = run_command(["findmnt", "-n", mountpoint], capture_output=True, timeout=3)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return True
     return result.returncode == 0
 
@@ -53,9 +53,9 @@ def persist_artifacts(log, context, sources, *, run_command, as_root) -> None:
                         )
                 log(f"Installer artifacts persisted to {destination} on the target disk.")
                 return
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 log(f"Warning: could not persist artifacts to {mountpoint}: {exc}")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             continue
 
 
@@ -75,7 +75,7 @@ def persist_failure_message(log, context, message: str, *, persist, run_command,
                     text=True, stdout=subprocess.DEVNULL, check=False,
                 )
                 return
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             continue

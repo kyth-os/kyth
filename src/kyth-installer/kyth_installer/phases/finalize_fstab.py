@@ -28,7 +28,7 @@ def append_fstab_line(
     except OSError as exc:
         log(f"Warning: failed to update fstab for {description}: {format_error(exc, path=fstab_path)}")
         return False
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Warning: failed to update fstab for {description}: {exc}")
         return False
     log(f"Fstab updated for {description}: {fstab_line.strip()}")
@@ -87,5 +87,5 @@ def configure_manual_mounts(
             if fstype != "linux-swap":
                 run_command(as_root(["mount", part, str(target_path)]), check=False)
             log(f"Manual mount: {part} at {mountpoint} ({fstype})")
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             log(f"Warning: failed to configure manual mount {part} at {mountpoint}: {exc}")

@@ -15,12 +15,12 @@ try:
     from PySide6.QtCore import QObject as _QObject, Signal as _Signal
     Base = _QObject
     Sig = _Signal
-except Exception:
+except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
     try:
         from PyQt6.QtCore import QObject as _QObject, pyqtSignal as _Signal
         Base = _QObject
         Sig = _Signal
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         Base = object  # type: ignore[assignment]
         def Sig(*a, **kw):  # type: ignore[no-redef]
             return None
@@ -39,7 +39,7 @@ class HubState(Base if Base is not object else object):  # type: ignore[misc]
         # QObject init if available
         try:
             super().__init__()  # type: ignore[call-arg]
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         self._store: dict[str, Any] = {}
         self._profile: str = "everyday"
@@ -56,7 +56,7 @@ class HubState(Base if Base is not object else object):  # type: ignore[misc]
             try:
                 if self.changed is not None:
                     self.changed.emit("profile")  # type: ignore[attr-defined]
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -67,7 +67,7 @@ class HubState(Base if Base is not object else object):  # type: ignore[misc]
         try:
             if self.changed is not None:
                 self.changed.emit(key)  # type: ignore[attr-defined]
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
 
     def clear(self, key: str) -> None:
@@ -75,7 +75,7 @@ class HubState(Base if Base is not object else object):  # type: ignore[misc]
         try:
             if self.changed is not None:
                 self.changed.emit(key)  # type: ignore[attr-defined]
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
 
     # --- Control-plane extensions (progressive vs Bazzite/Portal) ---
@@ -116,7 +116,7 @@ def rollback_available_from_probe() -> bool:
             has_staged = status.get("staged") is not None
             has_rollback = status.get("rollback") is not None
             return bool(has_staged or has_rollback)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return False
 

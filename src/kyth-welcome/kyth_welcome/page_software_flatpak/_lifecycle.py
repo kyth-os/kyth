@@ -38,16 +38,16 @@ class _LifecycleMixin:
                 guard_disposed(lambda code, aid=app_id, n=name, b=btn, ob=open_btn: self._on_fp_install_done(code, aid, n, b, ob))
             )
             self._fp_install_worker.start()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("flatpak install worker failed to start", exc_info=True)
             try:
                 finish_worker(self, attr="_fp_install_worker")
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 logger.debug("finish_worker after install start failure", exc_info=True)
             try:
                 btn.setEnabled(True)
                 btn.setText("Install")
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 logger.debug("failed to reset install button", exc_info=True)
             self._fp_installing = None
             self._fp_progress.hide()
@@ -60,15 +60,15 @@ class _LifecycleMixin:
     def _on_fp_install_done(self, code: int, app_id: str, name: str, btn: QPushButton, open_btn: QPushButton | None = None):
         try:
             self._fp_progress.hide()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("failed to hide progress", exc_info=True)
         try:
             finish_worker(self, attr="_fp_install_worker")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("finish_worker failed in install_done", exc_info=True)
             try:
                 setattr(self, "_fp_install_worker", None)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         self._fp_installing = None
         try:
@@ -80,11 +80,11 @@ class _LifecycleMixin:
                 self._set_fp_task_state(f"Install failed (exit {code}).", "error")
                 _set_log_panel(self._fp_install_log_toggle, self._fp_install_log, True)
                 self._configure_fp_lifecycle_buttons(app_id, name, btn, open_btn, installed=False)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("install_done ui update failed", exc_info=True)
             try:
                 btn.setEnabled(True)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
 
     def _fp_store_uninstall(self, app_id: str, name: str, btn: QPushButton, open_btn: QPushButton | None = None):

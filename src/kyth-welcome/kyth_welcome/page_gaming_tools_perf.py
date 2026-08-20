@@ -344,7 +344,7 @@ class _PerfTuningMixin:
             set_profile_for_appid(appid, profile=goal, hdr=hdr)
             self._per_game_status.setText(f"Saved {goal} hdr={hdr} for {appid}")
             self._per_game_status.setObjectName("status-ok")
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._per_game_status.setText(f"Save failed: {exc}")
             self._per_game_status.setObjectName("status-err")
         from .core_base import restyle

@@ -491,7 +491,7 @@ def main() -> None:
                             line = re.sub(r"(brave-browser|brave)(\s|$)", r"\1 --password-store=kwallet5\2", line)
                 new_lines.append(line)
             atomic_write_text(brave_desktop_dst, "".join(new_lines), encoding="utf-8")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -522,7 +522,7 @@ def main() -> None:
             try:
                 with open(profile_path, "r", encoding="utf-8") as f:
                     role_profile = f.readline().strip() or "everyday"
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 logger.debug("handled expected exception", exc_info=True)
                 pass
         run_command(["/usr/bin/kyth-apply-role-preset", role_profile], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

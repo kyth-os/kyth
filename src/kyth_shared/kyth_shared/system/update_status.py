@@ -69,7 +69,7 @@ def _fetch_status() -> UpdateStatus:
                     check_state = "uptodate"
             else:
                 check_state = "uptodate"
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             detail = str(exc)
             check_state = "error"
             blocked_reason = detail
@@ -84,7 +84,7 @@ def _fetch_status() -> UpdateStatus:
             check_state=check_state,
             detail=detail,
         )
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return UpdateStatus(check_state="error", detail=str(exc), blocked_reason=str(exc))
 
 def get_update_status(*, force_refresh: bool = False) -> UpdateStatus:

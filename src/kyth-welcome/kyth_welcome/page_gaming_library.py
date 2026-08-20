@@ -163,7 +163,7 @@ class _LibraryMixin:
                     else:
                         return
                     _popen(gaming_slice_command(cmd))
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     pass
             launch_btn.clicked.connect(lambda _=False: _launch_scoped())
             btns.addWidget(launch_btn)

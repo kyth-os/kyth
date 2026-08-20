@@ -25,7 +25,7 @@ if _WEBENGINE_AVAILABLE:
                         print("[SAML dbg] callback POST body received")
                         sep = "&" if "?" in url else "?"
                         url = url + sep + body_str
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 print(f"[SAML dbg] requestBody read error: {exc}")
             if url.startswith("gc://saml-acs"):
                 print("[SAML dbg] scheme handler url: gc://saml-acs?<redacted>")
@@ -296,7 +296,7 @@ if _WEBENGINE_AVAILABLE:
                         lambda r: self._on_portal_page_structure(str(r or ""), _url_snap),
                     )
                 self._page.runJavaScript("document.title", self._on_page_title)
-            except Exception as e:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
                 print("[SAML load_finished error]", e)
 
         def _on_page_title(self, title) -> None:
@@ -371,7 +371,7 @@ if _WEBENGINE_AVAILABLE:
                     return
                 print("[SAML dbg] JS token found")
                 self._emit_cookie(result)
-            except Exception as e:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
                 print("[SAML js_token error]", e)
 
         def _on_cookie_added(self, cookie) -> None:
@@ -385,7 +385,7 @@ if _WEBENGINE_AVAILABLE:
                 if name in _GP_AUTH_COOKIES:
                     print(f"[SAML dbg] GP auth cookie matched: {name}")
                     self._emit_cookie(f"{name}={value}")
-            except Exception as e:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
                 print("[SAML cookie_added error]", e)
 
         def _on_callback(self, url: str) -> None:
@@ -423,7 +423,7 @@ if _WEBENGINE_AVAILABLE:
                 cookie_str = replay_saml_acs(
                     action_url, body, self._expected_gateway
                 )
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 print(f"[SAML dbg] ACS replay failed: {exc}")
                 self._info.setText("Could not replay the SAML response to the VPN portal.")
                 self._status_msg.setText("VPN handoff failed")

@@ -12,5 +12,5 @@ def mok_status() -> tuple[str, str]:
         return sb_state, "enrolled" if enrolled else "not enrolled"
     except FileNotFoundError:
         return "unknown", "mokutil not installed"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return "unknown", str(exc)

@@ -23,7 +23,7 @@ def perf_profile_transaction(profile: str, dry_run: bool = True) -> bool:
         if r and r.returncode != 0:
             logger.warning("sysctl --dry-run failed with code %s", r.returncode)
             return False
-    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
         logger.debug("sysctl --dry-run failed", exc_info=True)
         pass
     if dry_run:

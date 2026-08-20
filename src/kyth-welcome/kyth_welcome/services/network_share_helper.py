@@ -89,7 +89,7 @@ def _atomic_write(path: Path, content: str, mode: int) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         try:
             os.unlink(temporary)
         except FileNotFoundError:
@@ -177,7 +177,7 @@ def remove_share(share: dict) -> None:
     try:
         if credential_path.is_file() and not credential_path.is_symlink():
             run_sync(["shred", "-u", "-n", "3", str(credential_path)], check=False, timeout=5)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     credential_path.unlink(missing_ok=True)
     run_sync(["systemctl", "daemon-reload"], check=True, timeout=30)

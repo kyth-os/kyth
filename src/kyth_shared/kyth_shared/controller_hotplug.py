@@ -16,7 +16,7 @@ def hotplug_invalidate(cache_key: str = "controllers-detect") -> None:
         from kyth_shared.system.probe import invalidate_probe_caches
 
         invalidate_probe_caches([cache_key])
-    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     # Sentinel for tests without probe plumbing — O_NOFOLLOW so a pre-created
     # symlink at this predictable /tmp path can't redirect the write elsewhere

@@ -21,11 +21,11 @@ def find_efi_partition(disk: str) -> str:
                 for part in _disk.list_partitions(other_disk):
                     if part.get("efi"):
                         return part["name"]
-    except Exception:
+    except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
         _logger.debug("find_efi_partition: fallback scan of other disks failed", exc_info=True)
     try:
         protected = _disk._protected_install_disks()
-    except Exception:
+    except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
         _logger.debug("find_efi_partition: protected-disk lookup failed", exc_info=True)
         # Fail closed: if we can't determine what's protected, don't risk
         # handing back a live-media ESP as an install target.
@@ -43,7 +43,7 @@ def find_efi_partition(disk: str) -> str:
             if _disk._parent_disk(out) in protected:
                 continue
             return out
-        except Exception:
+        except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
             _logger.debug("find_efi_partition: findmnt probe of %s failed", mount, exc_info=True)
     return ""
 
@@ -63,7 +63,7 @@ def get_root_partition(disk: str) -> str:
                     parts.append((int(c.get("size", 0)), c["name"]))
         if parts:
             return "/dev/" + sorted(parts, reverse=True)[0][1]
-    except Exception:
+    except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
         _logger.debug("get_root_partition: lsblk probe of %s failed", disk, exc_info=True)
     try:
         result = _disk.run_command(
@@ -75,7 +75,7 @@ def get_root_partition(disk: str) -> str:
             dev = raw_dev.strip()
             if dev and dev.startswith(disk):
                 return dev
-    except Exception:
+    except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
         _logger.debug("get_root_partition: blkid probe of %s failed", disk, exc_info=True)
     raise RuntimeError(
         f"Cannot determine root partition on {disk}. "

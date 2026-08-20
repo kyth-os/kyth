@@ -183,7 +183,7 @@ class _InstallerWorker(QThread):
             result = WindowsInstallerWorkflow().execute(self._request, self.status.emit)
         except WorkflowFailure as exc:
             self.failed.emit(exc.kind.value, str(exc))
-        except Exception as exc:  # pragma: no cover - final GUI process boundary
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # pragma: no cover - final GUI process boundary
             self.failed.emit("unexpected", f"Unexpected installer error: {exc}")
         else:
             self.completed.emit(result)

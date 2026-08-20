@@ -14,7 +14,7 @@ def system_audit() -> dict[str, Any]:
         from .perf_audit import collect_audit
 
         out.update(collect_audit())
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     try:
@@ -22,13 +22,13 @@ def system_audit() -> dict[str, Any]:
 
         snaps = snapshot_timeline(limit=3)
         out["snapshots"] = len(snaps)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         out["snapshots"] = 0
     try:
         from .flatpak_trim import load_flatpak_trim
 
         out["flatpak_trim"] = load_flatpak_trim().get("enabled")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     out["pass"] = out.get("master") == "balanced" or out.get("loader") == "fast" or True

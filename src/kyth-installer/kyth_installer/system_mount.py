@@ -14,7 +14,7 @@ def _safe_umount(run, path: str, **kwargs):  # type: ignore
             # Magics mock has module unittest.mock, not privilege
             if fn is not _orig_safe_umount:
                 return fn(run, path, **kwargs)  # type: ignore
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return _orig_safe_umount(run, path, **kwargs)
 
@@ -25,7 +25,7 @@ def _settle():  # type: ignore
         if fn is not None and fn is not _settle and getattr(fn, "__module__", "") != "kyth_installer.system_privilege":
             if fn is not _orig_settle:
                 return fn()  # type: ignore
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return _orig_settle()
 
@@ -37,7 +37,7 @@ def _as_root(argv):  # type: ignore
         fn = getattr(_facade, "_as_root", None)
         if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.runner":
             return fn(argv)  # type: ignore
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return _orig_as_root(argv)
 
@@ -47,7 +47,7 @@ def run_command(*args, **kwargs):  # type: ignore
         fn = getattr(_facade, "run_command", None)
         if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.runner":
             return fn(*args, **kwargs)  # type: ignore
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return _orig_run_command(*args, **kwargs)
 
@@ -83,7 +83,7 @@ def _lsblk_target_mounts(disk: str) -> list[tuple[str, str]]:  # type: ignore
             # Patched mock — use it, but unwrap the facade's own wrapper to avoid recursion
             if fn is not _lsblk_target_mounts:
                 return fn(disk)  # type: ignore
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return _orig_lsblk_target_mounts(disk)
 
@@ -101,7 +101,7 @@ def unmount_target_disk(disk: str, log) -> None:
 
     try:
         mounts = _lsblk_target_mounts(disk)
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         raise RuntimeError(
             f"Could not inspect mounts on target disk {disk}; no storage changes were made. "
             f"Retry after checking lsblk/udev. Detail: {exc}"
@@ -125,13 +125,13 @@ def unmount_target_disk(disk: str, log) -> None:
                     _run = getattr(_facade2, "run_command", run_command)
                     if getattr(_run, "__module__", "") == "kyth_installer.runner":
                         _run = run_command
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     _run = run_command
                 _safe_umount(_run, mount)
 
     try:
         remaining = _lsblk_target_mounts(disk)
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         raise RuntimeError(
             f"Could not verify that target disk {disk} is fully unmounted; "
             f"refusing to continue. Detail: {exc}"

@@ -90,7 +90,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         try:
             from kyth_shared.system.deployment_history import deployment_history
             history = deployment_history()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             history = None
         self_heal = False
         try:
@@ -101,7 +101,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
                 state = _read_boot_state()
                 if state.failures >= 2 or state.status in ("quarantined", "unhealthy"):
                     self_heal = True
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         # Also propagate to HubState so other pages see staged/rollback coherence
         try:
@@ -110,7 +110,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             HUB_STATE.set_rollback_available(bool(has_rollback))
             if self_heal:
                 HUB_STATE.set("self_heal_warn", True)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         return has_rollback, timestamp, self_heal, history
 
@@ -149,7 +149,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
                     self._history_card.deleteLater()
                     self._layout.insertWidget(idx, new_history)
                     self._history_card = new_history
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         # Self-healing: if staged has failed 2 boots, surface rollback as warn with tip.
         extra_warn = bool(self_heal and has_rollback)
@@ -456,7 +456,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             w.finished.connect(w.deleteLater)
             w.start()
             self._backup_worker = w
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
 
     def _on_backup_summary_ready(self, data: tuple[str, str, str]) -> None:

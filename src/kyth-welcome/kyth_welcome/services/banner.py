@@ -10,12 +10,12 @@ from typing import Any
 
 try:
     from ..core_base import restyle as _restyle
-except Exception:  # pragma: no cover — bare import for tests without Qt
+except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # pragma: no cover — bare import for tests without Qt
     def _restyle(widget: Any) -> None:  # type: ignore[no-redef]
         try:
             widget.style().unpolish(widget)
             widget.style().polish(widget)
-        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
 
 
@@ -27,7 +27,7 @@ def set_banner(label: Any, text: str, *, kind: str = "err") -> None:
         label.setObjectName(style)
         label.show()
         _restyle(label)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
 
 
@@ -36,5 +36,5 @@ def clear_banner(label: Any) -> None:
         label.setText("")
         label.hide()
         _restyle(label)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass

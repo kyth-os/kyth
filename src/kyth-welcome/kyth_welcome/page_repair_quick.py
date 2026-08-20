@@ -93,7 +93,7 @@ class _QuickFixMixin:
                 "Done. Double-clicking .exe and .msi files will now open Bottles.\n"
                 "If Bottles is not installed, install it from the App Store first."
             )
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             QMessageBox.warning(self, "Fix .exe Files", f"Could not update file associations: {exc}")
 
     def _enable_clipboard_history(self):
@@ -104,7 +104,7 @@ class _QuickFixMixin:
                 "Clipboard history enabled (25 items).\n"
                 "Press Meta+V (Meta+V) to open the clipboard history popup."
             )
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             QMessageBox.warning(self, "Clipboard History", f"Could not enable clipboard history: {exc}")
 
     def _open_night_light(self):

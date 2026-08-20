@@ -18,7 +18,7 @@ def mesa_version() -> str:
         if r2.returncode == 0:
             return r2.stdout.strip()
         return "mesa stable"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return f"mesa unknown: {exc}"
 
 def mesa_overlay_dry_run() -> tuple[bool, str]:
@@ -28,5 +28,5 @@ def mesa_overlay_dry_run() -> tuple[bool, str]:
         if r.returncode == 0:
             return True, "dry-run ok: mesa overlay would be COPR enable + bootc lint"
         return True, "dry-run ok: mesa-git overlay gated"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return False, str(exc)

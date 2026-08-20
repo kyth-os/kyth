@@ -77,19 +77,19 @@ def _storage_state(body: dict, context: InstallerContext) -> tuple[dict, dict]:
             # doesn't cause StopIteration → snapshot=None → extra calls.
             try:
                 _parts = tuple(disk.list_partitions(target_disk))
-            except Exception:
+            except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
                 _parts = ()
             try:
                 _free = tuple(disk.list_free_space(target_disk)) if mode == "free_space" else ()
-            except Exception:
+            except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
                 _free = ()
             try:
                 _efi_part = disk.find_efi_partition(target_disk)
-            except Exception:
+            except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
                 _efi_part = body.get("efi_partition", "") or None
             try:
                 _is_gpt = plan._is_gpt_disk(target_disk) if mode in ("alongside", "manual") else False
-            except Exception:
+            except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
                 _is_gpt = False
             _snapshot = _Snapshot(
                 disks=tuple(disks.values()),
@@ -103,7 +103,7 @@ def _storage_state(body: dict, context: InstallerContext) -> tuple[dict, dict]:
             # stays compatible with unit tests that expect exact call counts.
             if not _parts:
                 _snapshot = None
-        except Exception:
+        except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
             _snapshot = None
 
     def _part_names() -> set[str]:
@@ -245,7 +245,7 @@ def validate_install_request(body: dict, context: InstallerContext, *, strict_lo
             # Persist for rescue probe / failure summary — best-effort.
             if hasattr(context, "state") and isinstance(context.state, dict):
                 context.state["locale_warnings"] = list(_locale_warnings)
-        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+        except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
     username = body.get("username", "")
     _require_valid_username(username)

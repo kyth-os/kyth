@@ -116,7 +116,7 @@ def _installed_flatpaks() -> set[str]:
         res = run(["flatpak", "list", "--app", "--columns=application"], capture_output=True, text=True, timeout=10)
         if res.returncode == 0:
             return {ln.strip() for ln in res.stdout.splitlines() if ln.strip()}
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return set()
@@ -127,7 +127,7 @@ def _installed_distroboxes() -> set[str]:
         res = run(["distrobox", "list", "--no-color"], capture_output=True, text=True, timeout=10)
         if res.returncode == 0:
             return {parts[2] for line in res.stdout.splitlines() if len(parts := line.split()) >= 3}
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return set()
@@ -139,7 +139,7 @@ def _installed_vscode_extensions() -> set[str]:
             res = run([binary, "--list-extensions"], capture_output=True, text=True, timeout=10)
             if res.returncode == 0:
                 return {ln.strip().lower() for ln in res.stdout.splitlines() if ln.strip()}
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             continue
     return set()
 
@@ -180,7 +180,7 @@ def apply_preset(
             if not dry_run:
                 try:
                     run(["flatpak", "install", "-y", "flathub", app], capture_output=True, timeout=300)
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     logger.debug("handled expected exception", exc_info=True)
                     pass
 
@@ -193,7 +193,7 @@ def apply_preset(
             if not dry_run:
                 try:
                     run(["distrobox", "create", "--yes", "--name", box, "--image", "registry.fedoraproject.org/fedora-toolbox:44"], capture_output=True, timeout=300)
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     logger.debug("handled expected exception", exc_info=True)
                     pass
 
@@ -209,7 +209,7 @@ def apply_preset(
                     try:
                         run([binary, "--install-extension", ext], capture_output=True, timeout=60)
                         break
-                    except Exception:
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                         continue
 
     return {"profile": preset.profile, "installed": installed, "skipped": skipped, "dry_run": dry_run}

@@ -28,7 +28,7 @@ class SystemProbe:
                 timeout=5
             )
             return parse_systemd_state(res.stdout)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return "inactive"
 
     @staticmethod
@@ -42,7 +42,7 @@ class SystemProbe:
                 timeout=5
             )
             return res.stdout.strip()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return ""
 
     @staticmethod
@@ -56,7 +56,7 @@ class SystemProbe:
                 timeout=5
             )
             return parse_secure_boot_state(res.stdout)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return ""
 
     @staticmethod
@@ -82,7 +82,7 @@ class SystemProbe:
                     timeout=5
                 )
                 return res.stdout.strip()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 return ""
         return ""
 

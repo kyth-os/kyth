@@ -117,7 +117,7 @@ def collect_availability(*, branch: str | None = None, use_cached: bool = True) 
             return AvailabilityStatus(state="error", detail=result.detail, flatpak_count=0)
         system_state = result.state  # "available" | "uptodate" | etc
         system_detail = result.detail
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return AvailabilityStatus(state="error", detail=str(exc))
 
     # Flatpak count — best effort, never fails the whole check

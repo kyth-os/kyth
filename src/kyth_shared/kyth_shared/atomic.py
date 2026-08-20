@@ -50,7 +50,7 @@ def atomic_write_json(
                 os.close(dir_fd)
         except OSError:
             pass
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         try:
             os.unlink(tmp)
         except OSError:

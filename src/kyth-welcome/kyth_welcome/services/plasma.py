@@ -22,7 +22,7 @@ def run_text(cmd: list[str], timeout: int = 5) -> tuple[int, str, str]:
             cmd, capture_output=True, text=True, timeout=timeout, check=False,
         )
         return result.returncode, result.stdout.strip(), result.stderr.strip()
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return 1, "", str(exc)
 
 

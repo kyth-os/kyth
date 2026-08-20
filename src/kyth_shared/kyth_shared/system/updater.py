@@ -87,7 +87,7 @@ def get_github_headers() -> dict[str, str]:
     if secret_path.is_file():
         try:
             token = secret_path.read_text(encoding="utf-8").strip()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     if not token:

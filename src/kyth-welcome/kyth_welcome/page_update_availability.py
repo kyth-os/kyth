@@ -92,7 +92,7 @@ class _UpdateAvailabilityMixin:
             try:
                 old_timer.stop()
                 old_timer.deleteLater()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         self._avail_deadline_timer = QTimer(self)
         self._avail_deadline_timer.setSingleShot(True)
@@ -144,7 +144,7 @@ class _UpdateAvailabilityMixin:
         if getattr(self, "_avail_deadline_timer", None):
             try:
                 self._avail_deadline_timer.stop()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         self._finish_availability_check(completed)
 
@@ -152,7 +152,7 @@ class _UpdateAvailabilityMixin:
         if getattr(self, "_avail_deadline_timer", None):
             try:
                 self._avail_deadline_timer.stop()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         self._check_state = completed.system_state
         self._check_ts = datetime.now().strftime("%H:%M")

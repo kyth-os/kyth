@@ -87,7 +87,7 @@ def apply_network_preset(cfg: dict[str, Any] | None = None, root: Path = Path("/
     try:
         import time
         Path("/run/kyth-network-ttl").write_text(str(int(time.time())+30), encoding="utf-8")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return written

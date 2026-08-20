@@ -75,7 +75,7 @@ def generate_irq_conf(cfg: dict[str, Any] | None = None, dest: Path | None = Non
             c = get_amd_ccd0_cpus() or get_intel_pcores() or ""
             if c:
                 cpus = c
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     banned = cpus or "1"

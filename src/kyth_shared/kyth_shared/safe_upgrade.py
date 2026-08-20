@@ -20,7 +20,7 @@ from .boot_health import (
 # so UpdatePage and RepairPage share one source without per-page bootc spawns
 try:
     from kyth_welcome.services.hub_state import HUB_STATE as _HUB_STATE  # type: ignore[import-not-found]
-except (OSError, subprocess.SubprocessError) as exc:
+except (ImportError, OSError, subprocess.SubprocessError) as exc:  # noqa: BLE001 -- narrow: hub_state optional import
     _HUB_STATE = None  # type: ignore[assignment]
 from .commands import run
 from .system.bootc import image_digest_from_status, image_reference_from_status
@@ -112,10 +112,10 @@ def upgrade(
                 from .system.bootc import has_rollback_deployment
 
                 _HUB_STATE.set_rollback_available(bool(has_rollback_deployment()))
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 logger.debug("handled expected exception", exc_info=True)
                 pass
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return 0

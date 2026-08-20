@@ -122,7 +122,7 @@ def write_state(state: BootHealthState, path: str | Path = DEFAULT_STATE_PATH) -
         try:
             from kyth_shared.system.probe import invalidate_bootc
             invalidate_bootc()
-        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
 
 
@@ -381,7 +381,7 @@ def _default_rollback_runner() -> tuple[int, str]:
     spec = CommandSpec(argv=("/usr/bin/bootc", "rollback"), timeout=60, name="bootc rollback")
     try:
         result = runner.run(spec, capture_output=True, text=True)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return 1, "bootc rollback could not execute"
     if result is None:
         return 1, "bootc rollback could not execute"
@@ -419,11 +419,11 @@ def trigger_rollback_if_newly_quarantined(
         return
     try:
         returncode, detail = run()
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         print(f"bootc rollback errored for quarantined digest {digest}: {exc}", file=sys.stderr)
         try:
             coordinator.note_rollback_attempted(digest)
-        except Exception as exc2:  # nosec B110 -- best-effort persistence of rollback marker
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc2:  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort persistence of rollback marker
             print(f"Failed to persist rollback marker for {digest}: {exc2}", file=sys.stderr)
         return
     # Record attempt regardless of success so we never loop on a bad rollback target;
@@ -434,7 +434,7 @@ def trigger_rollback_if_newly_quarantined(
         print(f"bootc rollback failed for quarantined digest {digest}: {detail}", file=sys.stderr)
     try:
         coordinator.note_rollback_attempted(digest)
-    except Exception as exc:  # nosec B110 -- best-effort persistence of rollback marker
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort persistence of rollback marker
         print(f"Failed to persist rollback marker for {digest}: {exc}", file=sys.stderr)
 
 

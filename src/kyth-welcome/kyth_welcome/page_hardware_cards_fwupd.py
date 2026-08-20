@@ -44,14 +44,14 @@ def make_driver_fwupd_card(page: "HardwarePage"):
                 from kyth_shared.system.firmware import firmware_updates_command
                 from kyth_shared.commands import run as _fw_run2
                 upd = _fw_run2(firmware_updates_command(), capture_output=True, text=True, timeout=15, check=False)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 upd = run_command(["fwupdmgr", "get-updates"], timeout=15)
             upd_ok = upd is not None and upd.returncode == 0
             upd_stdout = upd.stdout if upd and upd.stdout else ""
             msg = f"{mok} — fwupd: {'updates available' if 'Updates' in upd_stdout else 'up to date' if upd_ok else 'fwupd unavailable'}"
             page._fwupd_status.setText(msg)
             page._fwupd_status.setObjectName("status-ok")
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             page._fwupd_status.setText(f"Check failed: {exc}")
             page._fwupd_status.setObjectName("status-err")
         restyle(page._fwupd_status)

@@ -301,7 +301,7 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
             for key in ("vrr", "hdr"):
                 if key in verify_out and facts.get(key.upper(), "").lower() not in verify_out:
                     facts[key.upper()] += " (pending — re-apply may be needed)"
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         for name, value in facts.items():
             label = self._wayland_row_labels.get(name)

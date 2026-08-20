@@ -60,7 +60,7 @@ def _systemd_escape_mount_path(path: str) -> str:
         )
         if r.returncode == 0:
             return r.stdout.strip()
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         _logger.debug("_systemd_escape_mount_path: systemd-escape probe of %s failed", path, exc_info=True)
     # Fallback: strip leading /, replace / with -, append .mount
     return path.lstrip("/").replace("/", "-") + ".mount"
@@ -77,7 +77,7 @@ def _is_mounted(path: str) -> bool:
             capture_output=True, text=True, timeout=5, check=False,
         )
         return r.returncode == 0 and bool(r.stdout.strip())
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return False
  # _is_mounted
 

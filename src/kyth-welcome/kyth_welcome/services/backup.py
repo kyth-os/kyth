@@ -15,7 +15,7 @@ def _pika_backup_summary() -> tuple[str, str, str]:
     try:
         from .flatpak import is_installed
         pika_flatpak = is_installed(flatpak_id)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pika_flatpak = False
     pika_bin = shutil.which("pika-backup") is not None or shutil.which("pika_backup") is not None
     if not (pika_flatpak or pika_bin):

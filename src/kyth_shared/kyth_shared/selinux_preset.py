@@ -54,20 +54,20 @@ def apply_selinux(cfg: dict[str, Any] | None = None) -> list[str]:
     try:
         if run(["selinuxenabled"], capture_output=True, timeout=3).returncode!=0:
             return applied
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return applied
     for dom in cfg.get("permissive", []):
         try:
             run(["semanage","permissive","-a", dom], capture_output=True, timeout=5)
             applied.append(f"permissive:{dom}")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     for k,v in cfg.get("booleans", {}).items():
         try:
             run(["setsebool","-P", k, "on" if v else "off"], capture_output=True, timeout=5)
             applied.append(f"boolean:{k}={v}")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     return applied

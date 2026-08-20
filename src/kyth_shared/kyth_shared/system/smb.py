@@ -28,5 +28,5 @@ def smb_browse_dry_run(host: str | None = None) -> tuple[bool, str]:
         return False, r.stderr[:500] or f"{' '.join(cmd)} failed"
     except FileNotFoundError:
         return False, f"{cmd[0]} not installed"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         return False, str(exc)

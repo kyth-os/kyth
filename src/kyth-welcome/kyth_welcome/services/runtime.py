@@ -155,7 +155,7 @@ class TaskSupervisor:
                     stop()
                 except RuntimeError:
                     continue
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     _logger.debug("TaskSupervisor.shutdown: stop() on %r failed", thread, exc_info=True)
         deadline = time.monotonic() + timeout_ms / 1000
         while True:
@@ -259,10 +259,10 @@ class Worker(TrackedThread):
             os.killpg(proc.pid, signal.SIGTERM)
         except ProcessLookupError:
             return
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             try:
                 proc.terminate()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 return
 
     def run(self):
@@ -300,7 +300,7 @@ class Worker(TrackedThread):
                 self.done.emit(self.CANCELLED)
             else:
                 self.done.emit(proc.returncode)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self.line.emit(f"Error: {exc}")
             self.done.emit(1)
         finally:
@@ -317,7 +317,7 @@ class Worker(TrackedThread):
                     invalidate_after_flatpak_change()
                 if "bootc" in self._spec.invalidates:
                     invalidate_after_bootc_change()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 _logger.debug("Worker.run: targeted disk-cache invalidation failed", exc_info=True)
 
 
@@ -357,10 +357,10 @@ class StreamingProcessWorker(TrackedThread):
             os.killpg(proc.pid, signal.SIGTERM)
         except ProcessLookupError:
             return
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             try:
                 proc.terminate()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 return
         # In bwrap/sandbox the pgid may not match pid — ensure process dies
         try:
@@ -370,13 +370,13 @@ class StreamingProcessWorker(TrackedThread):
             time.sleep(0.05)
             if proc.poll() is None:
                 proc.kill()
-        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
 
     def run(self):
         try:
             cmd = self.command()
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self.line.emit(f"Error: {exc}")
             self.done.emit(1)
             return
@@ -393,7 +393,7 @@ class StreamingProcessWorker(TrackedThread):
                 self.line.emit(ln.rstrip())
             self._proc.wait()
             self.done.emit(self._proc.returncode)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self.line.emit(f"Error: {exc}")
             self.done.emit(1)
 
@@ -454,7 +454,7 @@ def start_or_extend_dl_monitor(
         after = text.split("layers needed:")[1]
         size_str = after.split("(")[1].rstrip(")") if "(" in after else ""
         new_total = parse_size_bytes(size_str)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         _logger.debug("start_or_extend_dl_monitor: failed to parse download size from %r", text, exc_info=True)
         return monitor, total, False, False
     if new_total <= 0:
@@ -479,7 +479,7 @@ class DataWorker(TrackedThread):
     def run(self):
         try:
             self.result.emit(self._key, self._fn())
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self.failed.emit(self._key, str(exc))
 
 

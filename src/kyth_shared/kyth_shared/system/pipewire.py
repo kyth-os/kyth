@@ -42,7 +42,7 @@ def apply_pipewire_quantum(preset: str, dry_run: bool = False) -> tuple[bool, st
                 os.fsync(fd)
             finally:
                 os.close(fd)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
         tmp.replace(target)
@@ -52,10 +52,10 @@ def apply_pipewire_quantum(preset: str, dry_run: bool = False) -> tuple[bool, st
                 os.fsync(fd2)
             finally:
                 os.close(fd2)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
         return True, f"pipewire quantum {q} ({preset}) applied — restart pipewire"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         logger.warning("pipewire quantum apply failed, fallback not available: %s", exc)
         return False, str(exc)

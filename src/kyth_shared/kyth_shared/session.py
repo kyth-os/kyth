@@ -52,13 +52,13 @@ def write_code_argv(path: Path) -> None:
             data = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 data = {}
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
     data["password-store"] = "kwallet5"
     try:
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -67,14 +67,14 @@ def write_chromium_flags(path: Path) -> None:
     """Configure password store to kwallet5 in Chromium/Brave flags file."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     lines = []
     if path.is_file():
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -94,7 +94,7 @@ def write_chromium_flags(path: Path) -> None:
 
     try:
         path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -136,7 +136,7 @@ def mark_run(name: str) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -152,7 +152,7 @@ def write_app_status(status_file: Path, state: str, message: str) -> None:
     )
     try:
         status_file.write_text(content, encoding="utf-8")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -161,7 +161,7 @@ def datetime_now_iso() -> str:
     from datetime import datetime
     try:
         return datetime.now().astimezone().isoformat()
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return str(time.time())
 
 
@@ -179,7 +179,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
         cmdline = Path("/proc/cmdline").read_text(encoding="utf-8")
         if "kyth.live" in cmdline.split():
             return 0
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -267,7 +267,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
     
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -278,7 +278,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
         try:
             with out.open("a", encoding="utf-8") as f:
                 f.write(f"\n== {title} ==\n")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
 
@@ -294,11 +294,11 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
                 f.write(output)
                 if not output.endswith("\n"):
                     f.write("\n")
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
             try:
                 with out.open("a", encoding="utf-8") as f:
                     f.write(f"Execution failed: {e}\n")
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 logger.debug("handled expected exception", exc_info=True)
                 pass
 
@@ -307,7 +307,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
     user = getpass.getuser() or "unknown"
     try:
         host = socket.gethostname()
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         host = "unknown"
 
     try:
@@ -316,7 +316,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
             f.write(f"Generated: {now_iso}\n")
             f.write(f"User: {user}\n")
             f.write(f"Host: {host}\n")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -349,7 +349,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
             for p in gaming_paths:
                 if p.exists():
                     f.write(f"{p}\n")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 
@@ -370,7 +370,7 @@ def generate_session_snapshot(out_dir: Path | None = None) -> Path:
     try:
         with out.open("a", encoding="utf-8") as f:
             f.write(notes)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
 

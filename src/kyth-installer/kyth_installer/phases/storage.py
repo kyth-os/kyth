@@ -112,7 +112,7 @@ def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerC
             capture_output=True, text=True, check=True, timeout=5,
         )
         current_efi_mnt = result.stdout.strip()
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         current_efi_mnt = ""
     if current_efi_mnt:
         run_command(
@@ -143,7 +143,7 @@ def _snapshot_efi_boot_entries(log) -> str:
     try:
         result = run_command(_as_root(["efibootmgr", "-v"]), capture_output=True, text=True, timeout=10)
         return result.stdout if result.returncode == 0 else ""
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return ""
 
 
@@ -210,7 +210,7 @@ def _prepare_partition_target_storage(
                     run_command(_as_root(["umount", td]), check=False, capture_output=True)
                     if has_ms:
                         log(f"ESP {efi_part} contains Windows bootloader — will not format, only reuse.")
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             log(f"Warning: could not inspect ESP {efi_part}: {exc}")
     _create_btrfs_subvolumes(target_part, log, progress, context)
 

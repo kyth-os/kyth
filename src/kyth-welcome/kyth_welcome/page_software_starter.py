@@ -292,11 +292,11 @@ class _StarterPackTabMixin:
                                 dl_exes.append(p.name)
                     # Merge Program Files + Downloads, dedup
                     all_names = list(dict.fromkeys([*names, *dl_exes]))
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     all_names = names
                 mapped = map_to_familiar(all_names, list(self._FAMILIAR_APPS))
                 return {"names": all_names, "mapped": mapped, "dl_count": len(dl_exes)}
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 return {"error": str(exc)}
 
         w = DataWorker("win-app-scan", _scan)

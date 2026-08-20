@@ -31,7 +31,7 @@ def load_pipewire_latency(path: Path | None = None) -> dict[str, int]:
     for app, q in apps.items():
         try:
             qi=int(q)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             continue
         qi=max(16, min(2048, qi))
         # round to power of 2

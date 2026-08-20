@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             p = urlparse(value)
             return p.scheme == "http" and p.hostname in ("127.0.0.1", "localhost") and p.port == PORT
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return False
 
     def _require_same_origin_context(self) -> bool:
@@ -250,7 +250,7 @@ class Handler(BaseHTTPRequestHandler):
             if LOG_FILE.is_file() and not LOG_FILE.is_symlink():
                 lines = LOG_FILE.read_text(errors="replace").splitlines()
                 probe["log_tail"] = "\n".join(lines[-80:])
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             probe["log_tail"] = f"(could not read log: {exc})"
         # sgdisk --verify on the selected disk if any
         try:
@@ -258,14 +258,14 @@ class Handler(BaseHTTPRequestHandler):
             if sel_disk:
                 r = run_command(_as_root(["sgdisk", "--verify", sel_disk]), capture_output=True, text=True, timeout=10)
                 probe["sgdisk_verify"] = (r.stdout or "") + (r.stderr or "")
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             probe["sgdisk_verify"] = f"(verify failed: {exc})"
         # efibootmgr -v (read-only)
         try:
             r = run_command(_as_root(["efibootmgr", "-v"]), capture_output=True, text=True, timeout=5)
             if r.stdout:
                 probe["efibootmgr"] = r.stdout
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         # bootc status --json (read-only)
         try:
@@ -290,9 +290,9 @@ class Handler(BaseHTTPRequestHandler):
                                 if dep.get("staged") and not staged:
                                     staged = str(dep.get("image") or dep.get("id") or "")
                     probe["bootc_status_summary"] = {"booted": booted[:256], "staged": staged[:256]}
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     probe["bootc_status_summary"] = {"booted": "", "staged": ""}
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         return probe
 
@@ -309,12 +309,12 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     try:
                         self.wfile.write(chunk.encode())
-                    except Exception:
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                         break
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             try:
                 self.wfile.write(f"Could not read installer log: {exc}\n".encode())
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
 
     def _send_text(self, text: str, content_type: str) -> None:
@@ -337,7 +337,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length).decode() or "{}")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             self.send_error(400, "Invalid JSON")
             return
 
@@ -375,7 +375,7 @@ class Handler(BaseHTTPRequestHandler):
                         try:
                             self.wfile.write(b":ka\n\n")
                             self.wfile.flush()
-                        except Exception:
+                        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                             return
                 batch = self.context.events.events[sent:]
             for event in batch:
@@ -384,7 +384,7 @@ class Handler(BaseHTTPRequestHandler):
                         f"id: {sent}\ndata: {json.dumps(event)}\n\n".encode()
                     )
                     self.wfile.flush()
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     return
                 sent += 1
                 if event["type"] in ("done", "error"):

@@ -67,7 +67,7 @@ def generate_work_cache(cfg: dict[str, Any] | None = None, tmpfiles: Path | None
         req_gb = {"1G": 1, "2G": 2, "4G": 4}.get(size, 1)
         if req_gb > max_gb:
             size = f"{max_gb}G"
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     try:

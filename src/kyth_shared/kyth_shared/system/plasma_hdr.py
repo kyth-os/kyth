@@ -76,11 +76,11 @@ def apply_preset(name: str, dry_run: bool = False) -> tuple[bool, str]:
         # Try kwin --replace lightly (optional)
         try:
             _run(["kwin_wayland", "--help"], capture_output=True, timeout=3, check=False)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
         return True, f"applied {name}"
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # noqa: BLE001
         return False, str(exc)
 
 
@@ -95,5 +95,5 @@ def preset_status(name: str) -> str:
                 if f"{k}={v}" not in txt:
                     return f"{k}={v} not active"
         return "active"
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # noqa: BLE001
         return str(exc)

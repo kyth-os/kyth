@@ -125,7 +125,7 @@ class _DrivesMixin:
         # Update Takeout wizard first (summary driven from partitions)
         try:
             self._update_takeout(partitions)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         if not partitions:
             self._drive_status.setText("No Windows/NTFS partitions found.")
@@ -150,7 +150,7 @@ class _DrivesMixin:
         try:
             from ..services.windows_migration import summarize_takeout
             score = summarize_takeout(partitions).get("score", 2 + (1 if clean else 0) + (1 if steam else 0) + (1 if profiles else 0))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             score = 2 + (1 if clean else 0) + (1 if steam else 0) + (1 if profiles else 0)
         score_text = (
             f"Switch readiness: {score}/5. Found {clean} safely readable drive(s), "

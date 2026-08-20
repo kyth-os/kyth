@@ -28,7 +28,7 @@ def read_sched_status() -> dict[str, Any]:
     path = status_file_path()
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return {}
 
 
@@ -39,7 +39,7 @@ def list_schedulers() -> list[str]:
             capture_output=True, text=True, timeout=5, check=False,
         )
         schedulers = [s.strip() for s in r.stdout.splitlines() if s.strip()]
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         schedulers = []
     if not schedulers:
         try:
@@ -48,7 +48,7 @@ def list_schedulers() -> list[str]:
                 for p in glob.glob("/usr/bin/scx_*")
                 if os.path.isfile(p) and not p.endswith("scx_loader")
             )
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             _logger.debug("list_schedulers: /usr/bin/scx_* glob scan failed", exc_info=True)
     return schedulers or ["scx_rusty"]
 
@@ -60,7 +60,7 @@ def is_sched_daemon_active() -> bool:
             capture_output=True, text=True, timeout=3, check=False,
         )
         return r.stdout.strip() == "active"
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return False
 
 
@@ -72,7 +72,7 @@ def apply_scheduler(name: str) -> None:
             scheduler_action(name),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         _logger.warning("apply_scheduler: failed to launch kyth-scx set %s", name, exc_info=True)
 
 
@@ -86,5 +86,5 @@ def set_sched_daemon_enabled(enabled: bool) -> None:
             ),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         _logger.warning("set_sched_daemon_enabled: failed to %s kyth-sched.service", cmd, exc_info=True)

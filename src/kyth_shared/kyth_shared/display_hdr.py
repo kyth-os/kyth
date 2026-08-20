@@ -37,7 +37,7 @@ def load_hdr_config(path: Path | None = None) -> dict[str, dict[str, Any]]:
             continue
         try:
             peak = int(entry.get("peak_nits", 400))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             peak = 400
         peak = max(100, min(4000, peak))
         hdr = bool(entry.get("hdr_enabled", False))
@@ -96,7 +96,7 @@ def parse_edid_peak_nits(edid_path: Path) -> int | None:
                     if 1 <= maybe <= 10:
                         return maybe * 100  # heuristic
         return None
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return None
 
 

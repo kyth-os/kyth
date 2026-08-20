@@ -43,11 +43,11 @@ def DiskLease(disk: str, log, *, exclusive: bool = True):
         if fd != -1:
             try:
                 fcntl.flock(fd, fcntl.LOCK_UN)
-            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
             try:
                 os.close(fd)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
 
 
@@ -82,11 +82,11 @@ def PartitionTableGuard(disk: str, log, *, disk_service=None):
             log(f"Warning: could not fsync partition backup: {exc}")
         try:
             yield backup_path
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             # restore on any exception inside the guarded scope
             try:
                 disk_service.restore_table(disk, backup_path)
                 log("Partition table restored to its state before this attempt.")
-            except Exception as restore_exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as restore_exc:  # noqa: BLE001 -- narrow: best-effort production path
                 log(f"Warning: automatic partition table restore failed: {restore_exc}")
             raise

@@ -160,7 +160,7 @@ def load_registry(config_dir: Path | None = None) -> dict[str, TunableSpec]:
         try:
             with toml_path.open("rb") as f:
                 data = tomllib.load(f)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             data = {}
         tunables = data.get("tunables", {})
         if isinstance(tunables, dict) and tunables:

@@ -79,7 +79,7 @@ class _AutoUpdateMixin:
         if ts:
             try:
                 ts_str = datetime.fromtimestamp(ts).strftime("%b %d %H:%M")
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 ts_str = str(ts)
         else:
             ts_str = "Never"
@@ -228,7 +228,7 @@ class _AutoUpdateMixin:
             from .qt import single_shot as _ss
 
             _ss(self, 500, self._refresh_wu_staged_label)
-        except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
             pass
         self._add(card)
 
@@ -278,5 +278,5 @@ class _AutoUpdateMixin:
             from .core_base import restyle
 
             restyle(self._wu_staged_lbl)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass

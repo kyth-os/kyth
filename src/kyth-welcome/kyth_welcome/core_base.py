@@ -72,7 +72,7 @@ def prefer_xwayland_if_wayland_plugin_missing() -> None:
                 )
                 if _wheel_dir not in QT6_PLATFORM_DIRS:
                     QT6_PLATFORM_DIRS.append(_wheel_dir)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     for platform_dir in QT6_PLATFORM_DIRS:
         if not os.path.isdir(platform_dir):

@@ -54,6 +54,6 @@ def numa_cpus(cfg: dict[str,Any]|None=None) -> str:
         try:
             from .performance import get_amd_ccd0_cpus
             return get_amd_ccd0_cpus() or ""
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return ""
     return ""

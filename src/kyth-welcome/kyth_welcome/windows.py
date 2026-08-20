@@ -107,11 +107,11 @@ class MainWindow(QMainWindow):
             try:
                 page = self._ensure_page(idx)
                 page.profile_changed.connect(self._apply_profile_visibility)
-            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
             try:
                 self._apply_profile_visibility(load_profile())
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
 
         single_shot(self, 0, _wire_welcome_profile)
@@ -194,20 +194,20 @@ class MainWindow(QMainWindow):
 
             try:
                 branch = branch_display_name(current_branch())
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 branch = "System Hub"
             try:
                 staged = has_staged_update()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 staged = False
             try:
                 rollback = has_rollback_deployment()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 rollback = False
             try:
                 portal = command_stdout(["systemctl", "--user", "is-active", "xdg-desktop-portal.service"], timeout=2) or ""
                 portal = portal.strip()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 portal = ""
             return {"branch": branch, "staged": staged, "rollback": rollback, "portal": portal}
 
@@ -256,7 +256,7 @@ class MainWindow(QMainWindow):
                 self._mission_ai_hint.show()
             else:
                 self._mission_ai_hint.hide()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             self._mission_ai_hint.hide()
 
     def _show_palette(self):

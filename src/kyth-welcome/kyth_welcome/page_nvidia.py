@@ -183,7 +183,7 @@ class NvidiaPage(Page):
             try:
                 from kyth_shared.system.probe import invalidate_nvidia
                 invalidate_nvidia()
-            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
             self._log_panel.append("\nDone. Reboot to activate NVIDIA drivers.")
             self._reboot_btn.show()

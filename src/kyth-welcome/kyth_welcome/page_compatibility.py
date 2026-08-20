@@ -293,7 +293,7 @@ class CompatibilityPage(Page):
             gpu = "\n".join(lspci_gpu_lines()[:1])
             if gpu:
                 self._sum_copy.setText(self._sum_copy.text() + f"\n\nLocal GPU: {gpu[:80]}")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -404,7 +404,7 @@ class CompatibilityPage(Page):
                         p = lib.get("path") if isinstance(lib, dict) else None
                         if p:
                             extra_paths.append(p)
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     pass
                 names = scan_steam_manifests(extra_paths if extra_paths else None)
                 if not names:
@@ -413,7 +413,7 @@ class CompatibilityPage(Page):
                 result = classify_library(names, list(_G))
                 result["names"] = names
                 return result
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 return {"error": str(exc), "total": 0, "buckets": {}}
 
         worker = DataWorker("truth-engine", _scan)

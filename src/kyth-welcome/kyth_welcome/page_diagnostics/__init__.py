@@ -161,7 +161,7 @@ class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _H
             from .core_base import restyle
 
             restyle(self._priv_status)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._priv_status.setText(f"{which} failed — {exc}")
             from .core_base import restyle
 

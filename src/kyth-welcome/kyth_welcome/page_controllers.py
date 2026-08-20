@@ -240,7 +240,7 @@ class ControllerPage(Page):
             groups = [grp.getgrgid(g).gr_name for g in os.getgroups()]
             if "input" not in groups and not os.path.exists("/etc/udev/rules.d/60-input.rules"):
                 extra = " — tip: add to 'input' group for direct evdev, or solaar/antimicrox via Flatpak"
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         self._status_lbl.setText(view.status_text + extra)
 

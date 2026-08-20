@@ -15,7 +15,7 @@ def pending_updates_summary() -> dict[str, str]:
     try:
         from kyth_shared.system.firmware import check_firmware_updates
         out["firmware"] = str(check_firmware_updates())
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         out["firmware"] = "0"
     # flatpak
     try:
@@ -25,13 +25,13 @@ def pending_updates_summary() -> dict[str, str]:
             out["flatpak"] = str(len(lines))
         else:
             out["flatpak"] = "0"
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         out["flatpak"] = "0"
     # bootc
     try:
         r = run(["bootc", "status", "--json"], capture_output=True, text=True, timeout=10, check=False)
         out["bootc"] = "staged" if "staged" in r.stdout.lower() else "current"
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         out["bootc"] = "unknown"
     return out
 

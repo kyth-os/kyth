@@ -53,7 +53,7 @@ def telemetry_collectors_status(path: Path | None = None) -> list[str]:
 
         allowed = {c.name for c in default_collectors()}
         return [c for c in cfg["collectors"] if c in allowed]
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return []
 
 

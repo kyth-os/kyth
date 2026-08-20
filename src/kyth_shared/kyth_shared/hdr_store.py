@@ -43,5 +43,5 @@ def hdr_store_audit() -> dict[str, Any]:
 
         cfg = load_hdr_config()
         return {"displays": len(cfg), "peak": {k: v.get("peak_nits") for k, v in cfg.items()}}
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return {"displays": 0}

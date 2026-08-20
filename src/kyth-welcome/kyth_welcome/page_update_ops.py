@@ -300,14 +300,14 @@ class _UpdateOpsMixin:
                         best = su_gb
                 except OSError:
                     pass
-            except Exception:  # nosec B112 -- best-effort per-item skip, failure here is non-fatal by design
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B112 -- best-effort per-item skip, failure here is non-fatal by design
                 continue
         if best < 0:
             try:
                 best = shutil.disk_usage("/").free / (1024**3)
             except OSError:
                 return 999.0
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 return 999.0
         return best
 
@@ -327,7 +327,7 @@ class _UpdateOpsMixin:
                 return
         except OSError:
             pass
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         self._start_operation_spec(full_update_operation())
 
@@ -470,7 +470,7 @@ class _UpdateOpsMixin:
             try:
                 from kyth_shared.system.probe import invalidate_bootc
                 invalidate_bootc()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         completion = self._operation.completion(
             code,
@@ -558,7 +558,7 @@ class _UpdateOpsMixin:
         # Low-disk measurement — single source, correct mountpoint (also enforced in _run_full_update)
         try:
             free_gb = self._free_gb_for_update()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             free_gb = 999.0
 
         # Staged row — include pending image ref + short digest when present (5/5 visibility)

@@ -55,7 +55,7 @@ class UpdateCheckWorker(TrackedThread):
                             and snap_digest != cur_digest
                         ):
                             raise ValueError("booted digest changed since snapshot")
-                    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
                         pass
                     else:
                         detail = getattr(snapshot, "reason", "") or getattr(snapshot, "output", "")
@@ -123,7 +123,7 @@ class FirmwareCheckWorker(TrackedThread):
             self.result.emit(
                 UpdateProbeResult.success("firmware", count, detail=updates.stdout.strip())
             )
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             _logger.warning("Firmware update probe failed: %s", exc)
             self.result.emit(UpdateProbeResult.error("firmware", str(exc)))
 
@@ -150,7 +150,7 @@ class ChangelogWorker(TrackedThread):
             if "@sha256:" in ref:
                 _BOOTED_ANNOTATIONS_CACHE[ref] = annotations
             return annotations
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             return {}
 
     def run(self):
@@ -165,7 +165,7 @@ class ChangelogWorker(TrackedThread):
         if self._remote_manifest:
             try:
                 remote_ann = image_annotations(json.loads(self._remote_manifest))
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 _logger.debug("ChangelogWorker.run: parsing the cached remote manifest failed", exc_info=True)
 
         if not remote_ann:
@@ -187,6 +187,6 @@ class FlatpakCheckWorker(TrackedThread):
             self.result.emit(
                 UpdateProbeResult.success("flatpak", 0 if count is None else int(count))
             )
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             _logger.warning("Flatpak update probe failed: %s", exc)
             self.result.emit(UpdateProbeResult.error("flatpak", str(exc)))

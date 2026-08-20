@@ -164,7 +164,7 @@ class WindowsMigrationPage(
                     ))
                 )
                 w.start()
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 self._win_import_status.setText(f"Import failed: {exc}")
 
         win_btn.clicked.connect(lambda _checked=False: _import_win())  # pylint: disable=unnecessary-lambda
@@ -229,9 +229,9 @@ class WindowsMigrationPage(
                 from ..core_base import restyle
 
                 restyle(self._verify_status)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._verify_status.setText(f"verify failed — {exc}")
 
 

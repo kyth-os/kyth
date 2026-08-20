@@ -32,7 +32,7 @@ def appimage_entry_from_desktop_text(
     parser.optionxform = str
     try:
         parser.read_string(desktop_text)
-    except Exception:
+    except Exception:  # noqa: BLE001 -- broad: configparser.MissingSectionHeaderError and other parse errors must be caught
         return None
     if not parser.has_section("Desktop Entry"):
         return None

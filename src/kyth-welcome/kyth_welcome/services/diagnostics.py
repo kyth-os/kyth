@@ -132,7 +132,7 @@ def _diagnostics_report(probes: list[HardwareProbe]) -> str:
             fwupd_status = "up to date"
         else:
             fwupd_status = f"check failed (exit {_fw.returncode})"
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         fwupd = run_command(["fwupdmgr", "get-updates"], timeout=20)
         if fwupd is None:
             fwupd_status = "fwupd unavailable"
@@ -207,7 +207,7 @@ def _health_command_report() -> str:
                 env=env,
             )
             running_procs.append((title, p, cmd, timeout, time.monotonic()))
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             results[title] = {"error": f"failed to run: {exc}", "cmd": cmd}
 
     for title, p, cmd, timeout, start_time in running_procs:
@@ -230,7 +230,7 @@ def _health_command_report() -> str:
                 "stdout": out,
                 "stderr": err,
             }
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             results[title] = {
                 "cmd": cmd,
                 "error": f"failed to read: {exc}",
@@ -267,7 +267,7 @@ def _health_command_report() -> str:
         from kyth_shared.diagnostics_scrub import scrub_logs
 
         text = scrub_logs(text)
-    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
         pass
     return text
  # _health_command_report
@@ -415,7 +415,7 @@ def collect_signin_status() -> list[tuple[str, str, str]]:
     except FileNotFoundError:
         result = None
         detail = "fprintd is not installed"
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         result = None
         detail = str(exc)
     lower = detail.lower()

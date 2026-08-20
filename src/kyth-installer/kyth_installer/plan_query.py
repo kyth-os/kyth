@@ -22,7 +22,7 @@ def is_gpt_disk(disk: str, *, run_command) -> bool:
         )
         if result.stdout.strip().lower() == "gpt":
             return True
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         _logger.debug("GPT blkid probe failed", exc_info=True)
     try:
         result = run_command(
@@ -30,7 +30,7 @@ def is_gpt_disk(disk: str, *, run_command) -> bool:
             capture_output=True, text=True, check=True, timeout=5,
         )
         return "Partition Table: gpt" in result.stdout
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return False
 
 
@@ -103,7 +103,7 @@ def find_bootcurrent_esp(*, run_command, as_root, which=shutil.which) -> str | N
              if line.strip().startswith(f"Boot{boot}")),
             None,
         )
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return None
 
 

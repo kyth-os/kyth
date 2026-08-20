@@ -214,7 +214,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
         os.makedirs(folder, exist_ok=True)
         try:
             popen(["dolphin", folder])
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
     # ── rclone install ────────────────────────────────────────────────────
@@ -299,7 +299,7 @@ class CloudStoragePage(Page, _GoogleDriveMixin, _OneDriveMixin, _DropboxMixin):
                 mounted = mnt.is_mount() if hasattr(mnt, "is_mount") else mnt.exists()
                 self._onedrive_status.setText(f"{'configured' if has else 'not configured'} — {'mounted' if mounted else 'not mounted'} at ~/OneDrive")
                 self._onedrive_status.setObjectName("status-ok" if has else "status-warn")
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 self._onedrive_status.setText(f"Check failed: {exc}"); self._onedrive_status.setObjectName("status-err")
             restyle(self._onedrive_status)
         check_btn.clicked.connect(lambda _=False: _check())

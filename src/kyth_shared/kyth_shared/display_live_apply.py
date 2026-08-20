@@ -27,6 +27,6 @@ def apply_display_live(mode: str) -> bool:
             return False
         # read-back verification: check output contains mode
         return mode in r.stdout
-    except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
         logger.debug("kscreen-doctor apply failed", exc_info=True)
         return False

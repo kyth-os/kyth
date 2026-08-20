@@ -14,7 +14,7 @@ def _as_root(argv):  # type: ignore
         fn = getattr(_facade, "_as_root", None)
         if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.runner":
             return fn(argv)  # type: ignore
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return _orig_as_root(argv)
 
@@ -24,7 +24,7 @@ def run_command(*args, **kwargs):  # type: ignore
         fn = getattr(_facade, "run_command", None)
         if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.runner":
             return fn(*args, **kwargs)  # type: ignore
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return _orig_run_command(*args, **kwargs)
 
@@ -107,7 +107,7 @@ def format_os_error(exc: BaseException, *, path: str | Path | None = None) -> st
         try:
             import errno as errno_mod
             name = errno_mod.errorcode.get(err, "UNKNOWN")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             name = "UNKNOWN"
         parts.append(f"errno={err} ({name})")
 

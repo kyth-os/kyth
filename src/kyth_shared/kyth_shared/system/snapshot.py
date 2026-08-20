@@ -11,7 +11,7 @@ def list_snapshots() -> list[str]:
         if r2.returncode == 0:
             return [l.strip() for l in r2.stdout.splitlines() if l.strip()][:20]
         return []
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return []
 
 def snapshot_dry_run() -> tuple[bool, str]:

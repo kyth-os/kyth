@@ -334,7 +334,7 @@ class _CreatorTabMixin:
                 try:
                     from kyth_welcome.services.flatpak import _is_flatpak_installed
                     obs_installed = _is_flatpak_installed("com.obsproject.Studio")
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     pass
                 goxlr_found = False
                 try:
@@ -348,10 +348,10 @@ class _CreatorTabMixin:
                                 for rel in ("AppData/Local/TC-Helicon/GoXLR", "AppData/Roaming/Elgato/StreamDeck", "Documents/OBS Studio"):
                                     if os.path.isdir(os.path.join(base, rel)):
                                         goxlr_found = True
-                except Exception:
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     pass
                 return {"peripherals": peri, "obs": obs_installed, "goxlr": goxlr_found}
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 return {"error": str(exc)}
 
         w = DataWorker("capture-scan", _scan)

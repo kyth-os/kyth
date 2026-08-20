@@ -51,11 +51,11 @@ def apply_selinux_gaming(cfg: dict[str, Any] | None = None) -> bool:
     try:
         if run(["selinuxenabled"], capture_output=True, timeout=3).returncode != 0:
             return False
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return False
     val = "on" if ah else "off"
     try:
         run(["setsebool", "allow_execheap", val], capture_output=True, timeout=5)
         return True
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return False

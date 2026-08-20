@@ -70,7 +70,7 @@ def _run_install_worker(
         _record_transaction(context, "complete", log=log)
         _push({"type": "done", "mok_state": mok_state}, context)
 
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         _handle_install_failure(exc, log, context)
     finally:
         # Guard against orphaned mounts when Phase 1 fails before the inner
@@ -119,7 +119,7 @@ def _run_install(context: InstallerContext) -> None:
         fd = os.open(str(LOG_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         os.close(fd)
         _record_transaction(context, "started")
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         message = format_install_error(exc)
         context.transition(InstallLifecycle.FAILED)
         _push({"type": "error", "message": message}, context)

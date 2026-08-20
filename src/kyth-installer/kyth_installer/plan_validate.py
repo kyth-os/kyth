@@ -388,7 +388,7 @@ def build_plan_report(
     except RuntimeError as exc:
         errors.append(str(exc))
         return report(False)
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         errors.append(f"Unexpected validation error: {exc}")
         return report(False)
 

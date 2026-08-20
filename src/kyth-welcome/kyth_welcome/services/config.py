@@ -11,7 +11,7 @@ def load_json_config(path: str, default=None) -> dict:
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         _logger.warning("load_json_config: %s is unreadable or invalid — using defaults", path, exc_info=True)
     return default if default is not None else {}
 
@@ -28,5 +28,5 @@ def save_json_config(path: str, data: dict, mode: int = None) -> bool:
             os.chmod(temp_path, mode)
         os.replace(temp_path, path)
         return True
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return False

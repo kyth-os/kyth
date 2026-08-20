@@ -66,11 +66,11 @@ class JustPage(Page):
         self._just_worker.done.connect(guard_disposed(self._on_just_list_done))
         try:
             self._just_worker.finished.connect(lambda: setattr(self, "_just_worker", None))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         try:
             self._just_worker.finished.connect(self._just_worker.deleteLater)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
         self._just_worker.start()
         return
@@ -110,5 +110,5 @@ class JustPage(Page):
         try:
             popen(["just", name])
             self._status.setText(f"Launched `just {name}`")
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
             self._status.setText(f"Failed to launch `just {name}`: {e}")

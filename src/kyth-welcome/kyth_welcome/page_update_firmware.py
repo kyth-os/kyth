@@ -55,7 +55,7 @@ class _FirmwareUpdateMixin:
             try:
                 old_timer.stop()
                 old_timer.deleteLater()
-            except Exception:  # nosec B110 -- best-effort, failure here is non-fatal by design
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
                 pass
         self._fw_deadline_timer = QTimer(self)
         self._fw_deadline_timer.setSingleShot(True)
@@ -78,7 +78,7 @@ class _FirmwareUpdateMixin:
         if getattr(self, "_fw_deadline_timer", None):
             try:
                 self._fw_deadline_timer.stop()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         if result.state == "error":
             self._fw_icon.setText("—")

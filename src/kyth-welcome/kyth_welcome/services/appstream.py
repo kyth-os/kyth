@@ -91,7 +91,7 @@ def _load_cached_catalog() -> dict | None:
             cached = load_json_config(_APPSTREAM_CACHE_PATH, default=None)
             if isinstance(cached, dict) and cached:
                 return cached
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return None
 
@@ -132,7 +132,7 @@ def load_appstream_catalog() -> dict[str, dict]:
         # applies to dev/test environments lacking that package. The scanner
         # can't see the conditional import, hence the suppression below.
         root = ET.parse(xml_path).getroot()  # nosec B314 -- nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         # Parse failed — use pre-parsed JSON fallback (R7)
         cached = _load_cached_catalog()
         if cached is not None:
@@ -203,7 +203,7 @@ def warm_appstream_cache() -> bool:
         if isinstance(data, dict) and data:
             save_json_config(_APPSTREAM_CACHE_PATH, data)
             return True
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     return False
 

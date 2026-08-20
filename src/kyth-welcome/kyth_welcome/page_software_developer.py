@@ -163,7 +163,7 @@ class _DeveloperTabMixin:
     def _ai_enter_box(self):
         try:
             popen(["konsole", "-e", "/usr/bin/kyth-ai-dev", "enter"])
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             QMessageBox.warning(self, "Developer Environment", f"Could not open the developer shell:\n{exc}")
 
     def _dev_cache_check(self, which: str):
@@ -190,7 +190,7 @@ class _DeveloperTabMixin:
                 self._dev_cache_status.setText(f"work {c['enabled']} {work_cache_status()}")
             self._dev_cache_status.setObjectName("status-ok")
             restyle(self._dev_cache_status)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._dev_cache_status.setText(f"{which} failed — {exc}")
             self._dev_cache_status.setObjectName("status-err")
             restyle(self._dev_cache_status)

@@ -31,7 +31,7 @@ def load_scaling(path: Path | None = None) -> dict[str, dict[str, Any]]:
             continue
         try:
             scale=float(e.get("scale", 1.0))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             scale=1.0
         scale=max(1.0, min(3.0, scale))
         icc=str(e.get("icc", "")) if e.get("icc") else ""

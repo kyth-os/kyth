@@ -63,6 +63,6 @@ def create_installer_user(
     except OSError as exc:
         log(f"Warning: user creation failed: {format_error(exc)}")
         log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Warning: user creation failed: {exc}")
         log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")

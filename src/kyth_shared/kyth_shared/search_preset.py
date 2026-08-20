@@ -46,12 +46,12 @@ def apply_search(cfg: dict[str, Any] | None = None) -> list[str]:
     try:
         run(["kwriteconfig5","--file","baloofilerc","--group","General","--key","Indexing-Enabled", str(cfg["baloo"]).lower()], capture_output=True, timeout=5)
         applied.append("baloofilerc")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         run(["kwriteconfig5","--file","krunnerrc","--group","General","--key","RecentFiles", str(cfg["recent"])], capture_output=True, timeout=5)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return applied

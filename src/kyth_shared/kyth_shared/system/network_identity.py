@@ -51,7 +51,7 @@ def _vpn_status() -> tuple[bool, str]:
                 if "vpn" in low or "wireguard" in low or "globalprotect" in low:
                     name = line.split()[0] if line.split() else "VPN"
                     return True, name
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return False, ""
@@ -61,7 +61,7 @@ def _smb_mounts() -> int:
     try:
         text = Path("/proc/mounts").read_text(encoding="utf-8", errors="ignore")
         return sum(1 for line in text.splitlines() if " cifs " in line)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return 0
 
 
@@ -76,7 +76,7 @@ def _cloud_providers() -> tuple[str, ...]:
             providers.append("gdrive")
         if isinstance(data.get("dropbox"), dict):
             providers.append("dropbox")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return tuple(providers)

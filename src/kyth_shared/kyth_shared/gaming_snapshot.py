@@ -16,14 +16,14 @@ def create_pre_gaming_snapshot(description: str = "pre-gaming-master") -> dict[s
         r = run(["snapper", "create", "--description", description, "--print-number"], capture_output=True, text=True, timeout=10)
         if r.returncode == 0:
             return {"ok": True, "id": r.stdout.strip(), "tool": "snapper"}
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     try:
         r = run(["btrfs", "subvolume", "snapshot", "-r", "/", f"/.snapshots/pre-gaming-{description}"], capture_output=True, text=True, timeout=10)
         if r.returncode == 0:
             return {"ok": True, "id": description, "tool": "btrfs"}
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
     return {"ok": False, "error": "no snapper/btrfs available — snapshot skipped (safe to proceed)"}

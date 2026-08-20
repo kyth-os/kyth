@@ -38,7 +38,7 @@ def _score() -> tuple[int, list[str], list[str]]:
             view = get_hardware_view()
             checks.append(f"v3: {view.evaluation.capabilities[:2]}")
             score += 20
-        except Exception:
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             checks.append("v3: unknown")
             suggestions.append("Run kyth-probe --system")
 
@@ -58,7 +58,7 @@ def _score() -> tuple[int, list[str], list[str]]:
             score += 20
         else:
             checks.append("btrfs: no")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         checks.append("btrfs: unknown")
 
     # scx
