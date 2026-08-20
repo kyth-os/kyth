@@ -415,6 +415,58 @@ class SafeUpgradeTests(unittest.TestCase):
             run.assert_called_once_with(["bootc", "upgrade"], check=False, timeout=1800)
             self.assertEqual(read_state(state_path).pending_digest, DIGEST)
 
+    def test_timeout_is_retryable_and_not_quarantined(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = pathlib.Path(temporary) / "health.json"
+            status = {
+                "status": {
+                    "booted": {
+                        "image": {
+                            "reference": "ghcr.io/example/kyth:testing",
+                            "imageDigest": OTHER_DIGEST,
+                        }
+                    }
+                }
+            }
+            with (
+                patch.object(safe_upgrade.os, "geteuid", return_value=0),
+                patch.object(safe_upgrade, "fetch_status_data", return_value=status),
+                patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
+                patch.object(safe_upgrade, "run", side_effect=subprocess.TimeoutExpired(["bootc", "upgrade"], 1800)) as run,
+            ):
+                result = safe_upgrade.upgrade(state_path=state_path, config_path=pathlib.Path(temporary) / "missing.toml")
+            self.assertEqual(result, 6)
+            run.assert_called_once_with(["bootc", "upgrade"], check=False, timeout=1800)
+            self.assertEqual(read_state(state_path).pending_digest, "")
+            self.assertEqual(read_state(state_path).quarantined, {})
+
+    def test_quarantine_blocks_restage_after_three_failed_boots(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = pathlib.Path(temporary) / "health.json"
+            state = BootHealthState()
+            for i in range(3):
+                state = record_failure(state, DIGEST, f"boot-{i}", "failed", now=i)
+            write_state(state, state_path)
+            status = {
+                "status": {
+                    "booted": {
+                        "image": {
+                            "reference": "ghcr.io/example/kyth:testing",
+                            "imageDigest": OTHER_DIGEST,
+                        }
+                    }
+                }
+            }
+            with (
+                patch.object(safe_upgrade.os, "geteuid", return_value=0),
+                patch.object(safe_upgrade, "fetch_status_data", return_value=status),
+                patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
+                patch.object(safe_upgrade, "run") as run,
+            ):
+                result = safe_upgrade.upgrade(state_path=state_path, config_path=pathlib.Path(temporary) / "missing.toml")
+            self.assertEqual(result, 5)
+            run.assert_not_called()
+
 
 class BootHealthPackagingTests(unittest.TestCase):
     def test_offline_desktops_do_not_use_required_dns_health_check(self):

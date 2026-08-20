@@ -10,7 +10,13 @@ enough.
 2. It refuses a digest that is quarantined locally or belongs to a different
    explicitly configured rollout ring.
 3. After `bootc upgrade` stages the deployment, KythOS records the pending
-   digest in `/var/lib/kyth/boot-health.json`.
+   digest in `/var/lib/kyth/boot-health.json`. A pull that times out
+   (`bootc upgrade` up to 1800 s) is **retryable** — no pending digest or
+   quarantine is written, and the next run retries the same digest.
+   Only after three unhealthy boots (step 6) does a digest become
+   quarantined; `retryable: bootc upgrade timed out` in
+   `/var/lib/kyth/update-watcher-status.json` surfaces as "Retry available"
+   in System Hub.
 4. On the next boot, greenboot runs KythOS checks from
    `/etc/greenboot/check/required.d`.
 5. A healthy boot records the exact digest as known-good. A failed boot records
