@@ -131,12 +131,23 @@ RECIPES: dict[str, Recipe] = {
         Recipe("controller.repair", "Restart controller stack", "controller",
                ("systemctl", "--user", "try-restart", "joycond.service"),
                "safe", False, True, 21600, "controller", "Restarts joycond for drift after suspend; re-pair if needed."),
+        Recipe("network.captive-fix", "Re-toggle networking for captive portals", "network",
+               ("bash", "-c", "nmcli networking off; sleep 2; nmcli networking on; nmcli connection up \"$(nmcli -t -f NAME connection show --active 2>/dev/null | head -n1)\" 2>/dev/null || true"),
+               "safe", False, True, 1800, "network", "Re-toggles NetworkManager to clear captive portal / local-only state; saved connections kept."),
+        Recipe("audio.sink-fallback", "Restore default audio sink", "audio",
+               ("bash", "-c", "pactl set-default-sink @DEFAULT_SINK@ 2>/dev/null; wpctl set-default @DEFAULT_AUDIO_SINK@ 2>/dev/null || systemctl --user try-restart pipewire-pulse.service 2>/dev/null || true"),
+               "safe", False, True, 900, "audio", "Falls back to the default sink after HDMI/headset swap; no data changed."),
+        Recipe("power.profile-fix", "Reset power profile to balanced", "power",
+               ("bash", "-c", "powerprofilesctl set balanced 2>/dev/null || powerprofilesctl set performance 2>/dev/null || true"),
+               "safe", False, True, 3600, "power", "Resets stuck power profile after driver update; no reboot."),
+        Recipe("thermal.notify", "Thermal throttling detected", "thermal", tuple(),
+               "advisory", False, False, 3600, "thermal", "System is hot — close heavy tasks and check vents; Guardian resumes after cooldown."),
         Recipe("update.review-health", "Review update health", "updates", tuple(),
                "advisory", False, False, 3600, "updates", "Run ujust update-health; rollback remains controlled by boot health."),
     )
 }
 
-ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates", "portal", "plasma", "firmware", "display", "controller"})
+ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates", "portal", "plasma", "firmware", "display", "controller", "power", "thermal"})
 # redact()'s input is capped at 4096 chars before any of these run, and none
 # of these patterns nest an unbounded quantifier over an overlapping
 # character class (the actual ReDoS shape) — verified empirically fast
@@ -223,9 +234,22 @@ def collect_symptoms() -> list[Symptom]:
     audio_down = [unit for unit in ("pipewire.service", "wireplumber.service") if not _active(unit, user=True)]
     if audio_down:
         symptoms.append(Symptom("audio", f"Inactive user services: {', '.join(audio_down)}", ("audio.restart",)))
+    else:
+        # Audio services up but default sink missing (HDMI/headset swap) → fallback
+        sink = _run(("pactl", "get-default-sink"), 4)
+        if sink is not None and sink.returncode != 0:
+            symptoms.append(Symptom("audio", f"Default audio sink missing: {(sink.stderr or sink.stdout or '').strip()[:80]}", ("audio.sink-fallback",)))
+        elif sink is not None and not (sink.stdout or "").strip() or (sink.stdout or "").strip() in {"auto_null", "@DEFAULT_SINK@"}:
+            # empty or dummy null sink means real sink lost
+            if (sink.stdout or "").strip() == "auto_null":
+                symptoms.append(Symptom("audio", "Audio sink is dummy (auto_null) — headset/HDMI swap", ("audio.sink-fallback",)))
     nm = _run(("nmcli", "-t", "-f", "STATE", "general"), 5)
-    if nm and nm.returncode == 0 and nm.stdout.strip() not in {"connected", "connected (local only)", "connecting"}:
-        symptoms.append(Symptom("network", f"NetworkManager state: {nm.stdout.strip()}", ("network.restart-user",)))
+    if nm and nm.returncode == 0:
+        st = nm.stdout.strip()
+        if st == "connected (local only)":
+            symptoms.append(Symptom("network", f"NetworkManager state: {st} (captive portal)", ("network.captive-fix",)))
+        elif st not in {"connected", "connecting"}:
+            symptoms.append(Symptom("network", f"NetworkManager state: {st}", ("network.restart-user",)))
     if not _active("bluetooth.service"):
         symptoms.append(Symptom("bluetooth", "Bluetooth service is inactive", ("bluetooth.restart",)))
     # Portals: file choosers / screen sharing break when either portal is down
@@ -300,6 +324,26 @@ def collect_symptoms() -> list[Symptom]:
             symptoms.append(Symptom("updates", f"Boot health is {health.status}; failures={health.failures}",
                                     ("update.review-health",), "error"))
     except (OSError, ValueError, AttributeError):
+        pass
+    # Power profile stuck (after update) — powerprofilesctl reports unavailable
+    try:
+        pp = _run(("powerprofilesctl", "get"), 4)
+        if pp and pp.returncode != 0 and "No power" not in (pp.stdout or ""):
+            symptoms.append(Symptom("power", f"Power profile unavailable: {(pp.stderr or '').strip()[:80]}", ("power.profile-fix",)))
+        elif pp and pp.returncode == 0 and (pp.stdout or "").strip() not in {"balanced", "performance", "power-saver"}:
+            symptoms.append(Symptom("power", f"Power profile unexpected: {(pp.stdout or '').strip()[:40]}", ("power.profile-fix",)))
+    except (OSError, ValueError, AttributeError):
+        pass
+    # Thermal pressure — advisory only, never auto-executes
+    try:
+        for tpath in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
+            try:
+                if int(tpath.read_text().strip()) >= 85_000:
+                    symptoms.append(Symptom("thermal", "Thermal throttling risk — system hot", ("thermal.notify",), "error"))
+                    break
+            except (OSError, ValueError):
+                continue
+    except (OSError, AttributeError):
         pass
     return symptoms
 
@@ -604,6 +648,21 @@ def verify_recipe(recipe_id: str) -> bool:
     if recipe.verification == "firmware":
         fw = _run(("fwupdmgr", "get-updates"), 8)
         return bool(fw and fw.returncode == 0)
+    if recipe.verification == "power":
+        pp = _run(("powerprofilesctl", "get"), 4)
+        return bool(pp and pp.returncode == 0 and (pp.stdout or "").strip() in {"balanced", "performance", "power-saver"})
+    if recipe.verification == "thermal":
+        # advisory — verify means no longer hot
+        try:
+            for tpath in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
+                try:
+                    if int(tpath.read_text().strip()) >= 85_000:
+                        return False
+                except (OSError, ValueError):
+                    continue
+            return True
+        except (OSError, AttributeError):
+            return True
     return False
 
 
