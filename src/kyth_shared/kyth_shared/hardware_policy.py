@@ -435,6 +435,11 @@ def evaluate_system(path: Path = DEFAULT_POLICY_PATH) -> Evaluation:
     global _CACHED_POLICY_DIGEST
     if _CACHED_POLICY_DIGEST is not None and _CACHED_POLICY_DIGEST != digest:
         # Policy file changed (rpm-ostree update) within TTL — force rescan for dock GPU etc.
+        _policy_logger.info(
+            "hardware policy digest changed %s -> %s, busted inventory cache for dock GPU",
+            _CACHED_POLICY_DIGEST[:8],
+            digest[:8],
+        )
         invalidate_inventory_cache()
     _CACHED_POLICY_DIGEST = digest
     evaluation = evaluate(policy, digest, collect_inventory())
