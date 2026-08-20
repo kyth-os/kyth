@@ -1,8 +1,6 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-source "../../lib/config-helpers.sh"
-
 # ── Zram swap tiering ────────────────────────────────────────────────────
 # zram-generator.conf is produced in sysconfig/kernel/13-ntsync.sh and
 # applied via systemd-zram-setup@zram0.service. That service is generator-
