@@ -41,13 +41,29 @@ def _require_no_symlink(path: str) -> None:
     `mount` (or file write) would silently follow it. Call this immediately
     before the first privileged operation touches the path — once mkdir/open
     has created a real, root-owned entry there, /tmp's sticky bit stops any
-    other user from swapping it out from under us.
+    other user from swapping it out from under us. Also checks parent dirs
+    for symlink components via O_NOFOLLOW and lstat.
     """
-    if os.path.islink(path):
-        raise RuntimeError(
-            f"Refusing to use {path}: it already exists as a symlink, which "
-            "may indicate local tampering. Remove it and retry."
-        )
+    # lstat the full path and each parent component to catch symlink in middle
+    p = Path(path)
+    for part in [p] + list(p.parents)[:3]:  # check path and up to 3 parents (e.g. /tmp, /var/tmp)
+        try:
+            if part.is_symlink():
+                raise RuntimeError(
+                    f"Refusing to use {path}: it already exists as a symlink (component {part}), which "
+                    "may indicate local tampering. Remove it and retry."
+                )
+        except OSError:
+            continue
+    # Also verify via O_NOFOLLOW open where possible
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY if Path(path).suffix == "" else os.O_RDONLY | os.O_NOFOLLOW)
+        os.close(fd)
+    except OSError as e:
+        # ENOENT is expected when path doesn't exist yet; ELOOP indicates symlink
+        import errno
+        if e.errno == errno.ELOOP:
+            raise RuntimeError(f"Refusing to use {path}: it already exists as a symlink (O_NOFOLLOW)") from e
 
 
 def _safe_umount(run, path: str, *, check: bool = False) -> subprocess.CompletedProcess:
