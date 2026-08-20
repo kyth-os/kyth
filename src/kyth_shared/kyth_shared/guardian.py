@@ -518,17 +518,32 @@ def install_model(manifest_path: Path = MODEL_MANIFEST) -> Path:
     deadline = time.monotonic() + 600
     try:
         with urllib.request.urlopen(str(manifest["url"]), timeout=30) as response, os.fdopen(fd, "wb") as output:  # nosec B310 -- load_manifest() above already rejects any non-https:// URL
+            # Content-Length gate before streaming 1GiB — fail early on mismatch
+            try:
+                clen = response.headers.get("Content-Length")
+                if clen is not None and int(clen) != int(manifest["size"]):
+                    raise ValueError(f"Content-Length {clen} != manifest size {manifest['size']}")
+            except (ValueError, TypeError, AttributeError):
+                # Header missing or unparsable — fall back to streaming size gate
+                pass
             while chunk := response.read(1024 * 1024):
                 if time.monotonic() > deadline:
                     raise TimeoutError("model download exceeded 600s deadline")
                 total += len(chunk)
+                # Streaming gate — abort before writing excess bytes
                 if total > int(manifest["size"]):
                     raise ValueError("model download exceeds manifest size")
                 digest.update(chunk)
                 output.write(chunk)
+                # Incremental fsync every 16MiB to bound loss on power-cut, not just at end
+                if total % (16 * 1024 * 1024) == 0:
+                    output.flush()
+                    os.fsync(output.fileno())
             output.flush()
             os.fsync(output.fileno())
-        if total != int(manifest["size"]) or digest.hexdigest() != manifest["sha256"]:
+        # Constant-time compare for hash, explicit size check
+        import hmac as _hmac
+        if total != int(manifest["size"]) or not _hmac.compare_digest(digest.hexdigest(), str(manifest["sha256"]).lower()):
             raise ValueError("model download failed size or SHA-256 verification")
         os.chmod(temporary, 0o600)
         os.replace(temporary, destination)
