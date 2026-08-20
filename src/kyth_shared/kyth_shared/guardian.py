@@ -243,6 +243,14 @@ def collect_symptoms() -> list[Symptom]:
                 continue
             percent = int(100 * usage.used / usage.total)
             if percent >= 90 or usage.free < 5 * 1024**3:
+                # Feedback bias: if user said storage.maint not helpful 2×, fall back to advisory
+                try:
+                    _fb = load_state().get("feedback", {}).get("storage.maint", {})
+                    if int(_fb.get("unhelpful", 0)) >= 2:
+                        symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("disk.review",), "error"))
+                        break
+                except (OSError, ValueError, AttributeError):
+                    pass
                 # Prefer gated maint when binaries exist, fall back to advisory
                 if shutil.which("kyth-btrfs-maint") or Path("/usr/bin/kyth-btrfs-maint").exists() or Path("/usr/libexec/kyth-storage-gate").exists():
                     symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("storage.maint",), "error"))
@@ -448,13 +456,80 @@ def can_execute(decision: Decision, config: dict[str, Any], state: dict[str, Any
         return False, "automatic safe fixes are disabled"
     if recipe.risk != "safe" or recipe.requires_auth or not recipe.automatic or not recipe.command:
         return False, "confirmation required"
+    # Feedback bias: if user marked this recipe unhelpful >=2, skip auto
+    feedback = state.get("feedback", {}).get(recipe.id, {})
+    if int(feedback.get("unhelpful", 0)) >= 2:
+        return False, "user feedback indicates not helpful — falling back to advisory"
     if int(state.get("occurrences", {}).get(recipe.component, 0)) < 2:
         return False, "waiting for a second consecutive failure"
     last = max((float(item.get("timestamp", 0)) for item in state.get("history", [])
                 if item.get("recipe_id") == recipe.id and item.get("action") == "executed"), default=0)
     if time.time() - last < recipe.cooldown:
         return False, "repair cooldown is active"
+    # Gaming/performance suppression — check before each execution
+    reason = suppression_reason()
+    if reason:
+        return False, f"suppressed: {reason}"
     return True, ""
+
+
+def record_feedback(recipe_id: str, helpful: bool) -> None:
+    """Persist Yes/No feedback for a recipe; decays after 30d via history age."""
+    state = load_state()
+    fb = state.setdefault("feedback", {}).setdefault(recipe_id, {"helpful": 0, "unhelpful": 0})
+    if helpful:
+        fb["helpful"] = int(fb.get("helpful", 0)) + 1
+    else:
+        fb["unhelpful"] = int(fb.get("unhelpful", 0)) + 1
+    fb["updated_at"] = time.time()
+    save_state(state)
+
+
+def execute_chain(recipe_ids: list[str], config: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Execute recipes sequentially as a gated chain, one history entry.
+
+    Respects per-recipe can_execute (cooldown, feedback, suppression) and
+    re-collects symptoms between steps so firmware.refresh only runs if storage
+    didn't already resolve the issue. Gaming suppression breaks the chain.
+    """
+    results: list[dict[str, Any]] = []
+    chain_entry: dict[str, Any] = {
+        "timestamp": time.time(),
+        "chain": list(recipe_ids),
+        "action": "executed",
+        "results": [],
+    }
+    for rid in recipe_ids:
+        # Re-check suppression before each step — gaming could start mid-chain
+        reason = suppression_reason()
+        if reason:
+            chain_entry["results"].append({"recipe_id": rid, "action": "skipped", "detail": f"suppressed: {reason}"})
+            continue
+        recipe = RECIPES.get(rid)
+        if recipe is None:
+            chain_entry["results"].append({"recipe_id": rid, "action": "skipped", "detail": "unknown recipe"})
+            continue
+        decision = Decision(rid, 1.0, f"Chain {rid}")
+        allowed, why = can_execute(decision, config, state)
+        if not allowed:
+            chain_entry["results"].append({"recipe_id": rid, "action": "skipped", "detail": why})
+            continue
+        ok, detail = execute_recipe(rid)
+        verified = ok and verify_recipe(rid) if ok else False
+        chain_entry["results"].append({"recipe_id": rid, "action": "executed", "ok": ok, "verified": verified, "detail": detail})
+        # Record per-recipe history for cooldown tracking
+        state.setdefault("history", []).append({
+            "timestamp": time.time(), "recipe_id": rid, "source": "chain", "confidence": 1.0,
+            "explanation": f"Chain {rid}", "action": "executed", "verified": verified, "detail": detail,
+        })
+        # Update occurrences for this component
+        state.setdefault("occurrences", {})[recipe.component] = int(state["occurrences"].get(recipe.component, 0)) + 1
+        if not ok:
+            # Don't continue chain on hard failure that isn't suppression
+            pass
+    # Coalesced chain entry for timeline
+    state.setdefault("history", []).append(chain_entry)
+    return chain_entry["results"]
 
 
 def execute_recipe(recipe_id: str) -> tuple[bool, str]:
@@ -520,7 +595,25 @@ def check(*, investigate: bool = False, automatic: bool = True) -> dict[str, Any
         model = infer(symptoms, state, force=investigate)
         if model:
             decisions.append(model)
-    results = []
+    # Healing chain: storage.maint → firmware.refresh as one coalesced run when both present
+    # Respects per-recipe cooldown/feedback/suppression inside execute_chain
+    chain_ids = [d.recipe_id for d in decisions if d.recipe_id in ("storage.maint", "firmware.refresh")]
+    if automatic and len(chain_ids) >= 2 and not suppression_reason():
+        # Run as chain, not two separate decisions
+        chain_results = execute_chain(chain_ids, config, state)
+        # execute_chain already wrote per-recipe + coalesced history; surface as results
+        results = []
+        for cr in chain_results:
+            results.append({
+                "timestamp": time.time(), "recipe_id": cr["recipe_id"],
+                "source": "chain", "confidence": 1.0,
+                "explanation": f"Chain {cr['recipe_id']}", "action": cr["action"],
+                "verified": cr.get("verified"), "detail": cr.get("detail", ""),
+            })
+        # Remove chain ids from individual decision loop
+        decisions = [d for d in decisions if d.recipe_id not in chain_ids]
+    else:
+        results = []
     for decision in decisions:
         allowed, reason = can_execute(decision, config, state)
         action = "recommended"

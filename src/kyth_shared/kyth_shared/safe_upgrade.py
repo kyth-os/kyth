@@ -91,6 +91,7 @@ def upgrade(
         need = 2 * 1024**3
         if free < need:
             print(f"Not enough free disk space: {free // (1024**2)} MB free, need {need // (1024**2)} MB — free space and retry", file=sys.stderr)
+            _maybe_trigger_guardian()
             return 6
     except (OSError, AttributeError, ValueError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
@@ -105,6 +106,7 @@ def upgrade(
             fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             print("Another bootc upgrade is in progress — will retry on next run", file=sys.stderr)
+            _maybe_trigger_guardian()
             return 6
         # Hold lock for duration of upgrade; released on process exit
     except (OSError, ImportError, AttributeError):  # noqa: BLE001 -- narrow: best-effort production path
@@ -113,6 +115,7 @@ def upgrade(
         result = run(["bootc", "upgrade"], check=False, timeout=1800)
     except subprocess.TimeoutExpired as exc:
         print(f"bootc upgrade timed out after {exc.timeout}s — will retry on next run (not quarantined)", file=sys.stderr)
+        _maybe_trigger_guardian()
         return 6
     except (FileNotFoundError, OSError) as exc:
         # `run` wraps subprocess.run — on hosts without bootc (e.g. testbeds,
@@ -159,6 +162,25 @@ def upgrade(
             logger.debug("handled expected exception", exc_info=True)
             pass
     return 0
+
+
+def _maybe_trigger_guardian() -> None:
+    """Touch probe-cache so kyth-guardian.path fires on next user session.
+
+    Keeps privilege boundary: safe_upgrade (root) never calls Guardian directly,
+    it just pokes the file the user path unit already watches.
+    """
+    try:
+        # XDG_RUNTIME_DIR is /run/user/<uid> for the graphical session; try common uid
+        for uid in ("1000",):
+            p = Path(f"/run/user/{uid}/kyth/probe-cache.json")
+            if p.parent.exists():
+                p.touch(exist_ok=True)
+                return
+        # Fallback: touch the system probe cache location
+        Path("/var/cache/kyth/probe-cache.json").touch(exist_ok=True)
+    except (OSError, ValueError, AttributeError):
+        pass
 
 
 def main(argv: Sequence[str] | None = None) -> int:

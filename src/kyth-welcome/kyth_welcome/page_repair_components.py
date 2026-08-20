@@ -114,6 +114,74 @@ def system_restore_history_card(
     return card
 
 
+def guardian_timeline_card(
+    history: list[dict] | None,
+    on_feedback: Callable[[str, bool], None],
+) -> object:
+    """Guardian 30-day timeline: last 5 auto-fixes with redacted evidence and Yes/No."""
+    from kyth_shared.guardian import RECIPES
+    import time
+
+    card, layout = _make_card("card-accent-ok" if history else None)
+    title = QLabel("Guardian — self-heal history (30 days)")
+    title.setObjectName("card-title")
+    layout.addWidget(title)
+    intro = QLabel(
+        "Offline, explainable auto-repairs. Guardian never deletes files and only runs safe recipes "
+        "after two failures + cooldown; gaming/thermal/update watcher suppress it."
+    )
+    intro.setObjectName("card-copy")
+    intro.setWordWrap(True)
+    layout.addWidget(intro)
+    if not history:
+        body = QLabel("No recent auto-repairs — system is healthy.")
+        body.setObjectName("card-copy")
+        layout.addWidget(body)
+        return card
+    # Last 5, newest first
+    for item in list(history)[-5:][::-1]:
+        rid = item.get("recipe_id") or (item.get("chain", [None])[0] if item.get("chain") else "unknown")
+        rec = RECIPES.get(rid, None)
+        rtitle = rec.title if rec else rid
+        ts = item.get("timestamp", 0)
+        try:
+            age = time.time() - float(ts)
+            if age < 3600:
+                when = f"{int(age//60)}m ago"
+            elif age < 86400:
+                when = f"{int(age//3600)}h ago"
+            else:
+                when = f"{int(age//86400)}d ago"
+        except (ValueError, TypeError):
+            when = "recently"
+        verified = item.get("verified")
+        vtxt = "✓ verified" if verified else ("✗ not verified" if verified is False else "")
+        row = QLabel(f"{when} — {rtitle} ({item.get('action','')}) {vtxt}")
+        row.setObjectName("card-copy")
+        row.setWordWrap(True)
+        layout.addWidget(row)
+        detail = (item.get("detail") or item.get("explanation") or "")[:200]
+        if detail:
+            d = QLabel(detail)
+            d.setObjectName("caption-text")
+            d.setWordWrap(True)
+            layout.addWidget(d)
+        # Feedback row per item
+        fb_row = QHBoxLayout()
+        fb_row.setSpacing(6)
+        fb_lbl = QLabel("Did this help?")
+        fb_lbl.setObjectName("caption-text")
+        fb_row.addWidget(fb_lbl)
+        for label, helpful in (("Yes", True), ("No", False)):
+            btn = QPushButton(label)
+            btn.setToolTip("Teach Guardian for next time (local only)")
+            btn.clicked.connect(lambda _=False, rid=rid, helpful=helpful: on_feedback(rid, helpful))
+            fb_row.addWidget(btn)
+        fb_row.addStretch()
+        layout.addLayout(fb_row)
+    return card
+
+
 def rollback_card(
     has_rollback: bool,
     run_rollback: Callable[[], None],

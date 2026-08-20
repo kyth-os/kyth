@@ -58,6 +58,11 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             self._has_rollback, self._run_rollback, self._navigate, self._rollback_timestamp
         )
         self._add(self._rollback_card)
+        # Guardian timeline (self-heal history) — built lazily via DataWorker
+        from .page_repair_components import guardian_timeline_card
+        self._guardian_timeline_card = guardian_timeline_card(None, self._on_guardian_feedback)
+        self._guardian_timeline_index = self._layout.count()
+        self._add(self._guardian_timeline_card)
 
         self._build_quick_fixes_card()
         self._build_guardian_link_card()
@@ -73,6 +78,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
 
         self._stretch()
         single_shot(self, 0, self._refresh_rollback_state)
+        single_shot(self, 0, self._refresh_guardian_timeline)
         single_shot(self, 0, self._refresh_nvidia_quick_fixes)
 
     @staticmethod
@@ -151,6 +157,11 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
                     self._history_card = new_history
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
+        # Guardian feedback: also refresh guardian timeline when rollback state updates
+        try:
+            single_shot(self, 0, self._refresh_guardian_timeline)
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+            pass
         # Self-healing: if staged has failed 2 boots, surface rollback as warn with tip.
         extra_warn = bool(self_heal and has_rollback)
         new_card, new_btn = rollback_card(has_rollback, self._run_rollback, self._navigate, timestamp, warn=extra_warn)
@@ -159,6 +170,43 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         self._layout.insertWidget(self._rollback_insert_index, new_card)
         self._rollback_card = new_card
         self._rollback_repair_btn = new_btn
+
+    def _on_guardian_feedback(self, recipe_id: str, helpful: bool) -> None:
+        try:
+            from kyth_shared.guardian import record_feedback
+            record_feedback(recipe_id, helpful)
+            single_shot(self, 0, self._refresh_guardian_timeline)
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+            pass
+
+    def _refresh_guardian_timeline(self):
+        if getattr(self, "_guardian_timeline_worker", None) is not None:
+            return
+        def _fetch() -> list[dict]:
+            try:
+                from kyth_shared.guardian import load_state
+                return list(load_state().get("history", []))
+            except (OSError, ValueError, AttributeError, KeyError):
+                return []
+        self._guardian_timeline_worker = DataWorker("guardian-timeline", _fetch)
+        self._guardian_timeline_worker.result.connect(guard_disposed(self._on_guardian_timeline_ready))
+        self._guardian_timeline_worker.finished.connect(lambda: setattr(self, "_guardian_timeline_worker", None))
+        self._guardian_timeline_worker.finished.connect(self._guardian_timeline_worker.deleteLater)
+        self._guardian_timeline_worker.start()
+
+    def _on_guardian_timeline_ready(self, _key: str, data: object):
+        history = data if isinstance(data, list) else []
+        try:
+            from .page_repair_components import guardian_timeline_card
+            new_card = guardian_timeline_card(history, self._on_guardian_feedback)
+            idx = self._layout.indexOf(self._guardian_timeline_card)
+            if idx >= 0:
+                self._layout.removeWidget(self._guardian_timeline_card)
+                self._guardian_timeline_card.deleteLater()
+                self._layout.insertWidget(idx, new_card)
+                self._guardian_timeline_card = new_card
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+            pass
 
     def _refresh_nvidia_quick_fixes(self):
         detect_nvidia_async(self, self._on_nvidia_quick_fixes_ready)

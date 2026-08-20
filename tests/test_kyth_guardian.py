@@ -72,22 +72,24 @@ class GuardianPolicyTests(unittest.TestCase):
     def test_two_failures_and_cooldown_are_required(self):
         decision = guardian.Decision("audio.restart", 1, "known")
         config = {"automatic_safe_fixes": True}
-        allowed, reason = guardian.can_execute(
-            decision, config, {"history": [], "occurrences": {"audio": 1}}
-        )
-        self.assertFalse(allowed)
-        self.assertIn("second", reason)
-        allowed, _ = guardian.can_execute(
-            decision, config, {"history": [], "occurrences": {"audio": 2}}
-        )
-        self.assertTrue(allowed)
-        allowed, reason = guardian.can_execute(decision, config, {
-            "occurrences": {"audio": 2},
-            "history": [{"recipe_id": "audio.restart", "action": "executed",
-                         "timestamp": guardian.time.time()}],
-        })
-        self.assertFalse(allowed)
-        self.assertIn("cooldown", reason)
+        with patch.object(guardian, "suppression_reason", return_value=""):
+            allowed, reason = guardian.can_execute(
+                decision, config, {"history": [], "occurrences": {"audio": 1}}
+            )
+            self.assertFalse(allowed)
+            self.assertIn("second", reason)
+            allowed, _ = guardian.can_execute(
+                decision, config, {"history": [], "occurrences": {"audio": 2}}
+            )
+            self.assertTrue(allowed)
+        with patch.object(guardian, "suppression_reason", return_value=""):
+            allowed, reason = guardian.can_execute(decision, config, {
+                "occurrences": {"audio": 2},
+                "history": [{"recipe_id": "audio.restart", "action": "executed",
+                             "timestamp": guardian.time.time()}],
+            })
+            self.assertFalse(allowed)
+            self.assertIn("cooldown", reason)
 
     def test_storage_and_firmware_autofix_are_deterministic(self):
         # disk 95% with maint binary → storage.maint ; fwupdmgr get-updates failure → firmware.refresh
