@@ -27,8 +27,47 @@ DefaultTasksMax=80%
 USERTASKSMAX
 
 # Explicitly lift the user slice which was the bottleneck in the 17:03 burst.
+# Host FA617NS (2026-08-20) showed fork rejected for every browser:
+#   app.slice pids.max=512 pids.current=508 (code-insiders 310 threads alone)
+#   Brave: pthread_create Resource temporarily unavailable -> FATAL BrowserThread:IO
+#   Edge/cobalt, flatpak-portal g_task_thread_pool_init failed similarly.
+# System DefaultTasksMax=80% raised user.slice to 95791 but user manager
+# DefaultTasksMax=80% did not apply to the per-session app.slice (still 512
+# — compiled default for F44 user sessions). Need explicit drop-ins for
+# app.slice/session.slice/background.slice.
 mkdir -p /etc/systemd/system/user.slice.d
 cat > /etc/systemd/system/user.slice.d/10-tasksmax.conf <<'USERSLICE'
 [Slice]
 TasksMax=80%
 USERSLICE
+
+# Lift app.slice/session.slice/background.slice which run browsers and portals.
+# app.slice hosts all Flatpak browsers (Brave/Edge) + Code + Discover;
+# session.slice hosts KWin/plasmashell; background.slice hosts xdg-portal.
+# Without these, DefaultTasksMax from user.conf alone leaves app.slice at 512.
+mkdir -p /etc/systemd/user/app.slice.d
+cat > /etc/systemd/user/app.slice.d/10-kyth-tasksmax.conf <<'APPSLICE'
+[Slice]
+TasksMax=80%
+APPSLICE
+
+mkdir -p /etc/systemd/user/session.slice.d
+cat > /etc/systemd/user/session.slice.d/10-kyth-tasksmax.conf <<'SESSSLICE'
+[Slice]
+TasksMax=80%
+SESSSLICE
+
+mkdir -p /etc/systemd/user/background.slice.d
+cat > /etc/systemd/user/background.slice.d/10-kyth-tasksmax.conf <<'BGSLICE'
+[Slice]
+TasksMax=80%
+BGSLICE
+
+# Also cover system-level user@.service delegation: ensure the delegated
+# cgroup does not clamp app.slice via the 512 fallback on old images that
+# upgraded via ostree without user daemon-reexec.
+mkdir -p /etc/systemd/system/user@.service.d
+cat > /etc/systemd/system/user@.service.d/10-kyth-tasksmax.conf <<'USERSVC'
+[Service]
+TasksMax=80%
+USERSVC
