@@ -412,7 +412,7 @@ class SafeUpgradeTests(unittest.TestCase):
                 )
 
             self.assertEqual(result, 0)
-            run.assert_called_once_with(["bootc", "upgrade"], check=False)
+            run.assert_called_once_with(["bootc", "upgrade"], check=False, timeout=1800)
             self.assertEqual(read_state(state_path).pending_digest, DIGEST)
 
 

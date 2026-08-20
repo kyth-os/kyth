@@ -83,7 +83,7 @@ def upgrade(
         print("KythOS is already running or has staged the latest allowed digest")
         return 0
     try:
-        result = run(["bootc", "upgrade"], check=False)
+        result = run(["bootc", "upgrade"], check=False, timeout=1800)
     except (FileNotFoundError, OSError) as exc:
         # `run` wraps subprocess.run — on hosts without bootc (e.g. testbeds,
         # wazuh nodes, or non-immutable dev VMs) the binary is missing and
