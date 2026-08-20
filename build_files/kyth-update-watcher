@@ -314,6 +314,29 @@ def _notify_updates(os_staged: bool, flatpak_count: int) -> None:
 # ---------------------------------------------------------------------------
 
 def run_bootc_upgrade(timeout: int) -> tuple[bool, str]:
+    # Pre-flight: low disk is retryable, not quarantined
+    try:
+        import shutil
+
+        if shutil.disk_usage("/").free < 2 * 1024**3:
+            free_mb = shutil.disk_usage("/").free // (1024**2)
+            return False, f"retryable: Not enough free disk space: {free_mb} MB free, need 2048 MB — free space and retry"
+    except (OSError, AttributeError, ValueError):  # noqa: BLE001 -- narrow: best-effort production path
+        pass
+    # Concurrency: if another bootc upgrade holds the lock, retry later
+    try:
+        import fcntl
+
+        lock_path = Path("/run/kyth-bootc.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(lock_path, "a+")  # noqa: SIM115, PTH123 -- persistent fd for flock lifetime
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False, "retryable: Another bootc upgrade is in progress — will retry on next run"
+        # Hold fh open for process lifetime; do not close before subprocess
+    except (OSError, ImportError, AttributeError):  # noqa: BLE001 -- narrow: best-effort production path
+        pass
     try:
         r = subprocess.run(
             ["bootc", "upgrade"],
@@ -323,7 +346,7 @@ def run_bootc_upgrade(timeout: int) -> tuple[bool, str]:
         output = (r.stdout + r.stderr).strip()
         return r.returncode == 0, output
     except subprocess.TimeoutExpired:
-        return False, f"bootc upgrade timed out after {timeout}s"
+        return False, f"retryable: bootc upgrade timed out after {timeout}s — will retry on next run (not quarantined)"
     except FileNotFoundError:
         return False, "bootc not found"
 

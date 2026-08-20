@@ -467,6 +467,51 @@ class SafeUpgradeTests(unittest.TestCase):
             self.assertEqual(result, 5)
             run.assert_not_called()
 
+    def test_low_disk_is_retryable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = pathlib.Path(temporary) / "health.json"
+            status = {
+                "status": {
+                    "booted": {
+                        "image": {"reference": "ghcr.io/example/kyth:testing", "imageDigest": OTHER_DIGEST}
+                    }
+                }
+            }
+            fake_usage = type("U", (), {"free": 512 * 1024 * 1024, "total": 10 * 1024**3, "used": 9 * 1024**3})()
+            with (
+                patch.object(safe_upgrade.os, "geteuid", return_value=0),
+                patch.object(safe_upgrade, "fetch_status_data", return_value=status),
+                patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
+                patch("shutil.disk_usage", return_value=fake_usage),
+                patch.object(safe_upgrade, "run") as run,
+            ):
+                result = safe_upgrade.upgrade(state_path=state_path, config_path=pathlib.Path(temporary) / "missing.toml")
+            self.assertEqual(result, 6)
+            run.assert_not_called()
+            self.assertEqual(read_state(state_path).pending_digest, "")
+
+    def test_bootc_lock_contention_is_retryable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = pathlib.Path(temporary) / "health.json"
+            status = {
+                "status": {
+                    "booted": {
+                        "image": {"reference": "ghcr.io/example/kyth:testing", "imageDigest": OTHER_DIGEST}
+                    }
+                }
+            }
+            with (
+                patch.object(safe_upgrade.os, "geteuid", return_value=0),
+                patch.object(safe_upgrade, "fetch_status_data", return_value=status),
+                patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
+                patch("builtins.open"),
+                patch("fcntl.flock", side_effect=BlockingIOError(11, "Resource temporarily unavailable")),
+                patch.object(safe_upgrade, "run") as run,
+            ):
+                result = safe_upgrade.upgrade(state_path=state_path, config_path=pathlib.Path(temporary) / "missing.toml")
+            self.assertEqual(result, 6)
+            run.assert_not_called()
+
 
 class BootHealthPackagingTests(unittest.TestCase):
     def test_offline_desktops_do_not_use_required_dns_health_check(self):

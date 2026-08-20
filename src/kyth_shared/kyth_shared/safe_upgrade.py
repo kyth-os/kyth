@@ -83,6 +83,32 @@ def upgrade(
     if remote_digest in {staged, booted}:
         print("KythOS is already running or has staged the latest allowed digest")
         return 0
+    # Pre-flight: require ~2 GB free on / (bootc needs space for new deployment)
+    try:
+        import shutil
+
+        free = shutil.disk_usage("/").free
+        need = 2 * 1024**3
+        if free < need:
+            print(f"Not enough free disk space: {free // (1024**2)} MB free, need {need // (1024**2)} MB — free space and retry", file=sys.stderr)
+            return 6
+    except (OSError, AttributeError, ValueError):  # noqa: BLE001 -- narrow: best-effort production path
+        pass
+    # Concurrency: if another bootc upgrade is in progress, retry later
+    try:
+        import fcntl  # noqa: PLC0415 -- local import keeps non-Linux tests portable
+
+        lock_path = Path("/run/kyth-bootc.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        _lock_fh = open(lock_path, "a+")  # noqa: SIM115, PTH123 -- intentional persistent fd for flock lifetime
+        try:
+            fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("Another bootc upgrade is in progress — will retry on next run", file=sys.stderr)
+            return 6
+        # Hold lock for duration of upgrade; released on process exit
+    except (OSError, ImportError, AttributeError):  # noqa: BLE001 -- narrow: best-effort production path
+        pass
     try:
         result = run(["bootc", "upgrade"], check=False, timeout=1800)
     except subprocess.TimeoutExpired as exc:
