@@ -8,16 +8,14 @@ fi
 
 repo_root="$(git rev-parse --show-toplevel)"
 
-# Fast local gate, not a full CI mirror: validate.sh (lint, actionlint,
-# zizmor, a shellcheck pass, syntax/secrets/systemd checks, and the full test
-# suite run once, plain) plus run-quality.sh --fast (ruff/BLE001 only — skips
-# the coverage-instrumented second full suite run and json/xml/html
-# generation, which is pure local-only duplication since CI runs validate.sh
-# and run-quality.sh as separate parallel jobs on separate runners; coverage
-# floors are still enforced there on every push). Codacy preflight and the
-# full CI-mirror double run are `just ci-preflight` if you want them locally —
-# this hook no longer runs them automatically.
-echo "[pre-push] Running fast local validation (full CI gate runs in parallel on push)..."
+# Full CI mirror locally before push: validate.sh (lint, actionlint, zizmor,
+# shell analysis, syntax/secrets/systemd, full test suite once, plain) plus
+# run-quality.sh with coverage (ruff/BLE001 + second coverage-instrumented
+# suite run and json/xml/html generation + coverage floors). This mirrors the
+# parallel CI jobs (validate + quality + gui-smoke) in one local gate — ~17s
+# extra for coverage — so fsresize/plan_commit-style floor regressions are
+# caught before push instead of after.
+echo "[pre-push] Running full local validation (mirrors CI)..."
 # Deprioritized (not paused) relative to the interactive session: this box is
 # a live desktop, not a dedicated CI runner, and the old validate+coverage-
 # twice pipeline pegging every core alongside a running compositor/browser/
@@ -36,7 +34,7 @@ if command -v systemd-run >/dev/null 2>&1; then
 	scope=(systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 --)
 fi
 "${scope[@]}" "${repo_root}/build_files/scripts/validate.sh"
-"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh" --fast
+"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh"
 
 # P1-3: also catch System Hub regressions the CI gui-smoke job checks. Run
 # the same canonical module CI runs (tests/test_kyth_welcome_hub_smoke.py)
