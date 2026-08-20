@@ -26,6 +26,16 @@ class UpdateSnapshot:
 
     @property
     def system_state(self) -> str:
+        # Quarantined must never show as 'available' — the watcher held the
+        # rollout. Treat as 'uptodate' to suppress the banner/spam.
+        if self.result == "quarantined" and not self.staged_digest:
+            return "uptodate"
+        # Skipped/error with no staged image should not be 'available' by
+        # digest alone; fall back to unknown so the notifier does its own
+        # careful skopeo check (which respects quarantine) instead of
+        # spamming "Update Available" during quiet hours etc.
+        if self.result in {"skipped", "error"} and not self.staged_digest:
+            return "unknown"
         if self.staged_digest or self.result == "upgraded" or (
             self.reason and "already staged" in self.reason.lower()
         ):

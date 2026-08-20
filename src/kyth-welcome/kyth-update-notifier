@@ -271,7 +271,22 @@ class UpdateCheckWorker(QThread):
             pass
 
         if remote_digest is None:
-            remote_digest = "sha256:" + hashlib.sha256(r.stdout).hexdigest()
+            # Unknown manifest type — don't fabricate a digest that would
+            # falsely appear as "available" and spam every check cycle.
+            # Treat as unknown so we retry later instead of notifying.
+            # Mirrors kyth_shared.system.registry.remote_digest_and_timestamp:
+            # only hash for known types (v1 manifest or config+layers).
+            try:
+                manifest = json.loads(r.stdout)
+                if manifest.get("mediaType", "").endswith("manifest.v1+json"):
+                    remote_digest = "sha256:" + hashlib.sha256(r.stdout).hexdigest()
+                elif manifest.get("config") and manifest.get("layers"):
+                    remote_digest = "sha256:" + hashlib.sha256(r.stdout).hexdigest()
+            except Exception:
+                pass
+            if remote_digest is None:
+                self.result.emit("unknown", "")
+                return
 
         if local_digest and remote_digest == local_digest:
             self.result.emit("uptodate", remote_digest)
