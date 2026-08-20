@@ -16,6 +16,7 @@ User=root
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
+ProtectSystem=strict
 ProtectHome=read-only
 ProtectClock=yes
 ProtectKernelTunables=yes
@@ -24,6 +25,12 @@ ProtectControlGroups=yes
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CacheDirectory=kyth
+CacheDirectoryMode=0700
 
 # Give the upgrade plenty of time (large container layers on slow connections)
 TimeoutStartSec=2400

@@ -16,6 +16,24 @@ CPUQuota=50%
 MemoryHigh=384M
 MemoryMax=512M
 TimeoutStartSec=120
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+CacheDirectory=kyth
+CacheDirectoryMode=0700
 
 [Install]
 WantedBy=graphical-session.target
