@@ -91,4 +91,20 @@ QPushButton#nav-item-active {{
     padding: 7px 10px 7px 7px;
     font-weight: 700;
 }}
+
+QPushButton#nav-item-badge {{
+    color: {KYTH_BLUE};
+    font-weight: 700;
+    background: rgba(74, 158, 255, 0.10);
+    border: 1px solid rgba(74, 158, 255, 0.28);
+    border-radius: 8px;
+    margin: 1px 8px;
+    padding: 7px 10px;
+    text-align: left;
+    font-size: 13px;
+}}
+QPushButton#nav-item-badge:hover {{
+    background: rgba(74, 158, 255, 0.16);
+    border-color: rgba(74, 158, 255, 0.38);
+}}
 """

@@ -320,17 +320,71 @@ class GuardianPage(Page):
 
         self._add(card)
 
-    # -- privacy tip -------------------------------------------------------
+    # -- privacy tip + redaction demo (phase 2.3) ---------------------------
 
     def _build_private_card(self) -> None:
-        card, _ = _make_tip_card(
-            "Privacy & safety boundary",
+        card, layout = _make_card()
+        title = QLabel("Privacy & safety boundary")
+        title.setObjectName("card-title")
+        layout.addWidget(title)
+        body = QLabel(
             "Evidence is capped at 4,096 characters and redacted before it reaches the model or history: "
             "credentials, tokens, SSIDs, IP/MAC addresses, usernames, home paths, and filenames are stripped. "
             "Prompts are not retained and nothing is uploaded. Automatic repair is limited to safe, "
-            "reversible, unprivileged recipes after two consecutive failures and a cooldown.",
-            buttons=[("Learn more", lambda _=False: self._navigate("Diagnostics"))],
+            "reversible, unprivileged recipes after two consecutive failures and a cooldown."
         )
+        body.setObjectName("card-copy")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+
+        # Interactive redaction preview — mirrors docs/guardian.md privacy contract
+        from .qt import QLineEdit  # local to keep module import light
+
+        demo_row = QHBoxLayout()
+        demo_row.setSpacing(8)
+        self._redact_input = QLineEdit()
+        self._redact_input.setPlaceholderText("Type a sample line (e.g. token=abc /home/alice/file.txt 10.0.0.1) to preview redaction")
+        self._redact_input.setToolTip("Local preview only — demonstrates guardian.redact() without storing anything.")
+        demo_row.addWidget(self._redact_input, 1)
+        demo_btn = QPushButton("Preview Redaction")
+        demo_btn.setToolTip("Shows how Guardian strips sensitive evidence before any model or history write.")
+        demo_row.addWidget(demo_btn)
+        layout.addLayout(demo_row)
+
+        self._redact_out = QLabel("Redacted output will appear here — try pasting a log snippet above.")
+        self._redact_out.setObjectName("card-copy")
+        self._redact_out.setWordWrap(True)
+        self._redact_out.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._redact_out.setStyleSheet("padding: 6px 8px; border: 1px solid palette(mid); border-radius: 6px;")
+        layout.addWidget(self._redact_out)
+
+        def _do_redact():
+            raw = self._redact_input.text()
+            if not raw.strip():
+                self._redact_out.setText("Enter text above to see the redacted form.")
+                return
+            try:
+                from kyth_shared.guardian import redact as _redact
+                out = _redact(raw)
+            except Exception as exc:  # noqa: BLE001
+                out = f"redact failed: {exc}"
+            # Show truncated if very long
+            if len(out) > 600:
+                out = out[:600] + "…"
+            self._redact_out.setText(f"Raw: {raw[:400]}\nRedacted: {out}")
+
+        demo_btn.clicked.connect(_do_redact)
+        self._redact_input.returnPressed.connect(_do_redact)
+
+        # Help link row
+        help_row = QHBoxLayout()
+        help_row.setSpacing(8)
+        help_btn = QPushButton("Learn more")
+        help_btn.clicked.connect(lambda _=False: self._navigate("Diagnostics"))
+        help_row.addWidget(help_btn)
+        help_row.addStretch()
+        layout.addLayout(help_row)
+
         self._add(card)
 
     # -- data wiring -------------------------------------------------------

@@ -209,7 +209,43 @@ class MainWindow(QMainWindow):
                 portal = portal.strip()
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 portal = ""
-            return {"branch": branch, "staged": staged, "rollback": rollback, "portal": portal}
+            # Guardian: fresh recommended / suppressed count — same 6h throttle as _notify
+            guardian = {}
+            try:
+                import time as _time
+
+                from kyth_shared.guardian import load_state
+
+                state = load_state()
+                now = _time.time()
+                history = state.get("history", []) if isinstance(state.get("history", []), list) else []
+                notified = state.get("notifications", {}) if isinstance(state.get("notifications"), dict) else {}
+                # fresh if not throttled (mirrors guardian._notify 6h logic)
+                fresh_recommended = [
+                    r for r in history
+                    if isinstance(r, dict) and r.get("action") == "recommended"
+                    and now - float(notified.get(r.get("recipe_id", ""), 0)) < 6 * 3600
+                ]
+                # fallback: count recent recommended within last 6h if notifications map empty
+                if not notified and fresh_recommended == []:
+                    fresh_recommended = [
+                        r for r in history
+                        if isinstance(r, dict) and r.get("action") == "recommended"
+                        and now - float(r.get("timestamp", 0)) < 6 * 3600
+                    ]
+                guardian["fresh"] = len(fresh_recommended)
+                # most recent recipe id for label
+                if fresh_recommended:
+                    guardian["label"] = str(fresh_recommended[-1].get("recipe_id", ""))
+                try:
+                    from kyth_shared.guardian import suppression_reason as _supp
+
+                    guardian["suppressed"] = _supp()
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
+                    guardian["suppressed"] = ""
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
+                guardian = {}
+            return {"branch": branch, "staged": staged, "rollback": rollback, "portal": portal, "guardian": guardian}
 
         self._mission_worker = DataWorker("mission-bar", _gather)
         self._mission_worker.result.connect(guard_disposed(self._on_mission_bar_ready))
@@ -244,6 +280,54 @@ class MainWindow(QMainWindow):
             else:
                 pill.hide()
             restyle(pill)
+
+        # Guardian pill + sidebar badge (phase 2 polish)
+        guardian = facts.get("guardian", {}) if isinstance(facts.get("guardian"), dict) else {}
+        fresh = int(guardian.get("fresh", 0) or 0)
+        suppressed = str(guardian.get("suppressed", "") or "")
+        try:
+            btn = self._nav_button_by_key.get("Guardian")
+            if btn is not None:
+                is_active = btn.objectName() == "nav-item-active"
+                if fresh and not suppressed:
+                    # badge: subtle blue pill when fresh, otherwise normal
+                    if not is_active:
+                        btn.setObjectName("nav-item-badge")
+                    btn.setToolTip(f"{fresh} issue(s) need review in Guardian")
+                else:
+                    # restore normal (keep active if that's the current page)
+                    if btn.objectName() == "nav-item-badge":
+                        btn.setObjectName("nav-item")
+                    if fresh and suppressed:
+                        btn.setToolTip(f"Guardian paused — {suppressed}")
+                    else:
+                        btn.setToolTip("")
+                restyle(btn)
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
+            pass
+
+        try:
+            hint = getattr(self, "_mission_guardian_hint", None)
+            if hint is not None:
+                # wire click once
+                if not getattr(hint, "_guardian_wired", False):
+                    hint.clicked.connect(lambda _=False: self._navigate_to("Guardian"))
+                    hint._guardian_wired = True  # type: ignore[attr-defined]
+                if fresh and not suppressed:
+                    label = str(guardian.get("label", "") or "").strip()
+                    count_txt = f"{fresh} need review" if fresh > 1 else "needs review"
+                    hint.setText(f"⬢ Guardian — {label} {count_txt}".strip() if label else f"⬢ Guardian — {count_txt}")
+                    hint.setToolTip("Open Guardian for fresh recommendations")
+                    hint.show()
+                elif suppressed and fresh:
+                    hint.setText(f"⬢ Guardian paused — {suppressed}")
+                    hint.setToolTip("Guardian will resume automatically")
+                    hint.show()
+                else:
+                    hint.hide()
+                restyle(hint)
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
+            pass
 
         # AI hint: surface repair plan summary if available (non-blocking, no glow)
         try:

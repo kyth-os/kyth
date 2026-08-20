@@ -61,6 +61,15 @@ def build_mission_bar(window: "Windows", central_layout) -> None:
 
     layout.addStretch()
 
+    from .qt import QPushButton, Qt as _Qt  # local to avoid circular
+
+    window._mission_guardian_hint = QPushButton("")
+    window._mission_guardian_hint.setObjectName("mission-pill-warn")
+    window._mission_guardian_hint.setCursor(_Qt.CursorShape.PointingHandCursor)
+    window._mission_guardian_hint.setFlat(True)
+    window._mission_guardian_hint.hide()
+    layout.addWidget(window._mission_guardian_hint)
+
     window._mission_ai_hint = QLabel("")
     window._mission_ai_hint.setObjectName("mission-kicker")
     window._mission_ai_hint.hide()

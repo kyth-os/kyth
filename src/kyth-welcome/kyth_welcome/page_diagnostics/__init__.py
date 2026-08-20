@@ -8,7 +8,7 @@ from ..widgets import ActionRow, EmptyState, Page, _make_card, _make_flow_step
 
 
 class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _HealthMixin):
-    def __init__(self):
+    def __init__(self, navigate=None):
         super().__init__()
         self._worker = None
         self._health_worker = None
@@ -65,6 +65,7 @@ class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _H
 
         # R6: AI control plane — same repair plan that Welcome/ Repair use,
         # shown here as a compact summary above hardware cards (no new probe).
+        self._navigate = navigate or (lambda _k: None)
         self._ai_card, self._ai_layout = _make_card("card-accent-ok")
         self._ai_title = QLabel("AI Control Plane — offline")
         self._ai_title.setObjectName("card-title")
@@ -73,6 +74,16 @@ class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _H
         self._ai_body.setObjectName("card-copy")
         self._ai_body.setWordWrap(True)
         self._ai_layout.addWidget(self._ai_body)
+        # Phase 2 polish: deep-link to dedicated Guardian page
+        ai_row = QHBoxLayout()
+        ai_row.setSpacing(8)
+        self._ai_guardian_btn = QPushButton("Open Guardian")
+        self._ai_guardian_btn.setObjectName("primary")
+        self._ai_guardian_btn.setToolTip("Open System → Guardian for fresh health history, recipes, and model controls.")
+        self._ai_guardian_btn.clicked.connect(lambda _=False: self._navigate("Guardian"))
+        ai_row.addWidget(self._ai_guardian_btn)
+        ai_row.addStretch()
+        self._ai_layout.addLayout(ai_row)
         self._ai_card.hide()
         self._add(self._ai_card)
 

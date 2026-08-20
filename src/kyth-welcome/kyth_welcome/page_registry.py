@@ -198,7 +198,7 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
             (("system-software-update", "update-none"), "↻", "Updates", "Update", _page_factory("page_update", "UpdatePage")),
             (("computer", "computer-laptop"), "◈", "Hardware", "Hardware", _page_factory("page_hardware", "HardwarePage", navigate=navigate)),
             (("preferences-desktop-display", "video-display"), "▣", "Plasma & Wayland", "Plasma Wayland", _page_factory("page_plasma_wayland", "PlasmaWaylandPage")),
-            (("view-statistics", "office-chart-bar"), "◌", "Health Report", "Diagnostics", _page_factory("page_diagnostics", "DiagnosticsPage")),
+            (("view-statistics", "office-chart-bar"), "◌", "Health Report", "Diagnostics", _page_factory("page_diagnostics", "DiagnosticsPage", navigate=navigate)),
             (("tools-wizard", "configure"), "⚠", "Repair", "Repair", _page_factory("page_repair", "RepairPage", navigate=navigate)),
         ]),
         ("Network & Internet", [
