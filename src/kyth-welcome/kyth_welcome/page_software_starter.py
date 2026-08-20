@@ -110,34 +110,65 @@ class _StarterPackTabMixin:
             self._ms_fonts_status.setText("✗ Installation failed. Check your network connection and try again.")
 
     def _make_opt_in_card(self) -> QFrame:
-        """Single Hub for opt-in apps that were debloated from the base image."""
+        """Single Hub for opt-in apps that were debloated — unified Installed handling inline."""
         card, layout = _make_card("card-accent-ok")
         title = QLabel("Opt-in apps — one click in System Hub (no store hop)")
         title.setObjectName("card-title")
         layout.addWidget(title)
         body = QLabel(
             "These were removed from the base image to keep it lean, but stay one click away "
-            "here in System Hub — no separate store, no terminal. Uses the same gated install as Starter Packs."
+            "here in System Hub — no separate store, no terminal. Installed state is shown inline; remove from here or the Installed tab."
         )
         body.setObjectName("card-copy")
         body.setWordWrap(True)
         layout.addWidget(body)
-        grid = QGridLayout()
-        grid.setSpacing(8)
+        # Opt-in rows with inline Installed / Remove — keeps base lean but discoverable
+        import shutil as _shutil
+        from pathlib import Path as _Path
+        def _is_opt_installed(cmd: str) -> bool:
+            if "com.bitwarden.desktop" in cmd:
+                return _is_flatpak_installed("com.bitwarden.desktop")
+            if "vesktop" in cmd:
+                return bool(_shutil.which("vesktop") or (_Path.home() / ".local/share/applications/vesktop.desktop").exists() or _is_flatpak_installed("dev.vencord.Vesktop"))
+            if "obs" in cmd:
+                return bool(_shutil.which("obs") or _is_flatpak_installed("com.obsproject.Studio"))
+            if "libreoffice" in cmd:
+                return bool(_shutil.which("libreoffice") or _is_flatpak_installed("org.libreoffice.LibreOffice"))
+            return False
+        self._opt_in_rows: list[tuple[QPushButton, QLabel, QPushButton, str]] = []
         opts = [
             ("Vesktop", "ujust install-vesktop", "Discord with Vencord, no Flatpak"),
             ("OBS Studio", "ujust install-obs", "Screen recording/streaming"),
             ("LibreOffice", "ujust install-libreoffice", "Office suite (also in packs)"),
             ("Bitwarden", "flatpak install flathub com.bitwarden.desktop", "Password manager"),
         ]
-        for idx, (label, cmd, tip) in enumerate(opts):
-            btn = QPushButton(label)
+        for label, cmd, tip in opts:
+            row = QFrame()
+            row.setObjectName("hw-card-dim")
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(10, 6, 10, 6)
+            rl.setSpacing(8)
+            lbl = QLabel(label)
+            lbl.setObjectName("card-subtitle")
+            lbl.setToolTip(f"{tip} — runs: {cmd}")
+            rl.addWidget(lbl, 1)
+            badge = QLabel("Installed" if _is_opt_installed(cmd) else "Not installed")
+            badge.setObjectName("status-ok" if _is_opt_installed(cmd) else "caption-text")
+            rl.addWidget(badge)
+            btn = QPushButton("Installed" if _is_opt_installed(cmd) else f"Install {label}")
+            btn.setEnabled(not _is_opt_installed(cmd))
             btn.setToolTip(f"{tip} — runs: {cmd}")
-            # Use the same privileged runner as Starter Packs
             btn.clicked.connect(lambda _=False, c=cmd: self._run_opt_in(c))
-            grid.addWidget(btn, idx // 2, idx % 2)
-        layout.addLayout(grid)
-        note = QLabel("All installs are Flatpak or ujust — sandboxed, removable from Installed tab.")
+            rl.addWidget(btn)
+            rm = QPushButton("Remove")
+            rm.setToolTip("Remove via Flatpak or ujust uninstall; also available in Installed tab")
+            rm.setEnabled(_is_opt_installed(cmd) and "flatpak" in cmd)
+            rm.setVisible(_is_opt_installed(cmd) and "flatpak" in cmd)
+            rm.clicked.connect(lambda _=False, c=cmd: self._run_opt_in_remove(c))
+            rl.addWidget(rm)
+            layout.addWidget(row)
+            self._opt_in_rows.append((btn, badge, rm, cmd))
+        note = QLabel("All installs are Flatpak or ujust — sandboxed; Flatpak removes are inline, ujust removes via Installed tab or terminal.")
         note.setObjectName("caption-text")
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -167,12 +198,59 @@ class _StarterPackTabMixin:
         self._opt_in_worker.finished.connect(lambda: self._opt_in_worker.deleteLater())
         self._opt_in_worker.start()
 
+    def _run_opt_in_remove(self, cmd: str):
+        """Inline Flatpak remove for opt-in; ujust payloads fall back to Installed tab."""
+        if "com.bitwarden.desktop" not in cmd:
+            self._opt_in_status.setText("Remove this app from Installed tab or run its ujust uninstall.")
+            self._opt_in_status.show()
+            from .core_base import restyle
+            restyle(self._opt_in_status)
+            return
+        if hasattr(self, "_opt_in_worker") and self._opt_in_worker and self._opt_in_worker.isRunning():
+            return
+        self._opt_in_status.setText("Removing Bitwarden …")
+        self._opt_in_status.show()
+        from .services.runtime import Worker
+        self._opt_in_worker = Worker("opt-in-remove", lambda: self._run_opt_in_sync(["flatpak", "uninstall", "-y", "com.bitwarden.desktop"]))
+        self._opt_in_worker.result.connect(lambda k, v: self._opt_in_status.setText(str(v)))
+        self._opt_in_worker.finished.connect(lambda: self._opt_in_worker.deleteLater())
+        self._opt_in_worker.start()
+
     def _run_opt_in_sync(self, argv: list[str]) -> str:
         from kyth_shared.commands import run
         res = run(argv, capture_output=True, text=True, timeout=300)
         if res and res.returncode == 0:
-            return "✓ Installed — find it in the Installed tab."
+            # refresh inline Installed badges after success
+            try:
+                self._refresh_opt_in_badges()
+            except Exception:
+                pass
+            return "✓ Done — check Installed tab."
         return f"✗ Failed: {(res.stderr or res.stdout or 'unknown')[:120]}"
+
+    def _refresh_opt_in_badges(self):
+        import shutil as _shutil
+        from pathlib import Path as _Path
+        from .core_base import restyle
+        def _is_inst(cmd: str) -> bool:
+            if "com.bitwarden.desktop" in cmd:
+                return _is_flatpak_installed("com.bitwarden.desktop")
+            if "vesktop" in cmd:
+                return bool(_shutil.which("vesktop") or (_Path.home() / ".local/share/applications/vesktop.desktop").exists() or _is_flatpak_installed("dev.vencord.Vesktop"))
+            if "obs" in cmd:
+                return bool(_shutil.which("obs") or _is_flatpak_installed("com.obsproject.Studio"))
+            if "libreoffice" in cmd:
+                return bool(_shutil.which("libreoffice") or _is_flatpak_installed("org.libreoffice.LibreOffice"))
+            return False
+        for btn, badge, rm, cmd in getattr(self, "_opt_in_rows", []):
+            inst = _is_inst(cmd)
+            badge.setText("Installed" if inst else "Not installed")
+            badge.setObjectName("status-ok" if inst else "caption-text")
+            restyle(badge)
+            btn.setText("Installed" if inst else f"Install {cmd.split()[-1].replace('install-','').title()}")
+            btn.setEnabled(not inst)
+            rm.setEnabled(inst and "flatpak" in cmd)
+            rm.setVisible(inst and "flatpak" in cmd)
 
     def _make_m365_webapps_card(self) -> QFrame:
         card, layout = _make_card()
