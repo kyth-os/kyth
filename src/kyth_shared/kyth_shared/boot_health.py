@@ -155,6 +155,25 @@ def quarantine_reason(state: BootHealthState, digest: str) -> str | None:
     )
 
 
+def is_retryable_bootc_error(exc: BaseException | None = None, reason: str | None = None) -> bool:
+    """Return True for transient bootc pull failures that must not quarantine."""
+    if exc is not None and isinstance(exc, TimeoutError):
+        return True
+    # subprocess.TimeoutExpired is a TimeoutError subclass on Python 3.11+
+    try:
+        import subprocess as _sp
+
+        if exc is not None and isinstance(exc, _sp.TimeoutExpired):
+            return True
+    except (OSError, ValueError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        pass
+    if reason is not None and "timed out" in reason.lower():
+        return True
+    if reason is not None and reason.lower().startswith("retryable:"):
+        return True
+    return False
+
+
 def record_staged(
     state: BootHealthState,
     digest: str,

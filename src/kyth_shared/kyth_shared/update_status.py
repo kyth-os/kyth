@@ -23,6 +23,7 @@ class UpdateSnapshot:
     booted_digest: str = ""
     staged_digest: str = ""
     remote_digest: str = ""
+    retryable: bool = False
 
     @property
     def system_state(self) -> str:
