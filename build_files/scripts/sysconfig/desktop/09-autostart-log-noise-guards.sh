@@ -34,6 +34,18 @@ if [ -f /etc/xdg/autostart/input-remapper-autoload.desktop ]; then
 	sed -i 's|^Exec=.*|Exec=/usr/libexec/kyth-input-remapper-autoload|' /etc/xdg/autostart/input-remapper-autoload.desktop
 fi
 
+
+# input-remapper-service logs ERROR: .../config.json" does not exist on every
+# login at 16:24:24 (4×) because the user config dir has never been created.
+# Seed an empty skeleton config so the daemon starts quietly; the existing
+# kyth-input-remapper-autoload wrapper already handles delayed autoload.
+mkdir -p /etc/skel/.config/input-remapper-2
+write_config /etc/skel/.config/input-remapper-2/config.json <<'IRMAPPERJSON'
+{
+  "autoload": {}
+}
+IRMAPPERJSON
+
 write_config /usr/lib/systemd/system/kyth-system-accounts.service <<'SYSACCOUNTUNITEOF'
 [Unit]
 Description=Ensure KythOS system accounts are visible in /etc

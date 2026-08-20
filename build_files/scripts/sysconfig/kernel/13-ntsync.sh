@@ -24,3 +24,12 @@ zram-size = min(ram, 8192)
 compression-algorithm = zstd
 swap-priority = 100
 ZRAMEOF
+
+# systemd waits for dev-zram0.device via udev; extend its job timeout so
+# the initial cold-boot race does not log as a failure before the module
+# creates the device (observed: timeout at 90s then success 1s later).
+mkdir -p /etc/systemd/system/dev-zram0.device.d
+cat > /etc/systemd/system/dev-zram0.device.d/10-timeout.conf <<'DEVTIMEOUT'
+[Unit]
+JobTimeoutSec=180
+DEVTIMEOUT
