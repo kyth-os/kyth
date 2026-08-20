@@ -55,6 +55,16 @@ def _guardian_check(*, investigate: bool = False) -> dict:
         return {"error": str(exc), "symptoms": [], "decisions": []}
 
 
+def _guardian_fix_my_system() -> dict:
+    """One-click Fix My System — runs healing chain with user consent, gaming-aware."""
+    try:
+        from kyth_shared.guardian import check as _check
+        # User clicked explicit fix — run as if automatic but with user present; respects suppression + cooldown
+        return _check(investigate=False, automatic=True)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "symptoms": [], "decisions": []}
+
+
 def _guardian_set_enabled(enabled: bool) -> dict:
     from kyth_shared.guardian import load_config, save_config, status as _status
     cfg = load_config()
@@ -221,6 +231,20 @@ class GuardianPage(Page):
         self._decisions_lbl.setWordWrap(True)
         self._decisions_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self._decisions_lbl)
+
+        # One-click healing with same gated runner as Starter Packs
+        fix_row = QHBoxLayout()
+        fix_row.setSpacing(8)
+        self._fix_btn = QPushButton("Fix My System — run safe repairs now")
+        self._fix_btn.setObjectName("primary")
+        self._fix_btn.setToolTip("Runs Guardian healing chain (storage.maint→firmware, display/controller, audio/network) with cooldown + gaming suppression. Same 30s bounded runner as Starter Packs.")
+        self._fix_btn.clicked.connect(self._run_fix_my_system)
+        fix_row.addWidget(self._fix_btn)
+        self._fix_status = QLabel("")
+        self._fix_status.setObjectName("card-copy")
+        self._fix_status.setWordWrap(True)
+        fix_row.addWidget(self._fix_status, 1)
+        layout.addLayout(fix_row)
 
         self._add(card)
 
@@ -697,6 +721,52 @@ class GuardianPage(Page):
         self._toggle_worker.finished.connect(lambda: setattr(self, "_toggle_worker", None))
         self._toggle_worker.finished.connect(self._toggle_worker.deleteLater)
         self._toggle_worker.start()
+
+    def _run_fix_my_system(self) -> None:
+        if getattr(self, "_fix_worker", None) and self._fix_worker and self._fix_worker.isRunning():
+            return
+        self._fix_status.setText("Running safe repairs (30s bound per step, gaming-aware)…")
+        self._fix_btn.setEnabled(False)
+        from .services.runtime import DataWorker
+        self._fix_worker = DataWorker("guardian-fix-my-system", _guardian_fix_my_system)
+        self._fix_worker.result.connect(guard_disposed(self._on_fix_done))
+        self._fix_worker.failed.connect(guard_disposed(lambda _k, m: self._on_fix_done(_k, {"error": m})))
+        self._fix_worker.finished.connect(lambda: setattr(self, "_fix_worker", None))
+        self._fix_worker.finished.connect(self._fix_worker.deleteLater)
+        self._fix_worker.start()
+
+    def _on_fix_done(self, _key: str, data: object) -> None:
+        self._fix_btn.setEnabled(True)
+        if not isinstance(data, dict):
+            self._fix_status.setText("Fix finished.")
+            return
+        if data.get("error"):
+            self._fix_status.setText(f"Fix failed: {data['error']}")
+            self._fix_status.setObjectName("status-err")
+        elif data.get("suppression_reason"):
+            self._fix_status.setText(f"Paused — {data['suppression_reason']}; try again after gaming/battery/thermal clears.")
+            self._fix_status.setObjectName("status-warn")
+        else:
+            decs = data.get("decisions", [])
+            execd = [d for d in decs if isinstance(d, dict) and d.get("action") == "executed"]
+            recmd = [d for d in decs if isinstance(d, dict) and d.get("action") == "recommended"]
+            if execd:
+                self._fix_status.setText(f"Fixed {len(execd)} issue(s) — {', '.join(d.get('recipe_id','') for d in execd[:3])} · History updated.")
+                self._fix_status.setObjectName("status-ok")
+            elif recmd:
+                self._fix_status.setText(f"No auto-fix — {len(recmd)} need confirmation in Repairs: {', '.join(d.get('recipe_id','') for d in recmd[:2])}")
+                self._fix_status.setObjectName("status-warn")
+            else:
+                self._fix_status.setText("Healthy — no repairs needed.")
+                self._fix_status.setObjectName("status-ok")
+        restyle(self._fix_status)
+        # mirror to health + refresh history/dashboard
+        try:
+            self._on_health_ready(_key, data)
+        except Exception:
+            pass
+        single_shot(self, 200, self._refresh_history)
+        single_shot(self, 200, self._refresh_status)
 
     def _copy_history(self) -> None:
         text = self._history_view.toPlainText()
