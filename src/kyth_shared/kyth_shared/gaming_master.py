@@ -91,12 +91,15 @@ def _thermal_high(threshold_c: int = 85) -> bool:
                 temp_millic = int(extra.read_text().strip())
                 # Filter placeholder sensors (0) and out-of-range spikes (>200C)
                 if temp_millic < 1000 or temp_millic > 200000:
+                    logger.debug("skipped hwmon %s placeholder %s", extra, temp_millic)
                     continue
                 if temp_millic > threshold_c * 1000:
                     return True
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                logger.debug("hwmon probe failed for %s: %s", extra, exc, exc_info=True)
                 continue
-    except OSError:
+    except OSError as exc:
+        logger.debug("thermal hwmon glob failed: %s", exc, exc_info=True)
         pass
     return False
 
@@ -130,15 +133,18 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
         elif _battery_low():
             throttled_reason = "battery <30% discharging — staying balanced"
             gaming = False
-    # snapshot before gaming master (77)
+    # snapshot before gaming master — must succeed or gaming is unsafe
     if gaming and not dry_run:
         try:
             from .gaming_snapshot import ensure_snapshot_before_master
 
             ensure_snapshot_before_master()
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-            logger.debug("handled expected exception", exc_info=True)
-            pass
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
+            logger.warning("gaming snapshot failed (%s) — staying balanced to avoid half-written kargs/Bore", exc, exc_info=True)
+            out: dict[str, str] = {"snapshot": f"failed: {exc}", "kargs": "balanced"}
+            if throttled_reason:
+                out["throttled_reason"] = throttled_reason
+            return out
     out: dict[str, str] = {}
     # dynamic imports to avoid cycles
     try:
