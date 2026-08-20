@@ -89,6 +89,29 @@ class GuardianPolicyTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("cooldown", reason)
 
+    def test_storage_and_firmware_autofix_are_deterministic(self):
+        # disk 95% with maint binary → storage.maint ; fwupdmgr get-updates failure → firmware.refresh
+        usage = type("U", (), {"total": 20 * 1024**3, "used": 19 * 1024**3, "free": 1 * 1024**3})()
+        fw_fail = subprocess.CompletedProcess(["fwupdmgr", "get-updates"], 1, stdout="", stderr="metadata stale")
+        with (
+            patch.object(guardian.shutil, "disk_usage", return_value=usage),
+            patch.object(guardian.shutil, "which", return_value="/usr/bin/kyth-btrfs-maint"),
+            patch.object(guardian, "_run", side_effect=lambda argv, timeout=8: fw_fail if argv[0] == "fwupdmgr" else subprocess.CompletedProcess(argv, 0, "", "")),
+            patch.object(guardian, "_active", return_value=True),
+            patch.object(guardian.Path, "exists", return_value=True),
+        ):
+            # storage symptom
+            syms = guardian.collect_symptoms()
+            storage_sym = next((s for s in syms if s.component == "storage"), None)
+            self.assertIsNotNone(storage_sym)
+            self.assertEqual(storage_sym.recipes, ("storage.maint",))
+            self.assertEqual(guardian.deterministic_decision(storage_sym).recipe_id, "storage.maint")
+            # firmware symptom
+            fw_sym = next((s for s in syms if s.component == "firmware"), None)
+            self.assertIsNotNone(fw_sym)
+            self.assertEqual(fw_sym.recipes, ("firmware.refresh",))
+            self.assertEqual(guardian.deterministic_decision(fw_sym).recipe_id, "firmware.refresh")
+
     def test_redaction_removes_sensitive_evidence_and_injection_bytes(self):
         raw = ("user=alice password=hunter2 token=abc SSID=HomeWifi "
                "10.1.2.3 aa:bb:cc:dd:ee:ff /home/alice/Documents/private.txt\x00")

@@ -26,6 +26,22 @@ unit reacts when the shared user probe cache changes. Both start a oneshot
 process; nothing polls continuously. The service runs at low CPU and I/O
 priority with memory and CPU limits.
 
+Recipes (allowlist, all `risk=safe` are automatic after two failures + cooldown):
+
+| id | title | risk | auto | cooldown |
+|---|---|---|---|---|
+| `audio.restart` | Restart audio services | safe | yes | 15m |
+| `network.restart-user` | Restart NetworkManager user integration | safe | yes | 15m |
+| `flatpak.refresh-metadata` | Refresh Flatpak metadata | safe | yes | 30m |
+| `portal.restart-user` | Restart desktop portals | safe | yes | 15m |
+| `plasma.restart-user` | Restart Plasma shell | safe | yes | 15m |
+| `storage.maint` | Run storage maintenance (gated scrub/balance) | safe | yes | 24h |
+| `firmware.refresh` | Refresh firmware metadata (flock) | safe | yes | 12h |
+| `disk.review` | Review storage usage (advisory) | advisory | no | 1h |
+| `flatpak.repair-user` | Repair user Flatpak data | confirm | no | 1h |
+| `bluetooth.restart` | Restart Bluetooth | confirm | no | 30m |
+| `update.review-health` | Review update health | advisory | no | 1h |
+
 The optional Apache-2.0 Q4 model is about 1.04 GiB. Its manifest is part of the
 signed Kyth image and pins the URL, byte size, SHA-256, license, prompt version,
 and Guardian compatibility version. Downloads are written atomically and are

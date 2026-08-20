@@ -119,12 +119,18 @@ RECIPES: dict[str, Recipe] = {
                "safe", False, True, 900, "plasma", "If the panel or task manager vanished, it should reappear. Open windows are kept."),
         Recipe("disk.review", "Review storage usage", "storage", tuple(),
                "advisory", False, False, 3600, "storage", "Open System Hub > Hardware > Storage; Guardian never deletes files."),
+        Recipe("storage.maint", "Run storage maintenance", "storage",
+               ("bash", "-c", "/usr/libexec/kyth-storage-gate && /usr/bin/kyth-btrfs-maint"),
+               "safe", False, True, 86400, "storage", "Gated btrfs scrub/balance (AC+idle+!gaming); safe to retry."),
+        Recipe("firmware.refresh", "Refresh firmware metadata", "firmware",
+               ("flock", "-w", "10", "/run/kyth-fwupd.lock", "fwupdmgr", "refresh", "--force"),
+               "safe", False, True, 43200, "firmware", "Refreshes LVFS metadata only; does not flash devices."),
         Recipe("update.review-health", "Review update health", "updates", tuple(),
                "advisory", False, False, 3600, "updates", "Run ujust update-health; rollback remains controlled by boot health."),
     )
 }
 
-ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates", "portal", "plasma"})
+ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates", "portal", "plasma", "firmware"})
 # redact()'s input is capped at 4096 chars before any of these run, and none
 # of these patterns nest an unbounded quantifier over an overlapping
 # character class (the actual ReDoS shape) — verified empirically fast
@@ -237,10 +243,19 @@ def collect_symptoms() -> list[Symptom]:
                 continue
             percent = int(100 * usage.used / usage.total)
             if percent >= 90 or usage.free < 5 * 1024**3:
-                symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("disk.review",), "error"))
+                # Prefer gated maint when binaries exist, fall back to advisory
+                if shutil.which("kyth-btrfs-maint") or Path("/usr/bin/kyth-btrfs-maint").exists() or Path("/usr/libexec/kyth-storage-gate").exists():
+                    symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("storage.maint",), "error"))
+                else:
+                    symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("disk.review",), "error"))
                 break
         except OSError:
             continue
+    # Firmware metadata staleness — fwupdmgr get-updates failure is the canary
+    fw = _run(("fwupdmgr", "get-updates"), 8)
+    if fw and fw.returncode != 0 and "No detected" not in (fw.stdout or ""):
+        # get-updates fails when metadata stale or LVFS unreachable; refresh is safe
+        symptoms.append(Symptom("firmware", f"Firmware metadata refresh needed: {fw.stderr.strip()[:120]}", ("firmware.refresh",)))
     try:
         from .boot_health import read_state as read_boot_health
         health = read_boot_health()
