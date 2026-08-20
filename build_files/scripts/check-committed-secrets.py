@@ -30,6 +30,9 @@ def main() -> int:
             continue
         if path.suffix.lower() in binary_suffixes:
             continue
+        # Don't flag the check script's own pattern literals
+        if name == "build_files/scripts/check-committed-secrets.py":
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:

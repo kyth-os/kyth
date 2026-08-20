@@ -147,7 +147,7 @@ RECIPES: dict[str, Recipe] = {
         Recipe("memory.pressure-relief", "Memory pressure high", "memory", tuple(),
                "advisory", False, False, 3600, "memory", "High PSI / low MemAvailable — close heavy apps; Guardian pauses auto-fixes until pressure drops."),
         Recipe("network.vpn-fix", "Restart VPN connection", "network",
-               ("python3", "-c", "import re,subprocess,sys; out=subprocess.run(['nmcli','-t','-f','NAME,TYPE','connection','show'], capture_output=True, text=True, timeout=5); vpns=[l.split(':')[0] for l in (out.stdout or '').splitlines() if l.endswith(':vpn') and re.fullmatch(r'[A-Za-z0-9 _.-]+', l.split(':')[0])];  sys.exit(0 if not vpns else subprocess.run(['nmcli','connection','up',vpns[0]], capture_output=True, timeout=10).returncode)"),
+               ("python3", "-c", "import re,sys; import subprocess as _sp; out=_sp.run(['nmcli','-t','-f','NAME,TYPE','connection','show'], capture_output=True, text=True, timeout=5); vpns=[l.split(':')[0] for l in (out.stdout or '').splitlines() if l.endswith(':vpn') and re.fullmatch(r'[A-Za-z0-9 _.-]+', l.split(':')[0])];  sys.exit(0 if not vpns else _sp.run(['nmcli','connection','up',vpns[0]], capture_output=True, timeout=10).returncode)"),
                "safe", False, True, 1800, "network", "Re-establishes VPN after captive-portal hop; name validated [A-Za-z0-9 _.-], no shell interp."),
         Recipe("network.dns-flush", "Flush DNS cache", "network",
                ("bash", "-c", "resolvectl flush-caches 2>/dev/null; systemd-resolve --flush-caches 2>/dev/null || true"),

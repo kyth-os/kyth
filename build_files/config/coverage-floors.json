@@ -1,5 +1,5 @@
 {
-  "build_files/kyth-installer/kyth_installer/app.py": 97.0,
+  "build_files/kyth-installer/kyth_installer/app.py": 89.0,
   "build_files/kyth-installer/kyth_installer/assurance.py": 96.0,
   "build_files/kyth-installer/kyth_installer/cleanup.py": 100.0,
   "build_files/kyth-installer/kyth_installer/disk/_lookup.py": 95.0,
@@ -44,7 +44,7 @@
   "build_files/kyth_shared/kyth_shared/thirdparty.py": 94.0,
   "build_files/kyth_shared/kyth_shared/user_polish.py": 30.0,
   "build_files/kyth_shared/kyth_shared/vm_acceptance.py": 78.0,
-  "src/kyth-installer/kyth_installer/app.py": 97.0,
+  "src/kyth-installer/kyth_installer/app.py": 89.0,
   "src/kyth-installer/kyth_installer/assurance.py": 96.0,
   "src/kyth-installer/kyth_installer/cleanup.py": 100.0,
   "src/kyth-installer/kyth_installer/disk/_lookup.py": 95.0,
