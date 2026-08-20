@@ -17,18 +17,67 @@ fi
 # Load zram early so /dev/zram0 exists before systemd-zram-setup runs.
 # Without this, the first boot always times out waiting for dev-zram0.device
 # (see journal: Job dev-zram0.device/start timed out -> succeeds 1s later).
+# Keep modules-load for fallback, but primary early load is via initramfs
+# (dracut add_drivers) so the device exists before switch-root and udev
+# coldplug. On FA617NS the real-root udevd was not running for ~122s
+# (10.76s Add -> 132.83s Found), so modules-load alone was too late.
 write_line 'zram' /usr/lib/modules-load.d/zram.conf
+write_config /etc/dracut.conf.d/99-kyth-zram.conf <<'DRACUTZRAM'
+add_drivers+=" zram "
+DRACUTZRAM
 
-# Tolerate the race where systemd requests dev-zram0.device before the
-# generator has created it: extend the device timeout from 90s default.
-# Also make the zram-setup stop path ignore busy-device errors on shutdown
-# (Error: Device or resource busy) which otherwise marks the service failed.
+# Explicit early modprobe service ordered before udevd coldplug. Ensures
+# /dev/zram0 uevent is queued before systemd-udev-trigger runs, even if
+# initramfs driver was not included for a given kver.
+write_config /usr/lib/systemd/system/kyth-zram-early.service <<'ZRAM_EARLY'
+[Unit]
+Description=Kyth early zram modprobe (before udev coldplug)
+DefaultDependencies=no
+Before=systemd-udevd.service systemd-udev-trigger.service
+Wants=systemd-udevd.service
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/modprobe zram num_devices=1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+ZRAM_EARLY
+systemctl enable kyth-zram-early.service 2>/dev/null || true
+
+# Fail-fast instead of hiding the race with 180s. The device should now
+# exist via initramfs/early service; if not, retry quickly rather than
+# blocking graphical.target for 2m. Keep busy-device tolerant stop path.
 mkdir -p /etc/systemd/system/systemd-zram-setup@.service.d
 cat > /etc/systemd/system/systemd-zram-setup@.service.d/10-kyth-zram.conf <<'ZRAMOVERRIDE'
 [Unit]
-JobTimeoutSec=180
+JobTimeoutSec=30
+JobRunningTimeoutSec=30
 [Service]
+ExecStartPre=-/sbin/modprobe zram num_devices=1
+Restart=on-failure
+RestartSec=1
 # On stop, zram may still be in use as swap; swapoff is handled by
 # dev-zram0.swap unit, so ignore busy errors here.
 ExecStopPost=-/usr/bin/bash -c 'echo 1 > /sys/block/zram0/reset 2>/dev/null || true'
 ZRAMOVERRIDE
+
+# Boot timing observability for FA617NS-class stalls. Provides
+# journalctl evidence without host nsenter (Operation not permitted
+# in current toolbx). Used by kyth doctor.
+write_config /usr/lib/systemd/system/kyth-boot-timing.service <<'BOOTTIMING'
+[Unit]
+Description=Kyth boot timing log (zram/udev)
+After=multi-user.target
+ConditionPathExists=/usr/bin/journalctl
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -c 'journalctl -b -o short-monotonic | grep -E "zram|dev-zram|systemd-udevd|systemd-udev-trigger" > /var/log/kyth-boot-timing.log 2>/dev/null || true'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+BOOTTIMING
+systemctl enable kyth-boot-timing.service 2>/dev/null || true
