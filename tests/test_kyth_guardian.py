@@ -128,6 +128,27 @@ class GuardianPolicyTests(unittest.TestCase):
             "flatpak.refresh-metadata", "flatpak.repair-user"))
         self.assertIsNone(guardian.deterministic_decision(symptom))
 
+    def test_display_and_controller_autofix_are_deterministic(self):
+        kd_ok = subprocess.CompletedProcess(["kscreen-doctor", "-o"], 0, stdout="Output: 1 HDMI-A-1\n connected\n enabled\n", stderr="")
+        kd_fail = subprocess.CompletedProcess(["kscreen-doctor", "-o"], 1, stdout="", stderr="failed")
+        with (
+            patch.object(guardian, "_active", return_value=False),
+            patch.object(guardian.Path, "exists", return_value=True),
+            patch.object(guardian, "_run", side_effect=lambda argv, timeout=8: kd_fail if argv[0] == "kscreen-doctor" else subprocess.CompletedProcess(argv, 0, "", "")),
+        ):
+            syms = guardian.collect_symptoms()
+            disp = next((s for s in syms if s.component == "display"), None)
+            self.assertIsNotNone(disp)
+            self.assertEqual(disp.recipes, ("display.reconfigure",))
+            ctrl = next((s for s in syms if s.component == "controller"), None)
+            self.assertIsNotNone(ctrl)
+            self.assertEqual(ctrl.recipes, ("controller.repair",))
+        # Verify display when connected+enabled
+        with patch.object(guardian, "_run", return_value=kd_ok):
+            self.assertTrue(guardian.verify_recipe("display.reconfigure"))
+        with patch.object(guardian, "_run", return_value=kd_fail):
+            self.assertFalse(guardian.verify_recipe("display.reconfigure"))
+
 
 class GuardianStorageTests(unittest.TestCase):
     def test_history_is_bounded_and_rotated(self):

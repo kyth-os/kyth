@@ -125,12 +125,18 @@ RECIPES: dict[str, Recipe] = {
         Recipe("firmware.refresh", "Refresh firmware metadata", "firmware",
                ("flock", "-w", "10", "/run/kyth-fwupd.lock", "fwupdmgr", "refresh", "--force"),
                "safe", False, True, 43200, "firmware", "Refreshes LVFS metadata only; does not flash devices."),
+        Recipe("display.reconfigure", "Re-apply display outputs", "display",
+               ("kscreen-doctor", "-o"),
+               "safe", False, True, 21600, "display", "Re-applies preferred mode after dock/HDR change; no reboot."),
+        Recipe("controller.repair", "Restart controller stack", "controller",
+               ("systemctl", "--user", "try-restart", "joycond.service"),
+               "safe", False, True, 21600, "controller", "Restarts joycond for drift after suspend; re-pair if needed."),
         Recipe("update.review-health", "Review update health", "updates", tuple(),
                "advisory", False, False, 3600, "updates", "Run ujust update-health; rollback remains controlled by boot health."),
     )
 }
 
-ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates", "portal", "plasma", "firmware"})
+ALLOWED_PROBES = frozenset({"audio", "network", "flatpak", "bluetooth", "storage", "updates", "portal", "plasma", "firmware", "display", "controller"})
 # redact()'s input is capped at 4096 chars before any of these run, and none
 # of these patterns nest an unbounded quantifier over an overlapping
 # character class (the actual ReDoS shape) — verified empirically fast
@@ -264,6 +270,29 @@ def collect_symptoms() -> list[Symptom]:
     if fw and fw.returncode != 0 and "No detected" not in (fw.stdout or ""):
         # get-updates fails when metadata stale or LVFS unreachable; refresh is safe
         symptoms.append(Symptom("firmware", f"Firmware metadata refresh needed: {fw.stderr.strip()[:120]}", ("firmware.refresh",)))
+    # Display drift after dock/HDR — kscreen-doctor shows disconnected or low-res
+    try:
+        kd = _run(("kscreen-doctor", "-o"), 5)
+        if kd and kd.returncode == 0:
+            out = kd.stdout or ""
+            # connected check: if no " connected" line with "enabled", re-apply
+            if " connected" not in out or "enabled" not in out.lower():
+                symptoms.append(Symptom("display", "Display output not correctly enabled after dock", ("display.reconfigure",)))
+            elif "No such" in out or "Failed" in out:
+                symptoms.append(Symptom("display", "kscreen-doctor reports display error", ("display.reconfigure",)))
+        elif kd and kd.returncode != 0:
+            symptoms.append(Symptom("display", f"kscreen-doctor failed: {(kd.stderr or '').strip()[:80]}", ("display.reconfigure",)))
+    except (OSError, ValueError, AttributeError):
+        pass
+    # Controller drift after suspend — joycond inactive when BT controller paired
+    if not _active("joycond.service", user=False) and Path("/sys/class/bluetooth").exists():
+        # Only report if BT subsystem exists (has controller hardware)
+        try:
+            has_bt = any(Path("/sys/class/bluetooth").iterdir())
+            if has_bt:
+                symptoms.append(Symptom("controller", "Controller stack (joycond) inactive", ("controller.repair",)))
+        except OSError:
+            pass
     try:
         from .boot_health import read_state as read_boot_health
         health = read_boot_health()
@@ -558,6 +587,23 @@ def verify_recipe(recipe_id: str) -> bool:
         return _active("xdg-desktop-portal.service", user=True) and _active("xdg-desktop-portal-kde.service", user=True)
     if recipe.verification == "plasma":
         return _active("plasma-plasmashell.service", user=True)
+    if recipe.verification == "display":
+        kd = _run(("kscreen-doctor", "-o"), 5)
+        return bool(kd and kd.returncode == 0 and " connected" in (kd.stdout or "") and "enabled" in (kd.stdout or "").lower())
+    if recipe.verification == "controller":
+        return _active("joycond.service", user=False)
+    if recipe.verification == "storage":
+        try:
+            for p in (Path.home(), Path("/")):
+                u = shutil.disk_usage(p)
+                if u.total >= 2 * 1024**3 and (int(100 * u.used / u.total) >= 90 or u.free < 5 * 1024**3):
+                    return False
+            return True
+        except OSError:
+            return False
+    if recipe.verification == "firmware":
+        fw = _run(("fwupdmgr", "get-updates"), 8)
+        return bool(fw and fw.returncode == 0)
     return False
 
 
