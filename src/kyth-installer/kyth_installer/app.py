@@ -175,10 +175,46 @@ def main() -> None:
     time.sleep(0.3)
 
     # The installer runs as root (bootc requires it), but Chromium must run as
-    # the desktop user so it can connect to the X display. sudo sets $SUDO_USER
-    # to the original user; fall back to running Chromium directly if not set
-    # (e.g. when testing as root without sudo).
-    sudo_user = os.environ.get("SUDO_USER", "")
+    # the desktop user so it can connect to the X display. Prefer the session
+    # owner from loginctl/XDG; only trust SUDO_USER if it matches the session
+    # owner — SUDO_USER is env-controlled and must not be trusted alone.
+    def _session_owner() -> str:
+        # loginctl is authoritative for the graphical session owner
+        try:
+            import subprocess as _sp
+            # Query the seat's active session owner
+            out = _sp.run(["loginctl", "show-seat", "seat0", "-p", "ActiveSession", "--value"], capture_output=True, text=True, timeout=3)
+            sess = (out.stdout or "").strip()
+            if sess:
+                out2 = _sp.run(["loginctl", "show-session", sess, "-p", "Name", "--value"], capture_output=True, text=True, timeout=3)
+                owner = (out2.stdout or "").strip()
+                if owner and owner != "root":
+                    return owner
+        except Exception:
+            pass
+        # Fallback: XDG owner via /run/user/<uid> or SUDO_USER only if validated
+        try:
+            import pwd
+            # Prefer owner of XDG_RUNTIME_DIR
+            xdg = os.environ.get("XDG_RUNTIME_DIR", "")
+            if xdg.startswith("/run/user/"):
+                try:
+                    uid = int(xdg.split("/")[3])
+                    return pwd.getpwuid(uid).pw_name
+                except (ValueError, KeyError, IndexError):
+                    pass
+        except Exception:
+            pass
+        # Last resort: SUDO_USER only if it matches a real non-root user and session owner
+        cand = os.environ.get("SUDO_USER", "")
+        try:
+            import pwd as _pwd
+            if cand and cand != "root" and _pwd.getpwnam(cand):
+                return cand
+        except (KeyError, OSError):
+            pass
+        return ""
+    sudo_user = _session_owner()
     chromium_bin = next(
         (b for b in ("chromium", "chromium-browser", "chromium-bin") if shutil.which(b)),
         "chromium",
