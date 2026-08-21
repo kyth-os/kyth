@@ -17,6 +17,9 @@ dnf5 install -y --skip-unavailable \
 	python3-defusedxml \
 	curl \
 	qt6-qtwayland \
+	xdg-desktop-portal \
+	xdg-desktop-portal-kde \
+	xdg-desktop-portal-gtk \
 	plymouth \
 	plymouth-plugin-script \
 	librsvg2-tools \

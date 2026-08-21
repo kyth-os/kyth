@@ -15,7 +15,7 @@ feel distinct, comfortable, and easy for new users to trust.
 - Fresh users get the KythOS default layout preset: a bottom taskbar, KythOS
   launcher, pinned System Hub/App Store/Steam/Brave/Dolphin/Konsole apps,
   system tray, clock, show-desktop target, and KythOS wallpaper. The
-  `kyth-comfort-v3` preset uses slightly larger panel targets, single-row task
+  `kyth-comfort-v4` preset uses slightly larger panel targets, single-row task
   grouping, a curated tray, visible date, and no seconds noise.
 - The curated tray keeps network, audio, Bluetooth, battery, notifications,
   clipboard, removable devices, printers, and KDE Connect discoverable.
@@ -34,6 +34,20 @@ feel distinct, comfortable, and easy for new users to trust.
   the primary desktop identity on KythOS. Explicit Windows wording belongs in
   migration flows, compatibility notes, and search aliases where it helps users
   find the right tool.
+
+## Session defaults (Wayland / X11)
+
+- **Bare metal:** `kyth-configure-session` (SDDM `ExecStartPre`) writes
+  `/etc/sddm.conf.d/11-kyth-session.conf` with Wayland + `plasma.desktop`
+  every boot (VRR, HDR, lower latency).
+- **VMs:** the same helper selects X11 + `plasmax11.desktop` so greeter/session
+  startup stays reliable on virtual GPUs without DRM/KMS Wayland backends.
+- **Fail-open:** if the helper cannot write `11-kyth-session.conf`, static
+  `/etc/sddm.conf.d/10-kyth.conf` keeps a conservative X11 fallback so login is
+  never blocked.
+- System KWin defaults set `[Wayland] VrrPolicy=1` (Automatic) under
+  `/etc/xdg/kwinrc`. Image packages explicitly include `xdg-desktop-portal`,
+  `xdg-desktop-portal-kde`, and `qt6-qtwayland`.
 
 ## Consistency Rules
 
@@ -61,18 +75,16 @@ feel distinct, comfortable, and easy for new users to trust.
 - Several System Hub pages still use inline `setStyleSheet(...)` colors and
   typography. Move repeated badges, section heads, keycaps, warnings, and
   status pills into shared QSS object names.
-- The project documents a Wayland-first direction while the current SDDM default
-  intentionally starts Plasma X11 for broad VM and hardware stability. Keep the
-  product language clear until the Wayland default is ready.
 - The current Kyth plasma theme only overrides the panel background. Expand it
   carefully with a small number of distinctive, maintainable assets: panel
   separators, tray spacing, launcher affordances, task focus states, and lock
   screen details instead of forking Breeze wholesale.
 - Desktop Modes cover gaming, creator, developer, laptop, ultrawide, balanced,
   and Windows comfort. Dedicated console and docked presets are still outstanding.
-- The Plasma & Wayland Hub page now probes portals (including
-  `plasma-xdg-desktop-portal-kde`), NVIDIA notes, and fractional scale off the
-  GUI thread; keep apply/repair actions on DataWorkers as new buttons land.
+- Remaining Wayland readiness gates: NVIDIA/hybrid sleep-wake on live hardware,
+  screen-share capture under Flatpak, and fractional-scale app quirks. Use
+  `kyth-doctor` desktop-stack lines and Guardian portal/PipeWire recipes for
+  recovery — not Hub-only probes.
 
 ## Plasma/Wayland Customization Path
 
@@ -85,12 +97,14 @@ feel distinct, comfortable, and easy for new users to trust.
 3. Expand opt-in role presets in System Hub:
    Console Mode and Docked Mode (creator/developer/laptop already land via
    Desktop Modes).
-4. Harden Wayland readiness:
-   portals, PipeWire capture, VRR policy, fractional scaling notes, NVIDIA
-   status, remote desktop/screen sharing repair, and per-app workaround buttons.
-5. Flip the default to Wayland only after live ISO, VM, NVIDIA, hybrid laptop,
-   screen sharing, and rollback tests stop producing avoidable first-login
-   failures.
+4. Harden Wayland readiness (OS-level):
+   portal packages on the image, PipeWire capture, VRR policy, NVIDIA suspend
+   quirk apply after akmods, `plasma_hdr` / `plasma_drift` / window-snap writers
+   that talk to Plasma 6 (`kwriteconfig6`, `qdbus6`, `kscreen-doctor`), and
+   `desktop_stack` diagnostics for doctor/smoke.
+5. Treat Wayland-on-bare-metal as the shipping default; keep advertising
+   "fully qualified" only after live ISO, VM, NVIDIA, hybrid laptop, screen
+   sharing, and rollback tests stop producing avoidable first-login failures.
 
 The north star: a new user should recognize the workflow, then notice that
 KythOS is calmer, more recoverable, and less noisy.

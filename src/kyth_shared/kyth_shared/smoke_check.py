@@ -198,6 +198,19 @@ class SmokeCheck:
             ("/usr/bin/kyth-session-snapshot", "Session snapshot helper"),
         ):
             self.check_path(path, label)
+        # Portal stack — screen share / Flatpak permission dialogs on Wayland.
+        portal_ok = any(
+            os.path.exists(p)
+            for p in (
+                "/usr/libexec/xdg-desktop-portal",
+                "/usr/libexec/xdg-desktop-portal-kde",
+                "/usr/lib64/libexec/xdg-desktop-portal-kde",
+            )
+        ) or bool(shutil.which("xdg-desktop-portal"))
+        (self.passed if portal_ok else self.warn)(
+            "xdg-desktop-portal stack",
+            "portal binaries present" if portal_ok else "xdg-desktop-portal / kde backend missing",
+        )
         self.check_contains(
             "/etc/plymouth/plymouthd.conf", "Theme=kyth", "Plymouth theme",
             "KythOS boot splash selected",
