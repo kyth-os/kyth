@@ -35,8 +35,14 @@ class CompatRefreshWorker(TrackedThread):
                 self.unchanged.emit()
                 return
             os.makedirs(os.path.dirname(_COMPAT_CACHE_PATH), exist_ok=True)
-            with open(_COMPAT_CACHE_PATH, "w", encoding="utf-8") as fh:
+            # Atomic replace avoids torn JSON if Hub refreshes while another
+            # process (or a second CompatRefreshWorker) is mid-write.
+            tmp_path = f"{_COMPAT_CACHE_PATH}.tmp.{os.getpid()}"
+            with open(tmp_path, "w", encoding="utf-8") as fh:
                 fh.write(raw)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, _COMPAT_CACHE_PATH)
             self.refreshed.emit(updated, games)
         except (OSError, RuntimeError, ValueError, json.JSONDecodeError, HTTPError, URLError) as exc:
             _logger.debug("Compat refresh failed: %s", exc, exc_info=True)

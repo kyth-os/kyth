@@ -72,8 +72,15 @@ class LazyPageTests(unittest.TestCase):
     def test_gaming_software_loaders_defined_in_source(self):
         # Avoid importing page modules (need full Qt bindings). Assert source shape.
         root = ROOT / "build_files" / "kyth-welcome" / "kyth_welcome"
+        if not root.exists():
+            root = ROOT / "src" / "kyth-welcome" / "kyth_welcome"
         gaming = (root / "page_gaming.py").read_text(encoding="utf-8")
         software = (root / "page_software.py").read_text(encoding="utf-8")
+        update = (root / "page_update.py").read_text(encoding="utf-8")
+        work = (root / "page_work" / "__init__.py").read_text(encoding="utf-8")
+        migration = (root / "page_windows_migration" / "__init__.py").read_text(encoding="utf-8")
+        plasma = (root / "page_plasma_wayland" / "__init__.py").read_text(encoding="utf-8")
+        diagnostics = (root / "page_diagnostics" / "__init__.py").read_text(encoding="utf-8")
         self.assertIn("def _load_gaming_mixins", gaming)
         self.assertIn("@compose_on_first_init(_load_gaming_mixins)", gaming)
         self.assertNotIn("from .page_gaming_library import", gaming.split("def _load_gaming_mixins")[0])
@@ -81,6 +88,15 @@ class LazyPageTests(unittest.TestCase):
         self.assertIn("@compose_on_first_init(_load_software_mixins)", software)
         self.assertNotIn("from .page_software_starter import", software.split("def _load_software_mixins")[0])
         self.assertIn("self._ensure_tab", software)
+        for name, src in (
+            ("update", update),
+            ("work", work),
+            ("migration", migration),
+            ("plasma", plasma),
+            ("diagnostics", diagnostics),
+        ):
+            self.assertIn("compose_on_first_init", src, msg=name)
+            self.assertIn("def _load_", src, msg=name)
 
 
 if __name__ == "__main__":

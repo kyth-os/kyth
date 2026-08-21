@@ -31,6 +31,16 @@ def _page_factory(module_name: str, class_name: str, *args, **kwargs) -> PageFac
     return factory
 
 
+# Sidebar focus: gaming pages only in gaming focus; Work Setup in everyday/work.
+_PAGE_PROFILES: dict[str, str] = {
+    "Gaming": "gaming",
+    "Performance": "gaming",
+    "Compatibility": "gaming",
+    "Controllers": "gaming",
+    "Work Setup": "work",
+}
+
+
 def descriptor_from_nav_item(
     *,
     section: str | None,
@@ -39,7 +49,9 @@ def descriptor_from_nav_item(
     title: str,
     factory: PageFactory,
     search_metadata: "tuple[str, str, list[str]] | SearchItem | None" = None,
+    profile: str | None = None,
 ) -> PageDescriptor:
+    resolved_profile = profile if profile is not None else _PAGE_PROFILES.get(key, "all")
     if search_metadata is None:
         return PageDescriptor(
             key=key,
@@ -47,6 +59,7 @@ def descriptor_from_nav_item(
             section=section,
             icon_names=icon_names,
             factory=factory,
+            profile=resolved_profile,
         )
     if isinstance(search_metadata, SearchItem):
         search_title, description, terms = search_metadata.title, search_metadata.description, search_metadata.terms
@@ -60,6 +73,7 @@ def descriptor_from_nav_item(
         factory=factory,
         search_description=description,
         search_terms=tuple(terms),
+        profile=resolved_profile,
     )
 
 
@@ -81,10 +95,12 @@ def descriptors_from_nav_groups(nav_groups, search_metadata) -> list[PageDescrip
 
 
 def visible_for_profile(descriptor: PageDescriptor, profile: str) -> bool:
+    """Match MainWindow sidebar focus: gaming-only vs everyday/work Work Setup."""
     if descriptor.profile == "gaming":
         return profile == "gaming"
     if descriptor.profile == "work":
-        return profile == "work"
+        # Everyday and work focuses keep Work Setup; gaming focus hides it.
+        return profile != "gaming"
     return True
 
 

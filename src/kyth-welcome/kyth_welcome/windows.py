@@ -3,7 +3,7 @@ from .core_base import IS_LIVE, load_profile, restyle
 from .services.bootc import current_branch
 from .services.hardware import detect_nvidia_async
 from .services.runtime import has_blocking_tasks
-from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups
+from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups, visible_for_profile
 from .qt import (
     QCompleter, QDialog, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
 )
@@ -335,12 +335,33 @@ class MainWindow(QMainWindow):
         hint.setObjectName("mission-kicker")
         lay.addWidget(hint)
 
-        edit = QLineEdit(dlg)
+        lst = QListWidget(dlg)
+
+        class _PaletteSearch(QLineEdit):
+            """Arrow keys move the result list; other keys keep normal line-edit behavior.
+
+            Replaces a brittle instance monkey-patch that called
+            ``edit.keyPressEvent.__self__`` after reassignment and raised
+            AttributeError on every non-arrow keystroke.
+            """
+
+            def keyPressEvent(self, event):  # type: ignore[override]
+                if event.key() == Qt.Key.Key_Down:
+                    row = lst.currentRow()
+                    if row < lst.count() - 1:
+                        lst.setCurrentRow(row + 1)
+                    return
+                if event.key() == Qt.Key.Key_Up:
+                    row = lst.currentRow()
+                    if row > 0:
+                        lst.setCurrentRow(row - 1)
+                    return
+                super().keyPressEvent(event)
+
+        edit = _PaletteSearch(dlg)
         edit.setPlaceholderText("Search settings, apps, or Windows name — try hdr, clipboard, fancyzones")
         edit.setObjectName("search-box")
         lay.addWidget(edit)
-
-        lst = QListWidget(dlg)
         lay.addWidget(lst, 1)
 
         def _refill(text: str):
@@ -368,20 +389,6 @@ class MainWindow(QMainWindow):
                     dlg.accept()
                     self._navigate_to(matches[0][0])
 
-        def _key_press(event):
-            if event.key() == Qt.Key.Key_Down:
-                row = lst.currentRow()
-                if row < lst.count() - 1:
-                    lst.setCurrentRow(row + 1)
-                return True
-            elif event.key() == Qt.Key.Key_Up:
-                row = lst.currentRow()
-                if row > 0:
-                    lst.setCurrentRow(row - 1)
-                return True
-            return False
-
-        edit.keyPressEvent = lambda ev: (edit.keyPressEvent.__self__.keyPressEvent(ev) if not _key_press(ev) else None)
         edit.textChanged.connect(_refill)
         edit.returnPressed.connect(_accept)
         lst.itemActivated.connect(lambda it: (dlg.accept(), self._navigate_to(it.data(Qt.ItemDataRole.UserRole))))
@@ -632,20 +639,25 @@ class MainWindow(QMainWindow):
 
     # ── Usage focus ────────────────────────────────────────────────────────────
 
-    _GAMING_PAGE_KEYS = ("Gaming", "Performance", "Compatibility", "Controllers")
-
     def _apply_profile_visibility(self, profile: str):
         """Tailor the sidebar to the Everyday/Gaming focus.
 
         Hidden pages stay in the stack and reachable through search — the
-        focus only de-emphasizes, it never removes.
+        focus only de-emphasizes, it never removes. Visibility comes from
+        ``PageDescriptor.profile`` via ``visible_for_profile`` (single source).
         """
-        gaming_visible = profile == "gaming"
-        work_visible = profile != "gaming"
-        self._nav_section_labels["Gaming"].setVisible(gaming_visible)
-        for key in self._GAMING_PAGE_KEYS:
-            self._nav_button_by_key[key].setVisible(gaming_visible)
-        self._nav_button_by_key["Work Setup"].setVisible(work_visible)
+        gaming_section_visible = False
+        for key, btn in self._nav_button_by_key.items():
+            desc = self._descriptor_by_key.get(key)
+            if desc is None:
+                continue
+            visible = visible_for_profile(desc, profile)
+            btn.setVisible(visible)
+            if desc.section == "Gaming" and visible:
+                gaming_section_visible = True
+        gaming_label = self._nav_section_labels.get("Gaming")
+        if gaming_label is not None:
+            gaming_label.setVisible(gaming_section_visible)
 
     # ── Navigation ────────────────────────────────────────────────────────────
 

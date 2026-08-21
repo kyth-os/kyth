@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from kyth_shared.commands import ujust_command
+from ..lazy_page import compose_on_first_init
 from ..services.runtime import (
     DataWorker,
 )
@@ -20,34 +21,39 @@ from ..widgets import (
     Page, _make_card, _make_flow_step,
 )
 
-from .shortcuts_phone import _ShortcutsPhoneMixin
-from .nearby_sharing import _NearbySharingMixin
-from .powertoys import _PowerToysMixin
-from .hw_sanity import _HwSanityMixin
-from .files_copy import _FilesCopyMixin
-from .bookmarks import _BookmarksMixin
-from .pc_drive_extras import _PcDriveExtrasMixin
-from .takeout import _TakeoutMixin
-from .wsl import _WslMixin
-from .drives import _DrivesMixin
-from .family_hub import _FamilyHubMixin
+
+def _load_migration_mixins() -> tuple[type, ...]:
+    from .shortcuts_phone import _ShortcutsPhoneMixin
+    from .nearby_sharing import _NearbySharingMixin
+    from .powertoys import _PowerToysMixin
+    from .hw_sanity import _HwSanityMixin
+    from .files_copy import _FilesCopyMixin
+    from .bookmarks import _BookmarksMixin
+    from .pc_drive_extras import _PcDriveExtrasMixin
+    from .takeout import _TakeoutMixin
+    from .wsl import _WslMixin
+    from .drives import _DrivesMixin
+    from .family_hub import _FamilyHubMixin
+    return (
+        _ShortcutsPhoneMixin,
+        _NearbySharingMixin,
+        _PowerToysMixin,
+        _HwSanityMixin,
+        _FilesCopyMixin,
+        _BookmarksMixin,
+        _PcDriveExtrasMixin,
+        _TakeoutMixin,
+        _FamilyHubMixin,
+        _WslMixin,
+        _DrivesMixin,
+    )
 
 
 # ── Page: Move Files ──────────────────────────────────────────────────
-class WindowsMigrationPage(
-    Page,
-    _ShortcutsPhoneMixin,
-    _NearbySharingMixin,
-    _PowerToysMixin,
-    _HwSanityMixin,
-    _FilesCopyMixin,
-    _BookmarksMixin,
-    _PcDriveExtrasMixin,
-    _TakeoutMixin,
-    _FamilyHubMixin,
-    _WslMixin,
-    _DrivesMixin,
-):
+# Mixins load on first construction — Move Files is the largest multi-mixin
+# page and should not tax Hub cold start until the user opens it.
+@compose_on_first_init(_load_migration_mixins)
+class WindowsMigrationPage(Page):
 
     def __init__(self, navigate=None):
         super().__init__()

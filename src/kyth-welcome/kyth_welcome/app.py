@@ -1,47 +1,68 @@
-import atexit
 import os
 import sys
 import traceback
 from pathlib import Path
 
-_LOCK_FILE = Path.home() / ".cache" / "kyth" / "kyth-welcome.lock"
-
-
-def _acquire_lock() -> bool:
-    _LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        if _LOCK_FILE.exists():
-            pid_text = _LOCK_FILE.read_text().strip()
-            if pid_text.isdigit():
-                pid = int(pid_text)
-                try:
-                    os.kill(pid, 0)
-                    return False  # already running
-                except (ProcessLookupError, PermissionError):
-                    pass  # stale lock
-        _LOCK_FILE.write_text(str(os.getpid()))
-        atexit.register(_LOCK_FILE.unlink, missing_ok=True)
-        return True
-    except OSError:
-        return True  # can't lock → allow launch
-
-# Hub windows are lazy-imported inside main() to keep cold import cheap
-# (windows.py is 709 LOC and pulls heavy page deps). See optimization-budgets.
+# __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, is_first_run, prefer_xwayland_if_wayland_plugin_missing, remove_autostart, wait_for_display_setup
+from .instance_ipc import decode_activate_message, encode_activate_message
 from .services.runtime import shutdown_threads
 from .qt import (
-    QApplication, QIcon,
+    QApplication, QIcon, QLocalServer, QLocalSocket,
 )
 from .theme import (
     QSS,
 )
+from .windows import MainWindow
+from .wizard import WizardWindow
+
+_SOCKET_NAME_PREFIX = "kyth-welcome"
+
+
+def _instance_socket_name() -> str:
+    return f"{_SOCKET_NAME_PREFIX}-{os.getuid()}"
+
+
+def _forward_to_running_instance(page: str | None) -> bool:
+    """If another Hub owns the local socket, ask it to raise (and optionally navigate)."""
+    socket_name = _instance_socket_name()
+    probe = QLocalSocket()
+    probe.connectToServer(socket_name)
+    if not probe.waitForConnected(500):
+        return False
+    probe.write(encode_activate_message(page))
+    probe.waitForBytesWritten(500)
+    probe.disconnectFromServer()
+    return True
+
+
+def _start_instance_server(window: MainWindow | WizardWindow) -> QLocalServer | None:
+    """Listen for second-launch activate messages; return None if we lost the race."""
+    socket_name = _instance_socket_name()
+    server = QLocalServer()
+    server.removeServer(socket_name)
+    if not server.listen(socket_name):
+        return None
+
+    def handle_new_connection() -> None:
+        connection = server.nextPendingConnection()
+        if connection is None:
+            return
+        if connection.waitForReadyRead(500):
+            page = decode_activate_message(bytes(connection.readAll()))
+            window.show()
+            window.raise_()
+            window.activateWindow()
+            if page and isinstance(window, MainWindow):
+                window._navigate_to(page)
+        connection.close()
+
+    server.newConnection.connect(handle_new_connection)
+    return server
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main():
-    if not _acquire_lock():
-        sys.exit(0)
-
     # Parse --page PAGEKEY before QApplication (which may strip unrecognised args)
     start_page = None
     raw_args = sys.argv[1:]
@@ -61,7 +82,7 @@ def main():
         # Ensure the launcher log (stderr) is flushed for _system_hub_probe
         try:
             sys.stderr.flush()
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        except Exception:
             pass
         # Also append a concise marker to the cache error file for diagnostics
         try:
@@ -69,7 +90,7 @@ def main():
             err_path.parent.mkdir(parents=True, exist_ok=True)
             with err_path.open("a", encoding="utf-8") as fh:
                 fh.write(f"[{exc_type.__name__}] {exc_value}\n")
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        except Exception:
             pass
     sys.excepthook = _log_uncaught
 
@@ -82,19 +103,30 @@ def main():
     app.setWindowIcon(QIcon.fromTheme("kyth"))
     app.setStyleSheet(QSS)
 
-    # Lazy-import windows so `import kyth_welcome.app` stays cheap for probe/cache checks
-    from .windows import MainWindow as _MainWindow
-    from .wizard import WizardWindow as _WizardWindow
+    # Single-instance: forward to the running Hub (raise + optional --page) instead
+    # of the old check-then-write PID lock race that allowed dual Hubs.
+    if _forward_to_running_instance(start_page):
+        return
 
     if IS_LIVE:
-        win = _MainWindow()
+        win = MainWindow()
     elif is_first_run():
-        win = _WizardWindow()
+        win = WizardWindow()
     else:
-        win = _MainWindow()
+        win = MainWindow()
+
+    server = _start_instance_server(win)
+    if server is None:
+        # Lost the listen race to another Hub that started between probe and listen.
+        if _forward_to_running_instance(start_page):
+            return
+        print("Warning: could not start System Hub single-instance listener", file=sys.stderr)
+    else:
+        app._hub_instance_server = server  # type: ignore[attr-defined]
+
     win.setWindowIcon(QIcon.fromTheme("kyth"))
     win.showMaximized()
-    if start_page and isinstance(win, _MainWindow):
+    if start_page and isinstance(win, MainWindow):
         win._navigate_to(start_page)
     remove_autostart()
     sys.exit(app.exec())

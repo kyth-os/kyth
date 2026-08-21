@@ -1,14 +1,20 @@
 # __KYTH_GENERATED_IMPORTS__
-from ._cards import _CardsMixin
-from ._profiles import _ProfilesMixin
-from ._polish import _PolishMixin
-from ._repair import _RepairMixin
-from ._refresh import _RefreshMixin
+from ..lazy_page import compose_on_first_init
 from ..qt import QLabel, QVBoxLayout, single_shot
 from ..widgets import ActionRow, Page, _make_card
 
 
-class PlasmaWaylandPage(Page, _CardsMixin, _ProfilesMixin, _PolishMixin, _RepairMixin, _RefreshMixin):
+def _load_plasma_mixins() -> tuple[type, ...]:
+    from ._cards import _CardsMixin
+    from ._profiles import _ProfilesMixin
+    from ._polish import _PolishMixin
+    from ._repair import _RepairMixin
+    from ._refresh import _RefreshMixin
+    return (_CardsMixin, _ProfilesMixin, _PolishMixin, _RepairMixin, _RefreshMixin)
+
+
+@compose_on_first_init(_load_plasma_mixins)
+class PlasmaWaylandPage(Page):
     def __init__(self):
         super().__init__()
         self._initial_refresh_started = False

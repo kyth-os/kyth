@@ -549,6 +549,12 @@ class _UpdateOpsMixin:
             self._rollback_btn.setEnabled(False)
             self._rollback_btn.setText("Roll Back")
             self._reboot_btn.hide()
+            try:
+                from .services.hub_state import HUB_STATE
+
+                HUB_STATE.set_update_status("updating", "Update in progress")
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
+                pass
             return
 
         staged = has_staged_update()
@@ -611,6 +617,23 @@ class _UpdateOpsMixin:
         restyle(self._rollback_val)
 
         self._rollback_btn.setEnabled(rollback and self._worker is None)
+
+        # Publish shared control-plane state so Repair/Guardian see the same
+        # rollback + staged truth without a second bootc spawn.
+        try:
+            from .services.hub_state import HUB_STATE
+
+            if self._worker is not None:
+                HUB_STATE.set_update_status("updating", "Update in progress")
+            elif staged:
+                HUB_STATE.set_update_status("staged", "Reboot to apply staged image")
+            elif low_disk:
+                HUB_STATE.set_update_status("blocked", f"Low disk: {free_gb:.1f} GB free")
+            else:
+                HUB_STATE.set_update_status("idle", "")
+            HUB_STATE.set_rollback_available(bool(rollback))
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- best-effort control plane
+            pass
 
         # Low-disk gate: disable Full/OS buttons when <10 GB free (also checked at click time)
         # low_disk already includes `and not staged` — staged image needs no pull

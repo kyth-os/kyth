@@ -1,14 +1,23 @@
 # __KYTH_GENERATED_IMPORTS__
+from .lazy_page import compose_on_first_init
 from .qt import QTimer, single_shot
 from .widgets import Page, _make_section_header
-from .page_update_auto import _AutoUpdateMixin
-from .page_update_availability import _UpdateAvailabilityMixin
-from .page_update_firmware import _FirmwareUpdateMixin
-from .page_update_ops import _UpdateOpsMixin
 from .services.updates import UpdateCheckCoordinator
 
+
+def _load_update_mixins() -> tuple[type, ...]:
+    from .page_update_auto import _AutoUpdateMixin
+    from .page_update_availability import _UpdateAvailabilityMixin
+    from .page_update_firmware import _FirmwareUpdateMixin
+    from .page_update_ops import _UpdateOpsMixin
+    return (_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _FirmwareUpdateMixin)
+
+
 # ── Page: Update ──────────────────────────────────────────────────────────────
-class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _FirmwareUpdateMixin, Page):
+# Mixins load on first construction so opening System Hub does not import
+# bootc/update ops modules until the user navigates here.
+@compose_on_first_init(_load_update_mixins)
+class UpdatePage(Page):
     """Split by concern across sibling modules: running update operations
     (page_update_ops), checking availability (page_update_availability), the
     automatic-update schedule (page_update_auto), and firmware (page_update_firmware).

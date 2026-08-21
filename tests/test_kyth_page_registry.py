@@ -32,7 +32,9 @@ _install_qt_stubs()
 from kyth_welcome.page_registry import (  # noqa: E402
     PROBLEM_ROUTES,
     SEARCH_ITEMS,
+    descriptors_from_nav_groups,
     get_nav_groups,
+    visible_for_profile,
 )
 
 
@@ -64,6 +66,22 @@ class PageRegistryTests(unittest.TestCase):
             for t in terms:
                 self.assertTrue(t.strip(), f"empty term for {key}")
                 self.assertEqual(t.strip().lower(), t.strip().lower())
+
+    def test_profile_visibility_matches_sidebar_focus(self):
+        groups = get_nav_groups(lambda _destination: None)
+        descriptors = descriptors_from_nav_groups(groups, SEARCH_ITEMS)
+        by_key = {d.key: d for d in descriptors}
+
+        self.assertEqual(by_key["Gaming"].profile, "gaming")
+        self.assertEqual(by_key["Work Setup"].profile, "work")
+        self.assertEqual(by_key["Update"].profile, "all")
+
+        self.assertTrue(visible_for_profile(by_key["Gaming"], "gaming"))
+        self.assertFalse(visible_for_profile(by_key["Gaming"], "everyday"))
+        self.assertFalse(visible_for_profile(by_key["Work Setup"], "gaming"))
+        self.assertTrue(visible_for_profile(by_key["Work Setup"], "everyday"))
+        self.assertTrue(visible_for_profile(by_key["Work Setup"], "work"))
+        self.assertTrue(visible_for_profile(by_key["Update"], "gaming"))
 
 
 if __name__ == "__main__":

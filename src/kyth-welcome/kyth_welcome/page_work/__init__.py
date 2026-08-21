@@ -1,16 +1,30 @@
 # __KYTH_GENERATED_IMPORTS__
-from ._apps import _WorkAppsMixin
-from ._m365 import _M365Mixin
-from ._fonts import _FontsMixin
-from ._pst import _PstMixin
-from ._focus import _FocusMixin
-from ._connect import _ConnectMixin
-from ._dev import _DevMixin
+from ..lazy_page import compose_on_first_init
 from ..qt import QApplication, QTimer
 from ..widgets import Page
 
 
-class WorkSetupPage(Page, _WorkAppsMixin, _M365Mixin, _FontsMixin, _PstMixin, _FocusMixin, _ConnectMixin, _DevMixin):
+def _load_work_mixins() -> tuple[type, ...]:
+    from ._apps import _WorkAppsMixin
+    from ._m365 import _M365Mixin
+    from ._fonts import _FontsMixin
+    from ._pst import _PstMixin
+    from ._focus import _FocusMixin
+    from ._connect import _ConnectMixin
+    from ._dev import _DevMixin
+    return (
+        _WorkAppsMixin,
+        _M365Mixin,
+        _FontsMixin,
+        _PstMixin,
+        _FocusMixin,
+        _ConnectMixin,
+        _DevMixin,
+    )
+
+
+@compose_on_first_init(_load_work_mixins)
+class WorkSetupPage(Page):
     def __init__(self, navigate=None):
         super().__init__()
         self._navigate = navigate or (lambda _: None)

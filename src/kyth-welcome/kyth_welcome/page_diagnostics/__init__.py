@@ -1,13 +1,19 @@
 # __KYTH_GENERATED_IMPORTS__
-from ._security import _SecurityMixin
-from ._signin import _SigninMixin
-from ._storage_sense import _StorageSenseMixin
-from ._health import _HealthMixin
+from ..lazy_page import compose_on_first_init
 from ..qt import QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget, single_shot
 from ..widgets import ActionRow, EmptyState, Page, _make_card, _make_flow_step
 
 
-class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _HealthMixin):
+def _load_diagnostics_mixins() -> tuple[type, ...]:
+    from ._security import _SecurityMixin
+    from ._signin import _SigninMixin
+    from ._storage_sense import _StorageSenseMixin
+    from ._health import _HealthMixin
+    return (_SecurityMixin, _SigninMixin, _StorageSenseMixin, _HealthMixin)
+
+
+@compose_on_first_init(_load_diagnostics_mixins)
+class DiagnosticsPage(Page):
     def __init__(self, navigate=None):
         super().__init__()
         self._worker = None
@@ -169,12 +175,12 @@ class DiagnosticsPage(Page, _SecurityMixin, _SigninMixin, _StorageSenseMixin, _H
 
                 run(["/usr/bin/kyth-telemetry-opt", "purge"])
                 self._priv_status.setText("purged telemetry cache")
-            from .core_base import restyle
+            from ..core_base import restyle
 
             restyle(self._priv_status)
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._priv_status.setText(f"{which} failed — {exc}")
-            from .core_base import restyle
+            from ..core_base import restyle
 
             restyle(self._priv_status)
 

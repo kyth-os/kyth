@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ..qt import QHBoxLayout, QLabel, QPushButton
+from ..services.launch import popen
 from ..widgets import _make_card
 
 
@@ -14,7 +15,7 @@ class _FamilyHubMixin:
         body = QLabel(
             "Windows shows Nearby Share + Phone Link in one spot. This hub unifies LocalSend (Quick Share / Nearby Share), "
             "KDE Connect (Phone Link — SMS, ring phone, cross-device clipboard), and Dynamic Lock (trusted phone locks PC). "
-            "No terminal needed."
+            "Configure Dynamic Lock on the Phone Link card above — no terminal needed."
         )
         body.setObjectName("card-copy")
         body.setWordWrap(True)
@@ -22,7 +23,7 @@ class _FamilyHubMixin:
         for label, desc in (
             ("Nearby Share", "LocalSend — send files to any nearby PC/phone via QR, no cloud. Same as Quick Share on Windows."),
             ("Phone Link", "KDE Connect — pair phone for SMS, ring phone, cross-device clipboard, and file drop."),
-            ("Dynamic Lock", "Walk away and PC locks via Bluetooth phone proximity — kyth-dynamic-lock.service."),
+            ("Dynamic Lock", "Walk away and PC locks via Bluetooth phone proximity — configure on the Phone Link card."),
         ):
             row = QHBoxLayout()
             row.setSpacing(10)
@@ -39,15 +40,36 @@ class _FamilyHubMixin:
         btns.setSpacing(8)
         nearby_btn = QPushButton("Open LocalSend")
         nearby_btn.setToolTip("Launch LocalSend for Nearby Share")
-        try:
-            from ..services.launch import popen
-            nearby_btn.clicked.connect(lambda _=False: popen(["flatpak","run","org.localsend.localsend_app"]))
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-            pass
+        nearby_btn.clicked.connect(
+            lambda _=False: popen(["flatpak", "run", "org.localsend.localsend_app"])
+        )
         btns.addWidget(nearby_btn)
         phone_btn = QPushButton("KDE Connect Settings")
-        phone_btn.clicked.connect(lambda _=False: __import__("kyth_welcome.services.launch", fromlist=["popen"]).popen(["kcmshell6","kcm_kdeconnect"]) if True else None)
+        phone_btn.clicked.connect(
+            lambda _=False: popen(["kcmshell6", "kcm_kdeconnect"])
+        )
         btns.addWidget(phone_btn)
+        lock_btn = QPushButton("Configure Dynamic Lock")
+        lock_btn.setToolTip("Jump to Dynamic Lock on the Phone Link card")
+        lock_btn.clicked.connect(lambda _=False: self._focus_dynamic_lock_controls())
+        btns.addWidget(lock_btn)
         btns.addStretch()
         layout.addLayout(btns)
         self._add(card)
+
+    def _focus_dynamic_lock_controls(self) -> None:
+        """Bring the Phone Link Dynamic Lock controls into view when present."""
+        check = getattr(self, "_dynamic_lock_check", None)
+        if check is None:
+            return
+        check.setFocus()
+        try:
+            check.ensurePolished()
+            parent = check.parentWidget()
+            while parent is not None:
+                if hasattr(parent, "ensureWidgetVisible"):
+                    parent.ensureWidgetVisible(check)
+                    break
+                parent = parent.parentWidget()
+        except (RuntimeError, AttributeError):
+            pass
