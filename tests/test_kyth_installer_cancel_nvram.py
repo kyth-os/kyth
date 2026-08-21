@@ -27,14 +27,25 @@ class InstallerCancelTests(unittest.TestCase):
     def test_check_cancelled_raises(self):
         ctx = InstallerContext()
         ctx.cancel_requested.set()
-        with self.assertRaises(execution.InstallCancelled):
+        with self.assertRaises(execution.InstallCancelled) as raised:
             execution.check_cancelled(ctx)
+        self.assertIn("before disk changes were committed", str(raised.exception))
 
-    def test_nvram_warning_emits_when_entry_lost(self):
+    def test_check_cancelled_after_storage_mentions_disk_changes(self):
+        from kyth_installer.context import InstallPhase
+        ctx = InstallerContext()
+        ctx.phase = InstallPhase.IMAGE
+        ctx.cancel_requested.set()
+        with self.assertRaises(execution.InstallCancelled) as raised:
+            execution.check_cancelled(ctx)
+        self.assertIn("Disk changes may have already started", str(raised.exception))
+
+    def test_nvram_fails_closed_when_entry_lost(self):
         logs = []
         before = "Boot0001* Windows Boot Manager\nBoot0002* KythOS\n"
         after = "Boot0002* KythOS\n"
-        _warn_if_efi_boot_entries_disappeared(before, after, logs.append)
+        with self.assertRaisesRegex(RuntimeError, "Windows Boot Manager"):
+            _warn_if_efi_boot_entries_disappeared(before, after, logs.append)
         self.assertTrue(any("Windows Boot Manager" in m for m in logs))
 
     def test_nvram_no_warning_when_same(self):

@@ -91,6 +91,20 @@ class PhaseCommonTests(unittest.TestCase):
         log.assert_called_once_with(context._power_failed)
 
     @mock.patch("kyth_installer.phases.common.threading.Thread", _ImmediateThread)
+    @mock.patch("kyth_installer.assurance._battery_check", side_effect=RuntimeError("Battery is at 9%"))
+    def test_power_watch_treats_battery_runtime_error_as_ac_yank(self, _battery):
+        event = _WatchEvent()
+        context = SimpleNamespace(
+            cancel_requested=SimpleNamespace(set=mock.Mock()),
+            events=SimpleNamespace(publish=mock.Mock()),
+        )
+        log = mock.Mock()
+        common._start_power_watch(log, context, event)
+        self.assertIn("Power lost during install", context._power_failed)
+        self.assertIn("Battery is at 9%", context._power_failed)
+        context.cancel_requested.set.assert_called_once_with()
+
+    @mock.patch("kyth_installer.phases.common.threading.Thread", _ImmediateThread)
     @mock.patch("kyth_installer.assurance._battery_check", side_effect=OSError("probe failed"))
     def test_power_watch_ignores_transient_probe_failure(self, _battery):
         event = _WatchEvent()

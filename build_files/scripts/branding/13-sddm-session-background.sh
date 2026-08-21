@@ -1,11 +1,21 @@
 # shellcheck shell=bash
 # ── SDDM session type + login screen background ───────────────────────────────
-# Force X11 display server. Kinoite 44 / KDE 6.6 defaults to a Wayland session;
-# KWin Wayland requires a working DRM/GBM backend and can crash on VM GPUs
-# without 3D acceleration, which drops the SPICE
-# connection and makes the VM appear to close. X11 is stable on all hardware
-# and VM GPU drivers; users can switch to Wayland from the session picker.
+# 10-kyth.conf owns the theme and a conservative X11 fallback used when
+# 11-kyth-session.conf is missing (kyth-configure-session failed to write).
+# Session type itself is owned by 11-kyth-session.conf (written every boot by
+# kyth-configure-session as SDDM ExecStartPre): Wayland on bare metal, X11 in
+# VMs. Lexical order means 11 overrides DisplayServer/DefaultSession here.
 write_config /etc/sddm.conf.d/10-kyth.conf <<'SDDMCONFEOF'
+[General]
+DisplayServer=x11
+DefaultSession=plasmax11.desktop
+
+[Theme]
+Current=breeze
+
+[X11]
+SessionDir=/usr/share/xsessions
+SDDMCONFEOF
 [General]
 DisplayServer=x11
 DefaultSession=plasmax11.desktop

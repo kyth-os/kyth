@@ -213,7 +213,8 @@ class EfiHandlingTests(unittest.TestCase):
         before = "Boot0002* Windows Boot Manager\nBoot0003 Linux Rescue\nBootOrder: 0002,0003\n"
         after = "Boot0004* KythOS\n"
         log = mock.Mock()
-        storage._warn_if_efi_boot_entries_disappeared(before, after, log)
+        with self.assertRaisesRegex(RuntimeError, "Linux Rescue, Windows Boot Manager"):
+            storage._warn_if_efi_boot_entries_disappeared(before, after, log)
         warning = log.call_args.args[0]
         self.assertIn("Linux Rescue, Windows Boot Manager", warning)
 
@@ -234,6 +235,9 @@ class WipeStorageTests(unittest.TestCase):
             mock.patch("kyth_installer.install._build_bootc_install_cmd", return_value=command) as build,
             mock.patch("kyth_installer.install.get_root_partition", return_value="/dev/sda3"),
             mock.patch.object(storage, "_disk_image_hold", return_value=contextlib.nullcontext()),
+            mock.patch.object(storage, "PartitionTableGuard", return_value=contextlib.nullcontext()),
+            mock.patch.object(storage, "_start_power_watch", return_value=mock.Mock()),
+            mock.patch.object(storage, "_stop_power_watch"),
             mock.patch("kyth_installer.install._run_cmd") as run,
         ):
             result = storage._prepare_wipe_disk_storage(
@@ -246,6 +250,23 @@ class WipeStorageTests(unittest.TestCase):
         )
         run.assert_called_once()
         self.assertIs(context.phase, InstallPhase.IMAGE)
+
+    def test_wipe_fails_closed_when_power_is_lost_during_image(self):
+        context = InstallerContext()
+        context._power_failed = "Power lost during install: AC yanked"
+        with (
+            mock.patch("kyth_installer.install.unmount_target_disk"),
+            mock.patch("kyth_installer.install._build_bootc_install_cmd", return_value=["bootc"]),
+            mock.patch.object(storage, "_disk_image_hold", return_value=contextlib.nullcontext()),
+            mock.patch.object(storage, "PartitionTableGuard", return_value=contextlib.nullcontext()),
+            mock.patch.object(storage, "_start_power_watch", return_value=mock.Mock()),
+            mock.patch.object(storage, "_stop_power_watch"),
+            mock.patch("kyth_installer.install._run_cmd"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "AC yanked"):
+                storage._prepare_wipe_disk_storage(
+                    "/dev/sda", "source", "target", mock.Mock(), mock.Mock(), "", context
+                )
 
 
 if __name__ == "__main__":

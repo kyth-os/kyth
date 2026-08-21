@@ -3,6 +3,8 @@ Description=KythOS MangoHud frame-time telemetry collector
 Documentation=https://github.com/mrtrick37/kyth
 After=graphical-session.target
 PartOf=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple

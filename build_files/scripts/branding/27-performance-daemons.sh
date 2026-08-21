@@ -1,10 +1,10 @@
 # shellcheck shell=bash
 # ── KythOS performance daemons ────────────────────────────────────────────────
 install -m 0755 /ctx/kyth-sched /usr/bin/kyth-sched
-install -m 0644 /ctx/kyth-sched.service /usr/lib/systemd/system/kyth-sched.service
+install -m 0644 /ctx/kyth-sched.service /usr/lib/systemd/user/kyth-sched.service
 
 install -m 0755 /ctx/kyth-telem /usr/bin/kyth-telem
-install -m 0644 /ctx/kyth-telem.service /usr/lib/systemd/system/kyth-telem.service
+install -m 0644 /ctx/kyth-telem.service /usr/lib/systemd/user/kyth-telem.service
 
 install -m 0755 /ctx/kyth-ai-perfd /usr/bin/kyth-ai-perfd
 install -m 0644 /ctx/kyth-ai-perfd.service /usr/lib/systemd/user/kyth-ai-perfd.service

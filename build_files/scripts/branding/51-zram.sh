@@ -58,6 +58,8 @@ write_config /etc/systemd/system/systemd-zram-setup@.service.d/10-kyth-zram.conf
 [Unit]
 JobTimeoutSec=30
 JobRunningTimeoutSec=30
+StartLimitIntervalSec=60
+StartLimitBurst=3
 [Service]
 ExecStartPre=-/sbin/modprobe zram num_devices=1
 Restart=on-failure

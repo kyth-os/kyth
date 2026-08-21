@@ -45,7 +45,7 @@ def configure_installed_system(
                 config_root, deploy_root, username, request.password_hash, log, progress,
             )
 
-        checks = validate_installed_target(Path(etc), request)
+        checks = validate_installed_target(Path(etc), request, root=Path(config_root))
         context.assurance_checks.extend(check.as_dict() for check in checks)
         for check in checks:
             log(f"Final check [{check.status}]: {check.name} — {check.detail}")

@@ -5,12 +5,21 @@ import pathlib
 import re
 import shutil
 import tempfile
+import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from ..context import InstallerContext, InstallPhase
 from ..plan import ResolvedInstallPlan
 from ..system import unmount_target_disk  # pylint: disable=unused-import
-from .common import _assert_still_on_ac, _disk_image_hold, _push
+from .common import (
+    _assert_still_on_ac,
+    _disk_image_hold,
+    _push,
+    _start_power_watch,
+    _stop_power_watch,
+)
+from ..storage_guard import PartitionTableGuard
 from .compat import phase_dependency
 
 def _prepare_storage_for_plan(
@@ -151,13 +160,13 @@ _EFI_BOOT_ENTRY_RE = re.compile(r"^Boot[0-9A-Fa-f]{4}\*?\s+(.+)$")
 
 
 def _warn_if_efi_boot_entries_disappeared(before: str, after: str, log) -> None:
-    """Warn (never raise) if a named EFI boot entry present before the
-    install — e.g. "Windows Boot Manager" — is gone from NVRAM afterward.
+    """Fail closed if a named EFI boot entry present before the install
+    — e.g. "Windows Boot Manager" — is gone from NVRAM afterward.
 
     bootc's bootupd step registers KythOS's own boot entry and can rewrite
     BootOrder; this is the safety net for it silently dropping another OS's
-    entry rather than just reordering it. The other OS's files/bootloader on
-    disk are untouched either way — only the firmware's menu entry is at risk.
+    entry rather than just reordering it. Empty snapshots (no efibootmgr, or
+    only one side captured) stay a no-op so BIOS and test environments work.
     """
     if not before or not after:
         return
@@ -172,13 +181,36 @@ def _warn_if_efi_boot_entries_disappeared(before: str, after: str, log) -> None:
 
     lost = entry_labels(before) - entry_labels(after)
     if lost:
-        log(
-            "Warning: these EFI boot entries were present before the install "
+        msg = (
+            "EFI boot entries were present before the install "
             f"but are missing from firmware NVRAM afterward: {', '.join(sorted(lost))}. "
             "The other OS on disk is unaffected — only its boot menu entry may "
             "be gone. Use your firmware's boot menu (often F12/Esc at power-on) "
             "or 'efibootmgr' to recreate the entry if needed."
         )
+        log(msg)
+        raise RuntimeError(msg)
+
+
+def _run_guarded_image_write(
+    disk: str, log, context: InstallerContext, write: Callable[[], None],
+) -> None:
+    """Hold the disk lock, watch AC power, and fail closed if power is yanked."""
+    stop_event = threading.Event()
+    watch = _start_power_watch(log, context, stop_event)
+    caught: BaseException | None = None
+    try:
+        with _disk_image_hold(disk, log):
+            write()
+    except BaseException as exc:
+        caught = exc
+    finally:
+        _stop_power_watch(watch, stop_event)
+    failed = getattr(context, "_power_failed", None)
+    if failed:
+        raise RuntimeError(failed) from caught
+    if caught is not None:
+        raise caught
 
 
 def _prepare_partition_target_storage(
@@ -236,16 +268,21 @@ def _prepare_partition_target_storage(
     )
     efi_before = _snapshot_efi_boot_entries(log)
     context.enter_phase(InstallPhase.IMAGE)
-    with _disk_image_hold(context.state.get("disk") or target_part, log):
+
+    def _write() -> None:
         _run_cmd(
-        install_cmd, 12, 90, log, progress,
-        stall_timeout=3600, absolute_timeout=None,
+            install_cmd, 12, 90, log, progress,
+            stall_timeout=3600, absolute_timeout=None,
             publish=lambda event: _push(event, context),
             cancel_event=context.cancel_requested,
             io_stall_timeout=600,
             net_stall_timeout=600,
         )
         _warn_if_efi_boot_entries_disappeared(efi_before, _snapshot_efi_boot_entries(log), log)
+
+    _run_guarded_image_write(
+        context.state.get("disk") or target_part, log, context, _write,
+    )
 
     return target_part, target_part, alongside_mount
 
@@ -264,13 +301,17 @@ def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_
         extra_flags=["--filesystem", "btrfs", "--wipe"],
     )
     context.enter_phase(InstallPhase.IMAGE)
-    with _disk_image_hold(disk, log):
+
+    def _write() -> None:
         _run_cmd(
             install_cmd, 5, 90, log, progress,
-        stall_timeout=3600, absolute_timeout=None,
-        publish=lambda event: _push(event, context),
+            stall_timeout=3600, absolute_timeout=None,
+            publish=lambda event: _push(event, context),
             cancel_event=context.cancel_requested,
             io_stall_timeout=600,
             net_stall_timeout=600,
-    )
+        )
+
+    with PartitionTableGuard(disk, log):
+        _run_guarded_image_write(disk, log, context, _write)
     return "", get_root_partition(disk), alongside_mount

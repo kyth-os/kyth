@@ -1,4 +1,5 @@
 import ast
+import contextlib
 import shutil
 import sys
 import tempfile
@@ -111,7 +112,11 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         with mock.patch.object(install, "_run_cmd"), \
              mock.patch.object(install, "run_command"), \
              mock.patch.object(install, "unmount_target_disk") as unmount_target_disk, \
-             mock.patch.object(install, "get_root_partition", return_value="/dev/sda3"):
+             mock.patch.object(install, "get_root_partition", return_value="/dev/sda3"), \
+             mock.patch.object(phases_storage, "PartitionTableGuard", return_value=contextlib.nullcontext()), \
+             mock.patch.object(phases_storage, "_start_power_watch", return_value=mock.Mock()), \
+             mock.patch.object(phases_storage, "_stop_power_watch"), \
+             mock.patch.object(phases_storage, "_disk_image_hold", return_value=contextlib.nullcontext()):
             target_part, root_part, alongside_mount = install._prepare_install_storage(
                 "/dev/sda",
                 "wipe",
@@ -170,6 +175,14 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 ), mock.patch.object(
                     install.Path,
                     "mkdir",
+                ), mock.patch.object(
+                    phases_storage, "PartitionTableGuard", return_value=contextlib.nullcontext(),
+                ), mock.patch.object(
+                    phases_storage, "_start_power_watch", return_value=mock.Mock(),
+                ), mock.patch.object(
+                    phases_storage, "_stop_power_watch",
+                ), mock.patch.object(
+                    phases_storage, "_disk_image_hold", return_value=contextlib.nullcontext(),
                 ):
                     run_command.return_value.stdout = "UUID=abc\n"
                     run_command.return_value.returncode = 0
@@ -273,9 +286,13 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         ), mock.patch.object(
             install,
             "unmount_target_disk",
-        ), mock.patch.object(
+        ), mock.patch.multiple(
             phases_storage,
-            "unmount_target_disk",
+            unmount_target_disk=mock.DEFAULT,
+            PartitionTableGuard=mock.Mock(return_value=contextlib.nullcontext()),
+            _start_power_watch=mock.Mock(return_value=mock.Mock()),
+            _stop_power_watch=mock.DEFAULT,
+            _disk_image_hold=mock.Mock(return_value=contextlib.nullcontext()),
         ), mock.patch.object(
             install,
             "require_root",
@@ -711,7 +728,7 @@ class EfiBootEntrySnapshotTests(unittest.TestCase):
              mock.patch.object(install, "run_command", side_effect=RuntimeError("not UEFI")):
             self.assertEqual(install._snapshot_efi_boot_entries(lambda _m: None), "")
 
-    def test_warns_when_a_named_entry_disappears(self):
+    def test_fails_closed_when_a_named_entry_disappears(self):
         before = (
             "BootCurrent: 0001\n"
             "BootOrder: 0000,0001\n"
@@ -724,7 +741,8 @@ class EfiBootEntrySnapshotTests(unittest.TestCase):
             "Boot0000* KythOS\tHD(1,GPT,...)\n"
         )
         logs = []
-        install._warn_if_efi_boot_entries_disappeared(before, after, logs.append)
+        with self.assertRaisesRegex(RuntimeError, "Windows Boot Manager"):
+            install._warn_if_efi_boot_entries_disappeared(before, after, logs.append)
         self.assertTrue(any("Windows Boot Manager" in m for m in logs))
 
     def test_no_warning_when_entries_are_unchanged(self):

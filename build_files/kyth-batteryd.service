@@ -1,11 +1,14 @@
 [Unit]
 Description=Kyth Battery charge limit daemon
 After=multi-user.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/kyth-batteryd
 Restart=on-failure
+RestartSec=10
 # Long-running background daemon — mostly idle between charge-limit checks;
 # deprioritized so it never competes with the desktop session for cycles.
 Nice=10

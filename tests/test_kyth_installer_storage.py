@@ -362,7 +362,9 @@ class InstallerStorageTests(unittest.TestCase):
 
     def test_find_efi_partition_falls_back_to_findmnt_when_no_partition_flagged(self):
         with patch.object(self.disk, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "efi": False}]), \
-             patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout="/dev/nvme0n1p1\n", returncode=0)):
+             patch.object(self.disk, "_protected_install_disks", return_value=set()), \
+             patch.object(self.disk, "_findmnt_source", return_value="/dev/nvme0n1p1"), \
+             patch.object(self.disk, "_parent_disk", return_value="/dev/nvme0n1"):
             result = self.disk.find_efi_partition("/dev/nvme0n1")
 
         self.assertEqual(result, "/dev/nvme0n1p1")
@@ -422,16 +424,18 @@ class InstallerStorageTests(unittest.TestCase):
             result = self.disk._latest_partition_on_disk("/dev/sda", before)
         self.assertEqual(result, "/dev/sda10")
 
-    def test_find_efi_partition_scans_other_disks_as_fallback(self):
+    def test_find_efi_partition_does_not_scan_other_disks(self):
         def fake_list_partitions(d):
             if d == "/dev/nvme0n1":
                 return [{"name": "/dev/nvme0n1p1", "efi": True}]
             return [{"name": "/dev/nvme1n1p1", "efi": False}]
 
         with patch.object(self.disk, "list_partitions", side_effect=fake_list_partitions), \
-             patch.object(self.disk, "list_disks", return_value=[{"name": "/dev/nvme0n1"}, {"name": "/dev/nvme1n1"}]):
+             patch.object(self.disk, "list_disks", return_value=[{"name": "/dev/nvme0n1"}, {"name": "/dev/nvme1n1"}]), \
+             patch.object(self.disk, "_protected_install_disks", return_value=set()), \
+             patch.object(self.disk, "_findmnt_source", return_value=""):
             result = self.disk.find_efi_partition("/dev/nvme1n1")
-            self.assertEqual(result, "/dev/nvme0n1p1")
+            self.assertEqual(result, "")
 
 
 class InstallerPlanTests(unittest.TestCase):

@@ -97,7 +97,9 @@ class VmGateHarnessTests(unittest.TestCase):
              patch.object(disk, "list_disks", return_value=fake_disks), \
              patch.object(disk, "_protected_install_disks", return_value=set()), \
              patch.object(disk, "_findmnt_source", return_value=""):
-            self.assertEqual(disk.find_efi_partition("/dev/nvme0n1"), other_efi)
+            found = disk.find_efi_partition("/dev/nvme0n1")
+            self.assertEqual(found, "")
+            self.assertNotEqual(found, other_efi)
 
     def test_find_efi_partition_excludes_live_media(self):
         live_esp = "/dev/sdb1"

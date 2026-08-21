@@ -26,6 +26,19 @@ def _assert_still_on_ac(log) -> None:
         raise RuntimeError(msg)
 
 
+def _abort_on_power_loss(log, context, msg: str) -> None:
+    log(msg)
+    try:
+        context._power_failed = msg  # type: ignore[attr-defined]
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        pass
+    try:
+        context.cancel_requested.set()
+        context.events.publish({"type": "log", "text": msg})
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        pass
+
+
 def _start_power_watch(log, context, stop_event: threading.Event) -> threading.Thread:
     """Background poll every 10s through IMAGE phase; fails closed on AC yank."""
     from ..assurance import _battery_check
@@ -36,24 +49,22 @@ def _start_power_watch(log, context, stop_event: threading.Event) -> threading.T
                 break
             try:
                 chk = _battery_check()
+            except OSError:
+                continue
+            except RuntimeError as exc:
+                detail = str(exc).strip() or "AC power lost"
+                _abort_on_power_loss(
+                    log, context, f"Power lost during install: {detail} — aborting to avoid half-write.",
+                )
+                break
+            else:
                 if chk.status == "fail":
-                    msg = f"Power lost during install: {chk.detail} — aborting to avoid half-write."
-                    log(msg)
-                    try:
-                        context._power_failed = msg  # type: ignore[attr-defined]
-                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-                        pass
-                    # Also trigger the same abort path as user cancel — streaming loop
-                    # checks a single abort_event (cancel_requested). Unifying keeps
-                    # IMAGE from continuing on battery.
-                    try:
-                        context.cancel_requested.set()
-                        context.events.publish({"type": "log", "text": msg})
-                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-                        pass
+                    _abort_on_power_loss(
+                        log,
+                        context,
+                        f"Power lost during install: {chk.detail} — aborting to avoid half-write.",
+                    )
                     break
-            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-                pass
 
     th = threading.Thread(target=_watch, name="kyth-power-watch", daemon=True)
     th.start()

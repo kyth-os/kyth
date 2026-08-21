@@ -42,6 +42,32 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("secureboot enrollment tests passed", result.stdout)
 
+    def test_sched_and_telem_install_as_user_units(self) -> None:
+        body = (ROOT / "build_files/scripts/branding/27-performance-daemons.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("/usr/lib/systemd/user/kyth-sched.service", body)
+        self.assertIn("/usr/lib/systemd/user/kyth-telem.service", body)
+        self.assertNotIn("/usr/lib/systemd/system/kyth-sched.service", body)
+        self.assertNotIn("/usr/lib/systemd/system/kyth-telem.service", body)
+
+    def test_restart_limited_units_cap_start_burst(self) -> None:
+        units = (
+            ROOT / "build_files/kyth-batteryd.service",
+            ROOT / "build_files/rclone@.service",
+            ROOT / "build_files/kyth-telem.service",
+            ROOT / "build_files/kyth-sched-arbiter.service",
+        )
+        for path in units:
+            body = path.read_text(encoding="utf-8")
+            with self.subTest(unit=path.name):
+                self.assertIn("StartLimitIntervalSec=60", body)
+                self.assertIn("StartLimitBurst=3", body)
+                self.assertIn("RestartSec=", body)
+        zram = (ROOT / "build_files/scripts/branding/51-zram.sh").read_text(encoding="utf-8")
+        self.assertIn("StartLimitIntervalSec=60", zram)
+        self.assertIn("StartLimitBurst=3", zram)
+
 
 class InstallerMokFailClosedTests(unittest.TestCase):
     def test_failed_mok_staging_blocks_install_success(self) -> None:

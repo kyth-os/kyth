@@ -153,6 +153,22 @@ class InstallerAssuranceCoverageTests(unittest.TestCase):
             checks = validate_installed_target(root, InstallRequest(hostname="kyth", username=""))
         self.assertEqual([check.name for check in checks], ["hostname", "filesystem"])
 
+    def test_installed_target_requires_bootloader_when_root_is_given(self):
+        request = InstallRequest(hostname="kyth", username="")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "etc").mkdir()
+            # validate uses `etc` as the /etc tree, not root/etc
+            etc = root / "etc"
+            (etc / "hostname").write_text("kyth\n")
+            (etc / "fstab").write_text("# generated\n")
+            with self.assertRaisesRegex(RuntimeError, "no bootloader"):
+                validate_installed_target(etc, request, root=root)
+            deploy = root / "ostree" / "deploy" / "default"
+            deploy.mkdir(parents=True)
+            checks = validate_installed_target(etc, request, root=root)
+        self.assertEqual(checks[-1].name, "bootloader")
+
 
 if __name__ == "__main__":
     unittest.main()

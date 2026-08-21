@@ -5,7 +5,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from .context import InstallLifecycle, InstallationState, InstallRequest
+from .context import InstallLifecycle, InstallationState, InstallRequest, InstallPhase
 
 
 class InstallCancelled(RuntimeError):
@@ -70,5 +70,17 @@ def request_cancel(context: InstallerContext) -> bool:
 
 def check_cancelled(context: InstallerContext) -> None:
     """Raise InstallCancelled if user requested cancel."""
-    if context.cancel_requested.is_set():
-        raise InstallCancelled("Installation cancelled by user before disk changes were committed.")
+    if not context.cancel_requested.is_set():
+        return
+    phase = getattr(context, "phase", None)
+    destructive = (
+        InstallPhase.STORAGE,
+        InstallPhase.IMAGE,
+        InstallPhase.CONFIGURE,
+        InstallPhase.SECURE_BOOT,
+    )
+    if phase in destructive:
+        raise InstallCancelled(
+            "Installation cancelled by user. Disk changes may have already started."
+        )
+    raise InstallCancelled("Installation cancelled by user before disk changes were committed.")

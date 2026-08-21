@@ -2,6 +2,8 @@
 Description=Kyth scheduler arbiter (single placement owner)
 After=multi-user.target
 Before=gamemode.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=oneshot

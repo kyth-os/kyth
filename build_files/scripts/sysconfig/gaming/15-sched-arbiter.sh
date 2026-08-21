@@ -16,11 +16,15 @@ write_config /usr/lib/systemd/system/kyth-sched-arbiter.service <<'ARBSVCEOF'
 Description=Kyth scheduler arbiter (single placement owner)
 After=multi-user.target
 Before=gamemode.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-sched-arbiter apply
 RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

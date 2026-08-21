@@ -22,22 +22,24 @@ class InstallerDiskLookupCoverageTests(unittest.TestCase):
             self.assertEqual(_lookup.find_efi_partition("/dev/sda"), "/dev/sda2")
         list_disks.assert_not_called()
 
-    def test_find_efi_uses_other_disks_before_mount_fallback(self):
+    def test_find_efi_does_not_scan_other_disks(self):
         def partitions(device):
             return [{"name": f"{device}1", "efi": device == "/dev/sdb"}]
 
         with mock.patch.object(disk, "list_partitions", side_effect=partitions), mock.patch.object(
             disk, "list_disks", return_value=[{"name": "/dev/sda"}, {"name": "/dev/sdb"}]
+        ), mock.patch.object(disk, "_protected_install_disks", return_value=set()), mock.patch.object(
+            disk, "_findmnt_source", return_value=""
         ):
-            self.assertEqual(_lookup.find_efi_partition("/dev/sda"), "/dev/sdb1")
+            self.assertEqual(_lookup.find_efi_partition("/dev/sda"), "")
 
-    def test_find_efi_mount_fallback_skips_protected_system_disk(self):
+    def test_find_efi_mount_fallback_skips_foreign_and_protected_disks(self):
         with mock.patch.object(disk, "list_partitions", return_value=[]), mock.patch.object(
-            disk, "list_disks", side_effect=OSError("probe failed")
-        ), mock.patch.object(disk, "_protected_install_disks", return_value={"/dev/sda"}), mock.patch.object(
+            disk, "_protected_install_disks", return_value={"/dev/sda"}
+        ), mock.patch.object(
             disk, "_findmnt_source", side_effect=["/dev/sda1", "/dev/sdb1"]
         ), mock.patch.object(disk, "_parent_disk", side_effect=["/dev/sda", "/dev/sdb"]):
-            self.assertEqual(_lookup.find_efi_partition("/dev/sdc"), "/dev/sdb1")
+            self.assertEqual(_lookup.find_efi_partition("/dev/sdc"), "")
 
     def test_find_efi_returns_empty_when_protection_or_mount_probes_fail(self):
         with mock.patch.object(disk, "list_partitions", return_value=[]), mock.patch.object(
@@ -65,6 +67,22 @@ class InstallerDiskLookupCoverageTests(unittest.TestCase):
         responses = [OSError("lsblk failed"), SimpleNamespace(stdout="/dev/sdb1\n/dev/sda3\n")]
         with mock.patch.object(disk, "run_command", side_effect=responses):
             self.assertEqual(_lookup.get_root_partition("/dev/sda"), "/dev/sda3")
+
+    def test_root_partition_prefers_btrfs_over_larger_foreign_fs(self):
+        payload = {"blockdevices": [{"children": [
+            {"name": "sda1", "size": 80_000_000_000, "type": "part", "fstype": "ext4", "label": ""},
+            {"name": "sda2", "size": 20_000_000_000, "type": "part", "fstype": "btrfs", "label": ""},
+        ]}]}
+        with mock.patch.object(disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload))):
+            self.assertEqual(_lookup.get_root_partition("/dev/sda"), "/dev/sda2")
+
+    def test_root_partition_prefers_kythos_label(self):
+        payload = {"blockdevices": [{"children": [
+            {"name": "sda1", "size": 80_000_000_000, "type": "part", "fstype": "btrfs", "label": ""},
+            {"name": "sda2", "size": 20_000_000_000, "type": "part", "fstype": "btrfs", "label": "KythOS"},
+        ]}]}
+        with mock.patch.object(disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload))):
+            self.assertEqual(_lookup.get_root_partition("/dev/sda"), "/dev/sda2")
 
     def test_root_partition_reports_when_both_probes_fail(self):
         with mock.patch.object(disk, "run_command", side_effect=OSError("failed")):

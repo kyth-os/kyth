@@ -160,7 +160,7 @@ class StreamingCommandRunner:
                     from .execution import InstallCancelled
 
                     raise InstallCancelled(
-                        "Installation cancelled by user."
+                        "Installation cancelled by user. Disk changes may have already started."
                     )
                 ready, _, _ = select.select([fd], [], [], 1)
                 if ready:

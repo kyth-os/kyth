@@ -15,8 +15,11 @@ def configure_session() -> int:
     try:
         sddm_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:
-        print(f"Error creating {sddm_dir}: {exc}", file=sys.stderr)
-        return 1
+        # Fail open: SDDM ExecStartPre must not block the greeter. 10-kyth.conf
+        # still provides a conservative X11 fallback when 11-kyth-session.conf
+        # cannot be written.
+        print(f"Warning: could not create {sddm_dir}: {exc}", file=sys.stderr)
+        return 0
 
     is_virt = False
     if shutil.which("systemd-detect-virt"):
@@ -34,8 +37,8 @@ def configure_session() -> int:
         conf_file.write_text(content, encoding="utf-8")
         return 0
     except Exception as exc:
-        print(f"Error writing {conf_file}: {exc}", file=sys.stderr)
-        return 1
+        print(f"Warning: could not write {conf_file}: {exc}", file=sys.stderr)
+        return 0
 
 
 def main() -> None:

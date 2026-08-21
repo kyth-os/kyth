@@ -124,8 +124,33 @@ def run_preflight(
     return checks
 
 
-def validate_installed_target(etc: Path, request: InstallRequest) -> list[AssuranceCheck]:
-    """Verify identity and account configuration before declaring success."""
+def _bootloader_installed(root: Path) -> str | None:
+    """Return a short reason if the mounted install looks bootable, else None."""
+    entries = root / "boot" / "loader" / "entries"
+    try:
+        if entries.is_dir() and any(entries.glob("*.conf")):
+            return "boot loader entries are present"
+    except OSError:
+        pass
+    efi = root / "boot" / "efi" / "EFI"
+    try:
+        if efi.is_dir() and any(efi.iterdir()):
+            return "EFI boot files are present"
+    except OSError:
+        pass
+    deploy = root / "ostree" / "deploy"
+    try:
+        if deploy.is_dir() and any(deploy.iterdir()):
+            return "ostree deployment is present"
+    except OSError:
+        pass
+    return None
+
+
+def validate_installed_target(
+    etc: Path, request: InstallRequest, *, root: Path | None = None,
+) -> list[AssuranceCheck]:
+    """Verify identity, account, and (when mounted) bootloader before success."""
     if not etc.is_dir():
         raise RuntimeError("Installed deployment has no writable /etc tree.")
     hostname_path = etc / "hostname"
@@ -152,4 +177,13 @@ def validate_installed_target(etc: Path, request: InstallRequest) -> list[Assura
     if not fstab.is_file():
         raise RuntimeError("Installed deployment is missing /etc/fstab.")
     checks.append(AssuranceCheck("filesystem", "pass", "Installed fstab is present"))
+
+    if root is not None:
+        reason = _bootloader_installed(root)
+        if not reason:
+            raise RuntimeError(
+                "Installed system has no bootloader (no loader entries, EFI files, "
+                "or ostree deployment). The target would not boot."
+            )
+        checks.append(AssuranceCheck("bootloader", "pass", reason))
     return checks

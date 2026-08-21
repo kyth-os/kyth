@@ -1,11 +1,14 @@
 [Unit]
 Description=Rclone mount for %i (Kyth Cloud)
 After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/rclone mount %i: %h/Cloud/%i --vfs-cache-mode writes
 Restart=on-failure
+RestartSec=10
 Nice=10
 IOSchedulingClass=idle
 MemoryHigh=256M
