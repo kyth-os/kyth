@@ -83,11 +83,15 @@ def upgrade(
     if remote_digest in {staged, booted}:
         print("KythOS is already running or has staged the latest allowed digest")
         return 0
-    # Pre-flight: require ~2 GB free on / (bootc needs space for new deployment)
+    # Pre-flight: require ~2 GB free on /sysroot (bootc needs space for new
+    # deployment). Must not check "/" — on composefs-root systems (Fedora
+    # 44+) / is a tiny synthetic overlay that always reports ~0 bytes free,
+    # which made this check fail unconditionally regardless of real free
+    # space on the underlying /sysroot partition.
     try:
         import shutil
 
-        free = shutil.disk_usage("/").free
+        free = shutil.disk_usage("/sysroot").free
         need = 2 * 1024**3
         if free < need:
             print(f"Not enough free disk space: {free // (1024**2)} MB free, need {need // (1024**2)} MB — free space and retry", file=sys.stderr)

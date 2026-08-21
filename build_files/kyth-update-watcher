@@ -314,12 +314,16 @@ def _notify_updates(os_staged: bool, flatpak_count: int) -> None:
 # ---------------------------------------------------------------------------
 
 def run_bootc_upgrade(timeout: int) -> tuple[bool, str]:
-    # Pre-flight: low disk is retryable, not quarantined
+    # Pre-flight: low disk is retryable, not quarantined. Must check
+    # /sysroot, not "/" — on composefs-root systems (Fedora 44+) / is a
+    # tiny synthetic overlay that always reports ~0 bytes free, which made
+    # this fail unconditionally regardless of real free space on the
+    # underlying /sysroot partition.
     try:
         import shutil
 
-        if shutil.disk_usage("/").free < 2 * 1024**3:
-            free_mb = shutil.disk_usage("/").free // (1024**2)
+        if shutil.disk_usage("/sysroot").free < 2 * 1024**3:
+            free_mb = shutil.disk_usage("/sysroot").free // (1024**2)
             return False, f"retryable: Not enough free disk space: {free_mb} MB free, need 2048 MB — free space and retry"
     except (OSError, AttributeError, ValueError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
