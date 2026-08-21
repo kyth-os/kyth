@@ -30,16 +30,17 @@ set -euo pipefail
 # gstreamer1-plugins-bad; remove the stock build first, then install the RPM
 # Fusion replacement with --allowerasing.
 #
-# Always --disablerepo=fedora-multimedia: ublue bases may still have negativo17
-# metadata even after 03-rpmfusion hygiene, and that repo's split libav* layout
-# makes gstreamer1-plugin-libav unsatisfiable (then --skip-unavailable used to
-# hide the gap until the fail-closed rpm -q check).
+# Always prefer RPM Fusion over negativo17 multimedia. 03-rpmfusion removes
+# leftover *multimedia* / *negativo* repo files so gstreamer1-plugin-libav can
+# resolve against a consistent ffmpeg/libav stack (the old --skip-unavailable
+# path used to hide an unsatisfiable solve).
 dnf5 remove -y gstreamer1-plugins-bad || true
 
 # Required codec stack — NO --skip-unavailable. A missing package must fail the
 # image build rather than ship a desktop that cannot play common video.
+# fedora-multimedia is removed in 03-rpmfusion; do not --disablerepo it here
+# (dnf5 exits 2 when that repo id no longer exists).
 dnf5 install -y --allowerasing \
-	--disablerepo=fedora-multimedia \
 	--exclude=gstreamer1-plugins-bad \
 	ffmpeg \
 	ffmpegthumbnailer \

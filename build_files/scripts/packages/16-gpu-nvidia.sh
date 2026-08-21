@@ -17,19 +17,15 @@ source "../lib/fedora-kernel.sh"
 # kernel in the image so akmods finds matching headers at first boot, and
 # verify the result so a regression fails the build instead of first boot.
 #
-# --disablerepo=fedora-multimedia: the negativo17 disable in
-# packages/03-rpmfusion-and-repo-hygiene.sh doesn't reliably hold all the way
-# to here (same class of leak
-# mesa-git.sh guards against). Left enabled, dnf5 resolves this transaction
-# across both RPM Fusion and negativo17 and picks up negativo17's
-# nvidia-driver-common alongside RPM Fusion's xorg-x11-drv-nvidia-power —
-# both ship /usr/lib/systemd/system/nvidia-powerd.service and the transaction
-# fails outright.
+# 03-rpmfusion deletes leftover negativo17 fedora-multimedia repo files.
+# Do not pass --disablerepo=fedora-multimedia here: dnf5 exits 2 when that
+# repo id is already gone. The NVIDIA origin check below still fails the
+# build if packages somehow resolve from negativo17.
 KERNEL_FLAVOR="$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)"
 if [[ "${KERNEL_FLAVOR}" == "fedora" ]]; then
 	update_fedora_kernel
 	KERNEL_VR="${FEDORA_KERNEL_VR}"
-	dnf5 install -y --setopt=excludepkgs= --disablerepo=fedora-multimedia \
+	dnf5 install -y --setopt=excludepkgs= \
 		akmod-nvidia \
 		xorg-x11-drv-nvidia \
 		xorg-x11-drv-nvidia-libs \
@@ -41,7 +37,7 @@ if [[ "${KERNEL_FLAVOR}" == "fedora" ]]; then
 else
 	# CachyOS flavor: matching headers (kernel-cachyos-devel-matched) come from
 	# the COPR in build_base; only the akmod machinery is needed here.
-	dnf5 install -y --setopt=excludepkgs= --disablerepo=fedora-multimedia \
+	dnf5 install -y --setopt=excludepkgs= \
 		akmod-nvidia \
 		xorg-x11-drv-nvidia \
 		xorg-x11-drv-nvidia-libs \
@@ -54,7 +50,7 @@ fi
 
 nvidia_origin=$(rpm -q --queryformat '%{VENDOR} %{PACKAGER}\n' akmod-nvidia xorg-x11-drv-nvidia 2>/dev/null || true)
 if grep -Eiq 'negativo17|fedora-multimedia' <<<"${nvidia_origin}"; then
-	echo "ERROR: NVIDIA stack installed from negativo17 despite --disablerepo: ${nvidia_origin:-unknown}"
+	echo "ERROR: NVIDIA stack installed from negativo17: ${nvidia_origin:-unknown}"
 	exit 1
 fi
 # nvidia-vaapi-driver and 32-bit CUDA libs: best-effort — not yet consistently

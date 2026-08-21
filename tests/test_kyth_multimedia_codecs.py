@@ -18,9 +18,8 @@ class MultimediaCodecPackageTests(unittest.TestCase):
         required_block = body.split("required_codec_rpms=(")[1].split(")")[0]
         self.assertIn("gstreamer1-plugin-libav", required_block)
         self.assertNotIn("gstreamer1-libav\n", required_block)
-        # Required install must disable multimedia and must not skip-unavailable.
-        self.assertIn("--disablerepo=fedora-multimedia", body)
-        # The required dnf5 install block (through mozilla-openh264) must not skip.
+        # Required install must not skip-unavailable; multimedia repo is removed in 03.
+        self.assertNotIn("--disablerepo=fedora-multimedia", body)
         install_block = body.split("dnf5 install -y --allowerasing")[1].split("mozilla-openh264")[0]
         self.assertNotIn("--skip-unavailable", install_block)
 
