@@ -3,38 +3,15 @@ from __future__ import annotations
 
 import pathlib
 import sys
-import types
 import unittest
-
-
-def _install_qt_stubs() -> None:
-    class _Signal:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __get__(self, obj, objtype=None):
-            return self
-
-        def emit(self, *args, **kwargs):
-            pass
-
-        def connect(self, *args, **kwargs):
-            pass
-
-    # hub_state imports PySide6 directly before falling back — stub both.
-    for pkg in ("PySide6", "PySide6.QtCore", "PyQt6", "PyQt6.QtCore"):
-        sys.modules[pkg] = types.ModuleType(pkg)
-    sys.modules["PySide6.QtCore"].QObject = object
-    sys.modules["PySide6.QtCore"].Signal = _Signal
-    sys.modules["PyQt6.QtCore"].QObject = object
-    sys.modules["PyQt6.QtCore"].pyqtSignal = _Signal
-
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src" / "kyth-welcome"))
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
-_install_qt_stubs()
 
+# hub_state falls back to a pure-Python store when Qt bindings are absent.
+# Do not stub PySide6 into sys.modules — that breaks later find_spec() checks
+# in the full unittest discover suite (ValueError: PySide6.__spec__ is None).
 from kyth_welcome.services.hub_state import HubState  # noqa: E402
 
 

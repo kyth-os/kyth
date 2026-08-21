@@ -16,16 +16,6 @@ Current=breeze
 [X11]
 SessionDir=/usr/share/xsessions
 SDDMCONFEOF
-[General]
-DisplayServer=x11
-DefaultSession=plasmax11.desktop
-
-[Theme]
-Current=breeze
-
-[X11]
-SessionDir=/usr/share/xsessions
-SDDMCONFEOF
 
 # Software-rendering fallback for virtual machines: makes Plasma's X11 session
 # usable when the VM display has no virgl/3D acceleration. Skipped on bare metal

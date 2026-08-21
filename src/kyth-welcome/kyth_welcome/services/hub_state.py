@@ -15,12 +15,12 @@ try:
     from PySide6.QtCore import QObject as _QObject, Signal as _Signal
     Base = _QObject
     Sig = _Signal
-except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+except (ImportError, OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
     try:
         from PyQt6.QtCore import QObject as _QObject, pyqtSignal as _Signal
         Base = _QObject
         Sig = _Signal
-    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+    except (ImportError, OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
         Base = object  # type: ignore[assignment]
         def Sig(*a, **kw):  # type: ignore[no-redef]
             return None
