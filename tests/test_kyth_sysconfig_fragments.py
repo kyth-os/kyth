@@ -58,6 +58,21 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn('TEST=="charge_control_start_threshold"', guards)
         self.assertNotIn('TEST{0002}!="/sys%p/charge_', guards)
 
+    def test_journald_cap_has_headroom_and_bounded_file_size(self):
+        """A tight cap with no per-file bound left normal growth sitting right at
+        the ceiling: systemd-journal-flush.service (stock, unavoidable, early in
+        every boot) then had to vacuum old journals back under the cap on every
+        boot, stalling all logging for ~30s under full boot I/O contention —
+        previously misread as a zram/udev-specific hang. Guard against
+        regressing back to a cap with no breathing room.
+        """
+        body = (FRAG_DIR / "systemd" / "28-journald-size-cap.sh").read_text(encoding="utf-8")
+        self.assertIn("SystemMaxFileSize=", body)
+        match = re.search(r"SystemMaxUse=(\d+)([MG])", body)
+        self.assertIsNotNone(match, "SystemMaxUse must be set with a M/G suffix")
+        size_mb = int(match.group(1)) * (1024 if match.group(2) == "G" else 1)
+        self.assertGreaterEqual(size_mb, 2048 - 1, "cap regressed back toward zero headroom")
+
     def test_openrgb_is_not_unconditionally_autostarted(self):
         body = (FRAG_DIR / "peripherals" / "39-openrgb-rgb-peripheral-control.sh").read_text(
             encoding="utf-8"
