@@ -125,6 +125,42 @@ class InstallerDiskQueryCoverageTests(unittest.TestCase):
         self.assertTrue(filesystems["btrfs"]["root_ok"])
         self.assertTrue(filesystems["fat32"]["efi_ok"])
 
+    def test_latest_partition_matches_geometry_not_highest_number(self):
+        existing = [
+            {"name": "/dev/sda1", "start_bytes": 1024**2, "size_bytes": 100 * 1024**3},
+            {"name": "/dev/sda2", "start_bytes": 200 * 1024**3, "size_bytes": 50 * 1024**3},
+        ]
+        after = existing + [
+            {"name": "/dev/sda3", "start_bytes": 300 * 1024**3, "size_bytes": 80 * 1024**3},
+        ]
+        with mock.patch.object(disk, "list_partitions", return_value=after):
+            created = _query._latest_partition_on_disk(
+                "/dev/sda",
+                set(),  # empty before — previously would pick sda3 by max number
+                start_bytes=200 * 1024**3,
+                size_bytes=50 * 1024**3,
+            )
+        self.assertEqual(created, "/dev/sda2")
+
+    def test_latest_partition_empty_before_without_geometry_fails_closed(self):
+        parts = [
+            {"name": "/dev/sda1", "start_bytes": 1024**2, "size_bytes": 100 * 1024**3},
+            {"name": "/dev/sda2", "start_bytes": 200 * 1024**3, "size_bytes": 50 * 1024**3},
+        ]
+        with mock.patch.object(disk, "list_partitions", return_value=parts):
+            self.assertIsNone(_query._latest_partition_on_disk("/dev/sda", set()))
+
+    def test_latest_partition_unique_set_diff_without_geometry(self):
+        after = [
+            {"name": "/dev/sda1", "start_bytes": 1024**2, "size_bytes": 10 * 1024**3},
+            {"name": "/dev/sda2", "start_bytes": 20 * 1024**3, "size_bytes": 40 * 1024**3},
+        ]
+        with mock.patch.object(disk, "list_partitions", return_value=after):
+            self.assertEqual(
+                _query._latest_partition_on_disk("/dev/sda", {"/dev/sda1"}),
+                "/dev/sda2",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

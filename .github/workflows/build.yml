@@ -385,6 +385,10 @@ jobs:
             SECUREBOOT_SIGNING_REQUESTED=1
           fi
 
+          RPM_SET_HASH="$(./build_files/scripts/hash-rpm-set.sh)"
+          SYSCONFIG_HASH="$(./build_files/scripts/hash-sysconfig.sh)"
+          GAMING_VERSIONS_HASH="$(./build_files/scripts/hash-gaming-versions.sh --print)"
+
           docker buildx build \
             --secret id=github_token,env=GITHUB_TOKEN \
             "${MOK_SECRET_ARG[@]}" \
@@ -392,6 +396,9 @@ jobs:
             --build-arg PROTON_CACHYOS_VER="${STEPS_PROTON_CACHYOS_OUTPUTS_VERSION}" \
             --build-arg UMU_VERSION="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_UMU}" \
             --build-arg THIRDPARTY_VERSIONS_HASH="${STEPS_THIRDPARTY_VERSIONS_OUTPUTS_HASH}" \
+            --build-arg RPM_SET_HASH="${RPM_SET_HASH}" \
+            --build-arg SYSCONFIG_HASH="${SYSCONFIG_HASH}" \
+            --build-arg GAMING_VERSIONS_HASH="${GAMING_VERSIONS_HASH}" \
             --build-arg ENABLE_GAMING_PERIPHERALS=0 \
             --build-arg ENABLE_VIRTUALIZATION_HOST=0 \
             --build-arg ENABLE_KSM=0 \

@@ -85,13 +85,16 @@ build: build-base
         echo "Secure Boot: MOK key not set — signing skipped (set MOK_KEY_FILE to enable)"
     fi
     ${PODMAN} build \
-        --build-arg ENABLE_SCX="${ENABLE_SCX:-1}" \
+        --build-arg ENABLE_SCX="${ENABLE_SCX:-0}" \
         --build-arg ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS:-0}" \
         --build-arg ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST:-0}" \
         --build-arg ENABLE_KSM="${ENABLE_KSM:-0}" \
         --build-arg PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" \
         --build-arg UMU_VERSION="${UMU_VERSION}" \
         --build-arg THIRDPARTY_VERSIONS_HASH="${THIRDPARTY_VERSIONS_HASH}" \
+        --build-arg RPM_SET_HASH="$(./build_files/scripts/hash-rpm-set.sh)" \
+        --build-arg SYSCONFIG_HASH="$(./build_files/scripts/hash-sysconfig.sh)" \
+        --build-arg GAMING_VERSIONS_HASH="$(./build_files/scripts/hash-gaming-versions.sh --print)" \
         --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
         --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
         "${MOK_SECRET_ARG[@]}" \

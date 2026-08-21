@@ -249,10 +249,12 @@ def collect_symptoms() -> list[Symptom]:
         sink = _run(("pactl", "get-default-sink"), 4)
         if sink is not None and sink.returncode != 0:
             symptoms.append(Symptom("audio", f"Default audio sink missing: {(sink.stderr or sink.stdout or '').strip()[:80]}", ("audio.sink-fallback",)))
-        elif sink is not None and not (sink.stdout or "").strip() or (sink.stdout or "").strip() in {"auto_null", "@DEFAULT_SINK@"}:
-            # empty or dummy null sink means real sink lost
-            if (sink.stdout or "").strip() == "auto_null":
-                symptoms.append(Symptom("audio", "Audio sink is dummy (auto_null) — headset/HDMI swap", ("audio.sink-fallback",)))
+        elif sink is not None and (
+            not (sink.stdout or "").strip()
+            or (sink.stdout or "").strip() in {"auto_null", "@DEFAULT_SINK@"}
+        ):
+            name = (sink.stdout or "").strip() or "empty"
+            symptoms.append(Symptom("audio", f"Audio sink is dummy or unset ({name}) — headset/HDMI swap", ("audio.sink-fallback",)))
     nm = _run(("nmcli", "-t", "-f", "STATE", "general"), 5)
     if nm and nm.returncode == 0:
         st = nm.stdout.strip()
@@ -785,10 +787,18 @@ def _notify(records: list[dict[str, Any]], config: dict[str, Any], state: dict[s
         notified[record["recipe_id"]] = now
 
 
-def check(*, investigate: bool = False, automatic: bool = True) -> dict[str, Any]:
+def check(
+    *,
+    investigate: bool = False,
+    automatic: bool = True,
+    components: set[str] | frozenset[str] | None = None,
+    recipe_ids: set[str] | frozenset[str] | None = None,
+) -> dict[str, Any]:
     config = load_config()
     state = load_state()
     symptoms = collect_symptoms()
+    if components is not None:
+        symptoms = [symptom for symptom in symptoms if symptom.component in components]
     active_components = {symptom.component for symptom in symptoms}
     occurrences = state.setdefault("occurrences", {})
     for component in {recipe.component for recipe in RECIPES.values()}:
@@ -799,6 +809,8 @@ def check(*, investigate: bool = False, automatic: bool = True) -> dict[str, Any
         model = infer(symptoms, state, force=investigate)
         if model:
             decisions.append(model)
+    if recipe_ids is not None:
+        decisions = [decision for decision in decisions if decision.recipe_id in recipe_ids]
     # Healing chain: storage.maint → firmware.refresh as one coalesced run when both present
     # Respects per-recipe cooldown/feedback/suppression inside execute_chain
     chain_ids = [d.recipe_id for d in decisions if d.recipe_id in ("storage.maint", "firmware.refresh")]

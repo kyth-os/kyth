@@ -283,15 +283,48 @@ def _partitions_after(disk: str, partition: str) -> list[dict]:
 
 
 
-def _latest_partition_on_disk(disk: str, before: set[str]) -> str | None:
-    after = {p["name"] for p in _disk.list_partitions(disk) if p.get("name")}
-    created = list(after - before)
-    if not created:
+def _latest_partition_on_disk(
+    disk: str,
+    before: set[str],
+    start_bytes: int | None = None,
+    size_bytes: int | None = None,
+) -> str | None:
+    """Identify a partition just created on *disk*.
+
+    Prefer a unique start/size geometry match so a flaky pre-create scan
+    (empty ``before``) cannot pick an existing Windows/data partition by
+    "highest number in the set-difference". Fall back to a unique
+    name-set difference only. Ambiguous results fail closed (``None``).
+    """
+    after_parts = [p for p in _disk.list_partitions(disk, strict=True) if p.get("name")]
+    if not after_parts:
         return None
-    import re
-    def sort_key(name: str):
-        return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', name)]
-    return sorted(created, key=sort_key)[-1]
+    _ALIGN = 1024 * 1024
+
+    def _close(left: int, right: int) -> bool:
+        return abs(int(left) - int(right)) <= _ALIGN
+
+    if start_bytes is not None and start_bytes > 0:
+        matches = []
+        for part in after_parts:
+            part_start = int(part.get("start_bytes") or 0)
+            part_size = int(part.get("size_bytes") or 0)
+            if not _close(part_start, start_bytes):
+                continue
+            if size_bytes is not None and size_bytes > 0 and not _close(part_size, size_bytes):
+                continue
+            matches.append(part["name"])
+        created = [name for name in matches if name not in before]
+        if len(created) == 1:
+            return created[0]
+        if len(matches) == 1:
+            return matches[0]
+        # Geometry missing from lsblk (START not yet populated): fall through
+        # to a unique name-set difference. Multiple unmatched names stay None.
+    created = [part["name"] for part in after_parts if part["name"] not in before]
+    if len(created) != 1:
+        return None
+    return created[0]
 
 
 

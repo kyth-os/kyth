@@ -42,7 +42,7 @@ def _patched_list_disks():
     from .disk import list_disks as _orig
     return _orig()
 
-def _patched_list_partitions(disk: str):
+def _patched_list_partitions(disk: str, *args, **kwargs):
     try:
         from . import partition_ops as _facade  # type: ignore
         fn = getattr(_facade, "list_partitions", None)
@@ -51,7 +51,7 @@ def _patched_list_partitions(disk: str):
     except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
         _logger.debug("shim list_partitions fallback for %s: %s", disk, exc, exc_info=True)
     from .disk import list_partitions as _orig
-    return _orig(disk)
+    return _orig(disk, *args, **kwargs)
 
 # Keep names for internal calls — replaced by shims below
 _parent_disk = _patched_parent_disk  # type: ignore
@@ -136,6 +136,7 @@ class Journal:
         self._committed = False
         self._root_partition: Optional[str] = None
         self._backup_dir: tempfile.TemporaryDirectory[str] | None = None
+        self.irreversible_completed = False
         if disk_service is not None:
             self._disk_service = disk_service
         else:
@@ -516,7 +517,7 @@ class Journal:
         if table_type == "gpt":
             before = set()
             if not self._disk_service.dry_run:
-                before = {part["name"] for part in list_partitions(self.disk) if part.get("name")}
+                before = {part["name"] for part in list_partitions(self.disk, strict=True) if part.get("name")}
             log("Creating BIOS boot partition required by the KythOS boot image...")
             self._disk_service.create_unformatted_partition(
                 self.disk, 1024**2, BIOS_BOOT_BYTES, "biosboot"
@@ -524,7 +525,9 @@ class Journal:
             if self._disk_service.dry_run:
                 part_num = 99
             else:
-                created = _latest_partition_on_disk(self.disk, before)
+                created = _latest_partition_on_disk(
+                    self.disk, before, start_bytes=1024**2, size_bytes=BIOS_BOOT_BYTES,
+                )
                 if not created:
                     raise RuntimeError("Could not find the automatic BIOS boot partition.")
                 part_num = _partition_number(created)
@@ -541,7 +544,7 @@ class Journal:
 
         before = set()
         if not self._disk_service.dry_run:
-            before = {pt["name"] for pt in list_partitions(self.disk) if pt.get("name")}
+            before = {pt["name"] for pt in list_partitions(self.disk, strict=True) if pt.get("name")}
 
         log(f"Creating {_human_size(size)} partition ({fs}) at offset {start}...")
         self._disk_service.create_partition(self.disk, start, size, fs, label)
@@ -549,7 +552,9 @@ class Journal:
         if self._disk_service.dry_run:
             created = f"{self.disk}p99"
         else:
-            created = _latest_partition_on_disk(self.disk, before)
+            created = _latest_partition_on_disk(
+                self.disk, before, start_bytes=start, size_bytes=size,
+            )
             if not created:
                 raise RuntimeError("Could not find the newly created partition.")
         # Record the resolved device name back onto the op so
@@ -557,6 +562,7 @@ class Journal:
         # journal after commit) can tell which real partition this
         # create op produced.
         p["partition"] = created
+        p["_created_this_journal"] = True
 
         if fs != "linux-swap":
             log(f"Formatting {created} as {fs}...")
@@ -589,7 +595,7 @@ class Journal:
             # staged) and shrink the filesystem itself first, or refuse for
             # any type without a safe shrink path. Skipping this would
             # silently corrupt whatever filesystem already lives here.
-            current = {pt["name"]: pt for pt in list_partitions(self.disk)}
+            current = {pt["name"]: pt for pt in list_partitions(self.disk, strict=True)}
             part_info = current.get(part_name)
             if not part_info:
                 raise RuntimeError(f"Resize: {part_name} was not found on {self.disk}.")
@@ -642,7 +648,10 @@ class Journal:
             # Snapshot is now handled by PartitionTableGuard (backed up with fsync);
             # keep _save_snapshot for rollback() compatibility but guard owns restore.
             self._save_snapshot()
-            with PartitionTableGuard(self.disk, log, disk_service=self._disk_service):
+            with PartitionTableGuard(
+                self.disk, log, disk_service=self._disk_service,
+                should_restore=lambda: not self.irreversible_completed,
+            ):
                 for op in self.ops:
                     kind = op["kind"]
                     p = op["params"]
@@ -664,11 +673,20 @@ class Journal:
                             self._commit_delete(p, log)
                         elif kind == "resize":
                             self._commit_resize(p, log)
+                            self.irreversible_completed = True
                         elif kind == "format":
                             self._commit_format(p, log)
+                            created_here = {
+                                item["params"].get("partition")
+                                for item in self.ops
+                                if item["kind"] == "create"
+                                and item["params"].get("_created_this_journal")
+                            }
+                            if p.get("partition") not in created_here:
+                                self.irreversible_completed = True
                     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-                        # PartitionTableGuard will restore table on exception;
-                        # clear committed flag and propagate.
+                        # PartitionTableGuard restores the table unless an
+                        # irreversible filesystem op already completed.
                         self._committed = False
                         raise
                     # _commit_create resolves the real device name onto the op, so

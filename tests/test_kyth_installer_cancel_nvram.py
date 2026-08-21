@@ -40,12 +40,11 @@ class InstallerCancelTests(unittest.TestCase):
             execution.check_cancelled(ctx)
         self.assertIn("Disk changes may have already started", str(raised.exception))
 
-    def test_nvram_fails_closed_when_entry_lost(self):
+    def test_nvram_warns_when_entry_lost_without_aborting(self):
         logs = []
         before = "Boot0001* Windows Boot Manager\nBoot0002* KythOS\n"
         after = "Boot0002* KythOS\n"
-        with self.assertRaisesRegex(RuntimeError, "Windows Boot Manager"):
-            _warn_if_efi_boot_entries_disappeared(before, after, logs.append)
+        _warn_if_efi_boot_entries_disappeared(before, after, logs.append)
         self.assertTrue(any("Windows Boot Manager" in m for m in logs))
 
     def test_nvram_no_warning_when_same(self):

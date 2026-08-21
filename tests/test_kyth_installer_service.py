@@ -378,6 +378,19 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
 
     @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_fails_closed_after_irreversible_op(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        journal.irreversible_completed = True
+        with patch.object(journal, "commit", side_effect=RuntimeError("mkfs of later op failed")), \
+             patch.object(journal, "rollback") as mock_rollback:
+            res = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+        self.assertTrue(res.get("irreversible"))
+        self.assertIn("would not restore files", res.get("message"))
+        mock_rollback.assert_not_called()
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.FAILED)
+
+    @patch("kyth_installer.disk.list_disks")
     def test_rollback_partitions_success_resets_the_journal(self, mock_list_disks):
         journal = self._committable_journal(mock_list_disks)
         with patch.object(journal, "rollback") as mock_rollback:

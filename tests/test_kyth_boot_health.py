@@ -115,6 +115,11 @@ class BootHealthStateTests(unittest.TestCase):
         self.assertEqual(recovered.last_recovered_digest, DIGEST)
         self.assertIn(DIGEST, recovered.last_reason)
 
+    def test_mark_healthy_preserves_rollback_attempted_for(self):
+        state = note_rollback_attempted(BootHealthState(), DIGEST, now=5)
+        healthy = mark_healthy(state, OTHER_DIGEST, now=10)
+        self.assertEqual(healthy.rollback_attempted_for, DIGEST)
+
     def test_failure_count_restarts_for_a_different_digest(self):
         first = record_failure(
             BootHealthState(), DIGEST, "boot-1", "failed", now=1

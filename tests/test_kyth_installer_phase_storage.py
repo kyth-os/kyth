@@ -213,8 +213,7 @@ class EfiHandlingTests(unittest.TestCase):
         before = "Boot0002* Windows Boot Manager\nBoot0003 Linux Rescue\nBootOrder: 0002,0003\n"
         after = "Boot0004* KythOS\n"
         log = mock.Mock()
-        with self.assertRaisesRegex(RuntimeError, "Linux Rescue, Windows Boot Manager"):
-            storage._warn_if_efi_boot_entries_disappeared(before, after, log)
+        storage._warn_if_efi_boot_entries_disappeared(before, after, log)
         warning = log.call_args.args[0]
         self.assertIn("Linux Rescue, Windows Boot Manager", warning)
 

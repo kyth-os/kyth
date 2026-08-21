@@ -719,6 +719,7 @@ class MainWindow(QMainWindow):
         "Graphics": "Performance",
         "Network": "VPN",
         "Software": "App Store",
+        "Updates": "Update",
         "Display": "Plasma Wayland",
         "About": "Feedback",
     }

@@ -438,6 +438,7 @@ class InstallerStorageTests(unittest.TestCase):
             self.assertEqual(result, "")
 
 
+@patch.dict("os.environ", {"KYTH_INSTALL_ALLOW_NO_DISK_LOCK": "1"}, clear=False)
 class InstallerPlanTests(unittest.TestCase):
     def setUp(self):
         self.plan = plan
@@ -1785,6 +1786,7 @@ class InstallerDiskServiceTests(unittest.TestCase):
         svc.set_partition_flag("/dev/sda", 1, "esp")
         self.assertEqual(svc.journal[-1][-7:], ["parted", "-s", "/dev/sda", "set", "1", "esp", "on"])
 
+    @patch.dict("os.environ", {"KYTH_INSTALL_ALLOW_NO_DISK_LOCK": "1"}, clear=False)
     def test_journal_with_dry_run_disk_service_executes_safely(self):
         from kyth_installer.services.disk_service import DiskService
         svc = DiskService(dry_run=True)

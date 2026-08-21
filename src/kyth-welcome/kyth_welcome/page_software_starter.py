@@ -183,7 +183,7 @@ class _StarterPackTabMixin:
             return
         self._opt_in_status.setText(f"Running: {cmd} …")
         self._opt_in_status.show()
-        from .services.runtime import Worker
+        from .services.runtime import DataWorker, guard_disposed
         argv = ["bash", "-c", cmd] if cmd.startswith("flatpak") else ujust_command(cmd.split()[-1].replace("install-", "install-"))
         # For ujust, use the validated wrapper; for flatpak use inline install
         if cmd.startswith("ujust"):
@@ -193,8 +193,9 @@ class _StarterPackTabMixin:
                 argv = ujust_command(recipe.replace("install-", "install-"))
             except ValueError:
                 argv = ["bash", "-c", cmd]
-        self._opt_in_worker = Worker("opt-in", lambda: self._run_opt_in_sync(argv))
-        self._opt_in_worker.result.connect(lambda k, v: self._opt_in_status.setText(str(v)))
+        self._opt_in_worker = DataWorker("opt-in", lambda: self._run_opt_in_sync(argv))
+        self._opt_in_worker.result.connect(guard_disposed(lambda _k, v: self._opt_in_status.setText(str(v))))
+        self._opt_in_worker.failed.connect(guard_disposed(lambda _k, m: self._opt_in_status.setText(f"✗ Failed: {m}")))
         self._opt_in_worker.finished.connect(lambda: self._opt_in_worker.deleteLater())
         self._opt_in_worker.start()
 
@@ -210,9 +211,10 @@ class _StarterPackTabMixin:
             return
         self._opt_in_status.setText("Removing Bitwarden …")
         self._opt_in_status.show()
-        from .services.runtime import Worker
-        self._opt_in_worker = Worker("opt-in-remove", lambda: self._run_opt_in_sync(["flatpak", "uninstall", "-y", "com.bitwarden.desktop"]))
-        self._opt_in_worker.result.connect(lambda k, v: self._opt_in_status.setText(str(v)))
+        from .services.runtime import DataWorker, guard_disposed
+        self._opt_in_worker = DataWorker("opt-in-remove", lambda: self._run_opt_in_sync(["flatpak", "uninstall", "-y", "com.bitwarden.desktop"]))
+        self._opt_in_worker.result.connect(guard_disposed(lambda _k, v: self._opt_in_status.setText(str(v))))
+        self._opt_in_worker.failed.connect(guard_disposed(lambda _k, m: self._opt_in_status.setText(f"✗ Failed: {m}")))
         self._opt_in_worker.finished.connect(lambda: self._opt_in_worker.deleteLater())
         self._opt_in_worker.start()
 

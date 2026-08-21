@@ -60,6 +60,17 @@ class ShrinkFilesystemDispatchTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "not supported"):
             fsresize.shrink_filesystem("/dev/sda1", "", 10 * 1024**3, lambda _m: None)
 
+    def test_encryption_warn_on_parent_disk_blocks_shrink(self):
+        from kyth_installer.assurance import AssuranceCheck
+
+        warn = AssuranceCheck("encryption", "warn", "Partition /dev/sda1 appears BitLocker-locked")
+        with patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"), \
+             patch("kyth_installer.assurance._encryption_check", return_value=warn), \
+             patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
+            with self.assertRaisesRegex(RuntimeError, "BitLocker"):
+                fsresize.shrink_filesystem("/dev/sda1", "ntfs", 10 * 1024**3, lambda _m: None)
+        mock_shrink.assert_not_called()
+
 
 class RequireToolsTests(unittest.TestCase):
     def test_raises_listing_every_missing_tool(self):

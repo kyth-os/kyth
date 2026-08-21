@@ -32,6 +32,11 @@ done
 computed="$(${hash_cmd} "${tmp}" | cut -d' ' -f1 | cut -c1-12)"
 rm -f "${tmp}"
 
+if [[ "${1:-}" == "--print" ]]; then
+  echo "${computed}"
+  exit 0
+fi
+
 # Check Dockerfile label exists and is hash-gated (not hardcoded version)
 if ! grep -q 'LABEL org.kyth.gaming-versions="${GAMING_VERSIONS_HASH}"' Dockerfile; then
   echo "gaming hash gate: Dockerfile must have LABEL org.kyth.gaming-versions=\"\${GAMING_VERSIONS_HASH}\"" >&2

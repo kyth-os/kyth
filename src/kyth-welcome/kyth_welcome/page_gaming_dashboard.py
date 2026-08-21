@@ -307,8 +307,12 @@ class _DashboardMixin:
 
         def _do_fix():
             from kyth_shared.guardian import check
-            # Fix gaming stack only — uses same gated chain as Hub's Fix My System
-            return check(investigate=False, automatic=True)
+            return check(
+                investigate=False,
+                automatic=True,
+                components={"display", "controller", "power"},
+                recipe_ids={"display.reconfigure", "controller.repair", "power.profile-fix"},
+            )
 
         # Reuse Guardian's Fix My System path but scoped to gaming recipes
         try:
@@ -318,8 +322,9 @@ class _DashboardMixin:
             if not gaming_syms:
                 QMessageBox.information(self, "Fix My Gaming", "Gaming stack looks healthy — no display/controller/power drift detected.")
                 return
-        except Exception:
-            pass
+        except Exception as err:
+            QMessageBox.warning(self, "Fix My Gaming", f"Could not probe the gaming stack: {err}")
+            return
         self._hud_perf_profile.setText("Running Fix My Gaming… (30s bound, gaming-aware)")
         worker = DataWorker("fix-my-gaming", _do_fix)
         worker.result.connect(guard_disposed(lambda _k, d: self._on_fix_gaming_done(d)))

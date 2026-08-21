@@ -167,6 +167,20 @@ class InstallerService:
             self.context.transition(context_module.InstallLifecycle.IDLE)
             return {"ok": True, "root_partition": root_part}
         except RuntimeError as exc:
+            irreversible = bool(getattr(journal, "irreversible_completed", False))
+            if irreversible:
+                # Format/shrink already mutated filesystems. Reloading GPT
+                # cannot restore contents and after a shrink is actively harmful.
+                self.context.transition(context_module.InstallLifecycle.FAILED)
+                return {
+                    "ok": False,
+                    "irreversible": True,
+                    "message": (
+                        f"{exc}. A format or filesystem shrink already completed. "
+                        "Restoring the partition table would not restore files. "
+                        "Those partitions no longer contain their original contents."
+                    ),
+                }
             journal.rollback(lambda _msg: None)
             # IDLE, not FAILED: journal.rollback() has already restored the
             # partition table, so the disk is back to a known-good state and

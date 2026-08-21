@@ -126,9 +126,9 @@ class PhaseCommonTests(unittest.TestCase):
     def test_stop_power_watch_accepts_missing_resources(self):
         common._stop_power_watch(None, None)
 
-    @mock.patch("kyth_installer.phases.common.os.close")
-    @mock.patch("kyth_installer.phases.common.fcntl.flock")
-    @mock.patch("kyth_installer.phases.common.os.open", return_value=31)
+    @mock.patch("kyth_installer.storage_guard.os.close")
+    @mock.patch("kyth_installer.storage_guard.fcntl.flock")
+    @mock.patch("kyth_installer.storage_guard.os.open", return_value=31)
     def test_disk_image_hold_locks_and_releases(self, opened, flock, closed):
         log = mock.Mock()
         with common._disk_image_hold("/dev/sda", log):
@@ -138,18 +138,15 @@ class PhaseCommonTests(unittest.TestCase):
         closed.assert_called_once_with(31)
         self.assertIn("shared lock", log.call_args.args[0])
 
-    @mock.patch("kyth_installer.phases.common.os.open", side_effect=PermissionError("denied"))
-    def test_disk_image_hold_warns_when_lock_is_unavailable(self, _opened):
-        log = mock.Mock()
-        entered = False
-        with common._disk_image_hold("/dev/sda", log):
-            entered = True
-        self.assertTrue(entered)
-        self.assertIn("could not flock", log.call_args.args[0])
+    @mock.patch("kyth_installer.storage_guard.os.open", side_effect=PermissionError("denied"))
+    def test_disk_image_hold_fails_closed_when_lock_is_unavailable(self, _opened):
+        with self.assertRaisesRegex(RuntimeError, "Could not lock /dev/sda"):
+            with common._disk_image_hold("/dev/sda", mock.Mock()):
+                self.fail("missing lock must not enter IMAGE hold")
 
-    @mock.patch("kyth_installer.phases.common.os.close", side_effect=OSError("close failed"))
-    @mock.patch("kyth_installer.phases.common.fcntl.flock")
-    @mock.patch("kyth_installer.phases.common.os.open", return_value=32)
+    @mock.patch("kyth_installer.storage_guard.os.close", side_effect=OSError("close failed"))
+    @mock.patch("kyth_installer.storage_guard.fcntl.flock")
+    @mock.patch("kyth_installer.storage_guard.os.open", return_value=32)
     def test_disk_image_cleanup_error_does_not_mask_body_error(self, _opened, flock, _closed):
         flock.side_effect = [None, OSError("unlock failed")]
         with self.assertRaisesRegex(ValueError, "body failed"):

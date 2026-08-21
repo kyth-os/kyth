@@ -194,8 +194,8 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
             (("document-import", "drive-harddisk"), "⇄", "Move Files", "Move Files", _page_factory("page_windows_migration", "WindowsMigrationPage", navigate=navigate)),
         ]),
         ("System", [
-            (("shield", "security-high"), "⬢", "Guardian", "Guardian", _page_factory("page_guardian", "GuardianPage")),
-            (("system-software-update", "update-none"), "↻", "Updates", "Update", _page_factory("page_update", "UpdatePage")),
+            (("shield", "security-high"), "⬢", "Guardian", "Guardian", _page_factory("page_guardian", "GuardianPage", navigate=navigate)),
+            (("system-software-update", "update-none"), "↻", "Updates", "Update", _page_factory("page_update", "UpdatePage", navigate=navigate)),
             (("computer", "computer-laptop"), "◈", "Hardware", "Hardware", _page_factory("page_hardware", "HardwarePage", navigate=navigate)),
             (("preferences-desktop-display", "video-display"), "▣", "Plasma & Wayland", "Plasma Wayland", _page_factory("page_plasma_wayland", "PlasmaWaylandPage")),
             (("view-statistics", "office-chart-bar"), "◌", "Health Report", "Diagnostics", _page_factory("page_diagnostics", "DiagnosticsPage", navigate=navigate)),

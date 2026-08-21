@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import threading
 import os
-import contextlib
-import fcntl
 
 from ..config import TRANSACTION_FILE
 from ..context import InstallerContext
@@ -80,27 +78,9 @@ def _stop_power_watch(thread: threading.Thread | None, stop_event: threading.Eve
 
 def _disk_image_hold(disk: str, log):
     """Context manager: hold shared flock on disk through IMAGE phase."""
-    @contextlib.contextmanager
-    def _hold():
-        fd = -1
-        try:
-            try:
-                fd = os.open(disk, os.O_RDONLY)
-                fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-                log(f"Holding shared lock on {disk} through image write...")
-            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
-                log(f"Warning: could not flock disk for IMAGE phase: {exc}")
-                fd = -1
-            yield
-        finally:
-            if fd != -1:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-                    os.close(fd)
-                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-                    pass
+    from ..storage_guard import DiskLease
 
-    return _hold()
+    return DiskLease(disk, log, exclusive=False)
 
 
 def _record_transaction(

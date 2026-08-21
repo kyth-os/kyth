@@ -40,3 +40,21 @@ dnf5 install -y --allowerasing --skip-unavailable --exclude=gstreamer1-plugins-b
 	gstreamer1-libav \
 	gstreamer1-vaapi \
 	mozilla-openh264
+
+required_codec_rpms=(
+	ffmpeg
+	gstreamer1-plugins-good
+	gstreamer1-plugins-bad-freeworld
+	gstreamer1-libav
+	gstreamer1-vaapi
+)
+missing_codec_rpms=()
+for pkg in "${required_codec_rpms[@]}"; do
+	if ! rpm -q "${pkg}" >/dev/null 2>&1; then
+		missing_codec_rpms+=("${pkg}")
+	fi
+done
+if ((${#missing_codec_rpms[@]})); then
+	echo "ERROR: required codec packages missing after install: ${missing_codec_rpms[*]}" >&2
+	exit 1
+fi

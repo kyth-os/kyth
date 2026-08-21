@@ -171,7 +171,13 @@ def shrink_filesystem(partition: str, fstype: str, new_size_bytes: int, log) -> 
         from .assurance import _battery_check, _encryption_check
 
         _battery_check()
-        enc = _encryption_check(snapshot=None)
+        from .disk import _parent_disk
+
+        try:
+            parent = _parent_disk(partition) or partition
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
+            parent = partition
+        enc = _encryption_check(disk=parent)
         if enc is not None and enc.status == "warn":
             raise RuntimeError(enc.detail)
     except (OSError, ValueError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort guard

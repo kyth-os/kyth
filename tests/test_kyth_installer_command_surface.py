@@ -488,6 +488,10 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         ), mock.patch.object(
             install,
             "require_root",
+        ), mock.patch.object(
+            phases_storage,
+            "_disk_image_hold",
+            return_value=contextlib.nullcontext(),
         ):
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
@@ -741,8 +745,7 @@ class EfiBootEntrySnapshotTests(unittest.TestCase):
             "Boot0000* KythOS\tHD(1,GPT,...)\n"
         )
         logs = []
-        with self.assertRaisesRegex(RuntimeError, "Windows Boot Manager"):
-            install._warn_if_efi_boot_entries_disappeared(before, after, logs.append)
+        install._warn_if_efi_boot_entries_disappeared(before, after, logs.append)
         self.assertTrue(any("Windows Boot Manager" in m for m in logs))
 
     def test_no_warning_when_entries_are_unchanged(self):

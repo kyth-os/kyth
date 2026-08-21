@@ -265,6 +265,7 @@ def mark_healthy(
         rollout_ring=state.rollout_ring,
         updated_at=recovery_at,
         quarantined=quarantined,
+        rollback_attempted_for=state.rollback_attempted_for,
     )
 
 

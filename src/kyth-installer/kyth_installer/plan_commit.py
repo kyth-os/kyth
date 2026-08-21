@@ -22,7 +22,7 @@ class CommitDependencies:
     has_bios_boot: Callable[[str], bool]
     list_partitions: Callable[[str], list[dict]]
     block_size: Callable[[str], int]
-    latest_partition: Callable[[str, set[str]], str | None]
+    latest_partition: Callable[..., str | None]
     partition_number: Callable[[str], int]
     human_size: Callable[[int], str]
     run_command: Callable
@@ -31,6 +31,23 @@ class CommitDependencies:
     disk_hold: Callable
     guard_factory: Callable
     disk_service_factory: Callable
+
+
+def _call_latest_partition(
+    dependencies: CommitDependencies,
+    disk: str,
+    before: set[str],
+    *,
+    start_bytes: int = 0,
+    size_bytes: int = 0,
+) -> str | None:
+    """Call latest_partition with geometry when the bound callable accepts it."""
+    try:
+        return dependencies.latest_partition(
+            disk, before, start_bytes=start_bytes, size_bytes=size_bytes,
+        )
+    except TypeError:
+        return dependencies.latest_partition(disk, before)
 
 
 def ensure_bios_boot_partition(
@@ -63,10 +80,14 @@ def ensure_bios_boot_partition(
         ]),
         check=True, timeout=120,
     )
-    created = dependencies.latest_partition(disk, before)
+    created = _call_latest_partition(
+        dependencies, disk, before, start_bytes=gap_start, size_bytes=BIOS_BOOT_BYTES,
+    )
     if not created:
         dependencies.settle()
-        created = dependencies.latest_partition(disk, before)
+        created = _call_latest_partition(
+            dependencies, disk, before, start_bytes=gap_start, size_bytes=BIOS_BOOT_BYTES,
+        )
     if not created:
         raise RuntimeError(
             "The installer could not find the new BIOS boot partition after partitioning."
@@ -133,7 +154,10 @@ def commit_new_kythos_partition(
                 except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     pass
             dependencies.settle()
-            created = dependencies.latest_partition(disk, before)
+            created = _call_latest_partition(
+                dependencies, disk, before,
+                start_bytes=btrfs_start, size_bytes=partition_end - btrfs_start,
+            )
             if not created:
                 raise RuntimeError(
                     "The installer could not find the new KythOS partition after partitioning."

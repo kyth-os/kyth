@@ -77,6 +77,25 @@ dnf_retry install -y --skip-unavailable --exclude=libde265.i686 \
 	libxcrypt-compat \
 	"${multilib_pkgs[@]}"
 
+# --skip-unavailable must not silently drop the x86_64 gaming stack.
+required_gaming_rpms=(
+	gamescope
+	gamescope-shaders
+	mangohud
+	gamemode
+	steam-devices
+)
+missing_gaming_rpms=()
+for pkg in "${required_gaming_rpms[@]}"; do
+	if ! rpm -q "${pkg}" >/dev/null 2>&1; then
+		missing_gaming_rpms+=("${pkg}")
+	fi
+done
+if ((${#missing_gaming_rpms[@]})); then
+	echo "ERROR: required gaming packages missing after install: ${missing_gaming_rpms[*]}" >&2
+	exit 1
+fi
+
 # Guards against a package landing in only one of x86_64/i686 (see
 # lib/check-multilib.sh for why). The install above uses --skip-unavailable,
 # so a mirror/COPR desync on any of these can silently drop just one arch.

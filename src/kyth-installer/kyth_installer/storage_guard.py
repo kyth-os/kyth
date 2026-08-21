@@ -9,6 +9,10 @@ import tempfile
 from pathlib import Path
 
 
+def _allow_unlocked_disk() -> bool:
+    return os.environ.get("KYTH_INSTALL_ALLOW_NO_DISK_LOCK", "") == "1"
+
+
 @contextlib.contextmanager
 def DiskLease(disk: str, log, *, exclusive: bool = True):
     """Shared flock primitive for both guided and manual partition paths.
@@ -16,8 +20,8 @@ def DiskLease(disk: str, log, *, exclusive: bool = True):
     Guided path (plan._commit_new_kythos_partition) and manual
     Journal.commit both need to serialize against udev/second installer.
     Using one helper avoids duplicate flock logic and accidental
-    exclusive-vs-shared mismatch. Best-effort on live ISO where disk may be
-    busy — falls back to warning instead of failing.
+    exclusive-vs-shared mismatch. Fail closed unless
+    KYTH_INSTALL_ALLOW_NO_DISK_LOCK=1 (constrained CI).
     """
     fd = -1
     try:
@@ -32,12 +36,18 @@ def DiskLease(disk: str, log, *, exclusive: bool = True):
                 raise RuntimeError(
                     f"Another process is using {disk}; close other installers and retry."
                 )
-        except OSError as exc:
-            # Re-raise the BlockingIOError wrapped as RuntimeError, otherwise warn
-            if isinstance(exc, RuntimeError):
+        except OSError as err:
+            # Re-raise the BlockingIOError wrapped as RuntimeError, otherwise
+            # fail closed — a missing lock is how two installers race.
+            if isinstance(err, RuntimeError):
                 raise
-            log(f"Warning: could not hold lock on {disk}: {exc}")
-            fd = -1
+            if _allow_unlocked_disk():
+                log(f"Warning: could not hold lock on {disk}: {err}")
+                fd = -1
+            else:
+                raise RuntimeError(
+                    f"Could not lock {disk} for exclusive use: {err}"
+                ) from err
         yield
     finally:
         if fd != -1:
@@ -52,13 +62,18 @@ def DiskLease(disk: str, log, *, exclusive: bool = True):
 
 
 @contextlib.contextmanager
-def PartitionTableGuard(disk: str, log, *, disk_service=None):
+def PartitionTableGuard(disk: str, log, *, disk_service=None, should_restore=None):
     """Back up GPT/MBR, fsync file+dir, yield, restore on exception.
 
     Consolidates the duplicate `sgdisk --backup`/`--load-backup` + fsync
     pattern from `plan._commit_new_kythos_partition` and
     `partition_ops.Journal._save_snapshot`. Uses `disk_service` if given,
     else lazy `DiskService`.
+
+    *should_restore*, when supplied, is called after a failure; return
+    False to skip table restore (format/shrink of an existing filesystem
+    cannot be undone by reloading GPT, and reloading after shrink is
+    worse than leaving the in-progress table).
     """
     if disk_service is None:
         from .services.disk_service import DiskService as _Concrete
@@ -78,15 +93,26 @@ def PartitionTableGuard(disk: str, log, *, disk_service=None):
                 os.fsync(dfd)
             finally:
                 os.close(dfd)
-        except OSError as exc:
-            log(f"Warning: could not fsync partition backup: {exc}")
+        except OSError as err:
+            log(f"Warning: could not fsync partition backup: {err}")
         try:
             yield backup_path
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-            # restore on any exception inside the guarded scope
-            try:
-                disk_service.restore_table(disk, backup_path)
-                log("Partition table restored to its state before this attempt.")
-            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as restore_exc:  # noqa: BLE001 -- narrow: best-effort production path
-                log(f"Warning: automatic partition table restore failed: {restore_exc}")
+            restore = True
+            if should_restore is not None:
+                try:
+                    restore = bool(should_restore())
+                except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError):
+                    restore = True
+            if restore:
+                try:
+                    disk_service.restore_table(disk, backup_path)
+                    log("Partition table restored to its state before this attempt.")
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as restore_exc:  # noqa: BLE001 -- narrow: best-effort production path
+                    log(f"Warning: automatic partition table restore failed: {restore_exc}")
+            else:
+                log(
+                    "Skipped partition-table restore: a format or filesystem "
+                    "shrink already completed and cannot be undone."
+                )
             raise

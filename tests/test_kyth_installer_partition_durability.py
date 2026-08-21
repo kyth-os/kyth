@@ -75,6 +75,7 @@ def build_journal(fail_on: str = "") -> tuple[Journal, FakeDiskService]:
     return journal, service
 
 
+@mock.patch.dict("os.environ", {"KYTH_INSTALL_ALLOW_NO_DISK_LOCK": "1"}, clear=False)
 class PartitionStepBracketingTests(unittest.TestCase):
     def test_each_destructive_op_is_bracketed(self):
         journal, _service = build_journal()

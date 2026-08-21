@@ -160,13 +160,16 @@ _EFI_BOOT_ENTRY_RE = re.compile(r"^Boot[0-9A-Fa-f]{4}\*?\s+(.+)$")
 
 
 def _warn_if_efi_boot_entries_disappeared(before: str, after: str, log) -> None:
-    """Fail closed if a named EFI boot entry present before the install
+    """Warn if a named EFI boot entry present before the install
     — e.g. "Windows Boot Manager" — is gone from NVRAM afterward.
 
     bootc's bootupd step registers KythOS's own boot entry and can rewrite
     BootOrder; this is the safety net for it silently dropping another OS's
     entry rather than just reordering it. Empty snapshots (no efibootmgr, or
     only one side captured) stay a no-op so BIOS and test environments work.
+
+    Called after a successful image write, so this logs a rescue checklist
+    rather than aborting configure/user/fstab.
     """
     if not before or not after:
         return
@@ -189,7 +192,10 @@ def _warn_if_efi_boot_entries_disappeared(before: str, after: str, log) -> None:
             "or 'efibootmgr' to recreate the entry if needed."
         )
         log(msg)
-        raise RuntimeError(msg)
+        # After IMAGE the OS is already on disk. Aborting here skips
+        # configure/user/fstab and reports a failed install while the other
+        # OS's files are intact — only its firmware boot entry may be gone.
+        # Surface a rescue checklist instead of failing closed after the write.
 
 
 def _run_guarded_image_write(

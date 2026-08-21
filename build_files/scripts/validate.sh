@@ -56,11 +56,7 @@ echo "==> Optimization budgets"
 python3 build_files/scripts/optimization-report.py --check
 
 echo "==> Gaming hash gate"
-if git diff --quiet HEAD -- build_files/kyth_shared/kyth_shared/gaming_resolve.py build_files/kyth_shared/kyth_shared/repos.py build_files/config/repos.json build_files/scripts/thirdparty.sh build_files/scripts/proton-cachyos.sh Dockerfile 2>/dev/null; then
-  echo "gaming hash gate: skipped (no relevant changes)"
-else
-  bash build_files/scripts/hash-gaming-versions.sh
-fi
+bash build_files/scripts/hash-gaming-versions.sh
 
 echo "==> Perf gate (10% ledger, probe collection duration)"
 PYTHONPATH=build_files/kyth_shared python3 build_files/scripts/check-perf-gate.py

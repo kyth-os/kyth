@@ -47,7 +47,14 @@ class DiskLeaseTests(unittest.TestCase):
         closed.assert_called_once_with(12)
 
     @mock.patch("kyth_installer.storage_guard.os.open", side_effect=PermissionError("denied"))
-    def test_unavailable_advisory_lock_warns_and_continues(self, _opened):
+    def test_unavailable_advisory_lock_fails_closed(self, _opened):
+        with self.assertRaisesRegex(RuntimeError, "Could not lock /dev/sda"):
+            with DiskLease("/dev/sda", mock.Mock()):
+                self.fail("missing lock must not enter guarded body")
+
+    @mock.patch.dict("os.environ", {"KYTH_INSTALL_ALLOW_NO_DISK_LOCK": "1"})
+    @mock.patch("kyth_installer.storage_guard.os.open", side_effect=PermissionError("denied"))
+    def test_unavailable_advisory_lock_override_warns_and_continues(self, _opened):
         log = mock.Mock()
         entered = False
         with DiskLease("/dev/sda", log):
@@ -112,6 +119,17 @@ class PartitionTableGuardTests(unittest.TestCase):
         service.backup_table.assert_called_once()
         service.restore_table.assert_not_called()
         self.assertIn("Backing up", log.call_args_list[0].args[0])
+
+    def test_body_failure_skips_restore_when_should_restore_is_false(self):
+        service = self._service()
+        log = mock.Mock()
+        with self.assertRaisesRegex(RuntimeError, "format already done"):
+            with PartitionTableGuard(
+                "/dev/sda", log, disk_service=service, should_restore=lambda: False,
+            ):
+                raise RuntimeError("format already done")
+        service.restore_table.assert_not_called()
+        self.assertTrue(any("Skipped partition-table restore" in call.args[0] for call in log.call_args_list))
 
     def test_body_failure_restores_snapshot_and_reraises(self):
         service = self._service()

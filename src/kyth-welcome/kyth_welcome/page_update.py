@@ -15,8 +15,9 @@ class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _F
     This file only owns page-wide state and build order.
     """
 
-    def __init__(self):
+    def __init__(self, navigate=None):
         super().__init__()
+        self._navigate = navigate or (lambda _k: None)
         self._worker = None
         self._dl_monitor = None
         self._dl_total = 0
@@ -104,7 +105,7 @@ class UpdatePage(_UpdateOpsMixin, _UpdateAvailabilityMixin, _AutoUpdateMixin, _F
         check_all.clicked.connect(lambda _=False: (self._check_for_update(), self._check_firmware(), self._refresh_unified()))
         btn_row.addWidget(check_all)
         hub_btn = QPushButton("Open Guardian → Fix My System")
-        hub_btn.clicked.connect(lambda _=False: self._navigate("Guardian") if hasattr(self, "_navigate") else None)
+        hub_btn.clicked.connect(lambda _=False: self._navigate("Guardian"))
         btn_row.addWidget(hub_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)

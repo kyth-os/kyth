@@ -159,6 +159,50 @@ class GuardianPolicyTests(unittest.TestCase):
         with patch.object(guardian, "_run", return_value=kd_fail):
             self.assertFalse(guardian.verify_recipe("display.reconfigure"))
 
+    def test_audio_sink_none_does_not_abort_collect_symptoms(self):
+        with (
+            patch.object(guardian, "_active", return_value=True),
+            patch.object(guardian, "_run", return_value=None),
+        ):
+            syms = guardian.collect_symptoms()
+        self.assertIsInstance(syms, list)
+
+    def test_dummy_audio_sink_is_reported(self):
+        dummy = subprocess.CompletedProcess(["pactl"], 0, stdout="auto_null\n", stderr="")
+        with (
+            patch.object(guardian, "_active", return_value=True),
+            patch.object(guardian, "_run", return_value=dummy),
+        ):
+            syms = guardian.collect_symptoms()
+        audio = next((s for s in syms if s.component == "audio"), None)
+        self.assertIsNotNone(audio)
+        self.assertEqual(audio.recipes, ("audio.sink-fallback",))
+
+    def test_check_recipe_allowlist_skips_storage_chain(self):
+        storage = guardian.Symptom("storage", "disk full", ("storage.maint",))
+        display = guardian.Symptom("display", "no output", ("display.reconfigure",))
+        with (
+            patch.object(guardian, "collect_symptoms", return_value=[storage, display]),
+            patch.object(guardian, "load_config", return_value={
+                "enabled": True, "automatic_safe_fixes": True, "notifications": False,
+            }),
+            patch.object(guardian, "load_state", return_value={"occurrences": {}, "history": []}),
+            patch.object(guardian, "save_state"),
+            patch.object(guardian, "execute_recipe", return_value=(True, "ok")) as execute,
+            patch.object(guardian, "verify_recipe", return_value=True),
+            patch.object(guardian, "suppression_reason", return_value=""),
+            patch.object(guardian, "can_execute", return_value=(True, "")),
+            patch.object(guardian, "execute_chain") as chain,
+        ):
+            result = guardian.check(
+                automatic=True,
+                components={"display"},
+                recipe_ids={"display.reconfigure"},
+            )
+        chain.assert_not_called()
+        execute.assert_called_once_with("display.reconfigure")
+        self.assertTrue(all(d["recipe_id"] == "display.reconfigure" for d in result["decisions"]))
+
 
 class GuardianStorageTests(unittest.TestCase):
     def test_history_is_bounded_and_rotated(self):
