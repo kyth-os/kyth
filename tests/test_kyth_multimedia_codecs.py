@@ -10,18 +10,24 @@ HYGIENE = ROOT / "build_files/scripts/packages/03-rpmfusion-and-repo-hygiene.sh"
 
 
 class MultimediaCodecPackageTests(unittest.TestCase):
-    def test_installs_plugin_libav_not_legacy_name_alone(self):
+    def test_installs_plugin_libav_and_bad_free_for_va(self):
         body = CODECS.read_text(encoding="utf-8")
         self.assertIn("gstreamer1-plugin-libav", body)
-        self.assertIn("gstreamer1-vaapi", body)
-        # Fail-closed check must query the real RPM name.
+        self.assertIn("gstreamer1-plugins-bad-free", body)
+        # Fail-closed check must query real RPM names, not the obsolete vaapi NEVRA.
         required_block = body.split("required_codec_rpms=(")[1].split(")")[0]
         self.assertIn("gstreamer1-plugin-libav", required_block)
+        self.assertIn("gstreamer1-plugins-bad-free", required_block)
         self.assertNotIn("gstreamer1-libav\n", required_block)
+        self.assertNotIn("gstreamer1-vaapi\n", required_block)
+        # VA capability is asserted via Provide + libgstva.so, not rpm -q NEVRA.
+        self.assertIn("rpm -q --whatprovides gstreamer1-vaapi", body)
+        self.assertIn("libgstva.so", body)
         # Required install must not skip-unavailable; multimedia repo is removed in 03.
         self.assertNotIn("--disablerepo=fedora-multimedia", body)
         install_block = body.split("dnf5 install -y --allowerasing")[1].split("mozilla-openh264")[0]
         self.assertNotIn("--skip-unavailable", install_block)
+        self.assertNotIn("gstreamer1-vaapi", install_block)
 
     def test_hygiene_removes_multimedia_repo_files(self):
         body = HYGIENE.read_text(encoding="utf-8")
