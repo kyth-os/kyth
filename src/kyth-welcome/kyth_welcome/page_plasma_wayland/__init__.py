@@ -52,7 +52,6 @@ class PlasmaWaylandPage(Page):
         self._add(self._make_polish_card())
         self._add(self._make_windows_parity_card())
         self._add(self._make_repair_card())
-        self._add(self._make_presets_card())
         self._add(self._make_desktop_modes_card())
         self._add(self._make_snap_grid_card())
         self._add(self._make_wayland_readiness_card())

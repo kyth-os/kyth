@@ -1,5 +1,6 @@
 # __KYTH_GENERATED_IMPORTS__
 from ..services.process import run_command
+from ..services.runtime import DataWorker, guard_disposed, release_worker_when_finished
 
 
 class _PolishMixin:
@@ -80,11 +81,25 @@ fi
         return ["bash", "-lc", script]
 
     def _apply_plasma_polish(self):
+        if getattr(self, "_polish_worker", None) is not None:
+            return
         cmd = self._plasma_polish_command()
         self._polish_result.set_running("Restoring the KythOS default layout...", self._command_details(cmd))
-        result = run_command(cmd, timeout=20)
+        worker = DataWorker("plasma-polish", lambda: (cmd, run_command(cmd, timeout=20)))
+        self._polish_worker = worker
+        worker.result.connect(guard_disposed(self._on_plasma_polish_done))
+        worker.failed.connect(guard_disposed(self._on_plasma_polish_failed))
+        release_worker_when_finished(self, "_polish_worker", worker)
+        worker.start()
+
+    def _on_plasma_polish_done(self, _key: str, payload: object) -> None:
+        cmd, result = payload  # type: ignore[misc]
         if result is None:
-            self._polish_result.set_result("err", "Could not apply KythOS polish: command failed to start", self._command_details(cmd))
+            self._polish_result.set_result(
+                "err",
+                "Could not apply KythOS polish: command failed to start",
+                self._command_details(cmd),
+            )
             return
         if result.returncode == 0:
             self._polish_result.set_result(
@@ -93,6 +108,13 @@ fi
                 self._command_details(cmd, result),
             )
             self.refresh()
-        else:
-            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            self._polish_result.set_result("err", f"Could not apply KythOS polish: {detail}", self._command_details(cmd, result))
+            return
+        detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        self._polish_result.set_result(
+            "err",
+            f"Could not apply KythOS polish: {detail}",
+            self._command_details(cmd, result),
+        )
+
+    def _on_plasma_polish_failed(self, _key: str, message: str) -> None:
+        self._polish_result.set_result("err", f"Could not apply KythOS polish: {message}", message)

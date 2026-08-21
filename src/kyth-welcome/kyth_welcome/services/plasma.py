@@ -324,3 +324,65 @@ def kscreen_doctor_output(max_lines: int = 40) -> str:
         timeout=4,
     )
     return out if code == 0 else ""
+
+
+def portal_units_summary() -> str:
+    """Summarize xdg-desktop-portal + KDE backend unit activity."""
+    portal_active = user_unit_active("xdg-desktop-portal.service")
+    kde_unit = first_active_user_unit(KDE_PORTAL_UNITS)
+    pipewire_active = user_unit_active("pipewire.service") or user_unit_active("pipewire.socket")
+    states = [
+        f"portal:{'active' if portal_active else 'inactive'}",
+        f"kde:{(kde_unit or 'inactive')}",
+        f"pipewire:{'active' if pipewire_active else 'inactive'}",
+    ]
+    return ", ".join(states)
+
+
+def screen_share_summary() -> str:
+    """PipeWire + KDE portal readiness for Wayland screen sharing."""
+    pipewire = user_unit_active("pipewire.service") or user_unit_active("pipewire.socket")
+    wireplumber = user_unit_active("wireplumber.service")
+    kde_unit = first_active_user_unit(KDE_PORTAL_UNITS)
+    states = {
+        "pipewire": "active" if pipewire else "inactive",
+        "wireplumber": "active" if wireplumber else "inactive",
+        "portal-kde": kde_unit or "inactive",
+    }
+    detail = ", ".join(f"{k}:{v}" for k, v in states.items())
+    if pipewire and kde_unit:
+        return f"Ready — PipeWire + KDE portal active ({detail})"
+    return f"Not ready — start PipeWire and the KDE desktop portal ({detail})"
+
+
+def nvidia_wayland_summary(gpu_text: str | None = None) -> str:
+    """NVIDIA presence note for Wayland readiness (no driver install)."""
+    text = (gpu_text if gpu_text is not None else gpu_lspci_summary()).lower()
+    if "nvidia" not in text:
+        return "No NVIDIA GPU in lspci probe"
+    from kyth_shared.system.gpu import query_nvidia_smi
+
+    smi = query_nvidia_smi()
+    if smi:
+        return f"NVIDIA present — {smi}; prefer proprietary + GBM for Wayland"
+    return (
+        "NVIDIA present but nvidia-smi unavailable — check proprietary drivers "
+        "and GBM/Wayland before relying on screen share"
+    )
+
+
+def fractional_scale_summary(kscreen_out: str | None = None) -> str:
+    """Parse kscreen-doctor output for scale factors."""
+    import re
+
+    out = (kscreen_out if kscreen_out is not None else kscreen_doctor_output()).lower()
+    if not out:
+        return "Install/run kscreen-doctor to probe scale"
+    scales = re.findall(r"scale[:\s]+([0-9]+(?:\.[0-9]+)?)", out)
+    if not scales:
+        return "Scale not advertised; open Display Settings for fractional scaling"
+    unique = list(dict.fromkeys(scales))
+    fractional = [s for s in unique if s not in {"1", "1.0"}]
+    if fractional:
+        return f"Fractional scale in use: {', '.join(unique)} — apps may need Xwayland"
+    return f"Integer scale factor(s): {', '.join(unique)}"

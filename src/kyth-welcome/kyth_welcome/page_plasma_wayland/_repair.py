@@ -1,13 +1,24 @@
 # __KYTH_GENERATED_IMPORTS__
 from ..services.launch import open_settings_module
 from ..services.process import run_command
+from ..services.runtime import DataWorker, guard_disposed, release_worker_when_finished
 
 
 class _RepairMixin:
-    def _open_kcm(self, label: str, module: str):
+    def _open_kcm(self, label: str, module: str, *, status_badge=None, result_attr: str | None = None):
         if open_settings_module(module):
+            if status_badge is not None:
+                status_badge.hide()
             return
-        self._repair_result.set_result("err", f"Could not open {label}.", f"Tried: kcmshell6 {module}, systemsettings {module}")
+        message = f"Could not open {label}."
+        details = f"Tried: kcmshell6 {module}, systemsettings {module}"
+        if status_badge is not None:
+            status_badge.show()
+            status_badge.set_state("err", message)
+            return
+        panel = getattr(self, result_attr or "_repair_result", None)
+        if panel is not None:
+            panel.set_result("err", message, details)
 
     @staticmethod
     def _command_details(cmd: list[str], result=None, exc: Exception | None = None) -> str:
@@ -25,17 +36,41 @@ class _RepairMixin:
         return "\n".join(lines)
 
     def _run_repair_command(self, label: str, success: str, cmd: list[str]):
+        if getattr(self, "_repair_worker", None) is not None:
+            return
         self._repair_result.set_running(label, self._command_details(cmd))
-        result = run_command(cmd, timeout=20)
+        worker = DataWorker(
+            "plasma-repair",
+            lambda: (cmd, run_command(cmd, timeout=20), success, label),
+        )
+        self._repair_worker = worker
+        worker.result.connect(guard_disposed(self._on_repair_command_done))
+        worker.failed.connect(guard_disposed(self._on_repair_command_failed))
+        release_worker_when_finished(self, "_repair_worker", worker)
+        worker.start()
+
+    def _on_repair_command_done(self, _key: str, payload: object) -> None:
+        cmd, result, success, label = payload  # type: ignore[misc]
         if result is None:
-            self._repair_result.set_result("err", f"{label} failed: command failed to start", self._command_details(cmd))
+            self._repair_result.set_result(
+                "err",
+                f"{label} failed: command failed to start",
+                self._command_details(cmd),
+            )
             return
         if result.returncode == 0:
             self._repair_result.set_result("ok", success, self._command_details(cmd, result))
             self.refresh()
-        else:
-            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            self._repair_result.set_result("err", f"{label} failed: {detail}", self._command_details(cmd, result))
+            return
+        detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        self._repair_result.set_result(
+            "err",
+            f"{label} failed: {detail}",
+            self._command_details(cmd, result),
+        )
+
+    def _on_repair_command_failed(self, _key: str, message: str) -> None:
+        self._repair_result.set_result("err", f"Repair command failed: {message}", message)
 
     def _restart_capture_stack(self):
         self._run_repair_command(

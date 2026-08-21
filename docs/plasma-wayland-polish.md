@@ -68,8 +68,11 @@ feel distinct, comfortable, and easy for new users to trust.
   carefully with a small number of distinctive, maintainable assets: panel
   separators, tray spacing, launcher affordances, task focus states, and lock
   screen details instead of forking Breeze wholesale.
-- Role-specific shell presets now exist for Everyday and Gaming. The next
-  preset work is to add creator, developer, laptop, and docked variants.
+- Desktop Modes cover gaming, creator, developer, laptop, ultrawide, balanced,
+  and Windows comfort. Dedicated console and docked presets are still outstanding.
+- The Plasma & Wayland Hub page now probes portals (including
+  `plasma-xdg-desktop-portal-kde`), NVIDIA notes, and fractional scale off the
+  GUI thread; keep apply/repair actions on DataWorkers as new buttons land.
 
 ## Plasma/Wayland Customization Path
 
@@ -80,7 +83,8 @@ feel distinct, comfortable, and easy for new users to trust.
    task manager behavior, multi-monitor behavior, launcher clarity, and restore
    diagnostics.
 3. Expand opt-in role presets in System Hub:
-   Creator Mode, Developer Mode, Laptop Mode, and Docked Mode.
+   Console Mode and Docked Mode (creator/developer/laptop already land via
+   Desktop Modes).
 4. Harden Wayland readiness:
    portals, PipeWire capture, VRR policy, fractional scaling notes, NVIDIA
    status, remote desktop/screen sharing repair, and per-app workaround buttons.

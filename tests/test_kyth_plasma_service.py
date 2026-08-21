@@ -67,6 +67,65 @@ class PlasmaServiceTests(unittest.TestCase):
             probe = plasma._probe_default_layout()
         self.assertEqual(probe.status, "dim")
 
+    def test_portal_units_summary_prefers_plasma_kde_unit(self):
+        def _active(unit: str) -> bool:
+            return unit in {
+                "xdg-desktop-portal.service",
+                "plasma-xdg-desktop-portal-kde.service",
+                "pipewire.service",
+            }
+
+        with mock.patch.object(plasma, "user_unit_active", side_effect=_active):
+            summary = plasma.portal_units_summary()
+        self.assertIn("portal:active", summary)
+        self.assertIn("plasma-xdg-desktop-portal-kde.service", summary)
+
+    def test_screen_share_summary_ready_with_plasma_portal_unit(self):
+        def _active(unit: str) -> bool:
+            return unit in {"pipewire.service", "wireplumber.service"}
+
+        with mock.patch.object(plasma, "user_unit_active", side_effect=_active), mock.patch.object(
+            plasma,
+            "first_active_user_unit",
+            return_value="plasma-xdg-desktop-portal-kde.service",
+        ):
+            summary = plasma.screen_share_summary()
+        self.assertTrue(summary.startswith("Ready"))
+        self.assertIn("plasma-xdg-desktop-portal-kde.service", summary)
+
+    def test_screen_share_summary_not_ready_without_portal(self):
+        with mock.patch.object(plasma, "user_unit_active", return_value=True), mock.patch.object(
+            plasma, "first_active_user_unit", return_value=""
+        ):
+            summary = plasma.screen_share_summary()
+        self.assertTrue(summary.startswith("Not ready"))
+
+    def test_nvidia_wayland_summary_without_nvidia(self):
+        self.assertEqual(
+            plasma.nvidia_wayland_summary("VGA compatible controller: AMD"),
+            "No NVIDIA GPU in lspci probe",
+        )
+
+    def test_nvidia_wayland_summary_with_smi(self):
+        with mock.patch(
+            "kyth_shared.system.gpu.query_nvidia_smi",
+            return_value="GeForce RTX 4070, 560.35.03",
+        ):
+            summary = plasma.nvidia_wayland_summary("3D controller: NVIDIA")
+        self.assertIn("NVIDIA present", summary)
+        self.assertIn("GeForce RTX 4070", summary)
+
+    def test_fractional_scale_summary(self):
+        self.assertIn(
+            "Fractional scale",
+            plasma.fractional_scale_summary("Output: eDP-1\n  Scale: 1.5\n"),
+        )
+        self.assertIn(
+            "Integer scale",
+            plasma.fractional_scale_summary("Output: HDMI-1\n  Scale: 1\n"),
+        )
+        self.assertIn("kscreen-doctor", plasma.fractional_scale_summary(""))
+
 
 if __name__ == "__main__":
     unittest.main()

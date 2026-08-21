@@ -1,6 +1,5 @@
 # __KYTH_GENERATED_IMPORTS__
-from ..services.runtime import guard_disposed, release_worker_when_finished
-from ..services.gaming import DataWorker
+from ..services.runtime import DataWorker, guard_disposed, release_worker_when_finished
 from ..services.hardware import HardwareProbe
 from ..services.plasma import _collect_wayland_probes
 from ..widgets import HardwareCard

@@ -1,8 +1,16 @@
 import os
 
 # __KYTH_GENERATED_IMPORTS__
-from ..services.plasma import _run_text, gpu_lspci_summary, kscreen_doctor_output
-from ..services.runtime import DataWorker, guard_disposed
+from ..services.plasma import (
+    fractional_scale_summary,
+    gpu_lspci_summary,
+    kscreen_doctor_output,
+    nvidia_wayland_summary,
+    portal_units_summary,
+    run_shell_script,
+    screen_share_summary,
+)
+from ..services.runtime import DataWorker, guard_disposed, release_worker_when_finished
 from ..qt import (
     QFrame, QHBoxLayout, QLabel, Qt,
 )
@@ -10,7 +18,7 @@ from ..ui_tokens import KYTH_TEXT_MUTED
 from ..widgets import ActionRow, CommandResultPanel, _make_card
 from ._profiles import DESKTOP_PROFILES
 
-_WAYLAND_ROW_NAMES = ("Session", "GPU", "Portals", "Screen sharing", "VRR", "HDR")
+_WAYLAND_ROW_NAMES = ("Session", "GPU", "NVIDIA", "Portals", "Screen sharing", "VRR", "HDR", "Scale")
 
 
 class _CardsMixin:
@@ -29,11 +37,35 @@ class _CardsMixin:
 
         actions = ActionRow("", "idle")
         actions.status.hide()
-        actions.add_button("Display", lambda _=False: self._open_kcm("Display Settings", "kcm_kscreen"))
-        actions.add_button("Shortcuts", lambda _=False: self._open_kcm("Shortcuts", "kcm_keys"))
-        actions.add_button("Window Rules", lambda _=False: self._open_kcm("Window Rules", "kcm_kwinrules"))
-        actions.add_button("Screen Edges", lambda _=False: self._open_kcm("Screen Edges", "kcm_kwinscreenedges"))
-        actions.add_button("Notifications", lambda _=False: self._open_kcm("Notifications", "kcm_notifications"))
+        self._settings_actions = actions
+        actions.add_button(
+            "Display",
+            lambda _=False: self._open_kcm(
+                "Display Settings", "kcm_kscreen", status_badge=actions.status
+            ),
+        )
+        actions.add_button(
+            "Shortcuts",
+            lambda _=False: self._open_kcm("Shortcuts", "kcm_keys", status_badge=actions.status),
+        )
+        actions.add_button(
+            "Window Rules",
+            lambda _=False: self._open_kcm(
+                "Window Rules", "kcm_kwinrules", status_badge=actions.status
+            ),
+        )
+        actions.add_button(
+            "Screen Edges",
+            lambda _=False: self._open_kcm(
+                "Screen Edges", "kcm_kwinscreenedges", status_badge=actions.status
+            ),
+        )
+        actions.add_button(
+            "Notifications",
+            lambda _=False: self._open_kcm(
+                "Notifications", "kcm_notifications", status_badge=actions.status
+            ),
+        )
         actions.finish()
         layout.addWidget(actions)
         return card
@@ -70,8 +102,16 @@ class _CardsMixin:
         actions = ActionRow("", "idle")
         actions.status.hide()
         actions.add_button("Restore KythOS Layout", self._apply_plasma_polish, primary=True)
-        actions.add_button("Open Desktop Theme", lambda _=False: self._open_kcm("Desktop Theme", "kcm_desktoptheme"))
-        actions.add_button("Open Colors", lambda _=False: self._open_kcm("Colors", "kcm_colors"))
+        actions.add_button(
+            "Open Desktop Theme",
+            lambda _=False: self._open_kcm(
+                "Desktop Theme", "kcm_desktoptheme", result_attr="_polish_result"
+            ),
+        )
+        actions.add_button(
+            "Open Colors",
+            lambda _=False: self._open_kcm("Colors", "kcm_colors", result_attr="_polish_result"),
+        )
         actions.finish()
         layout.addWidget(actions)
 
@@ -106,27 +146,18 @@ class _CardsMixin:
         layout.addWidget(self._repair_result)
         return card
 
-    def _make_presets_card(self) -> QFrame:
-        card, layout = _make_card()
-        title = QLabel("Desktop modes live below")
-        title.setObjectName("card-title")
-        layout.addWidget(title)
-        body = QLabel(
-            "Console, creator, developer, laptop, and docked workflows are applied from "
-            "Kyth Desktop Modes — use Apply on the mode that matches how you use this PC."
-        )
-        body.setObjectName("card-copy")
-        body.setWordWrap(True)
-        layout.addWidget(body)
-        return card
-
     def _make_desktop_modes_card(self) -> QFrame:
         card, body = _make_card("card-accent-ok")
         body.setContentsMargins(18, 16, 18, 16)
         body.setSpacing(12)
         title = QLabel("Kyth Desktop Modes")
         title.setObjectName("card-title")
-        copy = QLabel("Apply opinionated Plasma and KWin defaults for the way you use the machine. Each mode tunes snapping, placement, animation speed, tiling gaps, and stores a Kyth layout marker for future automation.")
+        copy = QLabel(
+            "Apply opinionated Plasma and KWin defaults for the way you use the machine. "
+            "Each mode tunes snapping, placement, animation speed, tiling gaps, and stores a "
+            "Kyth layout marker for future automation. Console and docked workflows use Gaming "
+            "or Laptop here until dedicated presets land."
+        )
         copy.setObjectName("card-copy")
         copy.setWordWrap(True)
         body.addWidget(title)
@@ -153,8 +184,8 @@ class _CardsMixin:
         title.setObjectName("card-title")
         copy = QLabel(
             "One toggle for familiar habits: double-click to open, strong edge snap, "
-            "Win+Arrow halves/quarters, Win+E for Dolphin, Win+D show desktop, Win+L lock. "
-            "Centered panel alignment is best-effort on Plasma. Reversible — switch back to Balanced anytime."
+            "Win+Arrow halves/quarters, Win+E for Dolphin, Win+D show desktop, Win+L lock, "
+            "Win+V clipboard. Reversible — switch back to Balanced anytime."
         )
         copy.setObjectName("card-copy")
         copy.setWordWrap(True)
@@ -163,8 +194,7 @@ class _CardsMixin:
         for label, detail in (
             ("Double-click", "Dolphin opens on double-click like Explorer — single-click just selects."),
             ("Snap Layouts", "Drag a window to a screen edge for halves; to a corner for quarters; Win+Arrow for halves."),
-            ("Familiar keys", "Win+E Dolphin, Win+D show desktop, Win+L lock, Alt-Tab switcher, Win opens launcher."),
-            ("Panel", "Plasma panel alignment hint applied when the containment supports it."),
+            ("Familiar keys", "Win+E Dolphin, Win+D show desktop, Win+L lock, Win+V clipboard, Alt-Tab switcher."),
         ):
             row = QHBoxLayout()
             row.setSpacing(10)
@@ -203,11 +233,19 @@ class _CardsMixin:
     def _open_clipboard_history(self) -> None:
         from ..services.launch import open_settings_module
 
-        open_settings_module("kcm_klipper")
+        if open_settings_module("kcm_klipper"):
+            return
+        panel = getattr(self, "_windows_result", None)
+        if panel is not None:
+            panel.set_result(
+                "err",
+                "Could not open Clipboard History settings.",
+                "Tried: kcmshell6 kcm_klipper, systemsettings kcm_klipper",
+            )
 
     def _apply_fancyzones_thirds(self):
-        from ..services.plasma import run_shell_script
-
+        if getattr(self, "_fancyzones_worker", None) is not None:
+            return
         panel = getattr(self, "_windows_result", None) or getattr(self, "_profile_result", None)
         if panel is not None:
             panel.show()
@@ -221,14 +259,28 @@ kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Le
 kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Right" "Meta+Right,Meta+Right,Quick Tile Window to the Right"
 qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
 """
-        code, out, err = run_shell_script(script, timeout=10)
-        details = ((out or "") + (err or "")).strip()
+        worker = DataWorker("fancyzones-thirds", lambda: run_shell_script(script, timeout=10))
+        self._fancyzones_worker = worker
+        worker.result.connect(guard_disposed(self._on_fancyzones_done))
+        worker.failed.connect(guard_disposed(self._on_fancyzones_failed))
+        release_worker_when_finished(self, "_fancyzones_worker", worker)
+        worker.start()
+
+    def _on_fancyzones_done(self, _key: str, payload: object) -> None:
+        code, out, err = payload  # type: ignore[misc]
+        panel = getattr(self, "_windows_result", None) or getattr(self, "_profile_result", None)
         if panel is None:
             return
+        details = ((out or "") + (err or "")).strip()
         if code == 0:
             panel.set_result("ok", "FancyZones-style thirds applied", details or "KWin refreshed.")
         else:
             panel.set_result("err", "Could not apply FancyZones-style thirds", details or f"exit {code}")
+
+    def _on_fancyzones_failed(self, _key: str, message: str) -> None:
+        panel = getattr(self, "_windows_result", None) or getattr(self, "_profile_result", None)
+        if panel is not None:
+            panel.set_result("err", f"Could not apply FancyZones-style thirds: {message}", message)
 
     def _make_snap_grid_card(self) -> QFrame:
         card, body = _make_card()
@@ -253,9 +305,22 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
         shortcuts.setWordWrap(True)
         body.addWidget(shortcuts)
         row = ActionRow("Open Plasma tools for detailed tuning")
-        row.add_button("Window Behavior", lambda: self._open_kcm("Window Behavior", "kcm_kwinoptions"))
-        row.add_button("Shortcuts", lambda: self._open_kcm("Shortcuts", "kcm_keys"))
-        row.add_button("Window Rules", lambda: self._open_kcm("Window Rules", "kcm_kwinrules"))
+        row.status.hide()
+        self._snap_actions = row
+        row.add_button(
+            "Window Behavior",
+            lambda: self._open_kcm(
+                "Window Behavior", "kcm_kwinoptions", status_badge=row.status
+            ),
+        )
+        row.add_button(
+            "Shortcuts",
+            lambda: self._open_kcm("Shortcuts", "kcm_keys", status_badge=row.status),
+        )
+        row.add_button(
+            "Window Rules",
+            lambda: self._open_kcm("Window Rules", "kcm_kwinrules", status_badge=row.status),
+        )
         row.finish()
         body.addWidget(row)
         return card
@@ -266,7 +331,10 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
         body.setSpacing(10)
         title = QLabel("Wayland Readiness")
         title.setObjectName("card-title")
-        copy = QLabel("A quick signal check for the modern desktop path: session type, GPU stack, portals, screen sharing, VRR, and HDR readiness.")
+        copy = QLabel(
+            "A quick signal check for the modern desktop path: session type, GPU stack, "
+            "NVIDIA notes, portals, screen sharing, VRR, HDR, and fractional scaling."
+        )
         copy.setObjectName("card-copy")
         copy.setWordWrap(True)
         body.addWidget(title)
@@ -291,22 +359,24 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
 
     def _fetch_wayland_readiness_facts(self) -> dict[str, str]:
         """Run off the GUI thread by _refresh_wayland_readiness()'s
-        DataWorker. kscreen-doctor is run once and shared between the VRR
-        and HDR rows instead of spawning it twice."""
+        DataWorker. kscreen-doctor is run once and shared between the VRR,
+        HDR, and Scale rows instead of spawning it repeatedly."""
         kscreen_out = kscreen_doctor_output().lower()
+        gpu = self._gpu_status()
         return {
             "Session": self._session_status(),
-            "GPU": self._gpu_status(),
-            "Portals": self._portal_status(),
-            "Screen sharing": self._screen_share_status(),
+            "GPU": gpu,
+            "NVIDIA": nvidia_wayland_summary(gpu),
+            "Portals": portal_units_summary(),
+            "Screen sharing": screen_share_summary(),
             "VRR": self._kscreen_status("vrr", kscreen_out),
             "HDR": self._kscreen_status("hdr", kscreen_out),
+            "Scale": fractional_scale_summary(kscreen_out),
         }
 
     def _refresh_wayland_readiness(self) -> None:
         if self._wayland_readiness_worker is not None:
             return
-        from ..services.runtime import release_worker_when_finished
 
         worker = DataWorker("wayland-readiness", self._fetch_wayland_readiness_facts)
         self._wayland_readiness_worker = worker
@@ -321,8 +391,8 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
 
     def _apply_wayland_readiness_facts(self, facts: dict[str, str]) -> None:
         # Do not re-run kscreen-doctor on the GUI thread. The worker already
-        # probed VRR/HDR once; a second live verify compared human summaries to
-        # raw kscreen text and produced false "pending" warnings.
+        # probed VRR/HDR/Scale once; a second live verify compared human
+        # summaries to raw kscreen text and produced false "pending" warnings.
         for name, value in facts.items():
             label = self._wayland_row_labels.get(name)
             if label is not None:
@@ -335,34 +405,6 @@ qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || qdbus-qt6 org.kde.KWin 
 
     def _gpu_status(self) -> str:
         return gpu_lspci_summary() or "GPU probe unavailable"
-
-    def _portal_status(self) -> str:
-        checks = [
-            ("portal", "xdg-desktop-portal.service"),
-            ("kde", "xdg-desktop-portal-kde.service"),
-            ("pipewire", "pipewire.service"),
-        ]
-        states = []
-        for name, unit in checks:
-            _, out, _ = _run_text(["systemctl", "--user", "is-active", unit], timeout=3)
-            states.append(f"{name}:{(out or 'inactive').strip()}")
-        return ", ".join(states)
-
-    def _screen_share_status(self) -> str:
-        checks = (
-            ("pipewire", "pipewire.service"),
-            ("wireplumber", "wireplumber.service"),
-            ("portal-kde", "xdg-desktop-portal-kde.service"),
-        )
-        states: dict[str, str] = {}
-        for name, unit in checks:
-            _, out, _ = _run_text(["systemctl", "--user", "is-active", unit], timeout=3)
-            states[name] = (out or "inactive").strip() or "inactive"
-        active = all(states[name] == "active" for name in ("pipewire", "portal-kde"))
-        detail = ", ".join(f"{k}:{v}" for k, v in states.items())
-        if active:
-            return f"Ready — PipeWire + KDE portal active ({detail})"
-        return f"Not ready — start PipeWire and xdg-desktop-portal-kde ({detail})"
 
     def _kscreen_status(self, feature: str, out: str | None = None) -> str:
         if out is None:
