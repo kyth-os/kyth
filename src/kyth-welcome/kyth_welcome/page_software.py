@@ -2,6 +2,7 @@ from typing import ClassVar
 
 # __KYTH_GENERATED_IMPORTS__
 from .lazy_page import compose_on_first_init
+from .services import software_catalogs as _software_catalogs
 from .services.runtime import DataWorker, Worker
 from .qt import QPushButton, QWidget
 from .widgets import Page, SegmentedTabBar, _divider
@@ -31,8 +32,6 @@ def _load_software_mixins() -> tuple[type, ...]:
 @compose_on_first_init(_load_software_mixins)
 class SoftwarePage(Page):
     """App store — Starter Packs | Store | AppImages | Installed."""
-
-    from .services import software_catalogs as _software_catalogs
 
     _STARTER_PACKS: ClassVar[list[dict]] = _software_catalogs.STARTER_PACKS
     _CR_TOOLS: ClassVar[list[dict]] = _software_catalogs.CR_TOOLS
