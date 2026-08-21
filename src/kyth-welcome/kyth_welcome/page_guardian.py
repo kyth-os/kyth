@@ -56,11 +56,10 @@ def _guardian_check(*, investigate: bool = False) -> dict:
 
 
 def _guardian_fix_my_system() -> dict:
-    """One-click Fix My System — runs healing chain with user consent, gaming-aware."""
+    """One-click Fix My System — applies eligible recipes now, without waiting for two timer hits."""
     try:
         from kyth_shared.guardian import check as _check
-        # User clicked explicit fix — run as if automatic but with user present; respects suppression + cooldown
-        return _check(investigate=False, automatic=True)
+        return _check(investigate=False, automatic=True, user_initiated=True)
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc), "symptoms": [], "decisions": []}
 
@@ -150,9 +149,10 @@ class GuardianPage(Page):
         layout.addWidget(title)
 
         intro = QLabel(
-            "Guardian watches audio, portals, Plasma shell, network, Bluetooth, Flatpak, storage, and update health. "
-            "Cheap checks run every 15 minutes and again when the system probe cache changes. "
-            "The optional local model starts only when a case is ambiguous, picks one Kyth recipe, then exits."
+            "Guardian watches audio, portals, Plasma shell, network, Bluetooth, Flatpak, storage, "
+            "display, controllers, power, and update health. Cheap checks run every 15 minutes and again "
+            "when the system probe cache changes. The optional local model starts only when a case is "
+            "ambiguous, picks one Kyth recipe, then exits."
         )
         intro.setObjectName("card-copy")
         intro.setWordWrap(True)
@@ -237,7 +237,11 @@ class GuardianPage(Page):
         fix_row.setSpacing(8)
         self._fix_btn = QPushButton("Fix My System — run safe repairs now")
         self._fix_btn.setObjectName("primary")
-        self._fix_btn.setToolTip("Runs Guardian healing chain (storage.maint→firmware, display/controller, audio/network) with cooldown + gaming suppression. Same 30s bounded runner as Starter Packs.")
+        self._fix_btn.setToolTip(
+            "Applies allowlisted safe repairs immediately (and confirm recipes such as Bluetooth or joycond, "
+            "which may ask for permission). Does not wait for two background failures. "
+            "Still paused during gaming, capture, updates, low battery, or thermal pressure."
+        )
         self._fix_btn.clicked.connect(self._run_fix_my_system)
         fix_row.addWidget(self._fix_btn)
         self._fix_status = QLabel("")
@@ -392,8 +396,8 @@ class GuardianPage(Page):
         body = QLabel(
             "Evidence is capped at 4,096 characters and redacted before it reaches the model or history: "
             "credentials, tokens, SSIDs, IP/MAC addresses, usernames, home paths, and filenames are stripped. "
-            "Prompts are not retained and nothing is uploaded. Automatic repair is limited to safe, "
-            "reversible, unprivileged recipes after two consecutive failures and a cooldown."
+            "Prompts are not retained and nothing is uploaded. Background auto-fix waits for two consecutive "
+            "failures and a cooldown. Fix My System applies the same allowlist immediately when you click it."
         )
         body.setObjectName("card-copy")
         body.setWordWrap(True)
@@ -590,6 +594,14 @@ class GuardianPage(Page):
             for d in decisions[:5]:
                 if isinstance(d, dict):
                     lines.append(f"→ {d.get('recipe_id')} [{d.get('source')}, {d.get('confidence')}] — {d.get('action')} — {d.get('detail','')[:120]}")
+            steps = data.get("next_steps") if isinstance(data.get("next_steps"), list) else []
+            recoveries = [
+                str(s.get("recovery"))
+                for s in steps
+                if isinstance(s, dict) and s.get("action") == "recommended" and s.get("recovery")
+            ]
+            if recoveries:
+                lines.append("Next: " + recoveries[0][:180])
             self._decisions_lbl.setText("\n".join(lines))
         else:
             self._decisions_lbl.setText("No repair queued — checks will re-run on the next timer tick or when system probes change.")
@@ -643,7 +655,7 @@ class GuardianPage(Page):
                 if hist2:
                     self._dash_chain.setText("Recent: " + " · ".join(f"{h.get('recipe_id')} @ {_fmt_ts(h.get('timestamp'))}" for h in hist2))
                 else:
-                    self._dash_chain.setText("No healing chains yet — Guardian stays quiet until two consecutive failures + cooldown.")
+                    self._dash_chain.setText("No healing chains yet — background auto-fix waits for two consecutive failures. Use Fix My System to apply safe repairs now.")
             restyle(self._dash_chain)
         except Exception:
             pass
@@ -751,10 +763,20 @@ class GuardianPage(Page):
             execd = [d for d in decs if isinstance(d, dict) and d.get("action") == "executed"]
             recmd = [d for d in decs if isinstance(d, dict) and d.get("action") == "recommended"]
             if execd:
-                self._fix_status.setText(f"Fixed {len(execd)} issue(s) — {', '.join(d.get('recipe_id','') for d in execd[:3])} · History updated.")
+                names = ", ".join(d.get("recipe_id", "") for d in execd[:3])
+                self._fix_status.setText(f"Fixed {len(execd)} issue(s) — {names} · History updated.")
                 self._fix_status.setObjectName("status-ok")
             elif recmd:
-                self._fix_status.setText(f"No auto-fix — {len(recmd)} need confirmation in Repairs: {', '.join(d.get('recipe_id','') for d in recmd[:2])}")
+                steps = data.get("next_steps") if isinstance(data.get("next_steps"), list) else []
+                hints = []
+                for step in steps:
+                    if isinstance(step, dict) and step.get("action") == "recommended" and step.get("recovery"):
+                        hints.append(str(step.get("recovery")))
+                extra = f" {hints[0]}" if hints else ""
+                self._fix_status.setText(
+                    f"Needs you — {len(recmd)} item(s): "
+                    f"{', '.join(d.get('recipe_id','') for d in recmd[:2])}.{extra}"
+                )
                 self._fix_status.setObjectName("status-warn")
             else:
                 self._fix_status.setText("Healthy — no repairs needed.")

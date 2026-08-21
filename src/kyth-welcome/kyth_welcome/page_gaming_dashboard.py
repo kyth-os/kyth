@@ -115,7 +115,10 @@ class _DashboardMixin:
         layout4.addWidget(self._hud_perf_controller)
         fix_gaming_btn = QPushButton("Fix My Gaming — power + display + controller")
         fix_gaming_btn.setObjectName("primary")
-        fix_gaming_btn.setToolTip("Runs Guardian display.reconfigure + controller.repair + power.profile-fix via System Hub (gaming-aware, 30s bound)")
+        fix_gaming_btn.setToolTip(
+            "Applies Guardian display, controller, and power recipes now (may ask for permission to restart joycond). "
+            "Paused during an active game or capture session."
+        )
         fix_gaming_btn.clicked.connect(self._fix_my_gaming)
         layout4.addWidget(fix_gaming_btn)
 
@@ -277,12 +280,22 @@ class _DashboardMixin:
             pass
 
     def _update_perf_hub_labels(self):
-        # Best-effort hub labels — async via guardian probe, no direct subprocess in page module
-        try:
-            from kyth_shared.guardian import collect_symptoms
+        # collect_symptoms shells out — never run it on the GUI thread.
+        if getattr(self, "_perf_hub_worker", None) is not None:
+            return
+        from .services.runtime import DataWorker, guard_disposed
 
-            syms = collect_symptoms()
-            comps = {s.component: s for s in syms}
+        def _probe():
+            from kyth_shared.guardian import collect_symptoms
+            return [symptom.component for symptom in collect_symptoms()]
+
+        worker = DataWorker("gaming-perf-hub", _probe)
+        self._perf_hub_worker = worker
+
+        def _apply(_key: str, comps: object) -> None:
+            self._perf_hub_worker = None
+            if not isinstance(comps, list):
+                return
             if hasattr(self, "_hud_perf_profile"):
                 if "power" in comps:
                     self._hud_perf_profile.setText("Power: drift — System Hub → Guardian will reset profile")
@@ -295,36 +308,28 @@ class _DashboardMixin:
                     self._hud_perf_display.setText("Display: ok (connected+enabled)")
             if hasattr(self, "_hud_perf_controller"):
                 if "controller" in comps:
-                    self._hud_perf_controller.setText("Controller: joycond inactive — Fix My Gaming will restart")
+                    self._hud_perf_controller.setText("Controller: joycond inactive — Fix My Gaming can restart it")
                 else:
                     self._hud_perf_controller.setText("Controller: joycond active")
-        except Exception:
-            pass
+
+        worker.result.connect(guard_disposed(_apply))
+        worker.failed.connect(lambda *_: setattr(self, "_perf_hub_worker", None))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
 
     def _fix_my_gaming(self):
         from .services.runtime import DataWorker, guard_disposed
-        from .qt import QMessageBox
 
         def _do_fix():
             from kyth_shared.guardian import check
             return check(
                 investigate=False,
                 automatic=True,
+                user_initiated=True,
                 components={"display", "controller", "power"},
                 recipe_ids={"display.reconfigure", "controller.repair", "power.profile-fix"},
             )
 
-        # Reuse Guardian's Fix My System path but scoped to gaming recipes
-        try:
-            from kyth_shared.guardian import collect_symptoms
-            syms = collect_symptoms()
-            gaming_syms = [s for s in syms if s.component in {"display", "controller", "power"}]
-            if not gaming_syms:
-                QMessageBox.information(self, "Fix My Gaming", "Gaming stack looks healthy — no display/controller/power drift detected.")
-                return
-        except Exception as err:
-            QMessageBox.warning(self, "Fix My Gaming", f"Could not probe the gaming stack: {err}")
-            return
         self._hud_perf_profile.setText("Running Fix My Gaming… (30s bound, gaming-aware)")
         worker = DataWorker("fix-my-gaming", _do_fix)
         worker.result.connect(guard_disposed(lambda _k, d: self._on_fix_gaming_done(d)))
@@ -334,16 +339,35 @@ class _DashboardMixin:
 
     def _on_fix_gaming_done(self, data: dict):
         try:
+            if not isinstance(data, dict):
+                self._hud_perf_profile.setText("Fix finished.")
+                return
+            if data.get("error"):
+                self._hud_perf_profile.setText(f"Fix failed: {data['error']}")
+                return
+            symptoms = data.get("symptoms") if isinstance(data.get("symptoms"), list) else []
             decs = data.get("decisions", [])
-            execd = [d for d in decs if isinstance(d, dict) and d.get("action") == "executed" and d.get("recipe_id") in {"display.reconfigure", "controller.repair", "power.profile-fix"}]
+            execd = [d for d in decs if isinstance(d, dict) and d.get("action") == "executed"
+                     and d.get("recipe_id") in {"display.reconfigure", "controller.repair", "power.profile-fix"}]
+            recmd = [d for d in decs if isinstance(d, dict) and d.get("action") == "recommended"
+                     and d.get("recipe_id") in {"display.reconfigure", "controller.repair", "power.profile-fix"}]
+            suppressed = data.get("suppression_reason", "")
             if execd:
-                self._hud_perf_profile.setText(f"Fixed {len(execd)}: {', '.join(d['recipe_id'] for d in execd)} — verified")
+                self._hud_perf_profile.setText(
+                    f"Fixed {len(execd)}: {', '.join(d['recipe_id'] for d in execd)}"
+                    + (" — verified" if any(d.get("verified") for d in execd) else "")
+                )
+            elif suppressed:
+                self._hud_perf_profile.setText(f"Paused — {suppressed}")
+            elif recmd:
+                self._hud_perf_profile.setText(
+                    "Needs you: " + ", ".join(str(d.get("recipe_id")) for d in recmd)
+                    + " — open Guardian if a permission prompt was dismissed"
+                )
+            elif not symptoms:
+                self._hud_perf_profile.setText("Gaming stack looks healthy — no display/controller/power drift")
             else:
-                suppressed = data.get("suppression_reason", "")
-                if suppressed:
-                    self._hud_perf_profile.setText(f"Paused — {suppressed}")
-                else:
-                    self._hud_perf_profile.setText("No gaming fixes needed — profile/display/controller ok")
+                self._hud_perf_profile.setText("No gaming fixes needed — profile/display/controller ok")
             self._update_perf_hub_labels()
         except Exception:
             pass

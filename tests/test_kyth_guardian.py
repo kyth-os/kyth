@@ -65,7 +65,7 @@ class GuardianPolicyTests(unittest.TestCase):
             ok, _detail = guardian.execute_recipe("audio.restart")
             self.assertTrue(ok)
             run.assert_called_once_with(guardian.RECIPES["audio.restart"].command, 30)
-        for recipe in ("bluetooth.restart", "flatpak.repair-user", "disk.review"):
+        for recipe in ("bluetooth.restart", "flatpak.repair-user", "disk.review", "controller.repair"):
             ok, _ = guardian.execute_recipe(recipe)
             self.assertFalse(ok)
 
@@ -132,6 +132,8 @@ class GuardianPolicyTests(unittest.TestCase):
         kd_ok = subprocess.CompletedProcess(["kscreen-doctor", "-o"], 0, stdout="Output: 1 HDMI-A-1\n connected\n enabled\n", stderr="")
         kd_fail = subprocess.CompletedProcess(["kscreen-doctor", "-o"], 1, stdout="", stderr="failed")
         def _fake_run(argv, timeout=8):
+            if argv[0] == "systemctl" and "LoadState" in argv:
+                return subprocess.CompletedProcess(argv, 0, "loaded\n", "")
             if argv[0] == "kscreen-doctor":
                 return kd_fail
             if argv[0] == "powerprofilesctl":
@@ -200,7 +202,7 @@ class GuardianPolicyTests(unittest.TestCase):
                 recipe_ids={"display.reconfigure"},
             )
         chain.assert_not_called()
-        execute.assert_called_once_with("display.reconfigure")
+        execute.assert_called_once_with("display.reconfigure", user_initiated=False)
         self.assertTrue(all(d["recipe_id"] == "display.reconfigure" for d in result["decisions"]))
 
 
@@ -294,6 +296,224 @@ class GuardianSuppressionTests(unittest.TestCase):
             patch.object(guardian.Path, "glob", return_value=[]),
         ):
             self.assertEqual(guardian.suppression_reason(), "gaming or screen capture")
+
+
+class GuardianRobustnessTests(unittest.TestCase):
+    def test_probe_exception_does_not_abort_later_checks(self):
+        fw_fail = subprocess.CompletedProcess(["fwupdmgr"], 1, stdout="", stderr="metadata stale")
+
+        def _run(argv, timeout=8):
+            if argv and argv[0] == "pactl":
+                raise RuntimeError("pactl crashed")
+            if argv and argv[0] == "fwupdmgr":
+                return fw_fail
+            if argv and argv[0] == "nmcli":
+                return subprocess.CompletedProcess(argv, 0, "connected\n", "")
+            if argv and argv[0] == "powerprofilesctl":
+                return subprocess.CompletedProcess(argv, 0, "balanced\n", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with (
+            patch.object(guardian, "_active", return_value=True),
+            patch.object(guardian, "_run", side_effect=_run),
+            patch.object(guardian.shutil, "which", return_value=None),
+        ):
+            syms = guardian.collect_symptoms()
+        fw = next((s for s in syms if s.component == "firmware"), None)
+        self.assertIsNotNone(fw)
+        self.assertEqual(fw.recipes, ("firmware.refresh",))
+        self.assertFalse(any(s.component == "audio" for s in syms))
+
+    def test_idle_vpn_profile_is_not_a_symptom(self):
+        def _run(argv, timeout=8):
+            joined = " ".join(argv)
+            if "STATE" in argv and "general" in argv:
+                return subprocess.CompletedProcess(argv, 0, "connected\n", "")
+            if "AUTOCONNECT" in joined:
+                return subprocess.CompletedProcess(argv, 0, "HomeVPN:vpn:no\n", "")
+            if "connection" in argv and "show" in argv:
+                return subprocess.CompletedProcess(argv, 0, "wlan:wifi\n", "")
+            if argv and argv[0] == "pactl":
+                return subprocess.CompletedProcess(argv, 0, "alsa_output.pci.analog-stereo\n", "")
+            if argv and argv[0] == "powerprofilesctl":
+                return subprocess.CompletedProcess(argv, 0, "balanced\n", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with (
+            patch.object(guardian, "_active", return_value=True),
+            patch.object(guardian, "_run", side_effect=_run),
+            patch.object(guardian.shutil, "which", return_value=None),
+        ):
+            syms = guardian.collect_symptoms()
+        self.assertFalse(any("VPN" in (s.evidence or "") for s in syms))
+
+    def test_autoconnect_vpn_down_is_reported(self):
+        def _run(argv, timeout=8):
+            joined = " ".join(argv)
+            if "STATE" in argv and "general" in argv:
+                return subprocess.CompletedProcess(argv, 0, "connected\n", "")
+            if "AUTOCONNECT" in joined:
+                return subprocess.CompletedProcess(argv, 0, "WorkVPN:vpn:yes\n", "")
+            if "connection" in argv and "--active" in argv:
+                return subprocess.CompletedProcess(argv, 0, "Home:wifi\n", "")
+            if argv and argv[0] == "pactl":
+                return subprocess.CompletedProcess(argv, 0, "alsa_output.pci.analog-stereo\n", "")
+            if argv and argv[0] == "powerprofilesctl":
+                return subprocess.CompletedProcess(argv, 0, "balanced\n", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with (
+            patch.object(guardian, "_active", return_value=True),
+            patch.object(guardian, "_run", side_effect=_run),
+            patch.object(guardian.shutil, "which", return_value=None),
+        ):
+            syms = guardian.collect_symptoms()
+        vpn = next((s for s in syms if "Always-on VPN" in s.evidence), None)
+        self.assertIsNotNone(vpn)
+        self.assertEqual(vpn.recipes, ("network.vpn-fix", "network.dns-flush"))
+
+    def test_user_initiated_skips_occurrence_wait_and_autofix_toggle(self):
+        decision = guardian.Decision("audio.restart", 1, "known")
+        config = {"automatic_safe_fixes": False}
+        state = {"history": [], "occurrences": {"audio": 1}}
+        with patch.object(guardian, "suppression_reason", return_value=""):
+            allowed, reason = guardian.can_execute(decision, config, state)
+            self.assertFalse(allowed)
+            self.assertIn("automatic", reason)
+            allowed, _ = guardian.can_execute(decision, config, state, user_initiated=True)
+            self.assertTrue(allowed)
+
+    def test_user_initiated_still_respects_suppression(self):
+        decision = guardian.Decision("audio.restart", 1, "known")
+        with patch.object(guardian, "suppression_reason", return_value="gaming or screen capture"):
+            allowed, reason = guardian.can_execute(
+                decision, {"automatic_safe_fixes": False},
+                {"history": [], "occurrences": {}}, user_initiated=True,
+            )
+            self.assertFalse(allowed)
+            self.assertIn("gaming", reason)
+
+    def test_timer_cannot_auto_restart_system_joycond(self):
+        decision = guardian.Decision("controller.repair", 1, "known")
+        with patch.object(guardian, "suppression_reason", return_value=""):
+            allowed, reason = guardian.can_execute(
+                decision, {"automatic_safe_fixes": True},
+                {"history": [], "occurrences": {"controller": 2}},
+            )
+            self.assertFalse(allowed)
+            self.assertEqual(reason, "confirmation required")
+            allowed, _ = guardian.can_execute(
+                decision, {"automatic_safe_fixes": False},
+                {"history": [], "occurrences": {}}, user_initiated=True,
+            )
+            self.assertTrue(allowed)
+
+    def test_user_initiated_controller_repair_uses_sudo(self):
+        with patch.object(guardian, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            ok, _detail = guardian.execute_recipe("controller.repair", user_initiated=True)
+            self.assertTrue(ok)
+            run.assert_called_once_with(("sudo", "-A", "systemctl", "restart", "joycond.service"), 20)
+
+    def test_user_initiated_can_run_confirm_recipe(self):
+        decision = guardian.Decision("flatpak.repair-user", 1, "known")
+        config = {"automatic_safe_fixes": False}
+        state = {"history": [], "occurrences": {}}
+        with patch.object(guardian, "suppression_reason", return_value=""):
+            allowed, _ = guardian.can_execute(decision, config, state, user_initiated=True)
+            self.assertTrue(allowed)
+            allowed, reason = guardian.can_execute(decision, config, state)
+            self.assertFalse(allowed)
+            self.assertEqual(reason, "automatic safe fixes are disabled")
+
+    def test_failed_verify_does_not_start_cooldown(self):
+        decision = guardian.Decision("audio.restart", 1, "known")
+        state = {
+            "occurrences": {"audio": 2},
+            "history": [{
+                "recipe_id": "audio.restart", "action": "executed",
+                "verified": False, "timestamp": guardian.time.time(),
+            }],
+        }
+        with patch.object(guardian, "suppression_reason", return_value=""):
+            allowed, _ = guardian.can_execute(decision, {"automatic_safe_fixes": True}, state)
+            self.assertTrue(allowed)
+
+    def test_pending_recommendations_tracks_latest_unresolved(self):
+        now = 1_700_000_000.0
+        state = {
+            "history": [
+                {"recipe_id": "audio.restart", "action": "recommended", "timestamp": now - 60},
+                {"recipe_id": "audio.restart", "action": "executed", "timestamp": now - 30, "verified": True},
+                {"recipe_id": "plasma.restart-user", "action": "recommended", "timestamp": now - 10},
+                {"recipe_id": "disk.review", "action": "recommended", "timestamp": now - 8 * 3600},
+            ]
+        }
+        pending = guardian.pending_recommendations(state, now=now)
+        ids = {item["recipe_id"] for item in pending}
+        self.assertEqual(ids, {"plasma.restart-user"})
+
+    def test_check_user_initiated_executes_on_first_occurrence(self):
+        audio = guardian.Symptom("audio", "down", ("audio.restart",))
+        with (
+            patch.object(guardian, "collect_symptoms", return_value=[audio]),
+            patch.object(guardian, "load_config", return_value={
+                "enabled": True, "automatic_safe_fixes": False, "notifications": False,
+            }),
+            patch.object(guardian, "load_state", return_value={"occurrences": {}, "history": []}),
+            patch.object(guardian, "save_state"),
+            patch.object(guardian, "execute_recipe", return_value=(True, "ok")) as execute,
+            patch.object(guardian, "verify_recipe", return_value=True),
+            patch.object(guardian, "suppression_reason", return_value=""),
+        ):
+            result = guardian.check(automatic=True, user_initiated=True)
+        execute.assert_called_once_with("audio.restart", user_initiated=True)
+        self.assertEqual(result["decisions"][0]["action"], "executed")
+        self.assertTrue(result["user_initiated"])
+        self.assertTrue(result["next_steps"])
+
+    def test_display_executor_enables_disabled_connected_output(self):
+        from kyth_shared.guardian_actions import apply_display_reconfigure
+
+        calls: list[tuple] = []
+
+        def _run(argv, timeout=8):
+            calls.append(tuple(argv))
+            if argv[0] == "kscreen-doctor" and argv[-1] == "-o":
+                return subprocess.CompletedProcess(
+                    argv, 0,
+                    "Output: 1 HDMI-A-1\n connected\n disabled\nOutput: 2 eDP-1\n connected\n enabled\n",
+                    "",
+                )
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        ok, detail = apply_display_reconfigure(_run)
+        self.assertTrue(ok)
+        self.assertIn("enabled HDMI-A-1", detail)
+        self.assertIn(("kscreen-doctor", "output.HDMI-A-1.enable"), calls)
+        self.assertIn(("systemctl", "--user", "restart", "plasma-kscreen.service"), calls)
+
+    def test_sink_fallback_refuses_dummy_success(self):
+        from kyth_shared.guardian_actions import restore_audio_sink
+
+        def _run(argv, timeout=8):
+            if argv[:3] == ("pactl", "list", "short") or list(argv[:3]) == ["pactl", "list", "short"]:
+                return subprocess.CompletedProcess(argv, 0, "0\tauto_null\tmodule-null-sink.c\n", "")
+            return subprocess.CompletedProcess(argv, 1, "", "fail")
+
+        ok, detail = restore_audio_sink(_run)
+        self.assertFalse(ok)
+        self.assertIn("no usable audio sink", detail)
+
+    def test_notify_uses_shared_throttle_constant(self):
+        self.assertEqual(guardian.NOTIFY_THROTTLE_S, 6 * 3600)
+        record = {"recipe_id": "audio.restart", "action": "recommended"}
+        state: dict[str, object] = {"notifications": {"audio.restart": guardian.time.time() - 60}}
+        with (
+            patch.object(guardian.shutil, "which", return_value="/usr/bin/notify-send"),
+            patch.object(guardian, "_run") as run,
+        ):
+            guardian._notify([record], {"notifications": True}, state)
+            run.assert_not_called()
 
 
 if __name__ == "__main__":

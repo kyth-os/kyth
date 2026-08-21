@@ -209,41 +209,20 @@ class MainWindow(QMainWindow):
                 portal = portal.strip()
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 portal = ""
-            # Guardian: fresh recommended / suppressed count — same 6h throttle as _notify
+            # Guardian: unresolved recommended recipes in the same 6h window as notifications
             guardian = {}
             try:
-                import time as _time
+                from kyth_shared.guardian import pending_recommendations, suppression_reason as _supp
 
-                from kyth_shared.guardian import load_state
-
-                state = load_state()
-                now = _time.time()
-                history = state.get("history", []) if isinstance(state.get("history", []), list) else []
-                notified = state.get("notifications", {}) if isinstance(state.get("notifications"), dict) else {}
-                # fresh if not throttled (mirrors guardian._notify 6h logic)
-                fresh_recommended = [
-                    r for r in history
-                    if isinstance(r, dict) and r.get("action") == "recommended"
-                    and now - float(notified.get(r.get("recipe_id", ""), 0)) < 6 * 3600
-                ]
-                # fallback: count recent recommended within last 6h if notifications map empty
-                if not notified and fresh_recommended == []:
-                    fresh_recommended = [
-                        r for r in history
-                        if isinstance(r, dict) and r.get("action") == "recommended"
-                        and now - float(r.get("timestamp", 0)) < 6 * 3600
-                    ]
-                guardian["fresh"] = len(fresh_recommended)
-                # most recent recipe id for label
-                if fresh_recommended:
-                    guardian["label"] = str(fresh_recommended[-1].get("recipe_id", ""))
+                pending = pending_recommendations()
+                guardian["fresh"] = len(pending)
+                if pending:
+                    guardian["label"] = str(pending[-1].get("recipe_id", ""))
                 try:
-                    from kyth_shared.guardian import suppression_reason as _supp
-
                     guardian["suppressed"] = _supp()
                 except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
                     guardian["suppressed"] = ""
-            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError, ImportError):
                 guardian = {}
             return {"branch": branch, "staged": staged, "rollback": rollback, "portal": portal, "guardian": guardian}
 

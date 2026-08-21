@@ -10,6 +10,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -20,15 +21,23 @@ import time
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .commands import APPLICATION_RUNNER
+from .guardian_actions import ACTION_EXECUTORS
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 COMPATIBILITY_VERSION = 1
 LOW_CONFIDENCE = 0.65
 MAX_HISTORY = 100
 MAX_HISTORY_AGE = 30 * 86400
+NOTIFY_THROTTLE_S = 6 * 3600
+_PROBE_ERRORS = (
+    OSError, ValueError, TypeError, AttributeError, RuntimeError, KeyError,
+    subprocess.SubprocessError, ImportError,
+)
 MODEL_MANIFEST = Path("/usr/share/kyth/guardian-model.json")
 MODEL_SCHEMA = json.dumps({
     "type": "object",
@@ -100,7 +109,7 @@ RECIPES: dict[str, Recipe] = {
                ("systemctl", "--user", "restart", "pipewire.service", "pipewire-pulse.service", "wireplumber.service"),
                "safe", False, True, 900, "audio", "Open System Hub > Repair and inspect the audio stack."),
         Recipe("network.restart-user", "Restart the NetworkManager user integration", "network",
-               ("systemctl", "--user", "try-restart", "plasma-nm.service"),
+               ("systemctl", "--user", "restart", "plasma-nm.service"),
                "safe", False, True, 900, "network", "Open KDE Network Settings; saved connections are not changed."),
         Recipe("flatpak.refresh-metadata", "Refresh Flatpak metadata", "flatpak",
                ("flatpak", "update", "--appstream", "--user", "--noninteractive"),
@@ -126,19 +135,19 @@ RECIPES: dict[str, Recipe] = {
                ("flock", "-w", "10", "/run/kyth-fwupd.lock", "fwupdmgr", "refresh", "--force"),
                "safe", False, True, 43200, "firmware", "Refreshes LVFS metadata only; does not flash devices."),
         Recipe("display.reconfigure", "Re-apply display outputs", "display",
-               ("kscreen-doctor", "-o"),
-               "safe", False, True, 21600, "display", "Re-applies preferred mode after dock/HDR change; no reboot."),
+               ("systemctl", "--user", "restart", "plasma-kscreen.service"),
+               "safe", False, True, 21600, "display", "Restarts KScreen and enables connected outputs after dock/HDR change; no reboot."),
         Recipe("controller.repair", "Restart controller stack", "controller",
-               ("systemctl", "--user", "try-restart", "joycond.service"),
-               "safe", False, True, 21600, "controller", "Restarts joycond for drift after suspend; re-pair if needed."),
+               ("sudo", "-A", "systemctl", "restart", "joycond.service"),
+               "confirm", True, False, 21600, "controller", "Restarts system joycond after suspend; may ask for permission. Re-pair if needed."),
         Recipe("network.captive-fix", "Re-toggle networking for captive portals", "network",
-               ("bash", "-c", "nmcli networking off; sleep 2; nmcli networking on; nmcli connection up \"$(nmcli -t -f NAME connection show --active 2>/dev/null | head -n1)\" 2>/dev/null || true"),
+               ("nmcli", "networking", "off"),
                "safe", False, True, 1800, "network", "Re-toggles NetworkManager to clear captive portal / local-only state; saved connections kept."),
         Recipe("audio.sink-fallback", "Restore default audio sink", "audio",
-               ("bash", "-c", "pactl set-default-sink @DEFAULT_SINK@ 2>/dev/null; wpctl set-default @DEFAULT_AUDIO_SINK@ 2>/dev/null || systemctl --user try-restart pipewire-pulse.service 2>/dev/null || true"),
-               "safe", False, True, 900, "audio", "Falls back to the default sink after HDMI/headset swap; no data changed."),
+               ("pactl", "list", "short", "sinks"),
+               "safe", False, True, 900, "audio", "Falls back to the first real sink after HDMI/headset swap; no data changed."),
         Recipe("power.profile-fix", "Reset power profile to balanced", "power",
-               ("bash", "-c", "powerprofilesctl set balanced 2>/dev/null || powerprofilesctl set performance 2>/dev/null || true"),
+               ("powerprofilesctl", "set", "balanced"),
                "safe", False, True, 3600, "power", "Resets stuck power profile after driver update; no reboot."),
         Recipe("thermal.notify", "Thermal throttling detected", "thermal", tuple(),
                "advisory", False, False, 3600, "thermal", "System is hot — close heavy tasks and check vents; Guardian resumes after cooldown."),
@@ -146,11 +155,11 @@ RECIPES: dict[str, Recipe] = {
                "advisory", False, False, 86400, "storage", "SMART reports reallocated/pending sectors — back up and check Disks."),
         Recipe("memory.pressure-relief", "Memory pressure high", "memory", tuple(),
                "advisory", False, False, 3600, "memory", "High PSI / low MemAvailable — close heavy apps; Guardian pauses auto-fixes until pressure drops."),
-        Recipe("network.vpn-fix", "Restart VPN connection", "network",
-               ("python3", "-c", "import re,sys; import subprocess as _sp; out=_sp.run(['nmcli','-t','-f','NAME,TYPE','connection','show'], capture_output=True, text=True, timeout=5); vpns=[l.split(':')[0] for l in (out.stdout or '').splitlines() if l.endswith(':vpn') and re.fullmatch(r'[A-Za-z0-9 _.-]+', l.split(':')[0])];  sys.exit(0 if not vpns else _sp.run(['nmcli','connection','up',vpns[0]], capture_output=True, timeout=10).returncode)"),
-               "safe", False, True, 1800, "network", "Re-establishes VPN after captive-portal hop; name validated [A-Za-z0-9 _.-], no shell interp."),
+        Recipe("network.vpn-fix", "Restart always-on VPN connection", "network",
+               ("nmcli", "-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"),
+               "safe", False, True, 1800, "network", "Re-establishes an autoconnect VPN after a captive-portal hop; idle VPN profiles are left alone."),
         Recipe("network.dns-flush", "Flush DNS cache", "network",
-               ("bash", "-c", "resolvectl flush-caches 2>/dev/null; systemd-resolve --flush-caches 2>/dev/null || true"),
+               ("resolvectl", "flush-caches"),
                "safe", False, True, 1800, "network", "Flushes systemd-resolved cache after portal/DNS change."),
         Recipe("update.review-health", "Review update health", "updates", tuple(),
                "advisory", False, False, 3600, "updates", "Run ujust update-health; rollback remains controlled by boot health."),
@@ -239,189 +248,280 @@ def _active(unit: str, *, user: bool = False) -> bool:
     return bool(result and result.returncode == 0)
 
 
-def collect_symptoms() -> list[Symptom]:
-    symptoms: list[Symptom] = []
+def _unit_loaded(unit: str, *, user: bool = False) -> bool:
+    command = ["systemctl"] + (["--user"] if user else []) + ["show", "-p", "LoadState", "--value", unit]
+    result = _run(command, 4)
+    return bool(result and (result.stdout or "").strip() == "loaded")
+
+
+def _probe_collect(name: str, collector: Callable[[], list[Symptom] | None]) -> list[Symptom]:
+    """Run one probe; a failure never aborts the rest of the scan."""
+    try:
+        found = collector()
+        return list(found) if found else []
+    except _PROBE_ERRORS:
+        logger.debug("guardian probe %s failed", name, exc_info=True)
+        return []
+
+
+def _audio_default_sink_ok(sink_name: str) -> bool:
+    name = (sink_name or "").strip()
+    return bool(name) and name not in {"auto_null", "@DEFAULT_SINK@"}
+
+
+def _probe_audio() -> list[Symptom]:
     audio_down = [unit for unit in ("pipewire.service", "wireplumber.service") if not _active(unit, user=True)]
     if audio_down:
-        symptoms.append(Symptom("audio", f"Inactive user services: {', '.join(audio_down)}", ("audio.restart",)))
-    else:
-        # Audio services up but default sink missing (HDMI/headset swap) → fallback
-        sink = _run(("pactl", "get-default-sink"), 4)
-        if sink is not None and sink.returncode != 0:
-            symptoms.append(Symptom("audio", f"Default audio sink missing: {(sink.stderr or sink.stdout or '').strip()[:80]}", ("audio.sink-fallback",)))
-        elif sink is not None and (
-            not (sink.stdout or "").strip()
-            or (sink.stdout or "").strip() in {"auto_null", "@DEFAULT_SINK@"}
-        ):
-            name = (sink.stdout or "").strip() or "empty"
-            symptoms.append(Symptom("audio", f"Audio sink is dummy or unset ({name}) — headset/HDMI swap", ("audio.sink-fallback",)))
+        return [Symptom("audio", f"Inactive user services: {', '.join(audio_down)}", ("audio.restart",))]
+    sink = _run(("pactl", "get-default-sink"), 4)
+    if sink is None:
+        return []
+    if sink.returncode != 0:
+        return [Symptom("audio", f"Default audio sink missing: {(sink.stderr or sink.stdout or '').strip()[:80]}",
+                        ("audio.sink-fallback",))]
+    name = (sink.stdout or "").strip()
+    if not _audio_default_sink_ok(name):
+        return [Symptom("audio", f"Audio sink is dummy or unset ({name or 'empty'}) — headset/HDMI swap",
+                        ("audio.sink-fallback",))]
+    return []
+
+
+def _probe_network() -> list[Symptom]:
     nm = _run(("nmcli", "-t", "-f", "STATE", "general"), 5)
-    if nm and nm.returncode == 0:
-        st = nm.stdout.strip()
-        if st == "connected (local only)":
-            symptoms.append(Symptom("network", f"NetworkManager state: {st} (captive portal)", ("network.captive-fix",)))
-        elif st not in {"connected", "connecting"}:
-            symptoms.append(Symptom("network", f"NetworkManager state: {st}", ("network.restart-user",)))
+    if not nm or nm.returncode != 0:
+        return []
+    st = (nm.stdout or "").strip()
+    if st == "connected (local only)":
+        return [Symptom("network", f"NetworkManager state: {st} (captive portal)", ("network.captive-fix",))]
+    if st not in {"connected", "connecting"}:
+        return [Symptom("network", f"NetworkManager state: {st}", ("network.restart-user",))]
+    return []
+
+
+def _probe_bluetooth() -> list[Symptom]:
     if not _active("bluetooth.service"):
-        symptoms.append(Symptom("bluetooth", "Bluetooth service is inactive", ("bluetooth.restart",)))
-    # Portals: file choosers / screen sharing break when either portal is down
-    portal_down = [unit for unit in ("xdg-desktop-portal.service", "xdg-desktop-portal-kde.service") if not _active(unit, user=True)]
+        return [Symptom("bluetooth", "Bluetooth service is inactive", ("bluetooth.restart",))]
+    return []
+
+
+def _probe_portal() -> list[Symptom]:
+    portal_down = [unit for unit in ("xdg-desktop-portal.service", "xdg-desktop-portal-kde.service")
+                   if not _active(unit, user=True)]
     if portal_down:
-        symptoms.append(Symptom("portal", f"Inactive portal services: {', '.join(portal_down)}", ("portal.restart-user",)))
+        return [Symptom("portal", f"Inactive portal services: {', '.join(portal_down)}", ("portal.restart-user",))]
+    return []
+
+
+def _probe_plasma() -> list[Symptom]:
     if not _active("plasma-plasmashell.service", user=True):
-        symptoms.append(Symptom("plasma", "Plasma shell service is inactive", ("plasma.restart-user",)))
+        return [Symptom("plasma", "Plasma shell service is inactive", ("plasma.restart-user",))]
+    return []
+
+
+def _probe_flatpak() -> list[Symptom]:
     flatpak = _run(("flatpak", "list", "--app", "--columns=application"), 10)
     if flatpak and flatpak.returncode != 0:
-        symptoms.append(Symptom("flatpak", f"Flatpak query failed: {flatpak.stderr.strip()}",
-                                ("flatpak.refresh-metadata", "flatpak.repair-user")))
-    # Check both home and root — home may be separate partition, root fill (ostree, flatpak) otherwise invisible
-    # Ignore tiny read-only images (composefs 46M at /run/host, always 100% by design on bootc)
-    # that would otherwise flood guardian and hit the .path trigger limit.
+        return [Symptom("flatpak", f"Flatpak query failed: {(flatpak.stderr or '').strip()}",
+                        ("flatpak.refresh-metadata", "flatpak.repair-user"))]
+    return []
+
+
+def _probe_storage() -> list[Symptom]:
+    # Home may be a separate partition; skip tiny composefs images that are 100% by design.
     for check_path, label in ((Path.home(), "Home"), (Path("/"), "Root")):
         try:
             usage = shutil.disk_usage(check_path)
-            # Skip small filesystems — real desktops have >>10GiB; composefs is 46M.
-            if usage.total < 2 * 1024**3:
-                continue
-            percent = int(100 * usage.used / usage.total)
-            if percent >= 90 or usage.free < 5 * 1024**3:
-                # Feedback bias: if user said storage.maint not helpful 2×, fall back to advisory
-                try:
-                    _fb = load_state().get("feedback", {}).get("storage.maint", {})
-                    if int(_fb.get("unhelpful", 0)) >= 2:
-                        symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("disk.review",), "error"))
-                        break
-                except (OSError, ValueError, AttributeError):
-                    pass
-                # Prefer gated maint when binaries exist, fall back to advisory
-                if shutil.which("kyth-btrfs-maint") or Path("/usr/bin/kyth-btrfs-maint").exists() or Path("/usr/libexec/kyth-storage-gate").exists():
-                    symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("storage.maint",), "error"))
-                else:
-                    symptoms.append(Symptom("storage", f"{label} filesystem is {percent}% full", ("disk.review",), "error"))
-                break
         except OSError:
             continue
-    # Firmware metadata staleness — fwupdmgr get-updates failure is the canary
+        if usage.total < 2 * 1024**3:
+            continue
+        percent = int(100 * usage.used / usage.total)
+        if percent < 90 and usage.free >= 5 * 1024**3:
+            continue
+        try:
+            feedback = load_state().get("feedback", {}).get("storage.maint", {})
+            if int(feedback.get("unhelpful", 0)) >= 2:
+                return [Symptom("storage", f"{label} filesystem is {percent}% full", ("disk.review",), "error")]
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+        if (shutil.which("kyth-btrfs-maint") or Path("/usr/bin/kyth-btrfs-maint").exists()
+                or Path("/usr/libexec/kyth-storage-gate").exists()):
+            return [Symptom("storage", f"{label} filesystem is {percent}% full", ("storage.maint",), "error")]
+        return [Symptom("storage", f"{label} filesystem is {percent}% full", ("disk.review",), "error")]
+    return []
+
+
+def _probe_firmware() -> list[Symptom]:
     fw = _run(("fwupdmgr", "get-updates"), 8)
     if fw and fw.returncode != 0 and "No detected" not in (fw.stdout or ""):
-        # get-updates fails when metadata stale or LVFS unreachable; refresh is safe
-        symptoms.append(Symptom("firmware", f"Firmware metadata refresh needed: {fw.stderr.strip()[:120]}", ("firmware.refresh",)))
-    # Display drift after dock/HDR — kscreen-doctor shows disconnected or low-res
+        return [Symptom("firmware", f"Firmware metadata refresh needed: {(fw.stderr or '').strip()[:120]}",
+                        ("firmware.refresh",))]
+    return []
+
+
+def _probe_display() -> list[Symptom]:
+    kd = _run(("kscreen-doctor", "-o"), 5)
+    if kd is None:
+        return []
+    if kd.returncode != 0:
+        return [Symptom("display", f"kscreen-doctor failed: {(kd.stderr or '').strip()[:80]}",
+                        ("display.reconfigure",))]
+    out = kd.stdout or ""
+    if " connected" not in out or "enabled" not in out.lower():
+        return [Symptom("display", "Display output not correctly enabled after dock", ("display.reconfigure",))]
+    if "No such" in out or "Failed" in out:
+        return [Symptom("display", "kscreen-doctor reports display error", ("display.reconfigure",))]
+    return []
+
+
+def _probe_controller() -> list[Symptom]:
+    if not Path("/sys/class/bluetooth").exists():
+        return []
     try:
-        kd = _run(("kscreen-doctor", "-o"), 5)
-        if kd and kd.returncode == 0:
-            out = kd.stdout or ""
-            # connected check: if no " connected" line with "enabled", re-apply
-            if " connected" not in out or "enabled" not in out.lower():
-                symptoms.append(Symptom("display", "Display output not correctly enabled after dock", ("display.reconfigure",)))
-            elif "No such" in out or "Failed" in out:
-                symptoms.append(Symptom("display", "kscreen-doctor reports display error", ("display.reconfigure",)))
-        elif kd and kd.returncode != 0:
-            symptoms.append(Symptom("display", f"kscreen-doctor failed: {(kd.stderr or '').strip()[:80]}", ("display.reconfigure",)))
-    except (OSError, ValueError, AttributeError):
-        pass
-    # Controller drift after suspend — joycond inactive when BT controller paired
-    if not _active("joycond.service", user=False) and Path("/sys/class/bluetooth").exists():
-        # Only report if BT subsystem exists (has controller hardware)
+        has_bt = any(Path("/sys/class/bluetooth").iterdir())
+    except OSError:
+        return []
+    if not has_bt:
+        return []
+    if not _unit_loaded("joycond.service", user=False):
+        return []
+    if not _active("joycond.service", user=False):
+        return [Symptom("controller", "Controller stack (joycond) inactive", ("controller.repair",))]
+    return []
+
+
+def _probe_updates() -> list[Symptom]:
+    from .boot_health import read_state as read_boot_health
+    health = read_boot_health()
+    if health.status not in {"healthy", "unknown", "idle"} or health.failures:
+        return [Symptom("updates", f"Boot health is {health.status}; failures={health.failures}",
+                        ("update.review-health",), "error")]
+    return []
+
+
+def _probe_power() -> list[Symptom]:
+    pp = _run(("powerprofilesctl", "get"), 4)
+    if pp is None:
+        return []
+    if pp.returncode != 0 and "No power" not in (pp.stdout or ""):
+        return [Symptom("power", f"Power profile unavailable: {(pp.stderr or '').strip()[:80]}",
+                        ("power.profile-fix",))]
+    if pp.returncode == 0 and (pp.stdout or "").strip() not in {"balanced", "performance", "power-saver"}:
+        return [Symptom("power", f"Power profile unexpected: {(pp.stdout or '').strip()[:40]}",
+                        ("power.profile-fix",))]
+    return []
+
+
+def _probe_thermal() -> list[Symptom]:
+    for tpath in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
         try:
-            has_bt = any(Path("/sys/class/bluetooth").iterdir())
-            if has_bt:
-                symptoms.append(Symptom("controller", "Controller stack (joycond) inactive", ("controller.repair",)))
-        except OSError:
-            pass
-    try:
-        from .boot_health import read_state as read_boot_health
-        health = read_boot_health()
-        if health.status not in {"healthy", "unknown", "idle"} or health.failures:
-            symptoms.append(Symptom("updates", f"Boot health is {health.status}; failures={health.failures}",
-                                    ("update.review-health",), "error"))
-    except (OSError, ValueError, AttributeError):
-        pass
-    # Power profile stuck (after update) — powerprofilesctl reports unavailable
-    try:
-        pp = _run(("powerprofilesctl", "get"), 4)
-        if pp and pp.returncode != 0 and "No power" not in (pp.stdout or ""):
-            symptoms.append(Symptom("power", f"Power profile unavailable: {(pp.stderr or '').strip()[:80]}", ("power.profile-fix",)))
-        elif pp and pp.returncode == 0 and (pp.stdout or "").strip() not in {"balanced", "performance", "power-saver"}:
-            symptoms.append(Symptom("power", f"Power profile unexpected: {(pp.stdout or '').strip()[:40]}", ("power.profile-fix",)))
-    except (OSError, ValueError, AttributeError):
-        pass
-    # Thermal pressure — advisory only, never auto-executes
-    try:
-        for tpath in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
-            try:
-                if int(tpath.read_text().strip()) >= 85_000:
-                    symptoms.append(Symptom("thermal", "Thermal throttling risk — system hot", ("thermal.notify",), "error"))
-                    break
-            except (OSError, ValueError):
-                continue
-    except (OSError, AttributeError):
-        pass
-    # SMART predictive — advisory, checks pending/reallocated via smartctl if present
-    try:
-        if shutil.which("smartctl"):
-            sm = _run(("smartctl", "--json", "scan"), 6)
-            if sm and sm.returncode == 0:
-                try:
-                    scan = json.loads(sm.stdout or "{}")
-                    for dev in (scan.get("devices") or [])[:2]:
-                        dname = dev.get("name", "")
-                        if not dname:
-                            continue
-                        health = _run(("smartctl", "-H", "--json", dname), 6)
-                        if health and health.returncode == 0 and "FAILED" in (health.stdout or ""):
-                            symptoms.append(Symptom("storage", f"SMART health failed on {dname}", ("storage.smart-warn",), "error"))
-                            break
-                except (ValueError, TypeError, AttributeError):
-                    pass
-    except (OSError, AttributeError):
-        pass
-    # Memory pressure — advisory, PSI or MemAvailable low but not yet suppressing
-    try:
-        low_mem = False
-        try:
-            mi = Path("/proc/meminfo").read_text(encoding="utf-8")
-            m = re.search(r"^MemAvailable:\s+(\d+)", mi, re.MULTILINE)
-            if m and int(m.group(1)) < 600_000:
-                low_mem = True
-        except OSError:
-            pass
-        try:
-            psi = Path("/proc/pressure/memory").read_text(encoding="utf-8")
-            # some avg10 > 30 indicates sustained pressure
-            if "avg10=" in psi:
-                vals = re.findall(r"avg10=([\d.]+)", psi)
-                if any(float(v) > 30 for v in vals):
-                    low_mem = True
+            if int(tpath.read_text().strip()) >= 85_000:
+                return [Symptom("thermal", "Thermal throttling risk — system hot", ("thermal.notify",), "error")]
         except (OSError, ValueError):
-            pass
-        if low_mem:
-            # Only report if not already suppressed (suppression is <1.8M, this is <600k + PSI)
-            symptoms.append(Symptom("memory", "Memory pressure high — close heavy apps", ("memory.pressure-relief",), "warning"))
-    except (OSError, AttributeError):
-        pass
-    # VPN/DNS after portal — nmcli shows vpn disconnected or resolvectl failure
+            continue
+    return []
+
+
+def _probe_smart() -> list[Symptom]:
+    if not shutil.which("smartctl"):
+        return []
+    sm = _run(("smartctl", "--json", "scan"), 6)
+    if not sm or sm.returncode != 0:
+        return []
+    scan = json.loads(sm.stdout or "{}")
+    for dev in (scan.get("devices") or [])[:2]:
+        dname = dev.get("name", "")
+        if not dname:
+            continue
+        health = _run(("smartctl", "-H", "--json", dname), 6)
+        if health and health.returncode == 0 and "FAILED" in (health.stdout or ""):
+            return [Symptom("storage", f"SMART health failed on {dname}", ("storage.smart-warn",), "error")]
+    return []
+
+
+def _probe_memory() -> list[Symptom]:
+    low_mem = False
     try:
-        vpn_state = _run(("nmcli", "-t", "-f", "TYPE,STATE", "connection", "show", "--active"), 5)
-        if vpn_state and vpn_state.returncode == 0 and "vpn:activated" not in (vpn_state.stdout or ""):
-            # Check if any VPN connection exists but not activated while network is connected
-            all_vpn = _run(("nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"), 5)
-            if all_vpn and ":vpn" in (all_vpn.stdout or ""):
-                # Network is up but VPN not active → suggest vpn-fix
-                nm2 = _run(("nmcli", "-t", "-f", "STATE", "general"), 4)
-                if nm2 and (nm2.stdout or "").strip() in {"connected", "connected (local only)"}:
-                    symptoms.append(Symptom("network", "VPN connection inactive while network is connected", ("network.vpn-fix", "network.dns-flush")))
-        # DNS stale: resolvectl status shows failed or empty
-        try:
-            dns = _run(("resolvectl", "status"), 5)
-            if dns and dns.returncode != 0:
-                # resolvectl failure after portal change → dns-flush
-                if any(s.component == "network" and "captive" in s.evidence for s in symptoms):
-                    symptoms.append(Symptom("network", "DNS cache may be stale after portal change", ("network.dns-flush",)))
-        except (OSError, ValueError, AttributeError):
-            pass
-    except (OSError, ValueError, AttributeError):
+        meminfo = Path("/proc/meminfo").read_text(encoding="utf-8")
+        match = re.search(r"^MemAvailable:\s+(\d+)", meminfo, re.MULTILINE)
+        if match and int(match.group(1)) < 600_000:
+            low_mem = True
+    except OSError:
         pass
+    try:
+        psi = Path("/proc/pressure/memory").read_text(encoding="utf-8")
+        if "avg10=" in psi:
+            vals = re.findall(r"avg10=([\d.]+)", psi)
+            if any(float(v) > 30 for v in vals):
+                low_mem = True
+    except (OSError, ValueError):
+        pass
+    if low_mem:
+        return [Symptom("memory", "Memory pressure high — close heavy apps", ("memory.pressure-relief",), "warning")]
+    return []
+
+
+def _probe_vpn() -> list[Symptom]:
+    """Only always-on (autoconnect) VPNs that failed to come up — idle profiles are not a fault."""
+    nm = _run(("nmcli", "-t", "-f", "STATE", "general"), 4)
+    if not nm or (nm.stdout or "").strip() not in {"connected", "connected (local only)"}:
+        return []
+    listed = _run(("nmcli", "-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"), 5)
+    if not listed or listed.returncode != 0:
+        return []
+    active = _run(("nmcli", "-t", "-f", "NAME,TYPE", "connection", "show", "--active"), 5)
+    active_vpn: set[str] = set()
+    if active and active.returncode == 0:
+        for line in (active.stdout or "").splitlines():
+            parts = line.split(":")
+            if len(parts) >= 2 and parts[-1] == "vpn":
+                active_vpn.add(":".join(parts[:-1]))
+    pending: list[str] = []
+    for line in (listed.stdout or "").splitlines():
+        parts = line.split(":")
+        if len(parts) < 3:
+            continue
+        name, conn_type, autoconnect = ":".join(parts[:-2]), parts[-2], parts[-1].lower()
+        if conn_type == "vpn" and autoconnect == "yes" and name not in active_vpn:
+            pending.append(name)
+    if pending:
+        return [Symptom("network", "Always-on VPN is disconnected while the network is up",
+                        ("network.vpn-fix", "network.dns-flush"))]
+    return []
+
+
+def _probe_dns(existing: list[Symptom]) -> list[Symptom]:
+    if not any(item.component == "network" and "captive" in item.evidence for item in existing):
+        return []
+    dns = _run(("resolvectl", "status"), 5)
+    if dns and dns.returncode != 0:
+        return [Symptom("network", "DNS cache may be stale after portal change", ("network.dns-flush",))]
+    return []
+
+
+def collect_symptoms() -> list[Symptom]:
+    """Gather desktop health symptoms. One probe failure never skips the rest."""
+    symptoms: list[Symptom] = []
+    for name, collector in (
+        ("audio", _probe_audio),
+        ("network", _probe_network),
+        ("bluetooth", _probe_bluetooth),
+        ("portal", _probe_portal),
+        ("plasma", _probe_plasma),
+        ("flatpak", _probe_flatpak),
+        ("storage", _probe_storage),
+        ("firmware", _probe_firmware),
+        ("display", _probe_display),
+        ("controller", _probe_controller),
+        ("updates", _probe_updates),
+        ("power", _probe_power),
+        ("thermal", _probe_thermal),
+        ("smart", _probe_smart),
+        ("memory", _probe_memory),
+        ("vpn", _probe_vpn),
+    ):
+        symptoms.extend(_probe_collect(name, collector))
+    symptoms.extend(_probe_collect("dns", lambda: _probe_dns(symptoms)))
     return symptoms
 
 
@@ -611,27 +711,40 @@ def infer(symptoms: list[Symptom], state: dict[str, Any], *, force: bool = False
     return parse_model_decision(result.stdout, allowed)
 
 
-def can_execute(decision: Decision, config: dict[str, Any], state: dict[str, Any]) -> tuple[bool, str]:
+def can_execute(
+    decision: Decision,
+    config: dict[str, Any],
+    state: dict[str, Any],
+    *,
+    user_initiated: bool = False,
+) -> tuple[bool, str]:
     recipe = RECIPES.get(decision.recipe_id)
     if recipe is None:
         return False, "unknown recipe"
     if decision.confidence < LOW_CONFIDENCE:
         return False, "low confidence"
-    if not config.get("automatic_safe_fixes"):
-        return False, "automatic safe fixes are disabled"
-    if recipe.risk != "safe" or recipe.requires_auth or not recipe.automatic or not recipe.command:
+    if not recipe.command:
         return False, "confirmation required"
+    if user_initiated:
+        if recipe.risk not in {"safe", "confirm"}:
+            return False, "confirmation required"
+    else:
+        if not config.get("automatic_safe_fixes"):
+            return False, "automatic safe fixes are disabled"
+        if recipe.risk != "safe" or recipe.requires_auth or not recipe.automatic:
+            return False, "confirmation required"
+        if int(state.get("occurrences", {}).get(recipe.component, 0)) < 2:
+            return False, "waiting for a second consecutive failure"
     # Feedback bias: if user marked this recipe unhelpful >=2, skip auto
     feedback = state.get("feedback", {}).get(recipe.id, {})
     if int(feedback.get("unhelpful", 0)) >= 2:
         return False, "user feedback indicates not helpful — falling back to advisory"
-    if int(state.get("occurrences", {}).get(recipe.component, 0)) < 2:
-        return False, "waiting for a second consecutive failure"
     last = max((float(item.get("timestamp", 0)) for item in state.get("history", [])
-                if item.get("recipe_id") == recipe.id and item.get("action") == "executed"), default=0)
+                if item.get("recipe_id") == recipe.id
+                and item.get("action") == "executed"
+                and item.get("verified") is not False), default=0)
     if time.time() - last < recipe.cooldown:
         return False, "repair cooldown is active"
-    # Gaming/performance suppression — check before each execution
     reason = suppression_reason()
     if reason:
         return False, f"suppressed: {reason}"
@@ -650,7 +763,13 @@ def record_feedback(recipe_id: str, helpful: bool) -> None:
     save_state(state)
 
 
-def execute_chain(recipe_ids: list[str], config: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+def execute_chain(
+    recipe_ids: list[str],
+    config: dict[str, Any],
+    state: dict[str, Any],
+    *,
+    user_initiated: bool = False,
+) -> list[dict[str, Any]]:
     """Execute recipes sequentially as a gated chain, one history entry.
 
     Respects per-recipe can_execute (cooldown, feedback, suppression) and
@@ -675,11 +794,11 @@ def execute_chain(recipe_ids: list[str], config: dict[str, Any], state: dict[str
             chain_entry["results"].append({"recipe_id": rid, "action": "skipped", "detail": "unknown recipe"})
             continue
         decision = Decision(rid, 1.0, f"Chain {rid}")
-        allowed, why = can_execute(decision, config, state)
+        allowed, why = can_execute(decision, config, state, user_initiated=user_initiated)
         if not allowed:
             chain_entry["results"].append({"recipe_id": rid, "action": "skipped", "detail": why})
             continue
-        ok, detail = execute_recipe(rid)
+        ok, detail = execute_recipe(rid, user_initiated=user_initiated)
         verified = ok and verify_recipe(rid) if ok else False
         chain_entry["results"].append({"recipe_id": rid, "action": "executed", "ok": ok, "verified": verified, "detail": detail})
         # Record per-recipe history for cooldown tracking
@@ -697,20 +816,32 @@ def execute_chain(recipe_ids: list[str], config: dict[str, Any], state: dict[str
     return chain_entry["results"]
 
 
-def execute_recipe(recipe_id: str) -> tuple[bool, str]:
+def execute_recipe(recipe_id: str, *, user_initiated: bool = False) -> tuple[bool, str]:
     recipe = RECIPES.get(recipe_id)
-    if recipe is None or recipe.risk != "safe" or recipe.requires_auth or not recipe.command:
+    if recipe is None or not recipe.command:
         return False, "recipe is not eligible for automatic execution"
+    if user_initiated:
+        if recipe.risk not in {"safe", "confirm"}:
+            return False, "recipe is not eligible for automatic execution"
+    elif recipe.risk != "safe" or recipe.requires_auth:
+        return False, "recipe is not eligible for automatic execution"
+    executor = ACTION_EXECUTORS.get(recipe_id)
+    if executor is not None:
+        ok, detail = executor(_run)
+        return ok, redact(detail)[:400]
     result = _run(recipe.command, 30)
     if result is None:
         return False, "repair failed to start"
-    return result.returncode == 0, redact((result.stderr or result.stdout).strip())[:400]
+    return result.returncode == 0, redact((result.stderr or result.stdout or "").strip())[:400]
 
 
 def verify_recipe(recipe_id: str) -> bool:
     """Re-run only the focused, bounded check associated with a repair."""
     recipe = RECIPES[recipe_id]
     if recipe.verification == "audio":
+        if recipe_id == "audio.sink-fallback":
+            sink = _run(("pactl", "get-default-sink"), 4)
+            return bool(sink and sink.returncode == 0 and _audio_default_sink_ok(sink.stdout or ""))
         return _active("pipewire.service", user=True) and _active("wireplumber.service", user=True)
     if recipe.verification == "network":
         result = _run(("nmcli", "-t", "-f", "STATE", "general"), 5)
@@ -767,13 +898,46 @@ def verify_recipe(recipe_id: str) -> bool:
     return False
 
 
+def pending_recommendations(
+    state: dict[str, Any] | None = None,
+    *,
+    now: float | None = None,
+    window: float = NOTIFY_THROTTLE_S,
+) -> list[dict[str, Any]]:
+    """Latest per-recipe history inside *window* whose action is still recommended.
+
+    Used by Hub's mission bar and sidebar badge so new issues appear immediately
+    and resolved recipes drop off, matching the 6h notification window.
+    """
+    if state is None:
+        state = load_state()
+    moment = time.time() if now is None else now
+    latest: dict[str, dict[str, Any]] = {}
+    for item in state.get("history", []):
+        if not isinstance(item, dict):
+            continue
+        recipe_id = item.get("recipe_id")
+        if not recipe_id:
+            continue
+        try:
+            timestamp = float(item.get("timestamp", 0))
+        except (TypeError, ValueError):
+            continue
+        if moment - timestamp > window:
+            continue
+        previous = latest.get(str(recipe_id))
+        if previous is None or timestamp >= float(previous.get("timestamp", 0)):
+            latest[str(recipe_id)] = item
+    return [item for item in latest.values() if item.get("action") == "recommended"]
+
+
 def _notify(records: list[dict[str, Any]], config: dict[str, Any], state: dict[str, Any]) -> None:
     if not config.get("notifications") or not records or not shutil.which("notify-send"):
         return
     now = time.time()
     notified = state.setdefault("notifications", {})
     fresh = [record for record in records
-             if now - float(notified.get(record["recipe_id"], 0)) >= 6 * 3600]
+             if now - float(notified.get(record["recipe_id"], 0)) >= NOTIFY_THROTTLE_S]
     executed = [record for record in fresh if record["action"] == "executed"]
     unresolved = [record for record in fresh if record["action"] == "recommended"]
     if executed:
@@ -791,6 +955,7 @@ def check(
     *,
     investigate: bool = False,
     automatic: bool = True,
+    user_initiated: bool = False,
     components: set[str] | frozenset[str] | None = None,
     recipe_ids: set[str] | frozenset[str] | None = None,
 ) -> dict[str, Any]:
@@ -811,13 +976,11 @@ def check(
             decisions.append(model)
     if recipe_ids is not None:
         decisions = [decision for decision in decisions if decision.recipe_id in recipe_ids]
+    apply = automatic or user_initiated
     # Healing chain: storage.maint → firmware.refresh as one coalesced run when both present
-    # Respects per-recipe cooldown/feedback/suppression inside execute_chain
     chain_ids = [d.recipe_id for d in decisions if d.recipe_id in ("storage.maint", "firmware.refresh")]
-    if automatic and len(chain_ids) >= 2 and not suppression_reason():
-        # Run as chain, not two separate decisions
-        chain_results = execute_chain(chain_ids, config, state)
-        # execute_chain already wrote per-recipe + coalesced history; surface as results
+    if apply and len(chain_ids) >= 2 and not suppression_reason():
+        chain_results = execute_chain(chain_ids, config, state, user_initiated=user_initiated)
         results = []
         for cr in chain_results:
             results.append({
@@ -826,17 +989,16 @@ def check(
                 "explanation": f"Chain {cr['recipe_id']}", "action": cr["action"],
                 "verified": cr.get("verified"), "detail": cr.get("detail", ""),
             })
-        # Remove chain ids from individual decision loop
         decisions = [d for d in decisions if d.recipe_id not in chain_ids]
     else:
         results = []
     for decision in decisions:
-        allowed, reason = can_execute(decision, config, state)
+        allowed, reason = can_execute(decision, config, state, user_initiated=user_initiated)
         action = "recommended"
         verified = None
         detail = reason
-        if automatic and allowed:
-            ok, detail = execute_recipe(decision.recipe_id)
+        if apply and allowed:
+            ok, detail = execute_recipe(decision.recipe_id, user_initiated=user_initiated)
             action = "executed"
             verified = ok and verify_recipe(decision.recipe_id)
             if ok and not verified:
@@ -852,12 +1014,27 @@ def check(
     state["last_check"] = time.time()
     _notify(results, config, state)
     save_state(state)
+    next_steps = []
+    for record in results:
+        recipe = RECIPES.get(str(record.get("recipe_id") or ""))
+        if recipe is None:
+            continue
+        next_steps.append({
+            "recipe_id": recipe.id,
+            "title": recipe.title,
+            "action": record.get("action"),
+            "recovery": recipe.recovery,
+            "verified": record.get("verified"),
+        })
     return {
         "schema_version": SCHEMA_VERSION,
         "enabled": bool(config.get("enabled")),
         "automatic_safe_fixes": bool(config.get("automatic_safe_fixes")),
+        "user_initiated": bool(user_initiated),
         "symptoms": [{**asdict(item), "evidence": redact(item.evidence)} for item in symptoms],
         "decisions": results,
+        "next_steps": next_steps,
+        "pending": pending_recommendations(state),
         "model": model_status(),
         "suppression_reason": suppression_reason(),
     }
@@ -875,10 +1052,15 @@ def model_status() -> dict[str, Any]:
 
 def status() -> dict[str, Any]:
     config, state = load_config(), load_state()
+    pending = pending_recommendations(state)
     return {"schema_version": SCHEMA_VERSION, **config, "last_check": state.get("last_check"),
             "history_count": len(state.get("history", [])), "model": model_status(),
+            "suppression_reason": suppression_reason(),
+            "pending_count": len(pending),
+            "pending": [{"recipe_id": item.get("recipe_id"), "detail": item.get("detail", "")} for item in pending],
             "recipes": [{"id": recipe.id, "title": recipe.title, "risk": recipe.risk,
-                         "requires_auth": recipe.requires_auth} for recipe in RECIPES.values()]}
+                         "requires_auth": recipe.requires_auth, "automatic": recipe.automatic}
+                        for recipe in RECIPES.values()]}
 
 
 def _print(value: Any, as_json: bool) -> None:
@@ -897,6 +1079,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("status")
     commands.add_parser("check")
     commands.add_parser("investigate")
+    commands.add_parser("fix")
     commands.add_parser("history")
     commands.add_parser("enable")
     commands.add_parser("disable")
@@ -914,6 +1097,8 @@ def main(argv: list[str] | None = None) -> int:
                 value = {"schema_version": SCHEMA_VERSION, "enabled": False, "skipped": True}
             else:
                 value = check(investigate=args.command == "investigate")
+        elif args.command == "fix":
+            value = check(investigate=False, automatic=True, user_initiated=True)
         elif args.command == "history":
             value = {"schema_version": SCHEMA_VERSION, "history": load_state().get("history", [])}
         elif args.command in {"enable", "disable"}:
