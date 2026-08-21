@@ -13,6 +13,22 @@ from .compat import phase_dependency
 from .finalize import _configure_installed_system, _handle_install_failure
 from .storage import _prepare_storage_for_plan
 
+
+def _require_secure_boot_ready(mok_state: object) -> None:
+    """Refuse DONE when CachyOS MOK staging failed on a Secure Boot machine.
+
+    The image may already be on disk. Failing closed still beats a success
+    screen that reboots into an unsigned CachyOS kernel the firmware will deny.
+    """
+    if mok_state == "failed":
+        raise RuntimeError(
+            "Secure Boot is enabled but KythOS could not stage MOK enrollment "
+            "for the CachyOS kernel. The installed system may not boot until "
+            "the KythOS key is enrolled. Disable Secure Boot, or from this "
+            "live session run 'ujust enroll-secureboot', then retry."
+        )
+
+
 def _run_install_worker(
     log, progress, alongside_mount, context: InstallerContext,
 ):
@@ -63,6 +79,7 @@ def _run_install_worker(
         log("── Phase 3: Staging Secure Boot enrollment ───────────────────────")
         context.enter_phase(InstallPhase.SECURE_BOOT)
         mok_state = _try_stage_mok_enrollment(log, resolved.kernel, resolved.request.mok_password)
+        _require_secure_boot_ready(mok_state)
 
         progress(100)
         context.enter_phase(InstallPhase.COMPLETE)

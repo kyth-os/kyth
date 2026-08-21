@@ -16,6 +16,10 @@ source "../../lib/config-helpers.sh"
 # last one we relabeled for. After first boot of a new deployment, subsequent
 # reboots skip it entirely. If a user needs to force a relabel, they can remove
 # /var/lib/kyth/selinux-relabel-home.stamp.
+#
+# Keep Before=sddm.service: unlabeled /var/home makes PAM/dbus deny login.
+# Cap the oneshot so a huge home cannot hang the greeter forever. The stamp is
+# written only after restorecon succeeds, so a timeout retries on the next boot.
 write_config /usr/lib/systemd/system/kyth-selinux-relabel-home.service <<'RELABELEOF'
 [Unit]
 Description=SELinux relabel /var/home (once per deployment)
@@ -28,6 +32,7 @@ ConditionSecurity=selinux
 Type=oneshot
 ExecStart=/usr/libexec/kyth-selinux-relabel-home
 RemainAfterExit=yes
+TimeoutStartSec=180
 
 [Install]
 WantedBy=multi-user.target

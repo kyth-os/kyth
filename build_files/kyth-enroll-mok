@@ -52,12 +52,15 @@ if "${MOKUTIL}" --list-new 2>/dev/null | grep -q "KythOS Secure Boot"; then
     exit 0
 fi
 
-# Stage the enrollment — user confirms with password "kyth" in MokManager
+# Stage the enrollment — user confirms with password "kyth" in MokManager.
+# Do not stamp the flag on import failure: ConditionPathExists=!…/mok-enrolled
+# would otherwise skip every later boot and leave Secure Boot broken.
 echo "kyth-enroll-mok: staging Secure Boot MOK enrollment"
 if echo "kyth" | "${MOKUTIL}" --import "${CERT_DER}" --stdin-passwd; then
     echo "kyth-enroll-mok: enrollment staged — reboot and enter password 'kyth' at the MokManager screen"
-else
-    echo "kyth-enroll-mok: mokutil import failed (non-fatal)" >&2
+    touch "${FLAG}"
+    exit 0
 fi
 
-touch "${FLAG}"
+echo "kyth-enroll-mok: mokutil import failed — leaving service eligible for retry" >&2
+exit 1

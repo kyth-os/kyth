@@ -28,8 +28,17 @@ case "$1" in
             echo "CN=KythOS Secure Boot"
         fi
         ;;
+    --list-new)
+        if [[ "${MOCK_PENDING:-0}" == "1" ]]; then
+            echo "CN=KythOS Secure Boot"
+        fi
+        ;;
     --import)
         cat >/dev/null
+        if [[ "${MOCK_IMPORT_FAIL:-0}" == "1" ]]; then
+            echo "import failed" >&2
+            exit 1
+        fi
         echo "import $2" >> "${MOCK_LOG}"
         ;;
     *)
@@ -44,6 +53,7 @@ run_enroller() {
 	MOCK_LOG="${LOG}" \
 		MOCK_SB_ENABLED="${1}" \
 		MOCK_ENROLLED="${2}" \
+		MOCK_IMPORT_FAIL="${MOCK_IMPORT_FAIL:-0}" \
 		KYTH_MOK_CERT_DER="${CERT}" \
 		KYTH_MOK_FLAG="${FLAG}" \
 		KYTH_MOKUTIL="${MOKUTIL}" \
@@ -78,6 +88,18 @@ if [[ ! -f "${FLAG}" ]]; then
 fi
 if [[ -s "${LOG}" ]]; then
 	echo "already-enrolled path should not import again" >&2
+	exit 1
+fi
+
+rm -f "${FLAG}" "${LOG}"
+enroll_status=0
+MOCK_IMPORT_FAIL=1 run_enroller 1 0 || enroll_status=$?
+if [[ "${enroll_status}" -eq 0 ]]; then
+	echo "failed mokutil import should exit non-zero" >&2
+	exit 1
+fi
+if [[ -f "${FLAG}" ]]; then
+	echo "failed mokutil import should not create enrollment marker" >&2
 	exit 1
 fi
 
