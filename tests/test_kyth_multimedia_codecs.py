@@ -15,16 +15,14 @@ class MultimediaCodecPackageTests(unittest.TestCase):
         self.assertIn("gstreamer1-plugin-libav", body)
         self.assertIn("gstreamer1-vaapi", body)
         # Fail-closed check must query the real RPM name.
-        self.assertIn("gstreamer1-plugin-libav", body.split("required_codec_rpms=(")[1].split(")")[0])
-        # Must not use --skip-unavailable on the required install (hides gaps).
-        required_install = [
-            line
-            for line in body.splitlines()
-            if "dnf5 install" in line and "allowerasing" in line
-        ]
-        self.assertTrue(required_install)
-        self.assertTrue(all("--skip-unavailable" not in line for line in required_install))
-        self.assertTrue(any("disablerepo=fedora-multimedia" in line for line in required_install))
+        required_block = body.split("required_codec_rpms=(")[1].split(")")[0]
+        self.assertIn("gstreamer1-plugin-libav", required_block)
+        self.assertNotIn("gstreamer1-libav\n", required_block)
+        # Required install must disable multimedia and must not skip-unavailable.
+        self.assertIn("--disablerepo=fedora-multimedia", body)
+        # The required dnf5 install block (through mozilla-openh264) must not skip.
+        install_block = body.split("dnf5 install -y --allowerasing")[1].split("mozilla-openh264")[0]
+        self.assertNotIn("--skip-unavailable", install_block)
 
     def test_hygiene_removes_multimedia_repo_files(self):
         body = HYGIENE.read_text(encoding="utf-8")
