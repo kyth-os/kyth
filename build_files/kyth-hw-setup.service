@@ -26,7 +26,12 @@ SystemCallFilter=@system-service
 SystemCallArchitectures=native
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-PrivateUsers=yes
+# PrivateUsers deliberately absent: this unit's hardware_policy.py path shells out to
+# `sudo -n kyth-bootc-guard status-json` for the booted digest. Even running
+# as root already (no privilege to gain), a private user namespace remaps
+# that root to an unprivileged UID outside it, so the real-root ownership
+# check on /etc/sudoers fails — "unable to open /etc/sudoers: Invalid
+# argument" on every run (see kyth_shared/system/bootc_query.py).
 UMask=0077
 ProtectSystem=strict
 CacheDirectory=kyth

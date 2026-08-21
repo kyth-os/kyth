@@ -29,8 +29,14 @@ CPUQuota=25%
 MemoryHigh=384M
 MemoryMax=512M
 PrivateTmp=yes
-PrivateUsers=yes
-NoNewPrivileges=yes
+# PrivateUsers and NoNewPrivileges deliberately absent: this runs per-user (systemctl
+# --global enable, WantedBy=graphical-session.target) and switches profiles
+# via `sudo -n /usr/bin/kyth-scx` (see kyth-sched:97). NNP blocks the kernel
+# from honoring sudo's setuid bit at exec for a non-root caller outright,
+# and PrivateUsers remaps this user's real UID to an unprivileged one
+# outside the namespace even if it somehow got through — either one alone
+# breaks the escalation ("unable to open /etc/sudoers: Invalid argument"),
+# so scheduler switching silently never applies.
 ProtectSystem=strict
 ProtectHome=read-only
 ProtectClock=yes

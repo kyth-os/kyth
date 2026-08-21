@@ -17,6 +17,42 @@ PRIVILEGED_UNITS = (
 )
 
 
+# Units whose own code path shells out to `sudo` (directly, or transitively
+# via kyth_shared.system.bootc_query's `sudo -n kyth-bootc-guard ...`) to
+# reach real root. PrivateUsers=yes remaps root to an unprivileged UID
+# outside the unit's private namespace, and NoNewPrivileges=yes blocks the
+# kernel from ever honoring sudo's setuid bit at exec for a non-root caller —
+# either one alone reproduces "unable to open /etc/sudoers: Invalid
+# argument" on every invocation. Root-context units (already euid 0, so sudo
+# never needs to *gain* privilege) only break via the PrivateUsers identity
+# remap; per-user units escalating from a real unprivileged UID break via
+# either directive, so both must be absent for those.
+SUDO_ESCALATING_ROOT_UNITS = (
+    "kyth-hw-setup.service",
+    "kyth-probe.service",
+)
+SUDO_ESCALATING_USER_UNITS = (
+    "kyth-guardian.service",
+    "kyth-sched.service",
+    "kyth-probe-user.service",
+)
+
+
+class SudoEscalationHardeningTests(unittest.TestCase):
+    def test_root_context_sudo_units_have_no_private_user_namespace(self) -> None:
+        for unit_name in SUDO_ESCALATING_ROOT_UNITS:
+            body = (ROOT / "build_files" / unit_name).read_text(encoding="utf-8")
+            with self.subTest(unit=unit_name):
+                self.assertNotIn("PrivateUsers=yes", body)
+
+    def test_user_context_sudo_units_allow_privilege_escalation(self) -> None:
+        for unit_name in SUDO_ESCALATING_USER_UNITS:
+            body = (ROOT / "build_files" / unit_name).read_text(encoding="utf-8")
+            with self.subTest(unit=unit_name):
+                self.assertNotIn("PrivateUsers=yes", body)
+                self.assertNotIn("NoNewPrivileges=yes", body)
+
+
 class SystemServiceHardeningTests(unittest.TestCase):
     def test_privileged_units_have_safe_process_baseline(self) -> None:
         required = (
