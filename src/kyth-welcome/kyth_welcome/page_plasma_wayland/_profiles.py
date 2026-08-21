@@ -70,16 +70,20 @@ DESKTOP_PROFILES = {
 
 
 class _ProfilesMixin:
-    def _apply_desktop_profile(self, profile_key: str) -> None:
+    def _apply_desktop_profile(self, profile_key: str, *, result_attr: str = "_profile_result") -> None:
         profile = DESKTOP_PROFILES[profile_key]
-        self._profile_result.set_running(f"Applying {profile['title']} mode", "Writing Plasma and KWin defaults...")
+        panel = getattr(self, result_attr, None) or getattr(self, "_profile_result", None)
+        if panel is None:
+            return
+        panel.show()
+        panel.set_running(f"Applying {profile['title']} mode", "Writing Plasma and KWin defaults...")
         script = self._desktop_profile_command(profile_key, profile)
         code, out, err = run_shell_script(script, timeout=20)
         details = (out or "") + (err or "")
         if code == 0:
-            self._profile_result.set_result("ok", f"Applied {profile['title']} mode", details.strip() or "KWin settings refreshed.")
+            panel.set_result("ok", f"Applied {profile['title']} mode", details.strip() or "KWin settings refreshed.")
         else:
-            self._profile_result.set_result("error", f"Failed to apply {profile['title']} mode", details.strip() or f"exit {code}")
+            panel.set_result("err", f"Failed to apply {profile['title']} mode", details.strip() or f"exit {code}")
 
     def _desktop_profile_command(self, profile_key: str, profile: dict[str, object]) -> str:
         snap = int(profile["snap"])
@@ -116,7 +120,11 @@ kwriteconfig6 --file kwinrc --group KythOS --key CenteredDialogs true
 kwriteconfig6 --file kdeglobals --group KDE --key SingleClick false
 kwriteconfig6 --file dolphinrc --group General --key ShowPreview true
 kwriteconfig6 --file kdeglobals --group General --key XftHintStyle hintslight
-# Windows 11 Snap parity: strong snap + centered taskbar hint
+# Familiar Meta shortcuts (best-effort; Plasma may remap some on next login)
+kwriteconfig6 --file kglobalshortcutsrc --group services --key 'org.kde.dolphin.desktop' 'Meta+E,none,Dolphin'
+kwriteconfig6 --file kglobalshortcutsrc --group kwin --key 'Show Desktop' 'Meta+D,none,Show Desktop'
+kwriteconfig6 --file kglobalshortcutsrc --group ksmserver --key 'Lock Session' 'Meta+L,Meta+L,Lock Session'
+# Windows 11 Snap parity: strong snap + centered taskbar hint when supported
 kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc --group Containments --key alignment 1
 """,
         }.get(profile_key, "")

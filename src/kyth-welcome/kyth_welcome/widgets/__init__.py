@@ -138,6 +138,11 @@ class TaskStatusBadge(QLabel):
         "ok": "task-status-ok",
         "warn": "task-status-warn",
         "err": "task-status-err",
+        # Aliases used by older call sites
+        "error": "task-status-err",
+        "failed": "task-status-err",
+        "success": "task-status-ok",
+        "warning": "task-status-warn",
     }
 
     def __init__(self, text: str = "", state: str = "idle"):

@@ -159,7 +159,7 @@ def apply_desktop_layout(*, force: bool = False, initial: bool = False) -> int:
     if not force:
         current = kreadconfig(CONFIG_FILE, "KythOS", "KythComfortLayout")
         legacy_current = kreadconfig(CONFIG_FILE, "KythOS", "WindowsFamiliarLayout")
-        if current in (LAYOUT_VERSION, "kyth-comfort-v2") or legacy_current == "windows-familiar-v1":
+        if current in (LAYOUT_VERSION, "kyth-comfort-v2", "kyth-comfort-v3") or legacy_current == "windows-familiar-v1":
             return 0
 
     if not force and not initial:

@@ -223,9 +223,14 @@ def _probe_comfort_defaults() -> HardwareProbe:
 
 def _probe_default_layout() -> HardwareProbe:
     """Probe KythOS default desktop layout."""
+    try:
+        from kyth_shared.desktop.plasma import LAYOUT_VERSION
+    except ImportError:  # pragma: no cover - shared always present in image
+        LAYOUT_VERSION = "kyth-comfort-v4"
     layout_marker = kread("plasma-org.kde.plasma.desktop-appletsrc", "KythOS", "KythComfortLayout")
     legacy_layout_marker = kread("plasma-org.kde.plasma.desktop-appletsrc", "KythOS", "WindowsFamiliarLayout")
-    layout_ok = layout_marker in ("kyth-comfort-v2", "kyth-comfort-v3") or legacy_layout_marker == "windows-familiar-v1"
+    known = {LAYOUT_VERSION, "kyth-comfort-v2", "kyth-comfort-v3", "kyth-comfort-v4"}
+    layout_ok = layout_marker in known or legacy_layout_marker == "windows-familiar-v1"
     return HardwareProbe(
         "KythOS default layout",
         "ok" if layout_ok else "dim",
