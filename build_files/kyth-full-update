@@ -2,7 +2,7 @@
 # Update the KythOS-owned system surfaces without traversing arbitrary
 # language-package managers or user development environments.
 
-set -euo pipefail
+set -uo pipefail
 
 declare -a STEP_NAMES=()
 declare -a STEP_RESULTS=()
@@ -47,7 +47,10 @@ flatpak_update_retry() {
 	# scope even though a plain, delta-free pull would succeed. Retry once
 	# without static deltas before giving up.
 	printf 'flatpak update %s failed; retrying without static deltas.\n' "${scope}" >&2
-	flatpak update "${scope}" --assumeyes --noninteractive --no-static-deltas
+	if flatpak update "${scope}" --assumeyes --noninteractive --no-static-deltas; then
+		return 0
+	fi
+	return 1
 }
 
 if command -v fwupdmgr >/dev/null 2>&1; then
