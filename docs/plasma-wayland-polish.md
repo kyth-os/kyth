@@ -98,9 +98,9 @@ feel distinct, comfortable, and easy for new users to trust.
    Console Mode and Docked Mode (creator/developer/laptop already land via
    Desktop Modes).
 4. Harden Wayland readiness (OS-level):
-   portal packages on the image, PipeWire capture, VRR policy, NVIDIA suspend
-   quirk apply after akmods, `plasma_hdr` / `plasma_drift` / window-snap writers
-   that talk to Plasma 6 (`kwriteconfig6`, `qdbus6`, `kscreen-doctor`), and
+   portal packages on the image, PipeWire capture, VRR/NightColor via
+   `kyth-apply-vrr`, fractional scale via `kyth-apply-scaling`, display HDR via
+   `kyth-apply-display-hdr`, Guardian portal dual-unit Plasma 6 names, and
    `desktop_stack` diagnostics for doctor/smoke.
 5. Treat Wayland-on-bare-metal as the shipping default; keep advertising
    "fully qualified" only after live ISO, VM, NVIDIA, hybrid laptop, screen

@@ -84,12 +84,12 @@ class PlasmaDriftTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "plasma.toml"
             p.write_text(
-                '[kwinrc.Compositing]\nLatencyPolicy = "extreme"\n'
+                '[kwinrc.Compositing]\nAllowTearing = "false"\n'
                 '[plasmarc]\nTheme = "kyth-dark"\n',
                 encoding="utf-8",
             )
             loaded = drift_mod.load_plasma(p)
-            self.assertEqual(loaded["kwinrc.Compositing"]["LatencyPolicy"], "extreme")
+            self.assertEqual(loaded["kwinrc.Compositing"]["AllowTearing"], "false")
             self.assertEqual(loaded["plasmarc"]["Theme"], "kyth-dark")
 
     def test_parse_section_defaults_to_general(self):
@@ -111,8 +111,8 @@ class PlasmaDriftTests(unittest.TestCase):
         ), mock.patch.object(drift_mod, "_reconfigure_kwin"), mock.patch.object(
             drift_mod, "_atomic_write_text"
         ):
-            applied = drift_mod.apply_plasma({"kwinrc.Compositing": {"LatencyPolicy": "extreme"}})
-        self.assertEqual(applied, ["kwinrc.Compositing:LatencyPolicy=extreme"])
+            applied = drift_mod.apply_plasma({"kwinrc.Compositing": {"AllowTearing": "false"}})
+        self.assertEqual(applied, ["kwinrc.Compositing:AllowTearing=false"])
         self.assertEqual(
             calls[0],
             [
@@ -122,8 +122,8 @@ class PlasmaDriftTests(unittest.TestCase):
                 "--group",
                 "Compositing",
                 "--key",
-                "LatencyPolicy",
-                "extreme",
+                "AllowTearing",
+                "false",
             ],
         )
 
@@ -188,6 +188,117 @@ class DesktopStackTests(unittest.TestCase):
         self.assertIn("Bare metal", body)
         self.assertIn("Wayland", body)
         self.assertNotIn("intentionally starts Plasma X11", body)
+
+
+class VrrApplyTests(unittest.TestCase):
+    def test_apply_writes_vrrpolicy_and_nightcolor(self):
+        from kyth_shared import vrr as vrr_mod
+
+        calls: list[list[str]] = []
+
+        def fake_run(args, **_kwargs):
+            calls.append(list(args))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(vrr_mod, "_kwriteconfig_bin", return_value="kwriteconfig6"), mock.patch.object(
+            vrr_mod, "run", side_effect=fake_run
+        ), mock.patch.object(vrr_mod, "_reconfigure_kwin"), mock.patch.object(
+            vrr_mod, "_atomic_write_text"
+        ), mock.patch.object(vrr_mod.shutil, "which", return_value=None):
+            notes = vrr_mod.apply_vrr(
+                {
+                    "outputs": {"DP-1": {"vrr": "always"}},
+                    "night": {"enabled": True, "temperature": 4200},
+                }
+            )
+        self.assertTrue(any("VrrPolicy=2" in n for n in notes))
+        self.assertTrue(any("NightColor.Active=True" in n for n in notes))
+        self.assertTrue(any("NightTemperature=4200" in n for n in notes))
+        groups_keys = {(c[c.index("--group") + 1], c[c.index("--key") + 1]) for c in calls if "--group" in c}
+        self.assertIn(("Wayland", "VrrPolicy"), groups_keys)
+        self.assertIn(("NightColor", "NightTemperature"), groups_keys)
+
+
+class ScalingApplyTests(unittest.TestCase):
+    def test_apply_scaling_calls_kscreen_doctor(self):
+        from kyth_shared import scaling as scaling_mod
+
+        calls: list[list[str]] = []
+
+        def fake_run(args, **_kwargs):
+            calls.append(list(args))
+            if args[:2] == ["kscreen-doctor", "-o"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="Output: 1 DP-1\nconnected\nenabled\n",
+                    stderr="",
+                )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(scaling_mod.shutil, "which", return_value="/usr/bin/kscreen-doctor"), mock.patch.object(
+            scaling_mod, "run", side_effect=fake_run
+        ), mock.patch.object(scaling_mod, "_atomic_write_text"):
+            notes = scaling_mod.apply_scaling({"DP-1": {"scale": 1.25, "icc": ""}})
+        self.assertTrue(any("DP-1.scale=1.25" in n for n in notes))
+        self.assertTrue(any(c == ["kscreen-doctor", "output.DP-1.scale.1.25"] for c in calls))
+
+
+class DisplayHdrApplyTests(unittest.TestCase):
+    def test_apply_display_hdr_enables_with_sdr_brightness(self):
+        from kyth_shared import display_hdr as hdr_mod
+
+        calls: list[list[str]] = []
+
+        def fake_run(args, **_kwargs):
+            calls.append(list(args))
+            if args[:2] == ["kscreen-doctor", "-o"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="Output: 1 HDMI-A-1\nconnected\nenabled\n",
+                    stderr="",
+                )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with mock.patch.dict("os.environ", {"XDG_SESSION_TYPE": "wayland"}), mock.patch.object(
+            hdr_mod.shutil, "which", return_value="/usr/bin/kscreen-doctor"
+        ), mock.patch.object(hdr_mod, "run", side_effect=fake_run):
+            notes = hdr_mod.apply_display_hdr(
+                {"HDMI-A-1": {"hdr_enabled": True, "sdr_nits": 250, "peak_nits": 600}}
+            )
+        self.assertTrue(any("HDMI-A-1.hdr.enable" in n and "sdr=250" in n for n in notes))
+        self.assertTrue(
+            any(
+                "output.HDMI-A-1.hdr.enable" in c
+                and "output.HDMI-A-1.wcg.enable" in c
+                and "output.HDMI-A-1.sdr-brightness.250" in c
+                for c in calls
+            )
+        )
+
+
+class KwinLatencyTests(unittest.TestCase):
+    def test_gaming_dropin_omits_latency_policy(self):
+        from kyth_shared import kwin_latency as kl
+
+        with tempfile.TemporaryDirectory() as td:
+            dropin = Path(td) / "99-kyth-latency.conf"
+            env = Path(td) / "99-kyth-kwin.conf"
+            kl.generate_kwin_latency({"profile": "gaming", "tearing": True}, dropin=dropin, env=env)
+            body = dropin.read_text(encoding="utf-8")
+            self.assertIn("AllowTearing=true", body)
+            self.assertNotIn("LatencyPolicy", body)
+
+
+class BrandingInstallTests(unittest.TestCase):
+    def test_vrr_and_scaling_branding_install_apply_binaries(self):
+        vrr = (ROOT / "build_files/scripts/branding/47-vrr-night.sh").read_text(encoding="utf-8")
+        scaling = (ROOT / "build_files/scripts/branding/41-scaling-color.sh").read_text(encoding="utf-8")
+        self.assertIn("kyth-apply-vrr", vrr)
+        self.assertIn("kyth-apply-scaling", scaling)
+        self.assertIn("kyth-apply-display-hdr", scaling)
+        self.assertTrue((ROOT / "build_files/kyth-apply-vrr").is_file())
+        self.assertTrue((ROOT / "build_files/kyth-apply-scaling").is_file())
+        self.assertTrue((ROOT / "build_files/kyth-apply-display-hdr").is_file())
 
 
 if __name__ == "__main__":

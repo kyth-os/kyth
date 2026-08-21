@@ -193,6 +193,36 @@ def restart_joycond(run: Run) -> tuple[bool, str]:
     return True, "joycond restarted"
 
 
+# Plasma 6 may ship either unit name; restart each candidate independently so a
+# missing alias does not fail the whole recipe.
+_PORTAL_UNITS = (
+    "xdg-desktop-portal.service",
+    "plasma-xdg-desktop-portal-kde.service",
+    "xdg-desktop-portal-kde.service",
+)
+
+
+def restart_desktop_portals(run: Run) -> tuple[bool, str]:
+    """Restart xdg-desktop-portal and whichever KDE backend unit exists."""
+    notes: list[str] = []
+    any_ok = False
+    for unit in _PORTAL_UNITS:
+        result = run(("systemctl", "--user", "restart", unit), 15)
+        if result is not None and result.returncode == 0:
+            notes.append(f"restarted {unit}")
+            any_ok = True
+        else:
+            # Missing unit is expected for the unused Plasma 6 alias.
+            err = ""
+            if result is not None:
+                err = (result.stderr or result.stdout or "").strip()[:120]
+            if err and "not found" not in err.lower() and "could not be found" not in err.lower():
+                notes.append(f"{unit}: {err}")
+    if any_ok:
+        return True, "; ".join(notes) if notes else "portals restarted"
+    return False, "; ".join(notes) or "portal restart failed"
+
+
 ACTION_EXECUTORS: dict[str, Callable[[Run], tuple[bool, str]]] = {
     "display.reconfigure": apply_display_reconfigure,
     "audio.sink-fallback": restore_audio_sink,
@@ -201,4 +231,5 @@ ACTION_EXECUTORS: dict[str, Callable[[Run], tuple[bool, str]]] = {
     "network.captive-fix": recapture_network,
     "network.vpn-fix": restore_autoconnect_vpn,
     "controller.repair": restart_joycond,
+    "portal.restart-user": restart_desktop_portals,
 }

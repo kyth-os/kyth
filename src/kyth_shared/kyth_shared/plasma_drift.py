@@ -6,7 +6,7 @@ TOML section names map to KDE config files. Nested tables become config groups:
     key = "value"                 # → --file kwinrc --group General
 
     [kwinrc.Compositing]
-    LatencyPolicy = "extreme"     # → --file kwinrc --group Compositing
+    AllowTearing = "false"        # → --file kwinrc --group Compositing
 
     [kwinrc.Containments.1.General]
     foo = "bar"                   # → nested --group path

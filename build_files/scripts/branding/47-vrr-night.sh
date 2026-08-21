@@ -1,4 +1,5 @@
 # shellcheck shell=bash
 # ── VRR + Night color scheduler ──────────────────────────────────────────
-# Writes kwinoutputconfig vrrPolicy + kwinrc NightColor, offline hash-gated
-# Hub Display handles apply via kwriteconfig + qdbus
+# Installs kyth-apply-vrr which writes [Wayland] VrrPolicy + [NightColor]
+# from ~/.config/kyth/vrr.toml (and best-effort per-output via kscreen-doctor).
+install -m 0755 /ctx/kyth-apply-vrr /usr/bin/kyth-apply-vrr

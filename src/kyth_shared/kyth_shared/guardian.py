@@ -121,7 +121,7 @@ RECIPES: dict[str, Recipe] = {
                ("sudo", "-A", "systemctl", "restart", "bluetooth.service"),
                "confirm", True, False, 1800, "bluetooth", "Re-open Bluetooth Settings and reconnect the device."),
         Recipe("portal.restart-user", "Restart desktop portals", "portal",
-               ("systemctl", "--user", "restart", "xdg-desktop-portal.service", "xdg-desktop-portal-kde.service"),
+               ("systemctl", "--user", "restart", "xdg-desktop-portal.service"),
                "safe", False, True, 900, "portal", "If file pickers or screen sharing were blank, retry them now."),
         Recipe("plasma.restart-user", "Restart Plasma shell", "plasma",
                ("systemctl", "--user", "restart", "plasma-plasmashell.service"),
@@ -305,10 +305,18 @@ def _probe_bluetooth() -> list[Symptom]:
 
 
 def _probe_portal() -> list[Symptom]:
-    portal_down = [unit for unit in ("xdg-desktop-portal.service", "xdg-desktop-portal-kde.service")
-                   if not _active(unit, user=True)]
-    if portal_down:
-        return [Symptom("portal", f"Inactive portal services: {', '.join(portal_down)}", ("portal.restart-user",))]
+    # Plasma 6 may expose plasma-xdg-desktop-portal-kde.service or the older
+    # xdg-desktop-portal-kde.service name — either backend is healthy.
+    from .system.desktop_stack import PORTAL_KDE_UNITS, PORTAL_UNITS
+
+    down: list[str] = []
+    for unit in PORTAL_UNITS:
+        if not _active(unit, user=True):
+            down.append(unit)
+    if not any(_active(unit, user=True) for unit in PORTAL_KDE_UNITS):
+        down.append("plasma/xdg-desktop-portal-kde")
+    if down:
+        return [Symptom("portal", f"Inactive portal services: {', '.join(down)}", ("portal.restart-user",))]
     return []
 
 
@@ -851,7 +859,11 @@ def verify_recipe(recipe_id: str) -> bool:
         result = _run(("flatpak", "list", "--app", "--columns=application"), 10)
         return bool(result and result.returncode == 0)
     if recipe.verification == "portal":
-        return _active("xdg-desktop-portal.service", user=True) and _active("xdg-desktop-portal-kde.service", user=True)
+        from .system.desktop_stack import PORTAL_KDE_UNITS, PORTAL_UNITS
+
+        portal_ok = all(_active(unit, user=True) for unit in PORTAL_UNITS)
+        kde_ok = any(_active(unit, user=True) for unit in PORTAL_KDE_UNITS)
+        return portal_ok and kde_ok
     if recipe.verification == "plasma":
         return _active("plasma-plasmashell.service", user=True)
     if recipe.verification == "display":

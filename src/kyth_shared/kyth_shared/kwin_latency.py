@@ -74,7 +74,6 @@ def generate_kwin_latency(cfg: dict[str, Any] | None = None, dropin: Path | None
         "MaxFPS=1000\n"
         "RefreshRate=0\n"
         f"AllowTearing={'true' if tearing else 'false'}\n"
-        "LatencyPolicy=extremely_low\n"
     )
     tmp = dropin.with_suffix(".tmp")
     tmp.write_text(content, encoding="utf-8")

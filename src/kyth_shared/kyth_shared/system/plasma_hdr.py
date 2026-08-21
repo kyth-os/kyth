@@ -9,30 +9,26 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import shutil
 from pathlib import Path
 
 from kyth_shared.commands import run as _run
-from kyth_shared.guardian_actions import parse_kscreen_outputs
 
 logger = logging.getLogger(__name__)
-
-_OUTPUT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # Global kwinrc keys only — HDR itself is per-output (see _apply_output_hdr).
 _PRESETS: dict[str, dict[str, dict[str, str]]] = {
     "hdr": {
         "Wayland": {"VrrPolicy": "1"},
-        "Compositing": {"AllowTearing": "false", "LatencyPolicy": "Low"},
+        "Compositing": {"AllowTearing": "false"},
     },
     "hdr10plus": {
         "Wayland": {"VrrPolicy": "1"},
-        "Compositing": {"AllowTearing": "false", "LatencyPolicy": "Low"},
+        "Compositing": {"AllowTearing": "false"},
     },
     "sdr": {
         "Wayland": {"VrrPolicy": "1"},
-        "Compositing": {"AllowTearing": "false", "LatencyPolicy": "Low"},
+        "Compositing": {"AllowTearing": "false"},
     },
     "vrr": {"Wayland": {"VrrPolicy": "1"}},
     "vrr_off": {"Wayland": {"VrrPolicy": "0"}},
@@ -95,42 +91,11 @@ def _reconfigure_kwin() -> None:
         logger.debug("kwin reconfigure skipped", exc_info=True)
 
 
-def _session_is_wayland() -> bool:
-    return os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
-
-
 def _apply_output_hdr(enable: bool) -> list[str]:
-    """Best-effort per-output HDR/WCG via kscreen-doctor (Wayland only)."""
-    if not shutil.which("kscreen-doctor"):
-        return ["kscreen-doctor unavailable"]
-    if not _session_is_wayland():
-        return ["hdr skipped: not a Wayland session"]
-    listed = _run(["kscreen-doctor", "-o"], capture_output=True, timeout=8, check=False)
-    if listed.returncode != 0:
-        return ["kscreen-doctor -o failed"]
-    notes: list[str] = []
-    action = "enable" if enable else "disable"
-    for output in parse_kscreen_outputs(listed.stdout or ""):
-        name = str(output.get("name") or "")
-        if not _OUTPUT_NAME_RE.fullmatch(name):
-            continue
-        if not output.get("connected"):
-            continue
-        # Enable WCG with HDR so colors match System Settings; disable both for SDR.
-        cmd = [
-            "kscreen-doctor",
-            f"output.{name}.hdr.{action}",
-            f"output.{name}.wcg.{action}",
-        ]
-        try:
-            res = _run(cmd, capture_output=True, timeout=12, check=False)
-            if res.returncode == 0:
-                notes.append(f"{name}.hdr.{action}")
-            else:
-                notes.append(f"{name}.hdr.{action} failed")
-        except (OSError, ValueError, RuntimeError) as exc:
-            notes.append(f"{name}.hdr.{action}: {exc}")
-    return notes or ["no connected outputs"]
+    """Delegate to display_hdr so peak/SDR nits from toml are respected."""
+    from kyth_shared.display_hdr import apply_display_hdr
+
+    return apply_display_hdr(force_enable=enable)
 
 
 def apply_preset(name: str, dry_run: bool = False) -> tuple[bool, str]:

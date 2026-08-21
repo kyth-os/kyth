@@ -444,8 +444,11 @@ def main() -> None:
             run_command([qdbus_cmd, "org.kde.KWin", "/KWin", "reconfigure"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         kwriteconfig("kwinrc", "Plugins", "desktopchangeosdEnabled", "false", "bool")
-        kwriteconfig("kwinrc", "Compositing", "LatencyPolicy", "extreme")
-        kwriteconfig("kwinrc", "Compositing", "AllowTearing", "false", "bool")
+        # LatencyPolicy is ignored on Plasma 6; AllowTearing is owned by
+        # kyth-kwin-latency gaming drop-in — do not clobber it from polish.
+        gaming_kwin = Path("/etc/xdg/kwinrc.d/99-kyth-latency.conf")
+        if not gaming_kwin.is_file():
+            kwriteconfig("kwinrc", "Compositing", "AllowTearing", "false", "bool")
         kwriteconfig("plasma-discoverrc", "UpdatesNotifier", "UseNotifications", "false", "bool")
 
         kwriteconfig("dolphinrc", "General", "RememberOpenedTabs", "true", "bool")

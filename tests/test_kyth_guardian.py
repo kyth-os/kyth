@@ -515,6 +515,46 @@ class GuardianRobustnessTests(unittest.TestCase):
             guardian._notify([record], {"notifications": True}, state)
             run.assert_not_called()
 
+    def test_portal_probe_accepts_plasma_kde_unit_name(self):
+        active = {"xdg-desktop-portal.service", "plasma-xdg-desktop-portal-kde.service"}
+        with patch.object(guardian, "_active", side_effect=lambda unit, user=False: unit in active):
+            self.assertEqual(guardian._probe_portal(), [])
+
+    def test_portal_probe_flags_when_neither_kde_backend_active(self):
+        active = {"xdg-desktop-portal.service"}
+        with patch.object(guardian, "_active", side_effect=lambda unit, user=False: unit in active):
+            symptoms = guardian._probe_portal()
+        self.assertEqual(len(symptoms), 1)
+        self.assertIn("plasma/xdg-desktop-portal-kde", symptoms[0].evidence)
+
+    def test_portal_verify_accepts_either_kde_unit(self):
+        active = {"xdg-desktop-portal.service", "xdg-desktop-portal-kde.service"}
+        with patch.object(guardian, "_active", side_effect=lambda unit, user=False: unit in active):
+            self.assertTrue(guardian.verify_recipe("portal.restart-user"))
+        active_plasma = {"xdg-desktop-portal.service", "plasma-xdg-desktop-portal-kde.service"}
+        with patch.object(guardian, "_active", side_effect=lambda unit, user=False: unit in active_plasma):
+            self.assertTrue(guardian.verify_recipe("portal.restart-user"))
+
+    def test_portal_restart_executor_tries_both_kde_aliases(self):
+        from kyth_shared.guardian_actions import restart_desktop_portals
+
+        calls: list[tuple] = []
+
+        def _run(argv, timeout=8):
+            calls.append(tuple(argv))
+            unit = argv[-1]
+            if unit == "xdg-desktop-portal-kde.service":
+                return subprocess.CompletedProcess(argv, 1, "", "Unit not found.")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        ok, detail = restart_desktop_portals(_run)
+        self.assertTrue(ok)
+        self.assertIn("plasma-xdg-desktop-portal-kde.service", detail)
+        restarted = {c[-1] for c in calls}
+        self.assertIn("xdg-desktop-portal.service", restarted)
+        self.assertIn("plasma-xdg-desktop-portal-kde.service", restarted)
+        self.assertIn("xdg-desktop-portal-kde.service", restarted)
+
 
 if __name__ == "__main__":
     unittest.main()
