@@ -3,18 +3,24 @@
 import "_vars.just"
 import "_internal.just"
 
+# Uses podman, not docker: CI's build.yml has its own independent docker
+# buildx pipeline and never calls these recipes, so this file only has to
+# work for local dev — and kyth ships podman, not docker, on the built OS
+# itself. Runs rootful (sudo) so the result lands directly in the same
+# containers-storage `bootc switch` reads (see `switch-local`), with no
+# rootless->rootful copy step needed afterward. The GHA/registry buildx
+# cache flags are dropped: podman/buildah's cache-from/cache-to take a
+# plain image reference, not BuildKit's `type=X,key=value` descriptor
+# syntax, and BuildKit's registry cache format isn't buildah-readable
+# anyway — local podman still reuses its own layer cache across repeated
+# runs, just not CI's remote one.
+
 # Build the base image from build_base/.
 [group('Build')]
 build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0":
     #!/usr/bin/env bash
-    if ! id -nG | grep -qw docker; then
-        if ! id -nG "$USER" | grep -qw docker; then
-            echo "Adding $USER to docker group (requires sudo)..."
-            sudo usermod -aG docker "$USER"
-        fi
-        echo "Activating docker group for this session via sg — re-running..."
-        exec sg docker -c "just build-base '{{ base_image }}' '{{ kernel_flavor }}'"
-    fi
+    set -euo pipefail
+    PODMAN="sudo --preserve-env=MOK_KEY podman"
 
     if command -v cosign &>/dev/null; then
         echo "Verifying base image signature with cosign..."
@@ -26,9 +32,9 @@ build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0
     else
         echo "WARNING: cosign not found — skipping signature verification."
     fi
-    if ! docker image inspect {{ base_image }} >/dev/null 2>&1; then
+    if ! ${PODMAN} image exists {{ base_image }}; then
         echo "Refreshing upstream base image {{ base_image }}..."
-        docker pull {{ base_image }}
+        ${PODMAN} pull {{ base_image }}
     fi
     CACHYOS_KERNEL_VER=unused
     if [[ "{{ kernel_flavor }}" != "fedora" ]]; then
@@ -37,16 +43,7 @@ build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0
     echo "CachyOS kernel: ${CACHYOS_KERNEL_VER}"
     echo "Kernel flavor: {{ kernel_flavor }}"
     echo "Enable NVIDIA: {{ enable_nvidia }}"
-    REGISTRY="${REGISTRY:-ghcr.io/mrtrick37/kyth}"
-    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-    CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
-    CACHE_KEY="base-${CACHE_BRANCH}-${CACHYOS_KERNEL_VER}-nvidia-{{ enable_nvidia }}"
-    docker buildx build \
-        --cache-from type=gha,scope=${CACHE_KEY} \
-        --cache-from type=registry,ref=${REGISTRY}:buildcache-${CACHE_KEY} \
-        --cache-to type=gha,scope=${CACHE_KEY},mode=max \
-        --cache-to type=registry,ref=${REGISTRY}:buildcache-${CACHE_KEY},mode=max \
-        --load \
+    ${PODMAN} build \
         --build-arg BASE_IMAGE={{ base_image }} \
         --build-arg KYTH_KERNEL_FLAVOR="{{ kernel_flavor }}" \
         --build-arg CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VER}" \
@@ -54,21 +51,16 @@ build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0
         --tag localhost/kyth-base:stable \
         build_base/
     if [[ "{{ enable_nvidia }}" == "1" ]]; then
-        docker tag localhost/kyth-base:stable localhost/kyth-base:stable-nvidia
+        ${PODMAN} tag localhost/kyth-base:stable localhost/kyth-base:stable-nvidia
         echo "Tagged localhost/kyth-base:stable-nvidia"
     fi
 
-# Build the full KythOS image.
+# Build the full KythOS image. See build-base for why this is podman, not docker.
 [group('Build')]
 build: build-base
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! id -nG | grep -qw docker; then
-        exec sg docker -c "just build"
-    fi
-    REGISTRY="${REGISTRY:-ghcr.io/mrtrick37/kyth}"
-    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-    CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
+    PODMAN="sudo --preserve-env=MOK_KEY podman"
 
     PROTON_CACHYOS_VER=$(python3 ./build_files/scripts/resolve-versions.py proton-cachyos)
     [[ -n "${PROTON_CACHYOS_VER}" ]] || { echo "Unable to pin Proton-CachyOS" >&2; exit 1; }
@@ -92,7 +84,7 @@ build: build-base
     else
         echo "Secure Boot: MOK key not set — signing skipped (set MOK_KEY_FILE to enable)"
     fi
-    docker buildx build \
+    ${PODMAN} build \
         --build-arg ENABLE_SCX="${ENABLE_SCX:-1}" \
         --build-arg ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS:-0}" \
         --build-arg ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST:-0}" \
@@ -103,13 +95,25 @@ build: build-base
         --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
         --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
         "${MOK_SECRET_ARG[@]}" \
-        --cache-from "type=gha,scope=final-${CACHE_BRANCH}-fedora" \
-        --cache-from "type=registry,ref=${REGISTRY}:buildcache-final-${CACHE_BRANCH}-fedora" \
-        --cache-to "type=gha,scope=final-${CACHE_BRANCH}-fedora,mode=max" \
-        --cache-to "type=registry,ref=${REGISTRY}:buildcache-final-${CACHE_BRANCH}-fedora,mode=max" \
         --tag localhost/kyth:latest \
-        --load \
         .
+
+# Entirely local — no registry/CI round-trip. Requires a reboot afterward to
+# actually boot into it; `bootc rollback` undoes it if something's wrong.
+
+# Switch the running deployment to the image `build` just produced.
+[group('Build')]
+switch-local tag="latest":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! sudo podman image exists localhost/kyth:{{ tag }}; then
+        echo "localhost/kyth:{{ tag }} not found in root's container storage — run 'just build' first." >&2
+        exit 1
+    fi
+    sudo bootc switch --transport containers-storage localhost/kyth:{{ tag }}
+    echo
+    echo "Staged. Reboot to apply: sudo systemctl reboot"
+    echo "To go back to the tracked channel later: sudo bootc switch ghcr.io/mrtrick37/kyth:testing"
 
 # Build a QCOW2 virtual machine image
 [group('Build Virtual Machine Image')]

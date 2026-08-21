@@ -9,14 +9,15 @@ Custom atomic gaming and development desktop OS built on Fedora Kinoite (KDE Pla
 ## Build & Test Commands
 
 ```bash
-just build                        # Build base image + full OS image (requires Docker)
-just check-dockerfile              # Docker buildx --check without building the full image (fast sanity check)
+just build                        # Build base image + full OS image via podman (prompts for sudo — see below)
+just switch-local                 # bootc switch to the image `just build` just produced, entirely local
+just check-dockerfile              # Docker buildx --check without building the full image (fast sanity check; needs real Docker)
 just build-live-iso                # Live ISO from the stable channel image
 just build-live-iso testing        # Live ISO from the testing channel image
 just rebuild-live-iso-local        # Live ISO embedding the local image
 just run-live-iso-native-local     # Native QEMU/SPICE boot of the local ISO
 just preview-installer              # Browser preview of the installer; touches no disks
-just build-qcow2                  # Build QCOW2 VM image
+just build-qcow2                  # Build QCOW2 VM image (still Docker/BIB-based, unlike build/build-base)
 just clean / just clean-all / just purge  # Reclaim build/disk space (increasing scope)
 just lint && just format          # Shellcheck + shfmt on all *.sh
 ```
@@ -46,17 +47,26 @@ PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-ins
 
 Feature flags (image build):
 ```bash
-ENABLE_SCX=1 sudo just build                     # opt in only with a kernel-compatible scheduler
-ENABLE_GAMING_PERIPHERALS=1 sudo just build
-ENABLE_VIRTUALIZATION_HOST=1 sudo just build
-ENABLE_KSM=1 sudo just build
+ENABLE_SCX=1 just build                     # opt in only with a kernel-compatible scheduler
+ENABLE_GAMING_PERIPHERALS=1 just build
+ENABLE_VIRTUALIZATION_HOST=1 just build
+ENABLE_KSM=1 just build
 ```
+No leading `sudo` — the recipe reads these as the invoking user before it ever
+elevates internally, so `sudo just build` would only lose them across the
+outer sudo boundary instead of helping.
 
 ## Common Issues
 
-**Docker permission denied on socket:**
-
-`just build-base` now handles this automatically — if you're not in the `docker` group it adds you and re-execs under `sg docker` without requiring a logout. If you hit the error outside of a just recipe, run `newgrp docker` to activate the group in the current shell.
+**`just build`/`just build-base` prompt for a sudo password (possibly more than
+once):** expected. `build.just` uses `podman`, not Docker — CI's own build
+pipeline (`.github/workflows/build.yml`) doesn't call these recipes at all, and
+kyth ships podman rather than Docker on the built OS, so local dev builds
+target podman directly. Each `podman build`/`pull`/`tag` call runs via
+`sudo podman` so the result lands straight in root's `containers-storage` —
+the same store `bootc switch --transport containers-storage` (what
+`just switch-local` uses) reads — with no separate rootless→rootful image
+copy step needed afterward.
 
 ## Architecture
 
