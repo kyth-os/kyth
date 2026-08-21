@@ -29,6 +29,17 @@ class SoftwareCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(CURATED_APPIMAGES), 3)
         self.assertEqual(SEC_BOX_NAME, "kali")
 
+    def test_store_landing_catalogs(self):
+        from kyth_welcome.services.software_catalogs import (
+            STORE_CATEGORIES,
+            STORE_SHELVES,
+            TRENDING_APPS,
+        )
+
+        self.assertGreaterEqual(len(STORE_CATEGORIES), 5)
+        self.assertGreaterEqual(len(TRENDING_APPS), 4)
+        self.assertTrue(all("name" in shelf and "apps" in shelf for shelf in STORE_SHELVES))
+
 
 if __name__ == "__main__":
     unittest.main()

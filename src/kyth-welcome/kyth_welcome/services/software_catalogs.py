@@ -200,7 +200,7 @@ FAMILIAR_APPS = [
     ("LibreOffice", "LibreOffice is the drop-in Office suite. Install it from Flatpak if not already present.", "org.libreoffice.LibreOffice"),
 ]
 
-_STORE_CATEGORIES: ClassVar[list[tuple[str, str]]] = [
+STORE_CATEGORIES = [
     ("Internet", "Network"),
     ("Gaming", "Game"),
     ("Productivity", "Office"),
@@ -210,7 +210,7 @@ _STORE_CATEGORIES: ClassVar[list[tuple[str, str]]] = [
     ("Utilities", "Utility"),
 ]
 
-_TRENDING_APPS: ClassVar[list[str]] = [
+TRENDING_APPS = [
     "com.brave.Browser",
     "com.discordapp.Discord",
     "com.spotify.Client",
@@ -221,7 +221,7 @@ _TRENDING_APPS: ClassVar[list[str]] = [
     "org.localsend.localsend_app",
 ]
 
-_STORE_SHELVES = [
+STORE_SHELVES = [
     {
         "name": "Game Night",
         "query": "Game",

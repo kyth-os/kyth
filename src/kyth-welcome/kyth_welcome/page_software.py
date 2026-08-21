@@ -40,6 +40,9 @@ class SoftwarePage(Page):
     _SEC_HOST_TOOLS: ClassVar[list[dict]] = _software_catalogs.SEC_HOST_TOOLS
     _CURATED_APPIMAGES: ClassVar[list[dict]] = _software_catalogs.CURATED_APPIMAGES
     _FAMILIAR_APPS: ClassVar[list[tuple[str, str, str]]] = _software_catalogs.FAMILIAR_APPS
+    _STORE_CATEGORIES: ClassVar[list[tuple[str, str]]] = _software_catalogs.STORE_CATEGORIES
+    _TRENDING_APPS: ClassVar[list[str]] = _software_catalogs.TRENDING_APPS
+    _STORE_SHELVES: ClassVar[list[dict]] = _software_catalogs.STORE_SHELVES
 
     def __init__(self, initial_tab: int = 0, store_landing: bool = False):
         super().__init__()

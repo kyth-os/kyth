@@ -18,13 +18,18 @@ if not hasattr(_qt_stub, "QDBusConnection"):
     _qt_stub.QDBusConnection = MagicMock()
 if not hasattr(_qt_stub, "QDBusInterface"):
     _qt_stub.QDBusInterface = MagicMock()
+if not hasattr(_qt_stub, "QDBusMessage") or isinstance(getattr(_qt_stub, "QDBusMessage", None), MagicMock):
+    # Mirror PySide6: MessageType.ErrorMessage lives on the class, not the reply.
+    _msg = MagicMock()
+    _msg.MessageType.ErrorMessage = object()
+    _qt_stub.QDBusMessage = _msg
 
 from kyth_welcome.services import dbus_utils  # noqa: E402
 
 
 def _error_reply():
     reply = MagicMock()
-    reply.type.return_value = reply.Type.ErrorMessage
+    reply.type.return_value = dbus_utils.QDBusMessage.MessageType.ErrorMessage
     return reply
 
 

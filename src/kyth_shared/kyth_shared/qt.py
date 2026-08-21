@@ -18,7 +18,7 @@ __all__ = [
     "Qt", "QThread", "Signal", "QTimer", "QUrl", "QLibraryInfo", "QSize", "QRect", "QStringListModel",
     "QPropertyAnimation", "QEasingCurve",
     "QDesktopServices", "QIcon", "QKeySequence", "QShortcut", "QAction",
-    "QDBusConnection", "QDBusInterface",
+    "QDBusConnection", "QDBusInterface", "QDBusMessage",
     "QLocalServer", "QLocalSocket",
     "QWebEngineView", "QWebEnginePage", "QWebEngineProfile", "QWebEngineUrlScheme",
     "QWebEngineUrlSchemeHandler", "QWebEngineUrlRequestJob", "QWebEngineScript",
@@ -41,7 +41,7 @@ try:
         QPropertyAnimation, QEasingCurve,
     )
     from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction
-    from PySide6.QtDBus import QDBusConnection, QDBusInterface
+    from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
     QT_BINDING = "PySide6"
@@ -61,7 +61,7 @@ except ImportError:
     )
     from PyQt6.QtCore import pyqtSignal as Signal
     from PyQt6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction
-    from PyQt6.QtDBus import QDBusConnection, QDBusInterface
+    from PyQt6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
     from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
     QT_BINDING = "PyQt6"
