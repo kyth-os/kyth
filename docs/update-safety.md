@@ -74,6 +74,60 @@ fallback updater all use `kyth-safe-upgrade`. Direct `sudo bootc upgrade`
 remains available as an expert escape hatch, but requires normal administrator
 authentication and deliberately bypasses KythOS quarantine policy.
 
+## Troubleshooting: Staged Upgrade Not Taking Effect
+
+Symptom: `bootc upgrade` (or `bootc switch`) reports success and "Queued for
+next boot" with the correct digest, but after reboot `bootc status` still
+shows the old digest — and repeating `bootc upgrade` any number of times
+doesn't change the outcome.
+
+Root cause observed on the ASUS TUF FA617NS host (2026-08-20): staging always
+succeeded (the new deployment tree was fully written under
+`/ostree/deploy/default/deploy/`), but the step that promotes a staged
+deployment into a real bootloader entry — `ExecStop=/usr/bin/ostree admin
+finalize-staged` on `ostree-finalize-staged.service`, which runs at shutdown
+— failed with:
+
+```
+error: Remounting /boot read-write: Invalid argument
+```
+
+`/boot` on this layout is a bind mount of itself onto the same btrfs subvol as
+root (`subvolid=5,subvol=/`), mounted read-only during normal operation;
+finalize needs to remount it read-write briefly to write the new
+kernel/initramfs/loader entry. When that remount fails at shutdown, the
+staged deployment appears to be silently dropped rather than retried — no
+error is surfaced to the user, and the next boot just reuses the previous
+default. This reproduced even after a single clean `bootc upgrade` followed
+by a single clean `systemctl reboot` (not just after re-running upgrade
+mid-flight), so don't assume a "ran it twice" race is always the explanation.
+
+Diagnose with:
+
+```bash
+journalctl -b -1 -u ostree-finalize-staged.service
+```
+
+Look for the `Invalid argument` line right after `Stopping
+ostree-finalize-staged.service`.
+
+Recovery — finalize manually in the same session immediately after staging,
+rather than trusting the automatic shutdown-time finalize:
+
+```bash
+sudo bootc upgrade
+sudo ostree admin status                  # confirm a "(staged)" line appears
+sudo mount -o remount,bind,rw /boot
+sudo ostree admin finalize-staged         # should print "Bootloader updated; bootconfig swap: yes"
+sudo ostree admin status                  # confirm it now shows "(pending)"
+sudo systemctl reboot
+```
+
+A deployment staged and finalized within the same interactive session hasn't
+failed this way; only the shutdown-deferred path has. This is a workaround,
+not a fix — the underlying remount failure in `ostree-finalize-staged`
+still needs root-causing.
+
 ## State and Privacy
 
 The state file contains image digests, timestamps, failure counts, rollout

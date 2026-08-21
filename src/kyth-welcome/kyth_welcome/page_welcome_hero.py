@@ -48,8 +48,8 @@ class _WelcomeHeroMixin:
 
         self._focus_buttons = {}
         for key, text, tip in (
-            ("everyday", "💻 Everyday — office, browser & creators. Atomic updates with instant rollback if an update misbehaves.", "Browser, office, files, and media. Bootc keeps work safe."),
-            ("gaming", "🎮 Gaming Rig — peak performance, one toggle. Same atomic safety, plus Steam/Proton.", "Steam, launchers, performance, and controls. One-click Windows game save import."),
+            ("everyday", "💻 Everyday", "Office, browser & creators. Atomic updates with instant rollback if an update misbehaves."),
+            ("gaming", "🎮 Gaming Rig", "Peak performance, one toggle. Same atomic safety, plus Steam/Proton."),
         ):
             button = QPushButton(text)
             button.setObjectName("segmented-tab")
