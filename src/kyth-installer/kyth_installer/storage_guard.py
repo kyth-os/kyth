@@ -37,8 +37,8 @@ def DiskLease(disk: str, log, *, exclusive: bool = True):
                     f"Another process is using {disk}; close other installers and retry."
                 )
         except OSError as err:
-            # Re-raise the BlockingIOError wrapped as RuntimeError, otherwise
-            # fail closed — a missing lock is how two installers race.
+            # Hybrid OSError+RuntimeError (tests / rare callers): re-raise as-is.
+            # Otherwise fail closed — a missing lock is how two installers race.
             if isinstance(err, RuntimeError):
                 raise
             if _allow_unlocked_disk():

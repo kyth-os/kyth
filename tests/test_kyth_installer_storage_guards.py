@@ -120,6 +120,20 @@ class PartitionTableGuardTests(unittest.TestCase):
         service.restore_table.assert_not_called()
         self.assertIn("Backing up", log.call_args_list[0].args[0])
 
+    def test_should_restore_callback_error_defaults_to_restore(self):
+        service = self._service()
+        log = mock.Mock()
+
+        def boom():
+            raise RuntimeError("callback crashed")
+
+        with self.assertRaisesRegex(ValueError, "original"):
+            with PartitionTableGuard(
+                "/dev/sda", log, disk_service=service, should_restore=boom,
+            ):
+                raise ValueError("original")
+        service.restore_table.assert_called_once()
+
     def test_body_failure_skips_restore_when_should_restore_is_false(self):
         service = self._service()
         log = mock.Mock()

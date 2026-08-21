@@ -228,14 +228,43 @@ class MainWindow(QMainWindow):
 
         self._mission_worker = DataWorker("mission-bar", _gather)
         self._mission_worker.result.connect(guard_disposed(self._on_mission_bar_ready))
-        self._mission_worker.failed.connect(lambda _k, _m: None)
+        self._mission_worker.failed.connect(guard_disposed(self._on_mission_bar_failed))
         self._mission_worker.finished.connect(lambda: setattr(self, "_mission_worker", None))
         self._mission_worker.finished.connect(self._mission_worker.deleteLater)
         self._mission_worker.start()
 
+    def _on_mission_bar_failed(self, _key: str, message: str) -> None:
+        """Surface probe failures instead of leaving the mission bar blank."""
+        import logging
+
+        logging.getLogger(__name__).warning("mission-bar probe failed: %s", message)
+        pills = getattr(self, "_mission_pills", None) or []
+        if pills:
+            pills[0].setText("Status unavailable")
+            pills[0].setToolTip(str(message or "Mission bar probe failed")[:200])
+            pills[0].show()
+            restyle(pills[0])
+            for pill in pills[1:]:
+                pill.hide()
+
     def _on_mission_bar_ready(self, _key: str, facts: object):
         if not isinstance(facts, dict):
             return
+        # Share staged/rollback with Repair/Update via the Hub control plane.
+        try:
+            from .services.hub_state import HUB_STATE
+
+            staged = bool(facts.get("staged"))
+            rollback = bool(facts.get("rollback"))
+            if staged:
+                HUB_STATE.set_update_status("staged", "Reboot to apply staged image")
+            elif rollback:
+                HUB_STATE.set_update_status("idle", "Rollback available")
+            else:
+                HUB_STATE.set_update_status("idle", "System current")
+            HUB_STATE.set_rollback_available(rollback)
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, ImportError):  # noqa: BLE001
+            pass
         pills = []
         branch = str(facts.get("branch") or "")
         if branch:
@@ -255,6 +284,7 @@ class MainWindow(QMainWindow):
         for i, pill in enumerate(self._mission_pills):
             if i < len(pills):
                 pill.setText(pills[i])
+                pill.setToolTip("")
                 pill.show()
             else:
                 pill.hide()
@@ -319,7 +349,7 @@ class MainWindow(QMainWindow):
                 self._mission_ai_hint.show()
             else:
                 self._mission_ai_hint.hide()
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, ImportError):  # noqa: BLE001 -- narrow: best-effort production path
             self._mission_ai_hint.hide()
 
     def _show_palette(self):
@@ -671,7 +701,7 @@ class MainWindow(QMainWindow):
 
         self._sidebar_channel_worker = DataWorker("sidebar-channel", current_branch)
         self._sidebar_channel_worker.result.connect(guard_disposed(self._on_sidebar_channel_ready))
-        self._sidebar_channel_worker.failed.connect(lambda _k, _m: None)
+        self._sidebar_channel_worker.failed.connect(guard_disposed(self._on_sidebar_channel_failed))
         self._sidebar_channel_worker.finished.connect(lambda: setattr(self, "_sidebar_channel_worker", None))
         self._sidebar_channel_worker.finished.connect(self._sidebar_channel_worker.deleteLater)
         self._sidebar_channel_worker.start()
@@ -679,6 +709,14 @@ class MainWindow(QMainWindow):
     def _on_sidebar_channel_ready(self, _key: str, branch: object):
         text = {"latest": "Stable Channel", "testing": "Testing Channel"}.get(branch or "", "System Hub")
         self._sidebar_ver_lbl.setText(text)
+        self._sidebar_ver_lbl.setToolTip("")
+
+    def _on_sidebar_channel_failed(self, _key: str, message: str) -> None:
+        import logging
+
+        logging.getLogger(__name__).warning("sidebar channel probe failed: %s", message)
+        self._sidebar_ver_lbl.setText("System Hub")
+        self._sidebar_ver_lbl.setToolTip(str(message or "Could not read update channel")[:200])
 
     def _refresh_nvidia_nav_visibility(self):
         """The NVIDIA nav button starts hidden (see __init__) since

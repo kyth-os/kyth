@@ -82,10 +82,10 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
         single_shot(self, 0, self._refresh_nvidia_quick_fixes)
 
     @staticmethod
-    def _fetch_rollback_state() -> tuple[bool, str | None, bool]:
+    def _fetch_rollback_state() -> tuple[bool, str | None, bool, object | None]:
         """Run off the GUI thread by _refresh_rollback_state()'s DataWorker.
 
-        Returns (has_rollback, timestamp, self_heal_warn). self_heal_warn is
+        Returns (has_rollback, timestamp, self_heal_warn, history). self_heal_warn is
         True when a staged image has failed >=2 boots and a rollback is
         available — Hub auto-offers rollback as warn (self-healing, Pillar 2).
         """
@@ -109,14 +109,19 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
                     self_heal = True
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             pass
-        # Also propagate to HubState so other pages see staged/rollback coherence
+        # Prefer HubState self-heal warn if Mission Bar / Update already set it.
         try:
             from kyth_welcome.services.hub_state import HUB_STATE
 
+            if HUB_STATE.get("self_heal_warn"):
+                self_heal = True
             HUB_STATE.set_rollback_available(bool(has_rollback))
             if self_heal:
                 HUB_STATE.set("self_heal_warn", True)
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+            status = HUB_STATE.get_update_status()
+            if status.get("status") == "idle" and has_rollback:
+                HUB_STATE.set_update_status("idle", "Rollback available")
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, ImportError):  # noqa: BLE001
             pass
         return has_rollback, timestamp, self_heal, history
 
