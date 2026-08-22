@@ -48,6 +48,10 @@ def fetch_status_text() -> str:
     # spams an auth-failure audit line on every probe. Route through the
     # guard, which does have a NOPASSWD rule. Keep the unprivileged
     # fallback only in case the guard binary itself is ever missing.
+    # Never take that write-lock while an upgrade is running: Hub probes
+    # otherwise convoy behind bootc/ostree and the upgrade hits its timeout.
+    if active_operation():
+        return ""
     for cmd in (["sudo", "-n", "/usr/bin/kyth-bootc-guard", "status"], ["bootc", "status"]):
         result = run_command(cmd, timeout=10)
         if result is not None and result.returncode == 0 and result.stdout.strip():
@@ -63,6 +67,8 @@ def fetch_status_data() -> dict | None:
     # See fetch_status_text() above: route through kyth-bootc-guard's
     # NOPASSWD status-json operation instead of a bare `sudo -n bootc
     # status --json`, which has no matching sudoers rule and always fails.
+    if active_operation():
+        return None
     for cmd in (
         ["sudo", "-n", "/usr/bin/kyth-bootc-guard", "status-json"],
         ["bootc", "status", "--json"],

@@ -1,0 +1,16 @@
+[Unit]
+Description=Keep KythOS /boot writable for ostree finalize
+Documentation=file:///usr/share/doc/kyth/update-safety.md
+DefaultDependencies=no
+After=local-fs.target ostree-remount.service
+Before=ostree-finalize-staged.service
+RequiresMountsFor=/boot
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# remount,rw is EINVAL on the root-subvol bind; bind,rw is the working layout.
+ExecStart=/usr/bin/mount -o remount,bind,rw /boot
+
+[Install]
+WantedBy=sysinit.target

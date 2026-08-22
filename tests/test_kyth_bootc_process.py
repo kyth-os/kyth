@@ -352,5 +352,14 @@ class RegistrySharedTests(unittest.TestCase):
         self.assertEqual(result.state, "available")
 
 
+class BootcQueryLockTests(unittest.TestCase):
+    def test_status_probes_are_skipped_during_upgrade(self):
+        with patch.object(bootc_query, "active_operation", return_value="/usr/bin/bootc upgrade"):
+            with patch.object(bootc_query, "run_command") as run:
+                self.assertEqual(bootc_query.fetch_status_text(), "")
+                self.assertIsNone(bootc_query.fetch_status_data())
+                run.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

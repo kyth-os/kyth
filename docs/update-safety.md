@@ -11,7 +11,7 @@ enough.
    explicitly configured rollout ring.
 3. After `bootc upgrade` stages the deployment, KythOS records the pending
    digest in `/var/lib/kyth/boot-health.json`. A pull that times out
-   (`bootc upgrade` up to 1800 s) is **retryable** — no pending digest or
+   (`bootc upgrade` up to 3600 s) is **retryable** — no pending digest or
    quarantine is written, and the next run retries the same digest.
    Only after three unhealthy boots (step 6) does a digest become
    quarantined; `retryable: bootc upgrade timed out` in
@@ -111,17 +111,21 @@ journalctl -b -1 -u ostree-finalize-staged.service
 Look for the `Invalid argument` line right after `Stopping
 ostree-finalize-staged.service`.
 
-`kyth-safe-upgrade` now remounts `/boot` and runs `ostree admin finalize-staged`
-in the same session as the pull, so a GUI or `ujust kyth-upgrade` reboot
-applies the image on the first try. `ostree-finalize-staged.service` is also
-wrapped (immediate ExecStart plus shutdown ExecStop) so a raw `bootc upgrade`
-writes the bootloader entry before reboot.
+`kyth-safe-upgrade` remounts `/boot` with `bind,rw` (plain `remount,rw` is
+EINVAL on this layout) and runs `ostree admin finalize-staged` after
+`bootc upgrade` returns. `ostree-finalize-staged.service` ExecStart only
+prepares `/boot`; finalize on ExecStart deadlocks against bootc's sysroot
+lock. ExecStop still finalizes at shutdown as a fallback.
+
+A pull that is still running after 3600s is retryable (not quarantined).
+Hub `bootc status` probes are skipped while an upgrade is active so they
+cannot take the same write-lock.
 
 If you are already stuck with "Queued for next boot" on an older image:
 
 ```bash
 sudo mount -o remount,bind,rw /boot
-sudo ostree admin finalize-staged         # should print "Bootloader updated; bootconfig swap: yes"
+sudo kyth-finalize-staged                 # remounts bind,rw, then finalize
 sudo ostree admin status                  # confirm it now shows "(pending)"
 sudo systemctl reboot
 ```

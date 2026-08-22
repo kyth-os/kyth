@@ -496,11 +496,21 @@ class SafeUpgradeTests(unittest.TestCase):
                 patch.object(safe_upgrade.os, "geteuid", return_value=0),
                 patch.object(safe_upgrade, "fetch_status_data", return_value=status),
                 patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
-                patch.object(safe_upgrade, "run", side_effect=subprocess.TimeoutExpired(["bootc", "upgrade"], 1800)) as run,
+                patch.object(
+                    safe_upgrade,
+                    "run",
+                    side_effect=subprocess.TimeoutExpired(
+                        ["bootc", "upgrade"], safe_upgrade.BOOTC_UPGRADE_TIMEOUT_SEC
+                    ),
+                ) as run,
             ):
                 result = safe_upgrade.upgrade(state_path=state_path, config_path=pathlib.Path(temporary) / "missing.toml")
             self.assertEqual(result, 6)
-            run.assert_called_once_with(["bootc", "upgrade"], check=False, timeout=1800)
+            run.assert_called_once_with(
+                ["bootc", "upgrade"],
+                check=False,
+                timeout=safe_upgrade.BOOTC_UPGRADE_TIMEOUT_SEC,
+            )
             self.assertEqual(read_state(state_path).pending_digest, "")
             self.assertEqual(read_state(state_path).quarantined, {})
 
@@ -554,6 +564,27 @@ class SafeUpgradeTests(unittest.TestCase):
             run.assert_not_called()
             self.assertEqual(read_state(state_path).pending_digest, "")
 
+    def test_active_bootc_upgrade_is_retryable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = pathlib.Path(temporary) / "health.json"
+            status = {
+                "status": {
+                    "booted": {
+                        "image": {"reference": "ghcr.io/example/kyth:testing", "imageDigest": OTHER_DIGEST}
+                    }
+                }
+            }
+            with (
+                patch.object(safe_upgrade.os, "geteuid", return_value=0),
+                patch.object(safe_upgrade, "fetch_status_data", return_value=status),
+                patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
+                patch.object(safe_upgrade, "active_operation", return_value="/usr/bin/bootc upgrade"),
+                patch.object(safe_upgrade, "run") as run,
+            ):
+                result = safe_upgrade.upgrade(state_path=state_path, config_path=pathlib.Path(temporary) / "missing.toml")
+            self.assertEqual(result, 6)
+            run.assert_not_called()
+
     def test_bootc_lock_contention_is_retryable(self):
         with tempfile.TemporaryDirectory() as temporary:
             state_path = pathlib.Path(temporary) / "health.json"
@@ -596,8 +627,15 @@ class BootHealthPackagingTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("/usr/libexec/kyth-finalize-staged", finalize)
         self.assertIn("ostree-finalize-staged.service.d", finalize)
-        self.assertIn("ExecStart=-/usr/libexec/kyth-finalize-staged", finalize)
+        self.assertIn("ExecStart=-/usr/libexec/kyth-finalize-staged prepare-boot", finalize)
         self.assertIn("ExecStop=/usr/libexec/kyth-finalize-staged", finalize)
+        self.assertIn("kyth-boot-rw.service", finalize)
+        helper = (ROOT / "build_files/scripts/sysconfig/kyth-finalize-staged").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("prepare-boot", helper)
+        self.assertIn("remount,bind,rw", helper)
+        self.assertNotIn("remount,rw /sysroot/boot", helper)
 
         install = (
             ROOT / "build_files/scripts/branding/35-diagnostic-script-installs.sh"

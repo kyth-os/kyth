@@ -25,35 +25,44 @@ except (ImportError, OSError, subprocess.SubprocessError) as exc:  # noqa: BLE00
     _HUB_STATE = None  # type: ignore[assignment]
 from .commands import run
 from .system.bootc import image_digest_from_status, image_reference_from_status
-from .system.bootc_query import fetch_status_data
+from .system.bootc_query import active_operation, fetch_status_data
 from .system.registry import remote_digest_for_ref
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path("/etc/kyth/auto-update.toml")
+BOOTC_UPGRADE_TIMEOUT_SEC = 3600
 
 # /boot is often a bind-mount of the root btrfs subvol. `mount -o remount,rw`
 # then fails with EINVAL, and shutdown-time `ostree admin finalize-staged`
 # silently drops the staged deployment. bind,rw is the layout that works.
+# Do not remount /sysroot/boot — it is often not a mount point.
 _BOOT_REMOUNT_TRIES: tuple[tuple[str, ...], ...] = (
-    ("mount", "-o", "remount,rw", "/boot"),
     ("mount", "-o", "remount,bind,rw", "/boot"),
-    ("mount", "-o", "remount,rw", "/sysroot/boot"),
-    ("mount", "-o", "remount,bind,rw", "/sysroot/boot"),
+    ("mount", "-o", "remount,rw", "/boot"),
 )
 
 
 def remount_boot_writable(*, runner=None) -> bool:
     """Make /boot writable so ostree can write BLS entries."""
     execute = run if runner is None else runner
+    ok = False
     for argv in _BOOT_REMOUNT_TRIES:
         try:
             result = execute(list(argv), check=False, timeout=15)
         except (FileNotFoundError, OSError, TypeError, ValueError):
             continue
         if int(getattr(result, "returncode", 1) or 1) == 0:
-            return True
-    return False
+            ok = True
+            break
+    if ok:
+        # ostree writes BLS via /sysroot/boot. Bind the real /boot over it
+        # when that path exists and is not already a mount.
+        try:
+            execute(["mount", "--bind", "/boot", "/sysroot/boot"], check=False, timeout=15)
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            pass
+    return ok
 
 
 def finalize_staged_deployment(*, runner=None) -> int:
@@ -138,6 +147,10 @@ def upgrade(
     if remote_digest == staged:
         print("Latest digest is already staged — promoting it to the next boot")
         return finalize_staged_deployment(runner=run)
+    if active_operation():
+        print("Another bootc upgrade is in progress — will retry on next run", file=sys.stderr)
+        _maybe_trigger_guardian()
+        return 6
     # Pre-flight: require ~2 GB free on /sysroot (bootc needs space for new
     # deployment). Must not check "/" — on composefs-root systems (Fedora
     # 44+) / is a tiny synthetic overlay that always reports ~0 bytes free,
@@ -171,7 +184,7 @@ def upgrade(
     except (OSError, ImportError, AttributeError):  # noqa: BLE001 -- narrow: best-effort production path
         pass
     try:
-        result = run(["bootc", "upgrade"], check=False, timeout=1800)
+        result = run(["bootc", "upgrade"], check=False, timeout=BOOTC_UPGRADE_TIMEOUT_SEC)
     except subprocess.TimeoutExpired as exc:
         print(f"bootc upgrade timed out after {exc.timeout}s — will retry on next run (not quarantined)", file=sys.stderr)
         _maybe_trigger_guardian()
