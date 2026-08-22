@@ -304,6 +304,100 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         self.assertFalse(journal.committed)
         self.assertIsNone(journal.root_partition)
 
+    def _commit_failing_second_create(self, journal, first_ops):
+        for op_kind, params in first_ops:
+            journal.add_op(op_kind, params)
+        journal.add_op("create", {
+            "start_bytes": 4 * 1024**2,
+            "size_bytes": 10 * 1024**3,
+            "fs_type": "btrfs",
+            "mountpoint": "/",
+        })
+        journal.add_op("create", {
+            "start_bytes": 20 * 1024**3,
+            "size_bytes": 1024**3,
+            "fs_type": "fat32",
+            "mountpoint": "/boot/efi",
+        })
+        journal._disk_service.create_partition.side_effect = [
+            None,
+            RuntimeError("parted failed creating EFI"),
+        ]
+        with (
+            mock.patch(
+                "kyth_installer.storage_guard.DiskLease",
+                side_effect=lambda *a, **k: nullcontext(),
+            ),
+            mock.patch.object(journal, "_save_snapshot"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "parted failed"):
+                journal.commit(mock.MagicMock())
+
+    def test_commit_does_not_restore_gpt_after_format_following_new_table(self):
+        # Manual wipe: new GPT + format root, then a later create fails.
+        # Reloading the pre-commit table would name the old Windows/data
+        # partitions over the mkfs'd region.
+        journal = self._journal()
+        self._commit_failing_second_create(journal, [
+            ("new_table", {"table_type": "gpt"}),
+        ])
+        self.assertTrue(journal.irreversible_completed)
+        journal._disk_service.restore_table.assert_not_called()
+
+    def test_commit_does_not_restore_gpt_after_format_following_delete(self):
+        journal = self._journal()
+        self._commit_failing_second_create(journal, [
+            ("delete", {"partition": "/dev/sda2"}),
+        ])
+        self.assertTrue(journal.irreversible_completed)
+        journal._disk_service.restore_table.assert_not_called()
+
+    def test_commit_restores_gpt_when_create_is_only_in_free_space(self):
+        # No prior delete/new_table: the new filesystem sits in free space,
+        # so reloading GPT just hides it. That undo is still correct.
+        journal = self._journal()
+        self._commit_failing_second_create(journal, [])
+        self.assertFalse(journal.irreversible_completed)
+        journal._disk_service.restore_table.assert_called_once()
+
+    def test_commit_does_not_restore_gpt_when_shrink_succeeds_and_table_move_fails(self):
+        journal = self._journal(dry_run=False)
+        journal.add_op("resize", {"partition": "/dev/sda2", "new_size_bytes": 8 * 1024**3})
+        journal._disk_service.resize_partition.side_effect = RuntimeError(
+            "parted resizepart failed"
+        )
+        with (
+            mock.patch(
+                "kyth_installer.storage_guard.DiskLease",
+                side_effect=lambda *a, **k: nullcontext(),
+            ),
+            mock.patch.object(journal, "_save_snapshot"),
+            mock.patch.object(journal_mod, "_require_parted"),
+            mock.patch.object(
+                journal_mod, "list_partitions",
+                return_value=[{"name": "/dev/sda2", "fstype": "ntfs"}],
+            ),
+            mock.patch.object(journal_mod, "shrink_filesystem") as shrink,
+            mock.patch.object(journal_mod, "_partition_number", return_value=2),
+            mock.patch.object(journal_mod, "_partition_start_bytes", return_value=1024**2),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "resizepart"):
+                journal.commit(mock.MagicMock())
+        shrink.assert_called_once()
+        self.assertTrue(journal.irreversible_completed)
+        journal._disk_service.restore_table.assert_not_called()
+
+    def test_rollback_refuses_after_irreversible_filesystem_op(self):
+        journal = self._journal()
+        journal.add_op("new_table", {})
+        journal.irreversible_completed = True
+        journal._snapshot_saved = True
+        with mock.patch.object(journal, "_restore_snapshot") as restore:
+            with self.assertRaisesRegex(RuntimeError, "would not restore files"):
+                journal.rollback(mock.MagicMock())
+        restore.assert_not_called()
+        self.assertEqual(len(journal.ops), 1)
+
     def test_partition_facade_builds_labels_and_resets_existing_journal(self):
         self.assertEqual(partition_ops._mkfs_cmd("unknown", "/dev/sda1"), [])
         fat = partition_ops._mkfs_cmd("fat32", "/dev/sda1", "EFI")

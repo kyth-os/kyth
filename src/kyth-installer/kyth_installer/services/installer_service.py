@@ -175,11 +175,7 @@ class InstallerService:
                 return {
                     "ok": False,
                     "irreversible": True,
-                    "message": (
-                        f"{exc}. A format or filesystem shrink already completed. "
-                        "Restoring the partition table would not restore files. "
-                        "Those partitions no longer contain their original contents."
-                    ),
+                    "message": f"{exc}. {partition_ops.IRREVERSIBLE_RESTORE_MESSAGE}",
                 }
             journal.rollback(lambda _msg: None)
             # IDLE, not FAILED: journal.rollback() has already restored the
@@ -202,12 +198,25 @@ class InstallerService:
         _disk, journal, error = self._journal_for(body)
         if error:
             return error
+        if bool(getattr(journal, "irreversible_completed", False)):
+            # Same gate as commit_partitions: Undo All must not reload a GPT
+            # that no longer matches filesystems the journal already mutated.
+            return {
+                "ok": False,
+                "irreversible": True,
+                "message": partition_ops.IRREVERSIBLE_RESTORE_MESSAGE,
+            }
         try:
             journal.rollback(lambda _msg: None)
             partition_ops.reset_journal(self.context)
             return {"ok": True}
         except RuntimeError as exc:
-            return {"ok": False, "message": str(exc)}
+            irreversible = bool(getattr(journal, "irreversible_completed", False))
+            return {
+                "ok": False,
+                "message": str(exc),
+                **({"irreversible": True} if irreversible else {}),
+            }
 
     def start_install(self, body: dict, *, strict_locale: bool = True) -> dict:
         # install.py is imported lazily here, not at module level: it pulls in

@@ -7,7 +7,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .partition_ops_journal import Journal, _require_mkfs  # pylint: disable=unused-import
+from .partition_ops_journal import (  # pylint: disable=unused-import  # noqa: F401
+    IRREVERSIBLE_RESTORE_MESSAGE,
+    Journal,
+    _require_mkfs,
+)
 
 # Re-exported for server.py and tests that import from partition_ops
 from .config import FILESYSTEM_OPTIONS, _FILESYSTEM  # pylint: disable=unused-import  # noqa: F401

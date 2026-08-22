@@ -95,6 +95,12 @@ _partition_number = _patched_partition_number  # type: ignore
 _partition_start_bytes = _patched_partition_start_bytes  # type: ignore
 shrink_filesystem = _patched_shrink_filesystem  # type: ignore
 
+IRREVERSIBLE_RESTORE_MESSAGE = (
+    "A format or filesystem shrink already completed. "
+    "Restoring the partition table would not restore files. "
+    "Those partitions no longer contain their original contents."
+)
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -567,6 +573,13 @@ class Journal:
         if fs != "linux-swap":
             log(f"Formatting {created} as {fs}...")
             self._disk_service.format_filesystem(created, fs, label)
+            # mkfs has already destroyed whatever previously occupied this
+            # region. Reloading the pre-commit GPT is only safe when this
+            # create was in already-free space: after new_table or delete,
+            # restore would put the old partition names back over the new
+            # filesystem (Windows "comes back" with its contents gone).
+            if self._replaces_existing_layout():
+                self.irreversible_completed = True
 
         if p.get("mountpoint") == "/boot/efi":
             part_num = _partition_number(created) if not self._disk_service.dry_run else 99
@@ -603,6 +616,10 @@ class Journal:
             log(f"Shrinking the {fstype or 'unknown'} filesystem on {part_name} "
                 "before moving the partition boundary...")
             shrink_filesystem(part_name, fstype, new_size, log)
+            # Filesystem is already smaller. If resize_partition fails next,
+            # reloading the old GPT re-extends the partition over the shrunk
+            # volume (or over a neighbor created in the freed tail).
+            self.irreversible_completed = True
         part_num = _partition_number(part_name) if not self._disk_service.dry_run else 99
         start = _partition_start_bytes(part_name) if not self._disk_service.dry_run else 1024**2
         log(f"Resizing {part_name} to {_human_size(new_size)}...")
@@ -699,7 +716,17 @@ class Journal:
                 root = self._root_partition or ""
                 return root
 
+    def _replaces_existing_layout(self) -> bool:
+        """True when this journal destroys a prior table or partition first.
+
+        A later mkfs then occupies space the old GPT still describes, so
+        restoring that GPT after the format is actively harmful.
+        """
+        return any(op.get("kind") in ("new_table", "delete") for op in self.ops)
+
     def rollback(self, log) -> None:
+        if self.irreversible_completed:
+            raise RuntimeError(IRREVERSIBLE_RESTORE_MESSAGE)
         if not self._snapshot_saved:
             log("No partition snapshot to restore from.")
             self.ops.clear()
