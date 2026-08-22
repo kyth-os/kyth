@@ -47,11 +47,10 @@ class SectionSerializabilityTests(unittest.TestCase):
         from kyth_shared.hardware_policy import Evaluation
         from kyth_shared.system.hardware_view import HardwareView
 
-        profile = mock.Mock()
-        profile.id = "amd-desktop"
+        # evaluate_system() stores profiles as dicts, not objects with .id.
         evaluation = mock.Mock(spec=Evaluation)
         evaluation.capabilities = ["gpu.amd", "gpu.hybrid"]
-        evaluation.profiles = [profile]
+        evaluation.profiles = [{"id": "amd-desktop"}]
         view = HardwareView(
             evaluation=evaluation, applied={}, has_nvidia=False, is_hybrid=True
         )
@@ -76,6 +75,21 @@ class SectionSerializabilityTests(unittest.TestCase):
 
         json.dumps(section)
         self.assertIsNone(section["hardware-summary"])
+
+    def test_display_collector_reads_profile_dicts(self):
+        from kyth_shared.hardware_policy import Evaluation
+
+        evaluation = mock.Mock(spec=Evaluation)
+        evaluation.capabilities = ["gpu.amd"]
+        evaluation.profiles = [{"id": "amd-desktop"}]
+
+        with mock.patch(
+            "kyth_shared.hardware_policy.evaluate_system", return_value=evaluation
+        ):
+            section = probe._collect_display()
+
+        json.dumps(section)
+        self.assertEqual(["amd-desktop"], section["display-detect"]["profiles"])
 
     def test_full_snapshot_write_round_trips(self):
         """End-to-end: what collect_snapshot produces must be writable."""

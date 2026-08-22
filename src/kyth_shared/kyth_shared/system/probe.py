@@ -441,8 +441,13 @@ def _collect_display() -> dict[str, Any]:
         from kyth_shared.hardware_policy import evaluate_system
 
         ev = evaluate_system()
-        return {"display-detect": {"capabilities": ev.capabilities[:8], "profiles": [p.id for p in ev.profiles[:3]]}}
-    except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: display probe is best-effort
+        return {
+            "display-detect": {
+                "capabilities": ev.capabilities[:8],
+                "profiles": [profile["id"] for profile in ev.profiles[:3]],
+            }
+        }
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError, TypeError):  # noqa: BLE001 -- narrow: display probe is best-effort
         return {"display-detect": None}
 
 
@@ -459,10 +464,10 @@ def _collect_hardware_view() -> dict[str, Any]:
                 "has_nvidia": bool(view.has_nvidia),
                 "is_hybrid": bool(view.is_hybrid),
                 "capabilities": list(view.evaluation.capabilities[:8]),
-                "profiles": [profile.id for profile in view.evaluation.profiles[:3]],
+                "profiles": [profile["id"] for profile in view.evaluation.profiles[:3]],
             }
         }
-    except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError, TypeError):  # noqa: BLE001 -- narrow: probe best-effort
         return {"hardware-summary": None}
 
 
