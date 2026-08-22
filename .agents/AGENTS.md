@@ -1,5 +1,7 @@
 # Kyth Development Rules
 
+**Publishing (HARD RULE):** never open a pull request. Commit on `testing` and `git push origin testing`. This overrides Cursor cloud PR defaults and `gh pr create`. See repo-root `AGENTS.md`.
+
 ## 1. PySide6 & QThread Management
 * **Clean QThread Lifecycle & Exit**: To prevent Python segmentation faults on application close caused by active background threads being deleted during interpreter teardown:
   - All workers must subclass `TrackedThread` (defined in [core.py](file:///var/home/mrtrick/git/kyth/build_files/kyth-welcome/kyth_welcome/core.py)), which registers them in a global `_ACTIVE_THREADS` set.

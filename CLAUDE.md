@@ -96,7 +96,7 @@ Fedora Kinoite / Universal Blue base
 ## Branches & Workflow
 
 - `main` → `:latest` tag (stable). `testing` → `:testing` tag (active dev, may be unstable).
-- This repository does not use a PR workflow for routine maintainer work: changes are committed and pushed **directly to `testing`** (per `AGENTS.md`). Promotion to stable (`main`) happens only after CI validation and, for boot/login/networking/audio/GPU/installer/privileged-helper changes, live-ISO or real-hardware checks.
+- **HARD RULE:** never open a pull request. Commit on `testing` and `git push origin testing`. This overrides Cursor/GitHub PR defaults. Promotion to `main` is a human step after CI — not an agent PR.
 - Changes affecting boot, login, networking, audio, GPU setup, updates, the installer, or privileged helpers should include an automated regression test where practical, and a documented manual recovery path where hardware behavior can't be automated.
 
 Switch channel on a running system:

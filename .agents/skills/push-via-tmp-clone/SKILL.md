@@ -1,6 +1,9 @@
 ---
 name: push-via-tmp-clone
-description: DEPRECATED - Use direct git push. Toolbox has .git rw; tmp clone no longer needed.
+description: >-
+  Publishes Kyth by pushing origin/testing. Use when committing, pushing,
+  opening a PR, or creating a GitHub pull request. Never open PRs; tmp clone
+  is deprecated.
 ---
 
 # Push Direct (Simplified - Toolbox)
