@@ -63,9 +63,14 @@ class SystemProbe:
     def get_autologin_user() -> str:
         config = configparser.ConfigParser(interpolation=None, strict=False)
         config.optionxform = str
-        sddm_files = ["/etc/sddm.conf", *sorted(glob.glob("/etc/sddm.conf.d/*.conf"))]
+        greeter_files = [
+            "/etc/plasmalogin.conf",
+            *sorted(glob.glob("/etc/plasmalogin.conf.d/*.conf")),
+            "/etc/sddm.conf",
+            *sorted(glob.glob("/etc/sddm.conf.d/*.conf")),
+        ]
         try:
-            config.read(sddm_files)
+            config.read(greeter_files)
             return config.get("Autologin", "User", fallback="").strip()
         except (configparser.Error, OSError):
             return ""

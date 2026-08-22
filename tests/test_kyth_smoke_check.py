@@ -65,7 +65,7 @@ class SmokeCheckTests(unittest.TestCase):
             checker.desktop()
         session = next(item for item in checker.results if item.name == "Session type")
         self.assertEqual(session.level, "FAIL")
-        self.assertIn("journalctl -u sddm", session.detail)
+        self.assertIn("journalctl -u plasmalogin", session.detail)
 
     def test_health_report_has_stable_json_schema(self) -> None:
         report = from_smoke_results(

@@ -1,4 +1,4 @@
-"""kyth-configure-session must fail-open so SDDM ExecStartPre cannot block login."""
+"""kyth-configure-session must fail-open so PLM ExecStartPre cannot block login."""
 from __future__ import annotations
 
 import importlib.util
@@ -26,52 +26,52 @@ def _load_configure_session():
 class ConfigureSessionFailOpenTests(unittest.TestCase):
     def test_mkdir_failure_does_not_block_the_greeter(self):
         mod = _load_configure_session()
-        sddm_dir = mock.Mock()
-        sddm_dir.mkdir.side_effect = PermissionError("denied")
-        with mock.patch.object(mod, "Path", return_value=sddm_dir):
+        conf_dir = mock.Mock()
+        conf_dir.mkdir.side_effect = PermissionError("denied")
+        with mock.patch.object(mod, "Path", return_value=conf_dir):
             self.assertEqual(mod.configure_session(), 0)
 
     def test_write_failure_does_not_block_the_greeter(self):
         mod = _load_configure_session()
         conf = mock.Mock()
         conf.write_text.side_effect = OSError("read-only")
-        sddm_dir = mock.Mock()
-        sddm_dir.__truediv__ = mock.Mock(return_value=conf)
-        with mock.patch.object(mod, "Path", return_value=sddm_dir):
+        conf_dir = mock.Mock()
+        conf_dir.__truediv__ = mock.Mock(return_value=conf)
+        with mock.patch.object(mod, "Path", return_value=conf_dir):
             self.assertEqual(mod.configure_session(), 0)
 
     def test_default_writes_wayland_session(self):
         mod = _load_configure_session()
         conf = mock.Mock()
-        sddm_dir = mock.Mock()
-        sddm_dir.__truediv__ = mock.Mock(return_value=conf)
-        with mock.patch.object(mod, "Path", return_value=sddm_dir):
+        conf_dir = mock.Mock()
+        conf_dir.__truediv__ = mock.Mock(return_value=conf)
+        with mock.patch.object(mod, "Path", return_value=conf_dir):
             self.assertEqual(mod.configure_session(), 0)
         written = conf.write_text.call_args.args[0]
-        self.assertIn("DisplayServer=wayland", written)
         self.assertIn("DefaultSession=plasma.desktop", written)
+        self.assertIn("Session=plasma.desktop", written)
+        self.assertNotIn("plasmax11", written)
 
     def test_nomodeset_writes_wayland_session(self):
         mod = _load_configure_session()
         conf = mock.Mock()
-        sddm_dir = mock.Mock()
-        sddm_dir.__truediv__ = mock.Mock(return_value=conf)
-        with mock.patch.object(mod, "Path", return_value=sddm_dir):
+        conf_dir = mock.Mock()
+        conf_dir.__truediv__ = mock.Mock(return_value=conf)
+        with mock.patch.object(mod, "Path", return_value=conf_dir):
             self.assertEqual(mod.configure_session(cmdline="quiet nomodeset"), 0)
         written = conf.write_text.call_args.args[0]
-        self.assertIn("DisplayServer=wayland", written)
         self.assertIn("DefaultSession=plasma.desktop", written)
         self.assertNotIn("plasmax11", written)
 
 
 class SessionConfOwnershipTests(unittest.TestCase):
-    def test_static_sddm_conf_documents_eleven_as_session_owner(self):
-        body = (ROOT / "build_files/scripts/branding/13-sddm-session-background.sh").read_text(
-            encoding="utf-8"
-        )
+    def test_static_plm_conf_documents_eleven_as_session_owner(self):
+        body = (
+            ROOT / "build_files/scripts/branding/13-plasmalogin-session-background.sh"
+        ).read_text(encoding="utf-8")
         self.assertIn("11-kyth-session.conf", body)
-        self.assertIn("Wayland greeter/session default", body)
-        self.assertIn("/etc/sddm.conf.d/10-kyth.conf", body)
+        self.assertIn("Wayland session default", body)
+        self.assertIn("/etc/plasmalogin.conf.d/10-kyth.conf", body)
 
 
 if __name__ == "__main__":

@@ -1,29 +1,34 @@
 # shellcheck shell=bash
-# ── SDDM session type + login screen background ───────────────────────────────
-# 10-kyth.conf owns the theme and the Wayland greeter/session default used when
+# ── Plasma Login Manager session type + login wallpaper ───────────────────────
+# 10-kyth.conf owns the wallpaper and the Wayland session default used when
 # 11-kyth-session.conf is missing (kyth-configure-session failed to write).
-# Session type is owned by 11-kyth-session.conf (written every boot as SDDM
-# ExecStartPre): always Plasma Wayland. Lexical order means 11 overrides
-# DisplayServer/DefaultSession here. VMs, nomodeset, and first-boot NVIDIA
-# without a render node use kyth-sddm-compositor's software-compose rescue.
+# Session type is owned by 11-kyth-session.conf (written every boot as
+# plasmalogin ExecStartPre): always Plasma Wayland. Lexical order means 11
+# overrides Session here. VMs, nomodeset, and first-boot NVIDIA without a
+# render node use kyth-greeter-compositor's software-compose rescue.
 # [X11] SessionDir is an empty directory so leftover Plasma X11 session
 # files cannot appear in the greeter even if a base RPM still ships them.
 install -d -m 0755 /usr/share/kyth/no-xsessions
-write_config /etc/sddm.conf.d/10-kyth.conf <<'SDDMCONFEOF'
+write_config /etc/plasmalogin.conf.d/10-kyth.conf <<'PLMCONFEOF'
 [General]
-DisplayServer=wayland
 DefaultSession=plasma.desktop
 
-[Theme]
-Current=breeze
+[Autologin]
+Session=plasma.desktop
+
+[Greeter]
+WallpaperPlugin=org.kde.image
+
+[Greeter][Wallpaper][org.kde.image][General]
+Image=file:///usr/share/wallpapers/kyth/contents/images/1920x1080.svg
+PreviewImage=file:///usr/share/wallpapers/kyth/contents/images/1920x1080.svg
 
 [Wayland]
 SessionDir=/usr/share/wayland-sessions
-CompositorCommand=/usr/bin/kyth-sddm-compositor
 
 [X11]
 SessionDir=/usr/share/kyth/no-xsessions
-SDDMCONFEOF
+PLMCONFEOF
 
 # System-wide session env: software compose when there is no GPU render node,
 # or when nomodeset disabled GPU KMS. kyth.hwgl=1 forces hardware GL (GPU
@@ -44,16 +49,6 @@ export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 export QT_QUICK_BACKEND=software
 export KWIN_COMPOSE=Q
 COMPOSEEOF
-
-# theme.conf.user overrides the breeze SDDM theme defaults without modifying
-# the upstream theme files. The wallpaper is already installed above.
-write_config /usr/share/sddm/themes/breeze/theme.conf.user <<'SDDMEOF'
-[General]
-type=image
-background=/usr/share/wallpapers/kyth/contents/images/1920x1080.svg
-logo=/usr/share/pixmaps/kyth.svg
-showlogo=shown
-SDDMEOF
 
 # Make enrolled fingerprints available to the login and screen-lock PAM stack.
 # fprintd-pam provides the module; authselect activates it in Fedora's profile.

@@ -17,9 +17,9 @@ ENROLL_SCRIPT = ROOT / "build_files/tests/secureboot-enrollment.sh"
 
 
 class BootStabilityUnitTests(unittest.TestCase):
-    def test_selinux_home_relabel_is_capped_and_still_before_sddm(self) -> None:
+    def test_selinux_home_relabel_is_capped_and_still_before_greeter(self) -> None:
         body = SELINUX_UNIT.read_text(encoding="utf-8")
-        self.assertIn("Before=sddm.service", body)
+        self.assertIn("Before=plasmalogin.service", body)
         self.assertIn("TimeoutStartSec=180", body)
 
     def test_boot_mutators_have_timeouts_and_path_trigger_limit(self) -> None:

@@ -178,7 +178,7 @@ Do these intentionally. Evangelists are made when recovery works.
 5. Connect a hibernated Windows volume and confirm migration tools warn the user
    to fully shut down Windows.
 6. If the greeter never appears, recover from a TTY (`Ctrl+Alt+F3`,
-   `journalctl -u sddm -b`). Plasma X11 is not a session. Reboot without
+   `journalctl -u plasmalogin -b`). Plasma X11 is not a session. Reboot without
    `nomodeset` when the GPU is fine, or boot the previous deployment.
 7. Fill memory pressure with a browser plus a game load screen and confirm the
    desktop survives without killing session-critical services.

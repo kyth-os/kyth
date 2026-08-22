@@ -29,14 +29,14 @@ DEFAULT_INTERVAL = 2.0
 SYSTEMD_RUNTIME_MARKER = Path("/run/systemd/system")
 DRM_DEVICE_DIR = Path("/dev/dri")
 GRAPHICAL_TARGET = "graphical.target"
-# sddm.service carries the display-manager.service alias; `list-units` reports
-# the concrete name, so both spellings are matched.
-DISPLAY_MANAGER_UNITS = ("sddm.service", "display-manager.service")
+# plasmalogin.service carries the display-manager.service alias; `list-units`
+# reports the concrete name, so both spellings are matched.
+DISPLAY_MANAGER_UNITS = ("plasmalogin.service", "display-manager.service")
 CRITICAL_UNITS = frozenset({
     "dbus-broker.service",
     "dbus.service",
     "display-manager.service",
-    "sddm.service",
+    "plasmalogin.service",
     "NetworkManager.service",
 })
 

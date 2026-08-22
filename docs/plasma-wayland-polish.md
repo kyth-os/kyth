@@ -37,9 +37,9 @@ feel distinct, comfortable, and easy for new users to trust.
 
 ## Session defaults (Plasma Wayland)
 
-- **Bare metal**, VMs, live media, and `nomodeset` all start SDDM and Plasma
-  on Wayland (`plasma.desktop`). The greeter compositor is
-  `kyth-sddm-compositor`. Plasma X11 is not a session.
+- **Bare metal**, VMs, live media, and `nomodeset` all start Plasma Login
+  Manager and Plasma on Wayland (`plasma.desktop`). The greeter compositor is
+  `kyth-greeter-compositor`. Plasma X11 is not a session.
 - **Software compose:** when there is no DRM render node, on live media, or
   with `nomodeset`, KWin uses QPainter + llvmpipe. `kyth.hwgl=1` forces
   hardware GL.
@@ -47,11 +47,11 @@ feel distinct, comfortable, and easy for new users to trust.
   userspace package (`xorg-x11-drv-nvidia*`) stays; classic Xorg and
   `plasma-workspace-x11` do not.
 - **Fail-open:** if the helper cannot write `11-kyth-session.conf`, static
-  `/etc/sddm.conf.d/10-kyth.conf` still provides the Wayland default so login
-  is never blocked. SDDM's X11 session directory is an empty KythOS path so
-  leftover X11 session files cannot appear in the greeter. On upgrade, the
-  helper also rewrites SDDM `LastSession` and `~/.dmrc` when they still name
-  Plasma X11.
+  `/etc/plasmalogin.conf.d/10-kyth.conf` still provides the Wayland default so
+  login is never blocked. PLM's X11 session directory is an empty KythOS path
+  so leftover X11 session files cannot appear in the greeter. On upgrade, the
+  helper also rewrites PLM/SDDM `LastSession` and `~/.dmrc` when they still
+  name Plasma X11.
 - System KWin defaults set `[Wayland] VrrPolicy=1` (Automatic) under
   `/etc/xdg/kwinrc`. Image packages explicitly include `xdg-desktop-portal`,
   `xdg-desktop-portal-kde`, and `qt6-qtwayland`.
@@ -60,8 +60,8 @@ feel distinct, comfortable, and easy for new users to trust.
 
 If the login screen never appears, Plasma X11 is not a fallback. Use a TTY:
 
-1. `Ctrl+Alt+F3`, log in, then `journalctl -u sddm -b --no-pager`.
-2. Look for `kyth-sddm-compositor` / `kwin_wayland`. A missing DRM card prints
+1. `Ctrl+Alt+F3`, log in, then `journalctl -u plasmalogin -b --no-pager`.
+2. Look for `kyth-greeter-compositor` / `kwin_wayland`. A missing DRM card prints
    a hint on that unit.
 3. If you booted **Basic Graphics** / `nomodeset` and the GPU is fine, reboot
    without `nomodeset`.

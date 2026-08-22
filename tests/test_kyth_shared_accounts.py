@@ -30,9 +30,9 @@ class EnsureSystemAccountsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _write(root / "usr/lib/passwd",
-                   "sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin\n"
+                   "plasmalogin:x:959:959:PLASMALOGIN Greeter Account:/var/lib/plasmalogin:/usr/sbin/nologin\n"
                    "foo:x:100:100::/home/foo:/sbin/nologin\n")
-            _write(root / "usr/lib/group", "sddm:x:959:\nfoo:x:100:\n")
+            _write(root / "usr/lib/group", "plasmalogin:x:959:\nfoo:x:100:\n")
             _write(root / "etc/passwd", "root:x:0:0:root:/root:/bin/bash\n")
             _write(root / "etc/group", "root:x:0:\n")
             _write(root / "etc/shadow", "root:!locked:19700:0:99999:7:::\n")
@@ -53,18 +53,18 @@ class EnsureSystemAccountsTests(unittest.TestCase):
 
             passwd = (root / "etc/passwd").read_text()
             group = (root / "etc/group").read_text()
-            self.assertIn("sddm:", passwd)
+            self.assertIn("plasmalogin:", passwd)
             self.assertIn("foo:", passwd)
-            self.assertIn("sddm:", group)
+            self.assertIn("plasmalogin:", group)
             self.assertIn("foo:", group)
-            self.assertIn("sddm:!*:19700:0:99999:7:::", shadow)
+            self.assertIn("plasmalogin:!*:19700:0:99999:7:::", shadow)
             self.assertIn("foo:!*:19700:0:99999:7:::", shadow)
             # root's existing shadow record must be untouched, not duplicated.
             self.assertEqual(shadow.count("root:!locked"), 1)
 
             self.assertEqual((root / "etc/passwd").stat().st_mode & 0o777, 0o644)
             self.assertEqual((root / "etc/group").stat().st_mode & 0o777, 0o644)
-            self.assertTrue((root / "var/lib/sddm").is_dir())
+            self.assertTrue((root / "var/lib/plasmalogin").is_dir())
             self.assertTrue(any("Repaired" in m for m in messages))
 
     def test_no_changes_still_re_locks_existing_shadow(self):
@@ -83,16 +83,16 @@ class EnsureSystemAccountsTests(unittest.TestCase):
 
             self.assertEqual(shadow_path.stat().st_mode & 0o777, 0o000)
 
-    def test_sddm_home_chowned_by_target_uid_gid_not_literal_name(self):
-        """The target tree's own sddm uid/gid must be used (not the string
-        'sddm'), since the process's own /etc/passwd may not have that user
+    def test_plasmalogin_home_chowned_by_target_uid_gid_not_literal_name(self):
+        """The target tree's own plasmalogin uid/gid must be used (not the string
+        'plasmalogin'), since the process's own /etc/passwd may not have that user
         or may allocate it a different id than the target image did."""
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _write(root / "etc/passwd",
                    "root:x:0:0:root:/root:/bin/bash\n"
-                   "sddm:x:777:888:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin\n")
-            _write(root / "etc/group", "root:x:0:\nsddm:x:888:\n")
+                   "plasmalogin:x:777:888:PLASMALOGIN Greeter Account:/var/lib/plasmalogin:/usr/sbin/nologin\n")
+            _write(root / "etc/group", "root:x:0:\nplasmalogin:x:888:\n")
 
             calls = []
 
@@ -138,13 +138,13 @@ class EnsureSystemAccountsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _write(root / "usr/lib/passwd",
-                   "sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin\n")
-            _write(root / "usr/lib/group", "sddm:x:959:\n")
+                   "plasmalogin:x:959:959:PLASMALOGIN Greeter Account:/var/lib/plasmalogin:/usr/sbin/nologin\n")
+            _write(root / "usr/lib/group", "plasmalogin:x:959:\n")
             _write(root / "etc/passwd", "root:x:0:0:root:/root:/bin/bash\n")
             _write(root / "etc/group", "root:x:0:\n")
 
             self.assertEqual(accounts.main([str(root)]), 0)
-            self.assertIn("sddm:", (root / "etc/passwd").read_text())
+            self.assertIn("plasmalogin:", (root / "etc/passwd").read_text())
 
 
 def _fake_useradd_run(useradd_uid_gid="1000:1000"):

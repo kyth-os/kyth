@@ -315,8 +315,8 @@ systemctl enable livesys.service livesys-late.service
 # Live media boots on hardware that has never run this OS. Autologin follows
 # DefaultSession (Plasma Wayland) plus live.sh llvmpipe/QPainter, including the
 # ISO's nomodeset / Basic Graphics entry. Do not pin Session= here.
-mkdir -p /etc/sddm.conf.d
-cat >/etc/sddm.conf.d/20-kyth-live-autologin.conf <<'EOF'
+mkdir -p /etc/plasmalogin.conf.d
+cat >/etc/plasmalogin.conf.d/20-kyth-live-autologin.conf <<'EOF'
 [Autologin]
 User=liveuser
 Relogin=false
@@ -332,7 +332,7 @@ for unit in \
 	kyth-proton-cachyos-update.service kyth-proton-cachyos-update.timer \
 	kyth-hw-setup.service kyth-local-bin-migrate.service \
 	kyth-duperemove.service kyth-duperemove.timer \
-	kyth-enroll-mok.service plasmalogin.service akmods.service \
+	kyth-enroll-mok.service sddm.service akmods.service \
 	plasma-setup.service scxd.service \
 	fwupd.service fwupd-refresh.service fwupd-refresh.timer; do
 	systemctl disable "${unit}" 2>/dev/null || true

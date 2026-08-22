@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""kyth-configure-session — keep SDDM on Plasma Wayland across upgrades.
+"""kyth-configure-session — keep Plasma Login Manager on Wayland across upgrades.
 
 Older images wrote DisplayServer=x11 into /etc/sddm.conf.d/11-kyth-session.conf
-for VMs or nomodeset, and SDDM may still remember LastSession=plasmax11 in
-/var/lib/sddm/state.conf or ~/.dmrc. Those locally modified files survive
-bootc updates unless this ExecStartPre overwrites them. Software-compose
-rescue (including nomodeset) is handled by kyth-sddm-compositor.
+for VMs or nomodeset, and leftover LastSession=plasmax11 may still live in
+/var/lib/sddm/state.conf, /var/lib/plasmalogin/state.conf, or ~/.dmrc. Those
+locally modified files survive bootc updates unless this ExecStartPre
+overwrites them. Software-compose rescue (including nomodeset) is handled by
+kyth-greeter-compositor and /run/kyth-greeter.env.
 
 Fail-open: a write error logs a warning and returns 0 so ExecStartPre cannot
 block the greeter. ``10-kyth.conf`` still provides the Wayland default.
@@ -16,15 +17,17 @@ import sys
 from pathlib import Path
 
 from kyth_shared.wayland_compose import (
-    SDDM_STATE_FILE,
+    LEGACY_SDDM_STATE_FILE,
+    PLM_STATE_FILE,
+    greeter_session_conf,
+    migrate_greeter_last_session,
     migrate_home_dmrcs,
-    migrate_sddm_last_session,
-    sddm_session_conf,
+    write_greeter_compose_env,
 )
 
 
-def configure_session(sddm_dir: Path | None = None, cmdline: str | None = None) -> int:
-    directory = Path(sddm_dir) if sddm_dir is not None else Path("/etc/sddm.conf.d")
+def configure_session(conf_dir: Path | None = None, cmdline: str | None = None) -> int:
+    directory = Path(conf_dir) if conf_dir is not None else Path("/etc/plasmalogin.conf.d")
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -32,7 +35,7 @@ def configure_session(sddm_dir: Path | None = None, cmdline: str | None = None) 
         return 0
     conf_file = directory / "11-kyth-session.conf"
     try:
-        conf_file.write_text(sddm_session_conf(cmdline), encoding="utf-8")
+        conf_file.write_text(greeter_session_conf(cmdline), encoding="utf-8")
     except OSError as exc:
         print(f"Warning: could not write {conf_file}: {exc}", file=sys.stderr)
         return 0
@@ -40,25 +43,36 @@ def configure_session(sddm_dir: Path | None = None, cmdline: str | None = None) 
 
 
 def configure_host_session(
-    sddm_dir: Path | None = None,
+    conf_dir: Path | None = None,
     cmdline: str | None = None,
     *,
     state_file: Path | None = None,
     homes: Path | None = None,
+    env_file: Path | None = None,
 ) -> int:
     """Wayland drop-in plus leftover LastSession / ~/.dmrc X11 values.
 
     Fail-open: migration errors are warnings. Login must not be blocked.
     """
-    configure_session(sddm_dir, cmdline)
-    try:
-        migrate_sddm_last_session(state_file or SDDM_STATE_FILE)
-    except OSError as exc:
-        print(f"Warning: could not migrate SDDM last session: {exc}", file=sys.stderr)
+    configure_session(conf_dir, cmdline)
+    targets = (
+        [state_file]
+        if state_file is not None
+        else [PLM_STATE_FILE, LEGACY_SDDM_STATE_FILE]
+    )
+    for path in targets:
+        try:
+            migrate_greeter_last_session(path)
+        except OSError as exc:
+            print(f"Warning: could not migrate greeter last session {path}: {exc}", file=sys.stderr)
     try:
         migrate_home_dmrcs(homes or Path("/home"))
     except OSError as exc:
         print(f"Warning: could not migrate user session files: {exc}", file=sys.stderr)
+    try:
+        write_greeter_compose_env(env_file)
+    except OSError as exc:
+        print(f"Warning: could not write greeter compose env: {exc}", file=sys.stderr)
     return 0
 
 

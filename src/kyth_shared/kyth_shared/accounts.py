@@ -4,9 +4,10 @@ Both install entry points that write a fresh KythOS deployment — the graphical
 kyth-installer and the kyth-partition-install CLI — must
 apply the exact same fix-up to a target tree's /etc/{passwd,group,shadow}
 after `bootc install`: merge in any system accounts missing from the base
-image's actual /etc (falling back to fixed records for accounts like sddm
-that may not exist yet), complete /etc/shadow for any of them, and lock the
-account database down to the same permissions a booted system would have.
+image's actual /etc (falling back to fixed records for accounts like
+plasmalogin that may not exist yet), complete /etc/shadow for any of them,
+and lock the account database down to the same permissions a booted system
+would have.
 
 This used to be reimplemented independently in Python and Bash and had already
 drifted in minor ways. This module is the single canonical implementation.
@@ -23,10 +24,13 @@ from typing import Callable
 
 RunFn = Callable[..., subprocess.CompletedProcess]
 
-SYSTEM_GROUP_FALLBACKS = {"sddm": "sddm:x:959:"}
+SYSTEM_GROUP_FALLBACKS = {"plasmalogin": "plasmalogin:x:967:"}
 
 SYSTEM_PASSWD_FALLBACKS = {
-    "sddm": "sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin",
+    "plasmalogin": (
+        "plasmalogin:x:967:967:PLASMALOGIN Greeter Account:"
+        "/var/lib/plasmalogin:/usr/sbin/nologin"
+    ),
 }
 
 
@@ -127,29 +131,28 @@ def ensure_system_accounts(deploy_root: str, log: Callable[[str], None], *, run:
     elif _path_exists(shadow, run):
         _chmod_path(shadow, 0o000, run)
 
-    sddm_home = root / "var/lib/sddm"
-    run(["mkdir", "-p", str(sddm_home)], check=True)
+    greeter_home = root / "var/lib/plasmalogin"
+    run(["mkdir", "-p", str(greeter_home)], check=True)
 
-    # Read the actual sddm UID/GID from the target's etc/passwd to support
-    # dynamic allocation and ensure numeric chown works even if the host
-    # environment has no sddm user/group of its own.
-    sddm_uid, sddm_gid = "959", "959"
+    # Read the actual plasmalogin UID/GID from the target's etc/passwd so
+    # numeric chown works even if the host has no plasmalogin user.
+    greeter_uid, greeter_gid = "967", "967"
     for line in _read_lines(etc / "passwd", run):
-        if line.startswith("sddm:"):
+        if line.startswith("plasmalogin:"):
             parts = line.split(":")
             if len(parts) >= 4:
-                sddm_uid, sddm_gid = parts[2], parts[3]
+                greeter_uid, greeter_gid = parts[2], parts[3]
                 break
-    run(["chown", f"{sddm_uid}:{sddm_gid}", str(sddm_home)], check=False)
+    run(["chown", f"{greeter_uid}:{greeter_gid}", str(greeter_home)], check=False)
     restorecon = shutil.which("restorecon")
     if restorecon:
         run(
-            [restorecon, str(etc / "passwd"), str(etc / "group"), str(shadow), str(sddm_home)],
+            [restorecon, str(etc / "passwd"), str(etc / "group"), str(shadow), str(greeter_home)],
             check=False,
         )
 
     if group_changed or passwd_changed or shadow_changed:
-        log("Repaired installed system account databases for SDDM/D-Bus")
+        log("Repaired installed system account databases for plasmalogin/D-Bus")
 
 
 def create_installer_user(

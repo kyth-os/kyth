@@ -49,11 +49,18 @@ for group in docker plugdev polkitd; do
 	fi
 done
 
-# Keep the display manager and graphical target explicit across upgrades.
+# Keep Plasma Login Manager as the display manager across upgrades.
+if [[ ! -f /usr/lib/systemd/system/plasmalogin.service ]]; then
+	echo "ERROR: plasmalogin.service missing; cannot set display-manager" >&2
+	exit 1
+fi
 mkdir -p /etc/systemd/system/graphical.target.wants
-ln -sf /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
+systemctl unmask plasmalogin.service 2>/dev/null || true
+ln -sf /usr/lib/systemd/system/plasmalogin.service /etc/systemd/system/display-manager.service
 ln -sf /etc/systemd/system/display-manager.service /etc/systemd/system/graphical.target.wants/display-manager.service
 ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
+rm -f /etc/systemd/system/sddm.service
+ln -s /dev/null /etc/systemd/system/sddm.service
 
 # Service masks/disables that are intentionally runtime-layer policy.
 # NetworkManager-wait-online.service is deliberately NOT disabled here — it is

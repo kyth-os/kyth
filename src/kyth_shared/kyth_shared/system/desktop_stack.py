@@ -128,7 +128,7 @@ def desktop_stack_checks(
                 "Wayland display",
                 False,
                 "X11 session — KythOS ships Plasma Wayland only. "
-                "Ctrl+Alt+F3, then journalctl -u sddm -b",
+                "Ctrl+Alt+F3, then journalctl -u plasmalogin -b",
                 advisory=False,
             )
         )

@@ -1,6 +1,6 @@
 """Wayland session defaults and software-compose rescue.
 
-The installed and live images start SDDM and Plasma on Wayland only. When there
+The installed and live images start Plasma Login Manager and Plasma on Wayland only. When there
 is no DRM render node, on live media, or with ``nomodeset``, KWin uses QPainter
 + llvmpipe. ``kyth.hwgl=1`` on the kernel command line forces hardware GL.
 XWayland remains for games and Electron; Plasma X11 is not a session.
@@ -20,19 +20,25 @@ SOFTWARE_COMPOSE_ENV: dict[str, str] = {
 
 DEFAULT_KWIN_WAYLAND: tuple[str, ...] = (
     "kwin_wayland",
-    "--drm",
     "--no-lockscreen",
     "--no-global-shortcuts",
+    "--no-kactivities",
+    "--inputmethod",
+    "plasma-keyboard",
     "--locale1",
 )
 
-SDDM_WAYLAND_CONF = "[General]\nDisplayServer=wayland\nDefaultSession=plasma.desktop\n"
+PLM_SESSION_CONF = (
+    "[General]\nDefaultSession=plasma.desktop\n\n[Autologin]\nSession=plasma.desktop\n"
+)
 PLASMA_WAYLAND_SESSION = "plasma.desktop"
-SDDM_STATE_FILE = Path("/var/lib/sddm/state.conf")
+PLM_STATE_FILE = Path("/var/lib/plasmalogin/state.conf")
+LEGACY_SDDM_STATE_FILE = Path("/var/lib/sddm/state.conf")
+GREETER_ENV_FILE = Path("/run/kyth-greeter.env")
 LEGACY_QEMU_SAFE_NAME = "10-kyth-qemu-safe.sh"
 GREETER_NO_DRM_HINT = (
-    "kyth-sddm-compositor: no DRM card; kwin_wayland --drm may fail. "
-    "Ctrl+Alt+F3, then journalctl -u sddm -b. Reboot without nomodeset if the GPU works."
+    "kyth-greeter-compositor: no DRM card; kwin_wayland may fail. "
+    "Ctrl+Alt+F3, then journalctl -u plasmalogin -b. Reboot without nomodeset if the GPU works."
 )
 
 
@@ -60,10 +66,10 @@ def nomodeset_requested(cmdline: str | None = None) -> bool:
     return "nomodeset" in _cmdline_tokens(cmdline)
 
 
-def sddm_session_conf(cmdline: str | None = None) -> str:
+def greeter_session_conf(cmdline: str | None = None) -> str:
     """Always Plasma Wayland. ``cmdline`` is accepted for call-site compatibility."""
     del cmdline
-    return SDDM_WAYLAND_CONF
+    return PLM_SESSION_CONF
 
 
 def has_drm_render_node(dri: Path | None = None) -> bool:
@@ -110,9 +116,9 @@ def _rewrite_session_key(text: str, key: str, replacement: str) -> tuple[str, bo
     return "".join(lines), changed
 
 
-def migrate_sddm_last_session(path: Path | None = None) -> bool:
-    """Rewrite SDDM LastSession when it still points at Plasma X11."""
-    target = path or SDDM_STATE_FILE
+def migrate_greeter_last_session(path: Path | None = None) -> bool:
+    """Rewrite PLM/SDDM LastSession when it still points at Plasma X11."""
+    target = path or PLM_STATE_FILE
     try:
         text = target.read_text(encoding="utf-8")
     except OSError:
@@ -183,10 +189,24 @@ def apply_software_compose_env(env: dict[str, str] | None = None) -> dict[str, s
 
 
 def compositor_argv(extra: list[str] | None = None) -> list[str]:
-    argv = list(DEFAULT_KWIN_WAYLAND)
+    """PLM's kwin flags when ``extra`` is empty; otherwise ``kwin_wayland`` + extra."""
     if extra:
-        argv.extend(extra)
-    return argv
+        return ["kwin_wayland", *extra]
+    return list(DEFAULT_KWIN_WAYLAND)
+
+
+def write_greeter_compose_env(path: Path | None = None) -> bool:
+    """Write software-compose env for plasmalogin.service and the greeter kwin unit."""
+    target = path or GREETER_ENV_FILE
+    body = ""
+    if needs_software_compose():
+        body = "".join(f"{key}={value}\n" for key, value in SOFTWARE_COMPOSE_ENV.items())
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    except OSError:
+        return False
+    return True
 
 
 def legacy_qemu_safe_path(home: Path | None = None) -> Path:

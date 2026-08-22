@@ -50,12 +50,12 @@ write_config /usr/lib/systemd/system/kyth-system-accounts.service <<'SYSACCOUNTU
 [Unit]
 Description=Ensure KythOS system accounts are visible in /etc
 DefaultDependencies=no
-# mkdir -p /var/lib/sddm needs /var writable; without this, the unit races
+# mkdir -p /var/lib/plasmalogin needs /var writable; without this, the unit races
 # ostree-remount.service on every boot and fails with "Read-only file system"
 # (it self-heals via a second, later pull-in, but that transiently fails the
 # Requires= dependent kyth-dbus-runtime-dir.service too).
 After=local-fs.target ostree-remount.service
-Before=dbus.socket dbus-broker.service sockets.target sddm.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
+Before=dbus.socket dbus-broker.service sockets.target plasmalogin.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
 
 [Service]
 Type=oneshot

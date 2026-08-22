@@ -32,7 +32,7 @@ def probe(
     *,
     booted=True,
     target="graphical.target",
-    active_units=("graphical.target", "sddm.service"),
+    active_units=("graphical.target", "plasmalogin.service"),
     failed=(),
     devices=("card0",),
     clock=None,
@@ -91,11 +91,11 @@ class RollbackTriggerTests(unittest.TestCase):
         self.assertIn("GPU driver did not load", display.detail)
 
     def test_failed_critical_unit_fails(self):
-        checks = probe(failed=("sddm.service", "cups.service"))
+        checks = probe(failed=("plasmalogin.service", "cups.service"))
 
         units = by_name(checks, "Critical units")
         self.assertFalse(units.passed)
-        self.assertIn("sddm.service", units.detail)
+        self.assertIn("plasmalogin.service", units.detail)
 
     def test_unrelated_failed_unit_is_tolerated(self):
         """A failed printer daemon is not worth discarding the deployment."""
@@ -124,7 +124,7 @@ class LateReadinessTests(unittest.TestCase):
                 state["active"] = True
             return state["active"] and unit in (
                 "graphical.target",
-                "sddm.service",
+                "plasmalogin.service",
                 "display-manager.service",
             )
 
@@ -158,7 +158,7 @@ class GraphicalTargetOrderingTests(unittest.TestCase):
         clock = FakeClock()
 
         checks = probe(
-            active_units=("sddm.service",),  # graphical.target deliberately absent
+            active_units=("plasmalogin.service",),  # graphical.target deliberately absent
             clock=clock,
         )
 
@@ -197,8 +197,8 @@ class NonRollbackContextTests(unittest.TestCase):
 
 class CriticalUnitPolicyTests(unittest.TestCase):
     def test_display_manager_matched_under_both_names(self):
-        """sddm.service carries the display-manager.service alias."""
-        self.assertIn("sddm.service", CRITICAL_UNITS)
+        """plasmalogin.service carries the display-manager.service alias."""
+        self.assertIn("plasmalogin.service", CRITICAL_UNITS)
         self.assertIn("display-manager.service", CRITICAL_UNITS)
 
 

@@ -9,7 +9,7 @@ source "../../lib/config-helpers.sh"
 # process under gaming.slice (large address space, easy to hit on a driver
 # bug) can otherwise dump multi-GB cores to /var/lib/systemd/coredump with no
 # ceiling. A full /var then cascades into unrelated failures — journald can't
-# write, D-Bus activation fails, sddm can't create its runtime dirs — that
+# write, D-Bus activation fails, the greeter can't create its runtime dirs — that
 # look like random instability rather than "disk is full because of one
 # crashing process." Bound it the same way 28-journald-size-cap.sh bounds the
 # journal, instead of leaving it unbounded.

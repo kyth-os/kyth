@@ -190,7 +190,7 @@ class SmokeCheck:
         if session_type == "x11":
             self.fail(
                 "Session type",
-                "X11 — KythOS ships Plasma Wayland only. Ctrl+Alt+F3, then journalctl -u sddm -b",
+                "X11 — KythOS ships Plasma Wayland only. Ctrl+Alt+F3, then journalctl -u plasmalogin -b",
             )
         elif session_type == "wayland":
             self.passed("Session type", "wayland")

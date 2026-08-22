@@ -294,10 +294,15 @@ cat >/usr/lib/bootc/kargs.d/99-kyth.toml <<'KARGSEOF'
 kargs = ["quiet", "rhgb", "splash", "rd.plymouth=1", "plymouth.enable=1", "plymouth.ignore-serial-consoles", "systemd.show_status=false", "rd.systemd.show_status=false", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0", "threadirqs", "split_lock_detect=off", "rootflags=noatime,compress=zstd:1,ssd,discard=async,commit=30", "amdgpu.ppfeaturemask=0xffffffff", "pcie_aspm=performance"]
 KARGSEOF
 
-# ── SDDM — ensure graphical target ───────────────────────────────────────────
-systemctl enable sddm 2>/dev/null || true
+# ── Plasma Login Manager — ensure graphical target ───────────────────────────
+if [[ ! -f /usr/lib/systemd/system/plasmalogin.service ]]; then
+	echo "ERROR: plasmalogin.service missing; cannot set display-manager" >&2
+	exit 1
+fi
+systemctl unmask plasmalogin.service 2>/dev/null || true
+systemctl enable plasmalogin.service
 systemctl set-default graphical.target 2>/dev/null || true
-ln -sf /usr/lib/systemd/system/sddm.service \
+ln -sf /usr/lib/systemd/system/plasmalogin.service \
 	/etc/systemd/system/display-manager.service
 mkdir -p /etc/systemd/system/graphical.target.wants
 ln -sf /etc/systemd/system/display-manager.service \
@@ -308,5 +313,5 @@ ln -sf /usr/lib/systemd/system/graphical.target \
 systemctl mask bootloader-update.service 2>/dev/null || true
 systemctl mask systemd-remount-fs.service 2>/dev/null || true
 
-rm -f /etc/systemd/system/plasmalogin.service
-ln -s /dev/null /etc/systemd/system/plasmalogin.service
+rm -f /etc/systemd/system/sddm.service
+ln -s /dev/null /etc/systemd/system/sddm.service

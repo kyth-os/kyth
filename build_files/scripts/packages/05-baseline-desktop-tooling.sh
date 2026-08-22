@@ -4,9 +4,10 @@ set -euo pipefail
 
 # Install baseline tooling in a single transaction to reduce solver and
 # metadata overhead before the gaming repos are enabled.
+dnf5 install -y \
+	plasma-login-manager
 dnf5 install -y --skip-unavailable \
-	sddm \
-	sddm-breeze \
+	kcm-plasmalogin \
 	kwallet-pam \
 	fprintd \
 	fprintd-pam \

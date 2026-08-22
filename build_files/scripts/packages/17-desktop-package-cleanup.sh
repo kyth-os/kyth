@@ -19,9 +19,10 @@ dnf5 remove -y --no-autoremove \
 	2>/dev/null || true
 
 # Plasma X11 session + classic Xorg greeter stack. KythOS greets and logs in
-# on Wayland only. Keep NVIDIA proprietary GL/EGL userspace and XWayland
-# (Steam/Proton/Electron). --no-autoremove so a leftover Requires: cannot pull
-# sddm or plasma-workspace out with Xorg.
+# on Wayland only via Plasma Login Manager. Keep NVIDIA proprietary GL/EGL
+# userspace and XWayland (Steam/Proton/Electron). --no-autoremove does not
+# protect reverse deps: removing xinit used to delete sddm. Reinstall PLM
+# after the purge, then drop leftover SDDM packages.
 dnf5 remove -y --no-autoremove \
 	plasma-workspace-x11 \
 	kwin-x11 \
@@ -29,7 +30,15 @@ dnf5 remove -y --no-autoremove \
 	xorg-x11-xinit \
 	xorg-x11-drv-libinput \
 	xorg-x11-drv-amdgpu \
-	xorg-x11-drv-ati \
+	xorg-x11-drv-ati
+dnf5 install -y plasma-login-manager
+dnf5 install -y --skip-unavailable kcm-plasmalogin
+dnf5 remove -y --no-autoremove \
+	sddm \
+	sddm-breeze \
+	sddm-wayland-plasma \
+	sddm-x11 \
+	sddm-kcm \
 	2>/dev/null || true
 
 # --no-autoremove can leave a package when something still Requires it. That
@@ -55,6 +64,16 @@ if ((${#leftover_x11_session_rpms[@]})); then
 fi
 if ! rpm -q xorg-x11-server-Xwayland >/dev/null 2>&1; then
 	echo "ERROR: xorg-x11-server-Xwayland must remain installed for games and Electron" >&2
+	exit 1
+fi
+if ! rpm -q plasma-login-manager >/dev/null 2>&1 \
+	|| [[ ! -x /usr/bin/plasmalogin ]] \
+	|| [[ ! -f /usr/lib/systemd/system/plasmalogin.service ]]; then
+	echo "ERROR: Plasma Login Manager must remain installed as the display manager" >&2
+	exit 1
+fi
+if rpm -q sddm >/dev/null 2>&1 || [[ -x /usr/bin/sddm ]]; then
+	echo "ERROR: SDDM is still installed; KythOS greets with plasmalogin" >&2
 	exit 1
 fi
 

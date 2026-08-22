@@ -14,22 +14,23 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.wayland_compose import (  # noqa: E402
     PLASMA_WAYLAND_SESSION,
-    SDDM_WAYLAND_CONF,
+    PLM_SESSION_CONF,
     SOFTWARE_COMPOSE_ENV,
     apply_software_compose_env,
     compositor_argv,
+    greeter_session_conf,
     has_drm_card,
     has_drm_render_node,
     hwgl_forced,
     is_live_image,
+    migrate_greeter_last_session,
     migrate_home_dmrcs,
-    migrate_sddm_last_session,
     migrate_user_dmrc,
     needs_software_compose,
     nomodeset_requested,
     remove_legacy_virt_software_gl,
-    sddm_session_conf,
     session_is_plasma_x11,
+    write_greeter_compose_env,
 )
 
 
@@ -42,8 +43,8 @@ class WaylandComposeTests(unittest.TestCase):
         self.assertFalse(is_live_image("quiet rhgb"))
         self.assertTrue(nomodeset_requested("quiet nomodeset"))
         self.assertFalse(nomodeset_requested("quiet rhgb"))
-        self.assertEqual(sddm_session_conf("quiet"), SDDM_WAYLAND_CONF)
-        self.assertEqual(sddm_session_conf("quiet nomodeset"), SDDM_WAYLAND_CONF)
+        self.assertEqual(greeter_session_conf("quiet"), PLM_SESSION_CONF)
+        self.assertEqual(greeter_session_conf("quiet nomodeset"), PLM_SESSION_CONF)
 
     def test_render_node_detection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,23 +83,41 @@ class WaylandComposeTests(unittest.TestCase):
         self.assertEqual(env["KWIN_COMPOSE"], "Q")
         self.assertEqual(env["LIBGL_ALWAYS_SOFTWARE"], "1")
         self.assertEqual(set(SOFTWARE_COMPOSE_ENV), set(env))
+        self.assertEqual(compositor_argv(["--foo"]), ["kwin_wayland", "--foo"])
         self.assertEqual(
-            compositor_argv(["--foo"]),
+            compositor_argv(),
             [
                 "kwin_wayland",
-                "--drm",
                 "--no-lockscreen",
                 "--no-global-shortcuts",
+                "--no-kactivities",
+                "--inputmethod",
+                "plasma-keyboard",
                 "--locale1",
-                "--foo",
             ],
         )
 
-    def test_sddm_conf_is_wayland_only(self) -> None:
-        self.assertIn("DisplayServer=wayland", SDDM_WAYLAND_CONF)
-        self.assertIn("DefaultSession=plasma.desktop", SDDM_WAYLAND_CONF)
-        self.assertNotIn("x11", SDDM_WAYLAND_CONF)
-        self.assertNotIn("plasmax11", SDDM_WAYLAND_CONF)
+    def test_plm_conf_is_wayland_only(self) -> None:
+        self.assertIn("DefaultSession=plasma.desktop", PLM_SESSION_CONF)
+        self.assertIn("Session=plasma.desktop", PLM_SESSION_CONF)
+        self.assertNotIn("plasmax11", PLM_SESSION_CONF)
+        self.assertNotIn("DisplayServer=x11", PLM_SESSION_CONF)
+
+    def test_write_greeter_compose_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "kyth-greeter.env"
+            with mock.patch(
+                "kyth_shared.wayland_compose.needs_software_compose", return_value=True
+            ):
+                self.assertTrue(write_greeter_compose_env(path))
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("KWIN_COMPOSE=Q", text)
+            self.assertIn("LIBGL_ALWAYS_SOFTWARE=1", text)
+            with mock.patch(
+                "kyth_shared.wayland_compose.needs_software_compose", return_value=False
+            ):
+                self.assertTrue(write_greeter_compose_env(path))
+            self.assertEqual(path.read_text(encoding="utf-8"), "")
 
     def test_remove_legacy_virt_script(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -119,15 +138,15 @@ class WaylandComposeTests(unittest.TestCase):
         self.assertFalse(session_is_plasma_x11("/usr/share/wayland-sessions/plasma.desktop"))
         self.assertFalse(session_is_plasma_x11(""))
 
-    def test_migrate_sddm_last_session_and_dmrc(self) -> None:
+    def test_migrate_greeter_last_session_and_dmrc(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "state.conf"
             state.write_text("[Last]\nUser=liveuser\nSession=/usr/share/xsessions/plasmax11.desktop\n")
-            self.assertTrue(migrate_sddm_last_session(state))
+            self.assertTrue(migrate_greeter_last_session(state))
             text = state.read_text(encoding="utf-8")
             self.assertIn(f"Session={PLASMA_WAYLAND_SESSION}", text)
             self.assertIn("User=liveuser", text)
-            self.assertFalse(migrate_sddm_last_session(state))
+            self.assertFalse(migrate_greeter_last_session(state))
 
             homes = Path(tmp) / "home"
             user = homes / "alice"
@@ -141,63 +160,64 @@ class WaylandComposeTests(unittest.TestCase):
     def test_configure_session_rewrites_stale_x11_dropin(self) -> None:
         launcher = ROOT / "build_files" / "kyth-configure-session"
         with tempfile.TemporaryDirectory() as tmp:
-            sddm_dir = Path(tmp)
-            stale = sddm_dir / "11-kyth-session.conf"
+            conf_dir = Path(tmp)
+            stale = conf_dir / "11-kyth-session.conf"
             stale.write_text("[General]\nDisplayServer=x11\nDefaultSession=plasmax11.desktop\n")
             sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
             spec_globals = runpy.run_path(str(launcher), run_name="not-main")
-            self.assertEqual(spec_globals["configure_session"](sddm_dir), 0)
+            self.assertEqual(spec_globals["configure_session"](conf_dir), 0)
             text = stale.read_text(encoding="utf-8")
-            self.assertIn("DisplayServer=wayland", text)
             self.assertIn("DefaultSession=plasma.desktop", text)
+            self.assertIn("Session=plasma.desktop", text)
             self.assertNotIn("plasmax11", text)
 
     def test_configure_host_session_rewrites_last_session(self) -> None:
         launcher = ROOT / "build_files" / "kyth-configure-session"
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            sddm_dir = root / "sddm"
-            sddm_dir.mkdir()
+            conf_dir = root / "plasmalogin"
+            conf_dir.mkdir()
             state = root / "state.conf"
             state.write_text("[Last]\nSession=/usr/share/xsessions/plasmax11.desktop\n")
             homes = root / "home"
             user = homes / "bob"
             user.mkdir(parents=True)
             (user / ".dmrc").write_text("[Desktop]\nSession=plasmax11.desktop\n")
+            env_file = root / "kyth-greeter.env"
             spec_globals = runpy.run_path(str(launcher), run_name="not-main")
             self.assertEqual(
                 spec_globals["configure_host_session"](
-                    sddm_dir, state_file=state, homes=homes
+                    conf_dir, state_file=state, homes=homes, env_file=env_file
                 ),
                 0,
             )
-            self.assertIn("DefaultSession=plasma.desktop", (sddm_dir / "11-kyth-session.conf").read_text())
+            self.assertIn("DefaultSession=plasma.desktop", (conf_dir / "11-kyth-session.conf").read_text())
             self.assertIn(f"Session={PLASMA_WAYLAND_SESSION}", state.read_text())
             self.assertIn("Session=plasma.desktop", (user / ".dmrc").read_text())
+            self.assertTrue(env_file.is_file())
 
     def test_configure_session_keeps_wayland_for_nomodeset(self) -> None:
         launcher = ROOT / "build_files" / "kyth-configure-session"
         with tempfile.TemporaryDirectory() as tmp:
-            sddm_dir = Path(tmp)
+            conf_dir = Path(tmp)
             spec_globals = runpy.run_path(str(launcher), run_name="not-main")
             self.assertEqual(
-                spec_globals["configure_session"](sddm_dir, cmdline="quiet nomodeset"),
+                spec_globals["configure_session"](conf_dir, cmdline="quiet nomodeset"),
                 0,
             )
-            text = (sddm_dir / "11-kyth-session.conf").read_text(encoding="utf-8")
-            self.assertIn("DisplayServer=wayland", text)
+            text = (conf_dir / "11-kyth-session.conf").read_text(encoding="utf-8")
             self.assertIn("DefaultSession=plasma.desktop", text)
             self.assertNotIn("plasmax11", text)
 
 
 class WaylandBrandingContractTests(unittest.TestCase):
-    def test_sddm_image_default_is_wayland(self) -> None:
+    def test_plm_image_default_is_wayland(self) -> None:
         fragment = (
-            ROOT / "build_files" / "scripts" / "branding" / "13-sddm-session-background.sh"
+            ROOT / "build_files" / "scripts" / "branding" / "13-plasmalogin-session-background.sh"
         ).read_text(encoding="utf-8")
-        self.assertIn("DisplayServer=wayland", fragment)
         self.assertIn("DefaultSession=plasma.desktop", fragment)
-        self.assertIn("CompositorCommand=/usr/bin/kyth-sddm-compositor", fragment)
+        self.assertIn("Session=plasma.desktop", fragment)
+        self.assertIn("kyth/contents/images/1920x1080.svg", fragment)
         self.assertIn("SessionDir=/usr/share/kyth/no-xsessions", fragment)
         self.assertIn("install -d -m 0755 /usr/share/kyth/no-xsessions", fragment)
         self.assertIn("10-kyth-software-compose.sh", fragment)
@@ -210,9 +230,11 @@ class WaylandBrandingContractTests(unittest.TestCase):
         fragment = (
             ROOT / "build_files" / "scripts" / "branding" / "12-wayland-x11-autodetect.sh"
         ).read_text(encoding="utf-8")
-        self.assertIn("kyth-sddm-compositor", fragment)
+        self.assertIn("kyth-greeter-compositor", fragment)
         self.assertIn("ExecStartPre=/usr/bin/kyth-configure-session", fragment)
-        compositor = (ROOT / "build_files" / "kyth-sddm-compositor").read_text(encoding="utf-8")
+        self.assertIn("plasmalogin.service.d", fragment)
+        self.assertIn("plasma-login-kwin_wayland.service.d", fragment)
+        compositor = (ROOT / "build_files" / "kyth-greeter-compositor").read_text(encoding="utf-8")
         self.assertIn("needs_software_compose", compositor)
         self.assertIn("kwin_wayland", compositor)
         self.assertIn("GREETER_NO_DRM_HINT", compositor)
@@ -227,6 +249,11 @@ class WaylandBrandingContractTests(unittest.TestCase):
         cleanup = (ROOT / "build_files" / "scripts" / "packages" / "17-desktop-package-cleanup.sh").read_text(
             encoding="utf-8"
         )
+        self.assertIn("plasma-login-manager", baseline)
+        self.assertNotIn("sddm", baseline)
+        self.assertIn("plasma-login-manager", cleanup)
+        self.assertIn("/usr/bin/plasmalogin", cleanup)
+        self.assertIn("sddm", cleanup)
         for package in (
             "plasma-workspace-x11",
             "xorg-x11-server-Xorg",
@@ -254,9 +281,9 @@ class WaylandBrandingContractTests(unittest.TestCase):
         self.assertIn("KWIN_COMPOSE=Q", body)
 
 
-class SddmCompositorEntryTests(unittest.TestCase):
+class GreeterCompositorEntryTests(unittest.TestCase):
     def test_compositor_execs_kwin_with_software_env(self) -> None:
-        launcher = ROOT / "build_files" / "kyth-sddm-compositor"
+        launcher = ROOT / "build_files" / "kyth-greeter-compositor"
         exec_calls: list[tuple] = []
 
         def fake_execvp(binary: str, argv: list[str]) -> None:
@@ -265,7 +292,7 @@ class SddmCompositorEntryTests(unittest.TestCase):
 
         with (
             mock.patch.dict(os.environ, {}, clear=False),
-            mock.patch.object(sys, "argv", ["kyth-sddm-compositor"]),
+            mock.patch.object(sys, "argv", ["kyth-greeter-compositor", "--no-lockscreen"]),
             mock.patch("kyth_shared.wayland_compose.needs_software_compose", return_value=True),
             mock.patch("kyth_shared.wayland_compose.has_drm_card", return_value=True),
             mock.patch("shutil.which", return_value="/usr/bin/kwin_wayland"),
@@ -278,7 +305,8 @@ class SddmCompositorEntryTests(unittest.TestCase):
             self.assertEqual(os.environ.get("KWIN_COMPOSE"), "Q")
             self.assertEqual(exec_calls[0][0], "/usr/bin/kwin_wayland")
             self.assertEqual(exec_calls[0][1][0], "/usr/bin/kwin_wayland")
-            self.assertIn("--drm", exec_calls[0][1])
+            self.assertIn("--no-lockscreen", exec_calls[0][1])
+            self.assertNotIn("--drm", exec_calls[0][1])
 
 
 if __name__ == "__main__":

@@ -342,7 +342,7 @@ class RequiredHealthCheckTests(unittest.TestCase):
         """Default path must reach boot_runtime, not silently check nothing."""
         with patch(
             "kyth_shared.system.boot_runtime.runtime_checks",
-            return_value=(RuntimeCheck("Critical units", False, "failed: sddm.service"),),
+            return_value=(RuntimeCheck("Critical units", False, "failed: plasmalogin.service"),),
         ):
             checks = required_checks(
                 status_data={

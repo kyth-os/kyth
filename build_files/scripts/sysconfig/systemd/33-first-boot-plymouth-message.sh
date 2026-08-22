@@ -14,13 +14,13 @@ write_config /usr/lib/systemd/system/kyth-first-boot-message.service <<'FIRSTBOO
 Description=KythOS first-boot splash message
 DefaultDependencies=no
 After=plymouth-start.service local-fs.target
-Before=sddm.service
+Before=plasmalogin.service
 ConditionPathExists=!/var/lib/kyth/.first-boot-complete
 
 [Service]
 Type=oneshot
 # Only send the message if the Plymouth daemon is actually listening.
-# On fast boots SDDM may already have started and stopped Plymouth before
+# On fast boots the greeter may already have started and stopped Plymouth before
 # this service runs; "plymouth message" would then exit non-zero and the
 # sentinel file would never be written, causing a retry on every boot.
 ExecCondition=/usr/bin/plymouth --ping
