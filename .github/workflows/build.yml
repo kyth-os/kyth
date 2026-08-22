@@ -5,7 +5,7 @@ on:
     - cron: '05 10 * * 0' # 10:05am UTC weekly on Sundays — rebuilds both :latest and :testing with fresh upstream packages
   workflow_dispatch:
   workflow_run: # zizmor: ignore[dangerous-triggers]
-    workflows: ["Validation", "CodeQL"]
+    workflows: ["Validation"]
     types: [completed]
     branches: [main, testing]
 
@@ -22,7 +22,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
   gate:
-    name: Gate on Validation + CodeQL
+    name: Gate on Validation
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -34,7 +34,7 @@ jobs:
       head_sha: ${{ steps.check.outputs.head_sha }}
       head_branch: ${{ steps.check.outputs.head_branch }}
     steps:
-      - name: Verify Validation and CodeQL succeeded for SHA
+      - name: Verify Validation succeeded for SHA
         id: check
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
@@ -68,26 +68,14 @@ jobs:
             const headBranch = run.head_branch;
             core.setOutput('head_sha', headSha);
             core.setOutput('head_branch', headBranch);
-            // Require both Validation and CodeQL to be successful for this SHA.
-            // The build is triggered twice (once per workflow); only the second
-            // to complete will see both as success and proceed.
-            const required = ['Validation', 'CodeQL'];
-            for (const wfName of required) {
-              const runs = await github.rest.actions.listWorkflowRuns({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: wfName === 'Validation' ? 'validation.yml' : 'codeql.yml',
-                head_sha: headSha,
-                per_page: 5,
-              });
-              const ok = runs.data.workflow_runs.some(r => r.conclusion === 'success' && r.head_branch === headBranch);
-              if (!ok) {
-                core.info(`Waiting for ${wfName} success on ${headSha} (${headBranch}) — not yet`);
-                core.setOutput('ok', 'false');
-                return;
-              }
+            // Image builds start when Validation succeeds. CodeQL still runs on
+            // the push as a parallel check and no longer blocks :testing/:latest.
+            if (run.name !== 'Validation') {
+              core.info(`Ignoring unexpected workflow_run from ${run.name}`);
+              core.setOutput('ok', 'false');
+              return;
             }
-            core.info(`Both Validation and CodeQL succeeded for ${headSha} — proceeding`);
+            core.info(`Validation succeeded for ${headSha} (${headBranch}) — proceeding`);
             core.setOutput('ok', 'true');
 
   plan:
@@ -117,7 +105,7 @@ jobs:
           if [[ "${EVENT_NAME}" == schedule ]]; then
             echo 'branches=["main","testing"]' >&3
           elif [[ "${EVENT_NAME}" == workflow_run && -n "${HEAD_BRANCH}" ]]; then
-            # Gated via Validation/CodeQL — build the exact branch that was validated
+            # Gated via Validation — build the exact branch that was validated
             # (workflow_run's head_branch, not the default branch)
             echo "branches=[\"${HEAD_BRANCH}\"]" >&3
             echo "head_sha=${HEAD_SHA}" >&3 || true
@@ -169,7 +157,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # For gated workflow_run, check out the exact SHA that Validation/CodeQL
+          # For gated workflow_run, check out the exact SHA that Validation
           # approved; otherwise fall back to the branch tip (schedule/dispatch)
           ref: ${{ needs.plan.outputs.head_sha || matrix.branch }}
           persist-credentials: false
@@ -294,14 +282,34 @@ jobs:
           IMAGE_FULL="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
           BASE_CACHE_REF="${IMAGE_FULL}:buildcache-base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}"
           BASE_IMAGE_REF="${IMAGE_FULL}:base-${STEPS_PREP_OUTPUTS_DEFAULT_TAG}"
+          BASE_SRC_HASH="$(python3 build_files/scripts/reuse-base-image.py hash --source-root build_base)"
+          DECISION="$(python3 build_files/scripts/reuse-base-image.py decide \
+            --ref "${BASE_IMAGE_REF}" \
+            --upstream "${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}" \
+            --flavor "${MATRIX_KERNEL_FLAVOR}" \
+            --kernel "${CACHYOS_KERNEL_VERSION}" \
+            --source-root build_base)"
+          echo "::notice::base reuse decision ${DECISION}"
+
+          if [[ "$(jq -r '.reuse' <<<"${DECISION}")" == "true" ]]; then
+            BASE_DIGEST="$(jq -r '.digest' <<<"${DECISION}")"
+            build_files/scripts/validate-digest.sh "${BASE_DIGEST}"
+            echo "image=${BASE_IMAGE_REF}" >&3
+            echo "digest=${BASE_DIGEST}" >&3
+            echo "pinned=${BASE_IMAGE_REF}@${BASE_DIGEST}" >&3
+            echo "reused=true" >&3
+            exit 0
+          fi
 
           docker buildx build \
             --build-arg BASE_IMAGE="${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}" \
             --build-arg KYTH_KERNEL_FLAVOR="${MATRIX_KERNEL_FLAVOR}" \
             --build-arg CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VERSION}" \
-            --cache-from "type=gha,scope=base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}" \
+            --label "org.kyth.build.upstream-base=${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}" \
+            --label "org.kyth.build.kernel-flavor=${MATRIX_KERNEL_FLAVOR}" \
+            --label "org.kyth.build.cachyos-kernel-version=${CACHYOS_KERNEL_VERSION}" \
+            --label "org.kyth.build.base-src-hash=${BASE_SRC_HASH}" \
             --cache-from "type=registry,ref=${BASE_CACHE_REF}" \
-            --cache-to "type=gha,scope=base-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR},mode=max" \
             --cache-to "type=registry,ref=${BASE_CACHE_REF},mode=max" \
             --tag "${BASE_IMAGE_REF}" \
             --metadata-file "${RUNNER_TEMP}/base-build-metadata.json" \
@@ -313,6 +321,7 @@ jobs:
           echo "image=${BASE_IMAGE_REF}" >&3
           echo "digest=${BASE_DIGEST}" >&3
           echo "pinned=${BASE_IMAGE_REF}@${BASE_DIGEST}" >&3
+          echo "reused=false" >&3
         env:
           MATRIX_BRANCH: ${{ matrix.branch }}
           MATRIX_KERNEL_FLAVOR: ${{ matrix.kernel_flavor }}
@@ -386,9 +395,7 @@ jobs:
             --build-arg ENABLE_KSM=0 \
             --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
             --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
-            --cache-from "type=gha,scope=final-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR}" \
             --cache-from "type=registry,ref=${FINAL_CACHE_REF}" \
-            --cache-to "type=gha,scope=final-${MATRIX_BRANCH}-${MATRIX_KERNEL_FLAVOR},mode=max" \
             --cache-to "type=registry,ref=${FINAL_CACHE_REF},mode=max" \
             --tag "${RAW_IMAGE_REF}" \
             "${LABEL_ARGS[@]}" \

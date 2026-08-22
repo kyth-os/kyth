@@ -5,14 +5,10 @@ on:
   # Separate from container build — ISO failures no longer hide successful
   # container publishes. build.yml's finalize job dispatches this explicitly
   # (workflow_dispatch, pinned digest) once the Fedora image actually
-  # publishes. There is deliberately no workflow_run trigger here: build.yml's
-  # own Validation+CodeQL gate fires "Build container image" twice per push
-  # (once per watched workflow) and the first of the two — before both checks
-  # have reported in — completes with every job skipped, which GitHub still
-  # reports as an overall success. A workflow_run listener can't tell that
-  # apart from a real publish, so it fired a doomed ISO build racing the
-  # actual one on every push. The explicit dispatch only ever fires from the
-  # leg that did real work.
+  # publishes. There is deliberately no workflow_run trigger here: a
+  # workflow_run listener cannot tell a skipped/gated image run from a real
+  # publish, and previously fired a doomed ISO build racing the actual one.
+  # The explicit dispatch only ever fires from the leg that did real work.
   workflow_call:
     inputs:
       source_tag:
