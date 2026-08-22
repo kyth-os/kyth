@@ -2,7 +2,7 @@
 
 Gaming-profile-only step. The launcher grid at the bottom embeds the live
 GamingPage's "setup" section (wizard_mode=True) rather than being
-reimplemented here — it's a tested install flow (Heroic/Lutris/ProtonUp-Qt
+reimplemented here — it's a tested install flow (Heroic/Lutris/ProtonPlus
 workers), not the kind of full-page-as-a-step problem the Update/Hardware
 steps were; everything above it is wizard-native.
 """

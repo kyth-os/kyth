@@ -66,7 +66,8 @@ class _ProtonToolsMixin:
         ge_desc = QLabel(
             "Keep Proton-CachyOS as the default. GE-Proton is worth having as "
             "a second per-game runner for extra game-specific patches, codec "
-            "support, and bleeding-edge Wine tweaks not yet in Proton-CachyOS."
+            "support, and bleeding-edge Wine tweaks not yet in Proton-CachyOS. "
+            "Use GE-Proton 11-5 or newer — 11-4 broke Easy Anti-Cheat loading."
         )
         ge_desc.setObjectName("card-copy")
         ge_desc.setWordWrap(True)
@@ -76,7 +77,7 @@ class _ProtonToolsMixin:
         ge_layout.addWidget(self._ge_version_lbl)
         ge_btns = QHBoxLayout()
         ge_btns.setSpacing(10)
-        ge_open = QPushButton("Open ProtonUp-Qt")
+        ge_open = QPushButton("Open ProtonPlus")
         ge_open.clicked.connect(lambda _=False: self._open_protonupqt())
         ge_btns.addWidget(ge_open)
         ge_docs = QPushButton("Open GE-Proton Page")
@@ -85,8 +86,9 @@ class _ProtonToolsMixin:
         ge_btns.addStretch()
         ge_layout.addLayout(ge_btns)
         ge_note = QLabel(
-            "In ProtonUp-Qt, add a Steam compatibility tool and choose GE-Proton. "
-            "Restart Steam, then select it per-game under Properties -> Compatibility."
+            "In ProtonPlus, add GE-Proton for Steam (and Lutris/Heroic if you use them). "
+            "Restart Steam, then select it per-game under Properties -> Compatibility. "
+            "Enable scheduled updates so you pick up anti-cheat hotfixes."
         )
         ge_note.setObjectName("card-copy")
         ge_note.setWordWrap(True)
@@ -137,7 +139,7 @@ class _ProtonToolsMixin:
         self._add(combo_sub)
         combo_txt = QTextEdit()
         combo_txt.setReadOnly(True)
-        combo_txt.setMinimumHeight(160)
+        combo_txt.setMinimumHeight(220)
         combo_txt.setPlainText(
             "# All-rounder: MangoHud overlay + Gamescope compositor\n"
             "kyth-gamescope quality -- %command%\n\n"
@@ -146,24 +148,34 @@ class _ProtonToolsMixin:
             "# Add CAS sharpening via vkBasalt\n"
             "kyth-gamescope sharp -- %command%\n\n"
             "# GameMode + performance profile (CPU/GPU governors, renice)\n"
-            "ujust game-performance -- %command%"
+            "ujust game-performance -- %command%\n\n"
+            "# Proton-CachyOS / GE-Proton 11 extras — per-game only, not global\n"
+            "PROTON_USE_OPTISCALER=1 %command%\n"
+            "PROTON_FSR4_UPGRADE=1 %command%\n"
+            "PROTON_USE_D7VK=1 %command%\n"
+            "PROTON_VKD3D_LOWLATENCY=1 %command%\n"
+            "PROTON_DISCORD_BRIDGE=1 %command%"
         )
         self._add(combo_txt)
 
     def _open_protonupqt(self):
-        if _is_flatpak_installed("net.davidotek.pupgui2"):
-            flatpak_run("net.davidotek.pupgui2")
-            return
+        for app_id, _label in (
+            ("com.vysp3r.ProtonPlus", "ProtonPlus"),
+            ("net.davidotek.pupgui2", "ProtonUp-Qt"),
+        ):
+            if _is_flatpak_installed(app_id):
+                flatpak_run(app_id)
+                return
         btn = self.sender()
         if not isinstance(btn, QPushButton):
             btn = QPushButton()
 
         def _launch_when_done(code: int):
             if code == 0:
-                flatpak_run("net.davidotek.pupgui2")
+                flatpak_run("com.vysp3r.ProtonPlus")
 
         _install_flatpak_inline(
-            self, btn, "net.davidotek.pupgui2", "ProtonUp-Qt", done_cb=_launch_when_done,
+            self, btn, "com.vysp3r.ProtonPlus", "ProtonPlus", done_cb=_launch_when_done,
         )
 
     def _update_proton_cachyos(self):

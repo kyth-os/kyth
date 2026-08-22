@@ -40,6 +40,13 @@ class SoftwareCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(TRENDING_APPS), 4)
         self.assertTrue(all("name" in shelf and "apps" in shelf for shelf in STORE_SHELVES))
 
+    def test_gaming_pack_includes_protonplus(self):
+        gaming = next(pack for pack in STARTER_PACKS if pack["name"] == "Gaming")
+        app_ids = [app[0] for app in gaming["apps"]]
+        self.assertIn("com.vysp3r.ProtonPlus", app_ids)
+        protonplus = next(app for app in gaming["apps"] if app[0] == "com.vysp3r.ProtonPlus")
+        self.assertTrue(protonplus[2], "ProtonPlus should be selected by default")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -58,6 +58,14 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn('TEST=="charge_control_start_threshold"', guards)
         self.assertNotIn('TEST{0002}!="/sys%p/charge_', guards)
 
+    def test_dxvk_defaults_do_not_enable_async(self):
+        body = (FRAG_DIR / "gaming" / "47-dxvk-async.sh").read_text(encoding="utf-8")
+        self.assertIn("DXVK_CONFIG_FILE=/etc/dxvk.conf", body)
+        self.assertIn("dxvk.numCompilerThreads = 0", body)
+        self.assertNotIn("dxvk.enableAsync", body)
+        self.assertNotIn("DXVK_ASYNC", body)
+        self.assertNotRegex(body, r"^DXVK_FRAME_RATE=", re.M)
+
     def test_journald_cap_has_headroom_and_bounded_file_size(self):
         """A tight cap with no per-file bound left normal growth sitting right at
         the ceiling: systemd-journal-flush.service (stock, unavoidable, early in

@@ -42,10 +42,13 @@ class _CaptureToolsMixin:
         opti_title.setObjectName("card-title")
         opti_layout.addWidget(opti_title)
         opti_desc = QLabel(
-            "Enables FSR2/3, XeSS, and DLSS-translation in any DirectX 11/12 game through "
-            "Proton's DLL override — including games that ship without upscaling support. "
-            "Works on all AMD and Intel GPUs. Deploy to a game folder, then set the Steam "
-            "launch option: <code>WINEDLLOVERRIDES=\"nvngx=n,b\" %command%</code>"
+            "Enables FSR2/3/4, XeSS, and DLSS-translation in DirectX 11/12 games, "
+            "including titles that ship without upscaling. On Proton-CachyOS or "
+            "GE-Proton 11, prefer the built-in hook: "
+            "<code>PROTON_USE_OPTISCALER=1 %command%</code>. "
+            "Manual folder deploy plus "
+            "<code>WINEDLLOVERRIDES=\"nvngx=n,b\" %command%</code> "
+            "is the fallback for Valve Proton."
         )
         opti_desc.setObjectName("card-copy")
         opti_desc.setWordWrap(True)
@@ -60,7 +63,7 @@ class _CaptureToolsMixin:
         opti_btns.addWidget(opti_deploy_btn)
         self._opti_deploy_btn = opti_deploy_btn
         opti_copy_btn = QPushButton("Copy Launch Option")
-        opti_copy_btn.setToolTip('Copies: WINEDLLOVERRIDES="nvngx=n,b" %command%')
+        opti_copy_btn.setToolTip("Copies: PROTON_USE_OPTISCALER=1 %command%")
         opti_copy_btn.clicked.connect(lambda _=False: self._copy_opticscaler_launch_opt(opti_copy_btn))
         opti_btns.addWidget(opti_copy_btn)
         self._opti_copy_btn = opti_copy_btn
@@ -173,7 +176,7 @@ class _CaptureToolsMixin:
         )
 
     def _copy_opticscaler_launch_opt(self, btn: QPushButton):
-        _copy_text('WINEDLLOVERRIDES="nvngx=n,b" %command%')
+        _copy_text("PROTON_USE_OPTISCALER=1 %command%")
         btn.setText("Copied!")
         single_shot(btn, 2000, lambda: btn.setText("Copy Launch Option"))
 

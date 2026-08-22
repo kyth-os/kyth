@@ -21,7 +21,8 @@ STARTER_PACKS = [
             ("net.lutris.Lutris", "Lutris", True, "Open-source game manager for Windows, GOG, Amazon, and emulated titles."),
             ("com.usebottles.bottles", "Bottles", True, "Run Windows software and games in isolated, sandboxed prefixes."),
             ("com.github.mtkennerly.ludusavi", "Ludusavi", True, "Back up and restore PC game save files across hundreds of titles."),
-            ("net.davidotek.pupgui2", "ProtonUp-Qt", True, "Install and manage custom Proton and Wine-GE compatibility builds."),
+            ("com.vysp3r.ProtonPlus", "ProtonPlus", True, "Install and update Proton, GE-Proton, Proton-CachyOS, and related tools for Steam, Lutris, Heroic, and Bottles."),
+            ("net.davidotek.pupgui2", "ProtonUp-Qt", False, "Alternate Proton/Wine-GE manager. ProtonPlus is the default for scheduled updates."),
         ],
     },
     {

@@ -25,15 +25,22 @@ class DefaultFlatpaksSentinelTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             (root / "default-flatpaks-v10-done").touch()
             (root / "default-flatpaks-v12-done").touch()
+            (root / "default-flatpaks-v13-done").touch()
             (root / "unrelated").touch()
             sentinel = default_flatpaks_sentinel(root)
             self.assertIsNotNone(sentinel)
-            self.assertEqual(sentinel.name, "default-flatpaks-v12-done")
+            self.assertEqual(sentinel.name, "default-flatpaks-v13-done")
             self.assertTrue(default_flatpaks_done(root))
 
     def test_missing_dir_is_not_done(self) -> None:
         self.assertFalse(default_flatpaks_done(pathlib.Path("/no/such/kyth-flatpaks-dir")))
         self.assertIsNone(default_flatpaks_sentinel(pathlib.Path("/no/such/kyth-flatpaks-dir")))
+
+    def test_unit_ships_protonplus_on_v13_sentinel(self) -> None:
+        unit = (ROOT / "build_files" / "kyth-default-flatpaks.service").read_text(encoding="utf-8")
+        self.assertIn("default-flatpaks-v13-done", unit)
+        self.assertIn("com.vysp3r.ProtonPlus", unit)
+        self.assertNotIn("default-flatpaks-v12-done", unit)
 
 
 class FirstWeekChecklistTests(unittest.TestCase):

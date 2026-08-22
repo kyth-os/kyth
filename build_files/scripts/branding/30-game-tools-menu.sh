@@ -31,6 +31,7 @@ write_config /etc/xdg/menus/applications-merged/kyth-game-tools.menu <<'GAMETOOL
         <Filename>com.github.Matoking.protontricks.desktop</Filename>
         <Filename>com.github.mtkennerly.ludusavi.desktop</Filename>
         <Filename>net.davidotek.pupgui2.desktop</Filename>
+        <Filename>com.vysp3r.ProtonPlus.desktop</Filename>
         <Filename>org.prismlauncher.PrismLauncher.desktop</Filename>
         <Filename>io.github.benjamimgois.goverlay.desktop</Filename>
         <Filename>io.github.radiolamp.mangojuice.desktop</Filename>
@@ -44,6 +45,7 @@ write_config /etc/xdg/menus/applications-merged/kyth-game-tools.menu <<'GAMETOOL
       <Filename>com.github.Matoking.protontricks.desktop</Filename>
       <Filename>com.github.mtkennerly.ludusavi.desktop</Filename>
       <Filename>net.davidotek.pupgui2.desktop</Filename>
+      <Filename>com.vysp3r.ProtonPlus.desktop</Filename>
       <Filename>org.prismlauncher.PrismLauncher.desktop</Filename>
       <Filename>io.github.benjamimgois.goverlay.desktop</Filename>
       <Filename>io.github.radiolamp.mangojuice.desktop</Filename>

@@ -289,6 +289,7 @@ class SmokeCheck:
             ("com.usebottles.bottles", "Bottles Flatpak"),
             ("com.github.mtkennerly.ludusavi", "Ludusavi Flatpak"),
             ("com.github.Matoking.protontricks", "Protontricks Flatpak"),
+            ("com.vysp3r.ProtonPlus", "ProtonPlus Flatpak"),
         ):
             self.check_flatpak(app_id, label)
 

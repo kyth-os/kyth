@@ -13,7 +13,7 @@ class _ModsMixin:
             "Mod Organizer 2 per game; use Bottles for standalone patchers and tools.",
             primary=None,
             buttons=[
-                ("Open ProtonUp-Qt", lambda _=False: self._open_protonupqt()),
+                ("Open ProtonPlus", lambda _=False: self._open_protonupqt()),
                 # Bottles installs inline: the button disables/relabels
                 # itself while running, so it needs a live reference to
                 # itself — connected below instead of passed as callback.

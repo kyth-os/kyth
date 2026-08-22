@@ -8,9 +8,9 @@ Requires=network-online.target kyth-flathub-setup.service
 # Sentinel is VERSIONED — bump the filename (v2 → v3, etc.) any time the app
 # list changes. The old sentinel survives OS upgrades (it lives in /var which
 # bootc never touches), so without versioning existing users never see new apps.
-# Current version: v12 (dropped Vesktop and OBS Studio from first-run defaults —
-# opt-in only, via `ujust install-vesktop` / `ujust install-obs`)
-ConditionPathExists=!/var/lib/kyth/default-flatpaks-v12-done
+# Current version: v13 (add ProtonPlus so GE-Proton/CachyOS/umu tools can
+# update on a schedule; ProtonUp-Qt stays for users who already use it)
+ConditionPathExists=!/var/lib/kyth/default-flatpaks-v13-done
 
 [Service]
 Type=oneshot
@@ -25,6 +25,7 @@ ExecStart=/usr/bin/flatpak install -y --noninteractive --system --or-update flat
     com.github.Matoking.protontricks \
     com.github.mtkennerly.ludusavi \
     net.davidotek.pupgui2 \
+    com.vysp3r.ProtonPlus \
     org.x.Warpinator \
     com.usebottles.bottles \
     com.github.tchx84.Flatseal \
@@ -37,7 +38,7 @@ ExecStart=/usr/bin/flatpak install -y --noninteractive --system --or-update flat
     org.libreoffice.LibreOffice \
     eu.betterbird.Betterbird
 ExecStartPost=/bin/mkdir -p /var/lib/kyth
-ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v12-done
+ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v13-done
 RemainAfterExit=yes
 Nice=10
 IOSchedulingClass=idle

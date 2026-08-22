@@ -61,7 +61,7 @@ class _AppsStepMixin:
         core_title.setObjectName("wiz-card-title")
         core_layout.addWidget(core_title)
         core_copy = QLabel(
-            "Heroic Games Launcher, Lutris, ProtonUp-Qt, and protontricks install automatically "
+            "Heroic Games Launcher, Lutris, ProtonPlus, and protontricks install automatically "
             "as soon as networking is available."
         )
         core_copy.setObjectName("wiz-card-copy")

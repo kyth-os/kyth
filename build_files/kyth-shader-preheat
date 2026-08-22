@@ -20,7 +20,6 @@ cat >"${env_dir}/kyth-shader-cache.conf" <<'EOF'
 MESA_SHADER_CACHE_DIR=${HOME}/.cache/mesa_shader_cache
 MESA_SHADER_CACHE_MAX_SIZE=32G
 RADV_PERF=gpl
-DXVK_ASYNC=1
 VKD3D_CONFIG=dxr11,dxr
 EOF
 
@@ -30,7 +29,6 @@ log "Wrote environment settings to ${env_dir}/kyth-shader-cache.conf"
 export MESA_SHADER_CACHE_DIR="${cache_dir}"
 export MESA_SHADER_CACHE_MAX_SIZE="32G"
 export RADV_PERF="gpl"
-export DXVK_ASYNC="1"
 
 log "Scanning for fossilize shader pipeline databases to pre-warm..."
 
@@ -55,7 +53,7 @@ if [[ -n "${fo_files}" && ${#fossilize_bins[@]} -gt 0 ]]; then
 	done
 else
 	log "No pending Fossilize pipeline databases found or fossilize_replay tool inactive."
-	log "Mesa Graphics Pipeline Library (GPL) & DXVK Async pipelines are active for all games."
+	log "Mesa Graphics Pipeline Library (GPL) shader pipelines are active for all games."
 fi
 
 cache_size=$(du -sh "${cache_dir}" 2>/dev/null | awk '{print $1}' || echo "0B")

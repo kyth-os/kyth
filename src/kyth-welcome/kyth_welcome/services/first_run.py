@@ -12,8 +12,10 @@ try:
     from kyth_shared.session import default_flatpaks_done as _default_flatpaks_done
 except ImportError:
     def _default_flatpaks_done() -> bool:
-        return os.path.exists("/var/lib/kyth/default-flatpaks-v12-done") or os.path.exists(
-            "/var/lib/kyth/default-flatpaks-v10-done"
+        return (
+            os.path.exists("/var/lib/kyth/default-flatpaks-v13-done")
+            or os.path.exists("/var/lib/kyth/default-flatpaks-v12-done")
+            or os.path.exists("/var/lib/kyth/default-flatpaks-v10-done")
         )
 
 DEFAULT_FIRST_RUN_APPS = (
