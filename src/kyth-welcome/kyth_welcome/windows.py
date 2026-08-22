@@ -11,6 +11,7 @@ from .page_registry import (
     destination_for_page,
     get_nav_groups,
     landing_for_page,
+    resolve_page_key,
     section_for_page,
     visible_for_profile,
 )
@@ -152,9 +153,9 @@ class MainWindow(QMainWindow):
         self._sidebar_channel_worker = None
         self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
         self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
-        # Paint the shell first; Home (and its widget tree) hydrates on the
-        # next event-loop tick so showMaximized is not blocked on WelcomePage.
-        single_shot(self, 0, lambda: self._switch_page(0, animate=False))
+        # Paint the shell first; Home hydrates on the next tick unless a
+        # caller already deep-linked (--page, wizard handoff).
+        single_shot(self, 0, self._show_initial_page)
         single_shot(self, 0, self._refresh_nvidia_nav_visibility)
 
     def _build_topbar(self, central_layout):
@@ -785,14 +786,19 @@ class MainWindow(QMainWindow):
         "About": "Feedback",
     }
 
+    def _show_initial_page(self) -> None:
+        if self._history:
+            return
+        self._switch_page(0, animate=False)
+
     def _navigate_to(self, destination: int | str):
         if isinstance(destination, int):
             self._switch_page(destination)
             return
-        key = destination
+        key = resolve_page_key(str(destination))
         index = self._page_index_by_key.get(key)
         if index is None:
-            alias = self._LEGACY_ALIASES.get(key)
+            alias = self._LEGACY_ALIASES.get(key) or self._LEGACY_ALIASES.get(str(destination))
             if alias is not None:
                 key = alias
                 index = self._page_index_by_key.get(key)

@@ -14,6 +14,7 @@ from kyth_shared.user_polish import (
     apply_foundation,
     apply_places,
     cleanup_autostart,
+    should_refresh_pulse_desktop_shortcut,
 )
 
 
@@ -115,6 +116,19 @@ class UserPolishTests(unittest.TestCase):
             result = apply_desktop_layout_step(force=False, first_polish=False)
         self.assertEqual(result.status, OperationStatus.SKIPPED)
         run.assert_not_called()
+
+    def test_stale_system_hub_desktop_shortcut_is_refreshed(self):
+        stale = "[Desktop Entry]\nName=KythOS System Hub\nComment=Helper\nExec=/usr/bin/kyth-welcome-launch\n"
+        shipped = "[Desktop Entry]\nName=Kyth Pulse\nGenericName=System Hub\nComment=Health, games, apps, and this PC\nExec=/usr/bin/kyth-welcome-launch\n"
+        self.assertTrue(should_refresh_pulse_desktop_shortcut(stale, shipped))
+        self.assertFalse(should_refresh_pulse_desktop_shortcut(shipped, shipped))
+        self.assertFalse(should_refresh_pulse_desktop_shortcut("", shipped))
+        self.assertFalse(
+            should_refresh_pulse_desktop_shortcut(
+                "[Desktop Entry]\nName=Notes\nExec=kate\n",
+                shipped,
+            )
+        )
 
 
 if __name__ == "__main__":

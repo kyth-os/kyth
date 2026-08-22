@@ -248,7 +248,7 @@ class WizardWindow(
         self._update_nav()
 
     def _open_hub_at(self, page_key: str):
-        """Hand off from the wizard to the System Hub opened at a page.
+        """Hand off from the wizard to Pulse opened at a page.
         closeEvent (fired by self.close()) records any not-yet-decided step
         as skipped, so this is safe to call from any step.
 

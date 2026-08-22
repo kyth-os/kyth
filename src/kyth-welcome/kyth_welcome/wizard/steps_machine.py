@@ -107,7 +107,7 @@ class _MachineStepMixin:
                 "on your next restart."
             )
         else:
-            copy_text = f"On the {channel} channel. Check for updates any time from System Hub."
+            copy_text = f"On the {channel} channel. Check for updates any time from Pulse."
         copy = QLabel(copy_text)
         copy.setObjectName("wiz-card-copy")
         copy.setWordWrap(True)

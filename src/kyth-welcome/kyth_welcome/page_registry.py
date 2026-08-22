@@ -105,6 +105,20 @@ def landing_for_page(key: str) -> str:
     return key
 
 
+def resolve_page_key(key: str) -> str:
+    """Map dest names and familiar aliases to a stack page key."""
+    text = str(key or "").strip()
+    if not text:
+        return text
+    lowered = text.lower()
+    if lowered in {"home", "pulse", "system hub", "kyth pulse"}:
+        return "Welcome"
+    for item in PULSE_RAIL:
+        if text == item.dest or lowered == item.title.lower():
+            return item.landing_key
+    return text
+
+
 def section_for_page(key: str) -> str | None:
     """Hub section to show, or None to open the page's own stack slot."""
     dest = destination_for_page(key)
@@ -252,7 +266,7 @@ SEARCH_ITEMS: dict[str, SearchItem] = {
     "NVIDIA": SearchItem("NVIDIA Drivers", "Check NVIDIA driver state and open driver actions.", ("Graphics drivers", "GeForce")),
     "Kernel": SearchItem("Kernel", "Choose installed kernels and understand advanced boot options.", ("Advanced system settings",)),
     "Channels": SearchItem("Update channel", "Choose stable or testing update channels.", ("Channels", "Insider program", "Update channel")),
-    "Just": SearchItem("Recipes", "Run Just recipes from System Hub without opening a terminal.", ("Just", "Just Recipes", "ujust", "Recipes")),
+    "Just": SearchItem("Recipes", "Run Just recipes from Pulse without opening a terminal.", ("Just", "Just Recipes", "ujust", "Recipes")),
     "Feedback": SearchItem("Feedback", "Send feedback or report a problem with optional system details.", ("Send feedback", "Feedback Hub")),
 }
 

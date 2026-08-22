@@ -34,7 +34,7 @@ body_file="${report_dir}/system-hub-crash-$(date +%Y%m%d-%H%M%S).md"
 {
     echo "## What happened"
     echo
-    echo "System Hub exited unexpectedly."
+    echo "Kyth Pulse exited unexpectedly."
     echo
     echo "## Crash context"
     echo
@@ -43,7 +43,7 @@ body_file="${report_dir}/system-hub-crash-$(date +%Y%m%d-%H%M%S).md"
     echo "- Display: DISPLAY=${DISPLAY-} WAYLAND_DISPLAY=${WAYLAND_DISPLAY-}"
     echo "- Qt platform: ${QT_QPA_PLATFORM:-default}"
     echo
-    echo "## Recent System Hub launch log"
+    echo "## Recent Pulse launch log"
     echo
     echo '```text'
     tail -n 120 "${log_file}" 2>/dev/null || true
@@ -56,7 +56,7 @@ body_file="${report_dir}/system-hub-crash-$(date +%Y%m%d-%H%M%S).md"
 
 if command -v /usr/bin/kyth-report-issue >/dev/null 2>&1; then
     /usr/bin/kyth-report-issue \
-        --title "System Hub crashed on launch" \
+        --title "Kyth Pulse crashed on launch" \
         --body-file "${body_file}" \
         --label "bug" \
         >/dev/null 2>&1 || true

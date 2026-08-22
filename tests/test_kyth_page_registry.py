@@ -37,6 +37,7 @@ from kyth_welcome.page_registry import (  # noqa: E402
     destination_for_page,
     get_nav_groups,
     landing_for_page,
+    resolve_page_key,
     section_for_page,
     visible_for_profile,
 )
@@ -117,6 +118,15 @@ class PageRegistryTests(unittest.TestCase):
         self.assertEqual(SEARCH_ITEMS["Plasma Wayland"].title, "Desktop & displays")
         self.assertEqual(SEARCH_ITEMS["Channels"].title, "Update channel")
         self.assertEqual(SEARCH_ITEMS["Just"].title, "Recipes")
+
+    def test_resolve_page_key_maps_dest_names_and_home(self):
+        self.assertEqual(resolve_page_key("Pulse"), "Welcome")
+        self.assertEqual(resolve_page_key("Home"), "Welcome")
+        self.assertEqual(resolve_page_key("system hub"), "Welcome")
+        self.assertEqual(resolve_page_key("Kyth Pulse"), "Welcome")
+        self.assertEqual(resolve_page_key("Play"), "Play")
+        self.assertEqual(resolve_page_key("This PC"), "This PC")
+        self.assertEqual(resolve_page_key("App Store"), "App Store")
 
 
 if __name__ == "__main__":

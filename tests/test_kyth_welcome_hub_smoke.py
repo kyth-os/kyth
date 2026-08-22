@@ -113,6 +113,53 @@ class TestHubSmoke(unittest.TestCase):
         self.assertEqual(self.window._place_btn.text(), "Play")
         self.assertIn("Boost", self.window._crumb_lbl.text())
 
+    def test_home_dest_tiles_and_rail_navigate(self):
+        self.window._navigate_to("Welcome")
+        self._app.processEvents()
+        home = self.window._pages[self.window._page_index_by_key["Welcome"]]
+        apps = next(btn for btn in home._dest_tile_btns if btn._dest_key == "Apps")
+        apps.click()
+        self._app.processEvents()
+        self.assertEqual(
+            self.window._stack.currentIndex(),
+            self.window._page_index_by_key["Apps"],
+        )
+        self.window._rail_buttons["Play"].click()
+        self._app.processEvents()
+        play = self.window._pages[self.window._page_index_by_key["Play"]]
+        self.assertEqual(self.window._stack.currentIndex(), self.window._page_index_by_key["Play"])
+        self.assertEqual(play.current_section(), "overview")
+        self.window._navigate_to("Pulse")
+        self._app.processEvents()
+        self.assertEqual(
+            self.window._stack.currentIndex(),
+            self.window._page_index_by_key["Welcome"],
+        )
+
+    def test_deep_link_survives_deferred_home_switch(self):
+        window = self.MainWindow()
+        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        window._navigate_to("App Store")
+        self._app.processEvents()
+        try:
+            idx = window._page_index_by_key["Apps"]
+            self.assertEqual(window._stack.currentIndex(), idx)
+            self.assertEqual(window._pages[idx].current_section(), "App Store")
+        finally:
+            window.close()
+            window.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            self._app.processEvents()
+
+    def test_mode_switch_reorders_home_tiles(self):
+        self.window._navigate_to("Welcome")
+        self._app.processEvents()
+        home = self.window._pages[self.window._page_index_by_key["Welcome"]]
+        home.set_profile("gaming")
+        self.assertEqual(home._dest_tile_btns[0]._dest_key, "Play")
+        home.set_profile("everyday")
+        self.assertEqual(home._dest_tile_btns[0]._dest_key, "Apps")
+
     def test_ensure_page_and_grab(self):
         for key in [d.key for d in self.window._page_descriptors][:5]:
             idx = self.window._page_index_by_key[key]

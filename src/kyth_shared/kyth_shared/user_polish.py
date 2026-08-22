@@ -27,6 +27,24 @@ from kyth_shared.desktop.polish_manifest import (  # noqa: E402 — re-export fo
     VERSION,
 )
 
+
+def _desktop_entry_field(text: str, key: str) -> str:
+    prefix = f"{key}="
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+def should_refresh_pulse_desktop_shortcut(existing: str, shipped: str) -> bool:
+    """True when ~/Desktop/kyth-welcome.desktop is ours but Name/Comment drifted."""
+    if not existing or not shipped or "kyth-welcome" not in existing:
+        return False
+    return any(
+        _desktop_entry_field(existing, key) != _desktop_entry_field(shipped, key)
+        for key in ("Name", "Comment", "GenericName")
+    )
+
 # The following comments are here to satisfy static assertions in kyth-smoke-check:
 # check_file_contains assertions:
 # Theme org.kythos.desktop
@@ -562,10 +580,24 @@ def main() -> None:
         run_command(["/usr/bin/kyth-apply-role-preset", role_profile], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     welcome_desktop = "/usr/share/applications/kyth-welcome.desktop"
-    if os.path.isdir(os.path.expanduser("~/Desktop")) and (args.force or had_polish_stamp == 0):
-        if os.path.isfile(welcome_desktop):
+    desktop_dst = os.path.expanduser("~/Desktop/kyth-welcome.desktop")
+    if os.path.isdir(os.path.expanduser("~/Desktop")) and os.path.isfile(welcome_desktop):
+        existing = ""
+        if os.path.isfile(desktop_dst):
             try:
-                shutil.copy(welcome_desktop, os.path.expanduser("~/Desktop/kyth-welcome.desktop"))
+                with open(desktop_dst, encoding="utf-8") as fh:
+                    existing = fh.read()
+            except OSError:
+                existing = ""
+        try:
+            shipped = Path(welcome_desktop).read_text(encoding="utf-8")
+        except OSError:
+            shipped = ""
+        seed_missing = not os.path.isfile(desktop_dst) and (args.force or had_polish_stamp == 0)
+        refresh_stale = bool(existing) and should_refresh_pulse_desktop_shortcut(existing, shipped)
+        if shipped and (seed_missing or refresh_stale):
+            try:
+                shutil.copy(welcome_desktop, desktop_dst)
                 # The executable bit is required for KDE Plasma 6 to treat this
                 # launcher as trusted without prompting (see the same rule in
                 # branding/23-kyth-helper-ctx-installs.sh, which uses 0o755 for
@@ -573,7 +605,7 @@ def main() -> None:
                 # user's own home directory, so owner-only 0o700 is tighter
                 # than the skel default, not a downgrade — no other user needs
                 # access to this desktop.
-                os.chmod(os.path.expanduser("~/Desktop/kyth-welcome.desktop"), 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+                os.chmod(desktop_dst, 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
             except OSError:
                 pass
 

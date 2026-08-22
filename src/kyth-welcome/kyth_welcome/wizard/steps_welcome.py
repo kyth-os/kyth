@@ -76,7 +76,7 @@ class _WelcomeStepMixin:
 
         sub = QLabel(
             "This decides what the rest of setup shows you. You can always change it "
-            "later from System Hub."
+            "later from Pulse."
         )
         sub.setObjectName("wiz-subheading")
         sub.setWordWrap(True)
