@@ -8,11 +8,9 @@ from .services.launch import reboot
 from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (
     FIRST_WEEK_ITEMS,
-    FIRST_WEEK_MAX_DAYS as _FIRST_WEEK_MAX_DAYS,
-    FIRST_WEEK_MIN_DAYS as _FIRST_WEEK_MIN_DAYS,
     _FIRST_WEEK_DISMISS,
-    _first_week_days,
     gather_first_week_checklist,
+    pulse_dest_tiles,
     pulse_greeting,
     pulse_next_step,
 )
@@ -29,14 +27,6 @@ from .qt import (
 from .widgets import (
     Page,
     _make_card,
-)
-
-
-PULSE_DEST_TILES = (
-    ("Play", "Play", "Launch games and tune performance."),
-    ("Apps", "Apps", "Install apps and set up work."),
-    ("This PC", "This PC", "Health, updates, and hardware."),
-    ("Move In", "Move In", "Bring files, saves, and shortcuts."),
 )
 
 
@@ -81,15 +71,11 @@ class WelcomePage(Page):
             single_shot(self, 0, self._refresh_ai_plan)
             single_shot(self, 0, self._refresh_ntfs_library_warning)
 
-        days = None if IS_LIVE else _first_week_days()
-        if days is not None and _FIRST_WEEK_MIN_DAYS <= days <= _FIRST_WEEK_MAX_DAYS:
-            self._add(self._make_first_week_card(days))
-            single_shot(self, 0, self._refresh_first_week)
-
     def set_profile(self, profile: str) -> None:
         """Chrome mode switch — keep Pulse copy in sync without owning the toggle."""
         self._profile = profile
         self._apply_preset_btn.setText(f"Apply {profile.title()} settings")
+        self._refresh_dest_tiles()
         self._refresh_pulse_action()
         self.profile_changed.emit(profile)
 
@@ -122,9 +108,6 @@ class WelcomePage(Page):
 
         self._add(self._make_facts_strip())
         self._add_layout(self._make_dest_tiles())
-
-        if self._incomplete:
-            self._add(self._make_setup_resume_card(self._incomplete))
 
     def _make_orb(self) -> QFrame:
         self._orb = QFrame()
@@ -194,14 +177,25 @@ class WelcomePage(Page):
     def _make_dest_tiles(self):
         row = QHBoxLayout()
         row.setSpacing(12)
-        for key, title, copy in PULSE_DEST_TILES:
+        self._dest_tile_btns: list[QPushButton] = []
+        for key, title, copy in pulse_dest_tiles(self._profile):
             btn = QPushButton(f"{title}\n{copy}")
             btn.setObjectName("pulse-dest-tile")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setMinimumHeight(88)
-            btn.clicked.connect(lambda _=False, k=key: self._navigate(k))
+            btn._dest_key = key
+            btn.clicked.connect(lambda _=False, b=btn: self._navigate(b._dest_key))
+            self._dest_tile_btns.append(btn)
             row.addWidget(btn, 1)
         return row
+
+    def _refresh_dest_tiles(self) -> None:
+        tiles = pulse_dest_tiles(self._profile)
+        buttons = getattr(self, "_dest_tile_btns", [])
+        for btn, (key, title, copy) in zip(buttons, tiles):
+            btn._dest_key = key
+            btn.setText(f"{title}\n{copy}")
+            restyle(btn)
 
     def _current_next_step(self):
         setup_target = ""

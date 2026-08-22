@@ -21,11 +21,11 @@ class _DashboardMixin:
         hero_text_col = QVBoxLayout()
         hero_text_col.setSpacing(4)
 
-        hero_title = QLabel("KYTHOS GAMING PLATFORM")
+        hero_title = QLabel("Library")
         hero_title.setObjectName("genz-hero-title")
         hero_text_col.addWidget(hero_title)
 
-        hero_sub = QLabel("Your Windows games, tuned — Proton-CachyOS, Gamescope, MangoHud, all wired for one-click launch.")
+        hero_sub = QLabel("Steam, Proton-CachyOS, Gamescope, and MangoHud — ready when you are.")
         hero_sub.setObjectName("genz-hero-subtitle")
         hero_sub.setWordWrap(True)
         hero_text_col.addWidget(hero_sub)

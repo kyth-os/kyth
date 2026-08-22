@@ -10,6 +10,8 @@ from .page_registry import (
     descriptors_from_nav_groups,
     destination_for_page,
     get_nav_groups,
+    landing_for_page,
+    section_for_page,
     visible_for_profile,
 )
 from .qt import (
@@ -52,6 +54,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("KythOS")
         self.setMinimumSize(980, 660)
         self.resize(1180, 760)
+        self._profile = load_profile()
 
         # Outer wrapper: live banner (if running from live ISO) + main content
         central = QWidget()
@@ -91,6 +94,8 @@ class MainWindow(QMainWindow):
 
         self._build_topbar(central_layout)
         self._build_mission_bar(central_layout)
+        if getattr(self, "_mission_bar", None) is not None:
+            self._mission_bar.hide()
         self._build_search_panel(central_layout)
 
         root = self._create_main_content_root()
@@ -649,6 +654,9 @@ class MainWindow(QMainWindow):
         page = self._pages[idx] if idx is not None else None
         if page is not None and hasattr(page, "set_profile"):
             page.set_profile(profile)
+        for constructed in self._pages:
+            if constructed is not None and hasattr(constructed, "apply_profile"):
+                constructed.apply_profile(profile)
 
     def _sync_mode_switch(self, profile: str) -> None:
         mode = "gaming" if profile == "gaming" else "everyday"
@@ -715,6 +723,8 @@ class MainWindow(QMainWindow):
             placeholder = self._stack.widget(index)
             self._stack.insertWidget(index, page)
             self._stack.removeWidget(placeholder)
+            if hasattr(page, "apply_profile"):
+                page.apply_profile(getattr(self, "_profile", "everyday"))
         return self._pages[index]  # type: ignore[return-value]
 
     def _make_nav_handler(self, index: int):
@@ -732,17 +742,33 @@ class MainWindow(QMainWindow):
     }
 
     def _navigate_to(self, destination: int | str):
-        if isinstance(destination, str):
-            index = self._page_index_by_key.get(destination)
-            if index is None:
-                alias = self._LEGACY_ALIASES.get(destination)
-                if alias is not None:
-                    index = self._page_index_by_key.get(alias)
-            if index is None:
-                return
-            self._switch_page(index)
+        if isinstance(destination, int):
+            self._switch_page(destination)
             return
-        self._switch_page(destination)
+        key = destination
+        index = self._page_index_by_key.get(key)
+        if index is None:
+            alias = self._LEGACY_ALIASES.get(key)
+            if alias is not None:
+                key = alias
+                index = self._page_index_by_key.get(key)
+        if index is None:
+            return
+        section = section_for_page(key)
+        if section:
+            landing = landing_for_page(key)
+            landing_index = self._page_index_by_key.get(landing, index)
+            self._switch_page(landing_index)
+            page = self._pages[landing_index]
+            if page is not None and hasattr(page, "show_section"):
+                page.show_section(section)
+            self._update_topbar(landing_index)
+            return
+        self._switch_page(index)
+        page = self._pages[index]
+        if page is not None and hasattr(page, "show_section"):
+            page.show_section("overview")
+            self._update_topbar(index)
 
     def _go_back(self):
         if self._history_pos > 0:
@@ -773,13 +799,28 @@ class MainWindow(QMainWindow):
     def _update_topbar(self, index: int):
         self._back_btn.setEnabled(self._history_pos > 0)
         self._fwd_btn.setEnabled(self._history_pos < len(self._history) - 1)
-        section, label = self._page_crumbs[index]
         if index == 0:
             self._crumb_lbl.setText("")
-        elif section and section != label:
-            self._crumb_lbl.setText(f"›  {section}  ›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
-        else:
-            self._crumb_lbl.setText(f"›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
+            return
+        key = self._page_specs[index][0] if 0 <= index < len(self._page_specs) else "Welcome"
+        dest = destination_for_page(key)
+        page = self._pages[index] if 0 <= index < len(self._pages) else None
+        section_key = ""
+        if page is not None and hasattr(page, "current_section"):
+            section_key = str(page.current_section() or "")
+        if section_key and section_key != "overview":
+            child_idx = self._page_index_by_key.get(section_key)
+            child_label = self._page_crumbs[child_idx][1] if child_idx is not None else section_key
+            self._crumb_lbl.setText(f"›  {dest}  ›  {child_label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
+            return
+        _section, label = self._page_crumbs[index]
+        if dest and dest != "Pulse" and dest != label:
+            self._crumb_lbl.setText(f"›  {dest}  ›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
+            return
+        if _section and _section != label:
+            self._crumb_lbl.setText(f"›  {_section}  ›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
+            return
+        self._crumb_lbl.setText(f"›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
 
     def closeEvent(self, event):
         busy = has_blocking_tasks()

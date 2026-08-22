@@ -19,7 +19,7 @@ class JustPage(Page):
         super().__init__()
         self._page_header(
             "Advanced",
-            "Just Recipes",
+            "Recipes",
             "Veteran tasks — same as `just --list` in terminal, no terminal needed.",
         )
 

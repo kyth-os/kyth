@@ -1,8 +1,21 @@
-"""Pulse destination hubs — composed Play, This PC, Move In, and Apps landings."""
+"""Pulse destination hubs — overview plus folded child pages as sections."""
 from __future__ import annotations
 
+from importlib import import_module
+
 from .core_base import restyle
-from .qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt, single_shot
+from .qt import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+    Qt,
+    single_shot,
+)
 from .services.welcome import (
     MOVE_IN_CHECKLIST,
     MOVE_IN_JOURNEY,
@@ -12,7 +25,7 @@ from .services.welcome import (
     play_launcher_states,
     this_pc_timeline,
 )
-from .widgets import Page, _make_card
+from .widgets import SegmentedTabBar, _make_card
 
 
 def _hub_card(title: str, copy: str, page_key: str, navigate) -> QFrame:
@@ -28,7 +41,6 @@ def _hub_card(title: str, copy: str, page_key: str, navigate) -> QFrame:
     btn.setObjectName("primary")
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.clicked.connect(lambda _=False, k=page_key: navigate(k))
-    layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignLeft)
     return card
 
 
@@ -49,23 +61,126 @@ def _chip(title: str, value: str, page_key: str, navigate) -> QPushButton:
     return btn
 
 
-class AppsHubPage(Page):
-    def __init__(self, navigate=None):
-        super().__init__()
-        self._navigate = navigate or (lambda _key: None)
-        self._page_header("Kyth Pulse", "Apps", "Trusted installs and a workday that feels familiar.")
-        self._add(_hub_card("Discover Apps", "Install Flatpaks and find familiar alternatives.", "App Store", self._navigate))
-        self._add(_hub_card("Work Setup", "Office, mail, focus sessions, and workday conveniences.", "Work Setup", self._navigate))
-        self._stretch()
+def _spawn_page(module_name: str, class_name: str, *, navigate=None, extra: dict | None = None) -> QWidget:
+    module = import_module(f".{module_name}", "kyth_welcome")
+    page_class = getattr(module, class_name)
+    kwargs = dict(extra or {})
+    if navigate is not None:
+        kwargs["navigate"] = navigate
+    return page_class(**kwargs)
 
 
-class PlayHubPage(Page):
+class SectionedHubPage(QWidget):
+    """Destination chrome: title, section tabs, overview or a folded child page."""
+
+    dest_title = ""
+    dest_subtitle = ""
+    tab_items: tuple[tuple[str, str], ...] = (("overview", "Overview"),)
+    child_specs: dict[str, tuple[str, str, bool, dict]] = {}
+    gaming_hidden_tabs: tuple[str, ...] = ()
+
     def __init__(self, navigate=None):
         super().__init__()
+        self.setObjectName("content-area")
         self._navigate = navigate or (lambda _key: None)
+        self._section = "overview"
+        self._children: dict[str, QWidget] = {}
+        self._profile = "everyday"
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QWidget()
+        header.setObjectName("page-header")
+        header_l = QVBoxLayout(header)
+        header_l.setContentsMargins(48, 20, 56, 12)
+        header_l.setSpacing(4)
+        eyebrow = QLabel("KYTH PULSE")
+        eyebrow.setObjectName("eyebrow")
+        header_l.addWidget(eyebrow)
+        title = QLabel(self.dest_title)
+        title.setObjectName("heading")
+        header_l.addWidget(title)
+        sub = QLabel(self.dest_subtitle)
+        sub.setObjectName("subheading")
+        sub.setWordWrap(True)
+        header_l.addWidget(sub)
+        root.addWidget(header)
+
+        self._tabs = SegmentedTabBar(list(self.tab_items), active="overview")
+        self._tabs.activated.connect(self.show_section)
+        root.addWidget(self._tabs)
+
+        self._stack = QStackedWidget()
+        self._stack.setObjectName("content-area")
+        overview_scroll = QScrollArea()
+        overview_scroll.setWidgetResizable(True)
+        overview_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        overview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        overview_host = QWidget()
+        overview_host.setObjectName("content-area")
+        self._overview_layout = QVBoxLayout(overview_host)
+        self._overview_layout.setContentsMargins(48, 24, 56, 36)
+        self._overview_layout.setSpacing(16)
+        self._fill_overview(self._overview_layout)
+        self._overview_layout.addStretch()
+        overview_scroll.setWidget(overview_host)
+        self._stack.addWidget(overview_scroll)
+        self._overview = overview_scroll
+        root.addWidget(self._stack, 1)
+
+    def _fill_overview(self, layout: QVBoxLayout) -> None:
+        raise NotImplementedError
+
+    def current_section(self) -> str:
+        return self._section
+
+    def show_section(self, key: object) -> None:
+        section = str(key or "overview")
+        if section != "overview" and section not in self.child_specs:
+            section = "overview"
+        self._section = section
+        self._tabs.set_active(section)
+        if section == "overview":
+            self._stack.setCurrentWidget(self._overview)
+            return
+        page = self._children.get(section)
+        if page is None:
+            module, cls, needs_nav, extra = self.child_specs[section]
+            page = _spawn_page(module, cls, navigate=self._navigate if needs_nav else None, extra=extra)
+            self._children[section] = page
+            self._stack.addWidget(page)
+        self._stack.setCurrentWidget(page)
+
+    def apply_profile(self, profile: str) -> None:
+        self._profile = profile
+        hidden = set(self.gaming_hidden_tabs if profile == "gaming" else ())
+        for key, btn in self._tabs._buttons.items():
+            btn.setVisible(str(key) not in hidden)
+        if self._section in hidden:
+            self.show_section("overview")
+
+
+class PlayHubPage(SectionedHubPage):
+    dest_title = "Play"
+    dest_subtitle = "Launchers, boost, controllers, and will-it-run."
+    tab_items = (
+        ("overview", "Overview"),
+        ("Gaming", "Library"),
+        ("Performance", "Boost"),
+        ("Compatibility", "Will it run?"),
+        ("Controllers", "Controllers"),
+    )
+    child_specs = {
+        "Gaming": ("page_gaming", "GamingPage", False, {}),
+        "Performance": ("page_performance", "PerformancePage", False, {}),
+        "Compatibility": ("page_compatibility", "CompatibilityPage", False, {}),
+        "Controllers": ("page_controllers", "ControllerPage", False, {}),
+    }
+
+    def _fill_overview(self, layout: QVBoxLayout) -> None:
         self._play_worker = None
-        self._page_header("Kyth Pulse", "Play", "Launchers, boost, controllers, and will-it-run — not a settings dump.")
-
         launchers = QFrame()
         launchers.setObjectName("pulse-hub-card")
         launch_col = QVBoxLayout(launchers)
@@ -81,36 +196,35 @@ class PlayHubPage(Page):
             btn.setObjectName("pulse-chip")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setMinimumHeight(72)
-            btn.clicked.connect(lambda _=False: self._navigate("Gaming"))
+            btn.clicked.connect(lambda _=False: self.show_section("Gaming"))
             self._launcher_btns[name] = btn
             row.addWidget(btn, 1)
         launch_col.addLayout(row)
-        self._add(launchers)
+        layout.addWidget(launchers)
 
         boost, boost_layout = _make_card("pulse-hub-card")
         boost_title = QLabel("Game Boost")
         boost_title.setObjectName("card-title")
         boost_layout.addWidget(boost_title)
-        self._boost_body = QLabel("Latency, scheduler, and MangoHud live on Performance.")
+        self._boost_body = QLabel("Latency, scheduler, and MangoHud live on Boost.")
         self._boost_body.setObjectName("card-copy")
         self._boost_body.setWordWrap(True)
         boost_layout.addWidget(self._boost_body)
-        boost_btn = QPushButton("Open Performance")
+        boost_btn = QPushButton("Open Boost")
         boost_btn.setObjectName("primary")
-        boost_btn.clicked.connect(lambda _=False: self._navigate("Performance"))
+        boost_btn.clicked.connect(lambda _=False: self.show_section("Performance"))
         boost_layout.addWidget(boost_btn, 0, Qt.AlignmentFlag.AlignLeft)
-        self._add(boost)
+        layout.addWidget(boost)
 
         tools = QHBoxLayout()
         tools.setSpacing(12)
-        self._controllers_chip = _chip("Controllers", "Checking…", "Controllers", self._navigate)
-        self._saves_chip = _chip("Saves", "Checking…", "Gaming", self._navigate)
-        self._compat_chip = _chip("Will it run?", "Search ProtonDB and anti-cheat.", "Compatibility", self._navigate)
+        self._controllers_chip = _chip("Controllers", "Checking…", "Controllers", self.show_section)
+        self._saves_chip = _chip("Saves", "Checking…", "Gaming", self.show_section)
+        self._compat_chip = _chip("Will it run?", "ProtonDB and anti-cheat.", "Compatibility", self.show_section)
         tools.addWidget(self._controllers_chip, 1)
         tools.addWidget(self._saves_chip, 1)
         tools.addWidget(self._compat_chip, 1)
-        self._add_layout(tools)
-        self._stretch()
+        layout.addLayout(tools)
         single_shot(self, 0, self._refresh_play)
 
     def _refresh_play(self) -> None:
@@ -155,26 +269,67 @@ class PlayHubPage(Page):
             btn = self._launcher_btns.get(name)
             if btn is None:
                 continue
-            btn.setText(f"{name}\n{'Ready' if ready else 'Install from Gaming'}")
+            btn.setText(f"{name}\n{'Ready' if ready else 'Install from Library'}")
             restyle(btn)
         count = int(facts.get("controllers") or 0)
         self._controllers_chip.setText(
             f"Controllers\n{count} connected" if count else "Controllers\nNone seen yet"
         )
-        self._saves_chip.setText(f"Saves\n{facts.get('saves') or 'Open Gaming'}")
+        self._saves_chip.setText(f"Saves\n{facts.get('saves') or 'Open Library'}")
         if facts.get("ntfs"):
             self._boost_body.setText("A Steam library is on NTFS. Move it before you chase FPS.")
         restyle(self._controllers_chip)
         restyle(self._saves_chip)
 
 
-class ThisPcHubPage(Page):
-    def __init__(self, navigate=None):
-        super().__init__()
-        self._navigate = navigate or (lambda _key: None)
-        self._pc_worker = None
-        self._page_header("Kyth Pulse", "This PC", "Health, updates, and hardware in one place.")
+class AppsHubPage(SectionedHubPage):
+    dest_title = "Apps"
+    dest_subtitle = "Trusted installs and a workday that feels familiar."
+    tab_items = (
+        ("overview", "Overview"),
+        ("App Store", "Discover"),
+        ("Work Setup", "Work"),
+    )
+    child_specs = {
+        "App Store": ("page_software", "SoftwarePage", False, {"initial_tab": 4, "store_landing": True}),
+        "Work Setup": ("page_work", "WorkSetupPage", True, {}),
+    }
+    gaming_hidden_tabs = ("Work Setup",)
 
+    def _fill_overview(self, layout: QVBoxLayout) -> None:
+        layout.addWidget(_hub_card("Discover", "Install Flatpaks and find familiar alternatives.", "App Store", self.show_section))
+        self._work_card = _hub_card("Work Setup", "Office, mail, focus sessions, and workday conveniences.", "Work Setup", self.show_section)
+        layout.addWidget(self._work_card)
+
+    def apply_profile(self, profile: str) -> None:
+        super().apply_profile(profile)
+        if hasattr(self, "_work_card"):
+            self._work_card.setVisible(profile != "gaming")
+
+
+class ThisPcHubPage(SectionedHubPage):
+    dest_title = "This PC"
+    dest_subtitle = "Health, updates, and hardware in one place."
+    tab_items = (
+        ("overview", "Overview"),
+        ("Guardian", "Guardian"),
+        ("Update", "Updates"),
+        ("Hardware", "Hardware"),
+        ("Plasma Wayland", "Desktop"),
+        ("Diagnostics", "Health"),
+        ("Repair", "Repair"),
+    )
+    child_specs = {
+        "Guardian": ("page_guardian", "GuardianPage", True, {}),
+        "Update": ("page_update", "UpdatePage", False, {}),
+        "Hardware": ("page_hardware", "HardwarePage", True, {}),
+        "Plasma Wayland": ("page_plasma_wayland", "PlasmaWaylandPage", False, {}),
+        "Diagnostics": ("page_diagnostics", "DiagnosticsPage", True, {}),
+        "Repair": ("page_repair", "RepairPage", True, {}),
+    }
+
+    def _fill_overview(self, layout: QVBoxLayout) -> None:
+        self._pc_worker = None
         self._timeline_labels: dict[str, QLabel] = {}
         timeline, timeline_layout = _make_card("pulse-hub-card")
         t_title = QLabel("Deployments")
@@ -193,19 +348,19 @@ class ThisPcHubPage(Page):
             self._timeline_labels[key] = value
         open_updates = QPushButton("Open Updates")
         open_updates.setObjectName("primary")
-        open_updates.clicked.connect(lambda _=False: self._navigate("Update"))
+        open_updates.clicked.connect(lambda _=False: self.show_section("Update"))
         timeline_layout.addWidget(open_updates, 0, Qt.AlignmentFlag.AlignLeft)
-        self._add(timeline)
+        layout.addWidget(timeline)
 
         chips = QHBoxLayout()
         chips.setSpacing(12)
-        self._gpu_chip = _chip("GPU", "Checking…", "Hardware", self._navigate)
-        self._display_chip = _chip("Displays", "HDR, VRR, layout", "Plasma Wayland", self._navigate)
-        self._audio_chip = _chip("Audio", "PipeWire", "Hardware", self._navigate)
-        self._storage_chip = _chip("Storage", "Checking…", "Hardware", self._navigate)
+        self._gpu_chip = _chip("GPU", "Checking…", "Hardware", self.show_section)
+        self._display_chip = _chip("Displays", "HDR, VRR, layout", "Plasma Wayland", self.show_section)
+        self._audio_chip = _chip("Audio", "PipeWire", "Hardware", self.show_section)
+        self._storage_chip = _chip("Storage", "Checking…", "Hardware", self.show_section)
         for chip in (self._gpu_chip, self._display_chip, self._audio_chip, self._storage_chip):
             chips.addWidget(chip, 1)
-        self._add_layout(chips)
+        layout.addLayout(chips)
 
         guardian, g_layout = _make_card("pulse-hub-card")
         g_title = QLabel("Guardian")
@@ -218,22 +373,25 @@ class ThisPcHubPage(Page):
         g_row = QHBoxLayout()
         scan = QPushButton("Open Guardian")
         scan.setObjectName("primary")
-        scan.clicked.connect(lambda _=False: self._navigate("Guardian"))
+        scan.clicked.connect(lambda _=False: self.show_section("Guardian"))
         g_row.addWidget(scan)
         repair = QPushButton("Repair")
-        repair.clicked.connect(lambda _=False: self._navigate("Repair"))
+        repair.clicked.connect(lambda _=False: self.show_section("Repair"))
         g_row.addWidget(repair)
         g_row.addStretch()
         g_layout.addLayout(g_row)
-        self._add(guardian)
+        layout.addWidget(guardian)
 
         footer = QHBoxLayout()
         footer.setSpacing(8)
-        for label, key in (("NVIDIA drivers", "NVIDIA"), ("Channels", "Channels"), ("Feedback", "Feedback"), ("Health report", "Diagnostics")):
+        for label, key in (
+            ("NVIDIA drivers", "NVIDIA"),
+            ("Update channel", "Channels"),
+            ("Feedback", "Feedback"),
+        ):
             footer.addWidget(_hub_link(label, key, self._navigate))
         footer.addStretch()
-        self._add_layout(footer)
-        self._stretch()
+        layout.addLayout(footer)
         single_shot(self, 0, self._refresh_this_pc)
 
     def _refresh_this_pc(self) -> None:
@@ -315,14 +473,26 @@ class ThisPcHubPage(Page):
         restyle(self._guardian_body)
 
 
-class MoveInHubPage(Page):
-    def __init__(self, navigate=None):
-        super().__init__()
-        self._navigate = navigate or (lambda _key: None)
+class MoveInHubPage(SectionedHubPage):
+    dest_title = "Move In"
+    dest_subtitle = "Four steps. Originals stay put until you choose to copy."
+    tab_items = (
+        ("overview", "Journey"),
+        ("Move Files", "Toolbox"),
+        ("Cloud Storage", "Cloud"),
+        ("Network Shares", "Shares"),
+        ("VPN", "VPN"),
+    )
+    child_specs = {
+        "Move Files": ("page_windows_migration", "WindowsMigrationPage", True, {}),
+        "Cloud Storage": ("page_cloud_storage", "CloudStoragePage", False, {}),
+        "Network Shares": ("page_network_shares", "NetworkSharesPage", False, {}),
+        "VPN": ("page_vpn", "VpnPage", False, {}),
+    }
+
+    def _fill_overview(self, layout: QVBoxLayout) -> None:
         self._move_worker = None
         self._active = "files"
-        self._page_header("Kyth Pulse", "Move In", "Four steps. Originals stay put until you choose to copy.")
-
         steps = QHBoxLayout()
         steps.setSpacing(8)
         self._step_btns: dict[str, QPushButton] = {}
@@ -333,24 +503,24 @@ class MoveInHubPage(Page):
             btn.clicked.connect(lambda _=False, k=key: self._show_step(k))
             self._step_btns[key] = btn
             steps.addWidget(btn, 1)
-        self._add_layout(steps)
+        layout.addLayout(steps)
 
-        card, layout = _make_card("pulse-action")
+        card, card_layout = _make_card("pulse-action")
         self._step_title = QLabel("")
         self._step_title.setObjectName("pulse-action-title")
-        layout.addWidget(self._step_title)
+        card_layout.addWidget(self._step_title)
         self._step_body = QLabel("")
         self._step_body.setObjectName("pulse-action-body")
         self._step_body.setWordWrap(True)
-        layout.addWidget(self._step_body)
+        card_layout.addWidget(self._step_body)
         self._step_btn = QPushButton("Continue")
         self._step_btn.setObjectName("primary")
         self._step_btn.clicked.connect(lambda _=False: self._open_active_step())
-        layout.addWidget(self._step_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        card_layout.addWidget(self._step_btn, 0, Qt.AlignmentFlag.AlignLeft)
         note = QLabel("Your original files stay put until you choose to move them.")
         note.setObjectName("card-copy")
-        layout.addWidget(note)
-        self._add(card)
+        card_layout.addWidget(note)
+        layout.addWidget(card)
 
         checklist, check_layout = _make_card("pulse-hub-card")
         check_title = QLabel("Move-in checklist")
@@ -366,11 +536,10 @@ class MoveInHubPage(Page):
             row.addWidget(link)
             check_layout.addLayout(row)
         toolbox = QPushButton("Open the full toolbox")
-        toolbox.clicked.connect(lambda _=False: self._navigate("Move Files"))
+        toolbox.clicked.connect(lambda _=False: self.show_section("Move Files"))
         check_layout.addWidget(toolbox, 0, Qt.AlignmentFlag.AlignLeft)
-        self._add(checklist)
+        layout.addWidget(checklist)
         self._show_step("files")
-        self._stretch()
         single_shot(self, 0, self._refresh_move_in)
 
     def _show_step(self, key: str) -> None:
@@ -384,7 +553,11 @@ class MoveInHubPage(Page):
             restyle(btn)
 
     def _open_active_step(self) -> None:
-        self._navigate(move_in_step(self._active)[3])
+        target = move_in_step(self._active)[3]
+        if target in self.child_specs:
+            self.show_section(target)
+            return
+        self._navigate(target)
 
     def _refresh_move_in(self) -> None:
         if self._move_worker is not None:

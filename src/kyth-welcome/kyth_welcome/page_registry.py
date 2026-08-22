@@ -74,6 +74,35 @@ def destination_for_page(key: str) -> str:
     return PAGE_DESTINATION.get(key, "Pulse")
 
 
+# Child pages folded into the hub as sections. Unlisted dest pages (NVIDIA,
+# Channels, Just, Feedback) still open on their own stack slot.
+DESTINATION_SECTIONS: dict[str, tuple[str, ...]] = {
+    "Play": ("Gaming", "Performance", "Compatibility", "Controllers"),
+    "Apps": ("App Store", "Work Setup"),
+    "This PC": ("Guardian", "Update", "Hardware", "Plasma Wayland", "Diagnostics", "Repair"),
+    "Move In": ("Move Files", "Cloud Storage", "Network Shares", "VPN"),
+}
+
+
+def landing_for_page(key: str) -> str:
+    """Rail landing page that should be on screen for this key."""
+    dest = destination_for_page(key)
+    for item in PULSE_RAIL:
+        if item.dest == dest:
+            return item.landing_key
+    return key
+
+
+def section_for_page(key: str) -> str | None:
+    """Hub section to show, or None to open the page's own stack slot."""
+    dest = destination_for_page(key)
+    if key == landing_for_page(key):
+        return None
+    if key in DESTINATION_SECTIONS.get(dest, ()):
+        return key
+    return None
+
+
 def _page_factory(module_name: str, class_name: str, *args, **kwargs) -> PageFactory:
     def factory() -> QWidget:
         module = import_module(f".{module_name}", __package__)
@@ -201,7 +230,7 @@ SEARCH_ITEMS: dict[str, SearchItem] = {
     "Game Boost": SearchItem("Game Boost", "Latency, scheduler, and MangoHud overlay.", ("Game Boost", "Latency", "scx", "MangoHud", "Stutter")),
     "Update": SearchItem("Updates", "Check OS updates, staged images, rollback status, and auto-update settings.", ("Check for updates", "System Update", "Restart pending", "Rollback", "Undo update", "Bad update")),
     "Hardware": SearchItem("Hardware", "Inspect graphics, displays, audio, Bluetooth, storage, and device health.", ("Device Manager", "Display", "Sound", "Bluetooth", "No audio", "No sound", "Speaker", "Microphone", "Wi-Fi", "Wifi", "Printer", "Monitor", "Black screen")),
-    "Plasma Wayland": SearchItem("Plasma & Wayland", "Check portals, PipeWire capture, display settings, shortcuts, and Plasma session repair.", ("Plasma", "Wayland", "KDE", "Screen sharing", "PipeWire", "Portal", "xdg desktop portal", "Display settings", "VRR", "HDR", "Scale", "Shortcuts", "Window rules", "Restart Plasma", "Screenshot", "Screen shot", "Screen capture", "Blank screen share", "Black screen", "Display scale")),
+    "Plasma Wayland": SearchItem("Desktop & displays", "Check portals, PipeWire capture, display settings, shortcuts, and Plasma session repair.", ("Plasma", "Wayland", "Plasma & Wayland", "KDE", "Screen sharing", "PipeWire", "Portal", "xdg desktop portal", "Display settings", "VRR", "HDR", "Scale", "Shortcuts", "Window rules", "Restart Plasma", "Screenshot", "Screen shot", "Screen capture", "Blank screen share", "Black screen", "Display scale")),
     "Diagnostics": SearchItem("Health Report", "Run system checks and gather useful troubleshooting information.", ("System information", "Diagnostics", "Sign-in options", "Fingerprint", "Passkeys", "Security")),
     "Guardian": SearchItem("Guardian", "Self-healing: automatic health checks, safe fixes, history, and optional local AI diagnosis.", ("Guardian", "Self heal", "Self-healing", "Auto repair", "Fix automatically", "Health check", "Supervisor", "AI repair", "Kyth Guardian", "no audio", "flatpak broken", "bluetooth not working", "wifi not working")),
     "Repair": SearchItem("Repair", "Rollback, restore, collect logs, and open recovery tools when something feels off.", ("Troubleshoot", "Recovery", "Reset this PC", "Rollback", "terminal", "command prompt", "PowerShell", "Quick Assist", "Remote Assistance", "RustDesk", "Remote Desktop", "Restore my apps", "Restore my setup", "PC backup", "Restore layout", "Missing apps", "Remote help", "broken")),
@@ -210,7 +239,8 @@ SEARCH_ITEMS: dict[str, SearchItem] = {
     "Cloud Storage": SearchItem("Cloud Storage", "Set up cloud sync and copy workflows for common providers.", ("OneDrive", "Google Drive", "Dropbox")),
     "NVIDIA": SearchItem("NVIDIA Drivers", "Check NVIDIA driver state and open driver actions.", ("Graphics drivers", "GeForce")),
     "Kernel": SearchItem("Kernel", "Choose installed kernels and understand advanced boot options.", ("Advanced system settings",)),
-    "Channels": SearchItem("Channels", "Choose stable or testing update channels.", ("Update channel", "Insider program")),
+    "Channels": SearchItem("Update channel", "Choose stable or testing update channels.", ("Channels", "Insider program", "Update channel")),
+    "Just": SearchItem("Recipes", "Run Just recipes from System Hub without opening a terminal.", ("Just", "Just Recipes", "ujust", "Recipes")),
     "Feedback": SearchItem("Feedback", "Send feedback or report a problem with optional system details.", ("Send feedback", "Feedback Hub")),
 }
 
@@ -273,7 +303,7 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
             (("shield", "security-high"), "⬢", "Guardian", "Guardian", _page_factory("page_guardian", "GuardianPage", navigate=navigate)),
             (("system-software-update", "update-none"), "↻", "Updates", "Update", _page_factory("page_update", "UpdatePage", navigate=navigate)),
             (("computer", "computer-laptop"), "◈", "Hardware", "Hardware", _page_factory("page_hardware", "HardwarePage", navigate=navigate)),
-            (("preferences-desktop-display", "video-display"), "▣", "Plasma & Wayland", "Plasma Wayland", _page_factory("page_plasma_wayland", "PlasmaWaylandPage")),
+            (("preferences-desktop-display", "video-display"), "▣", "Desktop & displays", "Plasma Wayland", _page_factory("page_plasma_wayland", "PlasmaWaylandPage")),
             (("view-statistics", "office-chart-bar"), "◌", "Health Report", "Diagnostics", _page_factory("page_diagnostics", "DiagnosticsPage", navigate=navigate)),
             (("tools-wizard", "configure"), "⚠", "Repair", "Repair", _page_factory("page_repair", "RepairPage", navigate=navigate)),
         ]),
@@ -289,8 +319,8 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
     ]
     # Kernel removed from Advanced nav — now hidden behind Gaming → Tuning → Advanced (Fedora default, Cachy opt-in via MOK). Keep page factory for deep-link/search only.
     # advanced_items.append((("cpu", "applications-system"), "◌", "Kernel", "Kernel", _page_factory("page_kernel", "KernelPage")))
-    advanced_items.append((("vcs-branch", "system-switch-user"), "⎇", "Channels", "Channels", _page_factory("page_branches", "BranchesPage")))
-    advanced_items.append((("application-x-executable", "utilities-terminal"), "▶", "Just", "Just", _page_factory("page_just", "JustPage")))
+    advanced_items.append((("vcs-branch", "system-switch-user"), "⎇", "Update channel", "Channels", _page_factory("page_branches", "BranchesPage")))
+    advanced_items.append((("application-x-executable", "utilities-terminal"), "▶", "Recipes", "Just", _page_factory("page_just", "JustPage")))
     advanced_items.append((("mail-send", "mail-message"), "✉", "Feedback", "Feedback", _page_factory("page_feedback", "FeedbackPage")))
     nav_groups.append(("Advanced", advanced_items))
 

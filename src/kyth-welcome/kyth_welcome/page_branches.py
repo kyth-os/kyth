@@ -31,7 +31,7 @@ class BranchesPage(Page):
 
         self._page_header(
             "Advanced",
-            "Channels",
+            "Update channel",
             "Choose which KythOS image stream this system follows.",
         )
 

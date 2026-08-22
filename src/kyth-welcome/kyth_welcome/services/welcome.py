@@ -301,6 +301,17 @@ MOVE_IN_CHECKLIST: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def pulse_dest_tiles(profile: str) -> tuple[tuple[str, str, str], ...]:
+    """Destination tiles. Gaming leads with Play; Everyday leads with Apps."""
+    play = ("Play", "Play", "Launch games and tune performance.")
+    apps = ("Apps", "Apps", "Install apps and set up work.")
+    this_pc = ("This PC", "This PC", "Health, updates, and hardware.")
+    move_in = ("Move In", "Move In", "Bring files, saves, and shortcuts.")
+    if profile == "gaming":
+        return (play, apps, this_pc, move_in)
+    return (apps, play, this_pc, move_in)
+
+
 def home_hero_view(staged: bool, rollback: bool, windows_found: bool) -> HomeHeroView:
     if staged:
         pill_text, pill_object_name = "RESTART REQUIRED", "glowing-pill-warn"

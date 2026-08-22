@@ -36,6 +36,8 @@ from kyth_welcome.page_registry import (  # noqa: E402
     descriptors_from_nav_groups,
     destination_for_page,
     get_nav_groups,
+    landing_for_page,
+    section_for_page,
     visible_for_profile,
 )
 
@@ -96,6 +98,23 @@ class PageRegistryTests(unittest.TestCase):
         self.assertEqual(destination_for_page("Move Files"), "Move In")
         self.assertEqual(destination_for_page("Cloud Storage"), "Move In")
         self.assertEqual(destination_for_page("unknown-page"), "Pulse")
+
+    def test_folded_pages_open_inside_destination_hubs(self):
+        self.assertEqual(landing_for_page("Performance"), "Play")
+        self.assertEqual(section_for_page("Performance"), "Performance")
+        self.assertEqual(landing_for_page("App Store"), "Apps")
+        self.assertEqual(section_for_page("App Store"), "App Store")
+        self.assertEqual(landing_for_page("Guardian"), "This PC")
+        self.assertEqual(section_for_page("Guardian"), "Guardian")
+        self.assertEqual(landing_for_page("VPN"), "Move In")
+        self.assertEqual(section_for_page("VPN"), "VPN")
+        self.assertIsNone(section_for_page("Play"))
+        self.assertIsNone(section_for_page("NVIDIA"))
+        self.assertIsNone(section_for_page("Channels"))
+        self.assertIsNone(section_for_page("Feedback"))
+        self.assertEqual(SEARCH_ITEMS["Plasma Wayland"].title, "Desktop & displays")
+        self.assertEqual(SEARCH_ITEMS["Channels"].title, "Update channel")
+        self.assertEqual(SEARCH_ITEMS["Just"].title, "Recipes")
 
 
 if __name__ == "__main__":

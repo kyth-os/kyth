@@ -53,6 +53,8 @@ class TestHubSmoke(unittest.TestCase):
         cls._app.processEvents()
 
     def test_navigate_all_20_pages(self):
+        from kyth_welcome.page_registry import landing_for_page, section_for_page
+
         keys = [d.key for d in self.window._page_descriptors]
         self.assertGreaterEqual(len(keys), 24)
         for expected in ("Welcome", "Play", "Apps", "This PC", "Move In", "Move Files"):
@@ -61,9 +63,17 @@ class TestHubSmoke(unittest.TestCase):
             with self.subTest(page=key):
                 self.window._navigate_to(key)
                 self._app.processEvents()
-                idx = self.window._page_index_by_key.get(key)
+                folded = section_for_page(key)
+                landing = landing_for_page(key) if folded else key
+                idx = self.window._page_index_by_key.get(landing)
                 self.assertIsNotNone(idx)
                 self.assertEqual(self.window._stack.currentIndex(), idx)
+                page = self.window._pages[idx]
+                if folded:
+                    self.assertTrue(hasattr(page, "current_section"))
+                    self.assertEqual(page.current_section(), key)
+                elif page is not None and hasattr(page, "current_section"):
+                    self.assertEqual(page.current_section(), "overview")
 
     def test_ensure_page_and_grab(self):
         for key in [d.key for d in self.window._page_descriptors][:5]:
@@ -101,12 +111,19 @@ class TestHubSmoke(unittest.TestCase):
         )
 
     def test_legacy_aliases(self):
+        from kyth_welcome.page_registry import landing_for_page, section_for_page
+
         for old, new in self.window._LEGACY_ALIASES.items():
             with self.subTest(alias=old):
-                expected = self.window._page_index_by_key.get(new)
+                folded = section_for_page(new)
+                landing = landing_for_page(new) if folded else new
+                expected = self.window._page_index_by_key.get(landing)
                 self.window._navigate_to(old)
                 self._app.processEvents()
                 self.assertEqual(self.window._stack.currentIndex(), expected)
+                if folded:
+                    page = self.window._pages[expected]
+                    self.assertEqual(page.current_section(), new)
 
     def test_search_panel_no_crash(self):
         for txt in ["", "a", "wifi"]:

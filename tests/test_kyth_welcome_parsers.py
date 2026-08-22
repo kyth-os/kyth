@@ -285,6 +285,14 @@ class HomeHeroViewTests(unittest.TestCase):
         gaming = welcome.pulse_next_step(profile="gaming")
         self.assertEqual(gaming.target, "Play")
 
+    def test_pulse_dest_tiles_lead_with_mode(self):
+        everyday = welcome.pulse_dest_tiles("everyday")
+        gaming = welcome.pulse_dest_tiles("gaming")
+        self.assertEqual(everyday[0][0], "Apps")
+        self.assertEqual(gaming[0][0], "Play")
+        self.assertEqual({tile[0] for tile in everyday}, {"Play", "Apps", "This PC", "Move In"})
+        self.assertEqual({tile[0] for tile in gaming}, {"Play", "Apps", "This PC", "Move In"})
+
 
 class PageServiceModelTests(unittest.TestCase):
     def test_update_operations_are_provider_independent(self):

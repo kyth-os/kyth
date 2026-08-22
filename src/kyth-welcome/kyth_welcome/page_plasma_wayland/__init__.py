@@ -21,7 +21,7 @@ class PlasmaWaylandPage(Page):
         self._worker = None
         self._page_header(
             "System",
-            "Plasma & Wayland",
+            "Desktop & displays",
             "Session readiness, screen sharing, display tuning, shortcuts, and Plasma repair tools.",
         )
 

@@ -60,15 +60,15 @@ class GamingPage(Page):
 
     def _make_section_switcher(self) -> SegmentedTabBar:
         display_labels = {
-            "all": "🎮 Dashboard",
-            "setup": "⚙️ Setup",
-            "library": "📚 My Library",
-            "migration": "⇄ Migration",
-            "tuning": "⚡ Performance & Tuning",
-            "fixes": "🛠️ Fixes",
+            "all": "Dashboard",
+            "setup": "Setup",
+            "library": "Library",
+            "migration": "Migration",
+            "tuning": "Tuning",
+            "fixes": "Fixes",
         }
         items = [(key, display_labels.get(key, label)) for key, label in self._SECTION_LABELS.items()]
-        bar = SegmentedTabBar(items, active=self._current_gaming_section, kicker="GAMING HUB:")
+        bar = SegmentedTabBar(items, active=self._current_gaming_section)
         bar.activated.connect(self._switch_gaming_section)
         return bar
 

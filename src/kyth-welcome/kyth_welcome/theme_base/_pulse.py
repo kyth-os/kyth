@@ -61,9 +61,9 @@ QPushButton#pulse-rail-btn-active {{
 }}
 
 QPushButton#pulse-rail-btn-badge {{
-    color: {KYTH_BLUE};
-    background: rgba(56, 189, 248, 31);
-    border: 1px solid rgba(56, 189, 248, 92);
+    color: {STATUS_WARN};
+    background: rgba(245, 158, 11, 28);
+    border: 1px solid {STATUS_WARN};
 }}
 
 /* ── Mode switch ─────────────────────────────────────────────────────────── */
