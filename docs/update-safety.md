@@ -111,22 +111,23 @@ journalctl -b -1 -u ostree-finalize-staged.service
 Look for the `Invalid argument` line right after `Stopping
 ostree-finalize-staged.service`.
 
-Recovery — finalize manually in the same session immediately after staging,
-rather than trusting the automatic shutdown-time finalize:
+`kyth-safe-upgrade` now remounts `/boot` and runs `ostree admin finalize-staged`
+in the same session as the pull, so a GUI or `ujust kyth-upgrade` reboot
+applies the image on the first try. `ostree-finalize-staged.service` is also
+wrapped (immediate ExecStart plus shutdown ExecStop) so a raw `bootc upgrade`
+writes the bootloader entry before reboot.
+
+If you are already stuck with "Queued for next boot" on an older image:
 
 ```bash
-sudo bootc upgrade
-sudo ostree admin status                  # confirm a "(staged)" line appears
 sudo mount -o remount,bind,rw /boot
 sudo ostree admin finalize-staged         # should print "Bootloader updated; bootconfig swap: yes"
 sudo ostree admin status                  # confirm it now shows "(pending)"
 sudo systemctl reboot
 ```
 
-A deployment staged and finalized within the same interactive session hasn't
-failed this way; only the shutdown-deferred path has. This is a workaround,
-not a fix — the underlying remount failure in `ostree-finalize-staged`
-still needs root-causing.
+Or, on an image that includes the helper: `sudo kyth-finalize-staged reboot`
+or `ujust apply-staged`.
 
 ## State and Privacy
 

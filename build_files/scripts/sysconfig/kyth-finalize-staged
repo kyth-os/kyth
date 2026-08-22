@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Promote a staged bootc/ostree deployment to the next-boot bootloader entry.
+# Shutdown-time ostree-finalize-staged.service fails on Kyth's /boot bind-mount
+# layout (remount,rw → EINVAL). Finalize in this session instead.
+set -euo pipefail
+
+_remount_boot_rw() {
+	mount -o remount,rw /boot 2>/dev/null && return 0
+	mount -o remount,bind,rw /boot 2>/dev/null && return 0
+	if [[ -d /sysroot/boot ]]; then
+		mount -o remount,rw /sysroot/boot 2>/dev/null && return 0
+		mount -o remount,bind,rw /sysroot/boot 2>/dev/null && return 0
+	fi
+	return 1
+}
+
+if ! _remount_boot_rw; then
+	echo "kyth-finalize-staged: could not remount /boot read-write; trying finalize anyway" >&2
+fi
+
+/usr/bin/ostree admin finalize-staged
+status=$?
+if [[ "${1:-}" == reboot && "${status}" -eq 0 ]]; then
+	exec /usr/bin/systemctl reboot
+fi
+exit "${status}"

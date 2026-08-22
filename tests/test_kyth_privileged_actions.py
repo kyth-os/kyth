@@ -72,6 +72,12 @@ class PrivilegedActionTests(unittest.TestCase):
             helper_action("sleep-mode", "s2idle")
         with self.assertRaises(PrivilegedActionError):
             helper_action("network-share", "add; reboot")
+        self.assertEqual(
+            helper_action("finalize-staged", "reboot").command()[-2:],
+            ["/usr/libexec/kyth-finalize-staged", "reboot"],
+        )
+        with self.assertRaises(PrivilegedActionError):
+            helper_action("finalize-staged", "now")
 
     def test_vpn_and_scheduler_reject_control_data(self):
         action = openconnect_action(

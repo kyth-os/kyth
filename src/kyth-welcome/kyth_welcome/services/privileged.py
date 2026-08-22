@@ -99,6 +99,7 @@ _HELPERS: dict[str, str] = {
     "sleep-mode": "/usr/libexec/kyth-set-sleep-mode",
     "xone-dongle-install": "/usr/bin/xone-dongle-install",
     "xone-firmware-install": "/usr/bin/xone-firmware-install",
+    "finalize-staged": "/usr/libexec/kyth-finalize-staged",
 }
 
 
@@ -184,6 +185,8 @@ def helper_action(
         raise PrivilegedActionError("hardware-setup accepts no arguments")
     if helper == "sleep-mode" and args != ("deep",):
         raise PrivilegedActionError("sleep-mode accepts only deep")
+    if helper == "finalize-staged" and args not in ((), ("reboot",)):
+        raise PrivilegedActionError("finalize-staged accepts no arguments or reboot")
     return PrivilegedAction(
         name=helper,
         argv=(*_prefix(frontend), executable, *args),

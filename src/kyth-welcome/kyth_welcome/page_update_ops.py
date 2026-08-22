@@ -9,7 +9,7 @@ from .services.bootc import (
     active_bootc_operation, bootc_image_digest, bootc_image_timestamp, bootc_proxy_running, branch_display_name,
     bootc_status_data, current_branch, has_rollback_deployment, has_staged_update, nested_get,
 )
-from .services.launch import reboot
+from .services.launch import reboot_to_apply
 from .services.runtime import Worker, finish_worker, start_or_extend_dl_monitor, stop_download_monitor
 from .services.privileged import bootc_action
 from .services.updates import (
@@ -162,7 +162,7 @@ class _UpdateOpsMixin:
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
         self._reboot_btn.hide()
-        self._reboot_btn.clicked.connect(reboot)
+        self._reboot_btn.clicked.connect(reboot_to_apply)
         self._add(self._reboot_btn)
 
     def _set_buttons_enabled(self, enabled: bool):

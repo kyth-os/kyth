@@ -7,7 +7,7 @@ from kyth_shared.update_status import read_update_snapshot
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import restyle
 from .services.dbus_utils import is_systemd_unit_enabled
-from .services.launch import popen_privileged, reboot
+from .services.launch import popen_privileged, reboot_to_apply
 from .services.privileged import AuthFrontend, systemctl_action
 from .qt import QCheckBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, Qt
 from .widgets import _make_card
@@ -256,7 +256,7 @@ class _AutoUpdateMixin:
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        reboot()
+        reboot_to_apply()
 
     def _refresh_wu_staged_label(self):
         """H7: keep staged label in sync with canonical bootc state."""

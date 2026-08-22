@@ -35,4 +35,9 @@ case "$1" in
         ;;
 esac
 
-exec /usr/bin/bootc switch "${ref}"
+/usr/bin/bootc switch "${ref}"
+if [[ -x /usr/libexec/kyth-finalize-staged ]]; then
+	exec /usr/libexec/kyth-finalize-staged
+fi
+mount -o remount,bind,rw /boot 2>/dev/null || true
+exec /usr/bin/ostree admin finalize-staged

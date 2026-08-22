@@ -384,6 +384,10 @@ class UpdateNotifier(QSystemTrayIcon):
                 return
 
     def _do_restart(self):
+        helper = "/usr/libexec/kyth-finalize-staged"
+        if os.path.isfile(helper):
+            subprocess.Popen(["sudo", "-n", helper, "reboot"])
+            return
         subprocess.Popen(["systemctl", "reboot"])
 
     def _check_flatpak(self):

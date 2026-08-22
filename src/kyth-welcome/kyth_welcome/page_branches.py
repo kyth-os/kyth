@@ -1,7 +1,7 @@
 import time
 
 # __KYTH_GENERATED_IMPORTS__
-from .services.launch import reboot
+from .services.launch import reboot_to_apply
 from .core_base import restyle, run_worker, set_session_inhibit
 from .services.process import format_dl_progress_line, format_elapsed, with_idle_inhibit
 from .services.runtime import finish_worker, start_or_extend_dl_monitor, stop_download_monitor
@@ -138,7 +138,7 @@ class BranchesPage(Page):
         self._reboot_btn = QPushButton("Reboot to Apply")
         self._reboot_btn.setObjectName("primary")
         self._reboot_btn.hide()
-        self._reboot_btn.clicked.connect(reboot)
+        self._reboot_btn.clicked.connect(reboot_to_apply)
         self._add(self._reboot_btn)
         self._stretch()
 

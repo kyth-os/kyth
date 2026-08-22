@@ -50,6 +50,7 @@ kyth-upgrade:
                  .get('imageDigest','unknown'))" 2>/dev/null || echo "unknown")
 
     sudo kyth-safe-upgrade
+    sudo /usr/libexec/kyth-finalize-staged 2>/dev/null || sudo ostree admin finalize-staged || true
 
     staged_digest=$(bootc status --format json 2>/dev/null \
         | python3 -c "import sys,json; s=json.load(sys.stdin); \
@@ -77,10 +78,25 @@ kyth-upgrade:
     # ── Summary ───────────────────────────────────────────────────────────────
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     if [[ "${os_updated}" -eq 1 ]]; then
-        echo "  OS update staged. Reboot when ready to apply it:"
-        echo "    systemctl reboot"
+        echo "  OS update is the next boot. Reboot when ready:"
+        echo "    sudo kyth-finalize-staged reboot"
     else
         echo "  Everything is up to date."
+    fi
+
+# Write the staged image into the bootloader, then reboot into it.
+# Use this when `bootc upgrade` says "Queued for next boot" but reboot
+# keeps the old deployment (Kyth /boot remount EINVAL).
+[group('KythOS')]
+apply-staged:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -x /usr/libexec/kyth-finalize-staged ]]; then
+        sudo /usr/libexec/kyth-finalize-staged reboot
+    else
+        sudo mount -o remount,bind,rw /boot
+        sudo ostree admin finalize-staged
+        sudo systemctl reboot
     fi
 
 # Show the currently booted image, any staged update, and rollback availability.
@@ -132,6 +148,12 @@ rebase image_ref="kyth:latest":
     echo "Rebasing to: ${ref}"
     echo "This will take effect on next reboot."
     sudo bootc switch "${ref}"
+    if [[ -x /usr/libexec/kyth-finalize-staged ]]; then
+        sudo /usr/libexec/kyth-finalize-staged
+    else
+        sudo mount -o remount,bind,rw /boot || true
+        sudo ostree admin finalize-staged || true
+    fi
 
 # Switch to a KythOS release channel.
 # Channels:

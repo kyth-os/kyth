@@ -4,7 +4,7 @@ from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, load_profile, restyle, save_profile
-from .services.launch import reboot
+from .services.launch import reboot_to_apply
 from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (
     FIRST_WEEK_ITEMS,
@@ -229,7 +229,7 @@ class WelcomePage(Page):
 
     def _on_pulse_action(self) -> None:
         if self._action_target == "reboot":
-            reboot()
+            reboot_to_apply()
             return
         self._navigate(self._action_target)
 

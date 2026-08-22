@@ -84,6 +84,17 @@ def reboot() -> subprocess.Popen | None:
     return popen(["systemctl", "reboot"])
 
 
+def reboot_to_apply() -> subprocess.Popen | None:
+    """Finalize a staged bootc deployment, then reboot into it.
+
+    `systemctl reboot` alone often leaves the image queued: ostree cannot
+    remount /boot read-write during shutdown on Kyth's bind-mount layout.
+    """
+    from .privileged import helper_action
+
+    return popen_privileged(helper_action("finalize-staged", "reboot"))
+
+
 def open_terminal_command(command: str) -> subprocess.Popen | None:
     """Run *command* in the first available terminal (no shell injection)."""
     if not command or not command.strip():

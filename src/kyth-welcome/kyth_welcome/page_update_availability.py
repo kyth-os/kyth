@@ -4,7 +4,7 @@ from datetime import datetime
 from .core_base import restyle
 from .services.bootc import bootc_image_timestamp, has_staged_update, update_availability_view
 from .services.runtime import guard_disposed,  release_worker_when_finished
-from .services.launch import reboot
+from .services.launch import reboot_to_apply
 from .services.updates import AvailabilityCheckResult, UpdateProbeResult
 from .services.workers.updates import FlatpakCheckWorker, UpdateCheckWorker
 from .qt import QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, Qt
@@ -54,7 +54,7 @@ class _UpdateAvailabilityMixin:
         self._restart_now_btn.setObjectName("primary")
         self._restart_now_btn.setMinimumWidth(120)
         self._restart_now_btn.hide()
-        self._restart_now_btn.clicked.connect(reboot)
+        self._restart_now_btn.clicked.connect(reboot_to_apply)
         avail_btn_col.addWidget(self._restart_now_btn)
         self._check_btn = QPushButton("Check Now")
         self._check_btn.setEnabled(False)

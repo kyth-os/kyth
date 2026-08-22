@@ -134,8 +134,16 @@ class SysconfigFragmentTests(unittest.TestCase):
         ):
             self.assertIn(f"/usr/bin/kyth-bootc-guard {operation}", body)
         self.assertNotIn("NOPASSWD: /usr/bin/bootc", body)
+        self.assertIn("NOPASSWD: /usr/libexec/kyth-finalize-staged", body)
+        self.assertIn("NOPASSWD: /usr/libexec/kyth-finalize-staged reboot", body)
         self.assertFalse((ROOT / "build_files/kyth-bootc-sudo").exists())
         self.assertFalse((ROOT / "build_files/kyth-sched-sudo").exists())
+
+    def test_bootc_guard_finalizes_after_switch(self):
+        guard = (ROOT / "build_files" / "kyth-bootc-guard").read_text(encoding="utf-8")
+        self.assertIn("/usr/bin/bootc switch", guard)
+        self.assertIn("/usr/libexec/kyth-finalize-staged", guard)
+        self.assertNotIn("exec /usr/bin/bootc switch", guard)
 
     def test_upgrade_sudoers_never_grants_podman(self):
         fragment = (

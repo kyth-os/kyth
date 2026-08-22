@@ -1,7 +1,7 @@
 """Repair page — rollback and destructive OS reset."""
 from __future__ import annotations
 
-from .services.launch import reboot
+from .services.launch import reboot_to_apply
 
 from .core_base import restyle, run_worker, set_session_inhibit
 from .services.bootc import has_rollback_deployment
@@ -58,7 +58,7 @@ class _ResetMixin:
             self._status_lbl.setText("Rollback staged — rebooting into the previous system image…")
             self._status_lbl.setObjectName("status-ok")
             self._log_panel.append("\nDone. Rebooting now.")
-            single_shot(self, 2000, reboot)
+            single_shot(self, 2000, reboot_to_apply)
         else:
             self._status_lbl.setText(f"Rollback failed (exit code {code}). See journal: journalctl --user -u kyth-probe")
             self._status_lbl.setObjectName("status-err")
@@ -97,7 +97,7 @@ class _ResetMixin:
             self._status_lbl.setObjectName("status-ok")
             self._log_panel.append("\nDone. Rebooting now.")
             restyle(self._status_lbl)
-            single_shot(self, 2000, reboot)
+            single_shot(self, 2000, reboot_to_apply)
         else:
             self._status_lbl.setText(f"Reset failed (exit code {code}).")
             self._status_lbl.setObjectName("status-err")

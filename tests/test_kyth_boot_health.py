@@ -404,12 +404,17 @@ class SafeUpgradeTests(unittest.TestCase):
                     }
                 }
             }
-            completed = subprocess.CompletedProcess(["bootc", "upgrade"], 0)
+            calls: list[list[str]] = []
+
+            def fake_run(cmd, **_kwargs):
+                calls.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0)
+
             with (
                 patch.object(safe_upgrade.os, "geteuid", return_value=0),
                 patch.object(safe_upgrade, "fetch_status_data", return_value=status),
                 patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
-                patch.object(safe_upgrade, "run", return_value=completed) as run,
+                patch.object(safe_upgrade, "run", side_effect=fake_run),
             ):
                 result = safe_upgrade.upgrade(
                     state_path=state_path,
@@ -417,8 +422,62 @@ class SafeUpgradeTests(unittest.TestCase):
                 )
 
             self.assertEqual(result, 0)
-            run.assert_called_once_with(["bootc", "upgrade"], check=False, timeout=1800)
+            self.assertIn(["bootc", "upgrade"], calls)
+            self.assertIn(["ostree", "admin", "finalize-staged"], calls)
             self.assertEqual(read_state(state_path).pending_digest, DIGEST)
+
+    def test_already_staged_digest_is_finalized_not_skipped(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = pathlib.Path(temporary) / "health.json"
+            status = {
+                "status": {
+                    "booted": {
+                        "image": {
+                            "reference": "ghcr.io/example/kyth:testing",
+                            "imageDigest": OTHER_DIGEST,
+                        }
+                    },
+                    "staged": {
+                        "image": {
+                            "reference": "ghcr.io/example/kyth:testing",
+                            "imageDigest": DIGEST,
+                        }
+                    },
+                }
+            }
+            calls: list[list[str]] = []
+
+            def fake_run(cmd, **_kwargs):
+                calls.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with (
+                patch.object(safe_upgrade.os, "geteuid", return_value=0),
+                patch.object(safe_upgrade, "fetch_status_data", return_value=status),
+                patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
+                patch.object(safe_upgrade, "run", side_effect=fake_run),
+            ):
+                result = safe_upgrade.upgrade(
+                    state_path=state_path,
+                    config_path=pathlib.Path(temporary) / "missing.toml",
+                )
+
+            self.assertEqual(result, 0)
+            self.assertNotIn(["bootc", "upgrade"], calls)
+            self.assertIn(["ostree", "admin", "finalize-staged"], calls)
+
+    def test_finalize_prefers_bind_rw_when_plain_remount_fails(self):
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(list(cmd))
+            if cmd[:3] == ["mount", "-o", "remount,rw"]:
+                return subprocess.CompletedProcess(cmd, 1)
+            return subprocess.CompletedProcess(cmd, 0)
+
+        self.assertEqual(safe_upgrade.finalize_staged_deployment(runner=fake_run), 0)
+        self.assertIn(["mount", "-o", "remount,bind,rw", "/boot"], calls)
+        self.assertIn(["ostree", "admin", "finalize-staged"], calls)
 
     def test_timeout_is_retryable_and_not_quarantined(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -532,6 +591,14 @@ class BootHealthPackagingTests(unittest.TestCase):
         self.assertNotIn("greenboot-default-health-checks", install_line)
 
     def test_greenboot_hooks_are_installed_in_lifecycle_directories(self):
+        finalize = (
+            ROOT / "build_files/scripts/sysconfig/systemd/58-finalize-staged-bootloader.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("/usr/libexec/kyth-finalize-staged", finalize)
+        self.assertIn("ostree-finalize-staged.service.d", finalize)
+        self.assertIn("ExecStart=-/usr/libexec/kyth-finalize-staged", finalize)
+        self.assertIn("ExecStop=/usr/libexec/kyth-finalize-staged", finalize)
+
         install = (
             ROOT / "build_files/scripts/branding/35-diagnostic-script-installs.sh"
         ).read_text(encoding="utf-8")

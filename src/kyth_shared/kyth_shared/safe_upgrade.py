@@ -32,6 +32,58 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path("/etc/kyth/auto-update.toml")
 
+# /boot is often a bind-mount of the root btrfs subvol. `mount -o remount,rw`
+# then fails with EINVAL, and shutdown-time `ostree admin finalize-staged`
+# silently drops the staged deployment. bind,rw is the layout that works.
+_BOOT_REMOUNT_TRIES: tuple[tuple[str, ...], ...] = (
+    ("mount", "-o", "remount,rw", "/boot"),
+    ("mount", "-o", "remount,bind,rw", "/boot"),
+    ("mount", "-o", "remount,rw", "/sysroot/boot"),
+    ("mount", "-o", "remount,bind,rw", "/sysroot/boot"),
+)
+
+
+def remount_boot_writable(*, runner=None) -> bool:
+    """Make /boot writable so ostree can write BLS entries."""
+    execute = run if runner is None else runner
+    for argv in _BOOT_REMOUNT_TRIES:
+        try:
+            result = execute(list(argv), check=False, timeout=15)
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            continue
+        if int(getattr(result, "returncode", 1) or 1) == 0:
+            return True
+    return False
+
+
+def finalize_staged_deployment(*, runner=None) -> int:
+    """Promote a staged bootc/ostree deployment to the next-boot entry now.
+
+    Do this in the same session as `bootc upgrade`. Waiting for
+    ostree-finalize-staged.service at shutdown fails on the Kyth /boot
+    bind-mount layout (EINVAL remount), so the image stays queued forever.
+    """
+    execute = run if runner is None else runner
+    remount_boot_writable(runner=execute)
+    try:
+        result = execute(["ostree", "admin", "finalize-staged"], check=False, timeout=120)
+    except (FileNotFoundError, OSError) as exc:
+        print(f"Could not finalize staged deployment: {exc}", file=sys.stderr)
+        return 1
+    code = int(getattr(result, "returncode", 1) or 0)
+    if code:
+        print(
+            "Staged the image but could not write the bootloader entry.",
+            file=sys.stderr,
+        )
+        print(
+            "Run: sudo mount -o remount,bind,rw /boot && sudo ostree admin finalize-staged",
+            file=sys.stderr,
+        )
+    else:
+        print("Bootloader updated — the staged image is the next boot.")
+    return code
+
 
 def load_rollout_ring(path: str | Path = DEFAULT_CONFIG_PATH) -> str:
     try:
@@ -80,9 +132,12 @@ def upgrade(
         return 5
     staged = image_digest_from_status(status, "staged")
     booted = image_digest_from_status(status, "booted")
-    if remote_digest in {staged, booted}:
-        print("KythOS is already running or has staged the latest allowed digest")
+    if remote_digest == booted:
+        print("KythOS is already running the latest allowed digest")
         return 0
+    if remote_digest == staged:
+        print("Latest digest is already staged — promoting it to the next boot")
+        return finalize_staged_deployment(runner=run)
     # Pre-flight: require ~2 GB free on /sysroot (bootc needs space for new
     # deployment). Must not check "/" — on composefs-root systems (Fedora
     # 44+) / is a tiny synthetic overlay that always reports ~0 bytes free,
@@ -165,7 +220,7 @@ def upgrade(
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
-    return 0
+    return finalize_staged_deployment(runner=run)
 
 
 def _maybe_trigger_guardian() -> None:
