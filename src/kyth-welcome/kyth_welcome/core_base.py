@@ -255,20 +255,19 @@ def save_profile(profile: str) -> None:
         pass
 
 
-def wait_for_display_setup(timeout: float = 8.0, interval: float = 0.25):
-    """C3: must not be called on the GUI thread — blocks for up to 8 s.
+def wait_for_display_setup(timeout: float = 2.0, interval: float = 0.25):
+    """Wait only while kyth-set-resolution is actually running.
 
-    Callers in the wizard/live path run this before QApplication is created
-    (safe). Pages must not call it from showEvent/__init__; use a DataWorker
-    or QTimer instead.
+    Must not be called on the GUI thread. Previously this also waited while
+    the first-login autostart .desktop existed, which froze Hub for the full
+    timeout on every new account. Cap at 2s so a stuck helper cannot hide
+    the window.
     """
-    autostart = os.path.expanduser("~/.config/autostart/kyth-set-resolution.desktop")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        result = run_command(["pgrep", "-af", "kyth-set-resolution"], timeout=2)
+        result = run_command(["pgrep", "-f", "/usr/bin/kyth-set-resolution"], timeout=1)
         running = bool(result is not None and result.returncode == 0 and result.stdout.strip())
-        pending = os.path.exists(autostart)
-        if not running and not pending:
+        if not running:
             return
         time.sleep(interval)
 

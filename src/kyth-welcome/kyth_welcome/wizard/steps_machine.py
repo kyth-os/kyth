@@ -13,7 +13,7 @@ those fixes) — NVIDIA detection, bootc status (rollback/staged/branch), and
 the NTFS drive scan are all subprocess-backed. _make_machine_step() below
 builds the update card and preflight card from safe defaults; the real
 values are fetched off the GUI thread by _refresh_machine_facts() (kicked
-off once from WizardWindow.__init__ via single_shot) and patched into the
+off once from _make_machine_step via single_shot) and patched into the
 already-built widgets by _on_machine_facts_ready(), which also feeds the
 same NTFS scan result to the Gaming step (_apply_gaming_windows_drives) so
 the two steps don't each pay for a separate lsblk call.
@@ -24,7 +24,7 @@ from ..core_base import IS_LIVE
 from ..services.process import command_stdout
 from ..services.bootc import current_branch, has_rollback_deployment, has_staged_update
 from ..services.runtime import DataWorker, guard_disposed
-from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from ..qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, single_shot
 from ..services.gaming import _COMPAT_GAMES, _find_ntfs_drives, _proton_cachyos_version
 from ..services.hardware import _detect_nvidia
 from ..widgets import _make_card
@@ -221,6 +221,7 @@ class _MachineStepMixin:
         layout.addWidget(self._machine_preflight_slot)
 
         layout.addStretch()
+        single_shot(self, 0, self._refresh_machine_facts)
         return page
 
     @staticmethod
@@ -235,6 +236,8 @@ class _MachineStepMixin:
         }
 
     def _refresh_machine_facts(self) -> None:
+        if getattr(self, "_machine_update_slot_layout", None) is None:
+            return
         if self._machine_facts_worker is not None:
             return
         worker = DataWorker("wizard-machine-facts", self._fetch_machine_facts)

@@ -3,23 +3,18 @@ import time
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, load_profile, restyle, save_profile
-from .services.bootc import has_rollback_deployment
 from .services.launch import reboot
 from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
 from .services.welcome import (
+    FIRST_WEEK_ITEMS,
     FIRST_WEEK_MAX_DAYS as _FIRST_WEEK_MAX_DAYS,
     FIRST_WEEK_MIN_DAYS as _FIRST_WEEK_MIN_DAYS,
     _FIRST_WEEK_DISMISS,
-    _browser_integration_native_ready,
-    _cloud_storage_configured,
-    _controller_seen,
     _first_week_days,
-    _kdeconnect_configured,
-    _printer_configured,
+    gather_first_week_checklist,
     home_categories,
     home_hero_view,
 )
-from .services.flatpak import _is_flatpak_installed as _flatpak_installed
 from .qt import (
     QFrame,
     QHBoxLayout,
@@ -125,6 +120,7 @@ class WelcomePage(Page):
         days = None if IS_LIVE else _first_week_days()
         if days is not None and _FIRST_WEEK_MIN_DAYS <= days <= _FIRST_WEEK_MAX_DAYS:
             self._add(self._make_first_week_card(days))
+            single_shot(self, 0, self._refresh_first_week)
 
         self._add(self._make_section_header("Explore Tasks", "Choose a card below to configure launchers, tune displays, or run diagnostics."))
         # Windows transfer prominence (complaint #2) — shown above categories when NTFS found
@@ -414,24 +410,13 @@ class WelcomePage(Page):
         body.setWordWrap(True)
         layout.addWidget(body)
 
-        app_setup_done = os.path.exists("/var/lib/kyth/default-flatpaks-v10-done")
-        checklist = [
-            (app_setup_done, "Default Apps", "Steam, bottles, and flatpaks installed.", "App Store"),
-            (_flatpak_installed("com.brave.Browser"), "Browser", "Brave browser set up.", "App Store"),
-            (_browser_integration_native_ready(), "Browser Integration", "Plasma desktop connection enabled.", "App Store"),
-            (_flatpak_installed("com.valvesoftware.Steam"), "Steam Integration", "Steam libraries and backups set up.", "Gaming"),
-            (_controller_seen(), "Controller Setup", "Game controllers detected.", "Controllers"),
-            (_kdeconnect_configured(), "KDE Connect", "Phone pairing and notifications set up.", "Move Files"),
-            (_cloud_storage_configured(), "Cloud Sync", "rclone/cloud sync initialized.", "Cloud Storage"),
-            (_printer_configured(), "Printers", "Local or network printers configured.", "Hardware"),
-            (has_rollback_deployment(), "Rollback Safety", "Previous builds cached for rollback.", "Update"),
-        ]
-
-        for done, label, text, page_key in checklist:
+        self._first_week_rows: list[tuple[QLabel, QPushButton]] = []
+        self._first_week_worker = None
+        for label, text, page_key in FIRST_WEEK_ITEMS:
             row = QHBoxLayout()
             row.setSpacing(10)
-            badge = QLabel("Done" if done else "Pending")
-            badge.setObjectName("task-status-ok" if done else "task-status-idle")
+            badge = QLabel("Checking…")
+            badge.setObjectName("task-status-idle")
             row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
 
             text_col = QVBoxLayout()
@@ -445,13 +430,12 @@ class WelcomePage(Page):
             text_col.addWidget(lbl)
             row.addLayout(text_col, 1)
 
-            btn = QPushButton("✓ Done" if done else "Set Up")
-            if not done:
-                btn.setObjectName("primary")
+            btn = QPushButton("Set Up")
             btn.setToolTip(text)
             btn.clicked.connect(lambda _=False, k=page_key: self._navigate(k))
             row.addWidget(btn, 0, Qt.AlignmentFlag.AlignTop)
             layout.addLayout(row)
+            self._first_week_rows.append((badge, btn))
 
         dismiss_row = QHBoxLayout()
         dismiss_btn = QPushButton("Got it — hide this")
@@ -460,6 +444,35 @@ class WelcomePage(Page):
         dismiss_row.addStretch()
         layout.addLayout(dismiss_row)
         return card
+
+    def _refresh_first_week(self) -> None:
+        if self._first_week_worker is not None:
+            return
+        from .services.runtime import DataWorker, guard_disposed
+
+        worker = DataWorker("first-week-checklist", gather_first_week_checklist)
+        self._first_week_worker = worker
+        worker.result.connect(guard_disposed(self._on_first_week_ready))
+        worker.failed.connect(lambda _k, _m: None)
+        worker.finished.connect(lambda: setattr(self, "_first_week_worker", None))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_first_week_ready(self, _key: str, flags: object) -> None:
+        if not isinstance(flags, list):
+            return
+        rows = getattr(self, "_first_week_rows", ())
+        for i, done in enumerate(flags):
+            if i >= len(rows):
+                break
+            badge, btn = rows[i]
+            done = bool(done)
+            badge.setText("Done" if done else "Pending")
+            badge.setObjectName("task-status-ok" if done else "task-status-idle")
+            restyle(badge)
+            btn.setText("✓ Done" if done else "Set Up")
+            btn.setObjectName("primary" if not done else "")
+            restyle(btn)
 
     def _make_windows_transfer_card(self) -> 'QFrame':
         """Prominent one-click Windows -> KythOS transfer (complaint #2)."""

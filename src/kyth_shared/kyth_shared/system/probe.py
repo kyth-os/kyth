@@ -627,6 +627,7 @@ class ProbeService:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._mem: dict[str, tuple[float, object]] = {}
+        self._inflight: dict[str, tuple[threading.Event, dict[str, Any]]] = {}
 
     _MEM_CAP = 64
 
@@ -655,7 +656,39 @@ class ProbeService:
             except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: probe best-effort
                 _logger.debug("ProbeService.cached: disk read for %r failed", key, exc_info=True)
 
-        value = fetch()
+        holder: dict[str, Any]
+        with self._lock:
+            inflight = self._inflight.get(key)
+            if inflight is None:
+                event = threading.Event()
+                holder = {"value": None, "error": None, "ok": False}
+                self._inflight[key] = (event, holder)
+                is_leader = True
+            else:
+                event, holder = inflight
+                is_leader = False
+
+        if not is_leader:
+            event.wait(timeout=120.0)
+            if holder.get("ok"):
+                return holder["value"]  # type: ignore[return-value]
+            if holder.get("error") is not None:
+                raise holder["error"]
+            # Leader finished without publishing (timeout / crash) — fetch ourselves.
+            return fetch()
+
+        try:
+            value = fetch()
+            holder["value"] = value
+            holder["ok"] = True
+        except Exception as exc:  # noqa: BLE001 — propagate to waiters, then re-raise
+            holder["error"] = exc
+            raise
+        finally:
+            with self._lock:
+                self._inflight.pop(key, None)
+            event.set()
+
         # Do not cache empty bootc results — a transient `sudo -n` failure or
         # missing digest would otherwise poison the mem+disk cache for 90s and
         # make the Hub appear "up to date" while bootc is actually unreachable.

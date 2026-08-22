@@ -18,6 +18,9 @@ class _GamingStepMixin:
     def _apply_gaming_windows_drives(self, drives: list[dict]) -> None:
         """Called by _MachineStepMixin._on_machine_facts_ready() once the
         shared background NTFS scan resolves (see steps_machine.py)."""
+        self._pending_gaming_drives = drives
+        if getattr(self, "_gaming_drive_slot_layout", None) is None:
+            return
         if self._gaming_drive_card is not None:
             self._gaming_drive_slot_layout.removeWidget(self._gaming_drive_card)
             self._gaming_drive_card.deleteLater()
@@ -91,9 +94,8 @@ class _GamingStepMixin:
         # Populated by _apply_gaming_windows_drives() once
         # _MachineStepMixin's background NTFS scan resolves — see
         # steps_machine.py's module docstring. Not fetched here: this step
-        # is built eagerly alongside every other step in WizardWindow's
-        # __init__ (before any window is shown), so it must not run lsblk
-        # itself.
+        # is built on first visit (see WizardWindow._ensure_step), so it must
+        # not run lsblk itself.
         self._gaming_drive_slot = QWidget()
         self._gaming_drive_slot.setObjectName("wiz-body")
         self._gaming_drive_slot_layout = QVBoxLayout(self._gaming_drive_slot)
@@ -175,5 +177,8 @@ class _GamingStepMixin:
         outer.addWidget(_divider())
 
         # ── Launcher grid (live GamingPage "setup" section) ───────────────────
-        outer.addWidget(self._gaming_page, 1)
+        outer.addWidget(self._ensure_gaming_page(), 1)
+        pending = getattr(self, "_pending_gaming_drives", None)
+        if pending:
+            self._apply_gaming_windows_drives(pending)
         return container

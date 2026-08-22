@@ -48,6 +48,9 @@ class _UpdateOpsMixin:
         booted_row, self._booted_val = _state_row("Running:")
         staged_row, self._staged_val = _state_row("Staged:")
         rollback_row, self._rollback_val = _state_row("Rollback:")
+        self._booted_val.setText("Checking…")
+        self._staged_val.setText("Checking…")
+        self._rollback_val.setText("Checking…")
         for row in (booted_row, staged_row, rollback_row):
             summary_layout.addLayout(row)
         self._add(self._summary_card)
@@ -531,54 +534,92 @@ class _UpdateOpsMixin:
         self._refresh_summary()
 
     def _refresh_summary(self):
+        if self._worker is not None:
+            self._apply_busy_summary()
+            return
+
+        if getattr(self, "_summary_worker", None) is not None:
+            return
+
+        from .services.runtime import DataWorker, guard_disposed
+
+        worker = DataWorker("update-summary", self._gather_summary_facts)
+        self._summary_worker = worker
+        worker.result.connect(guard_disposed(self._apply_summary_facts))
+        worker.failed.connect(lambda _k, _m: None)
+        worker.finished.connect(lambda: setattr(self, "_summary_worker", None))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _apply_busy_summary(self) -> None:
+        self._staged_val.setText("Update in progress…")
+        self._staged_val.setObjectName("prop-val")
+        restyle(self._staged_val)
+        self._rollback_val.setText("—")
+        self._rollback_btn.setEnabled(False)
+        self._rollback_btn.setText("Roll Back")
+        self._reboot_btn.hide()
+        try:
+            from .services.hub_state import HUB_STATE
+
+            HUB_STATE.set_update_status("updating", "Update in progress")
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
+            pass
+
+    def _gather_summary_facts(self) -> dict:
         tag = current_branch()
         branch = branch_display_name(tag)
         booted_ts = bootc_image_timestamp("booted")
-
-        # Running row
         running_text = branch
         if booted_ts:
             running_text += f"  ·  built {booted_ts}"
-        self._booted_val.setText(running_text)
-
-        if self._worker is not None:
-            self._staged_val.setText("Update in progress…")
-            self._staged_val.setObjectName("prop-val")
-            restyle(self._staged_val)
-            self._rollback_val.setText("—")
-            self._rollback_btn.setEnabled(False)
-            self._rollback_btn.setText("Roll Back")
-            self._reboot_btn.hide()
-            try:
-                from .services.hub_state import HUB_STATE
-
-                HUB_STATE.set_update_status("updating", "Update in progress")
-            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
-                pass
-            return
-
         staged = has_staged_update()
         rollback = has_rollback_deployment()
-        staged_ts = bootc_image_timestamp("staged") if staged else None
-        rollback_ts = bootc_image_timestamp("rollback") if rollback else None
-        # Low-disk measurement — single source, correct mountpoint (also enforced in _run_full_update)
         try:
             free_gb = self._free_gb_for_update()
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             free_gb = 999.0
+        data = bootc_status_data() or {} if (staged or rollback) else {}
+        return {
+            "running_text": running_text,
+            "staged": staged,
+            "rollback": rollback,
+            "staged_ts": bootc_image_timestamp("staged") if staged else None,
+            "rollback_ts": bootc_image_timestamp("rollback") if rollback else None,
+            "free_gb": free_gb,
+            "data": data,
+            "staged_digest": bootc_image_digest("staged") if staged else None,
+        }
+
+    def _apply_summary_facts(self, _key: str, facts: object) -> None:
+        if not isinstance(facts, dict):
+            return
+        if self._worker is not None:
+            self._apply_busy_summary()
+            return
+        staged = bool(facts.get("staged"))
+        rollback = bool(facts.get("rollback"))
+        staged_ts = facts.get("staged_ts")
+        rollback_ts = facts.get("rollback_ts")
+        try:
+            free_gb = float(facts.get("free_gb") or 999.0)
+        except (TypeError, ValueError):
+            free_gb = 999.0
+        data = facts.get("data") if isinstance(facts.get("data"), dict) else {}
+        staged_digest = facts.get("staged_digest")
+        running_text = str(facts.get("running_text") or "System Hub")
+        self._booted_val.setText(running_text)
 
         # Staged row — include pending image ref + short digest when present (5/5 visibility)
         # Low-disk warning must not be clobbered by the "None" branch below.
         low_disk = free_gb < 10 and not staged
         if staged:
-            data = bootc_status_data() or {}
             staged_ref = nested_get(data, ("status", "staged", "image", "image")) or nested_get(data, ("status", "staged", "image", "transport_image")) or ""
             if isinstance(staged_ref, dict):
                 staged_ref = staged_ref.get("image", "") or staged_ref.get("imageref", "") or staged_ref.get("reference", "") or staged_ref.get("transport_image", "") or ""
                 # Some bootc variants nest again
                 if isinstance(staged_ref, dict):
                     staged_ref = staged_ref.get("image", "") or ""
-            staged_digest = bootc_image_digest("staged")
             short = f"  ·  {staged_digest[0]}" if staged_digest else ""
             ref_part = f"{staged_ref.split('@')[0]}" if isinstance(staged_ref, str) and staged_ref else ""
             # Keep readable: tag or repo, not full digest
@@ -601,7 +642,6 @@ class _UpdateOpsMixin:
 
         # Rollback row + button label — also show rollback tag
         if rollback:
-            data = bootc_status_data() or {}
             rb_ref = nested_get(data, ("status", "rollback", "image", "image")) or ""
             if isinstance(rb_ref, dict):
                 rb_ref = rb_ref.get("image", "") or rb_ref.get("imageref", "") or ""

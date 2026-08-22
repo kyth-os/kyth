@@ -50,6 +50,7 @@ class UpdatePage(Page):
         self._remote_manifest = ""
         self._check_state = "idle"   # idle | checking | available | uptodate | error
         self._check_ts = ""
+        self._summary_worker = None
 
         self._page_header(
             "System",

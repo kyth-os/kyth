@@ -2,7 +2,6 @@ import json
 import os
 
 # __KYTH_GENERATED_IMPORTS__
-from ..services.appstream import load_appstream_catalog
 from ..services.runtime import Worker, finish_worker, guard_disposed
 
 
@@ -109,8 +108,9 @@ class _CatalogMixin:
     def _fp_appstream_catalog(self) -> dict[str, dict]:
         if self._fp_appstream_cache is not None:
             return self._fp_appstream_cache
-        self._fp_appstream_cache = load_appstream_catalog()
-        return self._fp_appstream_cache
+        # Never parse AppStream XML on the GUI thread. Store landing kicks a
+        # DataWorker; until that lands, render fallback names.
+        return {}
 
     def _fp_appstream_details(self, app_id: str) -> dict:
         return self._fp_appstream_catalog().get(app_id, {})

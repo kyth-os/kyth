@@ -77,6 +77,14 @@ class NvidiaPage(Page):
 
         self._refresh_status()
 
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self._refresh_status()
+
+    def hideEvent(self, event):  # noqa: N802
+        self._poll_timer.stop()
+        super().hideEvent(event)
+
     @staticmethod
     def _fetch_status_facts() -> dict:
         """Run off the GUI thread by _refresh_status()'s DataWorker.

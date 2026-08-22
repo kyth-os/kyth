@@ -24,9 +24,14 @@ from kyth_welcome.page_vpn import VpnPage
 
 app = QApplication([])
 wizard = WizardWindow()
-# Wizard is profile-adaptive: gaming step only for "gaming" profile (everyday→4, gaming→5)
-assert len(wizard._steps) in (4, 5)
+# Welcome is built eagerly; remaining steps (including GamingPage) are lazy.
+assert "welcome" in wizard._steps
+assert "gaming" not in wizard._steps
 assert wizard.windowTitle() == "Welcome to KythOS"
+for key in ("machine", "apps", "work", "finish"):
+    wizard._ensure_step(key)
+assert set(wizard._steps) >= {"welcome", "machine", "apps", "work", "finish"}
+assert "gaming" not in wizard._steps
 wizard.close()
 
 hub = MainWindow()

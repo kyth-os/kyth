@@ -62,6 +62,13 @@ class RefactorRuntimeImportTests(unittest.TestCase):
         "is_sched_daemon_active",
         "list_schedulers",
         "kscreen_doctor_output",
+        "load_appstream_catalog",
+        "build_repair_plan",
+        "gather_first_week_checklist",
+        "is_installed",
+        "_kdeconnect_configured",
+        "_printer_configured",
+        "_browser_integration_native_ready",
     })
 
     class _DirectCallFinder(ast.NodeVisitor):
@@ -94,13 +101,15 @@ class RefactorRuntimeImportTests(unittest.TestCase):
 
     # path (relative to PACKAGE) -> extra function names to scan, beyond the
     # default __init__/get_nav_groups. Covers pages that build eagerly from
-    # a helper method rather than __init__ itself directly: the wizard's
-    # WizardWindow.__init__ builds every step up front (see
-    # wizard/window.py), so _make_machine_step()/_make_gaming_step() must
-    # stay as free of direct blocking-probe calls as __init__ itself.
+    # a helper method rather than __init__ itself directly. Wizard steps
+    # are built lazily on first visit; constructors still must not block.
     _EXTRA_SCAN_TARGETS: dict = {
         "wizard/steps_machine.py": ("_make_machine_step",),
         "wizard/steps_gaming.py": ("_make_gaming_step",),
+        "page_welcome.py": ("_make_first_week_card",),
+        "page_update_ops.py": ("_refresh_summary",),
+        "page_software_flatpak/_catalog.py": ("_fp_appstream_catalog",),
+        "windows.py": ("_on_mission_bar_ready",),
     }
 
     def test_page_constructors_do_not_call_blocking_probes_directly(self):
@@ -114,6 +123,7 @@ class RefactorRuntimeImportTests(unittest.TestCase):
             ]
             + [PACKAGE / pathlib.PurePosixPath(rel) for rel in self._EXTRA_SCAN_TARGETS]
         )
+        scan_paths = list(dict.fromkeys(scan_paths))
         for path in scan_paths:
             tree = ast.parse(path.read_text(encoding="utf-8"))
             relative = path.relative_to(PACKAGE).as_posix()

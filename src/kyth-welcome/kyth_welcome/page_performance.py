@@ -178,9 +178,17 @@ class PerformancePage(Page):
         self._perf_timer = QTimer(self)
         self._perf_timer.setInterval(5000)
         self._perf_timer.timeout.connect(self._perf_refresh)
-        self._perf_timer.start()
         single_shot(self, 150, self._perf_refresh)
         single_shot(self, 0, self._refresh_scheduler_list)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        if not self._perf_timer.isActive():
+            self._perf_timer.start()
+
+    def hideEvent(self, event):  # noqa: N802
+        self._perf_timer.stop()
+        super().hideEvent(event)
 
     def _apply_gaming_preset(self) -> None:
         """One tap: cachyos kernel + scx bore + auto-switch on — mirrors wizard/steps_machine."""

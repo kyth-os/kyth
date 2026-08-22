@@ -15,7 +15,7 @@ from ..core_base import load_profile, restyle, save_profile
 from ..services.runtime import running_threads
 from ..qt import (
     QFrame, QHBoxLayout, QIcon, QLabel, QMainWindow, QMessageBox, QPushButton,
-    QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
+    QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
 )
 from ..services.setup_state import STEP_KEYS, mark_step, mark_wizard_closed
 from ..services.launch import popen
@@ -40,6 +40,7 @@ _HINTS = {
     "welcome": "Pick a focus. You can change it later from Home.",
     "machine": "Recommended. A quick look at what's already tuned, plus anything worth knowing.",
     "apps": "Optional. Install extras now, or continue with the game-ready defaults.",
+    "work": "Optional. Office, browsers, and everyday tools stay one tap away.",
     "gaming": "Optional. Launcher and Proton tools stay available from Gaming.",
     "finish": "System Hub stays in the app menu whenever you need it.",
 }
@@ -70,9 +71,8 @@ class WizardWindow(
 
         self._profile = load_profile()
         self._handoff_win: QMainWindow | None = None
-        # Lazy import avoids a circular import cycle with the hub package.
-        from ..page_gaming import GamingPage
-        self._gaming_page = GamingPage(wizard_mode=True)
+        self._pending_gaming_drives: list[dict] = []
+        self._gaming_page = None
 
         root = QWidget()
         root.setObjectName("wiz-window")
@@ -117,30 +117,11 @@ class WizardWindow(
         row_layout.addWidget(self._stack, 1)
         root_layout.addWidget(content_row, 1)
 
-        # Step content isn't guaranteed to fit the window (the Get Apps
-        # checklist and the Gaming step's proton/compat cards + embedded
-        # launcher grid can easily exceed it) — each step is built as a plain
-        # fixed-layout QWidget, so without a scroll wrapper Qt compresses it
-        # into corrupted, overlapping geometry instead of scrolling. Wrap each
-        # one in its own QScrollArea; _go_to navigates via _step_scrollers,
-        # while _steps keeps direct references to each step's own widgets.
-        self._steps: dict[str, QWidget] = {
-            "welcome": self._make_welcome_step(),
-            "machine": self._make_machine_step(),
-            "apps": self._make_first_run_apps_step(),
-            "gaming": self._make_gaming_step(),
-            "finish": self._make_finish_step(),
-        }
+        # Build only the welcome step before first paint. Other steps (and the
+        # embedded GamingPage) are constructed on first _go_to / _ensure_step.
+        self._steps: dict[str, QWidget] = {}
         self._step_scrollers: dict[str, QScrollArea] = {}
-        for key, widget in self._steps.items():
-            scroller = QScrollArea()
-            scroller.setObjectName("wiz-window")
-            scroller.setWidgetResizable(True)
-            scroller.setFrameShape(QFrame.Shape.NoFrame)
-            scroller.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            scroller.setWidget(widget)
-            self._step_scrollers[key] = scroller
-            self._stack.addWidget(scroller)
+        self._ensure_step("welcome")
 
         self._rail_num_labels: dict[str, QLabel] = {}
         self._rail_text_labels: dict[str, QLabel] = {}
@@ -179,18 +160,10 @@ class WizardWindow(
         self._current_key = "welcome"
         self._stack.setCurrentWidget(self._step_scrollers["welcome"])
         self._busy_timer = QTimer(self)
-        self._busy_timer.setInterval(250)
+        self._busy_timer.setInterval(1000)
         self._busy_timer.timeout.connect(self._update_nav)
         self._busy_timer.start()
         self._update_nav()
-
-        # Every step above was just built from safe, subprocess-free
-        # defaults (see steps_machine.py's module docstring) — fetch the
-        # real NVIDIA/bootc/NTFS facts off the GUI thread now that the
-        # window itself is fully constructed, instead of blocking this
-        # __init__ (and therefore the very first frame shown on a fresh
-        # install) on lspci/bootc status/lsblk.
-        single_shot(self, 0, self._refresh_machine_facts)
 
     # ── Step/profile plumbing ───────────────────────────────────────────────────
 
@@ -266,7 +239,7 @@ class WizardWindow(
         # Re-seed the Get Apps defaults to match the chosen profile. Only
         # enabled boxes are touched — already-installed apps stay locked.
         wanted = _default_checked_ids(profile)
-        for check, app_id, _name in self._wizard_extra_checks:
+        for check, app_id, _name in getattr(self, "_wizard_extra_checks", ()):
             if check.isEnabled():
                 check.setChecked(app_id in wanted)
         if hasattr(self, "_finish_work_btn"):
@@ -334,7 +307,45 @@ class WizardWindow(
         else:
             self._next_btn.setText("Next  →")
 
+    def _ensure_gaming_page(self):
+        if self._gaming_page is None:
+            from ..page_gaming import GamingPage
+            self._gaming_page = GamingPage(wizard_mode=True)
+        return self._gaming_page
+
+    def _wrap_step(self, key: str, widget: QWidget) -> QScrollArea:
+        scroller = QScrollArea()
+        scroller.setObjectName("wiz-window")
+        scroller.setWidgetResizable(True)
+        scroller.setFrameShape(QFrame.Shape.NoFrame)
+        scroller.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroller.setWidget(widget)
+        self._steps[key] = widget
+        self._step_scrollers[key] = scroller
+        self._stack.addWidget(scroller)
+        return scroller
+
+    def _ensure_step(self, key: str) -> QWidget:
+        existing = self._steps.get(key)
+        if existing is not None:
+            return existing
+        builders = {
+            "welcome": self._make_welcome_step,
+            "machine": self._make_machine_step,
+            "apps": self._make_first_run_apps_step,
+            "work": self._make_work_step,
+            "gaming": self._make_gaming_step,
+            "finish": self._make_finish_step,
+        }
+        builder = builders.get(key)
+        if builder is None:
+            raise KeyError(f"unknown wizard step: {key}")
+        widget = builder()
+        self._wrap_step(key, widget)
+        return widget
+
     def _go_to(self, key: str) -> None:
+        self._ensure_step(key)
         self._current_key = key
         self._stack.setCurrentWidget(self._step_scrollers[key])
         if key == "finish":

@@ -8,6 +8,14 @@ import shlex
 from .flatpak import is_installed
 from .process import is_live_session, run_command
 
+try:
+    from kyth_shared.session import default_flatpaks_done as _default_flatpaks_done
+except ImportError:
+    def _default_flatpaks_done() -> bool:
+        return os.path.exists("/var/lib/kyth/default-flatpaks-v12-done") or os.path.exists(
+            "/var/lib/kyth/default-flatpaks-v10-done"
+        )
+
 DEFAULT_FIRST_RUN_APPS = (
     ("com.valvesoftware.Steam", "Steam"),
     ("net.lutris.Lutris", "Lutris"),
@@ -28,7 +36,7 @@ def app_setup_state() -> tuple[str, str, list[str]]:
             [],
         )
     missing = [name for app_id, name in DEFAULT_FIRST_RUN_APPS if not is_installed(app_id)]
-    done = os.path.exists("/var/lib/kyth/default-flatpaks-v10-done")
+    done = _default_flatpaks_done()
     if not missing:
         return (
             "ready",

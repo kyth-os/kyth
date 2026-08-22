@@ -8,12 +8,21 @@ from dataclasses import dataclass
 from .process import run_command
 
 _FIRST_WEEK_DISMISS = os.path.expanduser("~/.config/kyth-first-week-done")
-_FIRST_BOOT_MARKERS = (
-    "/var/lib/kyth/default-flatpaks-v10-done",
-    os.path.expanduser("~/.config/kyth-welcome-done"),
-)
 FIRST_WEEK_MIN_DAYS = 2
 FIRST_WEEK_MAX_DAYS = 30
+
+# (label, copy, Hub page key) — gather_first_week_checklist() fills `done`.
+FIRST_WEEK_ITEMS: tuple[tuple[str, str, str], ...] = (
+    ("Default Apps", "Steam, bottles, and flatpaks installed.", "App Store"),
+    ("Browser", "Brave browser set up.", "App Store"),
+    ("Browser Integration", "Plasma desktop connection enabled.", "App Store"),
+    ("Steam Integration", "Steam libraries and backups set up.", "Gaming"),
+    ("Controller Setup", "Game controllers detected.", "Controllers"),
+    ("KDE Connect", "Phone pairing and notifications set up.", "Move Files"),
+    ("Cloud Sync", "rclone/cloud sync initialized.", "Cloud Storage"),
+    ("Printers", "Local or network printers configured.", "Hardware"),
+    ("Rollback Safety", "Previous builds cached for rollback.", "Update"),
+)
 
 
 def path_exists(path: str) -> bool:
@@ -48,10 +57,23 @@ def printer_configured() -> bool:
 
 
 def browser_integration_native_ready() -> bool:
-    result = run_command(["rpm", "-q", "plasma-browser-integration"], timeout=5)
-    if result and result.returncode == 0:
+    if path_exists("/usr/bin/plasma-browser-integration-host"):
         return True
-    return path_exists("/usr/bin/plasma-browser-integration-host")
+    result = run_command(["rpm", "-q", "plasma-browser-integration"], timeout=5)
+    return bool(result and result.returncode == 0)
+
+
+def _first_boot_markers() -> list[str]:
+    markers = [os.path.expanduser("~/.config/kyth-welcome-done")]
+    try:
+        from kyth_shared.session import default_flatpaks_sentinel
+
+        sentinel = default_flatpaks_sentinel()
+    except (OSError, ImportError):
+        sentinel = None
+    if sentinel is not None:
+        markers.append(str(sentinel))
+    return markers
 
 
 def first_week_days() -> int | None:
@@ -59,7 +81,7 @@ def first_week_days() -> int | None:
     if os.path.exists(_FIRST_WEEK_DISMISS):
         return None
     stamps = []
-    for marker in _FIRST_BOOT_MARKERS:
+    for marker in _first_boot_markers():
         try:
             stamps.append(os.stat(marker).st_mtime)
         except OSError:
@@ -68,6 +90,26 @@ def first_week_days() -> int | None:
         return None
     age = (time.time() - min(stamps)) / 86400.0
     return int(age)
+
+
+def gather_first_week_checklist() -> list[bool]:
+    """Subprocess-backed first-week flags — run off the GUI thread."""
+    from kyth_shared.session import default_flatpaks_done
+
+    from .bootc import has_rollback_deployment
+    from .flatpak import is_installed
+
+    return [
+        default_flatpaks_done(),
+        is_installed("com.brave.Browser"),
+        browser_integration_native_ready(),
+        is_installed("com.valvesoftware.Steam"),
+        controller_seen(),
+        kdeconnect_configured(),
+        cloud_storage_configured(),
+        printer_configured(),
+        has_rollback_deployment(),
+    ]
 
 
 @dataclass(frozen=True)

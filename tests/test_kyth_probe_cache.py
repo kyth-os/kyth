@@ -57,6 +57,9 @@ class ProbeCacheFileTests(unittest.TestCase):
         doc = json.loads(self.path.read_text())
         doc["sections"]["nvidia-detect"]["ts"] = time.time() - 10_000
         self.path.write_text(json.dumps(doc))
+        # Mutating the file in place can keep the same mtime; drop the
+        # in-process file cache so read_section sees the backdated ts.
+        probe_mod._FILE_CACHE.clear()
         self.assertIsNone(
             probe_mod.read_section("nvidia-detect", max_age=60, paths=[self.path])
         )

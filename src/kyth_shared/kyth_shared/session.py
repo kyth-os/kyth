@@ -120,6 +120,39 @@ def enable_vscode_brave_wallet_prompts(home: Path) -> None:
         write_chromium_flags(flags_path)
 
 
+_DEFAULT_FLATPAKS_DIR = Path("/var/lib/kyth")
+_DEFAULT_FLATPAKS_GLOB = "default-flatpaks-v*-done"
+
+
+def default_flatpaks_sentinel(root: Path | None = None) -> Path | None:
+    """Newest versioned first-run Flatpak sentinel (``v12``, ``v10``, …).
+
+    The unit filename is bumped when the default app list changes, so callers
+    must not hard-code a single version. Any matching stamp means setup ran.
+    """
+    directory = root if root is not None else _DEFAULT_FLATPAKS_DIR
+    best: Path | None = None
+    best_n = -1
+    try:
+        for path in directory.glob(_DEFAULT_FLATPAKS_GLOB):
+            name = path.name
+            try:
+                version = int(name.split("-v", 1)[1].removesuffix("-done"))
+            except (IndexError, ValueError):
+                continue
+            if version >= best_n:
+                best_n = version
+                best = path
+    except OSError:
+        return None
+    return best
+
+
+def default_flatpaks_done(root: Path | None = None) -> bool:
+    """True when any ``default-flatpaks-v*-done`` sentinel exists."""
+    return default_flatpaks_sentinel(root) is not None
+
+
 def marker_path(name: str) -> Path:
     """Path to a ~/.local/share/kyth stamp file used to gate run-once-unless-force behavior."""
     return Path.home() / ".local/share/kyth" / name
@@ -165,14 +198,14 @@ def datetime_now_iso() -> str:
         return str(time.time())
 
 
-def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_ready: bool = False) -> int:
+def check_firstboot_app_status(force: bool = False, delay: int = 2, notify_ready: bool = False) -> int:
     """Determine setup progress of default flatpak packages, notifying users and updating status logs."""
     from kyth_shared.diagnostics import DiagnosticReporter
 
     home = Path.home()
     stamp_dir = home / ".local/share/kyth"
     status_file = stamp_dir / "first-run-apps.status"
-    default_done = Path("/var/lib/kyth/default-flatpaks-v10-done")
+    default_done = default_flatpaks_done()
 
     # Read proc cmdline
     try:
@@ -183,7 +216,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 20, notify_read
         logger.debug("handled expected exception", exc_info=True)
         pass
 
-    if not force and already_run("firstboot-app-status-v1") and default_done.is_file():
+    if not force and already_run("firstboot-app-status-v1") and default_done:
         return 0
 
     time.sleep(delay)

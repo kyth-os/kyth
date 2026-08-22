@@ -259,36 +259,16 @@ def generate_plan(
 
 
 def try_ollama_enhance(plan: AiPlan, prompt: str | None = None) -> AiPlan:
-    """Optionally enhance plan via local Ollama. Never fails; offline fallback."""
-    _model = os.environ.get("KYTH_AI_MODEL", "qwen2.5-coder")
-    # Only attempt if ollama binary exists and model dir has content or box exists
-    try:
-        if not any(
-            Path(p).exists() for p in ("/usr/bin/ollama", "/usr/local/bin/ollama")
-        ):
-            # Check distrobox ollama
-            res = _run_cmd(
-                ["distrobox", "list", "--no-color"],
-                capture_output=True, text=True, timeout=3,
-            )
-            if "kyth-ai-dev" not in res.stdout:
-                return plan
-            # try inside
-            check = _run_cmd(
-                ["distrobox", "enter", "kyth-ai-dev", "--", "command", "-v", "ollama"],
-                capture_output=True, timeout=3,
-            )
-            if check.returncode != 0:
-                return plan
-            # For now, don't actually call remote model — keep offline deterministic.
-            # The hook is here for future GHCR-signed prompt work.
-            return plan
-        # If local ollama exists but we want to keep fully offline deterministic,
-        # skip network call as well — preserve GHCR-signed / offline story.
+    """Optionally enhance plan via local Ollama. Never fails; offline fallback.
+
+    Distrobox probing was removed: ``distrobox list`` / ``enter`` can block
+    several seconds on the Hub GUI thread when build_repair_plan() is used
+    from a worker, and the branch never called the model anyway.
+    """
+    del prompt  # reserved for a future GHCR-signed prompt path
+    if any(Path(p).exists() for p in ("/usr/bin/ollama", "/usr/local/bin/ollama")):
         return plan
-    except (OSError, ValueError) as exc:
-        logger.debug("try_ollama_enhance failed: %s", exc, exc_info=True)
-        return plan
+    return plan
 
 
 def build_repair_plan(

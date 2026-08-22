@@ -24,7 +24,7 @@ class WizardImportTests(unittest.TestCase):
             "steps_apps.py": {"QFrame", "QScrollArea", "QSizePolicy", "Qt"},
             "steps_gaming.py": {"_divider"},
             "steps_welcome.py": {"_divider"},
-            "steps_machine.py": {"command_stdout"},
+            "steps_machine.py": {"command_stdout", "single_shot"},
         }
         for filename, expected in required.items():
             with self.subTest(filename=filename):

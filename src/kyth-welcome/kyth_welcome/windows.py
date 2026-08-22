@@ -128,7 +128,9 @@ class MainWindow(QMainWindow):
         self._sidebar_channel_worker = None
         self._home_shortcut = QShortcut(QKeySequence("Alt+Home"), self)
         self._home_shortcut.activated.connect(lambda: self._navigate_to("Welcome"))
-        self._switch_page(0)
+        # Paint the shell first; Home (and its widget tree) hydrates on the
+        # next event-loop tick so showMaximized is not blocked on WelcomePage.
+        single_shot(self, 0, lambda: self._switch_page(0, animate=False))
         single_shot(self, 0, self._refresh_nvidia_nav_visibility)
 
     def _build_topbar(self, central_layout):
@@ -224,7 +226,22 @@ class MainWindow(QMainWindow):
                     guardian["suppressed"] = ""
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError, ImportError):
                 guardian = {}
-            return {"branch": branch, "staged": staged, "rollback": rollback, "portal": portal, "guardian": guardian}
+            repair_summary = ""
+            try:
+                from kyth_shared.ai_assist import build_repair_plan
+
+                plan = build_repair_plan()
+                repair_summary = str(plan.get("summary", ""))[:80]
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError, ImportError):
+                repair_summary = ""
+            return {
+                "branch": branch,
+                "staged": staged,
+                "rollback": rollback,
+                "portal": portal,
+                "guardian": guardian,
+                "repair_summary": repair_summary,
+            }
 
         self._mission_worker = DataWorker("mission-bar", _gather)
         self._mission_worker.result.connect(guard_disposed(self._on_mission_bar_ready))
@@ -338,18 +355,15 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
             pass
 
-        # AI hint: surface repair plan summary if available (non-blocking, no glow)
+        # AI hint: surface repair plan summary gathered off-thread
         try:
-            from kyth_shared.ai_assist import build_repair_plan
-
-            plan = build_repair_plan()
-            summary = str(plan.get("summary", ""))[:80]
+            summary = str(facts.get("repair_summary") or "")[:80]
             if summary and "healthy" not in summary.lower():
                 self._mission_ai_hint.setText(summary)
                 self._mission_ai_hint.show()
             else:
                 self._mission_ai_hint.hide()
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, ImportError):  # noqa: BLE001 -- narrow: best-effort production path
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             self._mission_ai_hint.hide()
 
     def _show_palette(self):
@@ -776,12 +790,13 @@ class MainWindow(QMainWindow):
             self._history_pos += 1
             self._switch_page(self._history[self._history_pos], record=False)
 
-    def _switch_page(self, index: int, record: bool = True):
+    def _switch_page(self, index: int, record: bool = True, animate: bool = True):
         self._ensure_page(index)
         for i, btn in enumerate(self._nav_buttons):
             btn.set_active(i == index)
         self._stack.setCurrentIndex(index)
-        fade_in(self._stack.currentWidget())
+        if animate and record:
+            fade_in(self._stack.currentWidget())
         if record:
             del self._history[self._history_pos + 1:]
             if not self._history or self._history[-1] != index:

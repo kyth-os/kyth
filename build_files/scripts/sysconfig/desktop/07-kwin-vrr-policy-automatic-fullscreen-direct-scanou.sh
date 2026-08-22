@@ -13,11 +13,11 @@ source "../../lib/config-helpers.sh"
 # desktop, which causes flicker artifacts on some panels and wastes panel power.
 write_config /etc/xdg/kwinrc <<'KWINRCEOF'
 [Effect-blur]
-BlurStrength=7
+BlurStrength=3
 NoiseStrength=0
 
 [Plugins]
-blurEnabled=true
+blurEnabled=false
 
 [org.kde.kdecoration2]
 ButtonsOnLeft=
