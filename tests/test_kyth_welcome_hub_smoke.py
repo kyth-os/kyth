@@ -55,7 +55,7 @@ class TestHubSmoke(unittest.TestCase):
     def test_navigate_all_20_pages(self):
         keys = [d.key for d in self.window._page_descriptors]
         self.assertGreaterEqual(len(keys), 24)
-        for expected in ("Welcome", "Play", "Apps", "This PC", "Move Files"):
+        for expected in ("Welcome", "Play", "Apps", "This PC", "Move In", "Move Files"):
             self.assertIn(expected, keys)
         for key in keys:
             with self.subTest(page=key):

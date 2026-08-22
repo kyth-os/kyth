@@ -36,7 +36,7 @@ PULSE_DEST_TILES = (
     ("Play", "Play", "Launch games and tune performance."),
     ("Apps", "Apps", "Install apps and set up work."),
     ("This PC", "This PC", "Health, updates, and hardware."),
-    ("Move Files", "Move In", "Bring files, saves, and shortcuts."),
+    ("Move In", "Move In", "Bring files, saves, and shortcuts."),
 )
 
 

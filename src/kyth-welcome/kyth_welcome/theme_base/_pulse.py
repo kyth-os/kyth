@@ -210,4 +210,50 @@ QPushButton#pulse-hub-link:hover {{
     background: {KYTH_SURFACE_OVERLAY};
     border-radius: 6px;
 }}
+
+QPushButton#pulse-chip {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-radius: 12px;
+    padding: 12px 14px;
+    text-align: left;
+    color: {KYTH_TEXT};
+    font-size: 13px;
+    font-weight: 600;
+}}
+
+QPushButton#pulse-chip:hover {{
+    background: {KYTH_SURFACE_RAISED};
+    border-color: {KYTH_BLUE};
+    color: {KYTH_BLUE_LIGHT};
+}}
+
+QPushButton#pulse-step,
+QPushButton#pulse-step-active {{
+    background: {KYTH_SURFACE};
+    border: 1px solid {KYTH_HAIRLINE};
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: {KYTH_TEXT_MUTED};
+    font-size: 13px;
+    font-weight: 600;
+}}
+
+QPushButton#pulse-step-active {{
+    border-color: {KYTH_BLUE};
+    color: {KYTH_TEXT};
+    background: {KYTH_BLUE_GLOW};
+}}
+
+QLabel#pulse-timeline-title {{
+    font-size: 12px;
+    font-weight: 700;
+    color: {KYTH_TEXT};
+    min-width: 88px;
+}}
+
+QLabel#pulse-timeline-body {{
+    font-size: 13px;
+    color: {KYTH_TEXT_MUTED};
+}}
 """

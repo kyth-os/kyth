@@ -45,6 +45,7 @@ assert constructed["Welcome"] == "WelcomePage"
 assert constructed["Play"] == "PlayHubPage"
 assert constructed["Apps"] == "AppsHubPage"
 assert constructed["This PC"] == "ThisPcHubPage"
+assert constructed["Move In"] == "MoveInHubPage"
 assert constructed["Hardware"] == "HardwarePage"
 
 # Deferred signal callbacks are not exercised by construction. Verify that

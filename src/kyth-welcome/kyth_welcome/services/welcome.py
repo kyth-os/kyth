@@ -206,7 +206,7 @@ def pulse_next_step(
             title="Windows disk detected",
             body="Bring files, saves, and familiar workflows over. Originals stay put.",
             button="Move in",
-            target="Move Files",
+            target="Move In",
             severity="ok",
             orb_label="CLEAR",
             orb_caption="Bring files over when ready",
@@ -231,6 +231,74 @@ def pulse_next_step(
         orb_label="CLEAR",
         orb_caption="Guardian watching",
     )
+
+
+PLAY_LAUNCHERS: tuple[tuple[str, str], ...] = (
+    ("Steam", "com.valvesoftware.Steam"),
+    ("Heroic", "com.heroicgameslauncher.hgl"),
+    ("Lutris", "net.lutris.Lutris"),
+    ("Bottles", "com.usebottles.bottles"),
+)
+
+
+def play_launcher_states(installed: dict[str, bool]) -> tuple[tuple[str, bool], ...]:
+    """Name + installed flag for the Play launcher row."""
+    return tuple((name, bool(installed.get(app_id))) for name, app_id in PLAY_LAUNCHERS)
+
+
+def this_pc_timeline(
+    *,
+    branch: str = "",
+    staged: bool = False,
+    rollback: bool = False,
+    rollback_when: str = "",
+) -> tuple[tuple[str, str, str, str], ...]:
+    """(key, title, body, state) for the This PC deployment timeline."""
+    channel = (branch or "unknown").strip() or "unknown"
+    staged_body = "New image ready · restart to apply" if staged else "No staged image"
+    if rollback and rollback_when:
+        rollback_body = rollback_when
+    elif rollback:
+        rollback_body = "One click to yesterday"
+    else:
+        rollback_body = "Appears after the first update"
+    return (
+        ("current", "Current", f"Kyth {channel} · healthy", "ok"),
+        ("staged", "Staged", staged_body, "info" if staged else "dim"),
+        ("rollback", "Rollback", rollback_body, "ok" if rollback else "dim"),
+    )
+
+
+MOVE_IN_JOURNEY: tuple[tuple[str, str, str, str], ...] = (
+    ("files", "Files", "Copy documents, pictures, and downloads. Originals stay on the Windows disk.", "Move Files"),
+    ("games", "Games", "Proton needs a Linux disk. Move Steam libraries off NTFS before you play.", "Play"),
+    ("apps", "Apps", "Install familiar apps and reconnect cloud storage.", "Apps"),
+    ("habits", "Muscle memory", "Shortcuts, phone link, and PowerToys-style tools.", "Move Files"),
+)
+
+
+def move_in_step(key: str) -> tuple[str, str, str, str]:
+    for step in MOVE_IN_JOURNEY:
+        if step[0] == key:
+            return step
+    return MOVE_IN_JOURNEY[0]
+
+
+def move_in_active_step(*, ntfs_library: bool = False, windows_found: bool = False) -> str:
+    """Pick the loudest Move In step from what we already know."""
+    if ntfs_library:
+        return "games"
+    if windows_found:
+        return "files"
+    return "files"
+
+
+MOVE_IN_CHECKLIST: tuple[tuple[str, str, str], ...] = (
+    ("Bookmarks", "Bring browser bookmarks over.", "Move Files"),
+    ("Fonts", "Copy familiar system fonts.", "Move Files"),
+    ("Phone link", "Pair a phone for SMS and sharing.", "Move Files"),
+    ("Cloud", "Reconnect OneDrive, Drive, or Dropbox.", "Cloud Storage"),
+)
 
 
 def home_hero_view(staged: bool, rollback: bool, windows_found: bool) -> HomeHeroView:

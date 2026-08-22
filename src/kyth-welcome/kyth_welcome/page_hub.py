@@ -1,7 +1,17 @@
-"""Pulse destination hubs — landings that route to existing Hub pages."""
+"""Pulse destination hubs — composed Play, This PC, Move In, and Apps landings."""
 from __future__ import annotations
 
-from .qt import QFrame, QHBoxLayout, QLabel, QPushButton, Qt
+from .core_base import restyle
+from .qt import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, Qt, single_shot
+from .services.welcome import (
+    MOVE_IN_CHECKLIST,
+    MOVE_IN_JOURNEY,
+    PLAY_LAUNCHERS,
+    move_in_active_step,
+    move_in_step,
+    play_launcher_states,
+    this_pc_timeline,
+)
 from .widgets import Page, _make_card
 
 
@@ -30,64 +40,379 @@ def _hub_link(label: str, page_key: str, navigate) -> QPushButton:
     return btn
 
 
-class _DestinationHubPage(Page):
-    """Shared landing: title, child cards, optional footer links."""
+def _chip(title: str, value: str, page_key: str, navigate) -> QPushButton:
+    btn = QPushButton(f"{title}\n{value}")
+    btn.setObjectName("pulse-chip")
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setMinimumHeight(72)
+    btn.clicked.connect(lambda _=False, k=page_key: navigate(k))
+    return btn
 
-    eyebrow = "Kyth Pulse"
-    title = ""
-    subtitle = ""
-    cards: tuple[tuple[str, str, str], ...] = ()
-    footer: tuple[tuple[str, str], ...] = ()
 
+class AppsHubPage(Page):
     def __init__(self, navigate=None):
         super().__init__()
         self._navigate = navigate or (lambda _key: None)
-        self._page_header(self.eyebrow, self.title, self.subtitle)
-        for heading, copy, key in self.cards:
-            self._add(_hub_card(heading, copy, key, self._navigate))
-        if self.footer:
-            row = QHBoxLayout()
-            row.setSpacing(8)
-            for label, key in self.footer:
-                row.addWidget(_hub_link(label, key, self._navigate))
-            row.addStretch()
-            self._add_layout(row)
+        self._page_header("Kyth Pulse", "Apps", "Trusted installs and a workday that feels familiar.")
+        self._add(_hub_card("Discover Apps", "Install Flatpaks and find familiar alternatives.", "App Store", self._navigate))
+        self._add(_hub_card("Work Setup", "Office, mail, focus sessions, and workday conveniences.", "Work Setup", self._navigate))
         self._stretch()
 
 
-class PlayHubPage(_DestinationHubPage):
-    title = "Play"
-    subtitle = "Games, boost, compatibility, and controllers — not a settings dump."
-    cards = (
-        ("Gaming", "Install launchers, scan libraries, and set up capture.", "Gaming"),
-        ("Performance", "Tune power, scheduler, and Game Boost.", "Performance"),
-        ("Compatibility", "Check ProtonDB context and known anti-cheat blocks.", "Compatibility"),
-        ("Controllers", "Pair, test, and troubleshoot gamepads.", "Controllers"),
-    )
+class PlayHubPage(Page):
+    def __init__(self, navigate=None):
+        super().__init__()
+        self._navigate = navigate or (lambda _key: None)
+        self._play_worker = None
+        self._page_header("Kyth Pulse", "Play", "Launchers, boost, controllers, and will-it-run — not a settings dump.")
+
+        launchers = QFrame()
+        launchers.setObjectName("pulse-hub-card")
+        launch_col = QVBoxLayout(launchers)
+        launch_col.setContentsMargins(20, 16, 20, 16)
+        launch_title = QLabel("Launch")
+        launch_title.setObjectName("card-title")
+        launch_col.addWidget(launch_title)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._launcher_btns: dict[str, QPushButton] = {}
+        for name, _app_id in PLAY_LAUNCHERS:
+            btn = QPushButton(f"{name}\nChecking…")
+            btn.setObjectName("pulse-chip")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setMinimumHeight(72)
+            btn.clicked.connect(lambda _=False: self._navigate("Gaming"))
+            self._launcher_btns[name] = btn
+            row.addWidget(btn, 1)
+        launch_col.addLayout(row)
+        self._add(launchers)
+
+        boost, boost_layout = _make_card("pulse-hub-card")
+        boost_title = QLabel("Game Boost")
+        boost_title.setObjectName("card-title")
+        boost_layout.addWidget(boost_title)
+        self._boost_body = QLabel("Latency, scheduler, and MangoHud live on Performance.")
+        self._boost_body.setObjectName("card-copy")
+        self._boost_body.setWordWrap(True)
+        boost_layout.addWidget(self._boost_body)
+        boost_btn = QPushButton("Open Performance")
+        boost_btn.setObjectName("primary")
+        boost_btn.clicked.connect(lambda _=False: self._navigate("Performance"))
+        boost_layout.addWidget(boost_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        self._add(boost)
+
+        tools = QHBoxLayout()
+        tools.setSpacing(12)
+        self._controllers_chip = _chip("Controllers", "Checking…", "Controllers", self._navigate)
+        self._saves_chip = _chip("Saves", "Checking…", "Gaming", self._navigate)
+        self._compat_chip = _chip("Will it run?", "Search ProtonDB and anti-cheat.", "Compatibility", self._navigate)
+        tools.addWidget(self._controllers_chip, 1)
+        tools.addWidget(self._saves_chip, 1)
+        tools.addWidget(self._compat_chip, 1)
+        self._add_layout(tools)
+        self._stretch()
+        single_shot(self, 0, self._refresh_play)
+
+    def _refresh_play(self) -> None:
+        if self._play_worker is not None:
+            return
+        from .services.runtime import DataWorker, guard_disposed
+
+        self._play_worker = DataWorker("pulse-play", self._gather_play_facts)
+        self._play_worker.result.connect(guard_disposed(self._on_play_ready))
+        self._play_worker.failed.connect(lambda _k, _m: None)
+        self._play_worker.finished.connect(lambda: setattr(self, "_play_worker", None))
+        self._play_worker.finished.connect(self._play_worker.deleteLater)
+        self._play_worker.start()
+
+    @staticmethod
+    def _gather_play_facts() -> dict:
+        from .services.flatpak import is_installed
+        from .services.gaming import _ludusavi_backup_summary, _steam_libraries_on_ntfs
+        from .services.hardware import _detect_controllers
+
+        installed = {app_id: bool(is_installed(app_id)) for _name, app_id in PLAY_LAUNCHERS}
+        controllers = _detect_controllers()
+        connected = 0
+        if isinstance(controllers, dict):
+            devices = controllers.get("devices") or controllers.get("controllers") or []
+            connected = len(devices) if isinstance(devices, (list, tuple)) else sum(
+                1 for value in controllers.values() if value
+            )
+        saves = _ludusavi_backup_summary()
+        return {
+            "installed": installed,
+            "controllers": connected,
+            "saves": saves[2] if isinstance(saves, tuple) and len(saves) > 2 else "Save backups",
+            "ntfs": bool(_steam_libraries_on_ntfs()),
+        }
+
+    def _on_play_ready(self, _key: str, facts: object) -> None:
+        if not isinstance(facts, dict):
+            return
+        installed = facts.get("installed") if isinstance(facts.get("installed"), dict) else {}
+        for name, ready in play_launcher_states(installed):
+            btn = self._launcher_btns.get(name)
+            if btn is None:
+                continue
+            btn.setText(f"{name}\n{'Ready' if ready else 'Install from Gaming'}")
+            restyle(btn)
+        count = int(facts.get("controllers") or 0)
+        self._controllers_chip.setText(
+            f"Controllers\n{count} connected" if count else "Controllers\nNone seen yet"
+        )
+        self._saves_chip.setText(f"Saves\n{facts.get('saves') or 'Open Gaming'}")
+        if facts.get("ntfs"):
+            self._boost_body.setText("A Steam library is on NTFS. Move it before you chase FPS.")
+        restyle(self._controllers_chip)
+        restyle(self._saves_chip)
 
 
-class AppsHubPage(_DestinationHubPage):
-    title = "Apps"
-    subtitle = "Trusted installs and a workday that feels familiar."
-    cards = (
-        ("Discover Apps", "Install Flatpaks and find familiar alternatives.", "App Store"),
-        ("Work Setup", "Office, mail, focus sessions, and workday conveniences.", "Work Setup"),
-    )
+class ThisPcHubPage(Page):
+    def __init__(self, navigate=None):
+        super().__init__()
+        self._navigate = navigate or (lambda _key: None)
+        self._pc_worker = None
+        self._page_header("Kyth Pulse", "This PC", "Health, updates, and hardware in one place.")
+
+        self._timeline_labels: dict[str, QLabel] = {}
+        timeline, timeline_layout = _make_card("pulse-hub-card")
+        t_title = QLabel("Deployments")
+        t_title.setObjectName("card-title")
+        timeline_layout.addWidget(t_title)
+        for key, title, body, _state in this_pc_timeline():
+            row = QHBoxLayout()
+            heading = QLabel(title)
+            heading.setObjectName("pulse-timeline-title")
+            row.addWidget(heading)
+            value = QLabel(body)
+            value.setObjectName("pulse-timeline-body")
+            value.setWordWrap(True)
+            row.addWidget(value, 1)
+            timeline_layout.addLayout(row)
+            self._timeline_labels[key] = value
+        open_updates = QPushButton("Open Updates")
+        open_updates.setObjectName("primary")
+        open_updates.clicked.connect(lambda _=False: self._navigate("Update"))
+        timeline_layout.addWidget(open_updates, 0, Qt.AlignmentFlag.AlignLeft)
+        self._add(timeline)
+
+        chips = QHBoxLayout()
+        chips.setSpacing(12)
+        self._gpu_chip = _chip("GPU", "Checking…", "Hardware", self._navigate)
+        self._display_chip = _chip("Displays", "HDR, VRR, layout", "Plasma Wayland", self._navigate)
+        self._audio_chip = _chip("Audio", "PipeWire", "Hardware", self._navigate)
+        self._storage_chip = _chip("Storage", "Checking…", "Hardware", self._navigate)
+        for chip in (self._gpu_chip, self._display_chip, self._audio_chip, self._storage_chip):
+            chips.addWidget(chip, 1)
+        self._add_layout(chips)
+
+        guardian, g_layout = _make_card("pulse-hub-card")
+        g_title = QLabel("Guardian")
+        g_title.setObjectName("card-title")
+        g_layout.addWidget(g_title)
+        self._guardian_body = QLabel("Checking health…")
+        self._guardian_body.setObjectName("card-copy")
+        self._guardian_body.setWordWrap(True)
+        g_layout.addWidget(self._guardian_body)
+        g_row = QHBoxLayout()
+        scan = QPushButton("Open Guardian")
+        scan.setObjectName("primary")
+        scan.clicked.connect(lambda _=False: self._navigate("Guardian"))
+        g_row.addWidget(scan)
+        repair = QPushButton("Repair")
+        repair.clicked.connect(lambda _=False: self._navigate("Repair"))
+        g_row.addWidget(repair)
+        g_row.addStretch()
+        g_layout.addLayout(g_row)
+        self._add(guardian)
+
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
+        for label, key in (("NVIDIA drivers", "NVIDIA"), ("Channels", "Channels"), ("Feedback", "Feedback"), ("Health report", "Diagnostics")):
+            footer.addWidget(_hub_link(label, key, self._navigate))
+        footer.addStretch()
+        self._add_layout(footer)
+        self._stretch()
+        single_shot(self, 0, self._refresh_this_pc)
+
+    def _refresh_this_pc(self) -> None:
+        if self._pc_worker is not None:
+            return
+        from .services.runtime import DataWorker, guard_disposed
+
+        self._pc_worker = DataWorker("pulse-this-pc", self._gather_this_pc_facts)
+        self._pc_worker.result.connect(guard_disposed(self._on_this_pc_ready))
+        self._pc_worker.failed.connect(lambda _k, _m: None)
+        self._pc_worker.finished.connect(lambda: setattr(self, "_pc_worker", None))
+        self._pc_worker.finished.connect(self._pc_worker.deleteLater)
+        self._pc_worker.start()
+
+    @staticmethod
+    def _gather_this_pc_facts() -> dict:
+        from .services.bootc import (
+            bootc_image_timestamp,
+            branch_display_name,
+            current_branch,
+            has_rollback_deployment,
+            has_staged_update,
+        )
+        from .services.hardware import _detect_nvidia
+
+        rollback = bool(has_rollback_deployment())
+        when = ""
+        if rollback:
+            try:
+                when = str(bootc_image_timestamp("rollback") or "")
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError, TypeError):
+                when = ""
+        guardian = {"fresh": 0, "suppressed": ""}
+        try:
+            from kyth_shared.guardian import pending_recommendations, suppression_reason
+
+            pending = pending_recommendations()
+            guardian["fresh"] = len(pending)
+            guardian["suppressed"] = str(suppression_reason() or "")
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, ImportError):
+            guardian = {"fresh": 0, "suppressed": ""}
+        return {
+            "branch": branch_display_name(current_branch()),
+            "staged": bool(has_staged_update()),
+            "rollback": rollback,
+            "rollback_when": when,
+            "nvidia": bool(_detect_nvidia()),
+            "guardian": guardian,
+        }
+
+    def _on_this_pc_ready(self, _key: str, facts: object) -> None:
+        if not isinstance(facts, dict):
+            return
+        for item_key, _title, body, _state in this_pc_timeline(
+            branch=str(facts.get("branch") or ""),
+            staged=bool(facts.get("staged")),
+            rollback=bool(facts.get("rollback")),
+            rollback_when=str(facts.get("rollback_when") or ""),
+        ):
+            label = self._timeline_labels.get(item_key)
+            if label is not None:
+                label.setText(body)
+                restyle(label)
+        self._gpu_chip.setText("GPU\nNVIDIA" if facts.get("nvidia") else "GPU\nOpen Hardware")
+        self._storage_chip.setText(
+            "Storage\nStaged update ready" if facts.get("staged") else "Storage\nOpen Hardware"
+        )
+        guardian = facts.get("guardian") if isinstance(facts.get("guardian"), dict) else {}
+        fresh = int(guardian.get("fresh", 0) or 0)
+        suppressed = str(guardian.get("suppressed") or "")
+        if fresh and not suppressed:
+            self._guardian_body.setText(f"{fresh} issue(s) need review.")
+        elif suppressed:
+            self._guardian_body.setText(f"Guardian paused — {suppressed}")
+        else:
+            self._guardian_body.setText("No fresh recommendations. Guardian is watching.")
+        restyle(self._gpu_chip)
+        restyle(self._storage_chip)
+        restyle(self._guardian_body)
 
 
-class ThisPcHubPage(_DestinationHubPage):
-    title = "This PC"
-    subtitle = "Health, updates, hardware, and repair in one place."
-    cards = (
-        ("Guardian", "Self-healing checks, safe fixes, and local diagnosis.", "Guardian"),
-        ("Updates", "Staged images, rollback, and auto-update settings.", "Update"),
-        ("Hardware", "Graphics, displays, audio, Bluetooth, and storage.", "Hardware"),
-        ("Desktop & displays", "HDR, VRR, portals, capture, and session repair.", "Plasma Wayland"),
-        ("Health Report", "System checks and useful troubleshooting facts.", "Diagnostics"),
-        ("Repair", "Rollback, restore, logs, and recovery tools.", "Repair"),
-    )
-    footer = (
-        ("NVIDIA drivers", "NVIDIA"),
-        ("Channels", "Channels"),
-        ("Feedback", "Feedback"),
-    )
+class MoveInHubPage(Page):
+    def __init__(self, navigate=None):
+        super().__init__()
+        self._navigate = navigate or (lambda _key: None)
+        self._move_worker = None
+        self._active = "files"
+        self._page_header("Kyth Pulse", "Move In", "Four steps. Originals stay put until you choose to copy.")
+
+        steps = QHBoxLayout()
+        steps.setSpacing(8)
+        self._step_btns: dict[str, QPushButton] = {}
+        for index, (key, title, _copy, _target) in enumerate(MOVE_IN_JOURNEY, 1):
+            btn = QPushButton(f"{index}  {title}")
+            btn.setObjectName("pulse-step")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, k=key: self._show_step(k))
+            self._step_btns[key] = btn
+            steps.addWidget(btn, 1)
+        self._add_layout(steps)
+
+        card, layout = _make_card("pulse-action")
+        self._step_title = QLabel("")
+        self._step_title.setObjectName("pulse-action-title")
+        layout.addWidget(self._step_title)
+        self._step_body = QLabel("")
+        self._step_body.setObjectName("pulse-action-body")
+        self._step_body.setWordWrap(True)
+        layout.addWidget(self._step_body)
+        self._step_btn = QPushButton("Continue")
+        self._step_btn.setObjectName("primary")
+        self._step_btn.clicked.connect(lambda _=False: self._open_active_step())
+        layout.addWidget(self._step_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        note = QLabel("Your original files stay put until you choose to move them.")
+        note.setObjectName("card-copy")
+        layout.addWidget(note)
+        self._add(card)
+
+        checklist, check_layout = _make_card("pulse-hub-card")
+        check_title = QLabel("Move-in checklist")
+        check_title.setObjectName("card-title")
+        check_layout.addWidget(check_title)
+        for title, copy, key in MOVE_IN_CHECKLIST:
+            row = QHBoxLayout()
+            text = QLabel(f"{title} — {copy}")
+            text.setObjectName("card-copy")
+            text.setWordWrap(True)
+            row.addWidget(text, 1)
+            link = _hub_link("Open", key, self._navigate)
+            row.addWidget(link)
+            check_layout.addLayout(row)
+        toolbox = QPushButton("Open the full toolbox")
+        toolbox.clicked.connect(lambda _=False: self._navigate("Move Files"))
+        check_layout.addWidget(toolbox, 0, Qt.AlignmentFlag.AlignLeft)
+        self._add(checklist)
+        self._show_step("files")
+        self._stretch()
+        single_shot(self, 0, self._refresh_move_in)
+
+    def _show_step(self, key: str) -> None:
+        self._active = key
+        _key, title, copy, _target = move_in_step(key)
+        self._step_title.setText(title)
+        self._step_body.setText(copy)
+        self._step_btn.setText(f"Continue {title}")
+        for step_key, btn in self._step_btns.items():
+            btn.setObjectName("pulse-step-active" if step_key == key else "pulse-step")
+            restyle(btn)
+
+    def _open_active_step(self) -> None:
+        self._navigate(move_in_step(self._active)[3])
+
+    def _refresh_move_in(self) -> None:
+        if self._move_worker is not None:
+            return
+        from .services.runtime import DataWorker, guard_disposed
+
+        self._move_worker = DataWorker("pulse-move-in", self._gather_move_in_facts)
+        self._move_worker.result.connect(guard_disposed(self._on_move_in_ready))
+        self._move_worker.failed.connect(lambda _k, _m: None)
+        self._move_worker.finished.connect(lambda: setattr(self, "_move_worker", None))
+        self._move_worker.finished.connect(self._move_worker.deleteLater)
+        self._move_worker.start()
+
+    @staticmethod
+    def _gather_move_in_facts() -> dict:
+        from .services.gaming import _find_ntfs_drives, _steam_libraries_on_ntfs
+
+        return {
+            "ntfs_library": bool(_steam_libraries_on_ntfs()),
+            "windows_found": bool(_find_ntfs_drives()),
+        }
+
+    def _on_move_in_ready(self, _key: str, facts: object) -> None:
+        if not isinstance(facts, dict):
+            return
+        self._show_step(
+            move_in_active_step(
+                ntfs_library=bool(facts.get("ntfs_library")),
+                windows_found=bool(facts.get("windows_found")),
+            )
+        )

@@ -45,7 +45,7 @@ class PageRegistryTests(unittest.TestCase):
         groups = get_nav_groups(lambda _destination: None)
         keys = [key for _section, items in groups for _icons, _glyph, _label, key, _factory in items]
 
-        for expected in ("Welcome", "Play", "Apps", "This PC", "App Store", "Update", "Hardware", "Feedback"):
+        for expected in ("Welcome", "Play", "Apps", "This PC", "Move In", "App Store", "Update", "Hardware", "Feedback"):
             self.assertIn(expected, keys)
         self.assertEqual(len(PULSE_RAIL), 5)
         self.assertEqual([item.dest for item in PULSE_RAIL], ["Pulse", "Play", "Apps", "This PC", "Move In"])
@@ -92,6 +92,7 @@ class PageRegistryTests(unittest.TestCase):
         self.assertEqual(destination_for_page("Performance"), "Play")
         self.assertEqual(destination_for_page("App Store"), "Apps")
         self.assertEqual(destination_for_page("Guardian"), "This PC")
+        self.assertEqual(destination_for_page("Move In"), "Move In")
         self.assertEqual(destination_for_page("Move Files"), "Move In")
         self.assertEqual(destination_for_page("Cloud Storage"), "Move In")
         self.assertEqual(destination_for_page("unknown-page"), "Pulse")

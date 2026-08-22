@@ -39,7 +39,7 @@ PULSE_RAIL: tuple[PulseRailItem, ...] = (
     PulseRailItem("Play", "Play", "Play", ("applications-games", "input-gaming"), "▶", "Games, boost, and controllers"),
     PulseRailItem("Apps", "Apps", "Apps", ("plasmadiscover", "applications-all"), "⬡", "Discover apps and work setup"),
     PulseRailItem("This PC", "This PC", "This PC", ("computer", "computer-laptop"), "◈", "Health, updates, and hardware"),
-    PulseRailItem("Move In", "Move Files", "Move In", ("document-import", "drive-harddisk"), "⇄", "Files, saves, and familiar workflows"),
+    PulseRailItem("Move In", "Move In", "Move In", ("document-import", "drive-harddisk"), "⇄", "Files, saves, and familiar workflows"),
 )
 
 # Child pages stay in the stack for search; the rail highlights the destination.
@@ -61,7 +61,7 @@ _DESTINATION_PAGES: dict[str, tuple[str, ...]] = {
         "Just",
         "Feedback",
     ),
-    "Move In": ("Move Files", "Cloud Storage", "Network Shares", "VPN"),
+    "Move In": ("Move In", "Move Files", "Cloud Storage", "Network Shares", "VPN"),
 }
 
 PAGE_DESTINATION: dict[str, str] = {
@@ -191,6 +191,7 @@ SEARCH_ITEMS: dict[str, SearchItem] = {
     "Controllers": SearchItem("Controllers", "Pair, test, and troubleshoot game controllers.", ("Game controllers", "Xbox controller", "PlayStation controller", "Controller not working", "Gamepad not detected")),
     "App Store": SearchItem("App Store", "Install trusted Flatpaks, find familiar app alternatives, and manage AppImages.", ("Add or remove programs", "Apps & features", "Install apps", "Uninstall a program", "dnf install", "rpm", "exe installer", "downloaded installer", "Flathub")),
     "Work Setup": SearchItem("Work Setup", "Set up office, mail, focus sessions, and workday conveniences.", ("Microsoft 365", "Office", "Outlook", "PST import", "Focus Assist", "Focus Sessions", "Do Not Disturb", "Pomodoro")),
+    "Move In": SearchItem("Move In", "Bring files, games, apps, and familiar habits over in four steps.", ("Transfer my files", "PC migration", "Move Files", "Windows migration")),
     "Move Files": SearchItem("Move Files", "Copy files, saves, libraries, bookmarks, fonts, and familiar workflows.", ("Transfer my files", "PC migration", "Copy game saves", "Keyboard shortcuts", "Snipping Tool", "familiar shortcuts", "PowerToys", "PowerToys Run", "FancyZones", "PowerRename", "Always on Top", "Keyboard Manager", "Awake", "Color Picker", "Copy my files", "Import bookmarks", "Bookmarks", "Phone Link", "Connected Devices", "KDE Connect", "Dynamic Lock", "trusted phone", "cross-device clipboard", "ring phone", "SMS", "send text", "text messages", "Nearby Sharing", "Nearby Share", "Quick Share", "LocalSend", "Send to device", "Wallpaper", "Desktop background", "system fonts", "Segoe UI", "Calibri", "Rescue game saves", "Sticky Notes", "Remote Desktop connections", "RDP", "mstsc", "KRDC", "WSL", "Linux subsystem", "Ubuntu", "Distrobox")),
     "Display": SearchItem("Display", "HDR, VRR, night light, and monitor layout.", ("HDR", "VRR", "Night Light", "Display Settings", "Monitor layout", "Refresh rate")),
     "Clipboard": SearchItem("Clipboard", "Clipboard history and PowerToys Run palette.", ("Clipboard history", "Win+V", "PowerToys Run", "Ctrl+K", "Command palette", "FancyZones", "PowerRename")),
@@ -255,6 +256,7 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
             (("applications-games", "input-gaming"), "▶", "Play", "Play", _page_factory("page_hub", "PlayHubPage", navigate=navigate)),
             (("plasmadiscover", "applications-all"), "⬡", "Apps", "Apps", _page_factory("page_hub", "AppsHubPage", navigate=navigate)),
             (("computer", "computer-laptop"), "◈", "This PC", "This PC", _page_factory("page_hub", "ThisPcHubPage", navigate=navigate)),
+            (("document-import", "drive-harddisk"), "⇄", "Move In", "Move In", _page_factory("page_hub", "MoveInHubPage", navigate=navigate)),
         ]),
         ("Gaming", [
             (("applications-games", "input-gaming"), "◉", "Gaming", "Gaming", _page_factory("page_gaming", "GamingPage")),

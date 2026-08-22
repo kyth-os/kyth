@@ -245,6 +245,17 @@ class HomeHeroViewTests(unittest.TestCase):
         self.assertEqual(view.rec_target, "Move Files")
         self.assertEqual(view.rec_btn_label, "Transfer Files")
 
+    def test_play_and_this_pc_and_move_in_models(self):
+        rows = welcome.play_launcher_states({"com.valvesoftware.Steam": True})
+        self.assertEqual(rows[0], ("Steam", True))
+        self.assertEqual(rows[1], ("Heroic", False))
+        timeline = welcome.this_pc_timeline(branch="testing", staged=True, rollback=True)
+        self.assertEqual(timeline[0][3], "ok")
+        self.assertEqual(timeline[1][3], "info")
+        self.assertEqual(welcome.move_in_active_step(ntfs_library=True), "games")
+        self.assertEqual(welcome.move_in_active_step(windows_found=True), "files")
+        self.assertEqual(welcome.move_in_step("habits")[1], "Muscle memory")
+
     def test_default_recommends_gaming_setup(self):
         view = welcome.home_hero_view(staged=False, rollback=False, windows_found=False)
         self.assertEqual(view.rec_target, "Gaming")
@@ -267,7 +278,7 @@ class HomeHeroViewTests(unittest.TestCase):
         repair = welcome.pulse_next_step(repair_needed=True, windows_found=True)
         self.assertEqual(repair.target, "Repair")
         windows = welcome.pulse_next_step(windows_found=True, rollback=True)
-        self.assertEqual(windows.target, "Move Files")
+        self.assertEqual(windows.target, "Move In")
         quiet = welcome.pulse_next_step(profile="everyday")
         self.assertEqual(quiet.target, "Apps")
         self.assertEqual(quiet.orb_label, "CLEAR")
