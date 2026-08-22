@@ -71,9 +71,10 @@ def PartitionTableGuard(disk: str, log, *, disk_service=None, should_restore=Non
     else lazy `DiskService`.
 
     *should_restore*, when supplied, is called after a failure; return
-    False to skip table restore (format/shrink of an existing filesystem
-    cannot be undone by reloading GPT, and reloading after shrink is
-    worse than leaving the in-progress table).
+    False to skip table restore (format/shrink of an existing filesystem,
+    or a wipe-mode `bootc install to-disk --wipe`, cannot be undone by
+    reloading GPT, and reloading after those ops is worse than leaving
+    the in-progress table).
     """
     if disk_service is None:
         from .services.disk_service import DiskService as _Concrete
@@ -112,7 +113,7 @@ def PartitionTableGuard(disk: str, log, *, disk_service=None, should_restore=Non
                     log(f"Warning: automatic partition table restore failed: {restore_exc}")
             else:
                 log(
-                    "Skipped partition-table restore: a format or filesystem "
-                    "shrink already completed and cannot be undone."
+                    "Skipped partition-table restore: an irreversible disk "
+                    "change already completed and cannot be undone."
                 )
             raise

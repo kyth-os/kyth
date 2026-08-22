@@ -318,6 +318,9 @@ def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_
             net_stall_timeout=600,
         )
 
-    with PartitionTableGuard(disk, log):
+    # bootc --wipe is irreversible once it starts mutating the disk.
+    # Reloading the pre-wipe GPT on cancel/power-loss/bootc failure would
+    # map the old partitions onto already-overwritten sectors.
+    with PartitionTableGuard(disk, log, should_restore=lambda: False):
         _run_guarded_image_write(disk, log, context, _write)
     return "", get_root_partition(disk), alongside_mount

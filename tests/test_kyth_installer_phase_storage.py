@@ -267,6 +267,66 @@ class WipeStorageTests(unittest.TestCase):
                     "/dev/sda", "source", "target", mock.Mock(), mock.Mock(), "", context
                 )
 
+    def test_wipe_failure_does_not_restore_pre_wipe_gpt(self):
+        """bootc --wipe is irreversible. Reloading the old GPT after a
+        partial write maps former partitions onto destroyed sectors.
+        """
+        context = InstallerContext()
+        service = mock.Mock()
+
+        def backup(_disk, path):
+            pathlib.Path(path).write_bytes(b"pre-wipe gpt")
+
+        service.backup_table.side_effect = backup
+        log = mock.Mock()
+        with (
+            mock.patch("kyth_installer.install.unmount_target_disk"),
+            mock.patch("kyth_installer.install._build_bootc_install_cmd", return_value=["bootc"]),
+            mock.patch("kyth_installer.install.get_root_partition", return_value="/dev/sda3"),
+            mock.patch.object(storage, "_disk_image_hold", return_value=contextlib.nullcontext()),
+            mock.patch.object(storage, "_start_power_watch", return_value=mock.Mock()),
+            mock.patch.object(storage, "_stop_power_watch"),
+            mock.patch("kyth_installer.install._run_cmd", side_effect=RuntimeError("bootc died after wipe")),
+            mock.patch("kyth_installer.services.disk_service.DiskService", return_value=service),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "bootc died after wipe"):
+                storage._prepare_wipe_disk_storage(
+                    "/dev/sda", "source", "target", log, mock.Mock(), "", context
+                )
+        service.backup_table.assert_called_once()
+        service.restore_table.assert_not_called()
+        self.assertTrue(
+            any("Skipped partition-table restore" in call.args[0] for call in log.call_args_list)
+        )
+
+    def test_wipe_power_loss_after_image_does_not_restore_pre_wipe_gpt(self):
+        """If bootc finished (or started) and AC is yanked, restoring the
+        pre-wipe table would destroy the new layout / lie about old ones.
+        """
+        context = InstallerContext()
+        context._power_failed = "Power lost during install: AC yanked"
+        service = mock.Mock()
+
+        def backup(_disk, path):
+            pathlib.Path(path).write_bytes(b"pre-wipe gpt")
+
+        service.backup_table.side_effect = backup
+        with (
+            mock.patch("kyth_installer.install.unmount_target_disk"),
+            mock.patch("kyth_installer.install._build_bootc_install_cmd", return_value=["bootc"]),
+            mock.patch("kyth_installer.install.get_root_partition", return_value="/dev/sda3"),
+            mock.patch.object(storage, "_disk_image_hold", return_value=contextlib.nullcontext()),
+            mock.patch.object(storage, "_start_power_watch", return_value=mock.Mock()),
+            mock.patch.object(storage, "_stop_power_watch"),
+            mock.patch("kyth_installer.install._run_cmd"),
+            mock.patch("kyth_installer.services.disk_service.DiskService", return_value=service),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "AC yanked"):
+                storage._prepare_wipe_disk_storage(
+                    "/dev/sda", "source", "target", mock.Mock(), mock.Mock(), "", context
+                )
+        service.restore_table.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
