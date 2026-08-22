@@ -223,6 +223,43 @@ def restart_desktop_portals(run: Run) -> tuple[bool, str]:
     return False, "; ".join(notes) or "portal restart failed"
 
 
+def refresh_firmware_metadata(run: Run) -> tuple[bool, str]:
+    """Refresh LVFS metadata. Prefer the shared flock; fall back without it.
+
+    The user sandbox cannot create ``/run/kyth-fwupd.lock`` (ProtectSystem=strict).
+    fwupd's D-Bus daemon still serializes refresh, so skipping the lock is safe
+    when flock cannot open that path.
+    """
+    locked = run(("flock", "-w", "10", "/run/kyth-fwupd.lock", "fwupdmgr", "refresh", "--force"), 30)
+    if locked is not None and locked.returncode == 0:
+        return True, "firmware metadata refreshed"
+    plain = run(("fwupdmgr", "refresh", "--force"), 30)
+    if plain is not None and plain.returncode == 0:
+        return True, "firmware metadata refreshed"
+    err = ""
+    source = plain if plain is not None else locked
+    if source is not None:
+        err = (source.stderr or source.stdout or "").strip()[:200]
+    return False, err or "firmware metadata refresh failed"
+
+
+def run_storage_maintenance(run: Run) -> tuple[bool, str]:
+    """Run gated btrfs maintenance without a shell. Skip is not success."""
+    gate = run(("/usr/libexec/kyth-storage-gate",), 15)
+    if gate is None:
+        return False, "storage gate failed to start"
+    if gate.returncode != 0:
+        detail = (gate.stderr or gate.stdout or "").strip()[:200]
+        return False, detail or "storage maintenance gated (need idle + not gaming)"
+    maint = run(("/usr/bin/kyth-btrfs-maint",), 60)
+    if maint is None:
+        return False, "storage maintenance failed to start"
+    if maint.returncode != 0:
+        detail = (maint.stderr or maint.stdout or "").strip()[:200]
+        return False, detail or "storage maintenance failed"
+    return True, "storage maintenance started"
+
+
 ACTION_EXECUTORS: dict[str, Callable[[Run], tuple[bool, str]]] = {
     "display.reconfigure": apply_display_reconfigure,
     "audio.sink-fallback": restore_audio_sink,
@@ -232,4 +269,6 @@ ACTION_EXECUTORS: dict[str, Callable[[Run], tuple[bool, str]]] = {
     "network.vpn-fix": restore_autoconnect_vpn,
     "controller.repair": restart_joycond,
     "portal.restart-user": restart_desktop_portals,
+    "firmware.refresh": refresh_firmware_metadata,
+    "storage.maint": run_storage_maintenance,
 }

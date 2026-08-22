@@ -24,7 +24,7 @@ from .qt import (
     Qt,
     single_shot,
 )
-from .widgets import Page, _make_card, _make_tip_card
+from .widgets import Page, _make_card
 
 # ---------------------------------------------------------------------------
 # helpers — run on background threads (DataWorker) so Hub never blocks
@@ -47,10 +47,24 @@ def _guardian_history() -> dict:
         return {"history": [], "error": str(exc)}
 
 
+def _guardian_inspect() -> dict:
+    """Live snapshot — never writes history or occurrence counters."""
+    try:
+        from kyth_shared.guardian import inspect as _inspect
+        return _inspect()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "symptoms": [], "decisions": []}
+
+
 def _guardian_check(*, investigate: bool = False) -> dict:
     try:
         from kyth_shared.guardian import check as _check
-        return _check(investigate=investigate, automatic=False)
+        return _check(
+            investigate=investigate,
+            automatic=False,
+            persist=True,
+            count_failures=False,
+        )
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc), "symptoms": [], "decisions": []}
 
@@ -60,6 +74,20 @@ def _guardian_fix_my_system() -> dict:
     try:
         from kyth_shared.guardian import check as _check
         return _check(investigate=False, automatic=True, user_initiated=True)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "symptoms": [], "decisions": []}
+
+
+def _guardian_apply(recipe_id: str) -> dict:
+    try:
+        from kyth_shared.guardian import check as _check
+        return _check(
+            investigate=False,
+            automatic=True,
+            user_initiated=True,
+            recipe_ids={recipe_id},
+            force_recipe_ids={recipe_id},
+        )
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc), "symptoms": [], "decisions": []}
 
@@ -121,6 +149,7 @@ class GuardianPage(Page):
         self._model_worker = None
         self._check_worker = None
         self._toggle_worker = None
+        self._apply_worker = None
 
         self._page_header(
             "System",
@@ -131,7 +160,6 @@ class GuardianPage(Page):
 
         self._build_status_card()
         self._build_health_card()
-        self._build_dashboard_card()
         self._build_history_card()
         self._build_recipes_card()
         self._build_model_card()
@@ -151,8 +179,7 @@ class GuardianPage(Page):
         intro = QLabel(
             "Guardian watches audio, portals, Plasma shell, network, Bluetooth, Flatpak, storage, "
             "display, controllers, power, and update health. Cheap checks run every 15 minutes and again "
-            "when the system probe cache changes. The optional local model starts only when a case is "
-            "ambiguous, picks one Kyth recipe, then exits."
+            "when the system probe cache changes. Opening this page does not count toward auto-fix."
         )
         intro.setObjectName("card-copy")
         intro.setWordWrap(True)
@@ -226,6 +253,12 @@ class GuardianPage(Page):
         self._health_lbl.setWordWrap(True)
         layout.addWidget(self._health_lbl)
 
+        self._symptom_box = QWidget()
+        self._symptom_layout = QVBoxLayout(self._symptom_box)
+        self._symptom_layout.setContentsMargins(0, 0, 0, 0)
+        self._symptom_layout.setSpacing(6)
+        layout.addWidget(self._symptom_box)
+
         self._decisions_lbl = QLabel("")
         self._decisions_lbl.setObjectName("card-copy")
         self._decisions_lbl.setWordWrap(True)
@@ -252,43 +285,6 @@ class GuardianPage(Page):
 
         self._add(card)
 
-    # -- health dashboard --------------------------------------------------
-
-    def _build_dashboard_card(self) -> None:
-        card, layout = _make_card("card-accent-ok")
-        title = QLabel("Health dashboard — super-app at a glance")
-        title.setObjectName("card-title")
-        layout.addWidget(title)
-        intro = QLabel(
-            "All Guardian healing plus StarTER packs, Installed, and updates live in this one System Hub — no store hop. "
-            "This dashboard surfaces what auto-healed, what needs you, and when gaming/battery paused it."
-        )
-        intro.setObjectName("card-copy")
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
-        self._dash_health = QLabel("Loading dashboard…")
-        self._dash_health.setObjectName("card-copy")
-        self._dash_health.setWordWrap(True)
-        self._dash_health.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self._dash_health)
-        self._dash_chain = QLabel("")
-        self._dash_chain.setObjectName("card-copy")
-        self._dash_chain.setWordWrap(True)
-        self._dash_chain.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self._dash_chain)
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        hub_btn = QPushButton("Open Software → Starter Packs")
-        hub_btn.setToolTip("Opt-in apps and starter packs — all in this same Hub")
-        hub_btn.clicked.connect(lambda _=False: self._navigate("App Store"))
-        row.addWidget(hub_btn)
-        upd_btn = QPushButton("Open System → Updates")
-        upd_btn.clicked.connect(lambda _=False: self._navigate("Update"))
-        row.addWidget(upd_btn)
-        row.addStretch()
-        layout.addLayout(row)
-        self._add(card)
-
     # -- history -----------------------------------------------------------
 
     def _build_history_card(self) -> None:
@@ -307,10 +303,18 @@ class GuardianPage(Page):
         self._history_summary.setWordWrap(True)
         layout.addWidget(self._history_summary)
 
+        self._history_list = QWidget()
+        self._history_list_layout = QVBoxLayout(self._history_list)
+        self._history_list_layout.setContentsMargins(0, 0, 0, 0)
+        self._history_list_layout.setSpacing(8)
+        layout.addWidget(self._history_list)
+
         self._history_view = QTextEdit()
         self._history_view.setReadOnly(True)
-        self._history_view.setMinimumHeight(180)
-        self._history_view.setPlaceholderText("History will appear here as JSON — copy, save, or clear from the buttons below.")
+        self._history_view.setMinimumHeight(120)
+        self._history_view.setMaximumHeight(180)
+        self._history_view.setPlaceholderText("Raw JSON (last 25 records) — copy if you are filing a report.")
+        self._history_view.document().setMaximumBlockCount(400)
         layout.addWidget(self._history_view)
 
         row = QHBoxLayout()
@@ -505,12 +509,7 @@ class GuardianPage(Page):
         self._status_lbl.setObjectName("status-ok" if enabled else "card-copy")
         restyle(self._status_lbl)
 
-        # suppression banner (from check's suppression_reason — also expose here via quick probe)
-        try:
-            from kyth_shared.guardian import suppression_reason
-            reason = suppression_reason()
-        except Exception:
-            reason = ""
+        reason = str(data.get("suppression_reason") or "")
         if reason:
             self._suppression_lbl.setText(f"Paused — {reason} (checks resume automatically)")
             self._suppression_lbl.show()
@@ -522,8 +521,10 @@ class GuardianPage(Page):
         if recipes:
             lines = []
             for r in recipes:
-                badge = "safe/auto" if r.get("risk") == "safe" and not r.get("requires_auth") else r.get("risk", "")
-                lines.append(f"• {r.get('id')} — {r.get('title')}  [{badge}]")
+                badge = "safe/auto" if r.get("risk") == "safe" and r.get("automatic") and not r.get("requires_auth") else r.get("risk", "")
+                rec = str(r.get("recovery") or "").strip()
+                extra = f" — {rec}" if rec else ""
+                lines.append(f"• {r.get('id')} — {r.get('title')}  [{badge}]{extra}")
             self._recipes_lbl.setText("\n".join(lines))
         else:
             self._recipes_lbl.setText("No recipes reported.")
@@ -558,7 +559,7 @@ class GuardianPage(Page):
     def _refresh_health_preview(self) -> None:
         if self._health_worker is not None:
             return
-        self._health_worker = DataWorker("guardian-preview", lambda: _guardian_check(investigate=False))
+        self._health_worker = DataWorker("guardian-preview", _guardian_inspect)
         self._health_worker.result.connect(guard_disposed(self._on_health_ready))
         self._health_worker.failed.connect(guard_disposed(lambda _k, m: self._health_lbl.setText(f"Preview failed: {m}")))
         self._health_worker.finished.connect(lambda: setattr(self, "_health_worker", None))
@@ -570,6 +571,7 @@ class GuardianPage(Page):
             return
         if data.get("error"):
             self._health_lbl.setText(f"Live check failed: {data['error']}")
+            self._clear_layout(self._symptom_layout)
             return
         symptoms = data.get("symptoms", [])
         decisions = data.get("decisions", [])
@@ -581,19 +583,20 @@ class GuardianPage(Page):
             self._health_lbl.setText("Healthy — no issues detected. Guardian stays quiet until something drifts.")
             self._health_lbl.setObjectName("status-ok")
         else:
-            parts = []
-            for s in symptoms if isinstance(symptoms, list) else []:
-                if isinstance(s, dict):
-                    parts.append(f"• {s.get('component')}: {s.get('evidence','')[:160]}  → {', '.join(s.get('recipes',()))}")
-            self._health_lbl.setText("\n".join(parts) if parts else f"{len(symptoms)} symptom(s) detected.")
+            count = len(symptoms) if isinstance(symptoms, list) else 0
+            self._health_lbl.setText(f"{count} issue(s) — apply one below, or use Fix My System for all eligible repairs.")
             self._health_lbl.setObjectName("status-warn")
         restyle(self._health_lbl)
+        self._render_symptom_rows(symptoms if isinstance(symptoms, list) else [], suppressed=bool(suppressed))
 
         if isinstance(decisions, list) and decisions:
             lines = []
             for d in decisions[:5]:
                 if isinstance(d, dict):
-                    lines.append(f"→ {d.get('recipe_id')} [{d.get('source')}, {d.get('confidence')}] — {d.get('action')} — {d.get('detail','')[:120]}")
+                    lines.append(
+                        f"→ {d.get('recipe_id')} [{d.get('source')}, {d.get('confidence')}] "
+                        f"— {d.get('action')} — {str(d.get('detail', ''))[:120]}"
+                    )
             steps = data.get("next_steps") if isinstance(data.get("next_steps"), list) else []
             recoveries = [
                 str(s.get("recovery"))
@@ -603,14 +606,54 @@ class GuardianPage(Page):
             if recoveries:
                 lines.append("Next: " + recoveries[0][:180])
             self._decisions_lbl.setText("\n".join(lines))
+        elif not symptoms:
+            self._decisions_lbl.setText("No repair queued — checks re-run every 15 minutes and when system probes change.")
         else:
-            self._decisions_lbl.setText("No repair queued — checks will re-run on the next timer tick or when system probes change.")
+            self._decisions_lbl.setText("")
         restyle(self._decisions_lbl)
-        # update dashboard mirror
-        try:
-            self._update_dashboard_preview(data, symptoms)
-        except Exception:
-            pass
+
+    def _clear_layout(self, layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            child = item.layout()
+            if widget is not None:
+                widget.deleteLater()
+            elif child is not None:
+                self._clear_layout(child)
+
+    def _render_symptom_rows(self, symptoms: list, *, suppressed: bool) -> None:
+        self._clear_layout(self._symptom_layout)
+        from kyth_shared.guardian import RECIPES
+
+        for symptom in symptoms:
+            if not isinstance(symptom, dict):
+                continue
+            recipes = [rid for rid in (symptom.get("recipes") or ()) if rid]
+            recipe_id = recipes[0] if recipes else ""
+            recipe = RECIPES.get(recipe_id)
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+            copy = QLabel(
+                f"{symptom.get('component')}: {str(symptom.get('evidence', ''))[:160]}"
+            )
+            copy.setObjectName("card-copy")
+            copy.setWordWrap(True)
+            row_layout.addWidget(copy, 1)
+            if recipe is not None and recipe.risk in {"safe", "confirm"}:
+                btn = QPushButton("Apply")
+                title = recipe.title
+                if recipe.requires_auth:
+                    btn.setText("Apply…")
+                    btn.setToolTip(f"{title} — may ask for permission. Paused during gaming, capture, updates, low battery, or thermal pressure.")
+                else:
+                    btn.setToolTip(f"{title}. Paused during gaming, capture, updates, low battery, or thermal pressure.")
+                btn.setEnabled(not suppressed and self._apply_worker is None)
+                btn.clicked.connect(lambda _=False, rid=recipe.id: self._run_apply(rid))
+                row_layout.addWidget(btn)
+            self._symptom_layout.addWidget(row)
 
     def _refresh_history(self) -> None:
         if self._history_worker is not None:
@@ -622,44 +665,6 @@ class GuardianPage(Page):
         self._history_worker.finished.connect(self._history_worker.deleteLater)
         self._history_worker.start()
 
-    def _update_dashboard_preview(self, check_data: dict, symptoms: list) -> None:
-        if not hasattr(self, "_dash_health"):
-            return
-        suppressed = check_data.get("suppression_reason", "")
-        if suppressed:
-            self._dash_health.setText(f"Guardian paused — {suppressed} (gaming/battery/thermal) · checks resume automatically")
-            self._dash_health.setObjectName("status-warn")
-        elif not symptoms:
-            self._dash_health.setText("Healthy — all probes ok · Storage ok · Firmware ok · Audio/Network ok")
-            self._dash_health.setObjectName("status-ok")
-        else:
-            comps = ", ".join(sorted({s.get("component","?") for s in symptoms if isinstance(s, dict)}))
-            self._dash_health.setText(f"Needs attention: {comps} — see Live health below. Heap: Starter Packs + Opt-in apps stay in System Hub.")
-            self._dash_health.setObjectName("status-warn")
-        restyle(self._dash_health)
-        # chain timeline from history if available
-        try:
-            from kyth_shared.guardian import load_state
-            hist = load_state().get("history", [])
-            chains = [h for h in hist if isinstance(h, dict) and "chain" in h]
-            if chains:
-                last = chains[-1]
-                ts = _fmt_ts(last.get("timestamp"))
-                chain_ids = last.get("chain", [])
-                results = last.get("results", [])
-                ok_n = sum(1 for r in results if r.get("verified"))
-                self._dash_chain.setText(f"Last healing chain {ts}: {' → '.join(chain_ids)} · verified {ok_n}/{len(results)} · see History")
-            else:
-                # show last 2 single actions
-                hist2 = [h for h in hist if isinstance(h, dict) and h.get("recipe_id")][-2:]
-                if hist2:
-                    self._dash_chain.setText("Recent: " + " · ".join(f"{h.get('recipe_id')} @ {_fmt_ts(h.get('timestamp'))}" for h in hist2))
-                else:
-                    self._dash_chain.setText("No healing chains yet — background auto-fix waits for two consecutive failures. Use Fix My System to apply safe repairs now.")
-            restyle(self._dash_chain)
-        except Exception:
-            pass
-
     def _on_history_ready(self, _key: str, data: object) -> None:
         if not isinstance(data, dict):
             return
@@ -667,15 +672,75 @@ class GuardianPage(Page):
         if not isinstance(history, list):
             history = []
         last = _fmt_ts(data.get("last_check"))
-        self._history_summary.setText(f"{len(history)} record(s) · last check {last} — newest last, rotated after 100 / 30 days.")
+        self._history_summary.setText(
+            f"{len(history)} record(s) · last check {last} — newest last, rotated after 100 / 30 days."
+        )
+        self._render_history_list(history)
         try:
             pretty = json.dumps(history[-25:], indent=2, sort_keys=True, ensure_ascii=False) if history else "[]"
         except (OSError, ValueError, TypeError):
             pretty = str(history[-25:])
-        # avoid flooding the widget on huge history
         if len(pretty) > 20000:
             pretty = pretty[-20000:]
         self._history_view.setPlainText(pretty)
+
+    def _render_history_list(self, history: list) -> None:
+        self._clear_layout(self._history_list_layout)
+        from kyth_shared.guardian import RECIPES
+
+        recent = [item for item in history if isinstance(item, dict)][-8:][::-1]
+        if not recent:
+            empty = QLabel("No recent auto-repairs — system is healthy, or monitoring has not run yet.")
+            empty.setObjectName("card-copy")
+            self._history_list_layout.addWidget(empty)
+            return
+        now = time.time()
+        for item in recent:
+            rid = item.get("recipe_id") or (item.get("chain", [None])[0] if item.get("chain") else "unknown")
+            rec = RECIPES.get(rid)
+            title = rec.title if rec else str(rid)
+            try:
+                age = now - float(item.get("timestamp", 0))
+                if age < 3600:
+                    when = f"{int(age // 60)}m ago"
+                elif age < 86400:
+                    when = f"{int(age // 3600)}h ago"
+                else:
+                    when = f"{int(age // 86400)}d ago"
+            except (ValueError, TypeError):
+                when = "recently"
+            verified = item.get("verified")
+            if verified is True:
+                vtxt = "verified"
+            elif verified is False:
+                vtxt = "not verified"
+            else:
+                vtxt = str(item.get("action") or "")
+            row = QLabel(f"{when} — {title} ({vtxt})")
+            row.setObjectName("card-copy")
+            row.setWordWrap(True)
+            self._history_list_layout.addWidget(row)
+            detail = (item.get("detail") or item.get("explanation") or "")[:200]
+            if detail:
+                d = QLabel(detail)
+                d.setObjectName("caption-text")
+                d.setWordWrap(True)
+                self._history_list_layout.addWidget(d)
+            if rid and rec is not None:
+                fb_row = QHBoxLayout()
+                fb_row.setSpacing(6)
+                fb_lbl = QLabel("Did this help?")
+                fb_lbl.setObjectName("caption-text")
+                fb_row.addWidget(fb_lbl)
+                for label, helpful in (("Yes", True), ("No", False)):
+                    btn = QPushButton(label)
+                    btn.setToolTip("Teach Guardian for next time (local only)")
+                    btn.clicked.connect(
+                        lambda _=False, recipe_id=str(rid), value=helpful: self._record_feedback(recipe_id, value)
+                    )
+                    fb_row.addWidget(btn)
+                fb_row.addStretch()
+                self._history_list_layout.addLayout(fb_row)
 
     def _run_check(self, *, investigate: bool) -> None:
         if self._check_worker is not None:
@@ -782,13 +847,38 @@ class GuardianPage(Page):
                 self._fix_status.setText("Healthy — no repairs needed.")
                 self._fix_status.setObjectName("status-ok")
         restyle(self._fix_status)
-        # mirror to health + refresh history/dashboard
         try:
             self._on_health_ready(_key, data)
         except Exception:
             pass
         single_shot(self, 200, self._refresh_history)
         single_shot(self, 200, self._refresh_status)
+        single_shot(self, 400, self._refresh_health_preview)
+
+    def _run_apply(self, recipe_id: str) -> None:
+        if self._apply_worker is not None:
+            return
+        self._fix_status.setText(f"Applying {recipe_id}…")
+        self._fix_btn.setEnabled(False)
+        self._apply_worker = DataWorker(f"guardian-apply-{recipe_id}", lambda: _guardian_apply(recipe_id))
+        self._apply_worker.result.connect(guard_disposed(self._on_apply_done))
+        self._apply_worker.failed.connect(guard_disposed(lambda _k, m: self._on_apply_done(_k, {"error": m})))
+        self._apply_worker.finished.connect(lambda: setattr(self, "_apply_worker", None))
+        self._apply_worker.finished.connect(self._apply_worker.deleteLater)
+        self._apply_worker.start()
+
+    def _on_apply_done(self, _key: str, data: object) -> None:
+        self._on_fix_done(_key, data)
+
+    def _record_feedback(self, recipe_id: str, helpful: bool) -> None:
+        try:
+            from kyth_shared.guardian import record_feedback
+            record_feedback(recipe_id, helpful)
+        except Exception as exc:  # noqa: BLE001
+            self._history_summary.setText(f"Could not save feedback: {exc}")
+            return
+        self._history_summary.setText("Thanks — Guardian will weigh that the next time this recipe comes up.")
+        restyle(self._history_summary)
 
     def _copy_history(self) -> None:
         text = self._history_view.toPlainText()

@@ -28,7 +28,10 @@ profile and leaving it disconnected is not treated as a fault.
 The user timer performs a bounded check every 15 minutes, while a systemd path
 unit reacts when the shared user probe cache changes. Both start a oneshot
 process; nothing polls continuously. The service runs at low CPU and I/O
-priority with memory and CPU limits.
+priority with memory and CPU limits. `ProtectSystem=strict` is paired with
+`StateDirectory=kyth` so occurrence counters and history actually survive a
+timer run — without that, background auto-fix can never reach two consecutive
+failures.
 
 Recipes (allowlist). Background auto-fix still requires `risk=safe`, no auth, two
 consecutive failures, and a cooldown. **Fix My System** / `kyth-guardian fix`
@@ -47,7 +50,7 @@ low battery, and thermal pressure still pause execution.
 | `flatpak.refresh-metadata` | Refresh Flatpak metadata | safe | yes | 30m |
 | `portal.restart-user` | Restart desktop portals | safe | yes | 15m |
 | `plasma.restart-user` | Restart Plasma shell | safe | yes | 15m |
-| `storage.maint` | Run storage maintenance (gated scrub/balance) | safe | yes | 24h |
+| `storage.maint` | Run storage maintenance (gated scrub/balance) | safe | no | 24h |
 | `firmware.refresh` | Refresh firmware metadata (flock) | safe | yes | 12h |
 | `display.reconfigure` | Re-apply display outputs | safe | yes | 6h |
 | `power.profile-fix` | Reset power profile | safe | yes | 1h |
@@ -81,9 +84,11 @@ System Hub exposes controls on **System → Guardian** (self-healing dashboard).
 
 ```bash
 kyth-guardian --json status
+kyth-guardian --json inspect
 kyth-guardian --json check
 kyth-guardian --json investigate
 kyth-guardian --json fix
+kyth-guardian --json fix audio.restart
 kyth-guardian --json history
 kyth-guardian enable
 kyth-guardian disable
@@ -92,7 +97,16 @@ kyth-guardian model install
 kyth-guardian model remove
 ```
 
-`check` is the timer path (auto-fix only after two consecutive failures). `fix`
-is the user-initiated path used by System Hub → Guardian → Fix My System.
+`check` is the timer path (auto-fix only after two consecutive failures). `inspect`
+is the read-only snapshot used by System Hub live health — it never writes
+history or occurrence counters, so opening the page cannot accelerate auto-fix.
+`fix` is the user-initiated path used by System Hub → Guardian → Fix My System
+or a per-recipe **Apply** button. Optional recipe ids apply that repair now:
+
+```bash
+kyth-guardian --json inspect
+kyth-guardian --json fix
+kyth-guardian --json fix audio.restart
+```
 
 The global `--json` option precedes the command.

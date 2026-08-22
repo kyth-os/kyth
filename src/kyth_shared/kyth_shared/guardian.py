@@ -129,8 +129,8 @@ RECIPES: dict[str, Recipe] = {
         Recipe("disk.review", "Review storage usage", "storage", tuple(),
                "advisory", False, False, 3600, "storage", "Open System Hub > Hardware > Storage; Guardian never deletes files."),
         Recipe("storage.maint", "Run storage maintenance", "storage",
-               ("bash", "-c", "/usr/libexec/kyth-storage-gate && /usr/bin/kyth-btrfs-maint"),
-               "safe", False, True, 86400, "storage", "Gated btrfs scrub/balance (AC+idle+!gaming); safe to retry."),
+               ("/usr/libexec/kyth-storage-gate",),
+               "safe", False, False, 86400, "storage", "Gated btrfs scrub/balance (AC+idle+!gaming). Not a timer auto-fix — a scrub can outlive the 90s oneshot."),
         Recipe("firmware.refresh", "Refresh firmware metadata", "firmware",
                ("flock", "-w", "10", "/run/kyth-fwupd.lock", "fwupdmgr", "refresh", "--force"),
                "safe", False, True, 43200, "firmware", "Refreshes LVFS metadata only; does not flash devices."),
@@ -248,10 +248,68 @@ def _active(unit: str, *, user: bool = False) -> bool:
     return bool(result and result.returncode == 0)
 
 
-def _unit_loaded(unit: str, *, user: bool = False) -> bool:
+def _unit_loaded(unit: str, *, user: bool = False) -> bool | None:
+    """True/False when systemd answers; None if the probe itself failed."""
     command = ["systemctl"] + (["--user"] if user else []) + ["show", "-p", "LoadState", "--value", unit]
     result = _run(command, 4)
-    return bool(result and (result.stdout or "").strip() == "loaded")
+    if result is None:
+        return None
+    state = (result.stdout or "").strip()
+    if not state:
+        return None
+    return state == "loaded"
+
+
+def _in_graphical_session() -> bool:
+    """Skip session-scoped probes on a tty/SSH login with no display."""
+    if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"):
+        return True
+    session = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
+    if session in {"wayland", "x11"}:
+        return True
+    if session in {"tty", "unspecified", "none"}:
+        return False
+    # User timers after graphical login often lack WAYLAND_DISPLAY in env.
+    return True
+
+
+def _bluetooth_adapter_present() -> bool:
+    root = Path("/sys/class/bluetooth")
+    if not root.exists():
+        return False
+    try:
+        return any(root.iterdir())
+    except OSError:
+        return False
+
+
+def _bluetooth_soft_blocked() -> bool:
+    """True when the user (or a hardware switch) has Bluetooth soft-blocked."""
+    try:
+        for path in Path("/sys/class/rfkill").glob("rfkill*"):
+            try:
+                if (path / "type").read_text(encoding="utf-8").strip() != "bluetooth":
+                    continue
+                if (path / "soft").read_text(encoding="utf-8").strip() == "1":
+                    return True
+            except OSError:
+                continue
+    except OSError:
+        return False
+    return False
+
+
+def _firmware_needs_metadata_refresh(returncode: int, stdout: str, stderr: str) -> bool:
+    """fwupdmgr get-updates: 0 = listed, 2 = nothing to do. Only metadata errors are a fault."""
+    if returncode in {0, 2}:
+        return False
+    blob = f"{stderr} {stdout}".lower()
+    if any(token in blob for token in ("no detected", "no upgrades", "nothing to do", "no updates")):
+        return False
+    return any(
+        token in blob
+        for token in ("metadata", "lvfs", "failed to download", "cannot refresh", "not up to date", "stale")
+    )
 
 
 def _probe_collect(name: str, collector: Callable[[], list[Symptom] | None]) -> list[Symptom]:
@@ -299,6 +357,13 @@ def _probe_network() -> list[Symptom]:
 
 
 def _probe_bluetooth() -> list[Symptom]:
+    if not _bluetooth_adapter_present():
+        return []
+    if _bluetooth_soft_blocked():
+        return []
+    loaded = _unit_loaded("bluetooth.service", user=False)
+    if loaded is False:
+        return []
     if not _active("bluetooth.service"):
         return [Symptom("bluetooth", "Bluetooth service is inactive", ("bluetooth.restart",))]
     return []
@@ -309,6 +374,9 @@ def _probe_portal() -> list[Symptom]:
     # xdg-desktop-portal-kde.service name — either backend is healthy.
     from .system.desktop_stack import PORTAL_KDE_UNITS, PORTAL_UNITS
 
+    loaded = _unit_loaded("xdg-desktop-portal.service", user=True)
+    if loaded is False:
+        return []
     down: list[str] = []
     for unit in PORTAL_UNITS:
         if not _active(unit, user=True):
@@ -321,6 +389,9 @@ def _probe_portal() -> list[Symptom]:
 
 
 def _probe_plasma() -> list[Symptom]:
+    loaded = _unit_loaded("plasma-plasmashell.service", user=True)
+    if loaded is False:
+        return []
     if not _active("plasma-plasmashell.service", user=True):
         return [Symptom("plasma", "Plasma shell service is inactive", ("plasma.restart-user",))]
     return []
@@ -361,35 +432,40 @@ def _probe_storage() -> list[Symptom]:
 
 def _probe_firmware() -> list[Symptom]:
     fw = _run(("fwupdmgr", "get-updates"), 8)
-    if fw and fw.returncode != 0 and "No detected" not in (fw.stdout or ""):
-        return [Symptom("firmware", f"Firmware metadata refresh needed: {(fw.stderr or '').strip()[:120]}",
-                        ("firmware.refresh",))]
-    return []
+    if not fw:
+        return []
+    if not _firmware_needs_metadata_refresh(fw.returncode, fw.stdout or "", fw.stderr or ""):
+        return []
+    return [Symptom("firmware", f"Firmware metadata refresh needed: {(fw.stderr or fw.stdout or '').strip()[:120]}",
+                    ("firmware.refresh",))]
 
 
 def _probe_display() -> list[Symptom]:
+    if not _in_graphical_session():
+        return []
     kd = _run(("kscreen-doctor", "-o"), 5)
     if kd is None:
         return []
     if kd.returncode != 0:
-        return [Symptom("display", f"kscreen-doctor failed: {(kd.stderr or '').strip()[:80]}",
+        err = (kd.stderr or kd.stdout or "").strip()
+        lowered = err.lower()
+        if any(token in lowered for token in ("not running", "could not connect", "display server", "unable to")):
+            return []
+        return [Symptom("display", f"kscreen-doctor failed: {err[:80]}", ("display.reconfigure",))]
+    from .guardian_actions import parse_kscreen_outputs
+    outputs = parse_kscreen_outputs(kd.stdout or "")
+    if not outputs:
+        return []
+    disabled = [str(item.get("name") or "") for item in outputs
+                if item.get("connected") and not item.get("enabled") and item.get("name")]
+    if disabled:
+        return [Symptom("display", f"Connected output(s) disabled: {', '.join(disabled[:4])}",
                         ("display.reconfigure",))]
-    out = kd.stdout or ""
-    if " connected" not in out or "enabled" not in out.lower():
-        return [Symptom("display", "Display output not correctly enabled after dock", ("display.reconfigure",))]
-    if "No such" in out or "Failed" in out:
-        return [Symptom("display", "kscreen-doctor reports display error", ("display.reconfigure",))]
     return []
 
 
 def _probe_controller() -> list[Symptom]:
-    if not Path("/sys/class/bluetooth").exists():
-        return []
-    try:
-        has_bt = any(Path("/sys/class/bluetooth").iterdir())
-    except OSError:
-        return []
-    if not has_bt:
+    if not _bluetooth_adapter_present():
         return []
     if not _unit_loaded("joycond.service", user=False):
         return []
@@ -411,12 +487,15 @@ def _probe_power() -> list[Symptom]:
     pp = _run(("powerprofilesctl", "get"), 4)
     if pp is None:
         return []
-    if pp.returncode != 0 and "No power" not in (pp.stdout or ""):
-        return [Symptom("power", f"Power profile unavailable: {(pp.stderr or '').strip()[:80]}",
+    if pp.returncode != 0:
+        err = (pp.stderr or pp.stdout or "")
+        if "No power" in err or "not available" in err.lower():
+            return []
+        return [Symptom("power", f"Power profile unavailable: {err.strip()[:80]}",
                         ("power.profile-fix",))]
-    if pp.returncode == 0 and (pp.stdout or "").strip() not in {"balanced", "performance", "power-saver"}:
-        return [Symptom("power", f"Power profile unexpected: {(pp.stdout or '').strip()[:40]}",
-                        ("power.profile-fix",))]
+    # Any named profile is fine — vendors ship custom names beyond the trio.
+    if not (pp.stdout or "").strip():
+        return [Symptom("power", "Power profile unset", ("power.profile-fix",))]
     return []
 
 
@@ -868,7 +947,15 @@ def verify_recipe(recipe_id: str) -> bool:
         return _active("plasma-plasmashell.service", user=True)
     if recipe.verification == "display":
         kd = _run(("kscreen-doctor", "-o"), 5)
-        return bool(kd and kd.returncode == 0 and " connected" in (kd.stdout or "") and "enabled" in (kd.stdout or "").lower())
+        if not kd or kd.returncode != 0:
+            return False
+        from .guardian_actions import parse_kscreen_outputs
+        outputs = parse_kscreen_outputs(kd.stdout or "")
+        if not outputs:
+            return "enabled" in (kd.stdout or "").lower()
+        return any(item.get("connected") for item in outputs) and not any(
+            item.get("connected") and not item.get("enabled") for item in outputs
+        )
     if recipe.verification == "controller":
         return _active("joycond.service", user=False)
     if recipe.verification == "storage":
@@ -882,7 +969,7 @@ def verify_recipe(recipe_id: str) -> bool:
             return False
     if recipe.verification == "firmware":
         fw = _run(("fwupdmgr", "get-updates"), 8)
-        return bool(fw and fw.returncode == 0)
+        return bool(fw and fw.returncode in {0, 2})
     if recipe.verification == "power":
         pp = _run(("powerprofilesctl", "get"), 4)
         return bool(pp and pp.returncode == 0 and (pp.stdout or "").strip() in {"balanced", "performance", "power-saver"})
@@ -970,22 +1057,33 @@ def check(
     user_initiated: bool = False,
     components: set[str] | frozenset[str] | None = None,
     recipe_ids: set[str] | frozenset[str] | None = None,
+    force_recipe_ids: set[str] | frozenset[str] | None = None,
+    persist: bool = True,
+    count_failures: bool | None = None,
 ) -> dict[str, Any]:
     config = load_config()
     state = load_state()
+    if count_failures is None:
+        count_failures = bool(persist) and not user_initiated
     symptoms = collect_symptoms()
     if components is not None:
         symptoms = [symptom for symptom in symptoms if symptom.component in components]
     active_components = {symptom.component for symptom in symptoms}
     occurrences = state.setdefault("occurrences", {})
-    for component in {recipe.component for recipe in RECIPES.values()}:
-        occurrences[component] = int(occurrences.get(component, 0)) + 1 if component in active_components else 0
+    if count_failures:
+        for component in {recipe.component for recipe in RECIPES.values()}:
+            occurrences[component] = int(occurrences.get(component, 0)) + 1 if component in active_components else 0
     decisions = [decision for symptom in symptoms if (decision := deterministic_decision(symptom))]
     ambiguous = [symptom for symptom in symptoms if deterministic_decision(symptom) is None]
     if investigate or ambiguous:
         model = infer(symptoms, state, force=investigate)
         if model:
             decisions.append(model)
+    if force_recipe_ids:
+        existing = {decision.recipe_id for decision in decisions}
+        for rid in force_recipe_ids:
+            if rid in RECIPES and rid not in existing:
+                decisions.append(Decision(rid, 1.0, "User requested this repair.", source="user"))
     if recipe_ids is not None:
         decisions = [decision for decision in decisions if decision.recipe_id in recipe_ids]
     apply = automatic or user_initiated
@@ -1021,11 +1119,13 @@ def check(
             "explanation": redact(decision.explanation), "action": action,
             "verified": verified, "detail": detail,
         }
-        state.setdefault("history", []).append(record)
+        if persist:
+            state.setdefault("history", []).append(record)
         results.append(record)
-    state["last_check"] = time.time()
-    _notify(results, config, state)
-    save_state(state)
+    if persist:
+        state["last_check"] = time.time()
+        _notify(results, config, state)
+        save_state(state)
     next_steps = []
     for record in results:
         recipe = RECIPES.get(str(record.get("recipe_id") or ""))
@@ -1043,13 +1143,24 @@ def check(
         "enabled": bool(config.get("enabled")),
         "automatic_safe_fixes": bool(config.get("automatic_safe_fixes")),
         "user_initiated": bool(user_initiated),
+        "persisted": bool(persist),
         "symptoms": [{**asdict(item), "evidence": redact(item.evidence)} for item in symptoms],
         "decisions": results,
         "next_steps": next_steps,
-        "pending": pending_recommendations(state),
+        "pending": pending_recommendations(state) if persist else pending_recommendations(),
         "model": model_status(),
         "suppression_reason": suppression_reason(),
     }
+
+
+def inspect(*, investigate: bool = False) -> dict[str, Any]:
+    """Read-only health snapshot. Does not write history, occurrences, or notifications."""
+    return check(
+        investigate=investigate,
+        automatic=False,
+        persist=False,
+        count_failures=False,
+    )
 
 
 def model_status() -> dict[str, Any]:
@@ -1071,7 +1182,8 @@ def status() -> dict[str, Any]:
             "pending_count": len(pending),
             "pending": [{"recipe_id": item.get("recipe_id"), "detail": item.get("detail", "")} for item in pending],
             "recipes": [{"id": recipe.id, "title": recipe.title, "risk": recipe.risk,
-                         "requires_auth": recipe.requires_auth, "automatic": recipe.automatic}
+                         "requires_auth": recipe.requires_auth, "automatic": recipe.automatic,
+                         "recovery": recipe.recovery}
                         for recipe in RECIPES.values()]}
 
 
@@ -1090,8 +1202,10 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
     commands.add_parser("check")
+    commands.add_parser("inspect")
     commands.add_parser("investigate")
-    commands.add_parser("fix")
+    fix = commands.add_parser("fix")
+    fix.add_argument("recipe_id", nargs="*", help="optional recipe ids to apply immediately")
     commands.add_parser("history")
     commands.add_parser("enable")
     commands.add_parser("disable")
@@ -1104,13 +1218,27 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             value = status()
+        elif args.command == "inspect":
+            value = inspect()
         elif args.command in {"check", "investigate"}:
             if not config["enabled"] and args.command == "check":
                 value = {"schema_version": SCHEMA_VERSION, "enabled": False, "skipped": True}
             else:
                 value = check(investigate=args.command == "investigate")
         elif args.command == "fix":
-            value = check(investigate=False, automatic=True, user_initiated=True)
+            requested = [rid for rid in (getattr(args, "recipe_id", None) or []) if rid]
+            unknown = [rid for rid in requested if rid not in RECIPES]
+            if unknown:
+                print(f"kyth-guardian: unknown recipe: {', '.join(unknown)}", file=sys.stderr)
+                return 1
+            ids = set(requested) or None
+            value = check(
+                investigate=False,
+                automatic=True,
+                user_initiated=True,
+                recipe_ids=ids,
+                force_recipe_ids=ids,
+            )
         elif args.command == "history":
             value = {"schema_version": SCHEMA_VERSION, "history": load_state().get("history", [])}
         elif args.command in {"enable", "disable"}:

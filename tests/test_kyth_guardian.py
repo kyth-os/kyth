@@ -145,7 +145,7 @@ class GuardianPolicyTests(unittest.TestCase):
         with (
             patch.object(guardian, "_active", return_value=False),
             patch.object(guardian.Path, "exists", return_value=True),
-            patch.object(guardian.Path, "iterdir", return_value=iter([pathlib.Path("/sys/class/bluetooth/hci0")])),
+            patch.object(guardian.Path, "iterdir", return_value=[pathlib.Path("/sys/class/bluetooth/hci0")]),
             patch.object(guardian, "_run", side_effect=_fake_run),
         ):
             syms = guardian.collect_symptoms()
@@ -517,12 +517,18 @@ class GuardianRobustnessTests(unittest.TestCase):
 
     def test_portal_probe_accepts_plasma_kde_unit_name(self):
         active = {"xdg-desktop-portal.service", "plasma-xdg-desktop-portal-kde.service"}
-        with patch.object(guardian, "_active", side_effect=lambda unit, user=False: unit in active):
+        with (
+            patch.object(guardian, "_active", side_effect=lambda unit, user=False: unit in active),
+            patch.object(guardian, "_unit_loaded", return_value=True),
+        ):
             self.assertEqual(guardian._probe_portal(), [])
 
     def test_portal_probe_flags_when_neither_kde_backend_active(self):
         active = {"xdg-desktop-portal.service"}
-        with patch.object(guardian, "_active", side_effect=lambda unit, user=False: unit in active):
+        with (
+            patch.object(guardian, "_active", side_effect=lambda unit, user=False: unit in active),
+            patch.object(guardian, "_unit_loaded", return_value=True),
+        ):
             symptoms = guardian._probe_portal()
         self.assertEqual(len(symptoms), 1)
         self.assertIn("plasma/xdg-desktop-portal-kde", symptoms[0].evidence)
@@ -554,6 +560,174 @@ class GuardianRobustnessTests(unittest.TestCase):
         self.assertIn("xdg-desktop-portal.service", restarted)
         self.assertIn("plasma-xdg-desktop-portal-kde.service", restarted)
         self.assertIn("xdg-desktop-portal-kde.service", restarted)
+
+
+class GuardianUsefulnessTests(unittest.TestCase):
+    def test_firmware_nothing_to_do_is_not_a_symptom(self):
+        fw_idle = subprocess.CompletedProcess(["fwupdmgr", "get-updates"], 2, stdout="No updates", stderr="")
+        with (
+            patch.object(guardian, "_active", return_value=True),
+            patch.object(guardian, "_run", side_effect=lambda argv, timeout=8: fw_idle if argv[0] == "fwupdmgr" else subprocess.CompletedProcess(argv, 0, "balanced\n", "")),
+            patch.object(guardian.shutil, "which", return_value=None),
+        ):
+            syms = guardian.collect_symptoms()
+        self.assertFalse(any(s.component == "firmware" for s in syms))
+
+    def test_tab_indented_kscreen_output_is_healthy(self):
+        kd_ok = subprocess.CompletedProcess(
+            ["kscreen-doctor", "-o"], 0,
+            stdout="Output: 1 eDP-1\n\tconnected\n\tenabled\n",
+            stderr="",
+        )
+        with patch.object(guardian, "_run", return_value=kd_ok), patch.object(guardian, "_in_graphical_session", return_value=True):
+            self.assertEqual(guardian._probe_display(), [])
+        with patch.object(guardian, "_run", return_value=kd_ok):
+            self.assertTrue(guardian.verify_recipe("display.reconfigure"))
+
+    def test_connected_disabled_output_is_a_display_symptom(self):
+        kd = subprocess.CompletedProcess(
+            ["kscreen-doctor", "-o"], 0,
+            stdout="Output: 1 HDMI-A-1\n\tconnected\n\tdisabled\nOutput: 2 eDP-1\n\tconnected\n\tenabled\n",
+            stderr="",
+        )
+        with patch.object(guardian, "_run", return_value=kd), patch.object(guardian, "_in_graphical_session", return_value=True):
+            symptoms = guardian._probe_display()
+        self.assertEqual(len(symptoms), 1)
+        self.assertEqual(symptoms[0].recipes, ("display.reconfigure",))
+        self.assertIn("HDMI-A-1", symptoms[0].evidence)
+
+    def test_bluetooth_without_adapter_is_not_a_symptom(self):
+        with (
+            patch.object(guardian, "_bluetooth_adapter_present", return_value=False),
+            patch.object(guardian, "_active", return_value=False),
+        ):
+            self.assertEqual(guardian._probe_bluetooth(), [])
+
+    def test_bluetooth_soft_blocked_is_not_a_symptom(self):
+        with (
+            patch.object(guardian, "_bluetooth_adapter_present", return_value=True),
+            patch.object(guardian, "_bluetooth_soft_blocked", return_value=True),
+            patch.object(guardian, "_active", return_value=False),
+        ):
+            self.assertEqual(guardian._probe_bluetooth(), [])
+
+    def test_custom_power_profile_is_not_a_fault(self):
+        quiet = subprocess.CompletedProcess(["powerprofilesctl", "get"], 0, stdout="quiet\n", stderr="")
+        with patch.object(guardian, "_run", return_value=quiet):
+            self.assertEqual(guardian._probe_power(), [])
+
+    def test_inspect_does_not_persist_history_or_occurrences(self):
+        audio = guardian.Symptom("audio", "down", ("audio.restart",))
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch.dict(os.environ, {"XDG_STATE_HOME": temp, "XDG_CONFIG_HOME": temp}, clear=False),
+            patch.object(guardian, "collect_symptoms", return_value=[audio]),
+            patch.object(guardian, "suppression_reason", return_value=""),
+        ):
+            before = guardian.load_state()
+            result = guardian.inspect()
+            after = guardian.load_state()
+        self.assertTrue(result["symptoms"])
+        self.assertFalse(result.get("persisted", True))
+        self.assertEqual(after.get("history"), before.get("history"))
+        self.assertEqual(after.get("occurrences"), before.get("occurrences"))
+
+    def test_run_check_does_not_count_failures_toward_autofix(self):
+        audio = guardian.Symptom("audio", "down", ("audio.restart",))
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch.dict(os.environ, {"XDG_STATE_HOME": temp, "XDG_CONFIG_HOME": temp}, clear=False),
+            patch.object(guardian, "collect_symptoms", return_value=[audio]),
+            patch.object(guardian, "suppression_reason", return_value=""),
+            patch.object(guardian, "load_config", return_value={
+                "enabled": True, "automatic_safe_fixes": True, "notifications": False,
+            }),
+        ):
+            guardian.check(automatic=False, persist=True, count_failures=False)
+            state = guardian.load_state()
+        self.assertEqual(int(state.get("occurrences", {}).get("audio", 0)), 0)
+        self.assertTrue(state.get("history"))
+
+    def test_force_recipe_applies_without_matching_symptom(self):
+        with (
+            patch.object(guardian, "collect_symptoms", return_value=[]),
+            patch.object(guardian, "load_config", return_value={
+                "enabled": True, "automatic_safe_fixes": False, "notifications": False,
+            }),
+            patch.object(guardian, "load_state", return_value={"occurrences": {}, "history": []}),
+            patch.object(guardian, "save_state"),
+            patch.object(guardian, "execute_recipe", return_value=(True, "ok")) as execute,
+            patch.object(guardian, "verify_recipe", return_value=True),
+            patch.object(guardian, "suppression_reason", return_value=""),
+        ):
+            result = guardian.check(
+                automatic=True,
+                user_initiated=True,
+                recipe_ids={"audio.restart"},
+                force_recipe_ids={"audio.restart"},
+            )
+        execute.assert_called_once_with("audio.restart", user_initiated=True)
+        self.assertEqual(result["decisions"][0]["action"], "executed")
+
+    def test_timer_cannot_auto_run_storage_maint(self):
+        decision = guardian.Decision("storage.maint", 1, "known")
+        with patch.object(guardian, "suppression_reason", return_value=""):
+            allowed, reason = guardian.can_execute(
+                decision, {"automatic_safe_fixes": True},
+                {"history": [], "occurrences": {"storage": 2}},
+            )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "confirmation required")
+        with patch.object(guardian, "suppression_reason", return_value=""):
+            allowed, _ = guardian.can_execute(
+                decision, {"automatic_safe_fixes": False},
+                {"history": [], "occurrences": {}}, user_initiated=True,
+            )
+        self.assertTrue(allowed)
+
+    def test_firmware_refresh_falls_back_without_system_lock(self):
+        from kyth_shared.guardian_actions import refresh_firmware_metadata
+
+        def _run(argv, timeout=8):
+            if argv[0] == "flock":
+                return subprocess.CompletedProcess(argv, 1, "", "cannot open lock")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        ok, detail = refresh_firmware_metadata(_run)
+        self.assertTrue(ok)
+        self.assertIn("refreshed", detail)
+
+    def test_storage_maint_executor_does_not_use_a_shell(self):
+        from kyth_shared.guardian_actions import run_storage_maintenance
+
+        calls: list[tuple] = []
+
+        def _run(argv, timeout=8):
+            calls.append(tuple(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        ok, _detail = run_storage_maintenance(_run)
+        self.assertTrue(ok)
+        self.assertEqual(calls[0], ("/usr/libexec/kyth-storage-gate",))
+        self.assertEqual(calls[1], ("/usr/bin/kyth-btrfs-maint",))
+
+    def test_cli_inspect_and_targeted_fix(self):
+        with (
+            patch.object(guardian, "inspect", return_value={"persisted": False}) as inspect,
+            patch.object(guardian, "check", return_value={"ok": True}) as check,
+            patch.object(guardian, "load_config", return_value={"enabled": True}),
+        ):
+            self.assertEqual(guardian.main(["inspect"]), 0)
+            inspect.assert_called_once_with()
+            self.assertEqual(guardian.main(["fix", "audio.restart"]), 0)
+            check.assert_called_once()
+            kwargs = check.call_args.kwargs
+            self.assertTrue(kwargs["user_initiated"])
+            self.assertEqual(kwargs["force_recipe_ids"], {"audio.restart"})
+
+    def test_cli_fix_rejects_unknown_recipe(self):
+        with patch.object(guardian, "load_config", return_value={"enabled": True}):
+            self.assertEqual(guardian.main(["fix", "shell.run"]), 1)
 
 
 if __name__ == "__main__":

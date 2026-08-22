@@ -70,7 +70,11 @@ class SystemServiceHardeningTests(unittest.TestCase):
                 with self.subTest(unit=unit_name, directive=directive):
                     self.assertIn(directive, body)
 
-    def test_network_installer_and_read_only_probe_use_strict_filesystems(self) -> None:
+    def test_guardian_user_unit_can_persist_state(self) -> None:
+        body = (ROOT / "build_files/kyth-guardian.service").read_text(encoding="utf-8")
+        self.assertIn("StateDirectory=kyth", body)
+        self.assertIn("ProtectSystem=strict", body)
+        self.assertIn("ReadWritePaths=-%h/.local/share/flatpak", body)
         proton = (ROOT / "build_files/kyth-proton-cachyos-update.service").read_text()
         probe = (ROOT / "build_files/kyth-probe.service").read_text()
         self.assertIn("ProtectSystem=strict", proton)

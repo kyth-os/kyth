@@ -36,8 +36,16 @@ SystemCallArchitectures=native
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 UMask=0077
+# ProtectSystem=strict makes the whole tree read-only. Without StateDirectory
+# the timer cannot write XDG_STATE_HOME/kyth/guardian.json, so occurrence
+# counters never survive a run and background auto-fix never reaches the
+# two-consecutive-failure gate.
+StateDirectory=kyth
+StateDirectoryMode=0700
 CacheDirectory=kyth
 CacheDirectoryMode=0700
+# flatpak --user metadata refresh (automatic recipe) writes here.
+ReadWritePaths=-%h/.local/share/flatpak -%h/.cache/flatpak
 
 [Install]
 WantedBy=default.target
