@@ -22,38 +22,71 @@ from .widgets import (
 )
 from .services.launch import popen
 
-# ── Pulse icon-rail button ─────────────────────────────────────────────────────
+def _rail_label(text: str, object_name: str) -> QLabel:
+    label = QLabel(text)
+    label.setObjectName(object_name)
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    return label
+
+
+# ── Pulse labeled-rail button (glyph + caption) ────────────────────────────────
 class RailButton(QPushButton):
     def __init__(self, icon_names: tuple[str, ...], glyph: str, label: str, hint: str = ""):
-        icon = _theme_icon(*icon_names)
-        if icon.isNull():
-            super().__init__(glyph)
-        else:
-            super().__init__("")
-            self.setIcon(icon)
-            self.setIconSize(QSize(22, 22))
+        super().__init__()
+        self._active = False
+        self._attention = False
+        self._default_tip = f"{label} — {hint}" if hint else label
         self.setObjectName("pulse-rail-btn")
         self.setCheckable(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(48, 48)
-        self.setToolTip(f"{label} — {hint}" if hint else label)
+        self.setFixedSize(92, 76)
+        self.setToolTip(self._default_tip)
         self.setAccessibleName(label)
 
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 8, 4, 6)
+        layout.setSpacing(2)
+        icon = _theme_icon(*icon_names)
+        glyph_lbl = _rail_label(glyph, "pulse-rail-glyph")
+        if not icon.isNull():
+            glyph_lbl.setPixmap(icon.pixmap(QSize(22, 22)))
+        layout.addWidget(glyph_lbl)
+        layout.addWidget(_rail_label(label, "pulse-rail-caption"))
+
     def set_active(self, active: bool):
-        if active:
-            self.setObjectName("pulse-rail-btn-active")
-        elif self.objectName() != "pulse-rail-btn-badge":
-            self.setObjectName("pulse-rail-btn")
-        restyle(self)
+        self._active = bool(active)
+        self._apply_chrome()
+
+    def set_attention(self, on: bool, tooltip: str | None = None):
+        self._attention = bool(on)
+        if tooltip is not None:
+            self.setToolTip(tooltip)
+        elif not on:
+            self.setToolTip(self._default_tip)
+        self._apply_chrome()
+
+    def _apply_chrome(self):
+        if self._active:
+            name = "pulse-rail-btn-active"
+        elif self._attention:
+            name = "pulse-rail-btn-badge"
+        else:
+            name = "pulse-rail-btn"
+        if self.objectName() != name:
+            self.setObjectName(name)
+            restyle(self)
+            for child in self.findChildren(QLabel):
+                restyle(child)
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("KythOS")
-        self.setMinimumSize(980, 660)
-        self.resize(1180, 760)
+        self.setWindowTitle("Kyth Pulse")
+        self.setMinimumSize(1080, 700)
+        self.resize(1280, 800)
         self._profile = load_profile()
 
         # Outer wrapper: live banner (if running from live ISO) + main content
@@ -150,11 +183,12 @@ class MainWindow(QMainWindow):
 
         topbar_layout.addSpacing(8)
 
-        home_crumb = QPushButton("Pulse")
-        home_crumb.setObjectName("breadcrumb-link")
-        home_crumb.setCursor(Qt.CursorShape.PointingHandCursor)
-        home_crumb.clicked.connect(lambda: self._navigate_to("Welcome"))
-        topbar_layout.addWidget(home_crumb)
+        self._place_btn = QPushButton("Pulse")
+        self._place_btn.setObjectName("breadcrumb-link")
+        self._place_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._place_btn.setToolTip("Open this destination's overview")
+        self._place_btn.clicked.connect(self._on_place_clicked)
+        topbar_layout.addWidget(self._place_btn)
 
         self._crumb_lbl = QLabel("")
         self._crumb_lbl.setObjectName("breadcrumb")
@@ -200,7 +234,7 @@ class MainWindow(QMainWindow):
             try:
                 branch = branch_display_name(current_branch())
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-                branch = "System Hub"
+                branch = "Kyth Pulse"
             try:
                 staged = has_staged_update()
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
@@ -317,19 +351,12 @@ class MainWindow(QMainWindow):
         try:
             btn = self._rail_buttons.get("This PC")
             if btn is not None:
-                is_active = btn.objectName() == "pulse-rail-btn-active"
                 if fresh and not suppressed:
-                    if not is_active:
-                        btn.setObjectName("pulse-rail-btn-badge")
-                    btn.setToolTip(f"{fresh} issue(s) need review in Guardian")
+                    btn.set_attention(True, tooltip=f"{fresh} issue(s) need review in Guardian")
+                elif fresh and suppressed:
+                    btn.set_attention(False, tooltip=f"Guardian paused — {suppressed}")
                 else:
-                    if btn.objectName() == "pulse-rail-btn-badge":
-                        btn.setObjectName("pulse-rail-btn")
-                    if fresh and suppressed:
-                        btn.setToolTip(f"Guardian paused — {suppressed}")
-                    else:
-                        btn.setToolTip("This PC — Health, updates, and hardware")
-                restyle(btn)
+                    btn.set_attention(False)
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
             pass
 
@@ -464,17 +491,26 @@ class MainWindow(QMainWindow):
     def _build_sidebar(self, parent_layout):
         rail = QWidget()
         rail.setObjectName("pulse-rail")
-        rail.setFixedWidth(72)
+        rail.setFixedWidth(108)
         rail_layout = QVBoxLayout(rail)
-        rail_layout.setContentsMargins(0, 12, 0, 12)
-        rail_layout.setSpacing(6)
+        rail_layout.setContentsMargins(8, 16, 8, 16)
+        rail_layout.setSpacing(4)
 
+        wordmark = QWidget()
+        wordmark.setObjectName("pulse-rail-wordmark-wrap")
+        mark = QVBoxLayout(wordmark)
+        mark.setContentsMargins(0, 0, 0, 10)
+        mark.setSpacing(0)
         self._rail_logo = QLabel("K")
         self._rail_logo.setObjectName("pulse-rail-logo")
         self._rail_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._rail_logo.setToolTip("Kyth Pulse")
-        rail_layout.addWidget(self._rail_logo)
-        rail_layout.addSpacing(8)
+        mark.addWidget(self._rail_logo)
+        pulse_word = QLabel("PULSE")
+        pulse_word.setObjectName("pulse-rail-wordmark")
+        pulse_word.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.addWidget(pulse_word)
+        rail_layout.addWidget(wordmark)
 
         self._page_specs: list[tuple[str, object]] = []
         self._nav_buttons = []
@@ -703,8 +739,8 @@ class MainWindow(QMainWindow):
         self._sidebar_channel_worker.start()
 
     def _on_sidebar_channel_ready(self, _key: str, branch: object):
-        text = {"latest": "Stable channel", "testing": "Testing channel"}.get(branch or "", "System Hub")
-        self._sidebar_ver_lbl.setToolTip(f"KythOS · {text}")
+        text = {"latest": "Stable channel", "testing": "Testing channel"}.get(branch or "", "Kyth Pulse")
+        self._sidebar_ver_lbl.setToolTip(f"Kyth Pulse · {text}")
 
     def _on_sidebar_channel_failed(self, _key: str, message: str) -> None:
         import logging
@@ -731,6 +767,8 @@ class MainWindow(QMainWindow):
             self._stack.removeWidget(placeholder)
             if hasattr(page, "apply_profile"):
                 page.apply_profile(getattr(self, "_profile", "everyday"))
+            if hasattr(page, "section_changed"):
+                page.section_changed.connect(lambda _s, idx=index: self._update_topbar(idx))
         return self._pages[index]  # type: ignore[return-value]
 
     def _make_nav_handler(self, index: int):
@@ -802,38 +840,39 @@ class MainWindow(QMainWindow):
             self._history_pos = len(self._history) - 1
         self._update_topbar(index)
 
+    def _on_place_clicked(self) -> None:
+        idx = self._stack.currentIndex()
+        key = self._page_specs[idx][0] if 0 <= idx < len(self._page_specs) else "Welcome"
+        self._navigate_to(landing_for_page(key))
+
     def _update_topbar(self, index: int):
         self._back_btn.setEnabled(self._history_pos > 0)
         self._fwd_btn.setEnabled(self._history_pos < len(self._history) - 1)
-        if index == 0:
-            self._crumb_lbl.setText("")
-            return
         key = self._page_specs[index][0] if 0 <= index < len(self._page_specs) else "Welcome"
         dest = destination_for_page(key)
+        self._place_btn.setText(dest)
         page = self._pages[index] if 0 <= index < len(self._pages) else None
         section_key = ""
         if page is not None and hasattr(page, "current_section"):
             section_key = str(page.current_section() or "")
-        if section_key and section_key != "overview":
+        if section_key and section_key not in {"", "overview"}:
             child_idx = self._page_index_by_key.get(section_key)
             child_label = self._page_crumbs[child_idx][1] if child_idx is not None else section_key
-            self._crumb_lbl.setText(f"›  {dest}  ›  {child_label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
-            return
-        _section, label = self._page_crumbs[index]
-        if dest and dest != "Pulse" and dest != label:
-            self._crumb_lbl.setText(f"›  {dest}  ›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
-            return
-        if _section and _section != label:
-            self._crumb_lbl.setText(f"›  {_section}  ›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
-            return
-        self._crumb_lbl.setText(f"›  {label}")  # noqa: RUF001 — breadcrumb separator, deliberate typography
+            tab_items = getattr(page, "tab_items", ())
+            tab_label = next((label for key, label in tab_items if key == section_key), "")
+            if tab_label:
+                child_label = tab_label
+            if child_label != dest:
+                self._crumb_lbl.setText(f"·  {child_label}")
+                return
+        self._crumb_lbl.setText("")
 
     def closeEvent(self, event):
         busy = has_blocking_tasks()
         if busy:
             QMessageBox.warning(
                 self,
-                "KythOS Is Busy",
+                "Kyth Pulse Is Busy",
                 "A task is still running. Please wait for it to finish before closing.",
             )
             event.ignore()

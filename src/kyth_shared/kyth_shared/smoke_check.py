@@ -190,7 +190,7 @@ class SmokeCheck:
         for path, label in (
             ("/usr/share/wallpapers/kyth/metadata.json", "KythOS wallpaper"),
             ("/usr/share/plymouth/themes/kyth/kyth-logo.png", "Plymouth KythOS logo"),
-            ("/usr/share/applications/kyth-welcome.desktop", "System Hub launcher"),
+            ("/usr/share/applications/kyth-welcome.desktop", "Pulse launcher"),
             ("/usr/bin/kyth-user-polish", "User comfort polish"),
             ("/usr/bin/kyth-apply-desktop-layout", "KythOS default layout helper"),
             ("/etc/xdg/mimeapps.list", "Default app associations"),

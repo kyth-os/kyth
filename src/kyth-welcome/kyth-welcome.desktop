@@ -1,12 +1,13 @@
 [Desktop Entry]
 Version=1.0
-Name=KythOS System Hub
-Comment=Helper and settings for KythOS
+Name=Kyth Pulse
+GenericName=System Hub
+Comment=Health, games, apps, and this PC
 Exec=/usr/bin/kyth-welcome-launch
 Icon=kyth
 Terminal=false
 Type=Application
 Categories=System;Settings;
-Keywords=kyth;helper;branch;update;settings;
+Keywords=kyth;pulse;hub;helper;games;apps;update;settings;system hub;
 StartupNotify=true
 StartupWMClass=kyth-welcome

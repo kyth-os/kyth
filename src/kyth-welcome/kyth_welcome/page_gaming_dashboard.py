@@ -96,10 +96,10 @@ class _DashboardMixin:
         layout4 = QVBoxLayout(card4)
         layout4.setContentsMargins(18, 16, 18, 16)
         layout4.setSpacing(8)
-        title4 = QLabel("QUICK PERFORMANCE — System Hub super-app")
+        title4 = QLabel("QUICK PERFORMANCE — Pulse Guardian")
         title4.setObjectName("hud-title")
         layout4.addWidget(title4)
-        perf_hint = QLabel("Power profile + display VRR + controller stack — all in System Hub Guardian. One-click Fix My Gaming uses same gated runner as Starter Packs.")
+        perf_hint = QLabel("Power profile + display VRR + controller stack — all in Pulse > This PC > Guardian. One-click Fix My Gaming uses same gated runner as Starter Packs.")
         perf_hint.setObjectName("hud-desc")
         perf_hint.setWordWrap(True)
         layout4.addWidget(perf_hint)
@@ -298,9 +298,9 @@ class _DashboardMixin:
                 return
             if hasattr(self, "_hud_perf_profile"):
                 if "power" in comps:
-                    self._hud_perf_profile.setText("Power: drift — System Hub → Guardian will reset profile")
+                    self._hud_perf_profile.setText("Power: drift — Pulse > Guardian will reset profile")
                 else:
-                    self._hud_perf_profile.setText("Power: ok (System Hub → Guardian fixes stuck profile)")
+                    self._hud_perf_profile.setText("Power: ok (Pulse > Guardian fixes stuck profile)")
             if hasattr(self, "_hud_perf_display"):
                 if "display" in comps:
                     self._hud_perf_display.setText("Display: drift — Hub will re-apply")

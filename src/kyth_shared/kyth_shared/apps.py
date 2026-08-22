@@ -51,7 +51,7 @@ _DEFAULT_APP_DB: list[tuple[str, str, str, str | None]] = [
     ("modorganizer|mo2", "Mod Organizer 2", "Install MO2 per game through SteamTinkerLaunch, or isolate it in Bottles.", None),
     # Productivity / tools
     ("notepad\\+\\+|npp\\b", "Notepad++", "Use Kate (already installed) or VS Code for text editing.", None),
-    ("code|vscode|visual.?studio.?code", "Visual Studio Code", "VS Code is available from the app menu or KythOS System Hub.", None),
+    ("code|vscode|visual.?studio.?code", "Visual Studio Code", "VS Code is available from the app menu or Kyth Pulse.", None),
     ("visual.?studio(?!.*code)", "Visual Studio", "Use VS Code, JetBrains Toolbox, or a Windows VM for full Visual Studio projects.", None),
     ("putty", "PuTTY", "Use Konsole with ssh, or search Flathub if you specifically want PuTTY.", None),
     ("winscp", "WinSCP", "Use Dolphin's sftp:// support or FileZilla from Flathub.", "org.filezillaproject.Filezilla"),
@@ -68,14 +68,14 @@ _DEFAULT_APP_DB: list[tuple[str, str, str, str | None]] = [
     ("plex", "Plex", "Install Plex Desktop from Flathub.", "tv.plex.PlexDesktop"),
     ("calibre", "Calibre", "Install Calibre from Flathub.", "com.calibre_ebook.calibre"),
     ("audacity", "Audacity", "Install Audacity from Flathub.", "org.audacityteam.Audacity"),
-    ("resolve|davinci", "DaVinci Resolve", "Install DaVinci Resolve via KythOS System Hub → Software.", None),
+    ("resolve|davinci", "DaVinci Resolve", "Install DaVinci Resolve via Pulse > Apps.", None),
     ("gimp", "GIMP", "Install GIMP from Flathub.", "org.gimp.GIMP"),
     ("inkscape", "Inkscape", "Install Inkscape from Flathub.", "org.inkscape.Inkscape"),
     ("blender", "Blender", "Install Blender from Flathub.", "org.blender.Blender"),
     # Hardware utilities
     ("logi|logitech|ghub|g.?hub", "Logitech G HUB", "Use Piper or OpenRGB when your device is supported.", "org.freedesktop.Piper"),
     ("razer|synapse", "Razer Synapse", "Use OpenRGB for lighting and OpenRazer-supported tools where available.", "org.openrgb.OpenRGB"),
-    ("elgato|stream.?deck", "Elgato / Stream Deck", "Use OpenDeck from KythOS System Hub for Stream Deck workflows.", None),
+    ("elgato|stream.?deck", "Elgato / Stream Deck", "Use OpenDeck from Pulse > Apps for Stream Deck workflows.", None),
     ("voicemeeter|go.?xlr", "Audio routing utility", "Use PipeWire audio routing tools; check System Settings > Audio first.", None),
 ]
 

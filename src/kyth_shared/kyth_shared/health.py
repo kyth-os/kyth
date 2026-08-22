@@ -68,13 +68,13 @@ class HealthReport:
 
 
 _REMEDIATIONS = {
-    "bootc": "Open System Hub > Repair and verify the bootc deployment.",
-    "firmware": "Open System Hub > Updates and run the firmware check.",
-    "flatpak": "Open System Hub > Repair and retry the default app setup.",
-    "secure boot": "Review Secure Boot status in System Hub > Hardware.",
-    "vulkan": "Open System Hub > Hardware and review the graphics driver.",
-    "pipewire": "Open System Hub > Repair and restart audio.",
-    "wireplumber": "Open System Hub > Repair and restart audio.",
+    "bootc": "Open Pulse > This PC > Repair and verify the bootc deployment.",
+    "firmware": "Open Pulse > This PC > Updates and run the firmware check.",
+    "flatpak": "Open Pulse > This PC > Repair and retry the default app setup.",
+    "secure boot": "Review Secure Boot status in Pulse > This PC > Hardware.",
+    "vulkan": "Open Pulse > This PC > Hardware and review the graphics driver.",
+    "pipewire": "Open Pulse > This PC > Repair and restart audio.",
+    "wireplumber": "Open Pulse > This PC > Repair and restart audio.",
 }
 
 
@@ -82,7 +82,7 @@ def remediation_for(component: str) -> str:
     lowered = component.lower()
     return next(
         (message for needle, message in _REMEDIATIONS.items() if needle in lowered),
-        "Review this check in System Hub or include the JSON report with support.",
+        "Review this check in Pulse or include the JSON report with support.",
     )
 
 

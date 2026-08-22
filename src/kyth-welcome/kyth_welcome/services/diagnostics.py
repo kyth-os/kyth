@@ -82,31 +82,31 @@ def _system_hub_probe() -> HardwareProbe:
 
     if not app_ok:
         return HardwareProbe(
-            "System Hub", "err",
-            "System Hub executable is missing or not runnable.",
+            "Pulse", "err",
+            "Pulse executable is missing or not runnable.",
             "\n".join(details),
             "Reinstall /usr/bin/kyth-welcome from the current image or repository checkout.",
         )
 
     if not launcher_ok or not desktop_uses_launcher or not autostart_uses_launcher:
         return HardwareProbe(
-            "System Hub", "warn",
-            "System Hub is installed, but the launcher diagnostics wrapper is not fully active.",
+            "Pulse", "warn",
+            "Pulse is installed, but the launcher diagnostics wrapper is not fully active.",
             "\n".join(details),
             "Install kyth-welcome-launch and refresh the desktop entry so launch failures are logged.",
         )
 
     if _system_hub_log_has_self_error(log_tail):
         return HardwareProbe(
-            "System Hub", "warn",
-            "Recent System Hub launch log contains an error.",
+            "Pulse", "warn",
+            "Recent Pulse launch log contains an error.",
             "\n".join(details),
             "Review the recent launch log included above.",
         )
 
     return HardwareProbe(
-        "System Hub", "ok",
-        "System Hub launcher and diagnostics wrapper are installed.",
+        "Pulse", "ok",
+        "Pulse launcher and diagnostics wrapper are installed.",
         "\n".join(details),
     )
  # _system_hub_probe

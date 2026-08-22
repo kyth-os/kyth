@@ -66,7 +66,7 @@ disk partitions.
 3. Boot the USB drive and open **Install KythOS**.
 4. Choose the target disk and installation layout, then create the local user.
 5. Let the installer verify and deploy the pinned KythOS image embedded in the ISO.
-6. Reboot, open **KythOS System Hub**, and complete the first-run checklist.
+6. Reboot, open **Kyth Pulse**, and complete the first-run checklist.
 
 The installer uses `bootc install to-disk` under a local graphical frontend.
 Before changing disk state, it verifies the embedded OCI manifest against the
@@ -124,36 +124,29 @@ KythOS does not maintain long-lived historical release branches. Stable and
 testing are moving channels; immutable artifacts remain available for audit and
 recovery, but old artifacts do not receive security updates.
 
-## System Hub
+## Kyth Pulse
 
 <div align="center">
-<img src="docs/system-hub-home.png" alt="KythOS System Hub" width="100%">
+<img src="docs/system-hub-home.png" alt="Kyth Pulse" width="100%">
 </div>
 
-System Hub is the main control surface for setup and support. Pages are loaded
-on demand so opening the Hub does not initialize every probe and service at
+Kyth Pulse is the main control surface for setup and support. Pages are loaded
+on demand so opening Pulse does not initialize every probe and service at
 once. Shared probe and update snapshots also prevent multiple pages and
 notifications from repeating the same expensive checks.
 
 | Area | Current capabilities |
 | --- | --- |
-| Home | First-run progress, common actions, system summary, and role-aware guidance |
-| Gaming | Launcher setup, installed-library status, ProtonDB context, migration, fixes, capture, and tuning tools |
-| Performance | Performance profiles, sched-ext controls, Gamescope, MangoHud, and workload-oriented tuning |
-| Compatibility | Game and launcher expectations, anti-cheat limitations, and known workarounds |
-| Apps | Flatpak discovery, creator and developer tools, work setup, and Windows file migration |
-| Updates | bootc and Flatpak status, staged deployments, firmware checks, and automatic-update controls |
-| Hardware | GPU, display, controller, Bluetooth, storage, firmware, NVIDIA, and kernel guidance |
-| Desktop | Plasma and Wayland profiles, layout repair, screenshots, and screen-sharing help |
-| Network | VPN, SMB shares, and rclone-backed Google Drive, OneDrive, Dropbox, and other remotes |
-| Health and Repair | Diagnostics, support snapshots, focused repairs, setup transfer, and recovery actions |
-| Guardian | Self-healing dashboard — live health, history, recipes, and optional local AI diagnosis (System → Guardian) |
-| Advanced | Channel switching, kernel image selection, NVIDIA support, and issue feedback |
+| Pulse | Health orb, the one next step, and destination tiles for Play, Apps, This PC, and Move In |
+| Play | Launcher setup, installed-library status, ProtonDB context, controllers, and performance boost |
+| Apps | Flatpak discovery, familiar alternatives, and work setup |
+| This PC | Updates, hardware, Guardian, diagnostics, repair, and advanced tools under More |
+| Move In | Files, saves, cloud storage, network shares, and VPN |
 
 ### VPN
 
 KythOS includes a standalone **VPN Connect** application and the same VPN page
-inside System Hub. Both use one shared implementation built around
+inside Pulse. Both use one shared implementation built around
 `openconnect`, with saved connection settings, redacted logs, gateway probing,
 and a GlobalProtect SAML browser flow. The standalone window is single-instance
 and stays alive while a connection worker is active.
@@ -161,7 +154,7 @@ and stays alive while a connection worker is active.
 ## Gaming, work, and creator setup
 
 KythOS keeps the base image focused on host integration while installing most
-desktop applications from Flathub. System Hub and the shipped `ujust` recipes
+desktop applications from Flathub. Pulse and the shipped `ujust` recipes
 cover the rest.
 
 ### Gaming

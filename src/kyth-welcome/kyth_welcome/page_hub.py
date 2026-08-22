@@ -14,8 +14,10 @@ from .qt import (
     QVBoxLayout,
     QWidget,
     Qt,
+    Signal,
     single_shot,
 )
+from .page_registry import PULSE_RAIL
 from .services.welcome import (
     MOVE_IN_CHECKLIST,
     MOVE_IN_JOURNEY,
@@ -84,6 +86,7 @@ class SectionedHubPage(QWidget):
     child_specs: dict[str, tuple[str, str, bool, dict]] = {}
     gaming_hidden_tabs: tuple[str, ...] = ()
     more_sections: tuple[str, ...] = ()
+    section_changed = Signal(str)
 
     def __init__(self, navigate=None):
         super().__init__()
@@ -100,23 +103,34 @@ class SectionedHubPage(QWidget):
         header = QWidget()
         header.setObjectName("page-header")
         header_l = QVBoxLayout(header)
-        header_l.setContentsMargins(48, 20, 56, 12)
+        header_l.setContentsMargins(48, 24, 56, 8)
         header_l.setSpacing(4)
-        eyebrow = QLabel("KYTH PULSE")
-        eyebrow.setObjectName("eyebrow")
-        header_l.addWidget(eyebrow)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        glyph = next((item.glyph for item in PULSE_RAIL if item.dest == self.dest_title), "")
+        if glyph:
+            glyph_lbl = QLabel(glyph)
+            glyph_lbl.setObjectName("pulse-hub-glyph")
+            title_row.addWidget(glyph_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
         title = QLabel(self.dest_title)
         title.setObjectName("heading")
-        header_l.addWidget(title)
+        title_row.addWidget(title, 1, Qt.AlignmentFlag.AlignVCenter)
+        header_l.addLayout(title_row)
         sub = QLabel(self.dest_subtitle)
         sub.setObjectName("subheading")
         sub.setWordWrap(True)
         header_l.addWidget(sub)
         root.addWidget(header)
 
+        tab_host = QWidget()
+        tab_host.setObjectName("pulse-hub-tabs")
+        tab_l = QHBoxLayout(tab_host)
+        tab_l.setContentsMargins(36, 4, 44, 8)
+        tab_l.setSpacing(0)
         self._tabs = SegmentedTabBar(list(self.tab_items), active="overview")
         self._tabs.activated.connect(self.show_section)
-        root.addWidget(self._tabs)
+        tab_l.addWidget(self._tabs)
+        root.addWidget(tab_host)
 
         self._stack = QStackedWidget()
         self._stack.setObjectName("content-area")
@@ -172,6 +186,7 @@ class SectionedHubPage(QWidget):
             self._section = "More"
             self._tabs.set_active("More")
             self._stack.setCurrentWidget(self._more)
+            self.section_changed.emit(self._section)
             return
         if section != "overview" and section not in self.child_specs:
             section = "overview"
@@ -179,6 +194,7 @@ class SectionedHubPage(QWidget):
         self._tabs.set_active(self._tab_for_section(section) if section != "overview" else "overview")
         if section == "overview":
             self._stack.setCurrentWidget(self._overview)
+            self.section_changed.emit(self._section)
             return
         page = self._children.get(section)
         if page is None:
@@ -187,6 +203,7 @@ class SectionedHubPage(QWidget):
             self._children[section] = page
             self._stack.addWidget(page)
         self._stack.setCurrentWidget(page)
+        self.section_changed.emit(self._section)
 
     def apply_profile(self, profile: str) -> None:
         self._profile = profile

@@ -6,6 +6,7 @@ from datetime import datetime
 from .core_base import IS_LIVE, load_profile, restyle, save_profile
 from .services.launch import reboot_to_apply
 from .services.setup_state import STEP_LABELS, STEP_RESUME_PAGE, incomplete_steps
+from .page_registry import PULSE_RAIL
 from .services.welcome import (
     FIRST_WEEK_ITEMS,
     _FIRST_WEEK_DISMISS,
@@ -89,17 +90,6 @@ class WelcomePage(Page):
         self._subhead.setWordWrap(True)
         self._add(self._subhead)
 
-        apply_row = QHBoxLayout()
-        apply_row.setSpacing(10)
-        self._apply_preset_btn = QPushButton(f"Apply {self._profile.title()} desktop")
-        self._apply_preset_btn.setToolTip("Apply the Everyday or Gaming desktop preset for this mode.")
-        self._apply_preset_btn.clicked.connect(lambda _=False: self._apply_role_preset())
-        apply_row.addWidget(self._apply_preset_btn)
-        self._preset_status = QLabel("Ready to tune.")
-        self._preset_status.setObjectName("status-dim")
-        apply_row.addWidget(self._preset_status, 1)
-        self._add_layout(apply_row)
-
         hero = QHBoxLayout()
         hero.setSpacing(20)
         hero.addWidget(self._make_orb(), 0, Qt.AlignmentFlag.AlignTop)
@@ -108,6 +98,19 @@ class WelcomePage(Page):
 
         self._add(self._make_facts_strip())
         self._add_layout(self._make_dest_tiles())
+
+        apply_row = QHBoxLayout()
+        apply_row.setSpacing(8)
+        self._apply_preset_btn = QPushButton(f"Apply {self._profile.title()} desktop")
+        self._apply_preset_btn.setObjectName("pulse-hub-link")
+        self._apply_preset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._apply_preset_btn.setToolTip("Apply the Everyday or Gaming desktop preset for this mode.")
+        self._apply_preset_btn.clicked.connect(lambda _=False: self._apply_role_preset())
+        apply_row.addWidget(self._apply_preset_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        self._preset_status = QLabel("Ready to tune.")
+        self._preset_status.setObjectName("status-dim")
+        apply_row.addWidget(self._preset_status, 1)
+        self._add_layout(apply_row)
 
     def _make_orb(self) -> QFrame:
         self._orb = QFrame()
@@ -178,12 +181,29 @@ class WelcomePage(Page):
         row = QHBoxLayout()
         row.setSpacing(12)
         self._dest_tile_btns: list[QPushButton] = []
+        glyphs = {item.dest: item.glyph for item in PULSE_RAIL}
         for key, title, copy in pulse_dest_tiles(self._profile):
-            btn = QPushButton(f"{title}\n{copy}")
+            btn = QPushButton()
             btn.setObjectName("pulse-dest-tile")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setMinimumHeight(88)
+            btn.setMinimumHeight(118)
+            layout = QVBoxLayout(btn)
+            layout.setContentsMargins(16, 16, 16, 16)
+            layout.setSpacing(4)
+            glyph = QLabel(glyphs.get(key, ""))
+            glyph.setObjectName("pulse-dest-glyph")
+            title_lbl = QLabel(title)
+            title_lbl.setObjectName("pulse-dest-title")
+            copy_lbl = QLabel(copy)
+            copy_lbl.setObjectName("pulse-dest-copy")
+            copy_lbl.setWordWrap(True)
+            for child in (glyph, title_lbl, copy_lbl):
+                child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                layout.addWidget(child)
             btn._dest_key = key
+            btn._glyph_lbl = glyph
+            btn._title_lbl = title_lbl
+            btn._copy_lbl = copy_lbl
             btn.clicked.connect(lambda _=False, b=btn: self._navigate(b._dest_key))
             self._dest_tile_btns.append(btn)
             row.addWidget(btn, 1)
@@ -191,10 +211,13 @@ class WelcomePage(Page):
 
     def _refresh_dest_tiles(self) -> None:
         tiles = pulse_dest_tiles(self._profile)
+        glyphs = {item.dest: item.glyph for item in PULSE_RAIL}
         buttons = getattr(self, "_dest_tile_btns", [])
         for btn, (key, title, copy) in zip(buttons, tiles):
             btn._dest_key = key
-            btn.setText(f"{title}\n{copy}")
+            btn._glyph_lbl.setText(glyphs.get(key, ""))
+            btn._title_lbl.setText(title)
+            btn._copy_lbl.setText(copy)
             restyle(btn)
 
     def _current_next_step(self):

@@ -15,7 +15,7 @@ import ast
 import inspect
 from unittest.mock import patch
 
-from kyth_welcome.qt import QApplication, QPushButton
+from kyth_welcome.qt import QApplication, QPushButton, QLabel, QWidget
 from kyth_welcome.services.runtime import shutdown_threads
 from kyth_welcome.windows import MainWindow
 from kyth_welcome.wizard import WizardWindow
@@ -35,6 +35,15 @@ assert "gaming" not in wizard._steps
 wizard.close()
 
 hub = MainWindow()
+assert hub.windowTitle() == "Kyth Pulse"
+rail = hub.findChild(QWidget, "pulse-rail")
+assert rail is not None
+assert rail.width() >= 100
+play = hub._rail_buttons["Play"]
+assert play.accessibleName() == "Play"
+assert any(label.text() == "Play" for label in play.findChildren(QLabel))
+wordmark = hub.findChild(QLabel, "pulse-rail-wordmark")
+assert wordmark is not None and wordmark.text() == "PULSE"
 pages = {
     key: hub._ensure_page(index)
     for key, index in hub._page_index_by_key.items()

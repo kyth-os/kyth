@@ -47,8 +47,9 @@ QPushButton#breadcrumb-link {{
     border: none;
     border-radius: 6px;
     padding: 4px 8px;
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 15px;
+    font-weight: 750;
+    letter-spacing: -0.2px;
     text-align: left;
 }}
 

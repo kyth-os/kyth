@@ -69,7 +69,7 @@ class SmokeCheckTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["healthy"], 1)
         self.assertEqual(payload["summary"]["warning"], 1)
         self.assertEqual(payload["summary"]["error"], 1)
-        self.assertIn("System Hub", payload["results"][1]["remediation"])
+        self.assertIn("Pulse", payload["results"][1]["remediation"])
 
     def test_health_text_groups_components_by_section(self) -> None:
         report = HealthReport(

@@ -80,6 +80,14 @@ class ShippedCommandContracts(unittest.TestCase):
                 with self.subTest(desktop=desktop.relative_to(ROOT), icon=icon):
                     self.assertIn(f"{icon}.svg", icon_installer)
 
+    def test_pulse_launcher_desktop_name(self):
+        desktop = ROOT / "src/kyth-welcome/kyth-welcome.desktop"
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        parser.read(desktop, encoding="utf-8")
+        self.assertEqual(parser["Desktop Entry"]["Name"], "Kyth Pulse")
+        self.assertEqual(parser["Desktop Entry"]["GenericName"], "System Hub")
+        self.assertIn("pulse", parser["Desktop Entry"]["Keywords"].lower())
+
 
 class BuildAssemblyContracts(unittest.TestCase):
     def test_package_install_sources_do_not_pin_literal_rpm_nvrs(self):

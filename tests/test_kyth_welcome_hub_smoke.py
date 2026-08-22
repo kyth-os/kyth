@@ -92,6 +92,27 @@ class TestHubSmoke(unittest.TestCase):
         self.assertEqual(pc.current_section(), "NVIDIA")
         self.assertEqual(pc._tab_for_section("NVIDIA"), "More")
 
+    def test_pulse_chrome_matches_labeled_rail(self):
+        from PySide6.QtWidgets import QLabel, QWidget
+
+        self.assertEqual(self.window.windowTitle(), "Kyth Pulse")
+        rail = self.window.findChild(QWidget, "pulse-rail")
+        self.assertIsNotNone(rail)
+        self.assertGreaterEqual(rail.width(), 100)
+        play = self.window._rail_buttons["Play"]
+        self.assertEqual(play.accessibleName(), "Play")
+        self.assertTrue(any(label.text() == "Play" for label in play.findChildren(QLabel)))
+        wordmark = self.window.findChild(QLabel, "pulse-rail-wordmark")
+        self.assertIsNotNone(wordmark)
+        self.assertEqual(wordmark.text(), "PULSE")
+        self.window._navigate_to("Play")
+        self._app.processEvents()
+        self.assertEqual(self.window._place_btn.text(), "Play")
+        self.window._navigate_to("Performance")
+        self._app.processEvents()
+        self.assertEqual(self.window._place_btn.text(), "Play")
+        self.assertIn("Boost", self.window._crumb_lbl.text())
+
     def test_ensure_page_and_grab(self):
         for key in [d.key for d in self.window._page_descriptors][:5]:
             idx = self.window._page_index_by_key[key]
