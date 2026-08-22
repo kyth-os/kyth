@@ -98,6 +98,13 @@ class BuildProfileTests(unittest.TestCase):
         self.assertIn("StartLimitIntervalSec=60", service)
         self.assertIn("StartLimitBurst=3", service)
 
+    def test_gamescope_shaders_optional_until_f44_copr(self):
+        gaming = _read("build_files/scripts/packages/06-gaming-core.sh")
+        self.assertIn("gamescope-shaders", gaming)
+        required = gaming.split("required_gaming_rpms=(")[1].split(")")[0]
+        self.assertIn("gamescope\n", required)
+        self.assertNotIn("gamescope-shaders", required)
+
     def test_dependent_workflows_require_successful_image_build(self):
         workflow = _read(".github/workflows/build.yml")
         iso = _read(".github/workflows/build-live-iso.yml")

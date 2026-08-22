@@ -51,6 +51,10 @@ if is_enabled "${ENABLE_GAMING_CORE:-1}"; then
 	)
 fi
 
+# gamescope-shaders (Reshade effects under /usr/share/gamescope/reshade) lives in
+# ublue-os/bazzite COPR but currently has no Fedora 44 build — only fedora-43.
+# Keep it in the install list so it lands when COPR catches up; do not fail-closed
+# on it (see required_gaming_rpms below).
 dnf_retry install -y --skip-unavailable --exclude=libde265.i686 \
 	gamescope \
 	gamescope-shaders \
@@ -78,9 +82,9 @@ dnf_retry install -y --skip-unavailable --exclude=libde265.i686 \
 	"${multilib_pkgs[@]}"
 
 # --skip-unavailable must not silently drop the x86_64 gaming stack.
+# gamescope-shaders is intentionally omitted: no F44 COPR build yet (optional).
 required_gaming_rpms=(
 	gamescope
-	gamescope-shaders
 	mangohud
 	gamemode
 	steam-devices
