@@ -161,7 +161,6 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
     : "cache-bust=${BUILD_DATE}" && \
     set -euo pipefail; \
     dnf5 upgrade -y --refresh --setopt=retries=10 --setopt=timeout=120 --setopt=zchunk=False --setopt=max_parallel_downloads=10 --setopt=keepcache=1 \
-        --disablerepo='fedora-multimedia' \
         --exclude='gstreamer1-plugins-bad' \
         --exclude='gstreamer1-plugins-bad.i686' && \
     source /ctx/lib/fedora-kernel.sh && \

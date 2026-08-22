@@ -14,14 +14,15 @@ if [[ "${ENABLE_MESA_GIT:-0}" == "0" ]]; then
 	echo "Mesa-git COPR layer disabled by ENABLE_MESA_GIT=0"
 
 	# Keep the default image on the stable Fedora/RPM Fusion Mesa stack. Some
-	# base images expose negativo17's fedora-multimedia repo, whose Mesa builds
-	# can outrank Fedora's EVRs and leave AMD VA-API present but unable to
-	# initialize. Layer 3's daily upgrade can reintroduce those packages, so
-	# normalize the GPU userspace stack here on every build.
+	# base images historically exposed negativo17's fedora-multimedia Mesa,
+	# which can outrank Fedora's EVRs and leave AMD VA-API present but unable
+	# to initialize. packages/03-rpmfusion removes those repo files, so do not
+	# pass --disablerepo for that deleted repo id (dnf5 exits 2 when gone).
+	# Layer 3's daily upgrade can still reintroduce mismatched RPMs from cache,
+	# so normalize the GPU userspace stack here on every build.
 	# Layer 3 refreshed the same stable repositories immediately before this
 	# script. Reuse that metadata instead of fetching it again.
 	dnf5 distro-sync -y --allowerasing \
-		--disablerepo='fedora-multimedia' \
 		mesa\* \
 		libdrm \
 		libva\* \
@@ -51,10 +52,9 @@ else
 
 	# Some base images carry negativo17 Mesa packages with newer or equal EVRs
 	# than Fedora, which can make a normal upgrade leave the intended mesa-git
-	# layer unused. Sync the Mesa stack with negativo17 disabled so xxmitsu's
-	# COPR wins when this layer is enabled.
+	# layer unused. Multimedia repos are already removed in packages/03; sync
+	# the Mesa stack so xxmitsu's COPR wins when this layer is enabled.
 	dnf5 distro-sync -y --refresh --allowerasing \
-		--disablerepo='fedora-multimedia' \
 		mesa\* \
 		libdrm \
 		libva\* \
