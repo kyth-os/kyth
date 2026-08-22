@@ -68,7 +68,8 @@ jobs:
           [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ -z "${SOURCE_GITHUB_SHA}" || "${SOURCE_GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${ORIGINAL_EVENT}" =~ ^[a-z_]*$ ]]
-          [[ "${ORIGINAL_ACTOR}" =~ ^[A-Za-z0-9-]*$ ]]
+          # GitHub Apps report as name[bot] (cursor[bot], dependabot[bot], …).
+          [[ "${ORIGINAL_ACTOR}" =~ ^([A-Za-z0-9-]+(\[bot\])?)?$ ]]
 
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
