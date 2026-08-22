@@ -107,7 +107,7 @@ class _FinishStepMixin:
         self._finish_work_btn.clicked.connect(lambda: self._open_hub_at("Work Setup"))
         self._finish_work_btn.setVisible(self._profile == "everyday")
         btn_row.addWidget(self._finish_work_btn)
-        hub_btn = QPushButton("Open Pulse")
+        hub_btn = QPushButton("Open Hub")
         hub_btn.clicked.connect(lambda: (self._next_btn.click() or None))
         btn_row.addWidget(hub_btn)
         btn_row.addStretch()

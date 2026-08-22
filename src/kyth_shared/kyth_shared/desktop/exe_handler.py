@@ -127,7 +127,7 @@ def save_auto_bottles(enabled: bool, conf_path: str = _CONF_PATH) -> None:
 
 
 def open_system_hub_page(page: str) -> None:
-    """Launch Kyth Pulse focused on a given page."""
+    """Launch Kyth Hub focused on a given page."""
     launcher = shutil.which("kyth-welcome-launch") or "/usr/bin/kyth-welcome-launch"
     try:
         subprocess.Popen([launcher, "--page", page])  # noqa: S603 -- fixed launcher argv

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""kyth-welcome — Kyth Pulse entry point.
+"""kyth-welcome — Kyth Hub entry point.
 
 The production entry point is generated from pyproject.toml. This source-tree
 shim remains convenient for development and imports the adjacent package.

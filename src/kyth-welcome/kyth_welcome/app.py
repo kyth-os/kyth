@@ -118,7 +118,7 @@ def main():
     # QThread aborts the process, turning a normal quit into a crash.
     app.aboutToQuit.connect(shutdown_threads)
     app.setApplicationName("kyth-welcome")
-    app.setApplicationDisplayName("Kyth Pulse")
+    app.setApplicationDisplayName("Kyth Hub")
     app.setDesktopFileName("kyth-welcome")
     app.setWindowIcon(QIcon.fromTheme("kyth"))
     app.setStyleSheet(QSS)
@@ -135,7 +135,7 @@ def main():
     if lock is None:
         if _forward_to_running_instance(start_page):
             return
-        print("Kyth Pulse is already running", file=sys.stderr)
+        print("Kyth Hub is already running", file=sys.stderr)
         return
 
     try:
@@ -150,7 +150,7 @@ def main():
         if server is None:
             if _forward_to_running_instance(start_page):
                 return
-            print("Kyth Pulse is already running", file=sys.stderr)
+            print("Kyth Hub is already running", file=sys.stderr)
             return
         app._hub_instance_server = server  # type: ignore[attr-defined]
         app._hub_instance_lock = lock  # type: ignore[attr-defined]

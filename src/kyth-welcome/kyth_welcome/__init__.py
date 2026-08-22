@@ -1,7 +1,7 @@
-"""kyth-welcome — Kyth Pulse and first-run wizard.
+"""kyth-welcome — Kyth Hub and first-run wizard.
 
 Shows once on first login (via /etc/skel autostart) and is always
-accessible from the application menu as "Kyth Pulse".
+accessible from the application menu as "Kyth Hub".
 
 Package layout:
     qt.py          Qt binding shim (PySide6 preferred, PyQt6 fallback)
@@ -11,7 +11,7 @@ Package layout:
     services/      domain logic (process, bootc, registry, runtime, …)
     widgets.py     shared UI building blocks (Page base, cards, tiles)
     page_*.py      one module per hub page
-    windows.py     MainWindow (Pulse shell)
+    windows.py     MainWindow (Hub shell)
     wizard/        first-run WizardWindow + step mixins
     app.py         entry point
 """

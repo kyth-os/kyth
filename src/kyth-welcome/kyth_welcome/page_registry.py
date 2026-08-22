@@ -35,7 +35,7 @@ class PulseRailItem:
 
 
 PULSE_RAIL: tuple[PulseRailItem, ...] = (
-    PulseRailItem("Pulse", "Welcome", "Pulse", ("go-home",), "⌂", "Health and the next step"),
+    PulseRailItem("Home", "Welcome", "Home", ("go-home",), "⌂", "Health and the next step"),
     PulseRailItem("Play", "Play", "Play", ("applications-games", "input-gaming"), "▶", "Games, boost, and controllers"),
     PulseRailItem("Apps", "Apps", "Apps", ("plasmadiscover", "applications-all"), "⬡", "Discover apps and work setup"),
     PulseRailItem("This PC", "This PC", "This PC", ("computer", "computer-laptop"), "◈", "Health, updates, and hardware"),
@@ -44,7 +44,7 @@ PULSE_RAIL: tuple[PulseRailItem, ...] = (
 
 # Child pages stay in the stack for search; the rail highlights the destination.
 _DESTINATION_PAGES: dict[str, tuple[str, ...]] = {
-    "Pulse": ("Welcome",),
+    "Home": ("Welcome",),
     "Play": ("Play", "Gaming", "Performance", "Compatibility", "Controllers"),
     "Apps": ("Apps", "App Store", "Work Setup"),
     "This PC": (
@@ -71,7 +71,7 @@ PAGE_DESTINATION: dict[str, str] = {
 
 def destination_for_page(key: str) -> str:
     """Map any Hub page key to its Pulse rail destination."""
-    return PAGE_DESTINATION.get(key, "Pulse")
+    return PAGE_DESTINATION.get(key, "Home")
 
 
 # Child pages folded into the hub as sections. Advanced This PC tools
@@ -111,7 +111,7 @@ def resolve_page_key(key: str) -> str:
     if not text:
         return text
     lowered = text.lower()
-    if lowered in {"home", "pulse", "system hub", "kyth pulse"}:
+    if lowered in {"home", "hub", "kyth hub", "system hub", "pulse", "kyth pulse"}:
         return "Welcome"
     for item in PULSE_RAIL:
         if text == item.dest or lowered == item.title.lower():
@@ -236,7 +236,7 @@ def _search_item_terms(item) -> tuple[str, ...]:
 
 
 SEARCH_ITEMS: dict[str, SearchItem] = {
-    "Welcome": SearchItem("Pulse", "See this PC's health and the one next step.", ("Home", "Control Panel", "System Hub", "PC focus", "Everyday preset", "Gaming preset", "Switch focus", "Dashboard")),
+    "Welcome": SearchItem("Home", "See this PC's health and the one next step.", ("Home", "Control Panel", "System Hub", "Kyth Hub", "PC focus", "Everyday preset", "Gaming preset", "Switch focus", "Dashboard")),
     "Play": SearchItem("Play", "Open games, launchers, boost, controllers, and compatibility.", ("Gaming", "Game launchers", "Steam", "Library")),
     "Apps": SearchItem("Apps", "Install trusted apps and set up work.", ("Discover", "App Store", "Work Setup")),
     "This PC": SearchItem("This PC", "Health, updates, hardware, and repair in one place.", ("Device Manager", "System", "Guardian", "Updates")),
@@ -266,7 +266,7 @@ SEARCH_ITEMS: dict[str, SearchItem] = {
     "NVIDIA": SearchItem("NVIDIA Drivers", "Check NVIDIA driver state and open driver actions.", ("Graphics drivers", "GeForce")),
     "Kernel": SearchItem("Kernel", "Choose installed kernels and understand advanced boot options.", ("Advanced system settings",)),
     "Channels": SearchItem("Update channel", "Choose stable or testing update channels.", ("Channels", "Insider program", "Update channel")),
-    "Just": SearchItem("Recipes", "Run Just recipes from Pulse without opening a terminal.", ("Just", "Just Recipes", "ujust", "Recipes")),
+    "Just": SearchItem("Recipes", "Run Just recipes from Kyth Hub without opening a terminal.", ("Just", "Just Recipes", "ujust", "Recipes")),
     "Feedback": SearchItem("Feedback", "Send feedback or report a problem with optional system details.", ("Send feedback", "Feedback Hub")),
 }
 
@@ -308,7 +308,7 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
     # windows.py's _refresh_nvidia_nav_visibility).
     nav_groups: list[tuple[str | None, list[NavItem]]] = [
         (None, [
-            (("go-home",), "⌂", "Pulse", "Welcome", _page_factory("page_welcome", "WelcomePage", navigate=navigate)),
+            (("go-home",), "⌂", "Home", "Welcome", _page_factory("page_welcome", "WelcomePage", navigate=navigate)),
             (("applications-games", "input-gaming"), "▶", "Play", "Play", _page_factory("page_hub", "PlayHubPage", navigate=navigate)),
             (("plasmadiscover", "applications-all"), "⬡", "Apps", "Apps", _page_factory("page_hub", "AppsHubPage", navigate=navigate)),
             (("computer", "computer-laptop"), "◈", "This PC", "This PC", _page_factory("page_hub", "ThisPcHubPage", navigate=navigate)),

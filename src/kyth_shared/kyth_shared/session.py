@@ -224,7 +224,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 2, notify_ready
     reporter = DiagnosticReporter("Firstboot Status")
 
     if not shutil.which("flatpak"):
-        write_app_status(status_file, "needs_attention", "Flatpak is not available. Open Pulse > This PC > Repair for details.")
+        write_app_status(status_file, "needs_attention", "Flatpak is not available. Open Hub > This PC > Repair for details.")
         return 2
 
     missing_ids = []
@@ -260,7 +260,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 2, notify_ready
     if service_state in ("active", "activating"):
         write_app_status(status_file, "setting_up", "Game launchers and migration tools are installing in the background.")
     elif service_state == "failed":
-        write_app_status(status_file, "failed", "Some default apps are missing. Open Pulse > This PC > Repair and retry Game Apps.")
+        write_app_status(status_file, "failed", "Some default apps are missing. Open Hub > This PC > Repair and retry Game Apps.")
     else:
         # Try starting
         started = False
@@ -283,7 +283,7 @@ def check_firstboot_app_status(force: bool = False, delay: int = 2, notify_ready
             write_app_status(
                 status_file,
                 "needs_attention",
-                "Some default apps are missing. Connect to the network, then open Pulse > This PC > Repair and retry Game Apps.",
+                "Some default apps are missing. Connect to the network, then open Hub > This PC > Repair and retry Game Apps.",
             )
 
     return 0

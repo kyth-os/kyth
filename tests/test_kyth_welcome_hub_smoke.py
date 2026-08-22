@@ -95,7 +95,7 @@ class TestHubSmoke(unittest.TestCase):
     def test_pulse_chrome_matches_labeled_rail(self):
         from PySide6.QtWidgets import QLabel, QWidget
 
-        self.assertEqual(self.window.windowTitle(), "Kyth Pulse")
+        self.assertEqual(self.window.windowTitle(), "Kyth Hub")
         rail = self.window.findChild(QWidget, "pulse-rail")
         self.assertIsNotNone(rail)
         self.assertGreaterEqual(rail.width(), 100)
@@ -104,7 +104,7 @@ class TestHubSmoke(unittest.TestCase):
         self.assertTrue(any(label.text() == "Play" for label in play.findChildren(QLabel)))
         wordmark = self.window.findChild(QLabel, "pulse-rail-wordmark")
         self.assertIsNotNone(wordmark)
-        self.assertEqual(wordmark.text(), "PULSE")
+        self.assertEqual(wordmark.text(), "HUB")
         self.window._navigate_to("Play")
         self._app.processEvents()
         self.assertEqual(self.window._place_btn.text(), "Play")

@@ -119,8 +119,10 @@ class UserPolishTests(unittest.TestCase):
 
     def test_stale_system_hub_desktop_shortcut_is_refreshed(self):
         stale = "[Desktop Entry]\nName=KythOS System Hub\nComment=Helper\nExec=/usr/bin/kyth-welcome-launch\n"
-        shipped = "[Desktop Entry]\nName=Kyth Pulse\nGenericName=System Hub\nComment=Health, games, apps, and this PC\nExec=/usr/bin/kyth-welcome-launch\n"
+        leftover_pulse = "[Desktop Entry]\nName=Kyth Pulse\nGenericName=System Hub\nComment=Health, games, apps, and this PC\nExec=/usr/bin/kyth-welcome-launch\n"
+        shipped = "[Desktop Entry]\nName=Kyth Hub\nGenericName=System Hub\nComment=Health, games, apps, and this PC\nExec=/usr/bin/kyth-welcome-launch\n"
         self.assertTrue(should_refresh_pulse_desktop_shortcut(stale, shipped))
+        self.assertTrue(should_refresh_pulse_desktop_shortcut(leftover_pulse, shipped))
         self.assertFalse(should_refresh_pulse_desktop_shortcut(shipped, shipped))
         self.assertFalse(should_refresh_pulse_desktop_shortcut("", shipped))
         self.assertFalse(

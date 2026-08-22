@@ -107,16 +107,16 @@ RECIPES: dict[str, Recipe] = {
     recipe.id: recipe for recipe in (
         Recipe("audio.restart", "Restart audio services", "audio",
                ("systemctl", "--user", "restart", "pipewire.service", "pipewire-pulse.service", "wireplumber.service"),
-               "safe", False, True, 900, "audio", "Open Pulse > This PC > Repair and inspect the audio stack."),
+               "safe", False, True, 900, "audio", "Open Hub > This PC > Repair and inspect the audio stack."),
         Recipe("network.restart-user", "Restart the NetworkManager user integration", "network",
                ("systemctl", "--user", "restart", "plasma-nm.service"),
                "safe", False, True, 900, "network", "Open KDE Network Settings; saved connections are not changed."),
         Recipe("flatpak.refresh-metadata", "Refresh Flatpak metadata", "flatpak",
                ("flatpak", "update", "--appstream", "--user", "--noninteractive"),
-               "safe", False, True, 1800, "flatpak", "Retry from Pulse > Apps."),
+               "safe", False, True, 1800, "flatpak", "Retry from Hub > Apps."),
         Recipe("flatpak.repair-user", "Repair user Flatpak data", "flatpak",
                ("flatpak", "repair", "--user"),
-               "confirm", False, False, 3600, "flatpak", "No apps are removed; retry the app from Pulse."),
+               "confirm", False, False, 3600, "flatpak", "No apps are removed; retry the app from Hub."),
         Recipe("bluetooth.restart", "Restart Bluetooth", "bluetooth",
                ("sudo", "-A", "systemctl", "restart", "bluetooth.service"),
                "confirm", True, False, 1800, "bluetooth", "Re-open Bluetooth Settings and reconnect the device."),
@@ -127,7 +127,7 @@ RECIPES: dict[str, Recipe] = {
                ("systemctl", "--user", "restart", "plasma-plasmashell.service"),
                "safe", False, True, 900, "plasma", "If the panel or task manager vanished, it should reappear. Open windows are kept."),
         Recipe("disk.review", "Review storage usage", "storage", tuple(),
-               "advisory", False, False, 3600, "storage", "Open Pulse > This PC > Hardware > Storage; Guardian never deletes files."),
+               "advisory", False, False, 3600, "storage", "Open Hub > This PC > Hardware > Storage; Guardian never deletes files."),
         Recipe("storage.maint", "Run storage maintenance", "storage",
                ("/usr/libexec/kyth-storage-gate",),
                "safe", False, False, 86400, "storage", "Gated btrfs scrub/balance (AC+idle+!gaming). Not a timer auto-fix — a scrub can outlive the 90s oneshot."),
@@ -1040,9 +1040,9 @@ def _notify(records: list[dict[str, Any]], config: dict[str, Any], state: dict[s
     executed = [record for record in fresh if record["action"] == "executed"]
     unresolved = [record for record in fresh if record["action"] == "recommended"]
     if executed:
-        body = f"Applied {len(executed)} safe repair(s). Open Pulse to review."
+        body = f"Applied {len(executed)} safe repair(s). Open Hub to review."
     elif unresolved:
-        body = f"Found {len(unresolved)} issue(s) that need review in Pulse."
+        body = f"Found {len(unresolved)} issue(s) that need review in Hub."
     else:
         return
     _run(("notify-send", "--app-name=KythOS", "Kyth Guardian", body), 5)

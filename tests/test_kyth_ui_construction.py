@@ -35,7 +35,7 @@ assert "gaming" not in wizard._steps
 wizard.close()
 
 hub = MainWindow()
-assert hub.windowTitle() == "Kyth Pulse"
+assert hub.windowTitle() == "Kyth Hub"
 rail = hub.findChild(QWidget, "pulse-rail")
 assert rail is not None
 assert rail.width() >= 100
@@ -43,7 +43,7 @@ play = hub._rail_buttons["Play"]
 assert play.accessibleName() == "Play"
 assert any(label.text() == "Play" for label in play.findChildren(QLabel))
 wordmark = hub.findChild(QLabel, "pulse-rail-wordmark")
-assert wordmark is not None and wordmark.text() == "PULSE"
+assert wordmark is not None and wordmark.text() == "HUB"
 pages = {
     key: hub._ensure_page(index)
     for key, index in hub._page_index_by_key.items()

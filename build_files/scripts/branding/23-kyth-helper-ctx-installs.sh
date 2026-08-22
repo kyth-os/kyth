@@ -70,7 +70,7 @@ install -m 0755 /ctx/kyth-network-share /usr/libexec/kyth-network-share
 install -m 0755 /ctx/kyth-set-sleep-mode /usr/libexec/kyth-set-sleep-mode
 install -m 0755 /ctx/kyth-retry-hardware-setup /usr/libexec/kyth-retry-hardware-setup
 
-# Place Pulse on the desktop for all new users. The executable bit is
+# Place Kyth Hub on the desktop for all new users. The executable bit is
 # required so KDE Plasma 6 treats it as trusted without prompting the user.
 mkdir -p /etc/skel/Desktop
 # _welcome_src was unset above; re-resolve for desktop seeding

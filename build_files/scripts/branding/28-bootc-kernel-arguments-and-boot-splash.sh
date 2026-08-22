@@ -85,7 +85,7 @@ ConditionPathExists=!/var/lib/kyth/first-boot-done
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/first-boot-done && plymouth message --text="After login, open Kyth Pulse to finish installing your preferred software."'
+ExecStart=/usr/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/first-boot-done && plymouth message --text="After login, open Kyth Hub to finish installing your preferred software."'
 
 [Install]
 WantedBy=basic.target

@@ -607,7 +607,7 @@ class _UpdateOpsMixin:
             free_gb = 999.0
         data = facts.get("data") if isinstance(facts.get("data"), dict) else {}
         staged_digest = facts.get("staged_digest")
-        running_text = str(facts.get("running_text") or "Kyth Pulse")
+        running_text = str(facts.get("running_text") or "Kyth Hub")
         self._booted_val.setText(running_text)
 
         # Staged row — include pending image ref + short digest when present (5/5 visibility)

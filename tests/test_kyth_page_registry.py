@@ -51,7 +51,7 @@ class PageRegistryTests(unittest.TestCase):
         for expected in ("Welcome", "Play", "Apps", "This PC", "Move In", "App Store", "Update", "Hardware", "Feedback", "Kernel"):
             self.assertIn(expected, keys)
         self.assertEqual(len(PULSE_RAIL), 5)
-        self.assertEqual([item.dest for item in PULSE_RAIL], ["Pulse", "Play", "Apps", "This PC", "Move In"])
+        self.assertEqual([item.dest for item in PULSE_RAIL], ["Home", "Play", "Apps", "This PC", "Move In"])
 
     def test_search_metadata_covers_core_pages(self):
         for expected in ("Welcome", "App Store", "Update", "Hardware", "Feedback"):
@@ -91,14 +91,14 @@ class PageRegistryTests(unittest.TestCase):
         self.assertTrue(visible_for_profile(by_key["Update"], "gaming"))
 
     def test_pulse_destinations_group_existing_pages(self):
-        self.assertEqual(destination_for_page("Welcome"), "Pulse")
+        self.assertEqual(destination_for_page("Welcome"), "Home")
         self.assertEqual(destination_for_page("Performance"), "Play")
         self.assertEqual(destination_for_page("App Store"), "Apps")
         self.assertEqual(destination_for_page("Guardian"), "This PC")
         self.assertEqual(destination_for_page("Move In"), "Move In")
         self.assertEqual(destination_for_page("Move Files"), "Move In")
         self.assertEqual(destination_for_page("Cloud Storage"), "Move In")
-        self.assertEqual(destination_for_page("unknown-page"), "Pulse")
+        self.assertEqual(destination_for_page("unknown-page"), "Home")
 
     def test_folded_pages_open_inside_destination_hubs(self):
         self.assertEqual(landing_for_page("Performance"), "Play")
@@ -120,13 +120,20 @@ class PageRegistryTests(unittest.TestCase):
         self.assertEqual(SEARCH_ITEMS["Just"].title, "Recipes")
 
     def test_resolve_page_key_maps_dest_names_and_home(self):
-        self.assertEqual(resolve_page_key("Pulse"), "Welcome")
         self.assertEqual(resolve_page_key("Home"), "Welcome")
+        self.assertEqual(resolve_page_key("Kyth Hub"), "Welcome")
         self.assertEqual(resolve_page_key("system hub"), "Welcome")
+        self.assertEqual(resolve_page_key("Pulse"), "Welcome")
         self.assertEqual(resolve_page_key("Kyth Pulse"), "Welcome")
         self.assertEqual(resolve_page_key("Play"), "Play")
         self.assertEqual(resolve_page_key("This PC"), "This PC")
         self.assertEqual(resolve_page_key("App Store"), "App Store")
+
+    def test_hub_search_does_not_claim_pulse_audio(self):
+        item = SEARCH_ITEMS["Welcome"]
+        terms = item.terms if hasattr(item, "terms") else item[2]
+        searchable = " ".join((item.title, *terms)).lower()
+        self.assertNotIn("pulse", searchable)
 
 
 if __name__ == "__main__":

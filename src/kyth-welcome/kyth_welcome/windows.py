@@ -85,7 +85,7 @@ class RailButton(QPushButton):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Kyth Pulse")
+        self.setWindowTitle("Kyth Hub")
         self.setMinimumSize(1080, 700)
         self.resize(1280, 800)
         self._profile = load_profile()
@@ -111,7 +111,7 @@ class MainWindow(QMainWindow):
             banner_layout.addSpacing(12)
 
             notice = QLabel(
-                "Connect to Wi-Fi or Ethernet first, then install KythOS or open Pulse for hardware checks."
+                "Connect to Wi-Fi or Ethernet first, then install KythOS or open Hub for hardware checks."
             )
             notice.setObjectName("live-banner-text")
             banner_layout.addWidget(notice, 1)
@@ -184,7 +184,7 @@ class MainWindow(QMainWindow):
 
         topbar_layout.addSpacing(8)
 
-        self._place_btn = QPushButton("Pulse")
+        self._place_btn = QPushButton("Home")
         self._place_btn.setObjectName("breadcrumb-link")
         self._place_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._place_btn.setToolTip("Open this destination's overview")
@@ -235,7 +235,7 @@ class MainWindow(QMainWindow):
             try:
                 branch = branch_display_name(current_branch())
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-                branch = "Kyth Pulse"
+                branch = "Kyth Hub"
             try:
                 staged = has_staged_update()
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
@@ -505,9 +505,9 @@ class MainWindow(QMainWindow):
         self._rail_logo = QLabel("K")
         self._rail_logo.setObjectName("pulse-rail-logo")
         self._rail_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._rail_logo.setToolTip("Kyth Pulse")
+        self._rail_logo.setToolTip("Kyth Hub")
         mark.addWidget(self._rail_logo)
-        pulse_word = QLabel("PULSE")
+        pulse_word = QLabel("HUB")
         pulse_word.setObjectName("pulse-rail-wordmark")
         pulse_word.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mark.addWidget(pulse_word)
@@ -669,7 +669,7 @@ class MainWindow(QMainWindow):
             return
 
         self._search_results_title.setText("Search results")
-        self._search_results_hint.setText("Open in Pulse.")
+        self._search_results_hint.setText("Open in Hub.")
         for key, _score in matches:
             descriptor = self._descriptor_by_key[key]
             title = descriptor.title
@@ -740,8 +740,8 @@ class MainWindow(QMainWindow):
         self._sidebar_channel_worker.start()
 
     def _on_sidebar_channel_ready(self, _key: str, branch: object):
-        text = {"latest": "Stable channel", "testing": "Testing channel"}.get(branch or "", "Kyth Pulse")
-        self._sidebar_ver_lbl.setToolTip(f"Kyth Pulse · {text}")
+        text = {"latest": "Stable channel", "testing": "Testing channel"}.get(branch or "", "Kyth Hub")
+        self._sidebar_ver_lbl.setToolTip(f"Kyth Hub · {text}")
 
     def _on_sidebar_channel_failed(self, _key: str, message: str) -> None:
         import logging
@@ -878,7 +878,7 @@ class MainWindow(QMainWindow):
         if busy:
             QMessageBox.warning(
                 self,
-                "Kyth Pulse Is Busy",
+                "Kyth Hub Is Busy",
                 "A task is still running. Please wait for it to finish before closing.",
             )
             event.ignore()

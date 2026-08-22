@@ -1,4 +1,4 @@
-"""Kyth Pulse shell — labeled rail, mode switch, home orb, destination tiles."""
+"""Kyth Hub shell — labeled rail, mode switch, home orb, destination tiles."""
 from ..ui_tokens import (
     KYTH_BLUE,
     KYTH_BLUE_GLOW,
