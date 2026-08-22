@@ -129,6 +129,21 @@ class BuildProfileTests(unittest.TestCase):
         # And the ISO workflow must not silently publish without a source image
         self.assertIn("source_tag", iso)
 
+    def test_image_build_gates_on_validation_only(self):
+        workflow = _read(".github/workflows/build.yml")
+        iso = _read(".github/workflows/build-live-iso.yml")
+        self.assertIn('workflows: ["Validation"]', workflow)
+        self.assertNotIn('workflows: ["Validation", "CodeQL"]', workflow)
+        self.assertNotIn("const required = ['Validation', 'CodeQL']", workflow)
+        self.assertNotIn("workflow_run:", iso.split("jobs:", 1)[0])
+
+    def test_image_build_writes_registry_cache_only(self):
+        workflow = _read(".github/workflows/build.yml")
+        self.assertNotIn("type=gha", workflow)
+        self.assertIn('--cache-from "type=registry,ref=', workflow)
+        self.assertIn('--cache-to "type=registry,ref=', workflow)
+        self.assertIn("mode=max", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
