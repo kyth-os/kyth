@@ -257,11 +257,16 @@ class WaylandBrandingContractTests(unittest.TestCase):
         for package in (
             "plasma-workspace-x11",
             "xorg-x11-server-Xorg",
-            "xorg-x11-xinit",
             "xorg-x11-drv-libinput",
         ):
             self.assertNotIn(package, baseline)
             self.assertIn(package, cleanup)
+        leftover_start = cleanup.index("forbidden_x11_session_rpms=(")
+        leftover_end = cleanup.index("leftover_x11_session_rpms=(")
+        leftover_list = cleanup[leftover_start:leftover_end]
+        self.assertNotIn("xorg-x11-xinit", leftover_list)
+        self.assertIn("xorg-x11-xinit must remain", cleanup)
+        self.assertNotIn("xorg-x11-xinit", baseline)
         self.assertNotIn("xorg-x11-drv-amdgpu", amd)
         self.assertNotIn("xorg-x11-drv-ati", amd)
         self.assertIn("xorg-x11-drv-amdgpu", cleanup)

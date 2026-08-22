@@ -18,16 +18,16 @@ dnf5 remove -y --no-autoremove \
 	cups-browsed \
 	2>/dev/null || true
 
-# Plasma X11 session + classic Xorg greeter stack. KythOS greets and logs in
+# Plasma X11 session + classic Xorg server/drivers. KythOS greets and logs in
 # on Wayland only via Plasma Login Manager. Keep NVIDIA proprietary GL/EGL
-# userspace and XWayland (Steam/Proton/Electron). --no-autoremove does not
-# protect reverse deps: removing xinit used to delete sddm. Reinstall PLM
-# after the purge, then drop leftover SDDM packages.
+# userspace and XWayland (Steam/Proton/Electron). Do not remove
+# xorg-x11-xinit: plasma-login-manager Requires it, so a purge yanks PLM
+# and the reinstall pulls xinit back. Reinstall PLM after the session
+# purge, then drop leftover SDDM packages.
 dnf5 remove -y --no-autoremove \
 	plasma-workspace-x11 \
 	kwin-x11 \
 	xorg-x11-server-Xorg \
-	xorg-x11-xinit \
 	xorg-x11-drv-libinput \
 	xorg-x11-drv-amdgpu \
 	xorg-x11-drv-ati
@@ -43,11 +43,11 @@ dnf5 remove -y --no-autoremove \
 
 # --no-autoremove can leave a package when something still Requires it. That
 # must fail the image: hiding xsessions is not the same as removing Plasma X11.
+# xorg-x11-xinit is not an X11 session; it is a PLM dependency and must stay.
 forbidden_x11_session_rpms=(
 	plasma-workspace-x11
 	kwin-x11
 	xorg-x11-server-Xorg
-	xorg-x11-xinit
 	xorg-x11-drv-libinput
 	xorg-x11-drv-amdgpu
 	xorg-x11-drv-ati
@@ -64,6 +64,10 @@ if ((${#leftover_x11_session_rpms[@]})); then
 fi
 if ! rpm -q xorg-x11-server-Xwayland >/dev/null 2>&1; then
 	echo "ERROR: xorg-x11-server-Xwayland must remain installed for games and Electron" >&2
+	exit 1
+fi
+if ! rpm -q xorg-x11-xinit >/dev/null 2>&1; then
+	echo "ERROR: xorg-x11-xinit must remain installed (plasma-login-manager Requires it)" >&2
 	exit 1
 fi
 if ! rpm -q plasma-login-manager >/dev/null 2>&1 \
