@@ -47,7 +47,7 @@ class PageRegistryTests(unittest.TestCase):
         groups = get_nav_groups(lambda _destination: None)
         keys = [key for _section, items in groups for _icons, _glyph, _label, key, _factory in items]
 
-        for expected in ("Welcome", "Play", "Apps", "This PC", "Move In", "App Store", "Update", "Hardware", "Feedback"):
+        for expected in ("Welcome", "Play", "Apps", "This PC", "Move In", "App Store", "Update", "Hardware", "Feedback", "Kernel"):
             self.assertIn(expected, keys)
         self.assertEqual(len(PULSE_RAIL), 5)
         self.assertEqual([item.dest for item in PULSE_RAIL], ["Pulse", "Play", "Apps", "This PC", "Move In"])
@@ -109,9 +109,11 @@ class PageRegistryTests(unittest.TestCase):
         self.assertEqual(landing_for_page("VPN"), "Move In")
         self.assertEqual(section_for_page("VPN"), "VPN")
         self.assertIsNone(section_for_page("Play"))
-        self.assertIsNone(section_for_page("NVIDIA"))
-        self.assertIsNone(section_for_page("Channels"))
-        self.assertIsNone(section_for_page("Feedback"))
+        self.assertEqual(section_for_page("NVIDIA"), "NVIDIA")
+        self.assertEqual(section_for_page("Channels"), "Channels")
+        self.assertEqual(section_for_page("Feedback"), "Feedback")
+        self.assertEqual(section_for_page("Kernel"), "Kernel")
+        self.assertEqual(landing_for_page("NVIDIA"), "This PC")
         self.assertEqual(SEARCH_ITEMS["Plasma Wayland"].title, "Desktop & displays")
         self.assertEqual(SEARCH_ITEMS["Channels"].title, "Update channel")
         self.assertEqual(SEARCH_ITEMS["Just"].title, "Recipes")

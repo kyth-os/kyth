@@ -679,6 +679,8 @@ class Page(QWidget):
         # Right padding accounts for the 8 px vertical scrollbar overlap
         self._layout.setContentsMargins(48, 34, 56, 42)
         self._layout.setSpacing(18)
+        self._page_header_band: QWidget | None = None
+        self._page_header_div: QWidget | None = None
 
     def _page_header(self, eyebrow: str, title: str, subtitle: str = "") -> None:
         """Insert a styled header band at the top of the page (above scroll)."""
@@ -702,9 +704,20 @@ class Page(QWidget):
             sub.setWordWrap(True)
             hdr_layout.addWidget(sub)
 
-        # Insert header before the scroll area
+        div = _divider()
+        self._page_header_band = hdr
+        self._page_header_div = div
         self._outer.insertWidget(0, hdr)
-        self._outer.insertWidget(1, _divider())
+        self._outer.insertWidget(1, div)
+
+    def set_embedded(self, embedded: bool = True) -> None:
+        """Hide Settings-style chrome when this page is a Pulse hub section."""
+        if self._page_header_band is not None:
+            self._page_header_band.setVisible(not embedded)
+        if self._page_header_div is not None:
+            self._page_header_div.setVisible(not embedded)
+        if embedded:
+            self._layout.setContentsMargins(32, 16, 40, 28)
 
     def _add(self, widget: QWidget) -> QWidget:
         self._layout.addWidget(widget)

@@ -74,7 +74,7 @@ class WelcomePage(Page):
     def set_profile(self, profile: str) -> None:
         """Chrome mode switch — keep Pulse copy in sync without owning the toggle."""
         self._profile = profile
-        self._apply_preset_btn.setText(f"Apply {profile.title()} settings")
+        self._apply_preset_btn.setText(f"Apply {profile.title()} desktop")
         self._refresh_dest_tiles()
         self._refresh_pulse_action()
         self.profile_changed.emit(profile)
@@ -91,7 +91,7 @@ class WelcomePage(Page):
 
         apply_row = QHBoxLayout()
         apply_row.setSpacing(10)
-        self._apply_preset_btn = QPushButton(f"Apply {self._profile.title()} settings")
+        self._apply_preset_btn = QPushButton(f"Apply {self._profile.title()} desktop")
         self._apply_preset_btn.setToolTip("Apply the Everyday or Gaming desktop preset for this mode.")
         self._apply_preset_btn.clicked.connect(lambda _=False: self._apply_role_preset())
         apply_row.addWidget(self._apply_preset_btn)

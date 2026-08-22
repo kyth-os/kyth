@@ -74,12 +74,24 @@ def destination_for_page(key: str) -> str:
     return PAGE_DESTINATION.get(key, "Pulse")
 
 
-# Child pages folded into the hub as sections. Unlisted dest pages (NVIDIA,
-# Channels, Just, Feedback) still open on their own stack slot.
+# Child pages folded into the hub as sections. Advanced This PC tools
+# (NVIDIA, Kernel, Channels, Just, Feedback) live under the More tab.
 DESTINATION_SECTIONS: dict[str, tuple[str, ...]] = {
     "Play": ("Gaming", "Performance", "Compatibility", "Controllers"),
     "Apps": ("App Store", "Work Setup"),
-    "This PC": ("Guardian", "Update", "Hardware", "Plasma Wayland", "Diagnostics", "Repair"),
+    "This PC": (
+        "Guardian",
+        "Update",
+        "Hardware",
+        "Plasma Wayland",
+        "Diagnostics",
+        "Repair",
+        "NVIDIA",
+        "Kernel",
+        "Channels",
+        "Just",
+        "Feedback",
+    ),
     "Move In": ("Move Files", "Cloud Storage", "Network Shares", "VPN"),
 }
 
@@ -316,12 +328,11 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
 
     advanced_items: list[NavItem] = [
         (("video-display", "preferences-desktop-display"), "▣", "NVIDIA Drivers", "NVIDIA", _page_factory("page_nvidia", "NvidiaPage")),
+        (("cpu", "applications-system"), "◌", "Kernel", "Kernel", _page_factory("page_kernel", "KernelPage")),
+        (("vcs-branch", "system-switch-user"), "⎇", "Update channel", "Channels", _page_factory("page_branches", "BranchesPage")),
+        (("application-x-executable", "utilities-terminal"), "▶", "Recipes", "Just", _page_factory("page_just", "JustPage")),
+        (("mail-send", "mail-message"), "✉", "Feedback", "Feedback", _page_factory("page_feedback", "FeedbackPage")),
     ]
-    # Kernel removed from Advanced nav — now hidden behind Gaming → Tuning → Advanced (Fedora default, Cachy opt-in via MOK). Keep page factory for deep-link/search only.
-    # advanced_items.append((("cpu", "applications-system"), "◌", "Kernel", "Kernel", _page_factory("page_kernel", "KernelPage")))
-    advanced_items.append((("vcs-branch", "system-switch-user"), "⎇", "Update channel", "Channels", _page_factory("page_branches", "BranchesPage")))
-    advanced_items.append((("application-x-executable", "utilities-terminal"), "▶", "Recipes", "Just", _page_factory("page_just", "JustPage")))
-    advanced_items.append((("mail-send", "mail-message"), "✉", "Feedback", "Feedback", _page_factory("page_feedback", "FeedbackPage")))
     nav_groups.append(("Advanced", advanced_items))
 
     return nav_groups

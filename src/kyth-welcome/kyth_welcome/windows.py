@@ -77,7 +77,7 @@ class MainWindow(QMainWindow):
             banner_layout.addSpacing(12)
 
             notice = QLabel(
-                "Connect to Wi-Fi or Ethernet first, then install KythOS or open System Hub for hardware checks."
+                "Connect to Wi-Fi or Ethernet first, then install KythOS or open Pulse for hardware checks."
             )
             notice.setObjectName("live-banner-text")
             banner_layout.addWidget(notice, 1)
@@ -93,9 +93,10 @@ class MainWindow(QMainWindow):
             central_layout.addWidget(banner)
 
         self._build_topbar(central_layout)
-        self._build_mission_bar(central_layout)
-        if getattr(self, "_mission_bar", None) is not None:
-            self._mission_bar.hide()
+        self._mission_bar = None
+        self._mission_pills = []
+        self._mission_guardian_hint = None
+        self._mission_ai_hint = None
         self._build_search_panel(central_layout)
 
         root = self._create_main_content_root()
@@ -163,7 +164,7 @@ class MainWindow(QMainWindow):
         self._search_box = QLineEdit()
         self._search_box.setObjectName("search-box")
         self._search_box.setPlaceholderText("Ask Kyth or jump to a task…")
-        self._search_box.setToolTip("Search settings, apps, or familiar names (Ctrl+K)")
+        self._search_box.setToolTip("Search tasks, apps, or familiar names (Ctrl+K)")
         self._search_box.setFixedWidth(380)
         self._search_box.setClearButtonEnabled(True)
         topbar_layout.addWidget(self._search_box)
@@ -357,14 +358,19 @@ class MainWindow(QMainWindow):
 
         # AI hint: surface repair plan summary gathered off-thread
         try:
+            hint = getattr(self, "_mission_ai_hint", None)
+            if hint is None:
+                return
             summary = str(facts.get("repair_summary") or "")[:80]
             if summary and "healthy" not in summary.lower():
-                self._mission_ai_hint.setText(summary)
-                self._mission_ai_hint.show()
+                hint.setText(summary)
+                hint.show()
             else:
-                self._mission_ai_hint.hide()
+                hint.hide()
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-            self._mission_ai_hint.hide()
+            hint = getattr(self, "_mission_ai_hint", None)
+            if hint is not None:
+                hint.hide()
 
     def _show_palette(self):
         dlg = QDialog(self)
@@ -403,7 +409,7 @@ class MainWindow(QMainWindow):
                 super().keyPressEvent(event)
 
         edit = _PaletteSearch(dlg)
-        edit.setPlaceholderText("Search settings, apps, or Windows name — try hdr, clipboard, fancyzones")
+        edit.setPlaceholderText("Search tasks, apps, or a familiar name — try hdr, clipboard, fancyzones")
         edit.setObjectName("search-box")
         lay.addWidget(edit)
         lay.addWidget(lst, 1)
@@ -466,7 +472,7 @@ class MainWindow(QMainWindow):
         self._rail_logo = QLabel("K")
         self._rail_logo.setObjectName("pulse-rail-logo")
         self._rail_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._rail_logo.setToolTip("KythOS System Hub")
+        self._rail_logo.setToolTip("Kyth Pulse")
         rail_layout.addWidget(self._rail_logo)
         rail_layout.addSpacing(8)
 
@@ -619,14 +625,14 @@ class MainWindow(QMainWindow):
         matches = self._rank_search_results(query)
         self._search_panel.show()
         if not matches:
-            self._search_results_title.setText("No matching settings")
+            self._search_results_title.setText("No matching tasks")
             self._search_results_hint.setText(
                 "Try a task name like Device Manager, game capture, map network drive, or add or remove programs."
             )
             return
 
         self._search_results_title.setText("Search results")
-        self._search_results_hint.setText("Matched System Hub tools.")
+        self._search_results_hint.setText("Open in Pulse.")
         for key, _score in matches:
             descriptor = self._descriptor_by_key[key]
             title = descriptor.title

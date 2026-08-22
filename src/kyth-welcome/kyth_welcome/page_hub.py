@@ -41,6 +41,7 @@ def _hub_card(title: str, copy: str, page_key: str, navigate) -> QFrame:
     btn.setObjectName("primary")
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.clicked.connect(lambda _=False, k=page_key: navigate(k))
+    layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignLeft)
     return card
 
 
@@ -67,7 +68,11 @@ def _spawn_page(module_name: str, class_name: str, *, navigate=None, extra: dict
     kwargs = dict(extra or {})
     if navigate is not None:
         kwargs["navigate"] = navigate
-    return page_class(**kwargs)
+    page = page_class(**kwargs)
+    embed = getattr(page, "set_embedded", None)
+    if callable(embed):
+        embed(True)
+    return page
 
 
 class SectionedHubPage(QWidget):
@@ -78,6 +83,7 @@ class SectionedHubPage(QWidget):
     tab_items: tuple[tuple[str, str], ...] = (("overview", "Overview"),)
     child_specs: dict[str, tuple[str, str, bool, dict]] = {}
     gaming_hidden_tabs: tuple[str, ...] = ()
+    more_sections: tuple[str, ...] = ()
 
     def __init__(self, navigate=None):
         super().__init__()
@@ -128,20 +134,49 @@ class SectionedHubPage(QWidget):
         overview_scroll.setWidget(overview_host)
         self._stack.addWidget(overview_scroll)
         self._overview = overview_scroll
+        self._more = None
+        if self.more_sections:
+            more_scroll = QScrollArea()
+            more_scroll.setWidgetResizable(True)
+            more_scroll.setFrameShape(QFrame.Shape.NoFrame)
+            more_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            more_host = QWidget()
+            more_host.setObjectName("content-area")
+            more_layout = QVBoxLayout(more_host)
+            more_layout.setContentsMargins(48, 24, 56, 36)
+            more_layout.setSpacing(16)
+            self._fill_more(more_layout)
+            more_layout.addStretch()
+            more_scroll.setWidget(more_host)
+            self._stack.addWidget(more_scroll)
+            self._more = more_scroll
         root.addWidget(self._stack, 1)
 
     def _fill_overview(self, layout: QVBoxLayout) -> None:
         raise NotImplementedError
 
+    def _fill_more(self, layout: QVBoxLayout) -> None:
+        return
+
     def current_section(self) -> str:
         return self._section
 
+    def _tab_for_section(self, section: str) -> str:
+        if section == "More" or section in self.more_sections:
+            return "More"
+        return section
+
     def show_section(self, key: object) -> None:
         section = str(key or "overview")
+        if section == "More" and self._more is not None:
+            self._section = "More"
+            self._tabs.set_active("More")
+            self._stack.setCurrentWidget(self._more)
+            return
         if section != "overview" and section not in self.child_specs:
             section = "overview"
         self._section = section
-        self._tabs.set_active(section)
+        self._tabs.set_active(self._tab_for_section(section) if section != "overview" else "overview")
         if section == "overview":
             self._stack.setCurrentWidget(self._overview)
             return
@@ -318,7 +353,9 @@ class ThisPcHubPage(SectionedHubPage):
         ("Plasma Wayland", "Desktop"),
         ("Diagnostics", "Health"),
         ("Repair", "Repair"),
+        ("More", "More"),
     )
+    more_sections = ("NVIDIA", "Kernel", "Channels", "Just", "Feedback")
     child_specs = {
         "Guardian": ("page_guardian", "GuardianPage", True, {}),
         "Update": ("page_update", "UpdatePage", False, {}),
@@ -326,6 +363,11 @@ class ThisPcHubPage(SectionedHubPage):
         "Plasma Wayland": ("page_plasma_wayland", "PlasmaWaylandPage", False, {}),
         "Diagnostics": ("page_diagnostics", "DiagnosticsPage", True, {}),
         "Repair": ("page_repair", "RepairPage", True, {}),
+        "NVIDIA": ("page_nvidia", "NvidiaPage", False, {}),
+        "Kernel": ("page_kernel", "KernelPage", False, {}),
+        "Channels": ("page_branches", "BranchesPage", False, {}),
+        "Just": ("page_just", "JustPage", False, {}),
+        "Feedback": ("page_feedback", "FeedbackPage", False, {}),
     }
 
     def _fill_overview(self, layout: QVBoxLayout) -> None:
@@ -384,12 +426,17 @@ class ThisPcHubPage(SectionedHubPage):
 
         footer = QHBoxLayout()
         footer.setSpacing(8)
+        more = QPushButton("More on this PC")
+        more.setObjectName("pulse-hub-link")
+        more.setCursor(Qt.CursorShape.PointingHandCursor)
+        more.clicked.connect(lambda _=False: self.show_section("More"))
+        footer.addWidget(more)
         for label, key in (
             ("NVIDIA drivers", "NVIDIA"),
             ("Update channel", "Channels"),
             ("Feedback", "Feedback"),
         ):
-            footer.addWidget(_hub_link(label, key, self._navigate))
+            footer.addWidget(_hub_link(label, key, self.show_section))
         footer.addStretch()
         layout.addLayout(footer)
         single_shot(self, 0, self._refresh_this_pc)
@@ -471,6 +518,20 @@ class ThisPcHubPage(SectionedHubPage):
         restyle(self._gpu_chip)
         restyle(self._storage_chip)
         restyle(self._guardian_body)
+
+    def _fill_more(self, layout: QVBoxLayout) -> None:
+        intro = QLabel("Advanced tools stay on This PC. Search still finds them by the old names.")
+        intro.setObjectName("card-copy")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        for title, copy, key in (
+            ("NVIDIA drivers", "Build and verify proprietary NVIDIA kernel modules.", "NVIDIA"),
+            ("Update channel", "Follow stable or testing.", "Channels"),
+            ("Kernel", "Fedora is the default. CachyOS is opt-in.", "Kernel"),
+            ("Recipes", "Run ujust tasks without opening a terminal.", "Just"),
+            ("Feedback", "Report a problem or request a feature.", "Feedback"),
+        ):
+            layout.addWidget(_hub_card(title, copy, key, self.show_section))
 
 
 class MoveInHubPage(SectionedHubPage):

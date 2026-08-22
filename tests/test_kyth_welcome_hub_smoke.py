@@ -75,6 +75,23 @@ class TestHubSmoke(unittest.TestCase):
                 elif page is not None and hasattr(page, "current_section"):
                     self.assertEqual(page.current_section(), "overview")
 
+    def test_folded_child_hides_settings_header(self):
+        self.window._navigate_to("Performance")
+        self._app.processEvents()
+        play = self.window._pages[self.window._page_index_by_key["Play"]]
+        child = play._children.get("Performance")
+        self.assertIsNotNone(child)
+        band = getattr(child, "_page_header_band", None)
+        self.assertIsNotNone(band)
+        self.assertFalse(band.isVisible())
+
+    def test_advanced_tools_stay_on_this_pc(self):
+        self.window._navigate_to("NVIDIA")
+        self._app.processEvents()
+        pc = self.window._pages[self.window._page_index_by_key["This PC"]]
+        self.assertEqual(pc.current_section(), "NVIDIA")
+        self.assertEqual(pc._tab_for_section("NVIDIA"), "More")
+
     def test_ensure_page_and_grab(self):
         for key in [d.key for d in self.window._page_descriptors][:5]:
             idx = self.window._page_index_by_key[key]
