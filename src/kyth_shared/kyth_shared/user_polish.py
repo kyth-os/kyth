@@ -269,6 +269,35 @@ def finish_polish(stamp_name: str, home: str) -> list[OperationResult]:
     ]
 
 
+def apply_desktop_layout_step(*, force: bool, first_polish: bool) -> OperationResult:
+    """Run kyth-apply-desktop-layout. Failure must not be stamped as success.
+
+    Plasma JS removeExistingPanels() can leave the panel gone if qdbus/
+    plasmashell fails; a polish stamp would then block retry.
+    """
+    helper = shutil.which("/usr/bin/kyth-apply-desktop-layout")
+    if not helper:
+        return OperationResult("desktop-layout", OperationStatus.UNAVAILABLE)
+    if not force and not first_polish:
+        return OperationResult("desktop-layout", OperationStatus.SKIPPED)
+    argv = [helper, "--force"] if force else [helper, "--initial"]
+    kwargs: dict = {}
+    if not force:
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.DEVNULL
+    try:
+        result = run_command(argv, **kwargs)
+    except OSError as exc:
+        return OperationResult("desktop-layout", OperationStatus.FAILED, str(exc))
+    if result.returncode != 0:
+        return OperationResult(
+            "desktop-layout",
+            OperationStatus.FAILED,
+            f"exit {result.returncode}",
+        )
+    return OperationResult("desktop-layout", OperationStatus.APPLIED)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="KythOS User Comfort Polish")
     parser.add_argument("--force", action="store_true", help="Force applying visual defaults")
@@ -501,11 +530,13 @@ def main() -> None:
     if shutil.which("/usr/bin/kyth-set-kickoff-icon"):
         run_command(["/usr/bin/kyth-set-kickoff-icon"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    if shutil.which("/usr/bin/kyth-apply-desktop-layout"):
-        if args.force:
-            run_command(["/usr/bin/kyth-apply-desktop-layout", "--force"])
-        elif had_polish_stamp == 0:
-            run_command(["/usr/bin/kyth-apply-desktop-layout", "--initial"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    layout = apply_desktop_layout_step(force=args.force, first_polish=had_polish_stamp == 0)
+    if layout.status == OperationStatus.FAILED:
+        logger.error(
+            "desktop layout failed (%s); not stamping polish so it can retry",
+            layout.detail,
+        )
+        sys.exit(1)
 
     refresh_kde_sycoca()
 

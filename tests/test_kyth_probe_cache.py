@@ -84,6 +84,35 @@ class ProbeCacheFileTests(unittest.TestCase):
         self.assertEqual(got, big)
 
 
+class ProbeCacheLockTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = pathlib.Path(self._tmp.name) / "probe-cache.json"
+        probe_mod._FILE_CACHE.clear()
+
+    def tearDown(self):
+        probe_mod._FILE_CACHE.clear()
+        self._tmp.cleanup()
+
+    def test_lock_timeout_skips_write(self):
+        import fcntl
+        import os
+
+        original = {"version": probe_mod.CACHE_VERSION, "sections": {"keep": {"ts": 1, "data": True}}}
+        self.path.write_text(json.dumps(original), encoding="utf-8")
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        lock_path.touch()
+        fd = os.open(str(lock_path), os.O_RDWR)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            with mock.patch.object(probe_mod, "CACHE_LOCK_TIMEOUT_SEC", 0.05):
+                probe_mod.write_cache_file(self.path, {"version": 9, "sections": {}})
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+        self.assertEqual(json.loads(self.path.read_text()), original)
+
+
 class ProbeCachedIntegrationTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

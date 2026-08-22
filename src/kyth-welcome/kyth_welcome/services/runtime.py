@@ -479,7 +479,8 @@ class DataWorker(TrackedThread):
     def run(self):
         try:
             self.result.emit(self._key, self._fn())
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
+        except Exception as exc:  # noqa: BLE001 -- always emit failed so GUI spinners cannot hang
+            _logger.exception("DataWorker %s failed", self._key)
             self.failed.emit(self._key, str(exc))
 
 

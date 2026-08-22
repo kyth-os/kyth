@@ -134,21 +134,35 @@ def flush_dns(run: Run) -> tuple[bool, str]:
 
 
 def recapture_network(run: Run) -> tuple[bool, str]:
-    """Re-toggle NetworkManager to clear captive-portal / local-only state."""
-    off = run(("nmcli", "networking", "off"), 8)
-    if off is None or off.returncode != 0:
-        return False, "nmcli networking off failed"
-    time.sleep(2)
-    on = run(("nmcli", "networking", "on"), 8)
-    if on is None or on.returncode != 0:
-        return False, "failed to re-enable networking"
-    active = run(("nmcli", "-t", "-f", "NAME", "connection", "show", "--active"), 5)
-    name = ""
-    if active is not None and active.returncode == 0:
-        name = (active.stdout or "").splitlines()[0].strip() if (active.stdout or "").strip() else ""
-    if name and _NM_NAME_RE.fullmatch(name):
-        run(("nmcli", "connection", "up", name), 15)
-    return True, "networking re-toggled"
+    """Re-toggle NetworkManager to clear captive-portal / local-only state.
+
+    ``nmcli networking off`` must always be paired with ``on``. A failed
+    re-enable used to return False while leaving networking off, which
+    unattended auto-fix could trigger. ``network.captive-fix`` is therefore
+    confirm-only (not automatic); this helper still re-enables in ``finally``.
+    """
+    networking_off = False
+    reenabled = False
+    try:
+        off = run(("nmcli", "networking", "off"), 8)
+        if off is None or off.returncode != 0:
+            return False, "nmcli networking off failed"
+        networking_off = True
+        time.sleep(2)
+        on = run(("nmcli", "networking", "on"), 8)
+        if on is None or on.returncode != 0:
+            return False, "failed to re-enable networking"
+        reenabled = True
+        active = run(("nmcli", "-t", "-f", "NAME", "connection", "show", "--active"), 5)
+        name = ""
+        if active is not None and active.returncode == 0:
+            name = (active.stdout or "").splitlines()[0].strip() if (active.stdout or "").strip() else ""
+        if name and _NM_NAME_RE.fullmatch(name):
+            run(("nmcli", "connection", "up", name), 15)
+        return True, "networking re-toggled"
+    finally:
+        if networking_off and not reenabled:
+            run(("nmcli", "networking", "on"), 8)
 
 
 def restore_autoconnect_vpn(run: Run) -> tuple[bool, str]:

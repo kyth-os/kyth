@@ -13,7 +13,7 @@ from .disk import list_disks, list_partitions, list_free_space
 from .partition_ops import FILESYSTEM_OPTIONS, get_journal
 from .post_routes import PostRouteService
 from .imagesrc import source_status
-from .recovery import read_transaction_state
+from .recovery import read_transaction_state, rescue_guidance
 from .system import list_keymaps, list_locales, list_timezones
 
 _WEBUI_DIR = Path(__file__).parent / "webui"
@@ -245,6 +245,7 @@ class Handler(BaseHTTPRequestHandler):
             "transaction": read_transaction_state(TRANSACTION_FILE),
             "bootc_status": "",
         }
+        probe["rescue_guidance"] = rescue_guidance(probe["transaction"])
         # Last 80 lines of installer log (best-effort)
         try:
             if LOG_FILE.is_file() and not LOG_FILE.is_symlink():

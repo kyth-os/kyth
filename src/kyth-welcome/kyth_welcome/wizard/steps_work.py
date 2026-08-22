@@ -1,36 +1,7 @@
-"""Wizard work orchestrator — one-click productivity ready (N15).
-
-Reuses existing idempotent helpers (Flatpak, fonts, rclone, SMB, printer)
-in dry-run→apply order, offline-friendly, no new daemon. Single entry
-point for 'Make ready to work' that aggregates what Mint Welcome +
-Timeshift do in many clicks.
-"""
+"""Wizard mixin for the Work Ready step."""
 from __future__ import annotations
 
-from typing import Callable
-
-# Re-export check so wizard can gate "ready" without importing each helper
-def work_ready_checks() -> list[tuple[str, Callable[[], tuple[bool, str]]]]:
-    """Return (label, check_fn) pairs. check_fn → (ok, msg). All offline-safe."""
-    checks: list[tuple[str, Callable[[], tuple[bool, str]]]] = []
-    try:
-        from ..services.flatpak import _is_flatpak_installed  # type: ignore
-        checks.append(("flatpak", lambda: (True, "flatpak ready") if _is_flatpak_installed("com.brave.Browser") else (False, "Brave not installed")) )
-    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-        pass
-    # Fonts, rclone, SMB, printer checks are best-effort; wizard shows "will apply on next online"
-    checks.append(("fonts", lambda: (True, "fonts idempotent — extra fonts via ujust install-ms-fonts")))
-    checks.append(("cloud", lambda: (True, "rclone/cloud idempotent — configure in Hub if needed")))
-    checks.append(("print", lambda: (True, "printer autodetected via system-config-printer")))
-    return checks
-
-
-def orchestrate_work_setup(dry_run: bool = False) -> tuple[bool, str]:
-    """Dry-run then apply work setup. Returns (ok, msg). Offline → ok with note."""
-    if dry_run:
-        return True, "dry-run ok: work setup would ensure Brave, LibreOffice, fonts, cloud, printer"
-    # Apply is delegated to existing ujust recipes / Hub pages; orchestrator is the UX entry
-    return True, "work setup: use Hub Apps/Gaming/Work pages or `ujust install-ms-fonts` — all idempotent"
+from ..services.work import orchestrate_work_setup, work_ready_checks
 
 
 class _WorkStepMixin:
@@ -38,7 +9,6 @@ class _WorkStepMixin:
 
     def _make_work_step(self):
         from ..qt import QLabel, QPushButton, QVBoxLayout, QWidget
-        from ..widgets import _make_card
 
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -47,7 +17,11 @@ class _WorkStepMixin:
         title = QLabel("Make ready to work — one click")
         title.setObjectName("wiz-heading")
         layout.addWidget(title)
-        body = QLabel("Ensures Brave, LibreOffice, fonts, cloud, printer — all idempotent, offline shows 'will apply on next online'.")
+        body = QLabel(
+            "Installs Brave and LibreOffice if missing, writes Microsoft 365 "
+            "shortcuts, and reports fonts / cloud / printer. Idempotent; offline "
+            "leaves a note instead of pretending it applied."
+        )
         body.setObjectName("wiz-subheading")
         body.setWordWrap(True)
         layout.addWidget(body)
@@ -63,12 +37,38 @@ class _WorkStepMixin:
                 try:
                     _ok, msg = fn()
                     msgs.append(f"{label}: {msg}")
-                except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001
                     msgs.append(f"{label}: {exc}")
             status.setText("\n".join(msgs))
 
-        btn = QPushButton("Check readiness")
-        btn.clicked.connect(lambda _=False: _check())
-        layout.addWidget(btn)
+        def _apply():
+            from ..services.runtime import DataWorker, guard_disposed
+
+            apply_btn.setEnabled(False)
+            status.setText("Applying work setup…")
+            worker = DataWorker("wizard-work-apply", orchestrate_work_setup)
+            self._work_apply_worker = worker
+
+            def _done(_key, result):
+                ok, msg = result if isinstance(result, tuple) and len(result) == 2 else (False, str(result))
+                status.setText(("Ready. " if ok else "Partial. ") + str(msg))
+                apply_btn.setEnabled(True)
+
+            worker.result.connect(guard_disposed(_done))
+            worker.failed.connect(guard_disposed(lambda _k, message: (
+                status.setText(f"Work setup failed: {message}"),
+                apply_btn.setEnabled(True),
+            )))
+            worker.finished.connect(lambda: setattr(self, "_work_apply_worker", None))
+            worker.finished.connect(worker.deleteLater)
+            worker.start()
+
+        check_btn = QPushButton("Check readiness")
+        check_btn.clicked.connect(lambda _=False: _check())
+        layout.addWidget(check_btn)
+        apply_btn = QPushButton("Make ready to work")
+        apply_btn.setObjectName("primary")
+        apply_btn.clicked.connect(lambda _=False: _apply())
+        layout.addWidget(apply_btn)
         _check()
         return page

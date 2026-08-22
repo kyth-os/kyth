@@ -59,7 +59,7 @@ def detect_nvidia_async(owner, on_result, *, attr: str = "_nvidia_probe_worker")
     # Guard on_result here, once, rather than trusting every caller to do it —
     # this helper exists precisely so pages don't hand-roll DataWorker wiring.
     worker.result.connect(guard_disposed(lambda _key, has_nvidia: on_result(bool(has_nvidia))))
-    worker.failed.connect(lambda _key, _message: None)
+    worker.failed.connect(guard_disposed(lambda _key, _message: on_result(False)))
     worker.finished.connect(lambda: setattr(owner, attr, None))
     worker.finished.connect(worker.deleteLater)
     worker.start()
@@ -167,8 +167,9 @@ class NvidiaStatusView:
 def nvidia_status_view(
     *, has_gpu: bool, loaded: bool, built: bool, installed: bool,
     hw_setup_done: bool, svc_state: str, secureboot: str = "unknown",
+    akmods_busy: bool = False,
 ) -> NvidiaStatusView:
-    auto_building = svc_state == "activating"
+    auto_building = svc_state == "activating" or akmods_busy
     sb_hint = ""
     if secureboot == "enabled:not-enrolled":
         sb_hint = " Secure Boot is on but the Kyth key is not enrolled — the driver will not load until you enroll (Reboot → Enroll MOK → Continue)."

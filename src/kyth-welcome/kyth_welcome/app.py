@@ -5,8 +5,14 @@ from pathlib import Path
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, is_first_run, prefer_xwayland_if_wayland_plugin_missing, remove_autostart, wait_for_display_setup
-from .instance_ipc import decode_activate_message, encode_activate_message
+from .instance_ipc import (
+    decode_activate_message,
+    encode_activate_message,
+    instance_server_window,
+    retarget_instance_server,
+)
 from .services.runtime import shutdown_threads
+from kyth_shared.session import acquire_run_lock
 from .qt import (
     QApplication, QIcon, QLocalServer, QLocalSocket,
 )
@@ -23,6 +29,13 @@ def _instance_socket_name() -> str:
     return f"{_SOCKET_NAME_PREFIX}-{os.getuid()}"
 
 
+def _instance_lock_path() -> Path:
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
+    if runtime:
+        return Path(runtime) / "kyth-welcome.instance.lock"
+    return Path.home() / ".cache" / "kyth" / "kyth-welcome.instance.lock"
+
+
 def _forward_to_running_instance(page: str | None) -> bool:
     """If another Hub owns the local socket, ask it to raise (and optionally navigate)."""
     socket_name = _instance_socket_name()
@@ -37,24 +50,30 @@ def _forward_to_running_instance(page: str | None) -> bool:
 
 
 def _start_instance_server(window: MainWindow | WizardWindow) -> QLocalServer | None:
-    """Listen for second-launch activate messages; return None if we lost the race."""
+    """Listen for second-launch activate messages; return None if we lost the race.
+
+    The activate handler reads ``server._hub_window`` so wizard → Hub handoff
+    can retarget the socket without constructing a second listener.
+    """
     socket_name = _instance_socket_name()
     server = QLocalServer()
     server.removeServer(socket_name)
     if not server.listen(socket_name):
         return None
+    retarget_instance_server(server, window)
 
     def handle_new_connection() -> None:
         connection = server.nextPendingConnection()
         if connection is None:
             return
-        if connection.waitForReadyRead(500):
+        win = instance_server_window(server)
+        if connection.waitForReadyRead(500) and win is not None:
             page = decode_activate_message(bytes(connection.readAll()))
-            window.show()
-            window.raise_()
-            window.activateWindow()
-            if page and isinstance(window, MainWindow):
-                window._navigate_to(page)
+            win.show()
+            win.raise_()
+            win.activateWindow()
+            if page and hasattr(win, "_navigate_to"):
+                win._navigate_to(page)
         connection.close()
 
     server.newConnection.connect(handle_new_connection)
@@ -108,25 +127,43 @@ def main():
     if _forward_to_running_instance(start_page):
         return
 
-    if IS_LIVE:
-        win = MainWindow()
-    elif is_first_run():
-        win = WizardWindow()
-    else:
-        win = MainWindow()
-
-    server = _start_instance_server(win)
-    if server is None:
-        # Lost the listen race to another Hub that started between probe and listen.
+    # Hold a run lock *before* constructing a window so a lost listen race
+    # cannot still show a second Hub. Fail closed if we cannot own the lock
+    # and cannot forward to the winner.
+    lock = acquire_run_lock(_instance_lock_path())
+    if lock is None:
         if _forward_to_running_instance(start_page):
             return
-        print("Warning: could not start System Hub single-instance listener", file=sys.stderr)
-    else:
-        app._hub_instance_server = server  # type: ignore[attr-defined]
+        print("System Hub is already running", file=sys.stderr)
+        return
 
-    win.setWindowIcon(QIcon.fromTheme("kyth"))
-    win.showMaximized()
-    if start_page and isinstance(win, MainWindow):
-        win._navigate_to(start_page)
-    remove_autostart()
-    sys.exit(app.exec())
+    try:
+        if IS_LIVE:
+            win = MainWindow()
+        elif is_first_run():
+            win = WizardWindow()
+        else:
+            win = MainWindow()
+
+        server = _start_instance_server(win)
+        if server is None:
+            if _forward_to_running_instance(start_page):
+                return
+            print("System Hub is already running", file=sys.stderr)
+            return
+        app._hub_instance_server = server  # type: ignore[attr-defined]
+        app._hub_instance_lock = lock  # type: ignore[attr-defined]
+        lock = None  # held for process lifetime via the QApplication attr
+
+        win.setWindowIcon(QIcon.fromTheme("kyth"))
+        win.showMaximized()
+        if start_page and isinstance(win, MainWindow):
+            win._navigate_to(start_page)
+        remove_autostart()
+        sys.exit(app.exec())
+    finally:
+        if lock is not None:
+            try:
+                lock.close()
+            except OSError:
+                pass

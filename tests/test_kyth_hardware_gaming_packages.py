@@ -137,6 +137,12 @@ class NvidiaStatusViewTests(unittest.TestCase):
         self.assertTrue(view.keep_polling)
         self.assertFalse(view.install_visible)
 
+    def test_akmods_lock_hides_build_button(self):
+        view = self._view(akmods_busy=True)
+        self.assertTrue(view.progress_visible)
+        self.assertTrue(view.keep_polling)
+        self.assertFalse(view.install_visible)
+
     def test_failed_build_offers_retry(self):
         view = self._view(hw_setup_done=True, svc_state="failed")
         self.assertEqual(view.status_style, "status-err")

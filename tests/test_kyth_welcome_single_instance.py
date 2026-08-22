@@ -12,6 +12,8 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 from kyth_welcome.instance_ipc import (  # noqa: E402
     decode_activate_message,
     encode_activate_message,
+    instance_server_window,
+    retarget_instance_server,
 )
 
 
@@ -33,6 +35,15 @@ class HubSingleInstanceMessageTests(unittest.TestCase):
 
     def test_decode_ignores_unrelated(self):
         self.assertIsNone(decode_activate_message(b"ping"))
+
+    def test_retarget_swaps_the_window_pointer(self):
+        server = type("Server", (), {})()
+        wizard = object()
+        hub = object()
+        retarget_instance_server(server, wizard)
+        self.assertIs(instance_server_window(server), wizard)
+        retarget_instance_server(server, hub)
+        self.assertIs(instance_server_window(server), hub)
 
 
 if __name__ == "__main__":

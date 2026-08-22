@@ -510,6 +510,44 @@ class GuardianRobustnessTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("no usable audio sink", detail)
 
+    def test_captive_fix_is_not_an_unattended_auto_recipe(self):
+        recipe = guardian.RECIPES["network.captive-fix"]
+        self.assertFalse(recipe.automatic)
+        ok, _detail = guardian.execute_recipe("network.captive-fix")
+        self.assertFalse(ok)
+        decision = guardian.Decision("network.captive-fix", 1, "captive portal")
+        allowed, reason = guardian.can_execute(
+            decision,
+            {"automatic_safe_fixes": True},
+            {"history": [], "occurrences": {"network": 2}},
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "confirmation required")
+        with patch.object(guardian, "ACTION_EXECUTORS", {}):
+            with patch.object(guardian, "_run", return_value=_completed(("nmcli", "networking", "off"), 0)):
+                ok, _detail = guardian.execute_recipe("network.captive-fix", user_initiated=True)
+        self.assertTrue(ok)
+
+    def test_recapture_network_re_enables_if_on_fails(self):
+        from kyth_shared.guardian_actions import recapture_network
+
+        calls: list[tuple] = []
+
+        def _run(argv, timeout=8):
+            calls.append(tuple(argv))
+            if argv == ("nmcli", "networking", "off"):
+                return _completed(argv, 0)
+            if argv == ("nmcli", "networking", "on"):
+                return _completed(argv, 1, stderr="fail")
+            return _completed(argv, 0)
+
+        with patch("kyth_shared.guardian_actions.time.sleep"):
+            ok, detail = recapture_network(_run)
+        self.assertFalse(ok)
+        self.assertIn("re-enable", detail)
+        on_calls = [c for c in calls if c == ("nmcli", "networking", "on")]
+        self.assertGreaterEqual(len(on_calls), 2)
+
     def test_notify_uses_shared_throttle_constant(self):
         self.assertEqual(guardian.NOTIFY_THROTTLE_S, 6 * 3600)
         record = {"recipe_id": "audio.restart", "action": "recommended"}

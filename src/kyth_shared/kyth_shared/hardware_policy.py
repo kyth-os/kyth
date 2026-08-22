@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .commands import run_optional, run_text
+from .akmods_lock import acquire_akmods_lock, release_akmods_lock
 
 import time as _time
 
@@ -572,9 +573,16 @@ def _configure_nvidia() -> str:
     if not _command_ok(["modinfo", "nvidia"]):
         if not kernel:
             raise RuntimeError("unable to determine running kernel for NVIDIA module build")
-        result = run_optional(["akmods", "--force", "--kernels", kernel])
-        if result is None or result.returncode != 0:
-            raise RuntimeError(f"NVIDIA module build failed for {kernel}")
+        lock_fd = None
+        try:
+            lock_fd = acquire_akmods_lock()
+            # Another builder may have finished while we waited for the lock.
+            if not _command_ok(["modinfo", "nvidia"]):
+                result = run_optional(["akmods", "--force", "--kernels", kernel])
+                if result is None or result.returncode != 0:
+                    raise RuntimeError(f"NVIDIA module build failed for {kernel}")
+        finally:
+            release_akmods_lock(lock_fd)
     kernel_args = (
         "rd.driver.blacklist=nouveau,nova_core "
         "modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1"

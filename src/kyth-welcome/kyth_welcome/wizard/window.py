@@ -4,7 +4,7 @@ Kyth Theme rewrite: a left-hand step rail instead of the old top-dot progress
 track, and a profile-adaptive step list — Everyday skips the Gaming Setup
 step entirely rather than showing one fixed path to everyone. Step
 completion is tracked per-step via services.setup_state (STEP_KEYS: machine,
-apps, gaming) so closing the wizard early is resumable from System Hub's
+apps, work, gaming) so closing the wizard early is resumable from System Hub's
 Home page instead of silently marking everything done.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import ClassVar
 from ..core_base import load_profile, restyle, save_profile
 from ..services.runtime import running_threads
 from ..qt import (
-    QFrame, QHBoxLayout, QIcon, QLabel, QMainWindow, QMessageBox, QPushButton,
+    QApplication, QFrame, QHBoxLayout, QIcon, QLabel, QMainWindow, QMessageBox, QPushButton,
     QScrollArea, QStackedWidget, QTimer, QVBoxLayout, QWidget, Qt,
 )
 from ..services.setup_state import STEP_KEYS, mark_step, mark_wizard_closed
@@ -250,12 +250,22 @@ class WizardWindow(
     def _open_hub_at(self, page_key: str):
         """Hand off from the wizard to the System Hub opened at a page.
         closeEvent (fired by self.close()) records any not-yet-decided step
-        as skipped, so this is safe to call from any step."""
+        as skipped, so this is safe to call from any step.
+
+        The single-instance QLocalServer stays on QApplication; this only
+        retargets which window later launches raise. Constructing a Hub
+        without migrating the socket used to leave IPC on the closed wizard.
+        """
+        from ..instance_ipc import retarget_instance_server
         from ..windows import MainWindow
         main_win = MainWindow()
         main_win.setWindowIcon(QIcon.fromTheme("kyth"))
         main_win.showMaximized()
         main_win._navigate_to(page_key)
+        app = QApplication.instance()
+        server = getattr(app, "_hub_instance_server", None) if app is not None else None
+        if server is not None:
+            retarget_instance_server(server, main_win)
         self._handoff_win = main_win
         self.close()
 

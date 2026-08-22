@@ -21,6 +21,7 @@ T = TypeVar("T")
 _logger = logging.getLogger(__name__)
 
 CACHE_VERSION = 2
+CACHE_LOCK_TIMEOUT_SEC = 2.0
 
 
 class ProbeStatus(StrEnum):
@@ -182,7 +183,7 @@ def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
             # Try non-blocking lock with 2s retry window to avoid boot thunder-herd blocking
             import errno as _errno
 
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + CACHE_LOCK_TIMEOUT_SEC
             while True:
                 try:
                     fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -191,13 +192,16 @@ def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
                     if e.errno not in (_errno.EAGAIN, _errno.EACCES):
                         raise
                     if time.monotonic() >= deadline:
-                        _logger.warning("write_cache_file: lock timeout for %s, proceeding without lock", path)
+                        _logger.warning(
+                            "write_cache_file: lock timeout for %s, skipping write",
+                            path,
+                        )
                         try:
                             os.close(lock_fd)
                         except OSError:
                             pass
                         lock_fd = None
-                        break
+                        return
                     time.sleep(0.05)
         except OSError:
             lock_fd = None

@@ -19,3 +19,18 @@ def decode_activate_message(payload: bytes) -> str | None:
         return None
     page = text.split(":", 1)[1].strip()
     return page or None
+
+
+def retarget_instance_server(server: object, window: object) -> None:
+    """Point the single-instance listener at a new window (wizard → Hub).
+
+    The QLocalServer stays alive on QApplication; only the window the
+    activate handler raises may change. Qt-free so tests can cover the
+    pointer swap with a dummy server object.
+    """
+    server._hub_window = window  # type: ignore[attr-defined]
+
+
+def instance_server_window(server: object) -> object | None:
+    """Return the window the listener currently raises, if any."""
+    return getattr(server, "_hub_window", None)

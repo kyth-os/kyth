@@ -194,8 +194,10 @@ class InstallerContext:
     assurance_checks: list[dict[str, str]] = field(default_factory=list)
     # Destructive partition steps, appended as they start and again as they
     # finish. This is the only record of how far a wipe got if the machine
-    # loses power mid-commit: the coarse transaction statuses jump straight
-    # from "prepared" to "image_installed" across the whole storage phase.
+    # loses power mid-commit: coarse transaction statuses now step
+    # prepared → storage_complete → configure_started → configure_complete
+    # → secure_boot_staged → complete (legacy journals may still say
+    # "image_installed", which Rescue treats as unbootable).
     partition_steps: list[dict[str, str]] = field(default_factory=list)
     cancel_requested: threading.Event = field(default_factory=threading.Event)
 

@@ -7,6 +7,9 @@ from __future__ import annotations
 import glob
 import os
 import shlex
+from pathlib import Path
+from typing import Callable
+
 from kyth_welcome.services.command import run_sync
 
 from .gaming import _find_ntfs_drives
@@ -177,3 +180,114 @@ def m365_shortcuts_present() -> bool:
 
 
 _m365_shortcuts_present = m365_shortcuts_present
+
+
+WORK_FLATPAKS = (
+    ("com.brave.Browser", "Brave"),
+    ("org.libreoffice.LibreOffice", "LibreOffice"),
+)
+
+
+def work_ready_checks() -> list[tuple[str, Callable[[], tuple[bool, str]]]]:
+    """Return (label, check_fn) pairs. check_fn → (ok, msg). All offline-safe."""
+    checks: list[tuple[str, Callable[[], tuple[bool, str]]]] = []
+    try:
+        from .flatpak import _is_flatpak_installed
+        for app_id, name in WORK_FLATPAKS:
+            checks.append(
+                (name.lower(), lambda i=app_id, n=name: (
+                    True, f"{n} installed",
+                ) if _is_flatpak_installed(i) else (False, f"{n} not installed"))
+            )
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
+        pass
+    checks.append(("fonts", _fonts_check))
+    checks.append(("cloud", _cloud_check))
+    checks.append(("print", _printer_check))
+    return checks
+
+
+def _fonts_check() -> tuple[bool, str]:
+    try:
+        from kyth_shared.system.fonts_ready import fonts_ready
+        return fonts_ready()
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+def _cloud_check() -> tuple[bool, str]:
+    conf = Path.home() / ".config" / "rclone" / "rclone.conf"
+    if conf.is_file():
+        return True, "rclone config present"
+    return True, "rclone/cloud optional — configure in Hub Cloud if needed"
+
+
+def _printer_check() -> tuple[bool, str]:
+    if Path("/run/cups/cups.sock").exists():
+        return True, "CUPS is running"
+    return True, "printer optional — add one from Hub Work or system-config-printer"
+
+
+def _app_installed(app_id: str) -> bool:
+    try:
+        from .flatpak import _is_flatpak_installed
+        return bool(_is_flatpak_installed(app_id))
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
+        return False
+
+
+def _install_work_flatpak(app_id: str) -> tuple[bool, str]:
+    try:
+        result = run_sync(
+            [
+                "flatpak", "install", "-y", "--noninteractive", "--or-update",
+                "flathub", app_id,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False, "flatpak is not installed"
+    except (OSError, ValueError, RuntimeError) as exc:
+        return False, str(exc)
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "").strip()[:200]
+        if "Network" in err or "network" in err or "offline" in err.lower():
+            return False, "offline — will apply when networked"
+        return False, err or f"flatpak install exited {result.returncode}"
+    return True, "installed"
+
+
+def orchestrate_work_setup(dry_run: bool = False) -> tuple[bool, str]:
+    """Install Brave/LibreOffice if missing, refresh M365 shortcuts, report fonts/cloud/printer."""
+    notes: list[str] = []
+    failed: list[str] = []
+    for app_id, name in WORK_FLATPAKS:
+        if _app_installed(app_id):
+            notes.append(f"{name}: already installed")
+            continue
+        if dry_run:
+            notes.append(f"{name}: would install from Flathub")
+            continue
+        ok, msg = _install_work_flatpak(app_id)
+        (notes if ok else failed).append(f"{name}: {msg}")
+    if dry_run:
+        notes.append("M365 shortcuts: would refresh")
+    else:
+        try:
+            written = create_m365_shortcuts()
+            notes.append(f"M365 shortcuts: {written} written")
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001
+            notes.append(f"M365 shortcuts: {exc}")
+    font_ok, font_msg = _fonts_check()
+    notes.append(f"fonts: {font_msg}" + ("" if font_ok else " (Hub Work → MS fonts)"))
+    _ok, cloud_msg = _cloud_check()
+    notes.append(f"cloud: {cloud_msg}")
+    _ok, print_msg = _printer_check()
+    notes.append(f"print: {print_msg}")
+    summary = "; ".join(failed + notes) if failed else "; ".join(notes)
+    if dry_run:
+        return True, "dry-run ok: " + summary
+    return not failed, summary

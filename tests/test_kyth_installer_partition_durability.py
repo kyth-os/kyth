@@ -1,9 +1,11 @@
 """Mid-phase durability for destructive partition commits.
 
-The coarse transaction statuses jump from "prepared" straight to
+The coarse transaction statuses used to jump from "prepared" straight to
 "image_installed" across the whole storage phase, so a power loss between
-mkpart and mkfs used to leave no record of how far the wipe got. These tests
-pin the per-op bracketing and the fsync ordering that make that record survive.
+mkpart and mkfs used to leave no record of how far the wipe got. Storage now
+records "storage_complete" only after the image write; these tests still pin
+the per-op bracketing and the fsync ordering that make the mid-wipe record
+survive.
 """
 from __future__ import annotations
 

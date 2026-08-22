@@ -93,6 +93,8 @@ class NvidiaPage(Page):
         _hw_setup_service_state (systemctl is-active) are all
         subprocess-backed — _hw_setup_done() just reads a local JSON file.
         _secureboot_state (mokutil) is also cached — missing mokutil -> unknown."""
+        from kyth_shared.akmods_lock import akmods_build_in_progress
+
         return {
             "has_gpu": _detect_nvidia(),
             "loaded": _nvidia_module_loaded(),
@@ -101,6 +103,7 @@ class NvidiaPage(Page):
             "hw_setup_done": _hw_setup_done(),
             "svc_state": _hw_setup_service_state(),
             "secureboot": _secureboot_state(),
+            "akmods_busy": akmods_build_in_progress(),
         }
 
     def _refresh_status(self):
@@ -129,6 +132,7 @@ class NvidiaPage(Page):
             hw_setup_done=facts["hw_setup_done"],
             svc_state=facts["svc_state"],
             secureboot=facts.get("secureboot", "unknown"),
+            akmods_busy=bool(facts.get("akmods_busy")),
         )
 
         # Keep polling while the background service is compiling.
@@ -158,6 +162,14 @@ class NvidiaPage(Page):
         self._build_module()
 
     def _build_module(self):
+        from kyth_shared.akmods_lock import akmods_build_in_progress
+
+        if _hw_setup_service_state() == "activating" or akmods_build_in_progress():
+            self._log_panel.reset(
+                "A NVIDIA module build is already running. This page will update when it finishes.\n"
+            )
+            self._refresh_status()
+            return
         cmd = helper_action("hardware-setup").command()
         self._log_panel.reset("→ Building NVIDIA kernel module via akmods…\n")
         self._progress.show()

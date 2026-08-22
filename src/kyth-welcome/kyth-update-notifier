@@ -20,8 +20,9 @@ from pathlib import Path
 from kyth_shared.update_status import read_update_snapshot  # noqa: E402
 
 from kyth_shared.qt import (
-    QThread, QTimer, Signal as pyqtSignal, QIcon, QApplication, QMenu, QSystemTrayIcon, single_shot
+    QTimer, Signal as pyqtSignal, QIcon, QApplication, QMenu, QSystemTrayIcon, single_shot
 )
+from kyth_shared.desktop.qt_threads import TrackedThread, shutdown_threads
 
 import functools
 
@@ -167,7 +168,7 @@ def _staged_image_digest() -> str | None:
 
 # ── Restart action worker ─────────────────────────────────────────────────────
 
-class RestartActionWorker(QThread):
+class RestartActionWorker(TrackedThread):
     """Sends a persistent notification with a 'Restart Now' action button and
     emits restart_clicked if the user activates it."""
     restart_clicked = pyqtSignal()
@@ -200,7 +201,7 @@ class RestartActionWorker(QThread):
 
 # ── Update check worker ───────────────────────────────────────────────────────
 
-class UpdateCheckWorker(QThread):
+class UpdateCheckWorker(TrackedThread):
     result = pyqtSignal(str, str)  # (state, digest): state = staged|available|uptodate|unknown|error
 
     def run(self):
@@ -296,7 +297,7 @@ class UpdateCheckWorker(QThread):
 
 # ── Flatpak update check worker ───────────────────────────────────────────────
 
-class FlatpakUpdateCheckWorker(QThread):
+class FlatpakUpdateCheckWorker(TrackedThread):
     """Counts pending Flatpak app updates. Emits count (0 = all up to date)."""
     result = pyqtSignal(int)  # number of pending Flatpak updates
 
@@ -549,6 +550,7 @@ def main():
         app = QApplication(sys.argv)
         app.setApplicationName("kyth-update-notifier")
         app.setQuitOnLastWindowClosed(False)
+        app.aboutToQuit.connect(shutdown_threads)
 
         if not QSystemTrayIcon.isSystemTrayAvailable():
             sys.exit(0)

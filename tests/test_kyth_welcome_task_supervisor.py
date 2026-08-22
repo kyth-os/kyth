@@ -78,6 +78,23 @@ class TaskSupervisorFinishRaceTests(unittest.TestCase):
         self.assertIsNone(owner.worker)
         self.assertNotIn(thread, supervisor._records)
 
+    def test_data_worker_emits_failed_for_typeerror(self):
+        from kyth_welcome.services.runtime import DataWorker
+
+        def _boom():
+            raise TypeError("boom")
+
+        seen: list[tuple[str, str]] = []
+        worker = DataWorker("boom", _boom)
+        worker.failed.connect(lambda key, message: seen.append((key, message)))
+        worker.start()
+        self.assertTrue(worker.wait(5000))
+        for _ in range(10):
+            self._app.processEvents()
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0][0], "boom")
+        self.assertIn("boom", seen[0][1])
+
 
 if __name__ == "__main__":
     unittest.main()

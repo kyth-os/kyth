@@ -18,11 +18,12 @@ _VALID_STATUSES = (STATUS_DONE, STATUS_SKIPPED, STATUS_PENDING)
 
 # Steps a user can meaningfully skip and resume later. "welcome" (profile
 # pick) isn't here — it's instant and not worth surfacing as outstanding work.
-STEP_KEYS = ("machine", "apps", "gaming")
+STEP_KEYS = ("machine", "apps", "work", "gaming")
 
 STEP_LABELS = {
     "machine": "Your machine check",
     "apps": "Get apps",
+    "work": "Work ready",
     "gaming": "Gaming setup",
 }
 
@@ -30,6 +31,7 @@ STEP_LABELS = {
 STEP_RESUME_PAGE = {
     "machine": "Hardware",
     "apps": "App Store",
+    "work": "Work Setup",
     "gaming": "Gaming",
 }
 
@@ -57,6 +59,10 @@ def load_state() -> dict[str, str]:
         for key, value in raw.items():
             if key in STEP_KEYS and value in _VALID_STATUSES:
                 state[key] = value
+        # Pre-work-tracking wizard files never recorded "work". Don't
+        # resurface a Finish setup card for users who already onboarded.
+        if "work" not in raw:
+            state["work"] = STATUS_SKIPPED
     return state
 
 

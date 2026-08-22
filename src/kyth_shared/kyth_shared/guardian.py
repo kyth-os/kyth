@@ -142,7 +142,7 @@ RECIPES: dict[str, Recipe] = {
                "confirm", True, False, 21600, "controller", "Restarts system joycond after suspend; may ask for permission. Re-pair if needed."),
         Recipe("network.captive-fix", "Re-toggle networking for captive portals", "network",
                ("nmcli", "networking", "off"),
-               "safe", False, True, 1800, "network", "Re-toggles NetworkManager to clear captive portal / local-only state; saved connections kept."),
+               "safe", False, False, 1800, "network", "Re-toggles NetworkManager to clear captive portal / local-only state; saved connections kept. Not an unattended auto-fix — a failed re-enable would leave networking off."),
         Recipe("audio.sink-fallback", "Restore default audio sink", "audio",
                ("pactl", "list", "short", "sinks"),
                "safe", False, True, 900, "audio", "Falls back to the first real sink after HDMI/headset swap; no data changed."),
@@ -910,7 +910,7 @@ def execute_recipe(recipe_id: str, *, user_initiated: bool = False) -> tuple[boo
     if user_initiated:
         if recipe.risk not in {"safe", "confirm"}:
             return False, "recipe is not eligible for automatic execution"
-    elif recipe.risk != "safe" or recipe.requires_auth:
+    elif recipe.risk != "safe" or recipe.requires_auth or not recipe.automatic:
         return False, "recipe is not eligible for automatic execution"
     executor = ACTION_EXECUTORS.get(recipe_id)
     if executor is not None:

@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 from kyth_shared.user_polish import (
     OperationStatus,
     _run_operation,
+    apply_desktop_layout_step,
     apply_foundation,
     apply_places,
     cleanup_autostart,
@@ -90,6 +91,30 @@ class UserPolishTests(unittest.TestCase):
             self.assertEqual(first.status, OperationStatus.APPLIED)
             self.assertEqual(second.status, OperationStatus.SKIPPED)
             self.assertTrue(unrelated.exists())
+
+    def test_layout_step_skips_when_helper_missing(self):
+        with mock.patch("kyth_shared.user_polish.shutil.which", return_value=None):
+            result = apply_desktop_layout_step(force=False, first_polish=True)
+        self.assertEqual(result.status, OperationStatus.UNAVAILABLE)
+
+    def test_layout_step_failure_is_not_success(self):
+        failed = mock.Mock(returncode=1)
+        with mock.patch(
+            "kyth_shared.user_polish.shutil.which",
+            return_value="/usr/bin/kyth-apply-desktop-layout",
+        ), mock.patch("kyth_shared.user_polish.run_command", return_value=failed):
+            result = apply_desktop_layout_step(force=False, first_polish=True)
+        self.assertEqual(result.status, OperationStatus.FAILED)
+        self.assertIn("exit 1", result.detail)
+
+    def test_layout_step_skips_when_already_polished(self):
+        with mock.patch(
+            "kyth_shared.user_polish.shutil.which",
+            return_value="/usr/bin/kyth-apply-desktop-layout",
+        ), mock.patch("kyth_shared.user_polish.run_command") as run:
+            result = apply_desktop_layout_step(force=False, first_polish=False)
+        self.assertEqual(result.status, OperationStatus.SKIPPED)
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

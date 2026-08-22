@@ -126,3 +126,58 @@ def read_transaction_state(path: Path) -> dict:
         return value if isinstance(value, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+# Coarse durable statuses written by phases/run.py. Rescue must not treat
+# "image_installed" (legacy) or storage/configure mid-states as a finished boot.
+_RESCUE_GUIDANCE: dict[str, tuple[str, str, bool]] = {
+    "": ("unknown", "No install transaction recorded. Do not assume the disk is bootable.", False),
+    "started": ("incomplete", "Install started but storage did not finish. Stay in this live session.", False),
+    "prepared": ("incomplete", "Install prepared a plan but storage did not finish. Stay in this live session.", False),
+    "storage_complete": (
+        "unbootable",
+        "The image is on disk but the installed system is not configured yet. Continue or rescue from this live session — do not reboot into the target.",
+        False,
+    ),
+    "image_installed": (
+        "unbootable",
+        "Legacy journal: image written, configure unknown. Treat the target as not bootable until configure_complete.",
+        False,
+    ),
+    "configure_started": (
+        "unbootable",
+        "Configuring the installed system was interrupted. Continue from this live session — the target is not bootable yet.",
+        False,
+    ),
+    "configure_complete": (
+        "almost",
+        "The installed system is configured. Secure Boot enrollment may still be pending — check MOK staging before reboot.",
+        False,
+    ),
+    "secure_boot_staged": (
+        "ready",
+        "Secure Boot enrollment is staged. Reboot and enroll the MOK if the firmware prompts.",
+        True,
+    ),
+    "complete": ("ready", "Install finished. The target should be bootable.", True),
+    "failed": ("failed", "Install failed. Use the log tail and transaction details below.", False),
+}
+
+
+def rescue_guidance(transaction: dict) -> dict[str, Any]:
+    """Map the last durable transaction status to Rescue copy and bootability."""
+    status = str(transaction.get("status") or "") if isinstance(transaction, dict) else ""
+    severity, message, bootable = _RESCUE_GUIDANCE.get(
+        status,
+        (
+            "unknown",
+            f"Unrecognized transaction status {status!r}. Do not assume the disk is bootable.",
+            False,
+        ),
+    )
+    return {
+        "status": status,
+        "severity": severity,
+        "message": message,
+        "bootable": bootable,
+    }

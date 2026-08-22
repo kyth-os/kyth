@@ -48,9 +48,11 @@ class SetupStateTests(unittest.TestCase):
     def test_incomplete_steps_only_lists_non_done_relevant_steps(self):
         setup_state.mark_step("machine", setup_state.STATUS_DONE)
         setup_state.mark_step("apps", setup_state.STATUS_SKIPPED)
+        setup_state.mark_step("work", setup_state.STATUS_DONE)
         incomplete = dict(setup_state.incomplete_steps("everyday"))
         self.assertNotIn("machine", incomplete)
         self.assertEqual(incomplete.get("apps"), setup_state.STATUS_SKIPPED)
+        self.assertNotIn("work", incomplete)
         self.assertNotIn("gaming", incomplete)  # not relevant for this profile
 
     def test_mark_wizard_closed_records_untouched_steps_as_skipped(self):
@@ -59,6 +61,7 @@ class SetupStateTests(unittest.TestCase):
         state = setup_state.load_state()
         self.assertEqual(state["machine"], setup_state.STATUS_DONE)
         self.assertEqual(state["apps"], setup_state.STATUS_SKIPPED)
+        self.assertEqual(state["work"], setup_state.STATUS_SKIPPED)
         # gaming isn't relevant for the everyday profile — left untouched.
         self.assertEqual(state["gaming"], setup_state.STATUS_PENDING)
 
@@ -69,6 +72,20 @@ class SetupStateTests(unittest.TestCase):
         self.assertTrue(all(v == setup_state.STATUS_DONE for v in state.values()))
         # Migration is persisted so subsequent loads don't need the legacy file.
         self.assertTrue(Path(setup_state._STATE_PATH).exists())
+
+    def test_work_is_a_tracked_resume_step(self):
+        self.assertIn("work", setup_state.STEP_KEYS)
+        self.assertEqual(setup_state.STEP_RESUME_PAGE["work"], "Work Setup")
+        self.assertIn("work", setup_state.relevant_steps("everyday"))
+
+    def test_existing_state_without_work_does_not_resurface(self):
+        setup_state.save_state({
+            "machine": setup_state.STATUS_DONE,
+            "apps": setup_state.STATUS_DONE,
+            "gaming": setup_state.STATUS_SKIPPED,
+        })
+        state = setup_state.load_state()
+        self.assertEqual(state["work"], setup_state.STATUS_SKIPPED)
 
 
 if __name__ == "__main__":

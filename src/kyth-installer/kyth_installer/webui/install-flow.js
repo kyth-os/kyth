@@ -76,18 +76,26 @@ function loadRescue() {
   const st = document.getElementById('rescue-status');
   st.textContent = 'Probing…';
   st.className = 'status-box status-info';
-  apiFetch('/api/rescue/probe').then(r=>r.json()).then(d => {
+    apiFetch('/api/rescue/probe').then(r=>r.json()).then(d => {
     document.getElementById('rescue-log').textContent = d.log_tail || '(no log)';
     document.getElementById('rescue-verify').textContent = d.sgdisk_verify || '(no output)';
     document.getElementById('rescue-efi').textContent = d.efibootmgr || '(unavailable)';
     document.getElementById('rescue-bootc').textContent = d.bootc_status || '(unavailable)';
     document.getElementById('rescue-tx').textContent = JSON.stringify(d.transaction || {}, null, 2);
-    if (d.bootc_status_summary) {
+    const guide = d.rescue_guidance || {};
+    if (guide.message) {
+      const bootc = d.bootc_status_summary;
+      const extra = (bootc && (bootc.booted || bootc.staged))
+        ? ` Booted: ${bootc.booted||'—'} → Staged: ${bootc.staged||'—'}`
+        : '';
+      st.textContent = guide.message + extra;
+      st.className = 'status-box ' + (guide.bootable ? 'status-ok' : (guide.severity === 'failed' ? 'status-err' : 'status-warn'));
+    } else if (d.bootc_status_summary) {
       const s = d.bootc_status_summary;
       if (s.booted || s.staged) st.textContent = `Booted: ${s.booted||'—'} → Staged: ${s.staged||'—'}`;
       else { st.textContent = 'Probe complete — read-only checks finished.'; }
-    } else { st.textContent = 'Probe complete — read-only checks finished.'; }
-    st.className = 'status-box status-ok';
+      st.className = 'status-box status-ok';
+    } else { st.textContent = 'Probe complete — read-only checks finished.'; st.className = 'status-box status-ok'; }
   }).catch(e => {
     st.textContent = 'Probe failed: ' + e;
     st.className = 'status-box status-err';

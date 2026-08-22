@@ -52,10 +52,11 @@ def _run_install_worker(
         target_part, root_part, alongside_mount = _prepare_storage_for_plan(
             resolved, log, progress, alongside_mount, context
         )
-        _record_transaction(context, "image_installed", log=log)
+        _record_transaction(context, "storage_complete", log=log)
 
         log("── Phase 2: Configuring installed system ─────────────────────────")
         progress(91)
+        _record_transaction(context, "configure_started", log=log)
 
         if alongside_mount:
             config_root = alongside_mount
@@ -75,11 +76,13 @@ def _run_install_worker(
             root_part, target_part, resolved.disk, resolved.kernel, resolved.mode,
             config_root, alongside_mount, log, progress, context, resolved.request,
         )
+        _record_transaction(context, "configure_complete", log=log)
 
         log("── Phase 3: Staging Secure Boot enrollment ───────────────────────")
         context.enter_phase(InstallPhase.SECURE_BOOT)
         mok_state = _try_stage_mok_enrollment(log, resolved.kernel, resolved.request.mok_password)
         _require_secure_boot_ready(mok_state)
+        _record_transaction(context, "secure_boot_staged", log=log)
 
         progress(100)
         context.enter_phase(InstallPhase.COMPLETE)

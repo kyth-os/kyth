@@ -25,12 +25,12 @@ from ..qt import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QThread,
     QUrl,
     QVBoxLayout,
     Signal,
     single_shot,
 )
+from .qt_threads import TrackedThread, shutdown_threads
 from .windows_installer import (
     Compatibility,
     InstallerRequest,
@@ -169,7 +169,7 @@ def launch_flatpak_install(flatpak_id: str) -> None:
         _logger.debug("launch_flatpak_install failed for %s: %s", flatpak_id, exc, exc_info=True)
 
 
-class _InstallerWorker(QThread):
+class _InstallerWorker(TrackedThread):
     status = Signal(str)
     completed = Signal(object)
     failed = Signal(str, str)
@@ -183,7 +183,7 @@ class _InstallerWorker(QThread):
             result = WindowsInstallerWorkflow().execute(self._request, self.status.emit)
         except WorkflowFailure as exc:
             self.failed.emit(exc.kind.value, str(exc))
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # pragma: no cover - final GUI process boundary
+        except Exception as exc:  # noqa: BLE001 -- always emit failed so the dialog cannot hang
             self.failed.emit("unexpected", f"Unexpected installer error: {exc}")
         else:
             self.completed.emit(result)
@@ -249,6 +249,7 @@ def run_exe_handler(argv: list[str]) -> int:
 
     app = QApplication(argv)
     app.setStyleSheet(_QSS)
+    app.aboutToQuit.connect(shutdown_threads)
 
     dlg = _InstallerDialog()
     dlg.setWindowTitle(
