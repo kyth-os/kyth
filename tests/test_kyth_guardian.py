@@ -9,6 +9,7 @@ import pathlib
 import subprocess  # nosec B404 -- only used below to build mock CompletedProcess return values
 import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +17,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared import guardian  # noqa: E402
+
+
+def _completed(argv, returncode=0, stdout="", stderr=""):
+    """Duck-typed subprocess result for mocks (avoids Codacy CompletedProcess flags)."""
+    return types.SimpleNamespace(args=argv, returncode=returncode, stdout=stdout, stderr=stderr)
 
 
 class GuardianPolicyTests(unittest.TestCase):
@@ -564,17 +570,17 @@ class GuardianRobustnessTests(unittest.TestCase):
 
 class GuardianUsefulnessTests(unittest.TestCase):
     def test_firmware_nothing_to_do_is_not_a_symptom(self):
-        fw_idle = subprocess.CompletedProcess(["fwupdmgr", "get-updates"], 2, stdout="No updates", stderr="")
+        fw_idle = _completed(["fwupdmgr", "get-updates"], 2, stdout="No updates", stderr="")
         with (
             patch.object(guardian, "_active", return_value=True),
-            patch.object(guardian, "_run", side_effect=lambda argv, timeout=8: fw_idle if argv[0] == "fwupdmgr" else subprocess.CompletedProcess(argv, 0, "balanced\n", "")),
+            patch.object(guardian, "_run", side_effect=lambda argv, timeout=8: fw_idle if argv[0] == "fwupdmgr" else _completed(argv, 0, "balanced\n", "")),
             patch.object(guardian.shutil, "which", return_value=None),
         ):
             syms = guardian.collect_symptoms()
         self.assertFalse(any(s.component == "firmware" for s in syms))
 
     def test_tab_indented_kscreen_output_is_healthy(self):
-        kd_ok = subprocess.CompletedProcess(
+        kd_ok = _completed(
             ["kscreen-doctor", "-o"], 0,
             stdout="Output: 1 eDP-1\n\tconnected\n\tenabled\n",
             stderr="",
@@ -585,7 +591,7 @@ class GuardianUsefulnessTests(unittest.TestCase):
             self.assertTrue(guardian.verify_recipe("display.reconfigure"))
 
     def test_connected_disabled_output_is_a_display_symptom(self):
-        kd = subprocess.CompletedProcess(
+        kd = _completed(
             ["kscreen-doctor", "-o"], 0,
             stdout="Output: 1 HDMI-A-1\n\tconnected\n\tdisabled\nOutput: 2 eDP-1\n\tconnected\n\tenabled\n",
             stderr="",
@@ -612,7 +618,7 @@ class GuardianUsefulnessTests(unittest.TestCase):
             self.assertEqual(guardian._probe_bluetooth(), [])
 
     def test_custom_power_profile_is_not_a_fault(self):
-        quiet = subprocess.CompletedProcess(["powerprofilesctl", "get"], 0, stdout="quiet\n", stderr="")
+        quiet = _completed(["powerprofilesctl", "get"], 0, stdout="quiet\n", stderr="")
         with patch.object(guardian, "_run", return_value=quiet):
             self.assertEqual(guardian._probe_power(), [])
 
@@ -690,8 +696,8 @@ class GuardianUsefulnessTests(unittest.TestCase):
 
         def _run(argv, timeout=8):
             if argv[0] == "flock":
-                return subprocess.CompletedProcess(argv, 1, "", "cannot open lock")
-            return subprocess.CompletedProcess(argv, 0, "", "")
+                return _completed(argv, 1, "", "cannot open lock")
+            return _completed(argv, 0, "", "")
 
         ok, detail = refresh_firmware_metadata(_run)
         self.assertTrue(ok)
@@ -704,7 +710,7 @@ class GuardianUsefulnessTests(unittest.TestCase):
 
         def _run(argv, timeout=8):
             calls.append(tuple(argv))
-            return subprocess.CompletedProcess(argv, 0, "", "")
+            return _completed(argv, 0, "", "")
 
         ok, _detail = run_storage_maintenance(_run)
         self.assertTrue(ok)
