@@ -186,6 +186,16 @@ class SmokeCheck:
         (self.passed if "KDE" in desktop or desktop.startswith("plasma") else self.warn)(
             "Desktop session", desktop
         )
+        session_type = (os.environ.get("XDG_SESSION_TYPE") or "").strip().lower()
+        if session_type == "x11":
+            self.fail(
+                "Session type",
+                "X11 — KythOS ships Plasma Wayland only. Ctrl+Alt+F3, then journalctl -u sddm -b",
+            )
+        elif session_type == "wayland":
+            self.passed("Session type", "wayland")
+        else:
+            self.warn("Session type", session_type or "no graphical session")
         self.check_unit("display-manager.service", "Login manager", enabled=True)
         for path, label in (
             ("/usr/share/wallpapers/kyth/metadata.json", "KythOS wallpaper"),

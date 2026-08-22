@@ -6,12 +6,20 @@ import os
 import shutil
 import sys
 
-from kyth_shared.wayland_compose import apply_software_compose_env, compositor_argv, needs_software_compose
+from kyth_shared.wayland_compose import (
+    GREETER_NO_DRM_HINT,
+    apply_software_compose_env,
+    compositor_argv,
+    has_drm_card,
+    needs_software_compose,
+)
 
 
 def main() -> None:
     if needs_software_compose():
         apply_software_compose_env()
+    if not has_drm_card():
+        print(GREETER_NO_DRM_HINT, file=sys.stderr)
     argv = compositor_argv(extra=sys.argv[1:])
     binary = shutil.which(argv[0])
     if binary is None:

@@ -54,6 +54,19 @@ class SmokeCheckTests(unittest.TestCase):
             checker.check_command("optional", "Optional", optional=True)
         self.assertEqual(checker.results[0].level, "WARN")
 
+    def test_x11_session_type_is_a_failure(self) -> None:
+        checker = SmokeCheck(quiet=True)
+        with (
+            mock.patch.dict("os.environ", {"XDG_SESSION_TYPE": "x11", "XDG_CURRENT_DESKTOP": "KDE"}),
+            mock.patch.object(checker, "check_unit"),
+            mock.patch.object(checker, "check_path"),
+            mock.patch.object(checker, "check_contains"),
+        ):
+            checker.desktop()
+        session = next(item for item in checker.results if item.name == "Session type")
+        self.assertEqual(session.level, "FAIL")
+        self.assertIn("journalctl -u sddm", session.detail)
+
     def test_health_report_has_stable_json_schema(self) -> None:
         report = from_smoke_results(
             [

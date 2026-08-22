@@ -49,10 +49,27 @@ feel distinct, comfortable, and easy for new users to trust.
 - **Fail-open:** if the helper cannot write `11-kyth-session.conf`, static
   `/etc/sddm.conf.d/10-kyth.conf` still provides the Wayland default so login
   is never blocked. SDDM's X11 session directory is an empty KythOS path so
-  leftover X11 session files cannot appear in the greeter.
+  leftover X11 session files cannot appear in the greeter. On upgrade, the
+  helper also rewrites SDDM `LastSession` and `~/.dmrc` when they still name
+  Plasma X11.
 - System KWin defaults set `[Wayland] VrrPolicy=1` (Automatic) under
   `/etc/xdg/kwinrc`. Image packages explicitly include `xdg-desktop-portal`,
   `xdg-desktop-portal-kde`, and `qt6-qtwayland`.
+
+## Greeter recovery (no Plasma X11)
+
+If the login screen never appears, Plasma X11 is not a fallback. Use a TTY:
+
+1. `Ctrl+Alt+F3`, log in, then `journalctl -u sddm -b --no-pager`.
+2. Look for `kyth-sddm-compositor` / `kwin_wayland`. A missing DRM card prints
+   a hint on that unit.
+3. If you booted **Basic Graphics** / `nomodeset` and the GPU is fine, reboot
+   without `nomodeset`.
+4. If software compose was forced on a working GPU, add `kyth.hwgl=1` and
+   log in again.
+5. From the boot menu, start the previous deployment.
+
+`ujust smoke-check` and `kyth-doctor` treat an X11 session as a failure.
 
 ## Consistency Rules
 

@@ -32,6 +32,32 @@ dnf5 remove -y --no-autoremove \
 	xorg-x11-drv-ati \
 	2>/dev/null || true
 
+# --no-autoremove can leave a package when something still Requires it. That
+# must fail the image: hiding xsessions is not the same as removing Plasma X11.
+forbidden_x11_session_rpms=(
+	plasma-workspace-x11
+	kwin-x11
+	xorg-x11-server-Xorg
+	xorg-x11-xinit
+	xorg-x11-drv-libinput
+	xorg-x11-drv-amdgpu
+	xorg-x11-drv-ati
+)
+leftover_x11_session_rpms=()
+for pkg in "${forbidden_x11_session_rpms[@]}"; do
+	if rpm -q "${pkg}" >/dev/null 2>&1; then
+		leftover_x11_session_rpms+=("${pkg}")
+	fi
+done
+if ((${#leftover_x11_session_rpms[@]})); then
+	echo "ERROR: Plasma X11 / Xorg session RPMs still installed: ${leftover_x11_session_rpms[*]}" >&2
+	exit 1
+fi
+if ! rpm -q xorg-x11-server-Xwayland >/dev/null 2>&1; then
+	echo "ERROR: xorg-x11-server-Xwayland must remain installed for games and Electron" >&2
+	exit 1
+fi
+
 # Remove Firefox — Brave Browser is installed as a Flatpak on first boot
 # via kyth-default-flatpaks.service (avoids baking external repo keys into
 # the build and eliminates DNS-dependent rpm --import calls in CI).

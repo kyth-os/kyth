@@ -203,6 +203,8 @@ class DesktopStackTests(unittest.TestCase):
         self.assertIn("plasma.desktop", body)
         self.assertNotIn("intentionally starts Plasma X11", body)
         self.assertNotIn("plasmax11", body)
+        self.assertIn("Ctrl+Alt+F3", body)
+        self.assertIn("journalctl -u sddm", body)
 
 
 class VrrApplyTests(unittest.TestCase):

@@ -177,13 +177,16 @@ Do these intentionally. Evangelists are made when recovery works.
    the setup path retries instead of silently giving up.
 5. Connect a hibernated Windows volume and confirm migration tools warn the user
    to fully shut down Windows.
-6. Fill memory pressure with a browser plus a game load screen and confirm the
+6. If the greeter never appears, recover from a TTY (`Ctrl+Alt+F3`,
+   `journalctl -u sddm -b`). Plasma X11 is not a session. Reboot without
+   `nomodeset` when the GPU is fine, or boot the previous deployment.
+7. Fill memory pressure with a browser plus a game load screen and confirm the
    desktop survives without killing session-critical services.
-7. Suspend and resume with Bluetooth audio or controller connected, then launch
+8. Suspend and resume with Bluetooth audio or controller connected, then launch
    a game.
-8. Try to copy a helper into `/usr/bin` on an installed system and confirm the
+9. Try to copy a helper into `/usr/bin` on an installed system and confirm the
    project docs/System Hub messaging explain that the OS image is immutable.
-9. On an NVMe system, benchmark a game while downloading or unpacking a large
+10. On an NVMe system, benchmark a game while downloading or unpacking a large
    file. Record `ujust nvme-tuning status`, then compare the kernel-default
    profile against `ujust nvme-tuning kyth`. Return to defaults with
    `ujust nvme-tuning default` and reboot before the baseline run.

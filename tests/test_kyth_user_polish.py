@@ -32,6 +32,8 @@ class UserPolishTests(unittest.TestCase):
             self.assertEqual(second[0].status, OperationStatus.APPLIED)
             self.assertEqual(first[-1].name, "legacy-virt-gl")
             self.assertEqual(first[-1].status, OperationStatus.SKIPPED)
+            self.assertEqual(first[-2].name, "session-wayland")
+            self.assertEqual(first[-2].status, OperationStatus.SKIPPED)
 
     def test_foundation_removes_legacy_virt_software_gl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, mock.patch(
@@ -45,6 +47,17 @@ class UserPolishTests(unittest.TestCase):
             self.assertFalse(legacy.exists())
             self.assertEqual(results[-1].name, "legacy-virt-gl")
             self.assertEqual(results[-1].status, OperationStatus.APPLIED)
+
+    def test_foundation_rewrites_x11_dmrc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch(
+            "kyth_shared.user_polish.shutil.which", return_value=None
+        ):
+            dmrc = Path(tmp) / ".dmrc"
+            dmrc.write_text("[Desktop]\nSession=plasmax11.desktop\n")
+            results = apply_foundation(tmp)
+            by_name = {item.name: item for item in results}
+            self.assertEqual(by_name["session-wayland"].status, OperationStatus.APPLIED)
+            self.assertEqual(dmrc.read_text(encoding="utf-8"), "[Desktop]\nSession=plasma.desktop\n")
 
     def test_partial_failure_does_not_stop_later_operations(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch(

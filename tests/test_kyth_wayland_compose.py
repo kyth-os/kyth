@@ -13,17 +13,23 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.wayland_compose import (  # noqa: E402
+    PLASMA_WAYLAND_SESSION,
     SDDM_WAYLAND_CONF,
     SOFTWARE_COMPOSE_ENV,
     apply_software_compose_env,
     compositor_argv,
+    has_drm_card,
     has_drm_render_node,
     hwgl_forced,
     is_live_image,
+    migrate_home_dmrcs,
+    migrate_sddm_last_session,
+    migrate_user_dmrc,
     needs_software_compose,
     nomodeset_requested,
     remove_legacy_virt_software_gl,
     sddm_session_conf,
+    session_is_plasma_x11,
 )
 
 
@@ -43,10 +49,13 @@ class WaylandComposeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dri = Path(tmp)
             self.assertFalse(has_drm_render_node(dri))
+            self.assertFalse(has_drm_card(dri))
             (dri / "card0").touch()
             self.assertFalse(has_drm_render_node(dri))
+            self.assertTrue(has_drm_card(dri))
             (dri / "renderD128").touch()
             self.assertTrue(has_drm_render_node(dri))
+            self.assertTrue(has_drm_card(dri))
 
     def test_software_compose_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -102,6 +111,33 @@ class WaylandComposeTests(unittest.TestCase):
             self.assertFalse(legacy.exists())
             self.assertFalse(remove_legacy_virt_software_gl(home))
 
+    def test_x11_session_values(self) -> None:
+        self.assertTrue(session_is_plasma_x11("plasmax11.desktop"))
+        self.assertTrue(session_is_plasma_x11("/usr/share/xsessions/plasmax11.desktop"))
+        self.assertTrue(session_is_plasma_x11("/usr/share/xsessions/plasma.desktop"))
+        self.assertFalse(session_is_plasma_x11("plasma.desktop"))
+        self.assertFalse(session_is_plasma_x11("/usr/share/wayland-sessions/plasma.desktop"))
+        self.assertFalse(session_is_plasma_x11(""))
+
+    def test_migrate_sddm_last_session_and_dmrc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.conf"
+            state.write_text("[Last]\nUser=liveuser\nSession=/usr/share/xsessions/plasmax11.desktop\n")
+            self.assertTrue(migrate_sddm_last_session(state))
+            text = state.read_text(encoding="utf-8")
+            self.assertIn(f"Session={PLASMA_WAYLAND_SESSION}", text)
+            self.assertIn("User=liveuser", text)
+            self.assertFalse(migrate_sddm_last_session(state))
+
+            homes = Path(tmp) / "home"
+            user = homes / "alice"
+            user.mkdir(parents=True)
+            (user / ".dmrc").write_text("[Desktop]\nSession=plasmax11\n")
+            (homes / "skip").mkdir()
+            self.assertEqual(migrate_home_dmrcs(homes), 1)
+            self.assertEqual((user / ".dmrc").read_text(encoding="utf-8"), "[Desktop]\nSession=plasma.desktop\n")
+            self.assertFalse(migrate_user_dmrc(user))
+
     def test_configure_session_rewrites_stale_x11_dropin(self) -> None:
         launcher = ROOT / "build_files" / "kyth-configure-session"
         with tempfile.TemporaryDirectory() as tmp:
@@ -115,6 +151,29 @@ class WaylandComposeTests(unittest.TestCase):
             self.assertIn("DisplayServer=wayland", text)
             self.assertIn("DefaultSession=plasma.desktop", text)
             self.assertNotIn("plasmax11", text)
+
+    def test_configure_host_session_rewrites_last_session(self) -> None:
+        launcher = ROOT / "build_files" / "kyth-configure-session"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sddm_dir = root / "sddm"
+            sddm_dir.mkdir()
+            state = root / "state.conf"
+            state.write_text("[Last]\nSession=/usr/share/xsessions/plasmax11.desktop\n")
+            homes = root / "home"
+            user = homes / "bob"
+            user.mkdir(parents=True)
+            (user / ".dmrc").write_text("[Desktop]\nSession=plasmax11.desktop\n")
+            spec_globals = runpy.run_path(str(launcher), run_name="not-main")
+            self.assertEqual(
+                spec_globals["configure_host_session"](
+                    sddm_dir, state_file=state, homes=homes
+                ),
+                0,
+            )
+            self.assertIn("DefaultSession=plasma.desktop", (sddm_dir / "11-kyth-session.conf").read_text())
+            self.assertIn(f"Session={PLASMA_WAYLAND_SESSION}", state.read_text())
+            self.assertIn("Session=plasma.desktop", (user / ".dmrc").read_text())
 
     def test_configure_session_keeps_wayland_for_nomodeset(self) -> None:
         launcher = ROOT / "build_files" / "kyth-configure-session"
@@ -156,6 +215,7 @@ class WaylandBrandingContractTests(unittest.TestCase):
         compositor = (ROOT / "build_files" / "kyth-sddm-compositor").read_text(encoding="utf-8")
         self.assertIn("needs_software_compose", compositor)
         self.assertIn("kwin_wayland", compositor)
+        self.assertIn("GREETER_NO_DRM_HINT", compositor)
 
     def test_image_does_not_install_plasma_x11_session(self) -> None:
         baseline = (ROOT / "build_files" / "scripts" / "packages" / "05-baseline-desktop-tooling.sh").read_text(
@@ -179,6 +239,9 @@ class WaylandBrandingContractTests(unittest.TestCase):
         self.assertNotIn("xorg-x11-drv-ati", amd)
         self.assertIn("xorg-x11-drv-amdgpu", cleanup)
         self.assertIn("kwin-x11", cleanup)
+        self.assertIn("leftover_x11_session_rpms", cleanup)
+        self.assertIn("xorg-x11-server-Xwayland", cleanup)
+        self.assertIn("exit 1", cleanup)
         nvidia = (ROOT / "build_files" / "scripts" / "packages" / "16-gpu-nvidia.sh").read_text(encoding="utf-8")
         self.assertIn("xorg-x11-drv-nvidia", nvidia)
         self.assertNotIn("xorg-x11-drv-nvidia", cleanup)
@@ -204,6 +267,7 @@ class SddmCompositorEntryTests(unittest.TestCase):
             mock.patch.dict(os.environ, {}, clear=False),
             mock.patch.object(sys, "argv", ["kyth-sddm-compositor"]),
             mock.patch("kyth_shared.wayland_compose.needs_software_compose", return_value=True),
+            mock.patch("kyth_shared.wayland_compose.has_drm_card", return_value=True),
             mock.patch("shutil.which", return_value="/usr/bin/kwin_wayland"),
             mock.patch("os.execvp", side_effect=fake_execvp),
         ):

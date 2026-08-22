@@ -69,7 +69,7 @@ def should_refresh_pulse_desktop_shortcut(existing: str, shipped: str) -> bool:
 from kyth_shared.desktop.plasma import kreadconfig, kwriteconfig  # noqa: E402
 from kyth_shared.desktop.shortcut import refresh_kde_sycoca  # noqa: E402
 from kyth_shared.session import acquire_run_lock, already_run, mark_run  # noqa: E402
-from kyth_shared.wayland_compose import remove_legacy_virt_software_gl  # noqa: E402
+from kyth_shared.wayland_compose import migrate_user_dmrc, remove_legacy_virt_software_gl  # noqa: E402
 from kyth_shared.commands import run as run_command  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,15 @@ def _remove_legacy_virt_software_gl(home: str) -> OperationResult:
     )
 
 
+def _migrate_x11_dmrc(home: str) -> OperationResult:
+    """Point leftover ~/.dmrc Session values at Plasma Wayland."""
+    changed = migrate_user_dmrc(Path(home))
+    return OperationResult(
+        "session-wayland",
+        OperationStatus.APPLIED if changed else OperationStatus.SKIPPED,
+    )
+
+
 def apply_foundation(
     home: str,
     *,
@@ -181,6 +190,7 @@ def apply_foundation(
         ("user-folders", lambda: _ensure_user_folders(home)),
         ("bluetooth", lambda: _enable_bluetooth(home, run)),
         ("mime-defaults", lambda: _set_mime_defaults(run)),
+        ("session-wayland", lambda: _migrate_x11_dmrc(home)),
         ("legacy-virt-gl", lambda: _remove_legacy_virt_software_gl(home)),
     )
     return [_run_operation(name, operation) for name, operation in operations]
