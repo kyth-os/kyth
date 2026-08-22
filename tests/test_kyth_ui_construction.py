@@ -40,8 +40,11 @@ pages = {
     for key, index in hub._page_index_by_key.items()
 }
 constructed = {key: type(page).__name__ for key, page in pages.items()}
-assert len(constructed) == 20
+assert len(constructed) >= 24
 assert constructed["Welcome"] == "WelcomePage"
+assert constructed["Play"] == "PlayHubPage"
+assert constructed["Apps"] == "AppsHubPage"
+assert constructed["This PC"] == "ThisPcHubPage"
 assert constructed["Hardware"] == "HardwarePage"
 
 # Deferred signal callbacks are not exercised by construction. Verify that

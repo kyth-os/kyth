@@ -1,46 +1,47 @@
 # __KYTH_GENERATED_IMPORTS__
-from .core_base import IS_LIVE, load_profile, restyle
+from .core_base import IS_LIVE, load_profile, restyle, save_profile
 from .services.bootc import current_branch
 from .services.hardware import detect_nvidia_async
 from .services.runtime import has_blocking_tasks
-from .page_registry import PROBLEM_ROUTES, SEARCH_ITEMS, descriptors_from_nav_groups, get_nav_groups, visible_for_profile
+from .page_registry import (
+    PULSE_RAIL,
+    PROBLEM_ROUTES,
+    SEARCH_ITEMS,
+    descriptors_from_nav_groups,
+    destination_for_page,
+    get_nav_groups,
+    visible_for_profile,
+)
 from .qt import (
-    QCompleter, QDialog, QFrame, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QShortcut, QSize, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
+    QCompleter, QDialog, QHBoxLayout, QKeySequence, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QShortcut, QSize, QStackedWidget, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .widgets import (
-    _divider, _theme_icon, fade_in,
+    _theme_icon, fade_in,
 )
 from .services.launch import popen
 
-# ── Sidebar nav button ─────────────────────────────────────────────────────────
-def _nav_section_label(text: str) -> QLabel:
-    """Create a sidebar section header label (e.g. 'System', 'Apps')."""
-    lbl = QLabel(text)
-    lbl.setObjectName("nav-section")
-    lbl.setContentsMargins(20, 14, 16, 4)
-    return lbl
-
-
-class NavButton(QPushButton):
-    def __init__(self, icon_names: tuple[str, ...], glyph: str, label: str):
+# ── Pulse icon-rail button ─────────────────────────────────────────────────────
+class RailButton(QPushButton):
+    def __init__(self, icon_names: tuple[str, ...], glyph: str, label: str, hint: str = ""):
         icon = _theme_icon(*icon_names)
         if icon.isNull():
-            # No matching theme icon installed — fall back to the text glyph.
-            super().__init__(f"  {glyph}  {label}")
+            super().__init__(glyph)
         else:
-            super().__init__(f"  {label}")
+            super().__init__("")
             self.setIcon(icon)
-            self.setIconSize(QSize(18, 18))
-        self.setObjectName("nav-item")
+            self.setIconSize(QSize(22, 22))
+        self.setObjectName("pulse-rail-btn")
         self.setCheckable(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        sp = self.sizePolicy()
-        sp.setHorizontalPolicy(QSizePolicy.Policy.Expanding)
-        self.setSizePolicy(sp)
-        self.setMinimumHeight(32)
+        self.setFixedSize(48, 48)
+        self.setToolTip(f"{label} — {hint}" if hint else label)
+        self.setAccessibleName(label)
 
     def set_active(self, active: bool):
-        self.setObjectName("nav-item-active" if active else "nav-item")
+        if active:
+            self.setObjectName("pulse-rail-btn-active")
+        elif self.objectName() != "pulse-rail-btn-badge":
+            self.setObjectName("pulse-rail-btn")
         restyle(self)
 
 
@@ -98,23 +99,7 @@ class MainWindow(QMainWindow):
         self._build_sidebar(root.layout())
         self._build_page_stack(root.layout())
 
-        # Welcome profile wiring was eager — defer to next tick so first
-        # frame paints without blocking on WelcomePage construction (see #1 cold-start).
-        def _wire_welcome_profile():
-            idx = self._page_index_by_key.get("Welcome")
-            if idx is None:
-                return
-            try:
-                page = self._ensure_page(idx)
-                page.profile_changed.connect(self._apply_profile_visibility)
-            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort, failure here is non-fatal by design
-                pass
-            try:
-                self._apply_profile_visibility(load_profile())
-            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-                pass
-
-        single_shot(self, 0, _wire_welcome_profile)
+        single_shot(self, 0, lambda: self._sync_mode_switch(load_profile()))
 
         self._history: list[int] = []
         self._history_pos: int = -1
@@ -159,7 +144,7 @@ class MainWindow(QMainWindow):
 
         topbar_layout.addSpacing(8)
 
-        home_crumb = QPushButton("System Hub")
+        home_crumb = QPushButton("Pulse")
         home_crumb.setObjectName("breadcrumb-link")
         home_crumb.setCursor(Qt.CursorShape.PointingHandCursor)
         home_crumb.clicked.connect(lambda: self._navigate_to("Welcome"))
@@ -172,11 +157,23 @@ class MainWindow(QMainWindow):
 
         self._search_box = QLineEdit()
         self._search_box.setObjectName("search-box")
-        self._search_box.setPlaceholderText("Search settings, apps, features (Ctrl+K)...")
-        self._search_box.setToolTip("Search settings, apps, or Windows names (Ctrl+K)")
-        self._search_box.setFixedWidth(340)
+        self._search_box.setPlaceholderText("Ask Kyth or jump to a task…")
+        self._search_box.setToolTip("Search settings, apps, or familiar names (Ctrl+K)")
+        self._search_box.setFixedWidth(380)
         self._search_box.setClearButtonEnabled(True)
         topbar_layout.addWidget(self._search_box)
+
+        topbar_layout.addSpacing(10)
+        self._mode_buttons: dict[str, QPushButton] = {}
+        for key, label in (("everyday", "Everyday"), ("gaming", "Gaming")):
+            btn = QPushButton(label)
+            btn.setObjectName("mode-switch")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip("Everyday lights Apps. Gaming lights Play. Search still finds everything.")
+            btn.clicked.connect(lambda _=False, k=key: self._set_profile(k))
+            self._mode_buttons[key] = btn
+            topbar_layout.addWidget(btn)
 
         central_layout.addWidget(topbar)
 
@@ -312,22 +309,20 @@ class MainWindow(QMainWindow):
         fresh = int(guardian.get("fresh", 0) or 0)
         suppressed = str(guardian.get("suppressed", "") or "")
         try:
-            btn = self._nav_button_by_key.get("Guardian")
+            btn = self._rail_buttons.get("This PC")
             if btn is not None:
-                is_active = btn.objectName() == "nav-item-active"
+                is_active = btn.objectName() == "pulse-rail-btn-active"
                 if fresh and not suppressed:
-                    # badge: subtle blue pill when fresh, otherwise normal
                     if not is_active:
-                        btn.setObjectName("nav-item-badge")
+                        btn.setObjectName("pulse-rail-btn-badge")
                     btn.setToolTip(f"{fresh} issue(s) need review in Guardian")
                 else:
-                    # restore normal (keep active if that's the current page)
-                    if btn.objectName() == "nav-item-badge":
-                        btn.setObjectName("nav-item")
+                    if btn.objectName() == "pulse-rail-btn-badge":
+                        btn.setObjectName("pulse-rail-btn")
                     if fresh and suppressed:
                         btn.setToolTip(f"Guardian paused — {suppressed}")
                     else:
-                        btn.setToolTip("")
+                        btn.setToolTip("This PC — Health, updates, and hardware")
                 restyle(btn)
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001
             pass
@@ -456,90 +451,53 @@ class MainWindow(QMainWindow):
         return root
 
     def _build_sidebar(self, parent_layout):
-        sidebar = QWidget()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(240)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(0, 0, 0, 0)
-        sidebar_layout.setSpacing(0)
+        rail = QWidget()
+        rail.setObjectName("pulse-rail")
+        rail.setFixedWidth(72)
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(0, 12, 0, 12)
+        rail_layout.setSpacing(6)
 
-        logo_area = QWidget()
-        logo_area.setObjectName("sidebar-header")
-        logo_layout = QVBoxLayout(logo_area)
-        logo_layout.setContentsMargins(20, 22, 20, 18)
-        logo_layout.setSpacing(3)
-
-        logo_lbl = QLabel("KythOS")
-        logo_lbl.setObjectName("sidebar-logo")
-        logo_layout.addWidget(logo_lbl)
-
-        self._sidebar_ver_lbl = QLabel("System Hub")
-        self._sidebar_ver_lbl.setObjectName("sidebar-ver")
-        logo_layout.addWidget(self._sidebar_ver_lbl)
-        single_shot(self, 0, self._refresh_sidebar_channel)
-        sidebar_layout.addWidget(logo_area)
-        sidebar_layout.addWidget(_divider())
+        self._rail_logo = QLabel("K")
+        self._rail_logo.setObjectName("pulse-rail-logo")
+        self._rail_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._rail_logo.setToolTip("KythOS System Hub")
+        rail_layout.addWidget(self._rail_logo)
+        rail_layout.addSpacing(8)
 
         self._page_specs: list[tuple[str, object]] = []
         self._nav_buttons = []
         self._nav_button_by_key = {}
         self._nav_section_labels = {}
+        self._rail_buttons: dict[str, RailButton] = {}
         self._page_crumbs = []
-
-        scroll = QScrollArea()
-        scroll.setObjectName("sidebar-scroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        scroll_content = QWidget()
-        scroll_content.setObjectName("sidebar-scroll-content")
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(0, 0, 0, 0)
-        scroll_layout.setSpacing(0)
+        self._sidebar_ver_lbl = self._rail_logo
+        single_shot(self, 0, self._refresh_sidebar_channel)
 
         nav_groups = get_nav_groups(self._navigate_to)
-        self._initialize_page_specs(nav_groups, scroll_layout)
+        self._initialize_page_specs(nav_groups)
 
         self._page_descriptors = descriptors_from_nav_groups(nav_groups, self._SEARCH_ITEMS)
         self._descriptor_by_key = {descriptor.key: descriptor for descriptor in self._page_descriptors}
         self._page_index_by_key = {key: idx for idx, (key, _) in enumerate(self._page_specs)}
 
+        for item in PULSE_RAIL:
+            btn = RailButton(item.icon_names, item.glyph, item.title, item.hint)
+            btn.clicked.connect(lambda _=False, key=item.landing_key: self._navigate_to(key))
+            rail_layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
+            self._nav_buttons.append(btn)
+            self._rail_buttons[item.dest] = btn
+            self._nav_button_by_key[item.landing_key] = btn
+
         self._nvidia_nav_worker = None
-        nvidia_btn = self._nav_button_by_key.get("NVIDIA")
-        if nvidia_btn is not None:
-            nvidia_btn.setVisible(False)
+        rail_layout.addStretch()
+        parent_layout.addWidget(rail)
 
-        scroll_layout.addStretch()
-        scroll.setWidget(scroll_content)
-        sidebar_layout.addWidget(scroll, 1)
-
-        sidebar_layout.addWidget(_divider())
-        ver_hint = QLabel("KythOS System Hub")
-        ver_hint.setObjectName("nav-section")
-        ver_hint.setContentsMargins(20, 10, 16, 12)
-        sidebar_layout.addWidget(ver_hint)
-
-        parent_layout.addWidget(sidebar)
-
-    def _initialize_page_specs(self, nav_groups, sidebar_layout):
-        global_idx = 0
+    def _initialize_page_specs(self, nav_groups):
         for section_title, items in nav_groups:
-            sidebar_layout.addSpacing(4)
-            if section_title is not None:
-                section_lbl = _nav_section_label(section_title)
-                self._nav_section_labels[section_title] = section_lbl
-                sidebar_layout.addWidget(section_lbl)
-            for icon_names, glyph, label, key, factory in items:
+            for _icon_names, _glyph, label, key, factory in items:
                 self._page_specs.append((key, factory))
                 self._page_crumbs.append((section_title, label))
-                btn = NavButton(icon_names, glyph, label)
-                btn.clicked.connect(self._make_nav_handler(global_idx))
-                sidebar_layout.addWidget(btn)
-                self._nav_buttons.append(btn)
-                self._nav_button_by_key[key] = btn
-                global_idx += 1
-            sidebar_layout.addSpacing(2)
 
     def _build_page_stack(self, parent_layout):
         self._stack = QStackedWidget()
@@ -683,25 +641,35 @@ class MainWindow(QMainWindow):
 
     # ── Usage focus ────────────────────────────────────────────────────────────
 
-    def _apply_profile_visibility(self, profile: str):
-        """Tailor the sidebar to the Everyday/Gaming focus.
+    def _set_profile(self, profile: str) -> None:
+        save_profile(profile)
+        self._sync_mode_switch(profile)
+        self._apply_profile_visibility(profile)
+        idx = self._page_index_by_key.get("Welcome")
+        page = self._pages[idx] if idx is not None else None
+        if page is not None and hasattr(page, "set_profile"):
+            page.set_profile(profile)
 
-        Hidden pages stay in the stack and reachable through search — the
-        focus only de-emphasizes, it never removes. Visibility comes from
-        ``PageDescriptor.profile`` via ``visible_for_profile`` (single source).
-        """
-        gaming_section_visible = False
+    def _sync_mode_switch(self, profile: str) -> None:
+        mode = "gaming" if profile == "gaming" else "everyday"
+        for key, btn in self._mode_buttons.items():
+            active = key == mode
+            btn.setChecked(active)
+            btn.setObjectName("mode-switch-active" if active else "mode-switch")
+            restyle(btn)
+
+    def _apply_profile_visibility(self, profile: str):
+        """Mode changes prominence, not availability. The rail stays at five."""
+        self._profile = profile
         for key, btn in self._nav_button_by_key.items():
             desc = self._descriptor_by_key.get(key)
             if desc is None:
                 continue
-            visible = visible_for_profile(desc, profile)
-            btn.setVisible(visible)
-            if desc.section == "Gaming" and visible:
-                gaming_section_visible = True
-        gaming_label = self._nav_section_labels.get("Gaming")
-        if gaming_label is not None:
-            gaming_label.setVisible(gaming_section_visible)
+            # Rail destinations stay visible; leftover mapped buttons honor profile.
+            if key in {item.landing_key for item in PULSE_RAIL}:
+                btn.setVisible(True)
+                continue
+            btn.setVisible(visible_for_profile(desc, profile))
 
     # ── Navigation ────────────────────────────────────────────────────────────
 
@@ -721,28 +689,24 @@ class MainWindow(QMainWindow):
         self._sidebar_channel_worker.start()
 
     def _on_sidebar_channel_ready(self, _key: str, branch: object):
-        text = {"latest": "Stable Channel", "testing": "Testing Channel"}.get(branch or "", "System Hub")
-        self._sidebar_ver_lbl.setText(text)
-        self._sidebar_ver_lbl.setToolTip("")
+        text = {"latest": "Stable channel", "testing": "Testing channel"}.get(branch or "", "System Hub")
+        self._sidebar_ver_lbl.setToolTip(f"KythOS · {text}")
 
     def _on_sidebar_channel_failed(self, _key: str, message: str) -> None:
         import logging
 
         logging.getLogger(__name__).warning("sidebar channel probe failed: %s", message)
-        self._sidebar_ver_lbl.setText("System Hub")
         self._sidebar_ver_lbl.setToolTip(str(message or "Could not read update channel")[:200])
 
     def _refresh_nvidia_nav_visibility(self):
-        """The NVIDIA nav button starts hidden (see __init__) since
-        detecting a GPU means an lspci call. Run it on a background thread
-        and reveal the button afterward instead of blocking startup."""
-        if "NVIDIA" not in self._nav_button_by_key:
+        """NVIDIA is search- and This PC-only now. Keep the probe so pages
+        that still listen for the worker attr do not see a missing start."""
+        if getattr(self, "_nvidia_nav_worker", None) is not None:
             return
         detect_nvidia_async(self, self._on_nvidia_nav_detected, attr="_nvidia_nav_worker")
 
     def _on_nvidia_nav_detected(self, has_nvidia: bool):
-        if has_nvidia:
-            self._nav_button_by_key["NVIDIA"].setVisible(True)
+        self._has_nvidia = bool(has_nvidia)
 
     def _ensure_page(self, index: int) -> QWidget:
         if self._pages[index] is None:
@@ -792,8 +756,10 @@ class MainWindow(QMainWindow):
 
     def _switch_page(self, index: int, record: bool = True, animate: bool = True):
         self._ensure_page(index)
-        for i, btn in enumerate(self._nav_buttons):
-            btn.set_active(i == index)
+        key = self._page_specs[index][0] if 0 <= index < len(self._page_specs) else "Welcome"
+        dest = destination_for_page(key)
+        for rail_dest, btn in self._rail_buttons.items():
+            btn.set_active(rail_dest == dest)
         self._stack.setCurrentIndex(index)
         if animate and record:
             fade_in(self._stack.currentWidget())

@@ -124,6 +124,115 @@ class HomeHeroView:
     rec_target: str
 
 
+@dataclass(frozen=True)
+class PulseNextStep:
+    """Single primary action for Pulse home — one thing, not a card dump."""
+
+    title: str
+    body: str
+    button: str
+    target: str
+    severity: str
+    orb_label: str
+    orb_caption: str
+
+
+def pulse_greeting(hour: int, hostname: str) -> str:
+    """Time-of-day greeting. Hostname is the machine name, not a person."""
+    if hour < 12:
+        prefix = "Good morning"
+    elif hour < 17:
+        prefix = "Good afternoon"
+    else:
+        prefix = "Good evening"
+    name = (hostname or "This PC").strip() or "This PC"
+    return f"{prefix}, {name}"
+
+
+def pulse_next_step(
+    *,
+    staged: bool = False,
+    rollback: bool = False,
+    windows_found: bool = False,
+    ntfs_library: bool = False,
+    setup_incomplete: bool = False,
+    setup_target: str = "Hardware",
+    repair_needed: bool = False,
+    profile: str = "everyday",
+) -> PulseNextStep:
+    """Pick the one Pulse action. Worse problems win."""
+    if ntfs_library:
+        return PulseNextStep(
+            title="Steam library is on NTFS",
+            body="Games on this drive will fail to launch. Proton needs a Linux disk.",
+            button="Fix this now",
+            target="Play",
+            severity="warn",
+            orb_label="ATTENTION",
+            orb_caption="Games need a Linux disk",
+        )
+    if setup_incomplete:
+        return PulseNextStep(
+            title="Finish setup",
+            body="A few first-boot steps are still open. Pick up whenever you are ready.",
+            button="Resume",
+            target=setup_target or "Hardware",
+            severity="warn",
+            orb_label="SETUP",
+            orb_caption="A few steps are still open",
+        )
+    if staged:
+        return PulseNextStep(
+            title="Update is staged",
+            body="A new image is ready. Restart to apply it — rollback stays one click away.",
+            button="Restart now",
+            target="reboot",
+            severity="warn",
+            orb_label="RESTART",
+            orb_caption="New image ready",
+        )
+    if repair_needed:
+        return PulseNextStep(
+            title="Guardian found something",
+            body="A safe fix is ready. Review it before anything else.",
+            button="Open Repair",
+            target="Repair",
+            severity="warn",
+            orb_label="ATTENTION",
+            orb_caption="A fix is ready",
+        )
+    if windows_found:
+        return PulseNextStep(
+            title="Windows disk detected",
+            body="Bring files, saves, and familiar workflows over. Originals stay put.",
+            button="Move in",
+            target="Move Files",
+            severity="ok",
+            orb_label="CLEAR",
+            orb_caption="Bring files over when ready",
+        )
+    if rollback:
+        return PulseNextStep(
+            title="Rollback is ready",
+            body="Yesterday's image is saved. One click if an update misbehaves.",
+            button="Review updates",
+            target="Update",
+            severity="ok",
+            orb_label="CLEAR",
+            orb_caption="Guardian watching",
+        )
+    dest = "Play" if profile == "gaming" else "Apps"
+    return PulseNextStep(
+        title="This PC is quiet",
+        body="Atomic updates, one-click rollback. Nothing needs you right now.",
+        button=f"Open {dest}",
+        target=dest,
+        severity="ok",
+        orb_label="CLEAR",
+        orb_caption="Guardian watching",
+    )
+
+
 def home_hero_view(staged: bool, rollback: bool, windows_found: bool) -> HomeHeroView:
     if staged:
         pill_text, pill_object_name = "RESTART REQUIRED", "glowing-pill-warn"

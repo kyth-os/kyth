@@ -30,9 +30,11 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
 from kyth_welcome.page_registry import (  # noqa: E402
+    PULSE_RAIL,
     PROBLEM_ROUTES,
     SEARCH_ITEMS,
     descriptors_from_nav_groups,
+    destination_for_page,
     get_nav_groups,
     visible_for_profile,
 )
@@ -43,8 +45,10 @@ class PageRegistryTests(unittest.TestCase):
         groups = get_nav_groups(lambda _destination: None)
         keys = [key for _section, items in groups for _icons, _glyph, _label, key, _factory in items]
 
-        for expected in ("Welcome", "App Store", "Update", "Hardware", "Feedback"):
+        for expected in ("Welcome", "Play", "Apps", "This PC", "App Store", "Update", "Hardware", "Feedback"):
             self.assertIn(expected, keys)
+        self.assertEqual(len(PULSE_RAIL), 5)
+        self.assertEqual([item.dest for item in PULSE_RAIL], ["Pulse", "Play", "Apps", "This PC", "Move In"])
 
     def test_search_metadata_covers_core_pages(self):
         for expected in ("Welcome", "App Store", "Update", "Hardware", "Feedback"):
@@ -82,6 +86,15 @@ class PageRegistryTests(unittest.TestCase):
         self.assertTrue(visible_for_profile(by_key["Work Setup"], "everyday"))
         self.assertTrue(visible_for_profile(by_key["Work Setup"], "work"))
         self.assertTrue(visible_for_profile(by_key["Update"], "gaming"))
+
+    def test_pulse_destinations_group_existing_pages(self):
+        self.assertEqual(destination_for_page("Welcome"), "Pulse")
+        self.assertEqual(destination_for_page("Performance"), "Play")
+        self.assertEqual(destination_for_page("App Store"), "Apps")
+        self.assertEqual(destination_for_page("Guardian"), "This PC")
+        self.assertEqual(destination_for_page("Move Files"), "Move In")
+        self.assertEqual(destination_for_page("Cloud Storage"), "Move In")
+        self.assertEqual(destination_for_page("unknown-page"), "Pulse")
 
 
 if __name__ == "__main__":

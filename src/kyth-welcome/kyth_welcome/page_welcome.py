@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
 from .core_base import IS_LIVE, load_profile, restyle, save_profile
@@ -12,8 +13,8 @@ from .services.welcome import (
     _FIRST_WEEK_DISMISS,
     _first_week_days,
     gather_first_week_checklist,
-    home_categories,
-    home_hero_view,
+    pulse_greeting,
+    pulse_next_step,
 )
 from .qt import (
     QFrame,
@@ -25,20 +26,20 @@ from .qt import (
     Signal,
     single_shot,
 )
-from .lazy_page import compose_on_first_init
 from .widgets import (
     Page,
     _make_card,
 )
 
-def _load_welcome_mixins():
-    from .page_welcome_grid import _WelcomeGridMixin
-    from .page_welcome_hero import _WelcomeHeroMixin
-    from .page_welcome_hud import _WelcomeHudMixin
-    return (_WelcomeGridMixin, _WelcomeHeroMixin, _WelcomeHudMixin)
 
-# ── Page: Welcome (Control Panel-style home) ──────────────────────────────────
-@compose_on_first_init(_load_welcome_mixins)
+PULSE_DEST_TILES = (
+    ("Play", "Play", "Launch games and tune performance."),
+    ("Apps", "Apps", "Install apps and set up work."),
+    ("This PC", "This PC", "Health, updates, and hardware."),
+    ("Move Files", "Move In", "Bring files, saves, and shortcuts."),
+)
+
+
 class WelcomePage(Page):
     profile_changed = Signal(str)
 
@@ -47,28 +48,14 @@ class WelcomePage(Page):
         self._navigate = navigate or (lambda _: None)
         self._profile = load_profile()
 
-        # Simplify standard header to let the new Gen Z Hero Banner shine
-        self._page_header(
-            "System Hub",
-            "Dashboard",
-            ""
-        )
-
-        # WelcomePage is built eagerly and synchronously by MainWindow before
-        # the app's first window is even shown (see windows.py), so none of
-        # the facts below may block on a subprocess call (bootc status,
-        # lsblk, lspci, systemctl) — that would freeze the whole app on
-        # first boot with no window visible at all. Start from safe
-        # defaults and let _refresh_system_status() (triggered after this
-        # constructor returns) fetch the real values on a background
-        # thread and patch the affected widgets in place; see
-        # _on_status_facts_ready().
         uname = os.uname()
-        hostname = uname.nodename or "This PC"
-        self._hostname = hostname
+        self._hostname = uname.nodename or "This PC"
         self._kernel = uname.release or "unknown"
         self._session = os.environ.get("XDG_SESSION_TYPE", "unknown").capitalize()
         self._status_worker = None
+        self._ntfs_libs: list[str] = []
+        self._repair_needed = False
+        self._action_target = "Apps"
         self._facts = {
             "branch": "Checking…",
             "staged": False,
@@ -78,43 +65,20 @@ class WelcomePage(Page):
             "pipewire": "checking…",
             "has_nvidia": False,
         }
-        staged = self._facts["staged"]
-        rollback = self._facts["rollback"]
-        windows_found = self._facts["windows_found"]
-        self._hero_view = home_hero_view(staged, rollback, windows_found)
-        hero_view = self._hero_view
-
-        self._add(self._make_hero_banner(hero_view))
-
-        incomplete = [] if IS_LIVE else incomplete_steps(self._profile)
-        if incomplete:
-            self._add(self._make_setup_resume_card(incomplete))
-
-        self._add(self._make_vibe_section())
-        self._add_layout(self._make_hud_grid())
-        # R6: AI control plane — surface deterministic repair plan from same
-        # probe snapshot + boot_health + Evaluation that RepairPage uses.
-        self._ai_card, ai_layout = _make_card("card-accent-ok")
-        ai_title = QLabel("AI Control Plane — offline")
-        ai_title.setObjectName("card-title")
-        ai_layout.addWidget(ai_title)
-        self._ai_desc = QLabel("Checking system health…")
-        self._ai_desc.setObjectName("card-copy")
-        self._ai_desc.setWordWrap(True)
-        ai_layout.addWidget(self._ai_desc)
-        self._ai_btn = QPushButton("Open Repair")
-        self._ai_btn.setToolTip("Open Repair for the AI-suggested action")
-        self._ai_btn.clicked.connect(lambda _=False: self._navigate("Repair"))
-        self._ai_btn.hide()
-        ai_layout.addWidget(self._ai_btn)
-        self._add(self._ai_card)
-        self._ai_worker = None
-
+        self._incomplete = [] if IS_LIVE else incomplete_steps(self._profile)
         self._apply_preset_worker = None
-
-        self._ntfs_library_insert_index = self._layout.count()
+        self._ai_worker = None
         self._ntfs_library_worker = None
+        self._win_dirs_worker = None
+        self._first_week_worker = None
+
+        self._build_pulse()
+        self._stretch()
+        self._refresh_pulse_action()
+
         if not IS_LIVE:
+            single_shot(self, 0, self._refresh_system_status)
+            single_shot(self, 0, self._refresh_ai_plan)
             single_shot(self, 0, self._refresh_ntfs_library_warning)
 
         days = None if IS_LIVE else _first_week_days()
@@ -122,49 +86,158 @@ class WelcomePage(Page):
             self._add(self._make_first_week_card(days))
             single_shot(self, 0, self._refresh_first_week)
 
-        self._add(self._make_section_header("Explore Tasks", "Choose a card below to configure launchers, tune displays, or run diagnostics."))
-        # Windows transfer prominence (complaint #2) — shown above categories when NTFS found
-        self._windows_transfer_card = self._make_windows_transfer_card()
-        self._windows_transfer_card.hide()
-        self._add(self._windows_transfer_card)
-        self._build_category_section()
-        self._stretch()
+    def set_profile(self, profile: str) -> None:
+        """Chrome mode switch — keep Pulse copy in sync without owning the toggle."""
+        self._profile = profile
+        self._apply_preset_btn.setText(f"Apply {profile.title()} settings")
+        self._refresh_pulse_action()
+        self.profile_changed.emit(profile)
 
-        if not IS_LIVE:
-            single_shot(self, 0, self._refresh_system_status)
-            single_shot(self, 0, self._refresh_ai_plan)
+    def _build_pulse(self) -> None:
+        self._greeting = QLabel(pulse_greeting(datetime.now().hour, self._hostname))
+        self._greeting.setObjectName("pulse-greeting")
+        self._add(self._greeting)
 
-    # hero/hud/grid moved to _Welcome*Mixin (page_welcome_hero/hud/grid.py) — compose_on_first_init provides them
+        self._subhead = QLabel("This PC is healthy · atomic updates · one-click rollback")
+        self._subhead.setObjectName("pulse-subhead")
+        self._subhead.setWordWrap(True)
+        self._add(self._subhead)
 
-    def _make_ntfs_library_card(self, libs: list[str]) -> QFrame:
-        card, layout = _make_card("card-accent-warn")
-        title = QLabel("Steam Library on NTFS Drive Detected")
-        title.setObjectName("card-title")
-        layout.addWidget(title)
-        home = os.path.expanduser("~")
-        listed = ",  ".join(lib.replace(home, "~", 1) for lib in libs[:3])
-        if len(libs) > 3:
-            listed += f"  (+{len(libs) - 3} more)"
-        body = QLabel(
-            f"Steam is using an NTFS/exFAT library: {listed}. Proton needs a "
-            "Linux-formatted disk (ext4 or btrfs). Games on NTFS will fail to launch or corrupt saves. "
-            "Copy games to your KythOS system partition to play safely."
-        )
-        body.setObjectName("card-copy")
-        body.setWordWrap(True)
-        layout.addWidget(body)
-        btns = QHBoxLayout()
-        btns.setSpacing(8)
-        copy_btn = QPushButton("Copy Games to KythOS")
-        copy_btn.setObjectName("primary")
-        copy_btn.clicked.connect(lambda _=False: self._navigate("Gaming"))
-        btns.addWidget(copy_btn)
-        learn_btn = QPushButton("Why This Breaks")
-        learn_btn.clicked.connect(lambda _=False: self._navigate("Move Files"))
-        btns.addWidget(learn_btn)
-        btns.addStretch()
-        layout.addLayout(btns)
+        apply_row = QHBoxLayout()
+        apply_row.setSpacing(10)
+        self._apply_preset_btn = QPushButton(f"Apply {self._profile.title()} settings")
+        self._apply_preset_btn.setToolTip("Apply the Everyday or Gaming desktop preset for this mode.")
+        self._apply_preset_btn.clicked.connect(lambda _=False: self._apply_role_preset())
+        apply_row.addWidget(self._apply_preset_btn)
+        self._preset_status = QLabel("Ready to tune.")
+        self._preset_status.setObjectName("status-dim")
+        apply_row.addWidget(self._preset_status, 1)
+        self._add_layout(apply_row)
+
+        hero = QHBoxLayout()
+        hero.setSpacing(20)
+        hero.addWidget(self._make_orb(), 0, Qt.AlignmentFlag.AlignTop)
+        hero.addWidget(self._make_action_card(), 1)
+        self._add_layout(hero)
+
+        self._add(self._make_facts_strip())
+        self._add_layout(self._make_dest_tiles())
+
+        if self._incomplete:
+            self._add(self._make_setup_resume_card(self._incomplete))
+
+    def _make_orb(self) -> QFrame:
+        self._orb = QFrame()
+        self._orb.setObjectName("pulse-orb-ok")
+        layout = QVBoxLayout(self._orb)
+        layout.setContentsMargins(12, 28, 12, 28)
+        layout.setSpacing(4)
+        self._orb_label = QLabel("CLEAR")
+        self._orb_label.setObjectName("pulse-orb-label")
+        self._orb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._orb_label)
+        self._orb_caption = QLabel("Guardian watching")
+        self._orb_caption.setObjectName("pulse-orb-caption")
+        self._orb_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._orb_caption.setWordWrap(True)
+        layout.addWidget(self._orb_caption)
+        return self._orb
+
+    def _make_action_card(self) -> QFrame:
+        card, layout = _make_card("pulse-action")
+        self._action_title = QLabel("This PC is quiet")
+        self._action_title.setObjectName("pulse-action-title")
+        layout.addWidget(self._action_title)
+        self._action_body = QLabel("Checking system health…")
+        self._action_body.setObjectName("pulse-action-body")
+        self._action_body.setWordWrap(True)
+        layout.addWidget(self._action_body)
+        self._action_detail = QLabel("")
+        self._action_detail.setObjectName("pulse-action-body")
+        self._action_detail.setWordWrap(True)
+        self._action_detail.hide()
+        layout.addWidget(self._action_detail)
+        self._action_btn = QPushButton("Open Apps")
+        self._action_btn.setObjectName("primary")
+        self._action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._action_btn.clicked.connect(lambda _=False: self._on_pulse_action())
+        layout.addWidget(self._action_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        self._action_card = card
         return card
+
+    def _make_facts_strip(self) -> QFrame:
+        strip = QFrame()
+        strip.setObjectName("pulse-facts")
+        row = QHBoxLayout(strip)
+        row.setContentsMargins(18, 12, 18, 12)
+        row.setSpacing(16)
+        self._fact_values: dict[str, QLabel] = {}
+        for key, value in (
+            ("Device", self._hostname),
+            ("Kernel", self._kernel),
+            ("Channel", "Checking…"),
+            ("Rollback", "Checking…"),
+        ):
+            col = QVBoxLayout()
+            col.setSpacing(2)
+            k = QLabel(key.upper())
+            k.setObjectName("pulse-fact-key")
+            col.addWidget(k)
+            v = QLabel(value)
+            v.setObjectName("pulse-fact-val")
+            v.setWordWrap(True)
+            col.addWidget(v)
+            self._fact_values[key] = v
+            row.addLayout(col, 1)
+        return strip
+
+    def _make_dest_tiles(self):
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        for key, title, copy in PULSE_DEST_TILES:
+            btn = QPushButton(f"{title}\n{copy}")
+            btn.setObjectName("pulse-dest-tile")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setMinimumHeight(88)
+            btn.clicked.connect(lambda _=False, k=key: self._navigate(k))
+            row.addWidget(btn, 1)
+        return row
+
+    def _current_next_step(self):
+        setup_target = ""
+        if self._incomplete:
+            setup_target = STEP_RESUME_PAGE.get(self._incomplete[0][0], "") or "Hardware"
+        return pulse_next_step(
+            staged=bool(self._facts.get("staged")),
+            rollback=bool(self._facts.get("rollback")),
+            windows_found=bool(self._facts.get("windows_found")),
+            ntfs_library=bool(self._ntfs_libs),
+            setup_incomplete=bool(self._incomplete),
+            setup_target=setup_target,
+            repair_needed=self._repair_needed,
+            profile=self._profile,
+        )
+
+    def _refresh_pulse_action(self) -> None:
+        step = self._current_next_step()
+        self._action_target = step.target
+        self._action_title.setText(step.title)
+        self._action_body.setText(step.body)
+        self._action_btn.setText(step.button)
+        self._orb_label.setText(step.orb_label)
+        self._orb_caption.setText(step.orb_caption)
+        self._orb.setObjectName("pulse-orb-warn" if step.severity == "warn" else "pulse-orb-ok")
+        restyle(self._orb)
+        if step.severity == "ok" and not self._facts.get("staged"):
+            self._subhead.setText("This PC is healthy · atomic updates · one-click rollback")
+        elif step.severity == "warn":
+            self._subhead.setText(step.orb_caption)
+
+    def _on_pulse_action(self) -> None:
+        if self._action_target == "reboot":
+            reboot()
+            return
+        self._navigate(self._action_target)
 
     def _refresh_ntfs_library_warning(self):
         if self._ntfs_library_worker is not None:
@@ -180,17 +253,12 @@ class WelcomePage(Page):
         self._ntfs_library_worker.start()
 
     def _on_ntfs_library_warning_ready(self, _key: str, libs: object):
-        if not libs:
-            return
-        card = self._make_ntfs_library_card(list(libs))
-        self._layout.insertWidget(self._ntfs_library_insert_index, card)
-        restyle(card)
+        self._ntfs_libs = list(libs) if libs else []
+        self._refresh_pulse_action()
 
     @staticmethod
     def _gather_status_facts() -> dict:
-        """Run off the GUI thread by _refresh_system_status()'s DataWorker.
-        Everything here is a subprocess/D-Bus call — see the comment at the
-        top of __init__ for why none of it may run synchronously there."""
+        """Run off the GUI thread by _refresh_system_status()'s DataWorker."""
         from concurrent.futures import ThreadPoolExecutor
 
         from .services.bootc import branch_display_name, current_branch, has_rollback_deployment, has_staged_update
@@ -198,8 +266,6 @@ class WelcomePage(Page):
         from .services.hardware import _detect_nvidia
         from .services.process import command_stdout
 
-        # Fix 7: run 4 independent probes in parallel — portal/pipewire/nvidia/ntfs
-        # previously ran serially ~9 s worst-case, now ~3 s (no bash -lc — direct systemctl, see Unit 1)
         def _portal():
             return command_stdout(
                 ["systemctl", "--user", "is-active", "xdg-desktop-portal.service"],
@@ -267,7 +333,7 @@ class WelcomePage(Page):
 
         self._ai_worker = DataWorker("welcome-ai-plan", self._gather_ai_plan)
         self._ai_worker.result.connect(guard_disposed(self._on_ai_plan_ready))
-        self._ai_worker.failed.connect(guard_disposed(lambda _k, _m: self._ai_desc.setText("AI check failed")))
+        self._ai_worker.failed.connect(lambda _k, _m: None)
         self._ai_worker.finished.connect(lambda: setattr(self, "_ai_worker", None))
         self._ai_worker.finished.connect(self._ai_worker.deleteLater)
         self._ai_worker.start()
@@ -275,102 +341,76 @@ class WelcomePage(Page):
     def _on_ai_plan_ready(self, _key: str, plan: object):
         if not isinstance(plan, dict):
             return
-        summary = str(plan.get("summary", "")) or "System looks healthy. No repair actions needed."
-        self._ai_desc.setText(summary)
         actions = plan.get("actions", [])
-        # Show button only when at least one actionable item exists
-        has_action = bool(actions) and any(a.get("id") != "refresh-probe" for a in actions if isinstance(a, dict))
-        self._ai_btn.setVisible(bool(has_action))
-        if has_action:
-            self._ai_card.setObjectName("card-accent-warn")
-        else:
-            self._ai_card.setObjectName("card-accent-ok")
-        restyle(self._ai_card)
+        self._repair_needed = bool(actions) and any(
+            a.get("id") != "refresh-probe" for a in actions if isinstance(a, dict)
+        )
+        self._refresh_pulse_action()
 
     def _on_status_facts_failed(self, _key: str, message: str):
-        # H4/M8: surface failure instead of leaving "Checking…" forever
         self._facts["branch"] = "Unavailable"
         self._facts["portal"] = f"check failed: {message}"
         self._facts["pipewire"] = "check failed"
-        try:
-            self._hud1_desc.setText(f"<b>Device:</b> {self._hostname}<br><b>Kernel:</b> {self._kernel}<br><b>Channel:</b> Unavailable")
-            self._hud2_desc.setText(f"<b>Session Type:</b> {self._session}<br><b>Audio Engine:</b> check failed<br><b>Desktop Portal:</b> check failed")
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-            pass
+        self._fact_values["Channel"].setText("Unavailable")
+        self._fact_values["Rollback"].setText("Check failed")
+        self._subhead.setText("Status check failed — search still finds every tool.")
 
     def _on_status_facts_ready(self, _key: str, facts: object):
         if not isinstance(facts, dict):
             return
         self._facts.update(facts)
-        staged = self._facts["staged"]
-        rollback = self._facts["rollback"]
-        windows_found = self._facts["windows_found"]
-
-        self._hero_view = home_hero_view(staged, rollback, windows_found)
-        self._hero_pill.setText(self._hero_view.pill_text)
-        self._hero_pill.setObjectName(self._hero_view.pill_object_name)
-        restyle(self._hero_pill)
-
-        self._hud1_desc.setText(
-            f"<b>Device:</b> {self._hostname}<br>"
-            f"<b>Kernel:</b> {self._kernel}<br>"
-            f"<b>Channel:</b> {self._facts['branch']}"
-        )
-        self._hud2_desc.setText(
-            f"<b>Session Type:</b> {self._session}<br>"
-            f"<b>Audio Engine:</b> PipeWire ({self._facts['pipewire'].strip()})<br>"
-            f"<b>Desktop Portal:</b> {self._facts['portal'].strip()}"
-        )
-        rollback_text = "Available — one reboot to previous system (bootc)" if rollback else "None — fresh install, rollback will appear after first update"
-        staged_text = " — staged update ready" if self._facts["staged"] else ""
-        dual_boot_text = "Detected — use Transfer card above" if windows_found else "Not Detected"
-        self._hud3_desc.setText(
-            f"<b>Previous State:</b> {rollback_text}{staged_text}<br>"
-            f"<b>Windows Disk:</b> {dual_boot_text}<br>"
-            f"<b>Atomic:</b> bootc — instant rollback, no reinstall"
-        )
-        self._hud4_desc.setText(self._hero_view.rec_text)
-        self._hud4_btn.setText(self._hero_view.rec_btn_label)
-
-        # Show Windows transfer card when dual-boot detected (complaint #2)
-        if hasattr(self, "_windows_transfer_card"):
-            self._windows_transfer_card.setVisible(bool(windows_found))
-        if bool(self._facts["has_nvidia"]) != self._nvidia_at_build:
-            self._rebuild_category_grid()
-
-    def _on_recommended_action(self):
-        target = self._hero_view.rec_target
-        if target == "reboot":
-            reboot()
+        self._fact_values["Channel"].setText(str(self._facts.get("branch") or "Unknown"))
+        if self._facts.get("staged"):
+            self._fact_values["Rollback"].setText("Staged update ready")
+        elif self._facts.get("rollback"):
+            self._fact_values["Rollback"].setText("Ready")
         else:
-            self._navigate(target)
+            self._fact_values["Rollback"].setText("After first update")
+        self._refresh_pulse_action()
+        if self._facts.get("windows_found"):
+            self._refresh_win_dirs()
 
-    def _rebuild_category_grid(self):
-        """Re-derive the category cards once real GPU detection lands, since
-        home_categories()'s "Advanced" card only lists "Manage NVIDIA
-        drivers" when has_nvidia is True and the initial build used the
-        False placeholder from self._facts (see __init__)."""
-        self._nvidia_at_build = self._facts["has_nvidia"]
-        # False positive: _category_cards is set in
-        # _WelcomeGridMixin._build_category_section(), called from __init__
-        # before this method can ever run; pylint doesn't trace attribute
-        # definitions across mixin classes in another file.
-        # pylint: disable-next=access-member-before-definition
-        for card, _is_games in self._category_cards:
-            self._category_grid.removeWidget(card)
-            card.deleteLater()
-        self._category_cards = []
-        for icon_names, glyph, title, tasks in home_categories(has_nvidia=self._nvidia_at_build):
-            card = self._make_category_card(icon_names, glyph, title, tasks)
-            self._category_cards.append((card, title == "Games"))
-        self._relayout_categories(self._profile)
+    def _refresh_win_dirs(self) -> None:
+        try:
+            from .services.migration import _ntfs_user_dirs
+            from .services.runtime import DataWorker, guard_disposed
+
+            if self._win_dirs_worker is not None:
+                return
+            worker = DataWorker("win-user-dirs", _ntfs_user_dirs)
+            self._win_dirs_worker = worker
+            worker.result.connect(guard_disposed(lambda _k, dirs: self._on_win_dirs_ready(dirs)))
+            worker.failed.connect(lambda _k, _m: None)
+            worker.finished.connect(lambda: setattr(self, "_win_dirs_worker", None))
+            worker.finished.connect(worker.deleteLater)
+            worker.start()
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+            pass
+
+    def _on_win_dirs_ready(self, dirs: object) -> None:
+        if not isinstance(dirs, list):
+            return
+        found = [d for d in dirs if isinstance(d, dict) and d.get("exists")]
+        if not found:
+            self._action_detail.hide()
+            return
+        by_user: dict[str, list[str]] = {}
+        mounts: set[str] = set()
+        for item in found:
+            by_user.setdefault(item.get("user", "?"), []).append(item.get("kind", "?"))
+            mounts.add(str(item.get("mount", "")))
+        parts = [f"{user} — {', '.join(sorted(kinds))}" for user, kinds in sorted(by_user.items())]
+        mount_hint = sorted(mounts)[0] if mounts else ""
+        text = "Found on " + mount_hint + ": " + " · ".join(parts) if mount_hint else "Found: " + " · ".join(parts)
+        self._action_detail.setText(text)
+        self._action_detail.show()
+        restyle(self._action_detail)
 
     def _make_setup_resume_card(self, incomplete: list[tuple[str, str]]) -> QFrame:
         card, layout = _make_card("card-accent-warn")
         title = QLabel("Finish setup")
         title.setObjectName("card-title")
         layout.addWidget(title)
-
         body = QLabel(
             "A few things from first-boot setup are still open. Pick up where you left off "
             "whenever you're ready."
@@ -378,18 +418,15 @@ class WelcomePage(Page):
         body.setObjectName("card-copy")
         body.setWordWrap(True)
         layout.addWidget(body)
-
         for key, status in incomplete:
             row = QHBoxLayout()
             row.setSpacing(10)
             badge = QLabel("Skipped" if status == "skipped" else "Not started")
             badge.setObjectName("task-status-warn" if status == "skipped" else "task-status-idle")
             row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
-
             label = QLabel(STEP_LABELS.get(key, key))
             label.setObjectName("card-copy")
             row.addWidget(label, 1)
-
             page_key = STEP_RESUME_PAGE.get(key)
             btn = QPushButton("Resume" if page_key else "Not available yet")
             btn.setEnabled(bool(page_key))
@@ -401,24 +438,20 @@ class WelcomePage(Page):
 
     def _make_first_week_card(self, days: int) -> QFrame:
         card, layout = _make_card("card-accent-ok")
-        title = QLabel(f"Day {days} Checklist — Finalize Your Setup")
+        title = QLabel(f"Day {days} checklist")
         title.setObjectName("card-title")
         layout.addWidget(title)
-
-        body = QLabel("Ensure the following components are fully configured for the best desktop experience.")
+        body = QLabel("A short list to finish settling in. Hide it whenever you like.")
         body.setObjectName("card-copy")
         body.setWordWrap(True)
         layout.addWidget(body)
-
         self._first_week_rows: list[tuple[QLabel, QPushButton]] = []
-        self._first_week_worker = None
         for label, text, page_key in FIRST_WEEK_ITEMS:
             row = QHBoxLayout()
             row.setSpacing(10)
             badge = QLabel("Checking…")
             badge.setObjectName("task-status-idle")
             row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
-
             text_col = QVBoxLayout()
             text_col.setSpacing(2)
             heading = QLabel(label)
@@ -429,14 +462,12 @@ class WelcomePage(Page):
             lbl.setWordWrap(True)
             text_col.addWidget(lbl)
             row.addLayout(text_col, 1)
-
             btn = QPushButton("Set Up")
             btn.setToolTip(text)
             btn.clicked.connect(lambda _=False, k=page_key: self._navigate(k))
             row.addWidget(btn, 0, Qt.AlignmentFlag.AlignTop)
             layout.addLayout(row)
             self._first_week_rows.append((badge, btn))
-
         dismiss_row = QHBoxLayout()
         dismiss_btn = QPushButton("Got it — hide this")
         dismiss_btn.clicked.connect(lambda _=False, c=card: self._dismiss_first_week(c))
@@ -474,79 +505,6 @@ class WelcomePage(Page):
             btn.setObjectName("primary" if not done else "")
             restyle(btn)
 
-    def _make_windows_transfer_card(self) -> 'QFrame':
-        """Prominent one-click Windows -> KythOS transfer (complaint #2)."""
-        card, layout = _make_card("card-accent-ok")
-        title = QLabel("🪟  Coming from Windows? Transfer in one click")
-        title.setObjectName("card-title")
-        layout.addWidget(title)
-        body = QLabel(
-            "KythOS found a Windows partition. Copy your Documents, Desktop, Downloads, "
-            "browser bookmarks, and Steam saves to your new home — originals stay untouched "
-            "(bootc keeps the system atomic, so you can try Kyth and rollback instantly). "
-            "OneDrive/Dropbox can be re-connected on the next page."
-        )
-        body.setObjectName("card-copy")
-        body.setWordWrap(True)
-        layout.addWidget(body)
-        # Dynamic NTFS user dirs line — populated off-thread via _ntfs_user_dirs (2/5 reuse of drives probe)
-        self._win_transfer_detail = QLabel("")
-        self._win_transfer_detail.setObjectName("card-copy")
-        self._win_transfer_detail.setWordWrap(True)
-        self._win_transfer_detail.hide()
-        layout.addWidget(self._win_transfer_detail)
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        go_btn = QPushButton("Transfer Files from Windows")
-        go_btn.setObjectName("primary")
-        go_btn.clicked.connect(lambda _=False: self._navigate("Move Files"))
-        row.addWidget(go_btn)
-        hw_btn = QPushButton("Check My Games First")
-        hw_btn.clicked.connect(lambda _=False: self._navigate("Gaming"))
-        row.addWidget(hw_btn)
-        row.addStretch()
-        layout.addLayout(row)
-        # Kick off NTFS scan off GUI thread (probe_cached 30s, never auto-mounts BitLocker)
-        try:
-            from .services.migration import _ntfs_user_dirs
-            from .services.runtime import DataWorker, guard_disposed
-            # False positive: the hasattr() guard short-circuits before this
-            # attribute read on the first call, when it doesn't exist yet.
-            # pylint: disable-next=access-member-before-definition
-            if not hasattr(self, "_win_dirs_worker") or self._win_dirs_worker is None:
-                w = DataWorker("win-user-dirs", _ntfs_user_dirs)
-                self._win_dirs_worker = w
-                w.result.connect(guard_disposed(lambda _k, dirs: self._on_win_dirs_ready(dirs)))
-                w.failed.connect(lambda _k, _m: None)
-                w.finished.connect(lambda: setattr(self, "_win_dirs_worker", None))
-                w.finished.connect(w.deleteLater)
-                w.start()
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-            pass
-        return card
-
-    def _on_win_dirs_ready(self, dirs: list[dict]) -> None:
-        if not hasattr(self, "_win_transfer_detail") or self._win_transfer_detail is None:
-            return
-        found = [d for d in dirs if d.get("exists")]
-        if not found:
-            self._win_transfer_detail.hide()
-            return
-        # Summarize: e.g. "Found: Alice — Documents, Pictures (D:) · Bob — Documents"
-        by_user: dict[str, list[str]] = {}
-        mounts: set[str] = set()
-        for d in found:
-            by_user.setdefault(d.get("user", "?"), []).append(d.get("kind", "?"))
-            mounts.add(d.get("mount", ""))
-        parts = []
-        for user, kinds in sorted(by_user.items()):
-            parts.append(f"{user} — {', '.join(sorted(kinds))}")
-        mount_hint = sorted(mounts)[0] if mounts else ""
-        text = "Found on " + mount_hint + ": " + " · ".join(parts) if mount_hint else "Found: " + " · ".join(parts)
-        self._win_transfer_detail.setText(text)
-        self._win_transfer_detail.show()
-        restyle(self._win_transfer_detail)
-
     def _dismiss_first_week(self, card: QFrame):
         try:
             os.makedirs(os.path.dirname(_FIRST_WEEK_DISMISS), exist_ok=True)
@@ -556,25 +514,11 @@ class WelcomePage(Page):
             pass
         card.hide()
 
-    # _make_section_header moved to _WelcomeGridMixin
-
-    def _on_focus_chosen(self, profile: str):
-        self._profile = profile
-        for key, btn in self._focus_buttons.items():
-            btn.setChecked(key == profile)
-        save_profile(profile)
-        self._relayout_categories(profile)
-        self.profile_changed.emit(profile)
-
     def _apply_role_preset(self):
-        # kyth-apply-role-preset runs with a 20s timeout; every other
-        # subprocess call on this page (WelcomePage is built eagerly at
-        # app startup — see __init__) was moved to a background worker for
-        # exactly this reason, but this button's handler ran the command
-        # synchronously and could freeze the whole app for up to 20s.
         if self._apply_preset_worker is not None:
             return
         profile = self._profile
+        save_profile(profile)
         self._apply_preset_btn.setEnabled(False)
         self._preset_status.setObjectName("status-dim")
         self._preset_status.setText("Applying…")
@@ -607,5 +551,3 @@ class WelcomePage(Page):
             self._preset_status.setObjectName("status-warn")
             self._preset_status.setText(f"Preset error: {detail or 'unknown error'}")
         restyle(self._preset_status)
-
-    # _relayout_categories / _make_category_card moved to _WelcomeGridMixin

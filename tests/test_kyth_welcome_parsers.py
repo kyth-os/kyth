@@ -251,6 +251,29 @@ class HomeHeroViewTests(unittest.TestCase):
         self.assertEqual(view.rec_btn_label, "Configure Games")
         self.assertEqual(view.pill_text, "SYSTEM UP-TO-DATE")
 
+    def test_pulse_greeting_uses_machine_name(self):
+        self.assertEqual(welcome.pulse_greeting(9, "aether-01"), "Good morning, aether-01")
+        self.assertEqual(welcome.pulse_greeting(15, "aether-01"), "Good afternoon, aether-01")
+        self.assertEqual(welcome.pulse_greeting(20, ""), "Good evening, This PC")
+
+    def test_pulse_next_step_priority(self):
+        ntfs = welcome.pulse_next_step(ntfs_library=True, staged=True, windows_found=True)
+        self.assertEqual(ntfs.target, "Play")
+        self.assertEqual(ntfs.severity, "warn")
+        setup = welcome.pulse_next_step(setup_incomplete=True, setup_target="App Store", staged=True)
+        self.assertEqual(setup.target, "App Store")
+        staged = welcome.pulse_next_step(staged=True, windows_found=True)
+        self.assertEqual(staged.target, "reboot")
+        repair = welcome.pulse_next_step(repair_needed=True, windows_found=True)
+        self.assertEqual(repair.target, "Repair")
+        windows = welcome.pulse_next_step(windows_found=True, rollback=True)
+        self.assertEqual(windows.target, "Move Files")
+        quiet = welcome.pulse_next_step(profile="everyday")
+        self.assertEqual(quiet.target, "Apps")
+        self.assertEqual(quiet.orb_label, "CLEAR")
+        gaming = welcome.pulse_next_step(profile="gaming")
+        self.assertEqual(gaming.target, "Play")
+
 
 class PageServiceModelTests(unittest.TestCase):
     def test_update_operations_are_provider_independent(self):

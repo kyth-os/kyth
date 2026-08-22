@@ -15,7 +15,7 @@ def build_search_panel(window: "Windows", central_layout) -> None:
     window._search_panel.setObjectName("search-results-panel")
     window._search_panel.hide()
     window._search_panel_layout = QVBoxLayout(window._search_panel)
-    window._search_panel_layout.setContentsMargins(266, 12, 24, 14)
+    window._search_panel_layout.setContentsMargins(84, 12, 24, 14)
     window._search_panel_layout.setSpacing(8)
 
     window._search_results_title = QLabel("Search results")
@@ -40,7 +40,7 @@ def build_mission_bar(window: "Windows", central_layout) -> None:
     bar.setObjectName("mission-bar")
     bar.setFixedHeight(30)
     layout = QHBoxLayout(bar)
-    layout.setContentsMargins(254, 4, 14, 4)
+    layout.setContentsMargins(84, 4, 14, 4)
     layout.setSpacing(8)
 
     kicker = QLabel("System")

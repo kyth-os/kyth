@@ -22,6 +22,58 @@ class PageDescriptor:
         return " ".join((self.key, self.title, self.search_description, *self.search_terms)).lower()
 
 
+@dataclass(frozen=True)
+class PulseRailItem:
+    """One icon-rail destination. Landing is the page the rail button opens."""
+
+    dest: str
+    landing_key: str
+    title: str
+    icon_names: tuple[str, ...]
+    glyph: str
+    hint: str
+
+
+PULSE_RAIL: tuple[PulseRailItem, ...] = (
+    PulseRailItem("Pulse", "Welcome", "Pulse", ("go-home",), "⌂", "Health and the next step"),
+    PulseRailItem("Play", "Play", "Play", ("applications-games", "input-gaming"), "▶", "Games, boost, and controllers"),
+    PulseRailItem("Apps", "Apps", "Apps", ("plasmadiscover", "applications-all"), "⬡", "Discover apps and work setup"),
+    PulseRailItem("This PC", "This PC", "This PC", ("computer", "computer-laptop"), "◈", "Health, updates, and hardware"),
+    PulseRailItem("Move In", "Move Files", "Move In", ("document-import", "drive-harddisk"), "⇄", "Files, saves, and familiar workflows"),
+)
+
+# Child pages stay in the stack for search; the rail highlights the destination.
+_DESTINATION_PAGES: dict[str, tuple[str, ...]] = {
+    "Pulse": ("Welcome",),
+    "Play": ("Play", "Gaming", "Performance", "Compatibility", "Controllers"),
+    "Apps": ("Apps", "App Store", "Work Setup"),
+    "This PC": (
+        "This PC",
+        "Guardian",
+        "Update",
+        "Hardware",
+        "Plasma Wayland",
+        "Diagnostics",
+        "Repair",
+        "NVIDIA",
+        "Kernel",
+        "Channels",
+        "Just",
+        "Feedback",
+    ),
+    "Move In": ("Move Files", "Cloud Storage", "Network Shares", "VPN"),
+}
+
+PAGE_DESTINATION: dict[str, str] = {
+    page: dest for dest, pages in _DESTINATION_PAGES.items() for page in pages
+}
+
+
+def destination_for_page(key: str) -> str:
+    """Map any Hub page key to its Pulse rail destination."""
+    return PAGE_DESTINATION.get(key, "Pulse")
+
+
 def _page_factory(module_name: str, class_name: str, *args, **kwargs) -> PageFactory:
     def factory() -> QWidget:
         module = import_module(f".{module_name}", __package__)
@@ -129,7 +181,10 @@ def _search_item_terms(item) -> tuple[str, ...]:
 
 
 SEARCH_ITEMS: dict[str, SearchItem] = {
-    "Welcome": SearchItem("Home", "Review this PC, pick a preset, and jump into common setup tasks.", ("Control Panel", "PC focus", "Everyday preset", "Gaming preset", "Switch focus")),
+    "Welcome": SearchItem("Pulse", "See this PC's health and the one next step.", ("Home", "Control Panel", "System Hub", "PC focus", "Everyday preset", "Gaming preset", "Switch focus", "Dashboard")),
+    "Play": SearchItem("Play", "Open games, launchers, boost, controllers, and compatibility.", ("Gaming", "Game launchers", "Steam", "Library")),
+    "Apps": SearchItem("Apps", "Install trusted apps and set up work.", ("Discover", "App Store", "Work Setup")),
+    "This PC": SearchItem("This PC", "Health, updates, hardware, and repair in one place.", ("Device Manager", "System", "Guardian", "Updates")),
     "Gaming": SearchItem("Gaming", "Install launchers, scan game libraries, set up capture, saves, and migration helpers.", ("Game launchers", "Steam", "Epic Games", "GOG", "Game Pass", "Xbox app", "Xbox Game Bar", "Game Bar", "Game capture", "Instant replay", "Battle.net", "Screen record", "Record gameplay")),
     "Performance": SearchItem("Performance", "Tune power, scheduler, and desktop performance behavior.", ("Task Manager", "Mission Center", "Performance mode", "Slow game", "Low FPS", "Stutter", "Lag", "Fan noise", "Battery life")),
     "Compatibility": SearchItem("Compatibility", "Check known game support, ProtonDB context, and blocked anti-cheat titles.", ("Game compatibility", "Will my games work", "ProtonDB", "Anti-cheat", "Game crashes", "Game won't launch", "Blocked game")),
@@ -196,7 +251,10 @@ def get_nav_groups(navigate) -> list[tuple[str | None, list[NavItem]]]:
     # windows.py's _refresh_nvidia_nav_visibility).
     nav_groups: list[tuple[str | None, list[NavItem]]] = [
         (None, [
-            (("go-home",), "⌂", "Home", "Welcome", _page_factory("page_welcome", "WelcomePage", navigate=navigate)),
+            (("go-home",), "⌂", "Pulse", "Welcome", _page_factory("page_welcome", "WelcomePage", navigate=navigate)),
+            (("applications-games", "input-gaming"), "▶", "Play", "Play", _page_factory("page_hub", "PlayHubPage", navigate=navigate)),
+            (("plasmadiscover", "applications-all"), "⬡", "Apps", "Apps", _page_factory("page_hub", "AppsHubPage", navigate=navigate)),
+            (("computer", "computer-laptop"), "◈", "This PC", "This PC", _page_factory("page_hub", "ThisPcHubPage", navigate=navigate)),
         ]),
         ("Gaming", [
             (("applications-games", "input-gaming"), "◉", "Gaming", "Gaming", _page_factory("page_gaming", "GamingPage")),
