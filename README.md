@@ -193,7 +193,7 @@ Check the [gaming validation matrix](docs/gaming-validation-matrix.md) and
 | --- | --- |
 | Base image | `ghcr.io/ublue-os/kinoite-main:44`, rebuilt in `build_base/` |
 | Final OS | `Dockerfile` plus ordered package, sysconfig, branding, and helper fragments in `build_files/scripts/` |
-| Desktop | KDE Plasma 6 Wayland (software-compose rescue; X11 remains in the session picker) |
+| Desktop | KDE Plasma 6 Wayland (software-compose rescue; XWayland for games) |
 | Deployment | OCI image published at `ghcr.io/mrtrick37/kyth` and installed/updated with bootc |
 | Kernel | Fedora-signed kernel by default; CachyOS is an optional image variant |
 | Installer | Local-only Python installer service and graphical kiosk frontend, deploying a pinned image with bootc |

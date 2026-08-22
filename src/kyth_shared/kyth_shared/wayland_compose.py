@@ -1,9 +1,9 @@
 """Wayland session defaults and software-compose rescue.
 
-The installed and live images start SDDM and Plasma on Wayland. When there is
-no DRM render node (simpledrm-only first boot, VM without 3D), KWin uses
-QPainter + llvmpipe instead of falling back to an X11 session. ``kyth.hwgl=1``
-on the kernel command line forces hardware GL.
+The installed and live images start SDDM and Plasma on Wayland only. When there
+is no DRM render node, on live media, or with ``nomodeset``, KWin uses QPainter
++ llvmpipe. ``kyth.hwgl=1`` on the kernel command line forces hardware GL.
+XWayland remains for games and Electron; Plasma X11 is not a session.
 """
 from __future__ import annotations
 
@@ -27,7 +27,6 @@ DEFAULT_KWIN_WAYLAND: tuple[str, ...] = (
 )
 
 SDDM_WAYLAND_CONF = "[General]\nDisplayServer=wayland\nDefaultSession=plasma.desktop\n"
-SDDM_NOMODESET_CONF = "[General]\nDisplayServer=x11\nDefaultSession=plasmax11.desktop\n"
 LEGACY_QEMU_SAFE_NAME = "10-kyth-qemu-safe.sh"
 
 
@@ -51,13 +50,13 @@ def is_live_image(cmdline: str | None = None) -> bool:
 
 
 def nomodeset_requested(cmdline: str | None = None) -> bool:
-    """nomodeset means no KMS — kwin_wayland --drm cannot start."""
+    """nomodeset disables GPU KMS — stay on Wayland with software compose."""
     return "nomodeset" in _cmdline_tokens(cmdline)
 
 
 def sddm_session_conf(cmdline: str | None = None) -> str:
-    if nomodeset_requested(cmdline):
-        return SDDM_NOMODESET_CONF
+    """Always Plasma Wayland. ``cmdline`` is accepted for call-site compatibility."""
+    del cmdline
     return SDDM_WAYLAND_CONF
 
 
@@ -77,9 +76,7 @@ def needs_software_compose(
     """Return True when the greeter or session should use software compose."""
     if hwgl_forced(cmdline):
         return False
-    if nomodeset_requested(cmdline):
-        return False
-    if is_live_image(cmdline):
+    if nomodeset_requested(cmdline) or is_live_image(cmdline):
         return True
     return not has_drm_render_node(dri)
 

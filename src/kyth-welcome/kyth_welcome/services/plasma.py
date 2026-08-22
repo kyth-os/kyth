@@ -97,10 +97,10 @@ _kread = kread
 
 def _probe_session(session: str) -> HardwareProbe:
     """Probe the current session type (Wayland/X11)."""
-    session_status = "ok" if session == "wayland" else ("dim" if session == "x11" else "warn")
+    session_status = "ok" if session == "wayland" else "warn"
     session_summary = (
         "Wayland session active" if session == "wayland"
-        else "X11 session active — Wayland is the default; Plasma X11 remains an emergency picker option"
+        else "X11 session active — KythOS ships Plasma Wayland only; log out and choose Plasma"
         if session == "x11"
         else "Session type could not be identified"
     )

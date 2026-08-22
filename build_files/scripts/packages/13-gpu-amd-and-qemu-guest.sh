@@ -17,9 +17,8 @@ set -euo pipefail
 # libdrm: Direct Rendering Manager userspace library.
 # mesa-dri-drivers: OpenGL/DRI Gallium drivers, also provides radeonsi_drv_video.so
 #   (AMD VA-API decode backend used by libva).
-# xorg-x11-drv-amdgpu: X11 DDX driver for AMD. Required for SDDM X11 greeter
-#   and Xwayland; relies on the in-kernel amdgpu KMS driver.
-# xorg-x11-drv-ati: fallback DDX for older Radeon GPUs.
+# Classic Xorg DDX drivers are not installed: the greeter and Plasma session
+# are Wayland. XWayland talks GBM/EGL, not those DDX drivers.
 #
 # ── QEMU/KVM guest ────────────────────────────────────────────────────────────
 # qemu-guest-agent: graceful shutdown, snapshot freeze, guest state queries.
@@ -34,8 +33,6 @@ dnf5 install -y --skip-unavailable \
 	mesa-dri-drivers \
 	mesa-libgbm \
 	libdrm \
-	xorg-x11-drv-amdgpu \
-	xorg-x11-drv-ati \
 	radeontop \
 	nvtop \
 	libclc \

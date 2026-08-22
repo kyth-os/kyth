@@ -35,20 +35,21 @@ feel distinct, comfortable, and easy for new users to trust.
   migration flows, compatibility notes, and search aliases where it helps users
   find the right tool.
 
-## Session defaults (Wayland / X11)
+## Session defaults (Plasma Wayland)
 
-- **Default:** `10-kyth.conf` and `kyth-configure-session` (SDDM `ExecStartPre`)
-  keep `/etc/sddm.conf.d/11-kyth-session.conf` on Wayland + `plasma.desktop`.
-  The greeter compositor is `kyth-sddm-compositor`.
-- **Software compose:** when there is no DRM render node (or on live media),
-  KWin uses QPainter + llvmpipe instead of falling back to `plasmax11`.
-  `kyth.hwgl=1` forces hardware GL.
-- **nomodeset:** the helper writes X11 + `plasmax11.desktop` because
-  `kwin_wayland` cannot attach without KMS. Plasma X11 also stays in the
-  session picker.
+- **Bare metal**, VMs, live media, and `nomodeset` all start SDDM and Plasma
+  on Wayland (`plasma.desktop`). The greeter compositor is
+  `kyth-sddm-compositor`. Plasma X11 is not a session.
+- **Software compose:** when there is no DRM render node, on live media, or
+  with `nomodeset`, KWin uses QPainter + llvmpipe. `kyth.hwgl=1` forces
+  hardware GL.
+- **XWayland** stays for Steam, Proton, Wine, and Electron. The NVIDIA
+  userspace package (`xorg-x11-drv-nvidia*`) stays; classic Xorg and
+  `plasma-workspace-x11` do not.
 - **Fail-open:** if the helper cannot write `11-kyth-session.conf`, static
   `/etc/sddm.conf.d/10-kyth.conf` still provides the Wayland default so login
-  is never blocked.
+  is never blocked. SDDM's X11 session directory is an empty KythOS path so
+  leftover X11 session files cannot appear in the greeter.
 - System KWin defaults set `[Wayland] VrrPolicy=1` (Automatic) under
   `/etc/xdg/kwinrc`. Image packages explicitly include `xdg-desktop-portal`,
   `xdg-desktop-portal-kde`, and `qt6-qtwayland`.
@@ -105,10 +106,8 @@ feel distinct, comfortable, and easy for new users to trust.
    portal packages on the image, PipeWire capture, VRR/NightColor via
    `kyth-apply-vrr`, fractional scale via `kyth-apply-scaling`, display HDR via
    `kyth-apply-display-hdr`, Guardian portal dual-unit Plasma 6 names, and
-   `desktop_stack` diagnostics for doctor/smoke.
-5. Drop the remaining X11 session packages only after live ISO, VM, NVIDIA,
-   hybrid laptop, screen sharing, and rollback tests stop producing avoidable
-   first-login failures. The default is already Wayland.
+   `desktop_stack` diagnostics for doctor/smoke. Prove software-compose greeter
+   startup on nomodeset live hardware and NVIDIA/hybrid sleep-wake.
 
 The north star: a new user should recognize the workflow, then notice that
 KythOS is calmer, more recoverable, and less noisy.

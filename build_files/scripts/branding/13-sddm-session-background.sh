@@ -3,10 +3,12 @@
 # 10-kyth.conf owns the theme and the Wayland greeter/session default used when
 # 11-kyth-session.conf is missing (kyth-configure-session failed to write).
 # Session type is owned by 11-kyth-session.conf (written every boot as SDDM
-# ExecStartPre): Wayland unless nomodeset. Lexical order means 11 overrides
-# DisplayServer/DefaultSession here. VMs and first-boot NVIDIA without a render
-# node use kyth-sddm-compositor's software-compose rescue instead of an X11
-# session. X11 remains installed for the session picker.
+# ExecStartPre): always Plasma Wayland. Lexical order means 11 overrides
+# DisplayServer/DefaultSession here. VMs, nomodeset, and first-boot NVIDIA
+# without a render node use kyth-sddm-compositor's software-compose rescue.
+# [X11] SessionDir is an empty directory so leftover Plasma X11 session
+# files cannot appear in the greeter even if a base RPM still ships them.
+install -d -m 0755 /usr/share/kyth/no-xsessions
 write_config /etc/sddm.conf.d/10-kyth.conf <<'SDDMCONFEOF'
 [General]
 DisplayServer=wayland
@@ -18,17 +20,22 @@ Current=breeze
 [Wayland]
 SessionDir=/usr/share/wayland-sessions
 CompositorCommand=/usr/bin/kyth-sddm-compositor
+
+[X11]
+SessionDir=/usr/share/kyth/no-xsessions
 SDDMCONFEOF
 
-# System-wide session env: software compose only when there is no GPU render
-# node. kyth.hwgl=1 forces hardware GL (GPU passthrough / virgl). Live media
-# adds its own unconditional live.sh on top of this.
+# System-wide session env: software compose when there is no GPU render node,
+# or when nomodeset disabled GPU KMS. kyth.hwgl=1 forces hardware GL (GPU
+# passthrough / virgl). Live media adds its own unconditional live.sh on top.
 write_config /etc/xdg/plasma-workspace/env/10-kyth-software-compose.sh 0755 <<'COMPOSEEOF'
 #!/bin/sh
 if grep -qw 'kyth.hwgl=1' /proc/cmdline 2>/dev/null; then
 	return 0 2>/dev/null || exit 0
 fi
-if ls /dev/dri/renderD* >/dev/null 2>&1; then
+if grep -qw nomodeset /proc/cmdline 2>/dev/null; then
+	:
+elif ls /dev/dri/renderD* >/dev/null 2>&1; then
 	return 0 2>/dev/null || exit 0
 fi
 export LIBGL_ALWAYS_SOFTWARE=1

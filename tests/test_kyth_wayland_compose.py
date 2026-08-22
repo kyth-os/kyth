@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.wayland_compose import (  # noqa: E402
-    SDDM_NOMODESET_CONF,
     SDDM_WAYLAND_CONF,
     SOFTWARE_COMPOSE_ENV,
     apply_software_compose_env,
@@ -38,7 +37,7 @@ class WaylandComposeTests(unittest.TestCase):
         self.assertTrue(nomodeset_requested("quiet nomodeset"))
         self.assertFalse(nomodeset_requested("quiet rhgb"))
         self.assertEqual(sddm_session_conf("quiet"), SDDM_WAYLAND_CONF)
-        self.assertEqual(sddm_session_conf("quiet nomodeset"), SDDM_NOMODESET_CONF)
+        self.assertEqual(sddm_session_conf("quiet nomodeset"), SDDM_WAYLAND_CONF)
 
     def test_render_node_detection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -57,10 +56,16 @@ class WaylandComposeTests(unittest.TestCase):
             self.assertFalse(needs_software_compose(dri=dri, cmdline="quiet"))
             self.assertTrue(needs_software_compose(dri=dri, cmdline="kyth.live=1"))
             self.assertFalse(needs_software_compose(dri=dri, cmdline="kyth.live=1 kyth.hwgl=1"))
-            self.assertFalse(needs_software_compose(dri=Path(tmp) / "empty", cmdline="nomodeset"))
             empty = Path(tmp) / "empty"
             empty.mkdir()
-            self.assertFalse(needs_software_compose(dri=empty, cmdline="kyth.hwgl=1"))
+            self.assertTrue(needs_software_compose(dri=empty, cmdline="nomodeset"))
+            (empty / "renderD128").touch()
+            self.assertTrue(needs_software_compose(dri=empty, cmdline="nomodeset"))
+            self.assertFalse(needs_software_compose(dri=empty, cmdline="nomodeset kyth.hwgl=1"))
+            bare = Path(tmp) / "bare"
+            bare.mkdir()
+            self.assertFalse(needs_software_compose(dri=bare, cmdline="kyth.hwgl=1"))
+            self.assertTrue(needs_software_compose(dri=bare, cmdline="quiet"))
 
     def test_compose_env_and_compositor_argv(self) -> None:
         env: dict[str, str] = {}
@@ -111,7 +116,7 @@ class WaylandComposeTests(unittest.TestCase):
             self.assertIn("DefaultSession=plasma.desktop", text)
             self.assertNotIn("plasmax11", text)
 
-    def test_configure_session_keeps_x11_for_nomodeset(self) -> None:
+    def test_configure_session_keeps_wayland_for_nomodeset(self) -> None:
         launcher = ROOT / "build_files" / "kyth-configure-session"
         with tempfile.TemporaryDirectory() as tmp:
             sddm_dir = Path(tmp)
@@ -121,8 +126,9 @@ class WaylandComposeTests(unittest.TestCase):
                 0,
             )
             text = (sddm_dir / "11-kyth-session.conf").read_text(encoding="utf-8")
-            self.assertIn("DisplayServer=x11", text)
-            self.assertIn("DefaultSession=plasmax11.desktop", text)
+            self.assertIn("DisplayServer=wayland", text)
+            self.assertIn("DefaultSession=plasma.desktop", text)
+            self.assertNotIn("plasmax11", text)
 
 
 class WaylandBrandingContractTests(unittest.TestCase):
@@ -133,7 +139,10 @@ class WaylandBrandingContractTests(unittest.TestCase):
         self.assertIn("DisplayServer=wayland", fragment)
         self.assertIn("DefaultSession=plasma.desktop", fragment)
         self.assertIn("CompositorCommand=/usr/bin/kyth-sddm-compositor", fragment)
+        self.assertIn("SessionDir=/usr/share/kyth/no-xsessions", fragment)
+        self.assertIn("install -d -m 0755 /usr/share/kyth/no-xsessions", fragment)
         self.assertIn("10-kyth-software-compose.sh", fragment)
+        self.assertIn("nomodeset", fragment)
         self.assertNotIn("DisplayServer=x11", fragment)
         self.assertNotIn("plasmax11.desktop", fragment)
         self.assertNotIn("systemd-detect-virt", fragment)
@@ -147,6 +156,32 @@ class WaylandBrandingContractTests(unittest.TestCase):
         compositor = (ROOT / "build_files" / "kyth-sddm-compositor").read_text(encoding="utf-8")
         self.assertIn("needs_software_compose", compositor)
         self.assertIn("kwin_wayland", compositor)
+
+    def test_image_does_not_install_plasma_x11_session(self) -> None:
+        baseline = (ROOT / "build_files" / "scripts" / "packages" / "05-baseline-desktop-tooling.sh").read_text(
+            encoding="utf-8"
+        )
+        amd = (ROOT / "build_files" / "scripts" / "packages" / "13-gpu-amd-and-qemu-guest.sh").read_text(
+            encoding="utf-8"
+        )
+        cleanup = (ROOT / "build_files" / "scripts" / "packages" / "17-desktop-package-cleanup.sh").read_text(
+            encoding="utf-8"
+        )
+        for package in (
+            "plasma-workspace-x11",
+            "xorg-x11-server-Xorg",
+            "xorg-x11-xinit",
+            "xorg-x11-drv-libinput",
+        ):
+            self.assertNotIn(package, baseline)
+            self.assertIn(package, cleanup)
+        self.assertNotIn("xorg-x11-drv-amdgpu", amd)
+        self.assertNotIn("xorg-x11-drv-ati", amd)
+        self.assertIn("xorg-x11-drv-amdgpu", cleanup)
+        self.assertIn("kwin-x11", cleanup)
+        nvidia = (ROOT / "build_files" / "scripts" / "packages" / "16-gpu-nvidia.sh").read_text(encoding="utf-8")
+        self.assertIn("xorg-x11-drv-nvidia", nvidia)
+        self.assertNotIn("xorg-x11-drv-nvidia", cleanup)
 
     def test_live_iso_autologin_follows_wayland_default(self) -> None:
         body = (ROOT / "installer" / "build.sh").read_text(encoding="utf-8")

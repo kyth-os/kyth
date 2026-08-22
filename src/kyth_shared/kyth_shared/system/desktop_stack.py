@@ -126,9 +126,9 @@ def desktop_stack_checks(
         checks.append(
             StackCheck(
                 "Wayland display",
-                True,
-                "X11 session (VM / fallback) — Wayland checks skipped",
-                advisory=True,
+                False,
+                "X11 session — KythOS ships Plasma Wayland only",
+                advisory=False,
             )
         )
     else:

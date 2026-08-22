@@ -2,10 +2,9 @@
 """kyth-configure-session — keep SDDM on Plasma Wayland across upgrades.
 
 Older images wrote DisplayServer=x11 into /etc/sddm.conf.d/11-kyth-session.conf
-for VMs. That file is locally modified on bootc systems, so it survives image
-updates unless this ExecStartPre overwrites it. Software-compose rescue is
-handled by kyth-sddm-compositor. The only automatic X11 write is ``nomodeset``,
-where kwin_wayland cannot attach to a DRM device.
+for VMs or nomodeset. That file is locally modified on bootc systems, so it
+survives image updates unless this ExecStartPre overwrites it. Software-compose
+rescue (including nomodeset) is handled by kyth-sddm-compositor.
 
 Fail-open: a write error logs a warning and returns 0 so ExecStartPre cannot
 block the greeter. ``10-kyth.conf`` still provides the Wayland default.

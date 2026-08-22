@@ -18,6 +18,20 @@ dnf5 remove -y --no-autoremove \
 	cups-browsed \
 	2>/dev/null || true
 
+# Plasma X11 session + classic Xorg greeter stack. KythOS greets and logs in
+# on Wayland only. Keep NVIDIA proprietary GL/EGL userspace and XWayland
+# (Steam/Proton/Electron). --no-autoremove so a leftover Requires: cannot pull
+# sddm or plasma-workspace out with Xorg.
+dnf5 remove -y --no-autoremove \
+	plasma-workspace-x11 \
+	kwin-x11 \
+	xorg-x11-server-Xorg \
+	xorg-x11-xinit \
+	xorg-x11-drv-libinput \
+	xorg-x11-drv-amdgpu \
+	xorg-x11-drv-ati \
+	2>/dev/null || true
+
 # Remove Firefox — Brave Browser is installed as a Flatpak on first boot
 # via kyth-default-flatpaks.service (avoids baking external repo keys into
 # the build and eliminates DNS-dependent rpm --import calls in CI).

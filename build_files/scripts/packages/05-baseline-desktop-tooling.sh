@@ -14,10 +14,6 @@ dnf5 install -y --skip-unavailable \
 	opensc \
 	krdc \
 	bubblewrap \
-	plasma-workspace-x11 \
-	xorg-x11-server-Xorg \
-	xorg-x11-xinit \
-	xorg-x11-drv-libinput \
 	irqbalance \
 	plocate \
 	ntfs-3g \

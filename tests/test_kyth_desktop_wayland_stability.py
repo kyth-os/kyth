@@ -176,6 +176,19 @@ class DesktopStackTests(unittest.TestCase):
         self.assertTrue(by_name["xdg-desktop-portal"].advisory)
         self.assertTrue(by_name["PipeWire"].passed)
 
+    def test_x11_session_is_unsupported(self):
+        checks = stack_mod.desktop_stack_checks(
+            has_session_bus=lambda: True,
+            session_type=lambda: "x11",
+            wayland_display=lambda: "",
+            user_unit_active=lambda _unit: False,
+            path_exists=lambda _p: True,
+            which=lambda _n: "/usr/bin/xdg-desktop-portal",
+        )
+        by_name = {c.name: c for c in checks}
+        self.assertFalse(by_name["Wayland display"].passed)
+        self.assertIn("Plasma Wayland only", by_name["Wayland display"].detail)
+
     def test_packages_script_lists_portal_rpms(self):
         body = (
             ROOT / "build_files/scripts/packages/18-desktop-helper-and-creator-tooling.sh"
@@ -187,7 +200,9 @@ class DesktopStackTests(unittest.TestCase):
         body = (ROOT / "docs/plasma-wayland-polish.md").read_text(encoding="utf-8")
         self.assertIn("Bare metal", body)
         self.assertIn("Wayland", body)
+        self.assertIn("plasma.desktop", body)
         self.assertNotIn("intentionally starts Plasma X11", body)
+        self.assertNotIn("plasmax11", body)
 
 
 class VrrApplyTests(unittest.TestCase):

@@ -30,9 +30,9 @@ class PlasmaWaylandPage(Page):
         title.setObjectName("card-title")
         overview_layout.addWidget(title)
         body = QLabel(
-            "KythOS starts Plasma on Wayland. These checks cover portals, PipeWire capture, display "
-            "behavior, visual polish, and session repair. Machines without a GPU render node use "
-            "software compose instead of falling back to X11."
+            "KythOS ships Plasma on Wayland only. These checks cover portals, PipeWire capture, display "
+            "behavior, visual polish, and session repair. Machines without a GPU render node, live "
+            "media, and nomodeset use software compose. XWayland still runs games and Electron."
         )
         body.setObjectName("card-copy")
         body.setWordWrap(True)

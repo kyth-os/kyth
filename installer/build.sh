@@ -313,10 +313,8 @@ systemctl enable livesys.service livesys-late.service
 
 # ── Log straight into the live desktop ────────────────────────────────────────
 # Live media boots on hardware that has never run this OS. Autologin follows
-# DefaultSession (Plasma Wayland) plus live.sh llvmpipe/QPainter. The ISO's
-# nomodeset entry is the exception: kyth-configure-session writes plasmax11
-# because kwin_wayland cannot attach without KMS. Do not pin Session= here or
-# that rescue is ignored.
+# DefaultSession (Plasma Wayland) plus live.sh llvmpipe/QPainter, including the
+# ISO's nomodeset / Basic Graphics entry. Do not pin Session= here.
 mkdir -p /etc/sddm.conf.d
 cat >/etc/sddm.conf.d/20-kyth-live-autologin.conf <<'EOF'
 [Autologin]

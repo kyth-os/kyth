@@ -51,7 +51,7 @@ class ConfigureSessionFailOpenTests(unittest.TestCase):
         self.assertIn("DisplayServer=wayland", written)
         self.assertIn("DefaultSession=plasma.desktop", written)
 
-    def test_nomodeset_writes_x11_session(self):
+    def test_nomodeset_writes_wayland_session(self):
         mod = _load_configure_session()
         conf = mock.Mock()
         sddm_dir = mock.Mock()
@@ -59,8 +59,9 @@ class ConfigureSessionFailOpenTests(unittest.TestCase):
         with mock.patch.object(mod, "Path", return_value=sddm_dir):
             self.assertEqual(mod.configure_session(cmdline="quiet nomodeset"), 0)
         written = conf.write_text.call_args.args[0]
-        self.assertIn("DisplayServer=x11", written)
-        self.assertIn("DefaultSession=plasmax11.desktop", written)
+        self.assertIn("DisplayServer=wayland", written)
+        self.assertIn("DefaultSession=plasma.desktop", written)
+        self.assertNotIn("plasmax11", written)
 
 
 class SessionConfOwnershipTests(unittest.TestCase):
