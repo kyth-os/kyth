@@ -96,6 +96,7 @@ Fedora Kinoite / Universal Blue base
 ## Branches & Workflow
 
 - `main` → `:latest` tag (stable). `testing` → `:testing` tag (active dev, may be unstable).
+- Cloud Agents default to this repository on `testing`, not `main`. `testing` is the working branch; `main` is promotion-only.
 - This repository does not use a PR workflow for routine maintainer work: changes are committed and pushed **directly to `testing`** (per `AGENTS.md`). Promotion to stable (`main`) happens only after CI validation and, for boot/login/networking/audio/GPU/installer/privileged-helper changes, live-ISO or real-hardware checks.
 - Changes affecting boot, login, networking, audio, GPU setup, updates, the installer, or privileged helpers should include an automated regression test where practical, and a documented manual recovery path where hardware behavior can't be automated.
 

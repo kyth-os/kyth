@@ -321,6 +321,7 @@ just install-git-hooks
 - `main` builds the stable `:latest` image and stable ISO channel.
 - Maintainer work is committed and pushed directly to `testing`; this
   repository does not use a PR publishing step for that workflow.
+- Cloud Agents should open on this repository at `testing`, not `main`.
 - Promotion to stable happens only after automated validation and relevant
   live-ISO or real-hardware checks.
 

@@ -1,0 +1,15 @@
+---
+description: Default Cloud Agent working branch is testing, not main
+alwaysApply: true
+---
+
+# Default working branch
+
+Kyth's default working branch is `testing`, not `main`.
+
+- Open new Cloud Agents on `github.com/mrtrick37/kyth` at branch `testing`.
+- Do all routine work on `testing`. Commit and push directly to `origin/testing`.
+- `main` is the stable promotion target only. Do not start routine work from `main`.
+- If this session is on `main` (or any other branch) and the user did not explicitly ask to work on that branch or to promote to stable, switch before making changes:
+
+  `git fetch origin testing && git checkout testing`
