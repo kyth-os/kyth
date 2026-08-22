@@ -1,35 +1,42 @@
 # shellcheck shell=bash
 # ── SDDM session type + login screen background ───────────────────────────────
-# 10-kyth.conf owns the theme and a conservative X11 fallback used when
+# 10-kyth.conf owns the theme and the Wayland greeter/session default used when
 # 11-kyth-session.conf is missing (kyth-configure-session failed to write).
-# Session type itself is owned by 11-kyth-session.conf (written every boot by
-# kyth-configure-session as SDDM ExecStartPre): Wayland on bare metal, X11 in
-# VMs. Lexical order means 11 overrides DisplayServer/DefaultSession here.
+# Session type is owned by 11-kyth-session.conf (written every boot as SDDM
+# ExecStartPre): Wayland unless nomodeset. Lexical order means 11 overrides
+# DisplayServer/DefaultSession here. VMs and first-boot NVIDIA without a render
+# node use kyth-sddm-compositor's software-compose rescue instead of an X11
+# session. X11 remains installed for the session picker.
 write_config /etc/sddm.conf.d/10-kyth.conf <<'SDDMCONFEOF'
 [General]
-DisplayServer=x11
-DefaultSession=plasmax11.desktop
+DisplayServer=wayland
+DefaultSession=plasma.desktop
 
 [Theme]
 Current=breeze
 
-[X11]
-SessionDir=/usr/share/xsessions
+[Wayland]
+SessionDir=/usr/share/wayland-sessions
+CompositorCommand=/usr/bin/kyth-sddm-compositor
 SDDMCONFEOF
 
-# Software-rendering fallback for virtual machines: makes Plasma's X11 session
-# usable when the VM display has no virgl/3D acceleration. Skipped on bare metal
-# (systemd-detect-virt returns non-zero when not in a VM/container) and when
-# kyth.hwgl=1 is in the cmdline to force hardware GL inside a VM.
-write_config /etc/skel/.config/plasma-workspace/env/10-kyth-qemu-safe.sh 0755 <<'QEMUSAFEEOF'
+# System-wide session env: software compose only when there is no GPU render
+# node. kyth.hwgl=1 forces hardware GL (GPU passthrough / virgl). Live media
+# adds its own unconditional live.sh on top of this.
+write_config /etc/xdg/plasma-workspace/env/10-kyth-software-compose.sh 0755 <<'COMPOSEEOF'
 #!/bin/sh
-if systemd-detect-virt -q 2>/dev/null && ! grep -qw 'kyth.hwgl=1' /proc/cmdline 2>/dev/null; then
-    export LIBGL_ALWAYS_SOFTWARE=1
-    export GALLIUM_DRIVER=llvmpipe
-    export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
-    export QT_QUICK_BACKEND=software
+if grep -qw 'kyth.hwgl=1' /proc/cmdline 2>/dev/null; then
+	return 0 2>/dev/null || exit 0
 fi
-QEMUSAFEEOF
+if ls /dev/dri/renderD* >/dev/null 2>&1; then
+	return 0 2>/dev/null || exit 0
+fi
+export LIBGL_ALWAYS_SOFTWARE=1
+export GALLIUM_DRIVER=llvmpipe
+export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
+export QT_QUICK_BACKEND=software
+export KWIN_COMPOSE=Q
+COMPOSEEOF
 
 # theme.conf.user overrides the breeze SDDM theme defaults without modifying
 # the upstream theme files. The wallpaper is already installed above.

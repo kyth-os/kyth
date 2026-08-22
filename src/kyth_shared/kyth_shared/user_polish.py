@@ -69,6 +69,7 @@ def should_refresh_pulse_desktop_shortcut(existing: str, shipped: str) -> bool:
 from kyth_shared.desktop.plasma import kreadconfig, kwriteconfig  # noqa: E402
 from kyth_shared.desktop.shortcut import refresh_kde_sycoca  # noqa: E402
 from kyth_shared.session import acquire_run_lock, already_run, mark_run  # noqa: E402
+from kyth_shared.wayland_compose import remove_legacy_virt_software_gl  # noqa: E402
 from kyth_shared.commands import run as run_command  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,15 @@ def _set_mime_defaults(run: Callable[..., object]) -> OperationResult:
     return OperationResult("mime-defaults", OperationStatus.APPLIED)
 
 
+def _remove_legacy_virt_software_gl(home: str) -> OperationResult:
+    """Drop the old virt-only llvmpipe script so GPU-passthrough VMs get hardware GL."""
+    removed = remove_legacy_virt_software_gl(Path(home))
+    return OperationResult(
+        "legacy-virt-gl",
+        OperationStatus.APPLIED if removed else OperationStatus.SKIPPED,
+    )
+
+
 def apply_foundation(
     home: str,
     *,
@@ -171,6 +181,7 @@ def apply_foundation(
         ("user-folders", lambda: _ensure_user_folders(home)),
         ("bluetooth", lambda: _enable_bluetooth(home, run)),
         ("mime-defaults", lambda: _set_mime_defaults(run)),
+        ("legacy-virt-gl", lambda: _remove_legacy_virt_software_gl(home)),
     )
     return [_run_operation(name, operation) for name, operation in operations]
 

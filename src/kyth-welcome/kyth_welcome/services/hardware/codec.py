@@ -156,13 +156,15 @@ def _codec_probe() -> HardwareProbe:
             for k in ("MESA_LOADER_DRIVER_OVERRIDE", "GALLIUM_DRIVER", "LIBGL_ALWAYS_SOFTWARE")
             if k in os.environ
         )
-        skel_file = os.path.expanduser("~/.config/plasma-workspace/env/10-kyth-qemu-safe.sh")
-        source = skel_file if os.path.exists(skel_file) else "~/.config/plasma-workspace/env/"
+        home_legacy = os.path.expanduser("~/.config/plasma-workspace/env/10-kyth-qemu-safe.sh")
+        system_env = "/etc/xdg/plasma-workspace/env/10-kyth-software-compose.sh"
+        source = home_legacy if os.path.exists(home_legacy) else system_env
         return HardwareProbe(
             "Video Decode", "warn",
             "Software rendering is active in this session — VA-API requires hardware GPU access.",
-            f"{env_lines}\n\nSet by {source} (QEMU compatibility fallback active on bare metal).",
-            f"Delete {skel_file} and log out/in to restore hardware rendering.",
+            f"{env_lines}\n\nSet by {source} (software-compose rescue: no DRM render node, or live media).",
+            "If a GPU render node exists, remove ~/.config/plasma-workspace/env/10-kyth-qemu-safe.sh "
+            "if present, add kyth.hwgl=1 to the kernel command line, and log out.",
         )
 
     vainfo = run_command(["vainfo"], timeout=10)

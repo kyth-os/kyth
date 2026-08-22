@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""SDDM Wayland greeter compositor — kwin_wayland with software-compose rescue."""
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+
+from kyth_shared.wayland_compose import apply_software_compose_env, compositor_argv, needs_software_compose
+
+
+def main() -> None:
+    if needs_software_compose():
+        apply_software_compose_env()
+    argv = compositor_argv(extra=sys.argv[1:])
+    binary = shutil.which(argv[0])
+    if binary is None:
+        print(f"kyth-sddm-compositor: {argv[0]} not found", file=sys.stderr)
+        sys.exit(127)
+    os.execvp(binary, [binary, *argv[1:]])
+
+
+if __name__ == "__main__":
+    main()

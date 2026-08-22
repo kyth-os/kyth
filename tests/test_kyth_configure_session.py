@@ -6,7 +6,6 @@ from importlib.machinery import SourceFileLoader
 import sys
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,33 +37,27 @@ class ConfigureSessionFailOpenTests(unittest.TestCase):
         conf.write_text.side_effect = OSError("read-only")
         sddm_dir = mock.Mock()
         sddm_dir.__truediv__ = mock.Mock(return_value=conf)
-        with mock.patch.object(mod, "Path", return_value=sddm_dir), mock.patch.object(
-            mod.shutil, "which", return_value=None
-        ):
+        with mock.patch.object(mod, "Path", return_value=sddm_dir):
             self.assertEqual(mod.configure_session(), 0)
 
-    def test_bare_metal_writes_wayland_session(self):
+    def test_default_writes_wayland_session(self):
         mod = _load_configure_session()
         conf = mock.Mock()
         sddm_dir = mock.Mock()
         sddm_dir.__truediv__ = mock.Mock(return_value=conf)
-        with mock.patch.object(mod, "Path", return_value=sddm_dir), mock.patch.object(
-            mod.shutil, "which", return_value=None
-        ):
+        with mock.patch.object(mod, "Path", return_value=sddm_dir):
             self.assertEqual(mod.configure_session(), 0)
         written = conf.write_text.call_args.args[0]
         self.assertIn("DisplayServer=wayland", written)
         self.assertIn("DefaultSession=plasma.desktop", written)
 
-    def test_virtual_machine_writes_x11_session(self):
+    def test_nomodeset_writes_x11_session(self):
         mod = _load_configure_session()
         conf = mock.Mock()
         sddm_dir = mock.Mock()
         sddm_dir.__truediv__ = mock.Mock(return_value=conf)
-        with mock.patch.object(mod, "Path", return_value=sddm_dir), mock.patch.object(
-            mod.shutil, "which", return_value="/usr/bin/systemd-detect-virt"
-        ), mock.patch.object(mod, "run_command", return_value=SimpleNamespace(returncode=0)):
-            self.assertEqual(mod.configure_session(), 0)
+        with mock.patch.object(mod, "Path", return_value=sddm_dir):
+            self.assertEqual(mod.configure_session(cmdline="quiet nomodeset"), 0)
         written = conf.write_text.call_args.args[0]
         self.assertIn("DisplayServer=x11", written)
         self.assertIn("DefaultSession=plasmax11.desktop", written)
@@ -76,7 +69,7 @@ class SessionConfOwnershipTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("11-kyth-session.conf", body)
-        self.assertIn("conservative X11 fallback", body)
+        self.assertIn("Wayland greeter/session default", body)
         self.assertIn("/etc/sddm.conf.d/10-kyth.conf", body)
 
 

@@ -170,6 +170,7 @@ export LIBGL_ALWAYS_SOFTWARE=1
 export GALLIUM_DRIVER=llvmpipe
 export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 export QT_QUICK_BACKEND=software
+export KWIN_COMPOSE=Q
 EOF
 chmod +x /etc/skel/.config/plasma-workspace/env/live.sh
 
@@ -311,18 +312,15 @@ sed -i 's/^livesys_session=.*/livesys_session="kde"/' /etc/sysconfig/livesys
 systemctl enable livesys.service livesys-late.service
 
 # ── Log straight into the live desktop ────────────────────────────────────────
-# Unlike the installed system (kyth-configure-session picks Wayland on bare
-# metal, X11 only inside VMs), the live session always forces X11 + llvmpipe
-# software rendering (see the plasma-workspace/env/live.sh skel above). Live
-# media boots on hardware that has never run this OS and whose GPU/DRM/KMS
-# support is unverified, so we trade rendering performance/theme fidelity for
-# a login that is guaranteed to come up everywhere. This is intentional, not
-# an oversight.
+# Live media boots on hardware that has never run this OS. Autologin follows
+# DefaultSession (Plasma Wayland) plus live.sh llvmpipe/QPainter. The ISO's
+# nomodeset entry is the exception: kyth-configure-session writes plasmax11
+# because kwin_wayland cannot attach without KMS. Do not pin Session= here or
+# that rescue is ignored.
 mkdir -p /etc/sddm.conf.d
 cat >/etc/sddm.conf.d/20-kyth-live-autologin.conf <<'EOF'
 [Autologin]
 User=liveuser
-Session=plasmax11.desktop
 Relogin=false
 EOF
 

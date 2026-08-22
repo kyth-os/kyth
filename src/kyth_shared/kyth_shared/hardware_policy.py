@@ -585,7 +585,7 @@ def _configure_nvidia() -> str:
             release_akmods_lock(lock_fd)
     kernel_args = (
         "rd.driver.blacklist=nouveau,nova_core "
-        "modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1"
+        "modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1 nvidia-drm.fbdev=1"
     )
     run_optional(["grubby", "--update-kernel=ALL", f"--args={kernel_args}"], capture_output=True)
     for unit in ("nvidia-suspend.service", "nvidia-resume.service", "nvidia-hibernate.service"):
@@ -596,7 +596,7 @@ def _configure_nvidia() -> str:
 def _clear_nvidia_policy() -> str:
     kernel_args = (
         "rd.driver.blacklist=nouveau,nova_core "
-        "modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1"
+        "modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1 nvidia-drm.fbdev=1"
     )
     run_optional(["grubby", "--update-kernel=ALL", f"--remove-args={kernel_args}"], capture_output=True)
     for unit in ("nvidia-suspend.service", "nvidia-resume.service", "nvidia-hibernate.service"):

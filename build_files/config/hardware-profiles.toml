@@ -184,7 +184,7 @@ classes = ["0300", "0302", "0380"]
 [[quirks.actions]]
 kind = "modprobe"
 module = "nvidia-drm"
-options = { modeset = "1" }
+options = { modeset = "1", fbdev = "1" }
 
 [[quirks.actions]]
 kind = "modprobe"

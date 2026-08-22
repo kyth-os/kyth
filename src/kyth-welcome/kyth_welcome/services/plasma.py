@@ -100,7 +100,7 @@ def _probe_session(session: str) -> HardwareProbe:
     session_status = "ok" if session == "wayland" else ("dim" if session == "x11" else "warn")
     session_summary = (
         "Wayland session active" if session == "wayland"
-        else "X11 session active (VM detected — Wayland enabled automatically on bare metal)"
+        else "X11 session active — Wayland is the default; Plasma X11 remains an emergency picker option"
         if session == "x11"
         else "Session type could not be identified"
     )

@@ -37,14 +37,18 @@ feel distinct, comfortable, and easy for new users to trust.
 
 ## Session defaults (Wayland / X11)
 
-- **Bare metal:** `kyth-configure-session` (SDDM `ExecStartPre`) writes
-  `/etc/sddm.conf.d/11-kyth-session.conf` with Wayland + `plasma.desktop`
-  every boot (VRR, HDR, lower latency).
-- **VMs:** the same helper selects X11 + `plasmax11.desktop` so greeter/session
-  startup stays reliable on virtual GPUs without DRM/KMS Wayland backends.
+- **Default:** `10-kyth.conf` and `kyth-configure-session` (SDDM `ExecStartPre`)
+  keep `/etc/sddm.conf.d/11-kyth-session.conf` on Wayland + `plasma.desktop`.
+  The greeter compositor is `kyth-sddm-compositor`.
+- **Software compose:** when there is no DRM render node (or on live media),
+  KWin uses QPainter + llvmpipe instead of falling back to `plasmax11`.
+  `kyth.hwgl=1` forces hardware GL.
+- **nomodeset:** the helper writes X11 + `plasmax11.desktop` because
+  `kwin_wayland` cannot attach without KMS. Plasma X11 also stays in the
+  session picker.
 - **Fail-open:** if the helper cannot write `11-kyth-session.conf`, static
-  `/etc/sddm.conf.d/10-kyth.conf` keeps a conservative X11 fallback so login is
-  never blocked.
+  `/etc/sddm.conf.d/10-kyth.conf` still provides the Wayland default so login
+  is never blocked.
 - System KWin defaults set `[Wayland] VrrPolicy=1` (Automatic) under
   `/etc/xdg/kwinrc`. Image packages explicitly include `xdg-desktop-portal`,
   `xdg-desktop-portal-kde`, and `qt6-qtwayland`.
@@ -102,9 +106,9 @@ feel distinct, comfortable, and easy for new users to trust.
    `kyth-apply-vrr`, fractional scale via `kyth-apply-scaling`, display HDR via
    `kyth-apply-display-hdr`, Guardian portal dual-unit Plasma 6 names, and
    `desktop_stack` diagnostics for doctor/smoke.
-5. Treat Wayland-on-bare-metal as the shipping default; keep advertising
-   "fully qualified" only after live ISO, VM, NVIDIA, hybrid laptop, screen
-   sharing, and rollback tests stop producing avoidable first-login failures.
+5. Drop the remaining X11 session packages only after live ISO, VM, NVIDIA,
+   hybrid laptop, screen sharing, and rollback tests stop producing avoidable
+   first-login failures. The default is already Wayland.
 
 The north star: a new user should recognize the workflow, then notice that
 KythOS is calmer, more recoverable, and less noisy.

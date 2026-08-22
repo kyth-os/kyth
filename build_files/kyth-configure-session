@@ -1,44 +1,37 @@
 #!/usr/bin/env python3
-"""kyth-configure-session — configure SDDM session defaults based on virtualization state."""
+"""kyth-configure-session — keep SDDM on Plasma Wayland across upgrades.
+
+Older images wrote DisplayServer=x11 into /etc/sddm.conf.d/11-kyth-session.conf
+for VMs. That file is locally modified on bootc systems, so it survives image
+updates unless this ExecStartPre overwrites it. Software-compose rescue is
+handled by kyth-sddm-compositor. The only automatic X11 write is ``nomodeset``,
+where kwin_wayland cannot attach to a DRM device.
+
+Fail-open: a write error logs a warning and returns 0 so ExecStartPre cannot
+block the greeter. ``10-kyth.conf`` still provides the Wayland default.
+"""
 from __future__ import annotations
 
-import os
-import shutil
 import sys
 from pathlib import Path
 
-from kyth_shared.commands import run as run_command
+from kyth_shared.wayland_compose import sddm_session_conf
 
 
-def configure_session() -> int:
-    sddm_dir = Path("/etc/sddm.conf.d")
+def configure_session(sddm_dir: Path | None = None, cmdline: str | None = None) -> int:
+    directory = Path(sddm_dir) if sddm_dir is not None else Path("/etc/sddm.conf.d")
     try:
-        sddm_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as exc:
-        # Fail open: SDDM ExecStartPre must not block the greeter. 10-kyth.conf
-        # still provides a conservative X11 fallback when 11-kyth-session.conf
-        # cannot be written.
-        print(f"Warning: could not create {sddm_dir}: {exc}", file=sys.stderr)
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"Warning: could not create {directory}: {exc}", file=sys.stderr)
         return 0
-
-    is_virt = False
-    if shutil.which("systemd-detect-virt"):
-        res = run_command(["systemd-detect-virt", "-q"], check=False)
-        if res.returncode == 0:
-            is_virt = True
-
-    conf_file = sddm_dir / "11-kyth-session.conf"
-    if is_virt:
-        content = "[General]\nDisplayServer=x11\nDefaultSession=plasmax11.desktop\n"
-    else:
-        content = "[General]\nDisplayServer=wayland\nDefaultSession=plasma.desktop\n"
-
+    conf_file = directory / "11-kyth-session.conf"
     try:
-        conf_file.write_text(content, encoding="utf-8")
-        return 0
-    except Exception as exc:
+        conf_file.write_text(sddm_session_conf(cmdline), encoding="utf-8")
+    except OSError as exc:
         print(f"Warning: could not write {conf_file}: {exc}", file=sys.stderr)
         return 0
+    return 0
 
 
 def main() -> None:
