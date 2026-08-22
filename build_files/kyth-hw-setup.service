@@ -34,6 +34,13 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 # argument" on every run (see kyth_shared/system/bootc_query.py).
 UMask=0077
 ProtectSystem=strict
+# ProtectSystem=strict remounts /etc and /var read-only. hardware_policy
+# atomically writes managed modprobe/scx config plus /var/lib/kyth state;
+# NVIDIA first-boot builds into /var/lib/akmods. Without these, apply
+# fails with EROFS on /etc/modprobe.d.
+StateDirectory=kyth
+StateDirectoryMode=0700
+ReadWritePaths=/etc/modprobe.d /etc/scx /var/lib/akmods /var/cache/akmods
 CacheDirectory=kyth
 CacheDirectoryMode=0700
 RestrictRealtime=yes

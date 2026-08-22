@@ -20,7 +20,10 @@ ConditionPathExists=/proc/meminfo
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 -c "from kyth_shared.memory_tune import generate_memory_tune; generate_memory_tune()"
-ExecStartPost=/usr/bin/sysctl --system
+# Apply only the file this unit just wrote. `sysctl --system` re-applies
+# network keys (tcp_congestion_control=bbr, default_qdisc) and fails the
+# whole unit when those modules are absent — ENOENT is not a memory-tune bug.
+ExecStartPost=/usr/bin/sysctl --load=/etc/sysctl.d/99-kyth-memory.conf
 RemainAfterExit=yes
 
 [Install]
@@ -35,7 +38,7 @@ install -Dm0755 /dev/stdin /usr/bin/kyth-memory-tune <<'WRAP'
 set -euo pipefail
 case "${1:-status}" in
   status) python3 -c 'from kyth_shared.memory_tune import load_memory_tune,memory_tune_status; import os; c=load_memory_tune(); print(f"tier={c[\"tier\"]} swappiness={c[\"swappiness\"]} dirty={c[\"dirty_bytes\"]} active={memory_tune_status()}")' ;;
-  apply) sudo python3 -c 'from kyth_shared.memory_tune import generate_memory_tune; generate_memory_tune()' && sudo sysctl --system >/dev/null 2>&1; echo "memory tune applied" ;;
+  apply) sudo python3 -c 'from kyth_shared.memory_tune import generate_memory_tune; generate_memory_tune()' && sudo sysctl --load=/etc/sysctl.d/99-kyth-memory.conf >/dev/null; echo "memory tune applied" ;;
   *) echo "Usage: kyth-memory-tune [status|apply]" >&2; exit 1 ;;
 esac
 WRAP

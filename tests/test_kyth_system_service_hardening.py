@@ -86,8 +86,14 @@ class SystemServiceHardeningTests(unittest.TestCase):
     def test_device_writing_services_declare_narrow_writable_paths(self) -> None:
         battery = (ROOT / "build_files/kyth-batteryd.service").read_text()
         mok = (ROOT / "build_files/kyth-enroll-mok.service").read_text()
+        hw = (ROOT / "build_files/kyth-hw-setup.service").read_text()
         self.assertIn("ReadWritePaths=/sys/class/power_supply", battery)
         self.assertIn("ReadWritePaths=/sys/firmware/efi/efivars", mok)
+        # ProtectSystem=strict without these is EROFS on /etc/modprobe.d at boot.
+        self.assertIn("StateDirectory=kyth", hw)
+        self.assertIn("ReadWritePaths=/etc/modprobe.d", hw)
+        self.assertIn("/etc/scx", hw)
+        self.assertIn("/var/lib/akmods", hw)
 
 
 # Units with no resource-limit directives at all before this — a bug/leak in
@@ -129,6 +135,13 @@ class ResourceLimitHardeningTests(unittest.TestCase):
             for directive in required:
                 with self.subTest(unit=unit_name, directive=directive):
                     self.assertIn(directive, body)
+
+    def test_browser_wallet_skips_immutable_root_home(self) -> None:
+        body = (ROOT / "build_files/kyth-browser-wallet-defaults.service").read_text()
+        self.assertIn("ConditionUser=!root", body)
+        self.assertIn("StateDirectory=kyth", body)
+        self.assertIn("ExecStartPost=/usr/bin/touch %S/kyth/browser-wallet-defaults-v2", body)
+        self.assertNotIn("mkdir -p", body)
 
     def test_scx_loader_gets_a_memory_ceiling_but_not_cpu_throttling(self) -> None:
         # It loads/manages the sched_ext scheduler itself — deliberately not

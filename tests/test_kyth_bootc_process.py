@@ -81,6 +81,17 @@ class BootcHelpersTests(unittest.TestCase):
             f"{REGISTRY}:testing",
         )
 
+    def test_root_status_commands_skip_sudo(self):
+        with patch("kyth_shared.system.bootc_query.os.geteuid", return_value=0):
+            cmds = bootc_query._status_commands(json_mode=True)
+        self.assertEqual(cmds[0], ["/usr/bin/kyth-bootc-guard", "status-json"])
+        self.assertTrue(all(cmd[0] != "sudo" for cmd in cmds))
+
+    def test_unprivileged_status_commands_use_sudo_guard(self):
+        with patch("kyth_shared.system.bootc_query.os.geteuid", return_value=1000):
+            cmds = bootc_query._status_commands(json_mode=False)
+        self.assertEqual(cmds[0], ["sudo", "-n", "/usr/bin/kyth-bootc-guard", "status"])
+
     def test_policy_layer_computes_kernel_target_without_probing(self):
         self.assertEqual(
             bootc_policy.image_tag_for_kernel("cachy", "testing"),

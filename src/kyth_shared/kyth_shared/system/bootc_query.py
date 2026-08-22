@@ -5,6 +5,7 @@ policy belong in :mod:`bootc_policy`.
 """
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime
 from typing import Any
@@ -40,6 +41,22 @@ def walk_strings(data: object):
             yield from walk_strings(value)
 
 
+def _status_commands(*, json_mode: bool) -> tuple[list[str], ...]:
+    """bootc status command candidates.
+
+    Unprivileged callers must go through ``sudo -n kyth-bootc-guard`` (the
+    only NOPASSWD path). Root-context units already have euid 0; invoking
+    sudo from those is unnecessary and fails in hardened sandboxes
+    (empty CapabilityBoundingSet + NoNewPrivileges → EPERM on /etc/sudoers).
+    """
+    guard_op = "status-json" if json_mode else "status"
+    guard = ["/usr/bin/kyth-bootc-guard", guard_op]
+    bootc = ["bootc", "status", "--json"] if json_mode else ["bootc", "status"]
+    if os.geteuid() == 0:
+        return (guard, bootc)
+    return (["sudo", "-n", *guard], bootc)
+
+
 def fetch_status_text() -> str:
     # `bootc status` requires root even for a read (bootc 1.16+ takes a
     # sysroot write-lock while querying privilege) — there is no NOPASSWD
@@ -52,7 +69,7 @@ def fetch_status_text() -> str:
     # otherwise convoy behind bootc/ostree and the upgrade hits its timeout.
     if active_operation():
         return ""
-    for cmd in (["sudo", "-n", "/usr/bin/kyth-bootc-guard", "status"], ["bootc", "status"]):
+    for cmd in _status_commands(json_mode=False):
         result = run_command(cmd, timeout=10)
         if result is not None and result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -69,10 +86,7 @@ def fetch_status_data() -> dict | None:
     # status --json`, which has no matching sudoers rule and always fails.
     if active_operation():
         return None
-    for cmd in (
-        ["sudo", "-n", "/usr/bin/kyth-bootc-guard", "status-json"],
-        ["bootc", "status", "--json"],
-    ):
+    for cmd in _status_commands(json_mode=True):
         result = run_command(cmd, timeout=10)
         if result is None or result.returncode != 0 or not result.stdout.strip():
             continue

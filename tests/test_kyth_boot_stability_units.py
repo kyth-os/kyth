@@ -68,6 +68,28 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("StartLimitIntervalSec=60", zram)
         self.assertIn("StartLimitBurst=3", zram)
 
+    def test_zram_setup_does_not_wait_for_udev_device(self) -> None:
+        """After switch-root, udevd is down until sysinit; sysinit After=swap.
+        Requiring dev-zram0.device plus After=udevd is a 30s deadlock.
+        """
+        zram = (ROOT / "build_files/scripts/branding/51-zram.sh").read_text(encoding="utf-8")
+        self.assertIn("ExecStart=/usr/libexec/kyth-zram-ensure", zram)
+        self.assertIn("mknod -m 0600 /dev/zram0", zram)
+        self.assertIn("After=systemd-modules-load.service", zram)
+        self.assertIn("Before=systemd-zram-setup@zram0.service swap.target", zram)
+        self.assertNotIn("After=systemd-udevd.service", zram)
+        self.assertIn("Requires=", zram)
+        self.assertIn("BindsTo=", zram)
+        self.assertIn("dev-zram0.swap.d/10-kyth-async.conf", zram)
+
+    def test_memory_tune_applies_only_its_own_sysctl_file(self) -> None:
+        body = (ROOT / "build_files/scripts/sysconfig/kernel/56-memory-tune.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("sysctl --load=/etc/sysctl.d/99-kyth-memory.conf", body)
+        self.assertNotIn("ExecStartPost=/usr/bin/sysctl --system", body)
+        self.assertNotIn("sudo sysctl --system", body)
+
 
 class InstallerMokFailClosedTests(unittest.TestCase):
     def test_failed_mok_staging_blocks_install_success(self) -> None:

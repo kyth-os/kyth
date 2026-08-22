@@ -1,10 +1,18 @@
 [Unit]
 Description=Apply VS Code and Brave KWallet defaults
-ConditionPathExists=!%h/.local/state/kyth/browser-wallet-defaults-v2
+# /root lives on the immutable ostree / — ProtectSystem=strict cannot make
+# it writable, so the marker touch fails EROFS when this user unit runs
+# as root (lingering or a root graphical session). Desktop users have
+# $HOME on /var/home.
+ConditionUser=!root
+ConditionPathExists=!%S/kyth/browser-wallet-defaults-v2
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/bash -c 'set -euo pipefail; /usr/bin/kyth-vscode-wallet; mkdir -p "${HOME}/.local/state/kyth"; touch "${HOME}/.local/state/kyth/browser-wallet-defaults-v2"'
+ExecStart=/usr/bin/kyth-vscode-wallet
+ExecStartPost=/usr/bin/touch %S/kyth/browser-wallet-defaults-v2
+StateDirectory=kyth
+StateDirectoryMode=0700
 # Runs once ever (marker-gated), often right at first login — deprioritized
 # so it never competes with the desktop session for cycles.
 Nice=15

@@ -25,13 +25,11 @@ compression-algorithm = lz4
 swap-priority = 100
 ZRAMEOF
 
-# systemd waits for dev-zram0.device via udev; the device appears only
-# after udev processes the synthetic block uevent. On FA617NS the real
-# root's systemd-udevd was not running for ~122s after switch-root, so
-# the 10s->132s gap blocked swap.target and delayed graphical.target.
-# Use a short fail-fast timeout (30s) and rely on early modprobe + initramfs
-# (51-zram.sh) to guarantee the device exists. Do not extend to 180s —
-# that only hides the race and makes boot 2m longer.
+# systemd-zram-setup used to wait for dev-zram0.device via udev. After
+# switch-root that is a deadlock (udevd down until sysinit, sysinit
+# After=swap.target). 51-zram.sh now creates /dev/zram0 without udev and
+# drops the .device Requires. Keep a short backstop timeout so a real
+# hang still fails fast instead of a 180s graphical.target stall.
 mkdir -p /etc/systemd/system/dev-zram0.device.d
 cat > /etc/systemd/system/dev-zram0.device.d/10-timeout.conf <<'DEVTIMEOUT'
 [Unit]

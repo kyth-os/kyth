@@ -257,6 +257,8 @@ class HardwarePolicySafetyTests(unittest.TestCase):
         self.assertIn("hardware-profiles.toml", install)
         self.assertNotIn("hw-setup-done", service)
         self.assertIn("kyth-hardware-policy apply --force", retry)
+        self.assertIn("ReadWritePaths=/etc/modprobe.d", service)
+        self.assertIn("StateDirectory=kyth", service)
 
     def test_service_timeout_survives_a_real_akmods_build(self):
         """_configure_nvidia() shells out to `akmods --force` synchronously when
