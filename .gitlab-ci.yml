@@ -100,8 +100,6 @@ build:
   stage: build
   image: quay.io/podman/stable
   timeout: 120m
-  tags:
-    - saas-linux-large-amd64
   variables:
     BUILDAH_FORMAT: docker
   rules:
@@ -152,7 +150,7 @@ build:
       # Build final image with podman (fallback to docker buildx if podman fails)
       set -x
       if podman build --help 2>&1 | grep -q "secret"; then
-        podman build $BUILD_ARGS -t "$CI_REGISTRY_IMAGE:$TAG" -t "$CI_REGISTRY_IMAGE:$IMAGE_VERSION" -f Dockerfile . 2>&1 | tail -n 100
+        podman build --squash-all $BUILD_ARGS -t "$CI_REGISTRY_IMAGE:$TAG" -t "$CI_REGISTRY_IMAGE:$IMAGE_VERSION" -f Dockerfile . 2>&1 | tail -n 100 || podman build $BUILD_ARGS -t "$CI_REGISTRY_IMAGE:$TAG" -t "$CI_REGISTRY_IMAGE:$IMAGE_VERSION" -f Dockerfile . 2>&1 | tail -n 100
       else
         docker buildx build --secret id=mok_key,env=MOK_KEY $BUILD_ARGS -t "$CI_REGISTRY_IMAGE:$TAG" -t "$CI_REGISTRY_IMAGE:$IMAGE_VERSION" -f Dockerfile . --push 2>&1 | tail -n 100
         podman pull "$CI_REGISTRY_IMAGE:$TAG" 2>&1 | tail -n 5 || true
