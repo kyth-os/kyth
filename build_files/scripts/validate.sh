@@ -6,12 +6,24 @@ set -euo pipefail
 # when run directly on a live desktop; cgroup weight only bites under
 # contention — idle, this still runs at full speed. Gracefully fall back
 # if systemd-run --user is unavailable (e.g. CI).
-if [[ -z "${KYTH_VALIDATION_SCOPE:-}" ]] && command -v systemd-run >/dev/null 2>&1 && [[ -z "${INVOCATION_ID:-}" ]]; then
+#
+# KYTH_VALIDATION_SCOPE is the only re-entry guard: it's set below, right
+# before re-exec'ing into the throttled scope, so this block only ever
+# runs once per invocation. It used to also skip re-exec whenever
+# $INVOCATION_ID was already set, on the theory that meant "already inside
+# a deprioritized unit" — but INVOCATION_ID is set by systemd on every
+# descendant of any systemd-launched process (a terminal, an IDE, an
+# agent's own sandboxed shell — anything with a systemd unit somewhere in
+# its ancestry), not specifically this scope. That silently skipped the
+# throttle for exactly the desktop shells most likely to run validate.sh
+# directly, letting it peg every core at full priority and reproducing the
+# kwin_wayland starvation this guard exists to prevent.
+if [[ -z "${KYTH_VALIDATION_SCOPE:-}" ]] && command -v systemd-run >/dev/null 2>&1; then
 	export KYTH_VALIDATION_SCOPE=1
 	if systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 -- "$0" "$@" 2>/dev/null; then
 		exit $?
 	fi
-	# systemd-run --user failed (no user manager) — continue at normal priority
+	# systemd-run --user failed (no user manager, e.g. some CI runners) — continue at normal priority
 fi
 
 repo_root="$(git rev-parse --show-toplevel)"
