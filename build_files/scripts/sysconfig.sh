@@ -62,6 +62,33 @@ ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.targ
 rm -f /etc/systemd/system/sddm.service
 ln -s /dev/null /etc/systemd/system/sddm.service
 
+# Runtime fix for stale /etc overlay on ostree hosts (bootc upgrade preserves
+# /etc, so a pre-PLM deployment's display-manager.service -> sddm.service
+# survives even though the new image no longer ships sddm). Install a one-shot
+# that runs before the greeter on every boot and re-applies the PLM wiring.
+install -d -m 0755 /usr/libexec
+install -m 0755 /ctx/sysconfig/kyth-migrate-display-manager /usr/libexec/kyth-migrate-display-manager 2>/dev/null || install -m 0755 "$(dirname "${BASH_SOURCE[0]}")/kyth-migrate-display-manager" /usr/libexec/kyth-migrate-display-manager
+cat >/usr/lib/systemd/system/kyth-migrate-display-manager.service <<'MIGRATESERVICEEOF'
+[Unit]
+Description=Migrate stale display-manager from SDDM to Plasma Login Manager
+DefaultDependencies=no
+After=local-fs.target
+Before=plasmalogin.service display-manager.service
+ConditionPathExists=/usr/lib/systemd/system/plasmalogin.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kyth-migrate-display-manager
+RemainAfterExit=yes
+TimeoutStartSec=30
+
+[Install]
+WantedBy=graphical.target
+MIGRATESERVICEEOF
+systemctl enable kyth-migrate-display-manager.service 2>/dev/null || true
+
 # Service masks/disables that are intentionally runtime-layer policy.
 # NetworkManager-wait-online.service is deliberately NOT disabled here — it is
 # enabled later in branding/31-ujust-recipes.sh (which runs after this script

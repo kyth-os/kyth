@@ -1,0 +1,73 @@
+#!/usr/bin/bash
+# kyth-migrate-display-manager — fix stale /etc overlay after SDDM→PLM switch
+# On ostree/bootc, /etc is preserved across deployments. An image that removed
+# SDDM and now ships PLM will still boot SDDM on hosts whose
+# /etc/systemd/system/display-manager.service points at sddm.service, and
+# plasmalogin.service may be masked (from fedora-kinoite preset). This helper
+# is idempotent and safe to run on every boot; it does nothing when already
+# on PLM. It mirrors the wiring done at build time in sysconfig.sh.
+set -euo pipefail
+
+PLM_UNIT="/usr/lib/systemd/system/plasmalogin.service"
+SDDM_UNIT="/usr/lib/systemd/system/sddm.service"
+DM_LINK="/etc/systemd/system/display-manager.service"
+GRAPHICAL_WANTS="/etc/systemd/system/graphical.target.wants/display-manager.service"
+DEFAULT_LINK="/etc/systemd/system/default.target"
+
+changed=0
+
+# Must have PLM in the new image; otherwise nothing to migrate to.
+if [[ ! -f "${PLM_UNIT}" ]]; then
+    exit 0
+fi
+
+# 1) Unmask plasmalogin if stale mask exists (file symlink to /dev/null)
+if [[ -L /etc/systemd/system/plasmalogin.service ]] && [[ "$(readlink /etc/systemd/system/plasmalogin.service)" == "/dev/null" ]]; then
+    rm -f /etc/systemd/system/plasmalogin.service
+    changed=1
+fi
+# Also ask systemd to unmask (covers any other mask path)
+if systemctl is-enabled plasmalogin.service 2>&1 | grep -q "masked"; then
+    systemctl unmask plasmalogin.service 2>/dev/null || true
+    changed=1
+fi
+
+# 2) Ensure display-manager points at plasmalogin
+if [[ ! -L "${DM_LINK}" ]] || [[ "$(readlink "${DM_LINK}" 2>/dev/null || true)" != "${PLM_UNIT}" ]]; then
+    mkdir -p "$(dirname "${DM_LINK}")" "$(dirname "${GRAPHICAL_WANTS}")"
+    ln -sf "${PLM_UNIT}" "${DM_LINK}"
+    ln -sf "${DM_LINK}" "${GRAPHICAL_WANTS}"
+    changed=1
+fi
+
+# 3) Ensure default target is graphical
+if [[ ! -L "${DEFAULT_LINK}" ]] || [[ "$(readlink "${DEFAULT_LINK}")" != "/usr/lib/systemd/system/graphical.target" ]]; then
+    ln -sf /usr/lib/systemd/system/graphical.target "${DEFAULT_LINK}"
+    changed=1
+fi
+
+# 4) Mask SDDM if it was stale enabled (and remove any stale wants)
+if [[ -L /etc/systemd/system/sddm.service ]] && [[ "$(readlink /etc/systemd/system/sddm.service)" != "/dev/null" ]]; then
+    rm -f /etc/systemd/system/sddm.service
+    ln -s /dev/null /etc/systemd/system/sddm.service 2>/dev/null || true
+    changed=1
+elif [[ ! -L /etc/systemd/system/sddm.service ]]; then
+    # Ensure masked even if file did not exist (prevents manual enable)
+    ln -s /dev/null /etc/systemd/system/sddm.service 2>/dev/null || true
+    changed=1
+fi
+# Remove any stale graphical wants symlink that points at sddm
+if [[ -L "${GRAPHICAL_WANTS}" ]] && [[ "$(readlink "${GRAPHICAL_WANTS}")" == *"sddm"* ]]; then
+    ln -sf "${DM_LINK}" "${GRAPHICAL_WANTS}"
+    changed=1
+fi
+# Also ensure systemctl mask state
+if ! systemctl is-enabled sddm.service 2>&1 | grep -q "masked"; then
+    systemctl mask sddm.service 2>/dev/null || true
+    changed=1
+fi
+
+if (( changed )); then
+    systemctl daemon-reload 2>/dev/null || true
+fi
+exit 0
