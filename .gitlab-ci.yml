@@ -100,8 +100,6 @@ build:
   stage: build
   image: quay.io/podman/stable
   timeout: 120m
-  tags:
-    - saas-linux-large-amd64
   services:
     - name: docker:24-dind
       alias: docker
@@ -119,6 +117,8 @@ build:
     - df -h | head -n 20
     # Free disk like GitHub's free-disk-space action
     - df -h; du -sh /var/tmp 2>&1 | head; du -sh .cache 2>&1 | head || true
+    - sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache /usr/local/lib/android /usr/local/share/boost /opt/az 2>&1 | tail -n 5 || true
+    - sudo apt-get clean 2>&1 | tail -n 5 || true
     - podman system prune -a --volumes -f 2>&1 | tail -n 5 || true
     - docker system prune -a --volumes -f 2>&1 | tail -n 5 || true
     - df -h | head -n 10
