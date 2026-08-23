@@ -34,23 +34,19 @@ validation:
     - if: '$CI_PIPELINE_SOURCE == "web"'
   before_script:
     - apt-get update -qq
-    - apt-get install -y -qq file systemd curl git sudo python3 python3-pip
+    - apt-get install -y -qq file systemd curl git sudo python3 python3-pip nodejs
     - ./build_files/scripts/install-validation-tools.sh || true
-    - export PATH="$CI_PROJECT_DIR/.cache/kyth-ci-tools:$PATH"
+    - export PATH="$CI_PROJECT_DIR/.cache/kyth-ci-tools/bin:$CI_PROJECT_DIR/.cache/kyth-ci-tools:$PATH"
+    - ls -lh .cache/kyth-ci-tools/bin/ || true
   script:
     - echo "==> GitHub workflows lint (actionlint / zizmor if available)"
-    - .cache/kyth-ci-tools/actionlint -color -shellcheck="" || echo "actionlint skip"
-    - .cache/kyth-ci-tools/zizmor --persona auditor --min-severity medium --no-online-audits .github/workflows || true
+    - .cache/kyth-ci-tools/bin/actionlint -color -shellcheck="" || echo "actionlint skip"
+    - .cache/kyth-ci-tools/bin/zizmor --persona auditor --min-severity medium --no-online-audits .github/workflows || true
     - echo "==> Dockerfile lint"
-    - .cache/kyth-ci-tools/hadolint --failure-threshold error Dockerfile build_base/Dockerfile installer/Containerfile || true
+    - .cache/kyth-ci-tools/bin/hadolint --failure-threshold error Dockerfile build_base/Dockerfile installer/Containerfile || true
     - echo "==> Shell + Python validation"
-    - .cache/kyth-ci-tools/shellcheck --severity=warning $(git ls-files | xargs file --brief --mime-type | grep -l shell || true) || true
+    - .cache/kyth-ci-tools/bin/shellcheck --severity=warning $(git ls-files | xargs file --brief --mime-type | grep -l shell || true) || true
     - ./build_files/scripts/validate.sh
-  artifacts:
-    when: always
-    expire_in: 1 week
-    reports:
-      dotenv: build.env
 
 # ---- Quality: mirrors quality job (coverage + ruff) ----
 quality:
