@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS MangoHud frame-time telemetry collector
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=graphical-session.target
 PartOf=graphical-session.target
 StartLimitIntervalSec=60

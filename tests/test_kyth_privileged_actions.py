@@ -42,7 +42,7 @@ class PrivilegedActionTests(unittest.TestCase):
 
     def test_known_kyth_channels_use_fixed_bootc_guard_operations(self):
         self.assertEqual(
-            bootc_action("switch", "ghcr.io/mrtrick37/kyth:testing-cachy").command(),
+            bootc_action("switch", "ghcr.io/kyth-os/kyth:testing-cachy").command(),
             ["sudo", "-A", "/usr/bin/kyth-bootc-guard", "switch-testing-cachy"],
         )
 

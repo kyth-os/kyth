@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS user probe cache refresh
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 PartOf=graphical-session.target
 
 [Timer]

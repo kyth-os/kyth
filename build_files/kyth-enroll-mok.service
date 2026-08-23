@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS Secure Boot MOK enrollment
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=local-fs.target
 ConditionPathExists=!/var/lib/kyth/mok-enrolled
 

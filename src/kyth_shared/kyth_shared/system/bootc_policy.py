@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-REGISTRY = "ghcr.io/mrtrick37/kyth"
+REGISTRY = "ghcr.io/kyth-os/kyth"
 
 
 def default_phase(mode: str) -> str:

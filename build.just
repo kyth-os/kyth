@@ -116,7 +116,7 @@ switch-local tag="latest":
     sudo bootc switch --transport containers-storage localhost/kyth:{{ tag }}
     echo
     echo "Staged. Reboot to apply: sudo systemctl reboot"
-    echo "To go back to the tracked channel later: sudo bootc switch ghcr.io/mrtrick37/kyth:testing"
+    echo "To go back to the tracked channel later: sudo bootc switch ghcr.io/kyth-os/kyth:testing"
 
 # Build a QCOW2 virtual machine image
 [group('Build Virtual Machine Image')]

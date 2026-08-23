@@ -98,7 +98,7 @@ KythOS uses multiple validation layers:
 
 ## External Interfaces
 
-- OCI image: `ghcr.io/mrtrick37/kyth`.
+- OCI image: `ghcr.io/kyth-os/kyth`.
 - ISO downloads: stable and testing channel URLs documented in `README.md`.
 - GitHub issues and discussions for public support and bug reporting.
 - GitHub private vulnerability reporting for security reports.

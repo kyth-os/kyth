@@ -159,7 +159,7 @@ def create_github_issue_draft(
     body: str = "",
     body_file: str | None = None,
     label: str = "bug",
-    repo_url: str = "https://github.com/mrtrick37/kyth",
+    repo_url: str = "https://github.com/kyth-os/kyth",
     open_browser: bool = True,
 ) -> tuple[str, str]:
     import os

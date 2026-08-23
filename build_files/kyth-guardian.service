@@ -1,6 +1,6 @@
 [Unit]
 Description=Kyth Guardian bounded desktop health check
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=graphical-session.target kyth-probe.service
 ConditionPathExists=/usr/bin/kyth-guardian
 

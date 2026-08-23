@@ -14,7 +14,7 @@ June 16, 2025 through April 16, 2026.
 
 Recommended status: Met
 
-Recommended URL: `https://github.com/mrtrick37/kyth/issues`
+Recommended URL: `https://github.com/kyth-os/kyth/issues`
 
 Recommended entry: KythOS accepts public bug reports through GitHub Issues. The
 repository provides structured issue templates for installer problems, system
@@ -38,7 +38,7 @@ proposals.
 
 Evidence:
 
-- Public tracker: `https://github.com/mrtrick37/kyth/issues`
+- Public tracker: `https://github.com/kyth-os/kyth/issues`
 - Issue templates assign actionable titles and labels where appropriate.
 
 ### `report_responses`
@@ -83,7 +83,7 @@ Evidence:
 
 Recommended status: Met
 
-Recommended URL: `https://github.com/mrtrick37/kyth/issues`
+Recommended URL: `https://github.com/kyth-os/kyth/issues`
 
 Recommended entry: GitHub Issues and Discussions provide public, searchable,
 URL-addressable archives for reports and responses. Issue templates direct
@@ -92,8 +92,8 @@ to GitHub Issues.
 
 Evidence:
 
-- Issues archive: `https://github.com/mrtrick37/kyth/issues`
-- Discussions archive: `https://github.com/mrtrick37/kyth/discussions`
+- Issues archive: `https://github.com/kyth-os/kyth/issues`
+- Discussions archive: `https://github.com/kyth-os/kyth/discussions`
 - `.github/ISSUE_TEMPLATE/config.yml` links both reporting paths.
 
 ## Vulnerability Report Process
@@ -102,7 +102,7 @@ Evidence:
 
 Recommended status: Met
 
-Recommended URL: `https://github.com/mrtrick37/kyth/security/policy`
+Recommended URL: `https://github.com/kyth-os/kyth/security/policy`
 
 Recommended entry: KythOS publishes its vulnerability reporting process in
 `SECURITY.md`, which GitHub exposes at the repository Security Policy URL. It
@@ -112,13 +112,13 @@ lists information to include, and describes triage and disclosure handling.
 Evidence:
 
 - `SECURITY.md`
-- GitHub Security Policy: `https://github.com/mrtrick37/kyth/security/policy`
+- GitHub Security Policy: `https://github.com/kyth-os/kyth/security/policy`
 
 ### `vulnerability_report_private`
 
 Recommended status: Met
 
-Recommended URL: `https://github.com/mrtrick37/kyth/security/advisories/new`
+Recommended URL: `https://github.com/kyth-os/kyth/security/advisories/new`
 
 Recommended entry: KythOS supports private vulnerability reports through
 GitHub's private vulnerability reporting form and links that form from
@@ -126,7 +126,7 @@ GitHub's private vulnerability reporting form and links that form from
 
 Evidence:
 
-- `SECURITY.md` links `https://github.com/mrtrick37/kyth/security/advisories/new`
+- `SECURITY.md` links `https://github.com/kyth-os/kyth/security/advisories/new`
 - `.github/ISSUE_TEMPLATE/config.yml` routes security reports to the same
   private advisory form.
 

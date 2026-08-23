@@ -36,7 +36,7 @@ def _guard_disposed(slot):  # local guard — mirrors kyth_welcome.services.runt
             return None
     return _wrapped
 
-REGISTRY = "ghcr.io/mrtrick37/kyth"
+REGISTRY = "ghcr.io/kyth-os/kyth"
 CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000   # 4 hours
 _LOCK_FILE = Path.home() / ".cache" / "kyth" / "kyth-update-notifier.lock"
 _NOTIFIED_DIGEST_FILE = Path.home() / ".config" / "kyth-update-notified-digest"

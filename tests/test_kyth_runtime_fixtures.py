@@ -28,7 +28,7 @@ class RuntimeFixtureTests(unittest.TestCase):
         status = parse_json_object(fixture("bootc-status.json"))
         self.assertEqual(
             status["status"]["booted"]["image"]["reference"],
-            "ghcr.io/mrtrick37/kyth:testing",
+            "ghcr.io/kyth-os/kyth:testing",
         )
         self.assertIsNone(parse_json_object("{changed output"))
 

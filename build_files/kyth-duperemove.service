@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS Steam/Wine dedupe pass
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=local-fs.target
 ConditionACPower=true
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS User Comfort Polish Setup
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=graphical-session.target
 
 [Service]

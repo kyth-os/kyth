@@ -4,11 +4,11 @@
 #
 # Build with:
 #   sudo podman build --cap-add SYS_ADMIN --security-opt label=disable \
-#     --build-arg BASE_IMAGE=ghcr.io/mrtrick37/kyth:latest \
+#     --build-arg BASE_IMAGE=ghcr.io/kyth-os/kyth:latest \
 #     --build-arg SOURCE_TAG=latest \
 #     -t kyth-live:build -f installer/Containerfile .
 
-ARG BASE_IMAGE=ghcr.io/mrtrick37/kyth:latest
+ARG BASE_IMAGE=ghcr.io/kyth-os/kyth:latest
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG INSTALL_SOURCE_IMAGE=${BASE_IMAGE}

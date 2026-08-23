@@ -32,7 +32,7 @@ def verify_attest(path: Path | None = None) -> dict[str, Any]:
     try:
         # bundle may be inline or file path
         if isinstance(bundle, str) and Path(bundle).exists():
-            r=run(["cosign","verify","--offline","--bundle", bundle, "ghcr.io/mrtrick37/kyth:latest"], capture_output=True, timeout=10)
+            r=run(["cosign","verify","--offline","--bundle", bundle, "ghcr.io/kyth-os/kyth:latest"], capture_output=True, timeout=10)
             if r.returncode==0:
                 return {"verified": True, "reason": "cosign offline ok"}
             return {"verified": False, "reason": r.stderr[:200] if r.stderr else "cosign failed"}

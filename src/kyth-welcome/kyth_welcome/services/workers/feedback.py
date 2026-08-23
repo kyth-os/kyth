@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 from ...qt import Signal
 from ..runtime import TrackedThread
 
-_GITHUB_REPO = "mrtrick37/kyth"
+_GITHUB_REPO = "kyth-os/kyth"
 
 
 class GitHubIssueWorker(TrackedThread):

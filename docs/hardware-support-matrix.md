@@ -30,7 +30,7 @@
 |---|---|---|---|
 | `amdgpu-gaming-memory` | 2027-02-01 | Expose PowerPlay controls while bounding APU GTT pressure and retaining recoverable VM fault handling | [policy rationale](hardware-policy.md#managed-quirks) |
 | `amdgpu-psr-disable` | 2027-08-01 | Disable Display Core PSR on Navi 33 (7480) DCN 3.2.1, Rembrandt 780M (15b9/15bf/15be/164e) DCN 3.1.2/3.1.3 to avoid Pageflip timed out on eDP under Wayland/VRR — TUF A16 Phoenix | https://gitlab.freedesktop.org/drm/amd/-/issues and journalctl amdgpu Pageflip timed out (DCN 3.2.1 on 7480, DCN 3.1.2 eDP-2 PSR 1, TUF A16 15be/164e Phoenix) |
-| `asus-tuf-amd-cachy-stability` | 2027-08-01 | ASUS TUF all-AMD on CachyOS lacks asus-armoury.ko; use conservative GTT 2048 and retain recoverable faults, keep amd_pstate=active | https://github.com/mrtrick37/kyth/issues — TUF all-AMD vs ZBook Intel+AMD, build.sh:83 asus-armoury.ko missing on Cachy |
+| `asus-tuf-amd-cachy-stability` | 2027-08-01 | ASUS TUF all-AMD on CachyOS lacks asus-armoury.ko; use conservative GTT 2048 and retain recoverable faults, keep amd_pstate=active | https://github.com/kyth-os/kyth/issues — TUF all-AMD vs ZBook Intel+AMD, build.sh:83 asus-armoury.ko missing on Cachy |
 | `bluetooth-usb-autosuspend` | 2027-08-01 | Prevent missed remote wake traffic from Bluetooth controllers and low-bandwidth peripherals | [policy rationale](hardware-policy.md#managed-quirks) |
 | `intel-i915-media-firmware` | 2027-02-01 | Enable GuC submission and HuC media firmware on systems still using i915 | [policy rationale](hardware-policy.md#managed-quirks) |
 | `intel-wifi-association-power` | 2027-05-01 | Keep Intel wireless active during WPA association while preserving Bluetooth coexistence | [policy rationale](hardware-policy.md#managed-quirks) |

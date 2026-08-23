@@ -101,7 +101,7 @@ Fedora Kinoite / Universal Blue base
 
 Switch channel on a running system:
 ```bash
-sudo bootc switch ghcr.io/mrtrick37/kyth:testing
+sudo bootc switch ghcr.io/kyth-os/kyth:testing
 sudo bootc upgrade
 ```
 
@@ -136,4 +136,4 @@ docs/                     # Architecture, security model, hardware policy, valid
 - GPU: Mesa-git from xxmitsu/mesa-git COPR (bleeding-edge RADV/RADEONSI)
 - SELinux: enforcing (bootc/ostree relabels the deployed tree on every deployment using the bundled policy)
 - Live ISOs published to Cloudflare R2: `kyth-live-latest.iso` / `kyth-live-testing.iso`
-- GitHub: https://github.com/mrtrick37/kyth
+- GitHub: https://github.com/kyth-os/kyth

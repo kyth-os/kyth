@@ -21,7 +21,7 @@ class _ModsMixin:
                 (
                     "Modding Guide",
                     lambda: QDesktopServices.openUrl(
-                        QUrl("https://github.com/mrtrick37/kyth/blob/main/docs/modding-on-kythos.md")
+                        QUrl("https://github.com/kyth-os/kyth/blob/main/docs/modding-on-kythos.md")
                     ),
                 ),
             ],

@@ -1,6 +1,6 @@
 [Unit]
 Description=Run Kyth Guardian when the shared probe snapshot changes
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 
 [Path]
 PathChanged=%t/kyth/probe-cache.json

@@ -18,7 +18,7 @@ from kyth_shared.system.process import (
     run_command,
 )
 
-REGISTRY = "ghcr.io/mrtrick37/kyth"
+REGISTRY = "ghcr.io/kyth-os/kyth"
 
 
 def nested_get(data: object, path: tuple[str, ...]) -> Any:

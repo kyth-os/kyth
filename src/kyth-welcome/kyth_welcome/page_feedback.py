@@ -15,7 +15,7 @@ from .widgets import (
 
 # ── Page: Feedback ────────────────────────────────────────────────────────────
 _GITHUB_FEEDBACK_TOKEN_PATH = "/etc/kyth-github-feedback-token"
-_GITHUB_REPO = "mrtrick37/kyth"
+_GITHUB_REPO = "kyth-os/kyth"
 
 
 def _scrub_logs(text: str) -> str:

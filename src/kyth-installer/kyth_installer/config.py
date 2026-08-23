@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-SOURCE_IMAGE = os.environ.get("KYTH_SOURCE_IMAGE", "ghcr.io/mrtrick37/kyth:latest")
+SOURCE_IMAGE = os.environ.get("KYTH_SOURCE_IMAGE", "ghcr.io/kyth-os/kyth:latest")
 TARGET_IMAGE = os.environ.get("KYTH_TARGET_IMAGE", SOURCE_IMAGE)
 SOURCE_DIGEST = os.environ.get("KYTH_SOURCE_DIGEST", "").strip()
 SOURCE_METADATA_FILE = Path(

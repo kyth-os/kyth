@@ -129,7 +129,7 @@ class DiagnosticsTests(unittest.TestCase):
                     open_browser=True,
                 )
                 self.assertTrue(os.path.isfile(draft_path))
-                self.assertIn("https://github.com/mrtrick37/kyth/issues/new?", url)
+                self.assertIn("https://github.com/kyth-os/kyth/issues/new?", url)
                 self.assertIn("labels=bug", url)
                 mock_popen.assert_called_once()
 

@@ -75,10 +75,10 @@ class PrivilegedGateway:
 
 _SAFE_IMAGE_REF_RE = re.compile(r"^[A-Za-z0-9._/@:+-]+$")
 _PASSWORDLESS_KYTH_REFS = {
-    "ghcr.io/mrtrick37/kyth:latest": "switch-latest",
-    "ghcr.io/mrtrick37/kyth:testing": "switch-testing",
-    "ghcr.io/mrtrick37/kyth:latest-cachy": "switch-latest-cachy",
-    "ghcr.io/mrtrick37/kyth:testing-cachy": "switch-testing-cachy",
+    "ghcr.io/kyth-os/kyth:latest": "switch-latest",
+    "ghcr.io/kyth-os/kyth:testing": "switch-testing",
+    "ghcr.io/kyth-os/kyth:latest-cachy": "switch-latest-cachy",
+    "ghcr.io/kyth-os/kyth:testing-cachy": "switch-testing-cachy",
 }
 _SAFE_GATEWAY_RE = re.compile(r"^[A-Za-z0-9._:/?&=%+@\[\]-]+$")
 _SAFE_SCHEDULER_RE = re.compile(r"^scx_[A-Za-z0-9_-]+$")

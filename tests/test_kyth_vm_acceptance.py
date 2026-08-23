@@ -212,7 +212,7 @@ class InstallerTargetRefAndStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch("kyth_shared.vm_acceptance.INSTALLER_ENV_FILE", pathlib.Path(tmp) / "absent"):
                 self.assertEqual(
-                    vm_acceptance._installer_target_ref(), "ghcr.io/mrtrick37/kyth:testing"
+                    vm_acceptance._installer_target_ref(), "ghcr.io/kyth-os/kyth:testing"
                 )
 
     def test_installer_target_ref_defaults_when_key_missing(self):
@@ -221,7 +221,7 @@ class InstallerTargetRefAndStateTests(unittest.TestCase):
             env_file.write_text("OTHER=1\n")
             with mock.patch("kyth_shared.vm_acceptance.INSTALLER_ENV_FILE", env_file):
                 self.assertEqual(
-                    vm_acceptance._installer_target_ref(), "ghcr.io/mrtrick37/kyth:testing"
+                    vm_acceptance._installer_target_ref(), "ghcr.io/kyth-os/kyth:testing"
                 )
 
     def test_state_value_defaults_to_fresh(self):

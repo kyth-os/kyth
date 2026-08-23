@@ -50,27 +50,27 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
             "status": {
                 "booted": {
                     "image": {
-                        "reference": "ghcr.io/mrtrick37/kyth:latest"
+                        "reference": "ghcr.io/kyth-os/kyth:latest"
                     }
                 }
             }
         }
         self.assertEqual(
             self.watcher.get_bootc_image_reference(status_data),
-            "ghcr.io/mrtrick37/kyth:latest"
+            "ghcr.io/kyth-os/kyth:latest"
         )
 
     def test_get_bootc_image_reference_spec_fallback(self):
         status_data = {
             "spec": {
                 "image": {
-                    "image": "ghcr.io/mrtrick37/kyth:testing"
+                    "image": "ghcr.io/kyth-os/kyth:testing"
                 }
             }
         }
         self.assertEqual(
             self.watcher.get_bootc_image_reference(status_data),
-            "ghcr.io/mrtrick37/kyth:testing"
+            "ghcr.io/kyth-os/kyth:testing"
         )
 
     @patch("subprocess.run")
@@ -84,7 +84,7 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
         import hashlib
         expected = "sha256:" + hashlib.sha256(mock_run.return_value.stdout).hexdigest()
         self.assertEqual(
-            self.watcher.get_remote_digest("ghcr.io/mrtrick37/kyth:latest"),
+            self.watcher.get_remote_digest("ghcr.io/kyth-os/kyth:latest"),
             expected
         )
 
@@ -97,7 +97,7 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
             stderr=b""
         )
         self.assertEqual(
-            self.watcher.get_remote_digest("ghcr.io/mrtrick37/kyth:latest"),
+            self.watcher.get_remote_digest("ghcr.io/kyth-os/kyth:latest"),
             "sha256:1111111111111111111111111111111111111111111111111111111111111111"
         )
 
@@ -107,7 +107,7 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
             "status": {
                 "booted": {
                     "image": {
-                        "reference": "ghcr.io/mrtrick37/kyth:testing",
+                        "reference": "ghcr.io/kyth-os/kyth:testing",
                         "imageDigest": "sha256:" + "b" * 64,
                     }
                 }
@@ -152,7 +152,7 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
     @patch("subprocess.run")
     @patch("sys.exit")
     def test_main_skips_when_staged_matches_remote(self, mock_exit, mock_run):
-        status_json = b'{"status": {"booted": {"image": {"reference": "ghcr.io/mrtrick37/kyth:latest", "imageDigest": "sha256:booted"}}, "staged": {"image": {"imageDigest": "sha256:latest"}}}}'
+        status_json = b'{"status": {"booted": {"image": {"reference": "ghcr.io/kyth-os/kyth:latest", "imageDigest": "sha256:booted"}}, "staged": {"image": {"imageDigest": "sha256:latest"}}}}'
         manifest_json = b'{"manifests": [{"platform": {"architecture": "amd64", "os": "linux"}, "digest": "sha256:latest"}]}'
         
         def run_side_effect(args, **kwargs):
@@ -191,7 +191,7 @@ class UpdateWatcherOptimizationTests(unittest.TestCase):
     @patch("subprocess.run")
     @patch("sys.exit")
     def test_main_skips_when_booted_matches_remote(self, mock_exit, mock_run):
-        status_json = b'{"status": {"booted": {"image": {"reference": "ghcr.io/mrtrick37/kyth:latest", "imageDigest": "sha256:latest"}}}}'
+        status_json = b'{"status": {"booted": {"image": {"reference": "ghcr.io/kyth-os/kyth:latest", "imageDigest": "sha256:latest"}}}}'
         manifest_json = b'{"manifests": [{"platform": {"architecture": "amd64", "os": "linux"}, "digest": "sha256:latest"}]}'
         
         def run_side_effect(args, **kwargs):

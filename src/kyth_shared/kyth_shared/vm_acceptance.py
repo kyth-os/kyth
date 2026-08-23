@@ -129,7 +129,7 @@ def run_smoke_check(phase: str) -> None:
 
 
 def _installer_target_ref() -> str:
-    default = "ghcr.io/mrtrick37/kyth:testing"
+    default = "ghcr.io/kyth-os/kyth:testing"
     try:
         for line in INSTALLER_ENV_FILE.read_text(encoding="utf-8").splitlines():
             if line.startswith("KYTH_TARGET_IMAGE="):

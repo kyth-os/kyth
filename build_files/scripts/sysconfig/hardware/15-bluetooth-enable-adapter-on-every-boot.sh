@@ -26,7 +26,7 @@ install -m 0755 /ctx/sysconfig/kyth-enable-bluetooth /usr/libexec/kyth-enable-bl
 write_config /usr/lib/systemd/system/kyth-bluetooth-enable.service <<'BTENABLEUNITEOF'
 [Unit]
 Description=Enable Bluetooth adapters at boot
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=bluetooth.service systemd-rfkill.service
 Wants=bluetooth.service
 

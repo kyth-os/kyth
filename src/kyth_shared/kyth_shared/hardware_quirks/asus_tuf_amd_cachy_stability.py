@@ -16,7 +16,7 @@ QUIRK = {
     "id": "asus-tuf-amd-cachy-stability",
     "reason": "ASUS TUF all-AMD on CachyOS lacks asus-armoury.ko; drop mitigations=off and preempt=full to avoid thermal/boost trip, keep amd_pstate=active for EPP",
     "expires_on": "2027-08-01",
-    "provenance": "https://github.com/mrtrick37/kyth/issues — TUF all-AMD vs ZBook Intel+AMD, build.sh:83 asus-armoury.ko missing on Cachy",
+    "provenance": "https://github.com/kyth-os/kyth/issues — TUF all-AMD vs ZBook Intel+AMD, build.sh:83 asus-armoury.ko missing on Cachy",
     "match": {
         "dmi_vendors": ["ASUSTeK*"],
         "dmi_products": ["TUF*"],

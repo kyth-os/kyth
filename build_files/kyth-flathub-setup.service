@@ -1,6 +1,6 @@
 [Unit]
 Description=Add Flathub remote for Flatpak
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=network-online.target
 # Wants= (not Requires=): a failed/unreached network-online.target would
 # otherwise list this unit as failed on every offline boot. The ExecStart

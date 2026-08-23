@@ -38,7 +38,7 @@ class _SavesMixin:
         saves_refresh_btn.clicked.connect(self._refresh_gaming_dashboard)
         saves_btns.addWidget(saves_refresh_btn)
         saves_doc_btn = QPushButton("Save Migration Checklist")
-        saves_doc_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/mrtrick37/kyth/blob/main/docs/game-save-migration.md")))
+        saves_doc_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/kyth-os/kyth/blob/main/docs/game-save-migration.md")))
         saves_btns.addWidget(saves_doc_btn)
         saves_btns.addStretch()
         saves_layout.addLayout(saves_btns)

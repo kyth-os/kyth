@@ -8,13 +8,13 @@
 
 KythOS 44 · Based on Fedora Kinoite · KDE Plasma 6 · bootc · Atomic updates · Graphical installer
 
-[Download stable](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-latest.iso) · [Download testing](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-testing.iso) · [Report a bug](https://github.com/mrtrick37/kyth/issues) · [Discussions](https://github.com/mrtrick37/kyth/discussions)
+[Download stable](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-latest.iso) · [Download testing](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-testing.iso) · [Report a bug](https://github.com/kyth-os/kyth/issues) · [Discussions](https://github.com/kyth-os/kyth/discussions)
 
-[![Build](https://github.com/mrtrick37/kyth/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/mrtrick37/kyth/actions/workflows/build.yml)
-[![Live ISO](https://github.com/mrtrick37/kyth/actions/workflows/build-live-iso.yml/badge.svg)](https://github.com/mrtrick37/kyth/actions/workflows/build-live-iso.yml)
-[![CVE Scan](https://github.com/mrtrick37/kyth/actions/workflows/cve-scan.yml/badge.svg)](https://github.com/mrtrick37/kyth/actions/workflows/cve-scan.yml)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/mrtrick37/kyth/badge)](https://securityscorecards.dev/viewer/?uri=github.com/mrtrick37/kyth)
-[![Container](https://img.shields.io/badge/GHCR-ghcr.io%2Fmrtrick37%2Fkyth-73daca?logo=github)](https://github.com/mrtrick37/kyth/pkgs/container/kyth)
+[![Build](https://github.com/kyth-os/kyth/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/kyth-os/kyth/actions/workflows/build.yml)
+[![Live ISO](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml/badge.svg)](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml)
+[![CVE Scan](https://github.com/kyth-os/kyth/actions/workflows/cve-scan.yml/badge.svg)](https://github.com/kyth-os/kyth/actions/workflows/cve-scan.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kyth-os/kyth/badge)](https://securityscorecards.dev/viewer/?uri=github.com/kyth-os/kyth)
+[![Container](https://img.shields.io/badge/GHCR-ghcr.io%2Fkyth-os%2Fkyth-73daca?logo=github)](https://github.com/kyth-os/kyth/pkgs/container/kyth)
 
 <img src="build_files/wallpaper/kyth-wallpaper.svg" alt="KythOS desktop wallpaper" width="100%">
 
@@ -52,8 +52,8 @@ Its priorities are:
 | Testing | `testing` | New work before stable promotion | [kyth-live-testing.iso](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-testing.iso) |
 
 Moving channel releases and immutable archived builds are published on GitHub:
-[stable releases](https://github.com/mrtrick37/kyth/releases/tag/iso-latest) and
-[testing releases](https://github.com/mrtrick37/kyth/releases/tag/iso-testing).
+[stable releases](https://github.com/kyth-os/kyth/releases/tag/iso-latest) and
+[testing releases](https://github.com/kyth-os/kyth/releases/tag/iso-testing).
 
 Practical requirements are an x86-64 PC, a USB drive, and at least 8 GB of RAM
 for the live environment. The standard image installs offline; optional image
@@ -83,13 +83,13 @@ sha256sum -c kyth-live-CHANNEL.iso-CHECKSUM
 
 cosign verify-blob \
   --bundle kyth-live-CHANNEL.iso.bundle \
-  --certificate-identity-regexp '^https://github\.com/mrtrick37/kyth/\.github/workflows/build-live-iso\.yml@refs/heads/(main|testing)$' \
+  --certificate-identity-regexp '^https://github\.com/kyth-os/kyth/\.github/workflows/build-live-iso\.yml@refs/heads/(main|testing)$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   kyth-live-CHANNEL.iso
 
 gh attestation verify kyth-live-CHANNEL.iso \
-  --repo mrtrick37/kyth \
-  --signer-workflow mrtrick37/kyth/.github/workflows/build-live-iso.yml
+  --repo kyth-os/kyth \
+  --signer-workflow kyth-os/kyth/.github/workflows/build-live-iso.yml
 ```
 
 Replace `CHANNEL` with the basename from the release, such as `latest` or
@@ -114,8 +114,8 @@ reboot. The previous deployment remains selectable from the boot menu.
 For advanced use, the image can be addressed directly:
 
 ```bash
-sudo bootc switch ghcr.io/mrtrick37/kyth:latest
-sudo bootc switch ghcr.io/mrtrick37/kyth:testing
+sudo bootc switch ghcr.io/kyth-os/kyth:latest
+sudo bootc switch ghcr.io/kyth-os/kyth:testing
 sudo bootc upgrade
 bootc status
 ```
@@ -194,7 +194,7 @@ Check the [gaming validation matrix](docs/gaming-validation-matrix.md) and
 | Base image | `ghcr.io/ublue-os/kinoite-main:44`, rebuilt in `build_base/` |
 | Final OS | `Dockerfile` plus ordered package, sysconfig, branding, and helper fragments in `build_files/scripts/` |
 | Desktop | KDE Plasma 6 Wayland (software-compose rescue; XWayland for games) |
-| Deployment | OCI image published at `ghcr.io/mrtrick37/kyth` and installed/updated with bootc |
+| Deployment | OCI image published at `ghcr.io/kyth-os/kyth` and installed/updated with bootc |
 | Kernel | Fedora-signed kernel by default; CachyOS is an optional image variant |
 | Installer | Local-only Python installer service and graphical kiosk frontend, deploying a pinned image with bootc |
 | System Hub | Python/PySide6 application in `build_files/kyth-welcome/` with lazy pages and separated service modules |
@@ -245,7 +245,7 @@ managed quirks, and the generated [support matrix](docs/hardware-support-matrix.
   authentication boundaries.
 
 Report suspected vulnerabilities through
-[GitHub private vulnerability reporting](https://github.com/mrtrick37/kyth/security/advisories/new),
+[GitHub private vulnerability reporting](https://github.com/kyth-os/kyth/security/advisories/new),
 not a public issue. See [SECURITY.md](SECURITY.md) for scope and response policy.
 
 ## Build and test locally
@@ -256,7 +256,7 @@ live-ISO testing. Some release checks download their pinned analysis tools on
 first use.
 
 ```bash
-git clone https://github.com/mrtrick37/kyth.git
+git clone https://github.com/kyth-os/kyth.git
 cd kyth
 
 just test                 # Python unit tests
@@ -341,8 +341,8 @@ cover the hardware behavior.
 
 ## Support, privacy, and license
 
-Use [GitHub Issues](https://github.com/mrtrick37/kyth/issues) for reproducible
-defects and [Discussions](https://github.com/mrtrick37/kyth/discussions) for
+Use [GitHub Issues](https://github.com/kyth-os/kyth/issues) for reproducible
+defects and [Discussions](https://github.com/kyth-os/kyth/discussions) for
 general questions. A support snapshot can be created from System Hub without
 including stored passwords, browser sessions, SMB credentials, or cloud OAuth
 tokens.

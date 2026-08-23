@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS declarative hardware policy
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 # Run after filesystems and PCI devices are enumerated, but don't block SDDM —
 # WantedBy=multi-user.target (not Before=/Requires= on graphical.target) plus
 # Nice=10 + IOSchedulingClass=idle below already keep this off the login

@@ -19,7 +19,7 @@ LAUNCH_LOG="/tmp/kyth-installer-launch.log"
 # shellcheck source=/dev/null
 [ -f /etc/kyth-installer.env ] && . /etc/kyth-installer.env
 
-export KYTH_SOURCE_IMAGE="${KYTH_SOURCE_IMAGE:-ghcr.io/mrtrick37/kyth:latest}"
+export KYTH_SOURCE_IMAGE="${KYTH_SOURCE_IMAGE:-ghcr.io/kyth-os/kyth:latest}"
 export KYTH_TARGET_IMAGE="${KYTH_TARGET_IMAGE:-${KYTH_SOURCE_IMAGE}}"
 export KYTH_SOURCE_DIGEST="${KYTH_SOURCE_DIGEST:-}"
 # Live installations always perform the fetch/source preflight. Development

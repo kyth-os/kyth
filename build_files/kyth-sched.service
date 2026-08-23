@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS automatic sched-ext profile switcher
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=graphical-session.target scx_loader.service
 Wants=scx_loader.service
 PartOf=graphical-session.target

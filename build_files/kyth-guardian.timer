@@ -1,6 +1,6 @@
 [Unit]
 Description=Periodic Kyth Guardian health check
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 
 [Timer]
 OnStartupSec=2min

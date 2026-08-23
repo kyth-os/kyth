@@ -42,7 +42,7 @@ def main() -> None:
 
     args = parser.parse_args()
     repo_url = os.environ.get(
-        "KYTH_ISSUE_REPO_URL", "https://github.com/mrtrick37/kyth"
+        "KYTH_ISSUE_REPO_URL", "https://github.com/kyth-os/kyth"
     )
 
     try:

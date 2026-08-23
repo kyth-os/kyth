@@ -52,20 +52,20 @@ class InstallerImageSourceTests(unittest.TestCase):
         with mock.patch.object(imagesrc.socket, "getaddrinfo", return_value=[]), \
              mock.patch.object(imagesrc.socket, "create_connection", side_effect=OSError("network unreachable")):
 
-            result = imagesrc._network_preflight("docker://ghcr.io/mrtrick37/kyth:latest")
+            result = imagesrc._network_preflight("docker://ghcr.io/kyth-os/kyth:latest")
 
         self.assertIsInstance(result, str)
         self.assertIn("Connect", result)
 
     def test_install_images_returns_source_and_target_refs(self):
-        image = "ghcr.io/mrtrick37/kyth:testing"
+        image = "ghcr.io/kyth-os/kyth:testing"
         with mock.patch.object(imagesrc, "run_command") as run_command, \
              mock.patch.object(imagesrc, "SOURCE_IMAGE", image), \
              mock.patch.object(imagesrc, "TARGET_IMAGE", image):
             src, tgt = imagesrc._install_images("fedora")
 
         self.assertTrue(src.startswith("docker://"))
-        self.assertEqual(tgt, "ghcr.io/mrtrick37/kyth:testing")
+        self.assertEqual(tgt, "ghcr.io/kyth-os/kyth:testing")
         self.assertEqual(src, f"docker://{tgt}")
         run_command.assert_not_called()
 

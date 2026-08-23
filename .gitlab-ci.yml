@@ -181,4 +181,4 @@ codeql:stub:
   allow_failure: true
   script:
     - echo 'CodeQL is GitHub-native. On GitLab use include Security/SAST template'
-    - echo 'or keep CodeQL running on github.com/mrtrick37/kyth'
+    - echo 'or keep CodeQL running on github.com/kyth-os/kyth'

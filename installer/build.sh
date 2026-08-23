@@ -74,7 +74,7 @@ esac
 expected_digest="${INSTALL_SOURCE_IMAGE##*@}"
 release_digest="${embedded_digest}"
 [[ "${expected_digest}" == sha256:* ]] && release_digest="${expected_digest}"
-target_image="ghcr.io/mrtrick37/kyth:${SOURCE_TAG}"
+target_image="ghcr.io/kyth-os/kyth:${SOURCE_TAG}"
 printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\n' \
 	"${target_image}" "${embedded_digest}" >/etc/kyth-installer.env
 printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"%s","source_image":"%s"}\n' \

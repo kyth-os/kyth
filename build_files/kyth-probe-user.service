@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS user probe cache refresh (oneshot)
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=graphical-session-pre.target
 PartOf=graphical-session.target
 

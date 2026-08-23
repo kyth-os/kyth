@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS system probe cache refresh
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 
 [Timer]
 # Warm cache early so first System Hub open is cheap.

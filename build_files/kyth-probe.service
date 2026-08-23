@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS system probe cache refresh (oneshot)
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=local-fs.target
 # Start-limit is a [Unit] key. A boot-time probe storm must not hit
 # start-limit and paint the unit --failed on an otherwise healthy boot.

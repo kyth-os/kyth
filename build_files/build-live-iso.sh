@@ -8,7 +8,7 @@ SOURCE_TAG="${SOURCE_TAG:-latest}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${KYTH_ISO_OUTPUT:-${REPO_ROOT}/output/live-iso}"
-BASE_IMAGE="${INSTALLER_BASE_IMAGE:-ghcr.io/mrtrick37/kyth:${SOURCE_TAG}}"
+BASE_IMAGE="${INSTALLER_BASE_IMAGE:-ghcr.io/kyth-os/kyth:${SOURCE_TAG}}"
 INSTALL_SOURCE_IMAGE="${BASE_IMAGE}"
 LIVE_TAG="${KYTH_LIVE_TAG:-localhost/kyth-live:${SOURCE_TAG}}"
 TITANOBOA_REF="7737f4748458252ac827dca14b3d6dd09298472a"
@@ -29,7 +29,7 @@ if [[ "${BASE_IMAGE}" == localhost/* ]] &&
 	docker save "${BASE_IMAGE}" | sudo podman load
 fi
 
-# installer/build.sh always bakes KYTH_SOURCE_IMAGE=ghcr.io/mrtrick37/kyth:${SOURCE_TAG}
+# installer/build.sh always bakes KYTH_SOURCE_IMAGE=ghcr.io/kyth-os/kyth:${SOURCE_TAG}
 # into the live ISO, regardless of where the live payload itself was built from.
 # The booted live VM is a separate environment with no access to this host's
 # local image storage, so a local BASE_IMAGE must be published under that exact
@@ -41,7 +41,7 @@ fi
 # — a cross-repository blob-mount that GHCR rejects and podman doesn't fall
 # back from. `docker push` uploads them directly and does not hit this.
 if [[ "${BASE_IMAGE}" == localhost/* ]] && command -v docker >/dev/null; then
-	GHCR_REF="ghcr.io/mrtrick37/kyth:${SOURCE_TAG}"
+	GHCR_REF="ghcr.io/kyth-os/kyth:${SOURCE_TAG}"
 	echo "==> Publishing local build to ${GHCR_REF} so the installer can fetch it from inside the live VM"
 	docker tag "${BASE_IMAGE}" "${GHCR_REF}"
 	docker push "${GHCR_REF}"

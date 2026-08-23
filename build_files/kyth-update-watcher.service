@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS intelligent update watcher (oneshot)
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=network-online.target
 Wants=network-online.target
 ConditionACPower=true

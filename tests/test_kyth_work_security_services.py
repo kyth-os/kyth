@@ -181,7 +181,7 @@ class ProbeExpandedTests(unittest.TestCase):
 
         with mock.patch(
             "kyth_shared.system.bootc.fetch_bootc_status_data",
-            return_value={"status": {"booted": {"image": {"reference": "ghcr.io/mrtrick37/kyth:testing"}}}},
+            return_value={"status": {"booted": {"image": {"reference": "ghcr.io/kyth-os/kyth:testing"}}}},
         ), mock.patch(
             "kyth_shared.system.bootc.fetch_bootc_status_text",
             return_value="",

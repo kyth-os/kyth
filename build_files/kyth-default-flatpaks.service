@@ -1,6 +1,6 @@
 [Unit]
 Description=Install default Flatpak applications (GPU Screen Recorder, GOverlay, MissionCenter, VLC)
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=network-online.target kyth-flathub-setup.service
 # Wants= so an offline/unreached network-online.target does not mark this
 # unit failed. ExecCondition skips the install when Flathub is absent.

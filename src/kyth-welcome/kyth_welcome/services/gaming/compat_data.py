@@ -12,7 +12,7 @@ _COMPAT_BUNDLED_PATH = str(
 )
 _COMPAT_CACHE_PATH = os.path.expanduser("~/.cache/kyth-compat-games.json")
 _COMPAT_REMOTE_URL = (
-    "https://raw.githubusercontent.com/mrtrick37/kyth/main/"
+    "https://raw.githubusercontent.com/kyth-os/kyth/main/"
     "build_files/kyth-welcome/kyth_welcome/compat_games.json"
 )
 _COMPAT_STALE_DAYS = 45

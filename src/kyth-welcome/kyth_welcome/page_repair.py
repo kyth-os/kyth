@@ -519,7 +519,7 @@ class RepairPage(Page, _QuickFixMixin, _AssistMixin, _ResetMixin):
             buttons=[
                 (
                     "Download Live ISO",
-                    lambda _=False: QDesktopServices.openUrl(QUrl("https://github.com/mrtrick37/kyth/releases")),
+                    lambda _=False: QDesktopServices.openUrl(QUrl("https://github.com/kyth-os/kyth/releases")),
                     "Open the KythOS releases page to download a live ISO for installing on another disk.",
                 ),
                 (
