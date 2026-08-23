@@ -95,19 +95,12 @@ gui-smoke:
 
 # ---- Build: full bootc image on GitLab (mirrors GitHub build.yml) ----
 # Previously a stub that only echoed. Now builds with podman and pushes to registry.gitlab.com.
-# Shared runners have docker:dind available; we use podman-in-podman via quay.io/podman/stable + dind.
+# Use podman-in-podman via quay.io/podman/stable (no dind) to save disk, mirrors GitHub's podman build.
 build:
   stage: build
   image: quay.io/podman/stable
   timeout: 120m
-  services:
-    - name: docker:24-dind
-      alias: docker
-      command: ["--storage-driver=overlay2", "--host=tcp://0.0.0.0:2376", "--tls=false"]
   variables:
-    DOCKER_HOST: tcp://docker:2376
-    DOCKER_TLS_CERTDIR: ""
-    DOCKER_DRIVER: overlay2
     BUILDAH_FORMAT: docker
   rules:
     - if: '$CI_COMMIT_BRANCH == "testing" || $CI_COMMIT_BRANCH == "main"'
@@ -120,11 +113,11 @@ build:
     - sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache /usr/local/lib/android /usr/local/share/boost /opt/az 2>&1 | tail -n 5 || true
     - sudo apt-get clean 2>&1 | tail -n 5 || true
     - podman system prune -a --volumes -f 2>&1 | tail -n 5 || true
-    - docker system prune -a --volumes -f 2>&1 | tail -n 5 || true
+    - echo "docker dind not used (podman only)"
     - df -h | head -n 10
     # Login to GitLab registry (CI_REGISTRY_* is auto-provided on gitlab.com)
     - echo "$CI_REGISTRY_PASSWORD" | podman login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" 2>&1 | tail -n 5
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" 2>&1 | tail -n 5 || true
+    - echo "podman login only (no docker)"
   script:
     - set -euo pipefail
     - |
@@ -149,10 +142,10 @@ build:
       # Resolve base image (same as GitHub's upstream_base)
       BASE_IMAGE="ghcr.io/ublue-os/kinoite-main:44"
       echo "Pulling base $BASE_IMAGE"
-      podman pull "$BASE_IMAGE" 2>&1 | tail -n 5 || docker pull "$BASE_IMAGE" 2>&1 | tail -n 5 || true
+      podman pull "$BASE_IMAGE" 2>&1 | tail -n 5
       # Build base image first (like GitHub's build_base job) so localhost/kyth-base:stable exists
       echo "Building base image localhost/kyth-base:stable"
-      podman build -f build_base/Dockerfile -t localhost/kyth-base:stable --build-arg BASE_IMAGE="$BASE_IMAGE" build_base/ 2>&1 | tail -n 50 || docker build -f build_base/Dockerfile -t localhost/kyth-base:stable --build-arg BASE_IMAGE="$BASE_IMAGE" build_base/ 2>&1 | tail -n 50
+      podman build -f build_base/Dockerfile -t localhost/kyth-base:stable --build-arg BASE_IMAGE="$BASE_IMAGE" build_base/ 2>&1 | tail -n 50
       # Build final image with podman (fallback to docker buildx if podman fails)
       set -x
       if podman build --help 2>&1 | grep -q "secret"; then
