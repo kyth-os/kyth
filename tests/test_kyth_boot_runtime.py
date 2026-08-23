@@ -35,6 +35,7 @@ def probe(
     active_units=("graphical.target", "plasmalogin.service"),
     failed=(),
     devices=("card0",),
+    software_compose_rescue=False,
     clock=None,
     deadline=120.0,
 ):
@@ -45,6 +46,7 @@ def probe(
         default_target=lambda: target,
         failed_units=lambda: frozenset(failed),
         drm_devices=lambda: devices,
+        software_compose_rescue=lambda: software_compose_rescue,
         deadline=deadline,
         interval=2.0,
         monotonic=clock.monotonic,
@@ -89,6 +91,14 @@ class RollbackTriggerTests(unittest.TestCase):
         display = by_name(checks, "Display device")
         self.assertFalse(display.passed)
         self.assertIn("GPU driver did not load", display.detail)
+
+    def test_missing_drm_passes_when_software_compose_rescue_is_active(self):
+        """nomodeset / live software-compose rescue must not roll back a reachable greeter."""
+        checks = probe(devices=(), software_compose_rescue=True)
+
+        display = by_name(checks, "Display device")
+        self.assertTrue(display.passed, checks)
+        self.assertIn("software-compose rescue", display.detail)
 
     def test_failed_critical_unit_fails(self):
         checks = probe(failed=("plasmalogin.service", "cups.service"))

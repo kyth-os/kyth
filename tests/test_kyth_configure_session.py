@@ -72,6 +72,10 @@ class SessionConfOwnershipTests(unittest.TestCase):
         self.assertIn("11-kyth-session.conf", body)
         self.assertIn("Wayland session default", body)
         self.assertIn("/etc/plasmalogin.conf.d/10-kyth.conf", body)
+        self.assertIn("write_config /etc/plasmalogin.conf <<", body)
+        self.assertIn("WallpaperPluginId=org.kde.image", body)
+        self.assertIn("/var/lib/plasmalogin/wallpapers/kyth.svg", body)
+        self.assertIn("tmpfiles.d/kyth-plasmalogin-wallpaper.conf", body)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ from kyth_shared.wayland_compose import (  # noqa: E402
     migrate_home_dmrcs,
     migrate_user_dmrc,
     needs_software_compose,
+    software_compose_rescue_justified,
     nomodeset_requested,
     remove_legacy_virt_software_gl,
     session_is_plasma_x11,
@@ -76,6 +77,11 @@ class WaylandComposeTests(unittest.TestCase):
             bare.mkdir()
             self.assertFalse(needs_software_compose(dri=bare, cmdline="kyth.hwgl=1"))
             self.assertTrue(needs_software_compose(dri=bare, cmdline="quiet"))
+    def test_software_compose_rescue_justified_ignores_missing_drm(self) -> None:
+        self.assertTrue(software_compose_rescue_justified("quiet nomodeset"))
+        self.assertTrue(software_compose_rescue_justified("quiet kyth.live"))
+        self.assertFalse(software_compose_rescue_justified("quiet"))
+
 
     def test_compose_env_and_compositor_argv(self) -> None:
         env: dict[str, str] = {}
@@ -218,6 +224,10 @@ class WaylandBrandingContractTests(unittest.TestCase):
         self.assertIn("DefaultSession=plasma.desktop", fragment)
         self.assertIn("Session=plasma.desktop", fragment)
         self.assertIn("kyth/contents/images/1920x1080.svg", fragment)
+        self.assertIn("write_config /etc/plasmalogin.conf <<", fragment)
+        self.assertIn("/var/lib/plasmalogin/wallpapers/kyth.svg", fragment)
+        self.assertIn("tmpfiles.d/kyth-plasmalogin-wallpaper.conf", fragment)
+        self.assertIn("WallpaperPluginId=org.kde.image", fragment)
         self.assertIn("SessionDir=/usr/share/kyth/no-xsessions", fragment)
         self.assertIn("install -d -m 0755 /usr/share/kyth/no-xsessions", fragment)
         self.assertIn("10-kyth-software-compose.sh", fragment)

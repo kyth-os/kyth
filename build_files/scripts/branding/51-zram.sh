@@ -31,40 +31,42 @@ ensure_node() {
 	fi
 }
 
+# kyth_shared.memory_tune is the single writer of zram sizing policy. It
+# writes this plain key=value file alongside zram-generator.conf's
+# math-expression syntax specifically so this script never has to parse that
+# expression grammar (a format this project owns the writer of, but the
+# generator that would normally read it is masked below — see comment at
+# top of file). Before memory-tune has ever run (very first boot), or if the
+# file is missing/corrupt for any reason, fall back to the same half-of-RAM
+# default memory-tune's "low" tier would have written.
+load_zram_tune() {
+	KYTH_ZRAM_PERCENT=50
+	KYTH_ZRAM_CAP_MB=8192
+	KYTH_ZRAM_ALGO=lz4
+	if [[ -r /etc/kyth/zram-runtime.env ]]; then
+		# shellcheck disable=SC1091
+		source /etc/kyth/zram-runtime.env || true
+	fi
+}
+
 size_bytes() {
 	local mem_kb mem_mb size_mb
 	mem_kb=$(awk '/^MemTotal:/{print $2; exit}' /proc/meminfo)
 	mem_mb=$((${mem_kb:-0} / 1024))
-	size_mb=$((mem_mb / 2))
-	if ((size_mb > 8192)); then
-		size_mb=8192
+	load_zram_tune
+	size_mb=$((mem_mb * KYTH_ZRAM_PERCENT / 100))
+	if ((KYTH_ZRAM_CAP_MB > 0 && size_mb > KYTH_ZRAM_CAP_MB)); then
+		size_mb=${KYTH_ZRAM_CAP_MB}
 	fi
 	if ((size_mb < 64)); then
 		size_mb=64
-	fi
-	# Honor memory_tune / zram-generator.conf when the formula is obvious.
-	if [[ -r /etc/systemd/zram-generator.conf ]]; then
-		local raw
-		raw=$(awk -F= '/^[[:space:]]*zram-size[[:space:]]*=/{sub(/^[^=]*=/, ""); gsub(/[[:space:]]/, ""); print; exit}' /etc/systemd/zram-generator.conf)
-		case "${raw}" in
-		ram) size_mb=${mem_mb} ;;
-		ram*0.5 | 'min(ram*0.5,8192)' | 'min(ram*.5,8192)')
-			size_mb=$((mem_mb / 2))
-			((size_mb > 8192)) && size_mb=8192
-			;;
-		esac
 	fi
 	echo $((size_mb * 1024 * 1024))
 }
 
 compression() {
-	local algo=lz4
-	if [[ -r /etc/systemd/zram-generator.conf ]]; then
-		local listed
-		listed=$(awk -F= '/^[[:space:]]*compression-algorithm[[:space:]]*=/{sub(/^[^=]*=/, ""); gsub(/[[:space:]]/, ""); print; exit}' /etc/systemd/zram-generator.conf)
-		[[ -n "${listed}" ]] && algo=${listed%%,*}
-	fi
-	echo "${algo}"
+	load_zram_tune
+	echo "${KYTH_ZRAM_ALGO}"
 }
 
 cmd=${1:-start}

@@ -21,9 +21,33 @@ enough.
    `/etc/greenboot/check/required.d`.
 5. A healthy boot records the exact digest as known-good. A failed boot records
    the boot ID and reason, then greenboot retries the boot.
-6. After three unhealthy boots, greenboot rolls back to the previous bootc
-   deployment and KythOS quarantines the failed digest. The automatic updater
-   and guarded manual update paths will not download or stage that digest again.
+6. After three unhealthy boots, KythOS quarantines the failed digest. The
+   automatic updater and guarded manual update paths will not download or
+   stage that digest again.
+
+### Rollback is KythOS's own code, not greenboot's boot counter
+
+greenboot's usual automatic-rollback story relies on a GRUB2 `grubenv`
+boot-counter: GRUB decrements a counter on every unsuccessful boot and falls
+back to the previous deployment when it hits zero. This image boots via
+systemd-boot/BLS entries with no `grubenv` and no boot-counter suffix, so that
+mechanism does not exist here — a digest that keeps failing its required
+checks would otherwise just reboot into itself forever (reproduced directly:
+9 consecutive ~3-minute boots with no self-recovery).
+
+Instead, the moment a digest crosses the quarantine threshold in step 6,
+KythOS's own `red.d` hook (`kyth-boot-health record-failure`) calls
+`bootc rollback` directly — see
+`kyth_shared.boot_health.trigger_rollback_if_newly_quarantined`. This fires at
+most once per digest (tracked as `rollback_attempted_for` in
+`boot-health.json`) so a rollback target that turns out to be unhealthy itself
+can bounce back to the digest that triggered it exactly once, never loop.
+There is no lower-level bootloader fallback under this: if `bootc rollback`
+itself fails (for example because the same problem that made the deployment
+unhealthy also impairs `bootc`), the machine stays quarantined on the broken
+digest rather than being retried by anything else. Check
+`kyth-boot-health status --json`'s `rollback_attempted_for` field when
+diagnosing a machine stuck on a bad deployment.
 
 The required checks deliberately cover immutable deployment invariants: KythOS
 identity, bootc deployment metadata, the desktop and networking components, and

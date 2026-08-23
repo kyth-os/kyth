@@ -106,6 +106,27 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertNotIn("JobTimeoutSec=30", ntsync)
         self.assertNotIn("dev-zram0.device.d", ntsync)
 
+    def test_zram_swap_sources_a_plain_contract_instead_of_parsing_generator_syntax(
+        self,
+    ) -> None:
+        """kyth-zram-swap must not re-derive memory_tune's formula by
+        pattern-matching zram-generator.conf's math-expression grammar — a
+        format this project owns the writer of but that script doesn't parse.
+        A new shape memory_tune emits (that the old awk `case` didn't
+        enumerate) would silently fall back to the wrong tier instead of
+        erroring. It should source memory_tune's plain key=value sidecar
+        file instead.
+        """
+        zram = (ROOT / "build_files/scripts/branding/51-zram.sh").read_text(encoding="utf-8")
+        self.assertIn("/etc/kyth/zram-runtime.env", zram)
+        self.assertIn("KYTH_ZRAM_PERCENT", zram)
+        self.assertIn("KYTH_ZRAM_CAP_MB", zram)
+        self.assertIn("KYTH_ZRAM_ALGO", zram)
+        # The old awk one-liners only recognized a fixed set of formula
+        # shapes memory_tune happened to emit at the time they were written.
+        self.assertNotIn("awk -F=", zram)
+        self.assertNotIn("min(ram*0.5,8192)", zram)
+
     def test_memory_tune_applies_only_its_own_sysctl_file(self) -> None:
         body = (ROOT / "build_files/scripts/sysconfig/kernel/56-memory-tune.sh").read_text(
             encoding="utf-8"
@@ -188,12 +209,8 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertGreaterEqual(body.count("After=local-fs.target kyth-boot-rw.service"), 2)
         self.assertIn("grubby --update-kernel=ALL --remove-args=", body)
         self.assertIn("|| true", body)
-        self.assertIn("touch /var/lib/kyth/first-boot-done", body)
-        self.assertIn("ExecStart=-/usr/bin/plymouth", body)
-        self.assertLess(
-            body.find("touch /var/lib/kyth/first-boot-done"),
-            body.find('plymouth message --text="After login'),
-        )
+        self.assertNotIn("kyth-firstboot-notice.service", body)
+        self.assertNotIn("first-boot-done", body)
 
     def test_first_boot_plymouth_message_stamps_before_plymouth(self) -> None:
         body = (
@@ -203,6 +220,7 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("touch /var/lib/kyth/.first-boot-complete", unit)
         self.assertIn("ExecStart=-/usr/bin/plymouth", unit)
         self.assertNotIn("ExecCondition=/usr/bin/plymouth --ping", unit)
+        self.assertIn("open Kyth Hub", unit)
         self.assertLess(
             unit.find("touch /var/lib/kyth/.first-boot-complete"),
             unit.find("plymouth message"),

@@ -80,25 +80,3 @@ WantedBy=multi-user.target
 SPLASHINITRDEOF
 systemctl enable kyth-boot-splash-initramfs.service 2>/dev/null || true
 
-write_config /usr/lib/systemd/system/kyth-firstboot-notice.service <<'FBOOTEOF'
-[Unit]
-Description=KythOS first-boot Plymouth notice
-After=plymouth-start.service local-fs.target ostree-remount.service
-Before=plymouth-quit.service
-DefaultDependencies=no
-ConditionPathExists=!/var/lib/kyth/first-boot-done
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-StateDirectory=kyth
-# Write the sentinel first so a missing Plymouth daemon cannot fail
-# this unit on every subsequent boot.
-ExecStart=/usr/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/first-boot-done'
-ExecStart=-/usr/bin/plymouth --ping
-ExecStart=-/usr/bin/plymouth message --text="After login, open Kyth Hub to finish installing your preferred software."
-
-[Install]
-WantedBy=basic.target
-FBOOTEOF
-systemctl enable kyth-firstboot-notice.service 2>/dev/null || true

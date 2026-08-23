@@ -356,6 +356,42 @@ class RequiredHealthCheckTests(unittest.TestCase):
         units = next(check for check in checks if check.name == "Critical units")
         self.assertFalse(units.passed)
 
+    def _checks_with_verify_result(self, verify_runner):
+        return required_checks(
+            status_data={"status": {"booted": {"image": {"imageDigest": DIGEST}}}},
+            os_release='NAME="KythOS"\nID="kythos"\n',
+            path_exists=lambda _path: True,
+            kernel_release="6.0-fixture",
+            runtime_probe=self._runtime(
+                RuntimeCheck("Graphical session", True, "graphical.target active")
+            ),
+            verify_runner=verify_runner,
+        )
+
+    def test_measured_boot_passes_when_kyth_boot_verify_reports_ok(self):
+        checks = self._checks_with_verify_result(lambda: (0, "kyth-boot-verify: ok"))
+
+        measured = next(check for check in checks if check.name == "Measured boot")
+        self.assertTrue(measured.passed)
+
+    def test_measured_boot_fails_on_a_real_mismatch(self):
+        """Exit 2 is kyth-boot-verify's documented 'mismatch' contract."""
+        checks = self._checks_with_verify_result(
+            lambda: (2, "kyth-boot-verify: kernel signature mismatch")
+        )
+
+        measured = next(check for check in checks if check.name == "Measured boot")
+        self.assertFalse(measured.passed)
+        self.assertIn("mismatch", measured.detail)
+
+    def test_measured_boot_skips_rather_than_fails_when_verifier_is_absent(self):
+        """A missing/unexecutable verifier must not itself cause a false rollback."""
+        checks = self._checks_with_verify_result(lambda: None)
+
+        measured = next(check for check in checks if check.name == "Measured boot")
+        self.assertTrue(measured.passed)
+        self.assertIn("skipped", measured.detail)
+
 
 class SafeUpgradeTests(unittest.TestCase):
     def test_quarantined_remote_digest_blocks_bootc(self):

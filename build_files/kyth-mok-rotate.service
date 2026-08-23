@@ -1,5 +1,5 @@
 [Unit]
-Description=Kyth MOK rotation check (sbctl + TPM PCR7)
+Description=Kyth MOK expiry check (openssl)
 After=network.target
 
 [Service]

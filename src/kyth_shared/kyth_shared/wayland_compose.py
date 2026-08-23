@@ -117,7 +117,7 @@ def _rewrite_session_key(text: str, key: str, replacement: str) -> tuple[str, bo
 
 
 def migrate_greeter_last_session(path: Path | None = None) -> bool:
-    """Rewrite PLM/SDDM LastSession when it still points at Plasma X11."""
+    """Rewrite PLM/SDDM ``[Last] Session=`` when it still points at Plasma X11."""
     target = path or PLM_STATE_FILE
     try:
         text = target.read_text(encoding="utf-8")
@@ -167,6 +167,16 @@ def migrate_home_dmrcs(homes: Path | None = None) -> int:
         if migrate_user_dmrc(home):
             changed += 1
     return changed
+
+
+def software_compose_rescue_justified(cmdline: str | None = None) -> bool:
+    """True when cmdline intentionally selects software-compose rescue.
+
+    Missing DRM alone is *not* enough: that is the classic akmod failure
+    greenboot must still fail. Only ``nomodeset`` / live-image tokens match
+    the deliberate rescue path used by the greeter compositor.
+    """
+    return nomodeset_requested(cmdline) or is_live_image(cmdline)
 
 
 def needs_software_compose(

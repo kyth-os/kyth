@@ -28,6 +28,7 @@ StateDirectory=kyth
 ExecStart=/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/.first-boot-complete'
 ExecStart=-/usr/bin/plymouth --ping
 ExecStart=-/usr/bin/plymouth message --text="Running first boot setup, this may take a few moments..."
+ExecStart=-/usr/bin/plymouth message --text="After login, open Kyth Hub to finish installing your preferred software."
 
 [Install]
 WantedBy=multi-user.target

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from ..commands import run_text
+from ..wayland_compose import software_compose_rescue_justified
 
 # Must clear kyth-selinux-relabel-home (TimeoutStartSec=300) plus greeter
 # startup. The previous 180s budget raced restorecon on large /var/home and
@@ -113,6 +114,7 @@ def runtime_checks(
     default_target: Callable[[], str] = _default_target,
     failed_units: Callable[[], frozenset[str]] = _failed_units,
     drm_devices: Callable[[], Sequence[str]] = _drm_devices,
+    software_compose_rescue: Callable[[], bool] = software_compose_rescue_justified,
     deadline: float = DEFAULT_DEADLINE,
     interval: float = DEFAULT_INTERVAL,
     monotonic: Callable[[], float] = time.monotonic,
@@ -143,10 +145,12 @@ def runtime_checks(
     target = default_target()
     expects_graphical = target == GRAPHICAL_TARGET
 
+    rescue = software_compose_rescue()
+
     def _ready() -> bool:
         if expects_graphical and not _display_manager_active(unit_active):
             return False
-        if expects_graphical:
+        if expects_graphical and not rescue:
             return bool(drm_devices())
         return True
 
@@ -182,16 +186,29 @@ def runtime_checks(
 
     devices = tuple(drm_devices())
     # Headless deployments intentionally have no DRM device; don't fail them.
+    # Software-compose rescue (nomodeset / live) may also lack card* while the
+    # greeter still runs via QPainter — require the display manager instead.
     if expects_graphical:
-        checks.append(
-            RuntimeCheck(
-                "Display device",
-                bool(devices),
-                f"/dev/dri: {', '.join(devices)}"
-                if devices
-                else "no DRM card device — GPU driver did not load",
+        if rescue and not devices:
+            checks.append(
+                RuntimeCheck(
+                    "Display device",
+                    _display_manager_active(unit_active),
+                    "software-compose rescue (no DRM card; display manager active)"
+                    if _display_manager_active(unit_active)
+                    else "software-compose rescue but display manager inactive",
+                )
             )
-        )
+        else:
+            checks.append(
+                RuntimeCheck(
+                    "Display device",
+                    bool(devices),
+                    f"/dev/dri: {', '.join(devices)}"
+                    if devices
+                    else "no DRM card device — GPU driver did not load",
+                )
+            )
     else:
         checks.append(
             RuntimeCheck(

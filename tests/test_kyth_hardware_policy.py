@@ -279,6 +279,12 @@ class HardwarePolicySafetyTests(unittest.TestCase):
         migration = (ROOT / "build_files/scripts/branding/28-bootc-kernel-arguments-and-boot-splash.sh").read_text()
         self.assertEqual(migration.count("pcie_aspm=performance"), 1)
         self.assertIn('--remove-args="console=tty0 console=ttyS0,115200 amdgpu.ppfeaturemask', migration)
+        base = (ROOT / "build_base/build.sh").read_text()
+        # Image kargs.d must not reintroduce the retired globals after migration.
+        kargs_line = next(line for line in base.splitlines() if line.startswith("kargs = ["))
+        self.assertNotIn("pcie_aspm=performance", kargs_line)
+        self.assertNotIn("amdgpu.ppfeaturemask", kargs_line)
+
         for relative in (
             "build_files/scripts/sysconfig/gpu/10-amd-gpu-kernel-module-options.sh",
             "build_files/scripts/sysconfig/gpu/11-nvidia-kernel-module-options.sh",

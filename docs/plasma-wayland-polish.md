@@ -6,7 +6,7 @@ feel distinct, comfortable, and easy for new users to trust.
 
 ## Current Baseline
 
-- KythOS branding is present across boot splash, os-release, SDDM background,
+- KythOS branding is present across boot splash, os-release, Plasma Login Manager background,
   Kickoff icon, wallpaper, app menu defaults, and System Hub.
 - New users get KythDark, Papirus-Dark, Inter, Cascadia Code, KythOS wallpaper,
   right-side window controls, double-click open, Meta+E, Meta+Shift+S, Meta+V
@@ -21,8 +21,7 @@ feel distinct, comfortable, and easy for new users to trust.
   clipboard, removable devices, printers, and KDE Connect discoverable.
 - Screenshots have a visible home in `~/Screenshots`, are present in Dolphin
   Places, and Spectacle is pointed there during user polish.
-- Login and lock screen defaults use the KythOS wallpaper and Kyth mark, keeping
-  boot -> login -> desktop -> lock visually continuous without forking Breeze.
+- Login and lock screen defaults use the KythOS wallpaper and Kyth mark, keeping boot → login → desktop → lock visually continuous without forking Breeze. Greeter wallpaper is written to `/etc/plasmalogin.conf` (current PLM ignores Greeter wallpaper keys in drop-ins).
 - Existing users receive versioned comfort migrations through
   `kyth-user-polish`.
 - System Hub offers Everyday and Gaming role presets that adjust hub prominence,
@@ -50,7 +49,7 @@ feel distinct, comfortable, and easy for new users to trust.
   `/etc/plasmalogin.conf.d/10-kyth.conf` still provides the Wayland default so
   login is never blocked. PLM's X11 session directory is an empty KythOS path
   so leftover X11 session files cannot appear in the greeter. On upgrade, the
-  helper also rewrites PLM/SDDM `LastSession` and `~/.dmrc` when they still
+  helper also rewrites PLM/SDDM `[Last] Session=` and `~/.dmrc` when they still
   name Plasma X11.
 - System KWin defaults set `[Wayland] VrrPolicy=1` (Automatic) under
   `/etc/xdg/kwinrc`. Image packages explicitly include `xdg-desktop-portal`,

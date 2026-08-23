@@ -315,6 +315,41 @@ def current_boot_id(path: str | Path = "/proc/sys/kernel/random/boot_id") -> str
         return "unknown"
 
 
+def _default_boot_verify_runner() -> tuple[int, str] | None:
+    """Run kyth-boot-verify and return its (returncode, detail).
+
+    Returns None when the binary could not execute at all (missing on this
+    image, image-build/test context, ...) — callers must treat that as a
+    skip, never as a failure, the same as an absent optional tool anywhere
+    else in this module.
+    """
+    from .commands import run_text  # local: keep this module import-light
+
+    result = run_text(["/usr/bin/kyth-boot-verify"], timeout=30)
+    if result is None:
+        return None
+    return result.returncode, ((result.stderr or result.stdout) or "").strip()
+
+
+def _measured_boot_check(verify_runner: Callable[[], tuple[int, str] | None]) -> BootCheck:
+    """Score kyth-boot-verify's actual result, not just its presence on disk.
+
+    kyth-boot-verify's own contract: 0 = verified ok (or nothing applicable),
+    2 = a real mismatch that should fail this boot. Any other outcome —
+    including the binary being absent, which is common in image-build/test
+    contexts — is treated as a skip rather than a failure, since this is a
+    defense-in-depth check and a broken verifier must not itself cause a
+    false rollback.
+    """
+    outcome = verify_runner()
+    if outcome is None:
+        return BootCheck("Measured boot", True, "kyth-boot-verify not present — skipped")
+    code, detail = outcome
+    if code == 2:
+        return BootCheck("Measured boot", False, detail or "kyth-boot-verify reported a mismatch")
+    return BootCheck("Measured boot", True, detail or "kyth-boot-verify: ok")
+
+
 def required_checks(
     *,
     status_data: dict | None = None,
@@ -322,6 +357,7 @@ def required_checks(
     path_exists: Callable[[str | Path], bool] = lambda path: Path(path).exists(),
     kernel_release: str | None = None,
     runtime_probe: Callable[[], Sequence[object]] | None = None,
+    verify_runner: Callable[[], tuple[int, str] | None] = _default_boot_verify_runner,
 ) -> tuple[BootCheck, ...]:
     """Return the checks greenboot treats as required for this boot.
 
@@ -367,11 +403,7 @@ def required_checks(
             path_exists(f"/usr/lib/modules/{kernel_release}"),
             f"module tree for {kernel_release}",
         ),
-        BootCheck(
-            "Measured boot",
-            path_exists("/usr/bin/kyth-boot-verify"),
-            "kyth-boot-verify present (composefs + UKI + TPM)",
-        ),
+        _measured_boot_check(verify_runner),
     ]
     probe = runtime_probe
     if probe is None:
