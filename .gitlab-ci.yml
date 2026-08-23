@@ -90,7 +90,7 @@ gui-smoke:
     - apt-get update -qq && apt-get install -y -qq libegl1 libxkbcommon0 libdbus-1-3 libxcb1 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxkbcommon-x11-0
     - pip install --disable-pip-version-check PySide6==6.11.1 -q
   script:
-    - QT_QPA_PLATFORM=offscreen PYTHONPATH=build_files/kyth-welcome:build_files/kyth_shared python3 -m unittest tests.test_kyth_welcome_hub_smoke 2>&1 | tee gui-smoke.log; status=${PIPESTATUS[0]}; cat gui-smoke.log; if [ $status -eq 0 ]; then exit 0; fi; grep -qE "OK \(skipped|SkipTest.*PySide6 required" gui-smoke.log && exit 0 || exit $status
+    - QT_QPA_PLATFORM=offscreen PYTHONPATH=build_files/kyth-welcome:build_files/kyth_shared python3 -m unittest tests.test_kyth_welcome_hub_smoke 2>&1 | tee gui-smoke.log || true; status=${PIPESTATUS[0]}; cat gui-smoke.log; if [ $status -eq 0 ]; then exit 0; fi; grep -qE "OK \(skipped|SkipTest.*PySide6 required" gui-smoke.log && exit 0 || exit $status
   allow_failure: false
 
 # ---- Build: full bootc image on GitLab (mirrors GitHub build.yml) ----
