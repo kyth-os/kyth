@@ -33,12 +33,19 @@ write_config /usr/lib/systemd/system/kyth-asus-dbus-policy-fixup.service <<'ASUS
 [Unit]
 Description=Rewrite asusd/supergfxd D-Bus policy group for Fedora
 DefaultDependencies=no
+After=local-fs.target
 Before=dbus.socket dbus-broker.service sockets.target
+# No After=ostree-remount needed — script is read-only-safe (checks -w).
+# StartLimit prevents the "Start request repeated too quickly" storm seen on
+# host when dbus.socket + dbus-broker.service both pull this unit and the
+# old script exited 1 on ro composefs (now guarded with -w + || true).
 
 [Service]
 Type=oneshot
 ExecStart=/usr/libexec/kyth-fix-asus-dbus-policy
 RemainAfterExit=yes
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Install]
 WantedBy=sysinit.target

@@ -55,7 +55,11 @@ DefaultDependencies=no
 # (it self-heals via a second, later pull-in, but that transiently fails the
 # Requires= dependent kyth-dbus-runtime-dir.service too).
 After=local-fs.target ostree-remount.service
+# Must run before tmpfiles/sysusers/udev so groups like audio,disk,kvm are
+# visible when they parse static-nodes/udev rules — otherwise every boot
+# logs "Failed to resolve group 'audio': Unknown group" (see host journal).
 Before=dbus.socket dbus-broker.service sockets.target plasmalogin.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
+Before=systemd-tmpfiles-setup.service systemd-sysusers.service
 
 [Service]
 Type=oneshot
