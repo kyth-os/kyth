@@ -118,7 +118,7 @@ codeql:stub:
   rules:
     - if: '$CI_COMMIT_BRANCH == "testing" || $CI_COMMIT_BRANCH == "main"'
       when: manual
-      allow_failure: true
+  allow_failure: true
   script:
-    - echo "CodeQL is GitHub-native. On GitLab use: include: template: Security/SAST.gitlab-ci.yml"
-    - echo "or keep CodeQL running on github.com/mrtrick37/kyth (recommended — still mirrors there)"
+    - echo 'CodeQL is GitHub-native. On GitLab use include Security/SAST template'
+    - echo 'or keep CodeQL running on github.com/mrtrick37/kyth'
