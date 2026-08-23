@@ -101,7 +101,7 @@ build:
   image: quay.io/podman/stable
   timeout: 120m
   tags:
-    - saas-linux-medium-amd64
+    - saas-linux-large-amd64
   variables:
     BUILDAH_FORMAT: docker
   rules:
