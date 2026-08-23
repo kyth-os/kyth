@@ -1,94 +1,162 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-# ── Zram swap tiering ────────────────────────────────────────────────────
-# zram-generator.conf is produced in sysconfig/kernel/13-ntsync.sh and
-# applied via systemd-zram-setup@zram0.service. The generator Requires
-# dev-zram0.device, which after switch-root deadlocks with udevd/sysinit
-# (see kyth-zram-early below). Create the node without udev and drop that
-# Requires so swap.target does not time out every boot.
-if command -v zramctl >/dev/null 2>&1; then
-    mkdir -p /etc/systemd
-fi
+# ── Zram swap (udev-independent) ────────────────────────────────────────
+# systemd-zram-generator + systemd-zram-setup@zram0 Requires/After
+# dev-zram0.device. After switch-root, udevd is down until sysinit, and
+# sysinit After=swap.target — so waiting for the udev device deadlocks
+# until JobTimeoutSec (30s on this image). Users see that as
+# dev-zram0.device / "dev-zram0.service" timing out every boot.
+#
+# Own the swap setup: create the node from sysfs, mkswap/swapon, and
+# mask the generator units so they cannot enter the job queue.
 
-# Load zram early so /dev/zram0 exists before systemd-zram-setup runs.
-# After switch-root, real-root udevd is down (stopped at initrd-cleanup)
-# until sysinit proceeds, and sysinit After=swap.target. If zram-setup
-# Requires=dev-zram0.device (udev-ready) and kyth-zram-early After=udevd,
-# the job queue deadlocks for JobTimeoutSec: device wait holds sysinit,
-# udevd cannot start, swap.target times out. Do not wait for udev —
-# create the node from sysfs and drop the .device Requires.
 write_line 'zram' /usr/lib/modules-load.d/zram.conf
 write_config /etc/dracut.conf.d/99-kyth-zram.conf <<'DRACUTZRAM'
 add_drivers+=" zram "
 DRACUTZRAM
 
-install -Dm0755 /dev/stdin /usr/libexec/kyth-zram-ensure <<'ZRAMENSURE'
+install -Dm0755 /dev/stdin /usr/libexec/kyth-zram-swap <<'ZRAMSWAP'
 #!/usr/bin/bash
-# Ensure the zram module is loaded and /dev/zram0 exists without udev.
+# Set up /dev/zram0 swap without waiting for udev or zram-generator.
 set -euo pipefail
-/sbin/modprobe zram num_devices=1 || true
-if [[ ! -e /dev/zram0 && -r /sys/class/block/zram0/dev ]]; then
-	IFS=: read -r maj min < /sys/class/block/zram0/dev
-	if [[ -n "${maj:-}" && -n "${min:-}" ]]; then
-		mknod -m 0600 /dev/zram0 b "$maj" "$min"
-	fi
-fi
-ZRAMENSURE
 
-# Start independently of udevd. After=udevd + swap.target's device wait
-# is the 30s boot timeout on every FA617NS-class switch-root.
-write_config /usr/lib/systemd/system/kyth-zram-early.service <<'ZRAM_EARLY'
+ensure_node() {
+	/sbin/modprobe zram num_devices=1 2>/dev/null || true
+	if [[ ! -e /dev/zram0 && -r /sys/class/block/zram0/dev ]]; then
+		IFS=: read -r maj min < /sys/class/block/zram0/dev
+		if [[ -n "${maj:-}" && -n "${min:-}" ]]; then
+			mknod -m 0600 /dev/zram0 b "$maj" "$min"
+		fi
+	fi
+}
+
+size_bytes() {
+	local mem_kb mem_mb size_mb
+	mem_kb=$(awk '/^MemTotal:/{print $2; exit}' /proc/meminfo)
+	mem_mb=$((${mem_kb:-0} / 1024))
+	size_mb=$((mem_mb / 2))
+	if ((size_mb > 8192)); then
+		size_mb=8192
+	fi
+	if ((size_mb < 64)); then
+		size_mb=64
+	fi
+	# Honor memory_tune / zram-generator.conf when the formula is obvious.
+	if [[ -r /etc/systemd/zram-generator.conf ]]; then
+		local raw
+		raw=$(awk -F= '/^[[:space:]]*zram-size[[:space:]]*=/{sub(/^[^=]*=/, ""); gsub(/[[:space:]]/, ""); print; exit}' /etc/systemd/zram-generator.conf)
+		case "${raw}" in
+		ram) size_mb=${mem_mb} ;;
+		ram*0.5 | 'min(ram*0.5,8192)' | 'min(ram*.5,8192)')
+			size_mb=$((mem_mb / 2))
+			((size_mb > 8192)) && size_mb=8192
+			;;
+		esac
+	fi
+	echo $((size_mb * 1024 * 1024))
+}
+
+compression() {
+	local algo=lz4
+	if [[ -r /etc/systemd/zram-generator.conf ]]; then
+		local listed
+		listed=$(awk -F= '/^[[:space:]]*compression-algorithm[[:space:]]*=/{sub(/^[^=]*=/, ""); gsub(/[[:space:]]/, ""); print; exit}' /etc/systemd/zram-generator.conf)
+		[[ -n "${listed}" ]] && algo=${listed%%,*}
+	fi
+	echo "${algo}"
+}
+
+cmd=${1:-start}
+case "${cmd}" in
+start)
+	if grep -q '^/dev/zram0 ' /proc/swaps 2>/dev/null; then
+		exit 0
+	fi
+	ensure_node
+	if [[ ! -e /dev/zram0 ]]; then
+		echo "kyth-zram-swap: /dev/zram0 missing; skipping swap" >&2
+		exit 0
+	fi
+	echo 1 >/sys/block/zram0/reset 2>/dev/null || true
+	algo=$(compression)
+	echo "${algo}" >/sys/block/zram0/comp_algorithm 2>/dev/null || true
+	if ! echo "$(size_bytes)" >/sys/block/zram0/disksize; then
+		echo "kyth-zram-swap: could not set disksize; skipping" >&2
+		exit 0
+	fi
+	if ! /sbin/mkswap /dev/zram0 >/dev/null; then
+		echo "kyth-zram-swap: mkswap failed; skipping" >&2
+		exit 0
+	fi
+	if ! /sbin/swapon -p 100 /dev/zram0; then
+		echo "kyth-zram-swap: swapon failed; skipping" >&2
+		exit 0
+	fi
+	;;
+stop)
+	/sbin/swapoff /dev/zram0 2>/dev/null || true
+	echo 1 >/sys/block/zram0/reset 2>/dev/null || true
+	;;
+*)
+	echo "Usage: kyth-zram-swap [start|stop]" >&2
+	exit 1
+	;;
+esac
+ZRAMSWAP
+
+write_config /usr/lib/systemd/system/kyth-zram-swap.service <<'ZRAMSVCEOF'
 [Unit]
-Description=Kyth early zram device node (no udev wait)
+Description=Kyth zram swap (no udev device wait)
 DefaultDependencies=no
 After=systemd-modules-load.service
-Before=systemd-zram-setup@zram0.service swap.target
-Wants=systemd-udevd.service
+Before=swap.target
+# Never After=/Requires= a .device unit — that is the switch-root deadlock.
 ConditionPathIsDirectory=/sys/class/block
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
-ExecStart=/usr/libexec/kyth-zram-ensure
 RemainAfterExit=yes
+ExecStart=/usr/libexec/kyth-zram-swap start
+ExecStop=/usr/libexec/kyth-zram-swap stop
+TimeoutStartSec=20
 
 [Install]
 WantedBy=sysinit.target
-ZRAM_EARLY
-systemctl enable kyth-zram-early.service 2>/dev/null || true
+ZRAMSVCEOF
+systemctl enable kyth-zram-swap.service 2>/dev/null || true
 
-# Drop generator Requires/BindsTo on the udev .device unit — empty
-# assignment resets the merged list — and create the node ourselves.
-write_config /etc/systemd/system/systemd-zram-setup@.service.d/10-kyth-zram.conf <<'ZRAMOVERRIDE'
-[Unit]
-Requires=
-BindsTo=
-After=kyth-zram-early.service systemd-modules-load.service
-Wants=kyth-zram-early.service
-JobTimeoutSec=30
-JobRunningTimeoutSec=30
-StartLimitIntervalSec=60
-StartLimitBurst=3
-[Service]
-ExecStartPre=/usr/libexec/kyth-zram-ensure
-Restart=on-failure
-RestartSec=1
-# On stop, zram may still be in use as swap; swapoff is handled by
-# dev-zram0.swap unit, so ignore busy errors here.
-ExecStopPost=-/usr/bin/bash -c 'echo 1 > /sys/block/zram0/reset 2>/dev/null || true'
-ZRAMOVERRIDE
+# Disable the generator so it cannot recreate dev-zram0.device /
+# dev-zram0.swap / systemd-zram-setup@zram0.service on daemon-reload.
+install -d /etc/systemd/system-generators
+printf '%s\n' '#!/bin/true' >/etc/systemd/system-generators/zram-generator
+chmod 0755 /etc/systemd/system-generators/zram-generator
 
-# Same deadlock: generated dev-zram0.swap BindsTo/Requires the udev device.
-write_config /etc/systemd/system/dev-zram0.swap.d/10-kyth-async.conf <<'SWAPDEV'
-[Unit]
-Requires=
-BindsTo=
-After=systemd-zram-setup@zram0.service kyth-zram-early.service
-SWAPDEV
+# Mask leftover units from earlier images / generator leftovers. A masked
+# device unit is skipped (not failed) if udev later tries to plug it.
+for unit in \
+	dev-zram0.device \
+	dev-zram0.swap \
+	systemd-zram-setup@zram0.service; do
+	ln -sfn /dev/null "/etc/systemd/system/${unit}"
+	systemctl mask "${unit}" 2>/dev/null || true
+done
 
-# Boot timing observability for FA617NS-class stalls. Provides
-# journalctl evidence without host nsenter (Operation not permitted
-# in current toolbx). Used by kyth doctor.
+# Drop the 30s device/swap timeouts that guaranteed a failed unit.
+rm -f /etc/systemd/system/dev-zram0.device.d/10-timeout.conf
+rm -f /etc/systemd/system/swap.target.d/10-kyth-async.conf
+rmdir /etc/systemd/system/dev-zram0.device.d 2>/dev/null || true
+rmdir /etc/systemd/system/swap.target.d 2>/dev/null || true
+
+# Compatibility name used by older units/docs.
+install -Dm0755 /dev/stdin /usr/libexec/kyth-zram-ensure <<'ZRAMENSURE'
+#!/usr/bin/bash
+exec /usr/libexec/kyth-zram-swap start
+ZRAMENSURE
+
+# Boot timing observability for FA617NS-class stalls.
 write_config /usr/lib/systemd/system/kyth-boot-timing.service <<'BOOTTIMING'
 [Unit]
 Description=Kyth boot timing log (zram/udev)

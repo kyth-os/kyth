@@ -25,37 +25,10 @@ compression-algorithm = lz4
 swap-priority = 100
 ZRAMEOF
 
-# systemd-zram-setup used to wait for dev-zram0.device via udev. After
-# switch-root that is a deadlock (udevd down until sysinit, sysinit
-# After=swap.target). 51-zram.sh now creates /dev/zram0 without udev and
-# drops the .device Requires. Keep a short backstop timeout so a real
-# hang still fails fast instead of a 180s graphical.target stall.
-mkdir -p /etc/systemd/system/dev-zram0.device.d
-cat > /etc/systemd/system/dev-zram0.device.d/10-timeout.conf <<'DEVTIMEOUT'
-[Unit]
-JobTimeoutSec=30
-JobRunningTimeoutSec=30
-DEVTIMEOUT
-
-# Ensure zram uevent is tagged for systemd even when ID_FS probing is slow
-# (amdgpu/nvme coldplug starved the worker on FA617NS). The block device
-# already reports TAGS=:systemd: after ID_FS_TYPE=swap, but an explicit rule
-# guarantees SYSTEMD_READY=1 before swap.target ordering.
-write_config /usr/lib/udev/rules.d/99-kyth-zram.rules <<'ZRAMRULE'
-KERNEL=="zram0", TAG+="systemd", ENV{SYSTEMD_READY}="1"
-ZRAMRULE
-
-# Async swap: zram swap should not block graphical boot. The generator
-# creates dev-zram0.swap with Before=swap.target, and swap.target is
-# otherwise required transitively by sysinit. Allow boot to proceed even
-# if zram races; swap will still be activated within seconds when
-# systemd-zram-setup finishes.
-mkdir -p /etc/systemd/system/swap.target.d
-cat > /etc/systemd/system/swap.target.d/10-kyth-async.conf <<'SWAPASYNC'
-[Unit]
-JobTimeoutSec=30
-JobRunningTimeoutSec=30
-SWAPASYNC
+# zram swap is owned by kyth-zram-swap.service (51-zram.sh). Do not
+# attach JobTimeoutSec to dev-zram0.device or swap.target — that is
+# what listed a 30s timeout as a failed boot unit. The generator is
+# stubbed and the udev device/swap units are masked there.
 
 # TUF FA617NS has no Thunderbolt dock; boltd probing hit 2s timeout at
 # 17:41:09 during the same udev stall window. Masking is too aggressive;

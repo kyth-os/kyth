@@ -50,7 +50,7 @@ def _score() -> tuple[int, list[str], list[str]]:
         score += 20
     else:
         checks.append("zram: no")
-        suggestions.append("Enable zram: systemctl enable systemd-zram-setup@zram0")
+        suggestions.append("Enable zram: systemctl enable --now kyth-zram-swap.service")
 
     # btrfs
     try:

@@ -85,17 +85,26 @@ class BootStabilityUnitTests(unittest.TestCase):
 
     def test_zram_setup_does_not_wait_for_udev_device(self) -> None:
         """After switch-root, udevd is down until sysinit; sysinit After=swap.
-        Requiring dev-zram0.device plus After=udevd is a 30s deadlock.
+        Waiting for dev-zram0.device is a 30s timeout every boot.
         """
         zram = (ROOT / "build_files/scripts/branding/51-zram.sh").read_text(encoding="utf-8")
-        self.assertIn("ExecStart=/usr/libexec/kyth-zram-ensure", zram)
+        ntsync = (
+            ROOT / "build_files/scripts/sysconfig/kernel/13-ntsync.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("kyth-zram-swap.service", zram)
         self.assertIn("mknod -m 0600 /dev/zram0", zram)
         self.assertIn("After=systemd-modules-load.service", zram)
-        self.assertIn("Before=systemd-zram-setup@zram0.service swap.target", zram)
+        self.assertIn("Before=swap.target", zram)
         self.assertNotIn("After=systemd-udevd.service", zram)
-        self.assertIn("Requires=", zram)
-        self.assertIn("BindsTo=", zram)
-        self.assertIn("dev-zram0.swap.d/10-kyth-async.conf", zram)
+        self.assertNotIn("After=dev-zram0.device", zram)
+        self.assertNotIn("Requires=dev-zram0.device", zram)
+        self.assertIn("system-generators/zram-generator", zram)
+        self.assertIn("systemctl mask", zram)
+        self.assertIn("dev-zram0.device", zram)
+        self.assertIn("dev-zram0.swap", zram)
+        self.assertIn("systemd-zram-setup@zram0.service", zram)
+        self.assertNotIn("JobTimeoutSec=30", ntsync)
+        self.assertNotIn("dev-zram0.device.d", ntsync)
 
     def test_memory_tune_applies_only_its_own_sysctl_file(self) -> None:
         body = (ROOT / "build_files/scripts/sysconfig/kernel/56-memory-tune.sh").read_text(
