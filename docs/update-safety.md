@@ -45,9 +45,16 @@ can bounce back to the digest that triggered it exactly once, never loop.
 There is no lower-level bootloader fallback under this: if `bootc rollback`
 itself fails (for example because the same problem that made the deployment
 unhealthy also impairs `bootc`), the machine stays quarantined on the broken
-digest rather than being retried by anything else. Check
-`kyth-boot-health status --json`'s `rollback_attempted_for` field when
-diagnosing a machine stuck on a bad deployment.
+digest but records `last_rollback_error`/`last_rollback_at` in
+`boot-health.json`. Check `kyth-boot-health status --json`'s
+`rollback_attempted_for` + `last_rollback_error` fields when diagnosing a
+stuck deployment. A failed rollback can be retried manually after fixing the
+underlying condition:
+
+```bash
+sudo kyth-boot-health retry-rollback --digest sha256:…  # retries bootc rollback now
+sudo kyth-boot-health clear-quarantine --digest sha256:… # or allow the digest to be staged again
+```
 
 The required checks deliberately cover immutable deployment invariants: KythOS
 identity, bootc deployment metadata, the desktop and networking components, and

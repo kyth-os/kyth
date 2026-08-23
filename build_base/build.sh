@@ -94,7 +94,9 @@ install_cachyos_kernel() {
 	done
 	remove_kernel_packages_except 'cachyos'
 
-	if [ ! -f "/usr/lib/modules/${kver}/vmlinuz" ] && [ -f "/boot/vmlinuz-${kver}" ]; then
+	# Risk9: CachyOS kernel image may live only in /boot after install (vmlinuz not in module dir);
+# fallback copy ensures latest_kernel_version() still finds it for greenboot module-tree check.
+if [ ! -f "/usr/lib/modules/${kver}/vmlinuz" ] && [ -f "/boot/vmlinuz-${kver}" ]; then
 		cp --no-preserve=all "/boot/vmlinuz-${kver}" "/usr/lib/modules/${kver}/vmlinuz" 2>/dev/null || true
 	fi
 

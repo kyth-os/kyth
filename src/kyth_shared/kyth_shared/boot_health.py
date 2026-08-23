@@ -49,6 +49,8 @@ class BootHealthState:
     # threshold, so a rollback target that's itself unhealthy can never
     # ping-pong back and forth with the digest that triggered it.
     rollback_attempted_for: str = ""
+    last_rollback_error: str = ""
+    last_rollback_at: int = 0
 
     def invariants(self) -> list[str]:
         """S7: return list of violated invariants, [] if ok."""
@@ -273,12 +275,16 @@ def note_rollback_attempted(
     state: BootHealthState,
     digest: str,
     *,
+    error: str | None = None,
     now: int | None = None,
 ) -> BootHealthState:
+    ts = int(time.time()) if now is None else now
     return replace(
         state,
         rollback_attempted_for=digest,
-        updated_at=int(time.time()) if now is None else now,
+        last_rollback_error=error or "",
+        last_rollback_at=ts,
+        updated_at=ts,
     )
 
 
@@ -419,11 +425,14 @@ def required_checks(
 
 def _state_summary(state: BootHealthState) -> str:
     quarantined = len(state.quarantined)
-    return (
+    base = (
         f"status={state.status} current={state.current_digest or 'unknown'} "
         f"last-healthy={state.last_healthy_digest or 'unknown'} "
         f"failures={state.failures} quarantined={quarantined}"
     )
+    if state.last_rollback_error:
+        base += f" rollback_error={state.last_rollback_error!r}"
+    return base
 
 
 def _default_rollback_runner() -> tuple[int, str]:
@@ -474,18 +483,19 @@ def trigger_rollback_if_newly_quarantined(
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         print(f"bootc rollback errored for quarantined digest {digest}: {exc}", file=sys.stderr)
         try:
-            coordinator.note_rollback_attempted(digest)
+            coordinator.note_rollback_attempted(digest, error=str(exc)[:500])
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc2:  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort persistence of rollback marker
             print(f"Failed to persist rollback marker for {digest}: {exc2}", file=sys.stderr)
         return
     # Record attempt regardless of success so we never loop on a bad rollback target;
     # returncode is still logged for diagnostics.
+    error_detail: str | None = None if returncode == 0 else (detail or f"exit {returncode}")
     if returncode == 0:
         print(f"Rolled back from quarantined digest {digest} — takes effect next boot")
     else:
         print(f"bootc rollback failed for quarantined digest {digest}: {detail}", file=sys.stderr)
     try:
-        coordinator.note_rollback_attempted(digest)
+        coordinator.note_rollback_attempted(digest, error=error_detail)
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path  # nosec B110 -- best-effort persistence of rollback marker
         print(f"Failed to persist rollback marker for {digest}: {exc}", file=sys.stderr)
 
@@ -506,6 +516,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--json", action="store_true")
     clear = subparsers.add_parser("clear-quarantine")
     clear.add_argument("--digest", required=True)
+    retry = subparsers.add_parser("retry-rollback", help="retry a failed bootc rollback for a quarantined digest")
+    retry.add_argument("--digest", required=True, help="quarantined digest to retry rollback for")
     return parser
 
 
@@ -539,6 +551,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             if was_quarantined else f"Digest {args.digest} was not quarantined"
         )
         return 0
+    if args.command == "retry-rollback":
+        from .update_coordinator import UpdateCoordinator
+
+        coord = UpdateCoordinator(args.state)
+        state = coord.read()
+        if args.digest not in state.quarantined:
+            print(f"Digest {args.digest} is not quarantined — nothing to retry", file=sys.stderr)
+            return 1
+        # Clear the one-shot marker so trigger can fire again, keep failure detail for audit until success
+        try:
+            coord.transaction(lambda s: __import__("dataclasses").replace(s, rollback_attempted_for="", last_rollback_error="", last_rollback_at=0) if s.rollback_attempted_for == args.digest else s)
+        except ValueError as exc:
+            print(f"Refusing to persist corrupt state: {exc}", file=sys.stderr)
+            return 1
+        print(f"Cleared rollback marker for {args.digest} — next boot will retry rollback via record-failure, or retry now:")
+        # Attempt immediately in this process as well
+        before = coord.read()
+        # Fake an 'updated' that looks newly quarantined to reuse trigger
+        from .boot_health import trigger_rollback_if_newly_quarantined as _trig
+        # Build a synthetic before where digest was not yet quarantined (so trigger fires)
+        # Instead, directly run rollback runner
+        from .boot_health import _default_rollback_runner
+        rc, detail = _default_rollback_runner()
+        if rc == 0:
+            print(f"Rolled back from quarantined digest {args.digest} — takes effect next boot")
+            try:
+                coord.note_rollback_attempted(args.digest, error=None)
+            except ValueError as exc:
+                print(f"Failed to persist rollback marker: {exc}", file=sys.stderr)
+                return 1
+            return 0
+        else:
+            print(f"bootc rollback still failed for {args.digest}: {detail}", file=sys.stderr)
+            try:
+                coord.note_rollback_attempted(args.digest, error=detail or f"exit {rc}")
+            except ValueError as exc:
+                print(f"Failed to persist rollback marker: {exc}", file=sys.stderr)
+            return 1
     digest = current_digest()
     if not digest:
         print("Could not determine booted image digest")

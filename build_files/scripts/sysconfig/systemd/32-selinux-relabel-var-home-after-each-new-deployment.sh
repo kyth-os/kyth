@@ -33,6 +33,12 @@ Type=oneshot
 ExecStart=/usr/libexec/kyth-selinux-relabel-home
 RemainAfterExit=yes
 TimeoutStartSec=300
+# StartLimit: this unit is Before=plasmalogin and WantedBy=multi-user;
+# without explicit limits a restart during the boot transaction could
+# hit systemd's default start-limit and fail a healthy boot (see
+# greenboot 10-kyth.conf for same pattern). Keep generous burst.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Install]
 WantedBy=multi-user.target

@@ -190,13 +190,24 @@ def runtime_checks(
     # greeter still runs via QPainter — require the display manager instead.
     if expects_graphical:
         if rescue and not devices:
+            dm_active = _display_manager_active(unit_active)
+            # Risk6: explicit degraded-mode journal entry so Hub/diagnostics
+            # can distinguish intentional nomodeset/live rescue from silent
+            # akmod failure that was masked. Only rescue path hits this.
+            try:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "software-compose rescue active nomodeset/live, DRM missing, dm_active=%s", dm_active
+                )
+            except Exception:
+                pass
             checks.append(
                 RuntimeCheck(
                     "Display device",
-                    _display_manager_active(unit_active),
-                    "software-compose rescue (no DRM card; display manager active)"
-                    if _display_manager_active(unit_active)
-                    else "software-compose rescue but display manager inactive",
+                    dm_active,
+                    "software-compose rescue (no DRM card; display manager active) — degraded, intentional nomodeset/live"
+                    if dm_active
+                    else "software-compose rescue but display manager inactive — check cmdline",
                 )
             )
         else:

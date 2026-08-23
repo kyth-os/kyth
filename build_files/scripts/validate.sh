@@ -126,9 +126,9 @@ if [[ -n "${unexpected}" ]]; then
 fi
 # Security audits — warn, but also enforce bash -c variable interpolation gate
 # Fail only on shell-variable interpolation ($var / ${var}), not static $(cmd) subshells
-if grep -rn --include="*.py" 'bash.*-c.*\$[A-Za-z_]' src/kyth_shared/kyth_shared/guardian.py src/kyth-welcome 2>/dev/null | grep -v "static" | grep -q .; then
-	echo "Bash -c variable interpolation (\$var/\${var}) found in guardian/pages — use validated python helper instead" >&2
-	grep -rn --include="*.py" 'bash.*-c.*\$[A-Za-z_]' src/kyth_shared/kyth_shared/guardian.py src/kyth-welcome 2>/dev/null | head -n 5 >&2
+if grep -rn --include="*.py" 'bash.*-c.*\$[A-Za-z_]' src/kyth_shared src/kyth-welcome src/kyth-installer 2>/dev/null | grep -v "static" | grep -v "test_" | grep -q .; then
+	echo "Bash -c variable interpolation (\$var/\${var}) found — use validated python helper instead" >&2
+	grep -rn --include="*.py" 'bash.*-c.*\$[A-Za-z_]' src/kyth_shared src/kyth-welcome src/kyth-installer 2>/dev/null | grep -v "static" | head -n 5 >&2
 	exit 1
 fi
 # Non-blocking security audit — warn, don't fail (thresholds are advisory while

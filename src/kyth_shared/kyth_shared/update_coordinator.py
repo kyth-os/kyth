@@ -71,7 +71,7 @@ class UpdateCoordinator:
 
         return self.transaction(lambda s: clear_quarantine(s, digest))
 
-    def note_rollback_attempted(self, digest: str) -> BootHealthState:
+    def note_rollback_attempted(self, digest: str, error: str | None = None) -> BootHealthState:
         from .boot_health import note_rollback_attempted
 
-        return self.transaction(lambda s: note_rollback_attempted(s, digest))
+        return self.transaction(lambda s: note_rollback_attempted(s, digest, error=error))

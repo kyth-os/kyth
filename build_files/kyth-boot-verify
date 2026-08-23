@@ -49,6 +49,8 @@ if [[ -f /usr/.composefs/digest ]]; then
 fi
 
 # 3) TPM PCR 7 (SecureBoot) — measured, offline. Not fatal: many machines
+# Risk7: tool absence (tpm2_pcrread/composefs-info) is intentionally non-fatal here;
+# greenboot will still quarantine on the composefs digest mismatch (exit 2) when present.
 # have no fTPM/dTPM at all, and an unmeasured boot is not the same as a
 # tampered one.
 if command -v tpm2_pcrread >/dev/null 2>&1; then

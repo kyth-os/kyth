@@ -50,7 +50,7 @@ _HEX_ID = re.compile(r"^[0-9a-f]{4}$")
 _CLASS_ID = re.compile(r"^[0-9a-f]{2,6}$")
 _MODULE = re.compile(r"^[a-zA-Z0-9_-]+$")
 _OPTION = re.compile(r"^[a-zA-Z0-9_-]+$")
-_VALUE = re.compile(r"^[a-zA-Z0-9_.,:/+-]+$")
+_VALUE = re.compile(r"^[a-zA-Z0-9_.,:/+-]+$")  # Risk8: tight allowlist — value must be single token, no shell meta, no spaces/quotes
 _POLICY_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
