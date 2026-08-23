@@ -112,8 +112,8 @@ build:
     - df -h; du -sh /var/tmp 2>&1 | head; du -sh .cache 2>&1 | head || true
     - sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache /usr/local/lib/android /usr/local/share/boost /opt/az 2>&1 | tail -n 5 || true
     - dnf clean all 2>&1 | tail -n 5 || true; rm -rf /var/cache/dnf 2>&1 | tail -n 5 || true; rm -rf /var/cache/* /var/tmp/* 2>&1 | tail -n 5 || true
-    - rm -rf .cache/pip .cache/kyth-ci-tools 2>&1 | tail -n 5 || true; du -sh .cache 2>&1 | head || true
-    - podman system prune -a --volumes -f 2>&1 | tail -n 5 || true
+    - rm -rf .cache/pip .cache/kyth-ci-tools 2>&1 | tail -n 5 || true; du -sh /usr/share/doc 2>&1 | head; rm -rf /usr/share/doc/* /usr/share/man/* /var/log/* 2>&1 | tail -n 5 || true; du -sh .cache 2>&1 | head || true
+    - podman system prune -a --volumes -f 2>&1 | tail -n 5 || true; podman rmi --all 2>&1 | tail -n 5 || true
     - echo "docker dind not used (podman only)"
     - df -h | head -n 10
     # Login to GitLab registry (CI_REGISTRY_* is auto-provided on gitlab.com)
