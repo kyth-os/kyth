@@ -355,3 +355,5 @@ aggregate.
 The project is licensed under [Apache License 2.0](LICENSE). KythOS is not
 affiliated with Fedora, Universal Blue, KDE, Valve, CachyOS, or any game
 publisher.
+
+<!-- gitlab push test 2026-08-23: verify CI triggers on testing -->
