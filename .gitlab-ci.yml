@@ -35,7 +35,7 @@ validation:
     - if: '$CI_PIPELINE_SOURCE == "web"'
   before_script:
     - apt-get update -qq
-    - apt-get install -y -qq file systemd curl git sudo python3 python3-pip nodejs
+    - apt-get install -y -qq file systemd curl git sudo python3 python3-pip nodejs jq
     - ./build_files/scripts/install-validation-tools.sh || true
     - export PATH="$CI_PROJECT_DIR/.cache/kyth-ci-tools/bin:$CI_PROJECT_DIR/.cache/kyth-ci-tools:$PATH"
     - ls -lh .cache/kyth-ci-tools/bin/ || true
