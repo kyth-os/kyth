@@ -371,6 +371,31 @@ class BootcQueryLockTests(unittest.TestCase):
                 self.assertIsNone(bootc_query.fetch_status_data())
                 run.assert_not_called()
 
+    def test_holds_sysroot_lock_matches_upgrade_and_finalize(self):
+        self.assertTrue(bootc_query.holds_sysroot_lock("/usr/bin/bootc upgrade"))
+        self.assertTrue(bootc_query.holds_sysroot_lock("111908 /usr/bin/bootc upgrade"))
+        self.assertTrue(bootc_query.holds_sysroot_lock("sudo -n bootc upgrade"))
+        self.assertTrue(
+            bootc_query.holds_sysroot_lock("/usr/bin/ostree admin finalize-staged --hold")
+        )
+        self.assertTrue(
+            bootc_query.holds_sysroot_lock("113198 /usr/bin/ostree admin finalize-staged")
+        )
+        self.assertFalse(bootc_query.holds_sysroot_lock("/usr/bin/bootc status --json"))
+        self.assertFalse(bootc_query.holds_sysroot_lock("/usr/bin/ostree admin status"))
+        self.assertFalse(bootc_query.holds_sysroot_lock("kyth-bootc-guard status-json"))
+
+    def test_status_probes_are_skipped_during_finalize(self):
+        with patch.object(
+            bootc_query,
+            "active_operation",
+            return_value="/usr/bin/ostree admin finalize-staged",
+        ):
+            with patch.object(bootc_query, "run_command") as run:
+                self.assertEqual(bootc_query.fetch_status_text(), "")
+                self.assertIsNone(bootc_query.fetch_status_data())
+                run.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

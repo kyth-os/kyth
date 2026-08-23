@@ -615,6 +615,9 @@ class BootHealthPackagingTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("dnf5 install -y greenboot", package_script)
+        self.assertIn("greenboot-set-rollback-trigger.service.d", package_script)
+        self.assertIn("RemainAfterExit=yes", package_script)
+        self.assertIn("kyth-finalize-staged prepare-boot", package_script)
         install_line = next(
             line for line in package_script.splitlines()
             if line.startswith("dnf5 install")

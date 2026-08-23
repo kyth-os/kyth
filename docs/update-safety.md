@@ -118,8 +118,9 @@ prepares `/boot`; finalize on ExecStart deadlocks against bootc's sysroot
 lock. ExecStop still finalizes at shutdown as a fallback.
 
 A pull that is still running after 3600s is retryable (not quarantined).
-Hub `bootc status` probes are skipped while an upgrade is active so they
-cannot take the same write-lock.
+Hub `bootc status` probes are skipped while an upgrade *or*
+`ostree admin finalize-staged` is active so they cannot take the same
+write-lock. `PrivilegedGateway` allows `kyth-safe-upgrade` 3600 s (not 300 s).
 
 If you are already stuck with "Queued for next boot" on an older image:
 

@@ -53,6 +53,7 @@ class SysconfigFragmentTests(unittest.TestCase):
         )
         self.assertIn("groupadd --system plugdev", guards)
         self.assertIn("Before=dbus.socket", guards)
+        self.assertIn("RemainAfterExit=yes", guards)
         self.assertIn("systemd-udevd.service", guards)
         self.assertIn("/etc/udev/rules.d/99-input-remapper.rules", guards)
         self.assertIn('TEST=="charge_control_start_threshold"', guards)

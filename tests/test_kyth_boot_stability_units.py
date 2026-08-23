@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 import sys
 import unittest
@@ -87,8 +88,32 @@ class BootStabilityUnitTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("sysctl --load=/etc/sysctl.d/99-kyth-memory.conf", body)
+        self.assertIn("ExecStartPost=-/usr/bin/sysctl --load=/etc/sysctl.d/99-kyth-memory.conf", body)
         self.assertNotIn("ExecStartPost=/usr/bin/sysctl --system", body)
         self.assertNotIn("sudo sysctl --system", body)
+        self.assertIn("After=local-fs.target systemd-sysctl.service", body)
+        self.assertNotRegex(body, r"^After=multi-user\.target$", re.M)
+
+    def test_irqbalance_oneshot_does_not_fail_type_simple(self) -> None:
+        body = (ROOT / "build_files/scripts/sysconfig/systemd/05-irqbalance-tuning.sh").read_text(
+            encoding="utf-8"
+        )
+        late = (ROOT / "build_files/scripts/sysconfig/kernel/48-irqbalance-tuning.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("IRQBALANCE_ONESHOT=yes", body)
+        self.assertIn("irqbalance.service.d/10-kyth-oneshot.conf", body)
+        self.assertIn("Type=oneshot", body)
+        self.assertIn("RemainAfterExit=yes", body)
+        self.assertIn("--deepestcache=2", body)
+        self.assertNotIn("write_config /etc/sysconfig/irqbalance", late)
+
+    def test_dbus_runtime_dir_stays_active_after_mkdir(self) -> None:
+        body = (
+            ROOT / "build_files/scripts/sysconfig/desktop/09-autostart-log-noise-guards.sh"
+        ).read_text(encoding="utf-8")
+        dbus_unit = body.split("kyth-dbus-runtime-dir.service", 1)[1]
+        self.assertIn("RemainAfterExit=yes", dbus_unit.split("DBUSRUNDIREOF", 1)[0])
 
 
 class InstallerMokFailClosedTests(unittest.TestCase):

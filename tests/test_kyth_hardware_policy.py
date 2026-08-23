@@ -255,6 +255,7 @@ class HardwarePolicySafetyTests(unittest.TestCase):
         service = (ROOT / "build_files/kyth-hw-setup.service").read_text()
         retry = (ROOT / "build_files/kyth-retry-hardware-setup").read_text()
         self.assertIn("hardware-profiles.toml", install)
+        self.assertIn("install -d -m 0755 /etc/modprobe.d /etc/scx /var/lib/akmods /var/cache/akmods", install)
         self.assertNotIn("hw-setup-done", service)
         self.assertIn("kyth-hardware-policy apply --force", retry)
         self.assertIn("ReadWritePaths=/etc/modprobe.d", service)

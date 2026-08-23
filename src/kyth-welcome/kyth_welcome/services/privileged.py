@@ -130,7 +130,9 @@ def bootc_action(action: str, image_ref: str | None = None) -> PrivilegedAction:
     return PrivilegedAction(
         name=f"bootc-{action}",
         argv=(*_prefix(AuthFrontend.SUDO_ASKPASS), *args),
-        timeout=300,
+        # kyth-safe-upgrade allows bootc 3600s; a 300s gateway timeout
+        # killed OS-image upgrades that had already started writing.
+        timeout=3600 if action == "upgrade" else 300,
         environment=EnvironmentPolicy.DESKTOP,
         invalidates=frozenset({"bootc"}),
     )

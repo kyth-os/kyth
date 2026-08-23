@@ -114,7 +114,7 @@ class PrivilegedActionTests(unittest.TestCase):
         self.assertEqual(kwargs["env"]["PATH"], "/usr/bin")
         self.assertNotIn("LD_PRELOAD", kwargs["env"])
         self.assertFalse(kwargs["shell"])
-        self.assertEqual(kwargs["timeout"], 300)
+        self.assertEqual(kwargs["timeout"], 3600)
 
     def test_gateway_keeps_vpn_cookie_out_of_argv_and_audit_log(self):
         audit = []

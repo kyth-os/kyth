@@ -40,7 +40,11 @@ ProtectSystem=strict
 # fails with EROFS on /etc/modprobe.d.
 StateDirectory=kyth
 StateDirectoryMode=0700
-ReadWritePaths=/etc/modprobe.d /etc/scx /var/lib/akmods /var/cache/akmods
+# '-' means "ignore if the path is missing". /etc/scx and the akmods
+# dirs are NVIDIA/sched-ext only; a missing ReadWritePaths entry otherwise
+# fails the *entire* unit at namespace setup ("No such file or directory")
+# on AMD-only hosts. /boot is optional for grubby BLS writes.
+ReadWritePaths=/etc/modprobe.d -/etc/scx -/var/lib/akmods -/var/cache/akmods -/boot
 CacheDirectory=kyth
 CacheDirectoryMode=0700
 RestrictRealtime=yes

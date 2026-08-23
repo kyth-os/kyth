@@ -15,7 +15,18 @@ mkdir -p /etc/sysconfig
 write_config /etc/sysconfig/irqbalance <<'IRQBALANCE'
 # KythOS: one-shot mode is cheaper than the daemon on gaming desktops;
 # the kernel's default affinity is already optimal for most IRQs.
+# --deepestcache=2 keeps IRQs inside a CCD on Ryzen X3D / multi-CCD.
 IRQBALANCE_ONESHOT=yes
 IRQBALANCE_BANNED_CPUS=
-IRQBALANCE_ARGS="--hintpolicy=subset"
+IRQBALANCE_ARGS="--hintpolicy=subset --deepestcache=2"
 IRQBALANCE
+
+# Fedora's irqbalance.service is Type=simple. IRQBALANCE_ONESHOT=yes
+# makes the process exit after one pass, which systemd then records as
+# failed (exit-code) on every boot. Pair oneshot with RemainAfterExit.
+install -d /etc/systemd/system/irqbalance.service.d
+write_config /etc/systemd/system/irqbalance.service.d/10-kyth-oneshot.conf <<'IRQDROPIN'
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+IRQDROPIN

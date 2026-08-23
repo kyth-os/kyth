@@ -24,4 +24,7 @@ install -m 0644 /ctx/kyth-flathub-setup.service /usr/lib/systemd/system/kyth-fla
 install -m 0644 /ctx/kyth-default-flatpaks.service /usr/lib/systemd/system/kyth-default-flatpaks.service
 install -m 0755 /ctx/kyth-hw-setup /usr/bin/kyth-hw-setup
 install -m 0644 /ctx/kyth-hw-setup.service /usr/lib/systemd/system/kyth-hw-setup.service
+# hw-setup's ProtectSystem=strict ReadWritePaths need these dirs to exist
+# so namespace setup (and later atomic writes) cannot fail on AMD-only hosts.
+install -d -m 0755 /etc/modprobe.d /etc/scx /var/lib/akmods /var/cache/akmods
 install -Dm 0644 /ctx/config/hardware-profiles.toml /usr/share/kyth/hardware-profiles.toml

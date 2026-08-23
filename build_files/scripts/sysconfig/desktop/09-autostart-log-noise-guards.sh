@@ -102,6 +102,13 @@ Wants=kyth-system-accounts.service
 
 [Service]
 Type=oneshot
+# Without RemainAfterExit this unit goes inactive after mkdir, then
+# dbus.socket / sockets.target pull it again. A few rapid restarts
+# hit systemd's default start-limit and fail the boot unit list
+# even though /run/dbus was created on the first try.
+RemainAfterExit=yes
+StartLimitIntervalSec=60
+StartLimitBurst=5
 ExecStart=/usr/bin/mkdir -p /run/dbus
 ExecStart=/usr/bin/chmod 0755 /run/dbus
 

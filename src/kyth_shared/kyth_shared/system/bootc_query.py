@@ -100,16 +100,32 @@ def status_data() -> dict | None:
     return probe_cached("bootc-status-data", BOOTC_CACHE_TTL, fetch_status_data)
 
 
+# Commands that take ostree's sysroot write-lock. Hub `bootc status`
+# probes must not run while any of these are alive or they convoy
+# behind the lock and the GUI updater hits its timeout.
+# argv0 is often /usr/bin/bootc, so a leading-space " bootc upgrade"
+# marker misses the real process and lets Hub take the lock.
+_BOOTC_LOCK_RE = re.compile(
+    r"(?:^|[\s/])bootc\s+(upgrade|switch|rollback|reset)(?:\s|$)"
+)
+_FINALIZE_MARKER = "ostree admin finalize-staged"
+
+
+def holds_sysroot_lock(cmdline: str) -> bool:
+    """True if *cmdline* is a bootc/ostree process holding the sysroot lock."""
+    text = cmdline.strip()
+    if _FINALIZE_MARKER in text:
+        return True
+    return _BOOTC_LOCK_RE.search(text) is not None
+
+
 def active_operation() -> str | None:
     result = run_command(["ps", "-eo", "pid=,args="], timeout=5)
     if result is None or result.returncode != 0 or not result.stdout.strip():
         return None
     for line in result.stdout.splitlines():
         text = line.strip()
-        if " bootc " in f" {text} " and any(
-            op in text
-            for op in (" bootc upgrade", " bootc switch", " bootc rollback", " bootc reset")
-        ):
+        if holds_sysroot_lock(text):
             return text
     return None
 

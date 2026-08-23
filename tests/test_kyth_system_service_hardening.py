@@ -90,10 +90,13 @@ class SystemServiceHardeningTests(unittest.TestCase):
         self.assertIn("ReadWritePaths=/sys/class/power_supply", battery)
         self.assertIn("ReadWritePaths=/sys/firmware/efi/efivars", mok)
         # ProtectSystem=strict without these is EROFS on /etc/modprobe.d at boot.
+        # Optional NVIDIA/scx/boot paths are '-' prefixed so a missing dir
+        # cannot fail namespace setup on AMD-only hosts.
         self.assertIn("StateDirectory=kyth", hw)
         self.assertIn("ReadWritePaths=/etc/modprobe.d", hw)
-        self.assertIn("/etc/scx", hw)
-        self.assertIn("/var/lib/akmods", hw)
+        self.assertIn("-/etc/scx", hw)
+        self.assertIn("-/var/lib/akmods", hw)
+        self.assertIn("-/boot", hw)
 
 
 # Units with no resource-limit directives at all before this — a bug/leak in

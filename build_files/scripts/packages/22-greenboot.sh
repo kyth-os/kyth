@@ -11,3 +11,18 @@ set -euo pipefail
 # rollback-actionable checks during the branding phase instead.
 dnf5 install -y greenboot
 systemctl enable greenboot-healthcheck.service greenboot-set-rollback-trigger.service
+
+# Upstream unit is Type=oneshot without RemainAfterExit. After it
+# succeeds (often in <1s, including a /boot remount), anything that
+# Wants= it starts it again and the default start-limit fails the
+# unit for the boot even though the trigger was written. Keep it
+# active and remount /boot the Kyth way (bind,rw — plain remount,rw
+# is EINVAL on the autofs+btrfs bind).
+install -d /usr/lib/systemd/system/greenboot-set-rollback-trigger.service.d
+cat > /usr/lib/systemd/system/greenboot-set-rollback-trigger.service.d/10-kyth.conf <<'GBROLLBACK'
+[Service]
+RemainAfterExit=yes
+StartLimitIntervalSec=120
+StartLimitBurst=5
+ExecStartPre=-/usr/libexec/kyth-finalize-staged prepare-boot
+GBROLLBACK
