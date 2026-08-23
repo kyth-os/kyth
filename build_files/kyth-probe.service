@@ -2,12 +2,14 @@
 Description=KythOS system probe cache refresh (oneshot)
 Documentation=https://github.com/mrtrick37/kyth
 After=local-fs.target
+# Start-limit is a [Unit] key. A boot-time probe storm must not hit
+# start-limit and paint the unit --failed on an otherwise healthy boot.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-StartLimitIntervalSec=120
-StartLimitBurst=5
 ExecStart=/usr/bin/kyth-probe --system
 CacheDirectory=kyth
 CacheDirectoryMode=0700

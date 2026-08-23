@@ -253,8 +253,10 @@ class BootStabilityUnitTests(unittest.TestCase):
 
     def test_probe_oneshot_stays_active_for_timer(self) -> None:
         body = (ROOT / "build_files/kyth-probe.service").read_text(encoding="utf-8")
+        unit = body.split("[Service]", 1)[0]
         self.assertIn("RemainAfterExit=yes", body)
-        self.assertIn("StartLimitBurst=5", body)
+        self.assertIn("StartLimitIntervalSec=120", unit)
+        self.assertIn("StartLimitBurst=5", unit)
 
     def test_power_arbiter_can_retrigger_without_start_limit(self) -> None:
         body = (ROOT / "build_files/kyth-power-arbiter.service").read_text(
