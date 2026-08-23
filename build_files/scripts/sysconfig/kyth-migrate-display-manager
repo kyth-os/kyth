@@ -9,7 +9,6 @@
 set -euo pipefail
 
 PLM_UNIT="/usr/lib/systemd/system/plasmalogin.service"
-SDDM_UNIT="/usr/lib/systemd/system/sddm.service"
 DM_LINK="/etc/systemd/system/display-manager.service"
 GRAPHICAL_WANTS="/etc/systemd/system/graphical.target.wants/display-manager.service"
 DEFAULT_LINK="/etc/systemd/system/default.target"
