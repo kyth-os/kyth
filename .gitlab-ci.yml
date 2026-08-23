@@ -100,6 +100,8 @@ build:
   stage: build
   image: quay.io/podman/stable
   timeout: 120m
+  tags:
+    - saas-linux-large-amd64
   services:
     - name: docker:24-dind
       alias: docker
@@ -116,8 +118,10 @@ build:
     - podman info 2>&1 | head -n 20
     - df -h | head -n 20
     # Free disk like GitHub's free-disk-space action
-    - podman system prune -a -f 2>&1 | tail -n 5 || true
-    - docker system prune -a -f 2>&1 | tail -n 5 || true
+    - df -h; du -sh /var/tmp 2>&1 | head; du -sh .cache 2>&1 | head || true
+    - podman system prune -a --volumes -f 2>&1 | tail -n 5 || true
+    - docker system prune -a --volumes -f 2>&1 | tail -n 5 || true
+    - df -h | head -n 10
     # Login to GitLab registry (CI_REGISTRY_* is auto-provided on gitlab.com)
     - echo "$CI_REGISTRY_PASSWORD" | podman login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" 2>&1 | tail -n 5
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" 2>&1 | tail -n 5 || true
