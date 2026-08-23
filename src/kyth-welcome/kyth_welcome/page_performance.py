@@ -9,10 +9,10 @@ from .services.sched import (
     set_sched_daemon_enabled,
 )
 from .qt import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
+    QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .widgets import (
-    Page, _make_card,
+    Page, ToggleSwitch, _make_card,
 )
 
 # 111-115 vm/net headless — no new welcome modules; PerformancePage reuses single _make_card rows, keeping 215 headroom
@@ -24,6 +24,8 @@ class PerformancePage(Page):
         self._sched_daemon_worker = None
         self._scheduler_list_worker = None
         self._sched_status_worker = None
+        self._clean_worker = None
+        self._audit_worker = None
         self._page_header(
             "Gaming",
             "Scheduler & Performance",
@@ -77,13 +79,19 @@ class PerformancePage(Page):
         apply_btn.clicked.connect(self._apply_scheduler)
         ctrl_col.addWidget(apply_btn)
 
-        self._perf_auto_toggle = QCheckBox("Auto-switch (kyth-sched)")
+        auto_row = QHBoxLayout()
+        auto_row.setSpacing(8)
+        auto_label = QLabel("Auto-switch (kyth-sched)")
+        auto_label.setObjectName("card-copy")
+        auto_row.addWidget(auto_label)
+        self._perf_auto_toggle = ToggleSwitch()
+        self._perf_auto_toggle.toggled.connect(self._toggle_sched_daemon)
+        auto_row.addWidget(self._perf_auto_toggle)
+        auto_row.addStretch()
         # Game Boost card will be built below as separate section
-        self._perf_auto_toggle.setObjectName("card-copy")
         # Game Boost — single Game Night switch (17)
         self._add(self._make_game_boost_card())
-        self._perf_auto_toggle.stateChanged.connect(self._toggle_sched_daemon)
-        ctrl_col.addWidget(self._perf_auto_toggle)
+        ctrl_col.addLayout(auto_row)
 
         # One-click Gaming Preset (5/5) — stage cachyos + scx bore + mangohud together
         preset_btn = QPushButton("Apply Gaming Preset")
@@ -112,10 +120,12 @@ class PerformancePage(Page):
         self._ai_status_lbl = QLabel("AI: checking…")
         self._ai_status_lbl.setObjectName("prop-val")
         ai_row.addWidget(self._ai_status_lbl, 1)
-        self._ai_toggle = QCheckBox("Enable AI tuning (kyth-ai-perfd)")
-        self._ai_toggle.setChecked(True)
+        ai_toggle_label = QLabel("Enable AI tuning (kyth-ai-perfd)")
+        ai_toggle_label.setObjectName("card-copy")
+        ai_row.addWidget(ai_toggle_label)
+        self._ai_toggle = ToggleSwitch(checked=True)
         self._ai_toggle.setToolTip("Enable the 5s AI daemon — scx_rusty for gaming, bpfland for desktop, lavd for pressure")
-        self._ai_toggle.stateChanged.connect(self._toggle_ai_perf)
+        self._ai_toggle.toggled.connect(self._toggle_ai_perf)
         ai_row.addWidget(self._ai_toggle)
         ai_apply = QPushButton("Apply AI policy now")
         ai_apply.clicked.connect(self._apply_ai_now)
@@ -180,6 +190,7 @@ class PerformancePage(Page):
         self._perf_timer.timeout.connect(self._perf_refresh)
         single_shot(self, 150, self._perf_refresh)
         single_shot(self, 0, self._refresh_scheduler_list)
+        single_shot(self, 0, self._refresh_clean_status)
 
     def showEvent(self, event):  # noqa: N802
         super().showEvent(event)
@@ -362,10 +373,10 @@ class PerformancePage(Page):
     def _apply_scheduler(self) -> None:
         apply_scheduler(self._perf_sched_combo.currentText())
 
-    def _toggle_sched_daemon(self, state: int) -> None:
+    def _toggle_sched_daemon(self, state: bool) -> None:
         set_sched_daemon_enabled(bool(state))
 
-    def _toggle_ai_perf(self, state: int) -> None:
+    def _toggle_ai_perf(self, state: bool) -> None:
         # Must not block the GUI thread — systemctl --user can stall up to 10 s
         # under polkit or if the user service manager is busy.
         from .services.runtime import DataWorker, release_worker_when_finished
@@ -400,119 +411,43 @@ class PerformancePage(Page):
             self._ai_status_lbl.setText(f"AI: failed — {exc}")
             restyle(self._ai_status_lbl)
 
-    def _clean_kargs_status(self) -> None:
-        try:
-            from kyth_shared.kargs_preset import load_kargs, kargs_drift
-            c = load_kargs()
-            d = kargs_drift()
-            self._clean_status.setText(f"kargs {c['profile']} missing={d['missing'] or '∅'}")
-            restyle(self._clean_status)
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
-            self._clean_status.setText(f"kargs failed — {exc}")
-            restyle(self._clean_status)
+    def _refresh_clean_status(self) -> None:
+        if self._clean_worker is not None:
+            return
+        from .page_performance_cards_clean import gather_clean_status
 
-    def _run_clean(self, which: str) -> None:
-        try:
-            if which == "io":
-                from kyth_shared.io_tune import load_io_tune, io_status
-                c = load_io_tune()
-                self._clean_status.setText(f"io {c['profile']} rule={io_status()}")
-            elif which == "net":
-                from kyth_shared.net_latency import load_net_latency, net_latency_status
-                c = load_net_latency()
-                self._clean_status.setText(f"net enabled={c['enabled']} active={net_latency_status()}")
-            elif which == "uksmd":
-                from kyth_shared.uksmd_preset import load_uksmd, uksmd_suggested
-                c = load_uksmd()
-                self._clean_status.setText(f"uksmd enabled={c['enabled']} suggested={uksmd_suggested()}")
-            elif which == "journal":
-                from kyth_shared.journal_tune import load_journal, journal_status
-                c = load_journal()
-                self._clean_status.setText(f"journal perf={c['perf']} active={journal_status()}")
-            elif which == "thp":
-                from kyth_shared.thp_tune import load_thp, thp_status
-                c = load_thp()
-                self._clean_status.setText(f"thp {c['profile']} active={thp_status()}")
-            elif which == "mimalloc":
-                from kyth_shared.mimalloc_preset import load_mimalloc, mimalloc_status
-                c = load_mimalloc()
-                self._clean_status.setText(f"mimalloc {c['enabled']} {mimalloc_status()}")
-            elif which == "irq":
-                from kyth_shared.irq_tune import load_irq, irq_status
-                c = load_irq()
-                self._clean_status.setText(f"irq {c['profile']} active={irq_status()}")
-            elif which == "btrfs":
-                from kyth_shared.btrfs_perf import load_btrfs_perf, btrfs_perf_status
-                c = load_btrfs_perf()
-                self._clean_status.setText(f"btrfs {c['profile']} active={btrfs_perf_status()}")
-            elif which == "trim":
-                from kyth_shared.trim_preset import load_trim, trim_status
-                c = load_trim()
-                self._clean_status.setText(f"trim {c['profile']} active={trim_status()}")
-            elif which == "ananicy":
-                from kyth_shared.ananicy_preset import load_ananicy, ananicy_status
-                c = load_ananicy()
-                self._clean_status.setText(f"ananicy {c['profile']} active={ananicy_status()}")
-            elif which == "zswap":
-                from kyth_shared.zswap_preset import load_zswap, zswap_status
-                c = load_zswap()
-                self._clean_status.setText(f"zswap {c['profile']} active={zswap_status()}")
-            elif which == "gpu":
-                from kyth_shared.gpu_power import load_gpu_power
-                c = load_gpu_power()
-                self._clean_status.setText(f"gpu {c['profile']} dpm={c['dpm']}")
-            elif which == "sched":
-                from kyth_shared.sched_latency import load_sched_latency, sched_latency_status
-                c = load_sched_latency()
-                self._clean_status.setText(f"sched {c['profile']} active={sched_latency_status()}")
-            elif which == "readahead":
-                from kyth_shared.readahead_preset import load_readahead
-                c = load_readahead()
-                self._clean_status.setText(f"readahead {c['enabled']} {c['size_mb']}MB")
-            elif which == "master":
-                from kyth_shared.gaming_master import load_master
-                c = load_master()
-                self._clean_status.setText(f"master {c['profile']} 46-60")
-            elif which == "wine":
-                from kyth_shared.wine_sync import load_wine_sync, wine_sync_status, probe_wine_sync
-                c = load_wine_sync()
-                self._clean_status.setText(f"wine {c['mode']} probe={probe_wine_sync()} env={wine_sync_status()}")
-            elif which == "kwin":
-                from kyth_shared.kwin_latency import load_kwin_latency, kwin_latency_status
-                c = load_kwin_latency()
-                self._clean_status.setText(f"kwin {c['profile']} active={kwin_latency_status()}")
-            elif which == "pipewire":
-                from kyth_shared.pipewire_gaming import load_pipewire_gaming, pipewire_gaming_status
-                c = load_pipewire_gaming()
-                self._clean_status.setText(f"pipewire {c['profile']} q={c['quantum']} active={pipewire_gaming_status()}")
-            elif which == "btrfsauto":
-                from kyth_shared.btrfs_autotune import load_btrfs_autotune
-                c = load_btrfs_autotune()
-                self._clean_status.setText(f"btrfs-auto {c['enabled']} thr={c['threshold']}")
-            elif which == "boot":
-                from kyth_shared.boot_loader import load_loader, loader_status
-                c = load_loader()
-                self._clean_status.setText(f"boot fast={c['fast']} {loader_status()}")
-            elif which == "oomg":
-                from kyth_shared.oom_gaming import load_oom_gaming, oom_gaming_status
-                c = load_oom_gaming()
-                self._clean_status.setText(f"oom-gaming {c['profile']} {oom_gaming_status()}")
-            elif which == "shader":
-                from kyth_shared.shader_tmpfs import load_shader_tmpfs, shader_tmpfs_status
-                c = load_shader_tmpfs()
-                self._clean_status.setText(f"shader {c['enabled']} {shader_tmpfs_status()}")
-            elif which == "cfs":
-                from kyth_shared.gaming_cfs import load_gaming_cfs, gaming_cfs_status
-                c = load_gaming_cfs()
-                self._clean_status.setText(f"cfs {c['profile']} {gaming_cfs_status()}")
-            elif which == "audit":
-                from kyth_shared.perf_audit import collect_audit
-                a = collect_audit()
-                self._clean_status.setText(f"audit master={a.get('master')} {a.get('systemd_analyze','')[:40]}")
-            restyle(self._clean_status)
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
-            self._clean_status.setText(f"{which} failed — {exc}")
-            restyle(self._clean_status)
+        self._clean_worker = DataWorker("clean-perf-status", gather_clean_status)
+        self._clean_worker.result.connect(guard_disposed(lambda _k, statuses: self._apply_clean_status(statuses)))
+        self._clean_worker.failed.connect(lambda _k, _m: None)
+        self._clean_worker.finished.connect(lambda: setattr(self, "_clean_worker", None))
+        self._clean_worker.finished.connect(self._clean_worker.deleteLater)
+        self._clean_worker.start()
+
+    def _apply_clean_status(self, statuses: object) -> None:
+        if not isinstance(statuses, dict):
+            return
+        for key, badge in self._clean_badges.items():
+            text, active = statuses.get(key, ("unknown", False))
+            badge.setText(str(text))
+            badge.set_status("ok" if active else "dim")
+
+    def _run_audit(self) -> None:
+        if self._audit_worker is not None:
+            return
+        self._audit_label.setText("Running full audit…")
+        restyle(self._audit_label)
+
+        def _run():
+            from kyth_shared.perf_audit import collect_audit, format_audit
+
+            return format_audit(collect_audit(force=True))
+
+        self._audit_worker = DataWorker("perf-audit", _run)
+        self._audit_worker.result.connect(guard_disposed(lambda _k, text: (self._audit_label.setText(str(text)), restyle(self._audit_label))))
+        self._audit_worker.failed.connect(guard_disposed(lambda _k, msg: (self._audit_label.setText(f"Audit failed — {msg}"), restyle(self._audit_label))))
+        self._audit_worker.finished.connect(lambda: setattr(self, "_audit_worker", None))
+        self._audit_worker.finished.connect(self._audit_worker.deleteLater)
+        self._audit_worker.start()
 
     def _make_game_boost_card(self):
         from .page_performance_cards_game_boost import make_game_boost_card

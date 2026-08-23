@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 
 
 def make_game_boost_card(page: "PerformancePage"):
-    from .widgets import _make_card
-    from .qt import QLabel, QPushButton, QHBoxLayout, QCheckBox, QComboBox
+    from .widgets import ToggleSwitch, _make_card
+    from .qt import QLabel, QPushButton, QHBoxLayout, QComboBox
 
     card, layout = _make_card("card-accent-ok")
     title = QLabel("Game Boost — one switch for latency, scheduler, overlay")
@@ -28,11 +28,15 @@ def make_game_boost_card(page: "PerformancePage"):
     page._boost_sched_combo = QComboBox()
     page._boost_sched_combo.addItems(["scx_rusty", "scx_lavd", "scx_bpfland"])
     row.addWidget(page._boost_sched_combo)
-    page._boost_mh_check = QCheckBox("MangoHud")
-    page._boost_mh_check.setChecked(True)
+    mh_label = QLabel("MangoHud")
+    mh_label.setObjectName("card-copy")
+    row.addWidget(mh_label)
+    page._boost_mh_check = ToggleSwitch(checked=True)
     row.addWidget(page._boost_mh_check)
-    page._boost_latency_check = QCheckBox("Low latency")
-    page._boost_latency_check.setChecked(True)
+    latency_label = QLabel("Low latency")
+    latency_label.setObjectName("card-copy")
+    row.addWidget(latency_label)
+    page._boost_latency_check = ToggleSwitch(checked=True)
     row.addWidget(page._boost_latency_check)
     layout.addLayout(row)
     btns = QHBoxLayout()

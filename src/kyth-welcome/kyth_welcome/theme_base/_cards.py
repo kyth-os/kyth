@@ -265,4 +265,22 @@ QLabel#drop-title {{
     letter-spacing: -0.2px;
     color: {KYTH_TEXT};
 }}
+
+/* ── Setting rows — name + description + trailing switch/badge ─────────── */
+QFrame#setting-row {{
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid {KYTH_HAIRLINE};
+}}
+
+QLabel#setting-row-title {{
+    font-size: 13px;
+    font-weight: 600;
+    color: {KYTH_TEXT};
+}}
+
+QLabel#setting-row-subtitle {{
+    font-size: 12px;
+    color: {KYTH_TEXT_MUTED};
+}}
 """

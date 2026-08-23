@@ -4,7 +4,7 @@ Windows Settings density without bento: plain QFrame#card, 2-col grid.
 """
 from __future__ import annotations
 
-from ..qt import QFrame, QGridLayout, QLabel, QVBoxLayout
+from ..qt import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget, Qt
 
 
 def _make_card(name: str = "card") -> tuple[QFrame, QVBoxLayout]:
@@ -44,6 +44,34 @@ def _make_grid(container: QVBoxLayout) -> QGridLayout:
     grid.setColumnStretch(1, 1)
     container.addLayout(grid)
     return grid
+
+
+def _make_setting_row(title: str, subtitle: str, control: QWidget) -> QFrame:
+    """One row inside a settings card: name (+ optional one-line
+    description) on the left, a single trailing control — a ToggleSwitch,
+    a PillBadge, a button — on the right. The Windows-Settings list-row
+    shape, shared so pages stop hand-rolling their own QHBoxLayout around a
+    bare QCheckBox for every on/off setting."""
+    row = QFrame()
+    row.setObjectName("setting-row")
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 8, 0, 8)
+    layout.setSpacing(16)
+
+    text_col = QVBoxLayout()
+    text_col.setSpacing(2)
+    title_lbl = QLabel(title)
+    title_lbl.setObjectName("setting-row-title")
+    title_lbl.setWordWrap(True)
+    text_col.addWidget(title_lbl)
+    if subtitle:
+        sub_lbl = QLabel(subtitle)
+        sub_lbl.setObjectName("setting-row-subtitle")
+        sub_lbl.setWordWrap(True)
+        text_col.addWidget(sub_lbl)
+    layout.addLayout(text_col, 1)
+    layout.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
+    return row
 
 
 def _divider() -> QFrame:

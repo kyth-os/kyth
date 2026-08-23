@@ -16,8 +16,8 @@ __all__ = [
     "QListWidget", "QListWidgetItem", "QGraphicsOpacityEffect",
     "QMenu", "QSystemTrayIcon",
     "Qt", "QThread", "Signal", "QTimer", "QUrl", "QLibraryInfo", "QSize", "QRect", "QStringListModel",
-    "QPropertyAnimation", "QEasingCurve",
-    "QDesktopServices", "QIcon", "QKeySequence", "QShortcut", "QAction",
+    "QPropertyAnimation", "QEasingCurve", "Property",
+    "QDesktopServices", "QIcon", "QKeySequence", "QShortcut", "QAction", "QPainter", "QColor",
     "QDBusConnection", "QDBusInterface", "QDBusMessage",
     "QLocalServer", "QLocalSocket",
     "QWebEngineView", "QWebEnginePage", "QWebEngineProfile", "QWebEngineUrlScheme",
@@ -38,9 +38,9 @@ try:
     )
     from PySide6.QtCore import (
         Qt, QThread, Signal, QTimer, QUrl, QLibraryInfo, QSize, QRect, QStringListModel,
-        QPropertyAnimation, QEasingCurve,
+        QPropertyAnimation, QEasingCurve, Property,
     )
-    from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction
+    from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction, QPainter, QColor
     from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
@@ -60,7 +60,8 @@ except ImportError:
         QPropertyAnimation, QEasingCurve,
     )
     from PyQt6.QtCore import pyqtSignal as Signal
-    from PyQt6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction
+    from PyQt6.QtCore import pyqtProperty as Property
+    from PyQt6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut, QAction, QPainter, QColor
     from PyQt6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
     from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
