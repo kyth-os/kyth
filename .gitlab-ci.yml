@@ -8,6 +8,7 @@ stages:
   - build
 
 variables:
+  KYTH_TEST_MODE: "1"
   ACTIONLINT_VERSION: "1.7.7"
   HADOLINT_VERSION: "2.14.0"
   JUST_VERSION: "1.52.0"
