@@ -118,7 +118,8 @@ unexpected="$(printf '%s\n' "${output}" |
 		-e '^[^:]+: Command .+ is not executable: No such file or directory$' \
 		-e '^Failed to turn off SO_PASSRIGHTS on user lookup socket, ignoring: Operation not permitted$' \
 		-e '^Failed to enable SO_PASSCRED on handoff timestamp socket(, ignoring)?: Operation not permitted$' \
-		-e '^ERROR: ld\.so: object .* cannot be preloaded .* ignored\.$' ||
+		-e '^ERROR: ld\.so: object .* cannot be preloaded .* ignored\.$' \
+		-e '^Configuration file .* is marked world-writable\. Please remove world writability permission bits\. Proceeding anyway\.$' ||
 	true)"
 if [[ -n "${unexpected}" ]]; then
 	printf 'Unexpected systemd verification errors:\n%s\n' "${unexpected}" >&2
