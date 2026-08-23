@@ -28,6 +28,15 @@ install -Dm0755 /ctx/kyth-greenboot-failure /etc/greenboot/red.d/40_kyth_record_
 # into a reboot loop.
 install -d /usr/lib/systemd/system/greenboot-healthcheck.service.d
 cat >/usr/lib/systemd/system/greenboot-healthcheck.service.d/40-kyth-timeout.conf <<'EOF'
+[Unit]
+# Poll after restorecon so a large /var/home cannot consume the
+# display-manager deadline and mark a healthy first boot red.
+After=kyth-selinux-relabel-home.service
 [Service]
 TimeoutStartSec=600
+# Upstream is Type=oneshot without RemainAfterExit; Wants= from
+# multi-user.target would otherwise restart it into start-limit.
+RemainAfterExit=yes
+StartLimitIntervalSec=120
+StartLimitBurst=5
 EOF

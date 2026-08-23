@@ -71,7 +71,9 @@ DefaultDependencies=no
 Type=oneshot
 RemainAfterExit=yes
 TimeoutStartSec=300
-ExecStart=/usr/libexec/kyth-refresh-boot-splash-initramfs
+# '-' so a dracut/inspect failure cannot list this unit as failed every
+# boot. refresh() already no-ops when /boot stays read-only.
+ExecStart=-/usr/libexec/kyth-refresh-boot-splash-initramfs
 
 [Install]
 WantedBy=multi-user.target

@@ -8,6 +8,7 @@ import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 SELINUX_UNIT = (
     ROOT / "build_files/scripts/sysconfig/systemd"
@@ -21,7 +22,7 @@ class BootStabilityUnitTests(unittest.TestCase):
     def test_selinux_home_relabel_is_capped_and_still_before_greeter(self) -> None:
         body = SELINUX_UNIT.read_text(encoding="utf-8")
         self.assertIn("Before=plasmalogin.service", body)
-        self.assertIn("TimeoutStartSec=180", body)
+        self.assertIn("TimeoutStartSec=300", body)
 
     def test_boot_mutators_have_timeouts_and_path_trigger_limit(self) -> None:
         body = BOOT_SPLASH.read_text(encoding="utf-8")
@@ -156,6 +157,8 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertNotIn("Requires=network-online.target", body)
         self.assertIn("ExecCondition=", body)
         self.assertIn("grep -qx flathub", body)
+        self.assertIn("will retry next boot", body)
+        self.assertNotIn("ExecStartPost=/bin/touch", body)
 
     def test_qemu_guest_agent_is_vm_only(self) -> None:
         body = (
@@ -232,6 +235,45 @@ class BootStabilityUnitTests(unittest.TestCase):
         )
         self.assertIn("remount,bind,rw /boot", guard)
         self.assertIn('["mount", "-o", "remount,bind,rw", "/boot"]', ply)
+        repair = (
+            ROOT / "build_files/scripts/repair-current-plymouth-initramfs.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("remount,bind,rw /boot", repair)
+
+    def test_greenboot_waits_for_selinux_relabel_and_stays_active(self) -> None:
+        from kyth_shared.system.boot_runtime import DEFAULT_DEADLINE
+
+        body = (
+            ROOT / "build_files/scripts/branding/35-diagnostic-script-installs.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("After=kyth-selinux-relabel-home.service", body)
+        self.assertIn("TimeoutStartSec=600", body)
+        self.assertIn("RemainAfterExit=yes", body)
+        self.assertGreaterEqual(DEFAULT_DEADLINE, 300.0)
+
+    def test_probe_oneshot_stays_active_for_timer(self) -> None:
+        body = (ROOT / "build_files/kyth-probe.service").read_text(encoding="utf-8")
+        self.assertIn("RemainAfterExit=yes", body)
+        self.assertIn("StartLimitBurst=5", body)
+
+    def test_power_arbiter_can_retrigger_without_start_limit(self) -> None:
+        body = (ROOT / "build_files/kyth-power-arbiter.service").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("RemainAfterExit=no", body)
+        self.assertIn("StartLimitBurst=20", body)
+        self.assertNotIn("PrivateUsers=yes", body)
+
+    def test_scx_loader_skips_when_unconfigured(self) -> None:
+        unit = (ROOT / "build_files/kyth-scx-loader.service").read_text(encoding="utf-8")
+        script = (ROOT / "build_files/kyth-scx-loader").read_text(encoding="utf-8")
+        self.assertIn("ConditionPathExists=/etc/scx/scx_loader.conf", unit)
+        self.assertIn("leaving sched_ext unset", script)
+        self.assertNotIn("exit 1", script.split("missing", 1)[1].split("scheduler", 1)[0])
+
+    def test_splash_initramfs_cannot_fail_the_boot_unit_list(self) -> None:
+        body = BOOT_SPLASH.read_text(encoding="utf-8")
+        self.assertIn("ExecStart=-/usr/libexec/kyth-refresh-boot-splash-initramfs", body)
 
 
 class InstallerMokFailClosedTests(unittest.TestCase):

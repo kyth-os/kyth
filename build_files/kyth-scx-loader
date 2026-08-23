@@ -3,8 +3,8 @@ set -euo pipefail
 
 config=/etc/scx/scx_loader.conf
 [[ -r "${config}" ]] || {
-	echo "scx_loader: missing ${config}" >&2
-	exit 1
+	echo "scx_loader: missing ${config}; leaving sched_ext unset" >&2
+	exit 0
 }
 
 scheduler=$(awk -F= '/^SCX_SCHEDULER=/{print $2; exit}' "${config}")

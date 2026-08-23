@@ -32,7 +32,7 @@ ConditionSecurity=selinux
 Type=oneshot
 ExecStart=/usr/libexec/kyth-selinux-relabel-home
 RemainAfterExit=yes
-TimeoutStartSec=180
+TimeoutStartSec=300
 
 [Install]
 WantedBy=multi-user.target

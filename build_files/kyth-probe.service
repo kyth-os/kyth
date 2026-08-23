@@ -5,6 +5,9 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
+StartLimitIntervalSec=120
+StartLimitBurst=5
 ExecStart=/usr/bin/kyth-probe --system
 CacheDirectory=kyth
 CacheDirectoryMode=0700

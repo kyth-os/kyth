@@ -51,8 +51,13 @@ cleanup() {
 trap cleanup EXIT
 
 if findmnt -no OPTIONS /boot 2>/dev/null | tr ',' '\n' | grep -qx ro; then
-	mount -o remount,rw /boot
-	boot_was_ro=1
+	# remount,rw is EINVAL on the root-subvol bind; bind,rw is the working layout.
+	if mount -o remount,bind,rw /boot 2>/dev/null || mount -o remount,rw /boot 2>/dev/null; then
+		boot_was_ro=1
+	else
+		echo "ERROR: /boot is read-only and could not be remounted" >&2
+		exit 1
+	fi
 fi
 
 mkdir -p \

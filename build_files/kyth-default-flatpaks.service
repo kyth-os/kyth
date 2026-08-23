@@ -20,27 +20,9 @@ ExecCondition=/usr/bin/bash -c 'flatpak remotes --system --columns=name 2>/dev/n
 # --or-update: idempotent — updates if already present, installs if not
 # Keep first boot game-ready without pulling in general desktop, creator, or
 # admin utilities. Those stay available from the KythOS System Hub.
-ExecStart=/usr/bin/flatpak install -y --noninteractive --system --or-update flathub \
-    com.valvesoftware.Steam \
-    net.lutris.Lutris \
-    com.heroicgameslauncher.hgl \
-    com.github.Matoking.protontricks \
-    com.github.mtkennerly.ludusavi \
-    net.davidotek.pupgui2 \
-    com.vysp3r.ProtonPlus \
-    org.x.Warpinator \
-    com.usebottles.bottles \
-    com.github.tchx84.Flatseal \
-    com.dec05eba.gpu_screen_recorder \
-    io.github.benjamimgois.goverlay \
-    io.missioncenter.MissionCenter \
-    org.videolan.VLC \
-    io.github.wivrn.wivrn \
-    com.brave.Browser \
-    org.libreoffice.LibreOffice \
-    eu.betterbird.Betterbird
-ExecStartPost=/bin/mkdir -p /var/lib/kyth
-ExecStartPost=/bin/touch /var/lib/kyth/default-flatpaks-v13-done
+# Stamp only on full success. A flaky first-online pull must exit 0
+# (no --failed entry) and leave the sentinel unset so the next boot retries.
+ExecStart=/usr/bin/bash -c 'set +e; /usr/bin/flatpak install -y --noninteractive --system --or-update flathub com.valvesoftware.Steam net.lutris.Lutris com.heroicgameslauncher.hgl com.github.Matoking.protontricks com.github.mtkennerly.ludusavi net.davidotek.pupgui2 com.vysp3r.ProtonPlus org.x.Warpinator com.usebottles.bottles com.github.tchx84.Flatseal com.dec05eba.gpu_screen_recorder io.github.benjamimgois.goverlay io.missioncenter.MissionCenter org.videolan.VLC io.github.wivrn.wivrn com.brave.Browser org.libreoffice.LibreOffice eu.betterbird.Betterbird; status=$?; if [ "$status" -eq 0 ]; then mkdir -p /var/lib/kyth && touch /var/lib/kyth/default-flatpaks-v13-done; exit 0; fi; echo "kyth-default-flatpaks: install incomplete (exit $status); will retry next boot" >&2; exit 0'
 RemainAfterExit=yes
 Nice=10
 IOSchedulingClass=idle

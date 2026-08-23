@@ -1,6 +1,11 @@
 [Unit]
 Description=Kyth power arbiter (debounced EPP)
 After=local-fs.target
+# udev SYSTEMD_WANTS this on every power_supply change. RemainAfterExit
+# must stay no so AC/BAT transitions re-run the oneshot; a high burst
+# absorbs the boot-time sysfs storm without start-limit-hit.
+StartLimitIntervalSec=30
+StartLimitBurst=20
 
 [Service]
 Type=oneshot
@@ -12,7 +17,7 @@ Nice=15
 IOSchedulingClass=idle
 MemoryMax=384M
 PrivateTmp=yes
-PrivateUsers=yes
+# PrivateUsers remaps root; future sysfs/EPP writes would then fail.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only

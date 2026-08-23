@@ -24,7 +24,10 @@ from typing import Callable, Sequence
 
 from ..commands import run_text
 
-DEFAULT_DEADLINE = 180.0
+# Must clear kyth-selinux-relabel-home (TimeoutStartSec=300) plus greeter
+# startup. The previous 180s budget raced restorecon on large /var/home and
+# scored a healthy first boot red.
+DEFAULT_DEADLINE = 300.0
 DEFAULT_INTERVAL = 2.0
 SYSTEMD_RUNTIME_MARKER = Path("/run/systemd/system")
 DRM_DEVICE_DIR = Path("/dev/dri")
