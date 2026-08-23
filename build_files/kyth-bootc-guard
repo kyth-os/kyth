@@ -10,12 +10,48 @@ set -euo pipefail
     exit 2
 }
 
+# Kyth /boot is a read-only btrfs bind of the root subvol. bootc 1.16+ takes a
+# sysroot write-lock even for `status` and opens the sysroot-relative `boot`
+# directory; that returns EPERM ("Status: opendir(boot): Operation not
+# permitted") until the bind is remounted rw and, when present, /sysroot/boot
+# is bound to the real /boot.
+_prepare_boot() {
+	if [[ -x /usr/libexec/kyth-finalize-staged ]]; then
+		/usr/libexec/kyth-finalize-staged prepare-boot >/dev/null 2>&1 || true
+		return
+	fi
+	mount -o remount,bind,rw /boot 2>/dev/null || mount -o remount,rw /boot 2>/dev/null || true
+	if [[ -d /sysroot/boot ]] && ! findmnt -n /sysroot/boot >/dev/null 2>&1; then
+		mount --bind /boot /sysroot/boot 2>/dev/null || true
+	fi
+}
+
+_bootc_status() {
+	local extra=()
+	if [[ "${1:-}" == json ]]; then
+		extra+=(--json)
+	fi
+	_prepare_boot
+	if /usr/bin/bootc status "${extra[@]}"; then
+		return 0
+	fi
+	local rc=$?
+	if [[ "${1:-}" == json ]]; then
+		echo "kyth-bootc-guard: bootc status failed (often opendir(boot) EPERM on the /boot bind). Try: sudo kyth-finalize-staged prepare-boot" >&2
+		return "${rc}"
+	fi
+	echo "kyth-bootc-guard: bootc status could not open /boot; showing rpm-ostree status." >&2
+	/usr/bin/rpm-ostree status
+}
+
 case "$1" in
     status)
-        exec /usr/bin/bootc status
+        _bootc_status
+        exit $?
         ;;
     status-json)
-        exec /usr/bin/bootc status --json
+        _bootc_status json
+        exit $?
         ;;
     switch-latest)
         ref="ghcr.io/mrtrick37/kyth:latest"
@@ -35,6 +71,7 @@ case "$1" in
         ;;
 esac
 
+_prepare_boot
 /usr/bin/bootc switch "${ref}"
 if [[ -x /usr/libexec/kyth-finalize-staged ]]; then
 	exec /usr/libexec/kyth-finalize-staged

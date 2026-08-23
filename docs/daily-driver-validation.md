@@ -128,7 +128,7 @@ A release candidate should pass these before being called daily-driver ready:
   system.
 - NVIDIA hardware either loads the proprietary module or gives a clear
   reboot/build path.
-- `ujust kyth-upgrade` stages an update and rebooting activates it.
+- `ujust update` (or `ujust kyth-upgrade`) stages an update and rebooting activates it.
 - The previous deployment remains visible from the boot menu after update.
 - Steam installs or launches, Proton runners are available, and one known-good
   game reaches gameplay.

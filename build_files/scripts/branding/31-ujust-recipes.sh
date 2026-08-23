@@ -1,6 +1,20 @@
 # shellcheck shell=bash
 # ── ujust recipes ─────────────────────────────────────────────────────────────
 # Install KythOS-specific ujust recipes so users can run e.g. "ujust rebase kyth:stable".
+# Neutralize Universal Blue's `update` recipe *before* copying Kyth's just
+# files. Upstream 10-update.just runs `rpm-ostree update` and always prints
+# "Completed rpm-ostree update", even when rpm-ostreed dies mid-pull
+# ("Bus owner changed"). That path also uses ostree-unverified-registry and
+# skips Kyth quarantine/rollout. After this rename, `alias upgrade := update`
+# in the ublue file resolves to Kyth's `update` in 75-kyth.just.
+for ublue_update in \
+	/usr/share/ublue-os/just/10-update.just \
+	/usr/share/ublue-os/just/update.just; do
+	[[ -f "${ublue_update}" ]] || continue
+	sed -i -E \
+		-e 's/^update( VERB_LEVEL=|:)/ublue-legacy-update\1/' \
+		"${ublue_update}"
+done
 mkdir -p /usr/share/ublue-os/just
 cp /ctx/just/kyth.just /usr/share/ublue-os/just/75-kyth.just
 # kyth.just imports its per-domain recipe files from kyth/ next to itself

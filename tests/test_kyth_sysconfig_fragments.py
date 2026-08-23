@@ -154,6 +154,16 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn("/usr/libexec/kyth-finalize-staged", guard)
         self.assertNotIn("exec /usr/bin/bootc switch", guard)
 
+    def test_bootc_guard_prepares_boot_before_status(self):
+        """bootc status opens sysroot-relative `boot` and returns EPERM on the
+        Kyth read-only /boot bind until prepare-boot remounts it.
+        """
+        guard = (ROOT / "build_files" / "kyth-bootc-guard").read_text(encoding="utf-8")
+        self.assertIn("kyth-finalize-staged prepare-boot", guard)
+        self.assertIn("opendir(boot)", guard)
+        self.assertIn("/usr/bin/rpm-ostree status", guard)
+        self.assertNotIn("exec /usr/bin/bootc status", guard)
+
     def test_upgrade_sudoers_never_grants_podman(self):
         fragment = (
             FRAG_DIR / "systemd/35-sudoers-passwordless-safe-upgrade-firmware-operati.sh"

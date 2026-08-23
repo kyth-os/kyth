@@ -2,6 +2,18 @@
 # so this stays valid both standalone and when pulled in via kyth.just.
 import 'common.just'
 
+# Update the OS image, Flatpaks, firmware, and rclone via the guarded path.
+# Replaces Universal Blue's `ujust update`, which calls `rpm-ostree update`
+# (ostree-unverified-registry, no quarantine) and prints "Completed" even
+# when rpm-ostreed crashes mid-pull ("Bus owner changed").
+# VERB_LEVEL is accepted for ublue compatibility and ignored.
+[group('KythOS')]
+update VERB_LEVEL="full":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    _="{{ VERB_LEVEL }}"
+    exec /usr/bin/kyth-full-update
+
 # Upgrade the OS and Flatpak apps.
 # Pulls the latest KythOS image via bootc and updates all Flatpak apps.
 
@@ -104,7 +116,11 @@ apply-staged:
 status:
     #!/usr/bin/env bash
     set -euo pipefail
-    bootc status
+    if [[ -x /usr/bin/kyth-bootc-guard ]]; then
+        sudo -n /usr/bin/kyth-bootc-guard status
+    else
+        bootc status
+    fi
 
 # Show the digest-aware boot health and quarantined update records.
 [group('KythOS')]

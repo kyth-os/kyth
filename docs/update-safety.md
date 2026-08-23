@@ -69,10 +69,69 @@ ujust retry-quarantined-update sha256:FULL_DIGEST
 Clearing quarantine does not immediately update or reboot the machine. It only
 allows the normal update watcher to consider that digest again.
 
-System Hub, `ujust kyth-upgrade`, the full updater, and the Hub-independent
-fallback updater all use `kyth-safe-upgrade`. Direct `sudo bootc upgrade`
+System Hub, `ujust update` (and the `upgrade` alias), `ujust kyth-upgrade`,
+the full updater, and the Hub-independent fallback updater all use
+`kyth-safe-upgrade`. Direct `sudo bootc upgrade`
 remains available as an expert escape hatch, but requires normal administrator
 authentication and deliberately bypasses KythOS quarantine policy.
+
+## Troubleshooting: `Bus owner changed` during `ujust update`
+
+Symptom: `ujust update` prints `Running rpm-ostree update...`, pulls
+`ostree-unverified-registry:ghcr.io/...`, then fails with:
+
+```
+error: Bus owner changed, aborting. This likely means the daemon crashed; check logs with `journalctl -xe`.
+Completed rpm-ostree update
+```
+
+That is Universal Blue's leftover recipe, not Kyth's updater. It always
+prints "Completed" in full mode, even when `rpm-ostreed` dies. A concurrent
+`rpm-ostreed-automatic` stage (the "automatic updates (stage) are enabled"
+note) is a common trigger during a multi-GB ostree chunk fetch.
+
+On a machine that still has the old recipe:
+
+```bash
+sudo systemctl stop rpm-ostreed-automatic.timer rpm-ostreed-automatic.service
+sudo systemctl restart rpm-ostreed
+ujust kyth-upgrade
+```
+
+Current images make `ujust update` run `kyth-full-update` (bootc +
+quarantine) and set `AutomaticUpdatePolicy=none` so the two pullers cannot
+race.
+
+## Troubleshooting: `opendir(boot): Operation not permitted`
+
+Symptom:
+
+```
+$ sudo bootc status
+error: Status: opendir(boot): Operation not permitted
+```
+
+Kyth `/boot` is a read-only bind of the root btrfs subvol (the same layout
+that makes a plain `remount,rw` return EINVAL). `bootc status` still takes a
+sysroot write-lock and opens the sysroot-relative `boot` directory; that
+`opendir` returns EPERM until the bind is remounted and, when present,
+`/sysroot/boot` is bound to the real `/boot`.
+
+```bash
+sudo kyth-finalize-staged prepare-boot
+sudo bootc status
+```
+
+If `prepare-boot` is not on this image:
+
+```bash
+sudo mount -o remount,bind,rw /boot
+sudo bootc status
+```
+
+`rpm-ostree status` does not need that open and still shows the booted and
+rollback deployments. `ujust status` and `kyth-bootc-guard status` remount
+`/boot` first and fall back to `rpm-ostree status` when bootc still fails.
 
 ## Troubleshooting: Staged Upgrade Not Taking Effect
 
