@@ -22,6 +22,14 @@ systemctl --global enable kyth-proton-cachyos-update.timer 2>/dev/null || true
 # Without wait-online, network-online.target is reached instantly and the
 # flatpak units below race DNS at boot and fail. Enabling it only delays
 # units ordered After=network-online.target, not the rest of boot.
+# nm-online exits 1 when there is no connectivity; treat that as success
+# so an offline/Wi-Fi-first boot does not list this unit as failed.
+# Flathub/default-flatpaks already skip when there is no default route.
+install -d /usr/lib/systemd/system/NetworkManager-wait-online.service.d
+cat > /usr/lib/systemd/system/NetworkManager-wait-online.service.d/10-kyth-offline.conf <<'NMWONLINE'
+[Service]
+SuccessExitStatus=1
+NMWONLINE
 systemctl enable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl enable kyth-flathub-setup.service 2>/dev/null || true
 systemctl enable kyth-default-flatpaks.service 2>/dev/null || true

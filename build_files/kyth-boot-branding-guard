@@ -10,7 +10,7 @@ cleanup() {
 trap cleanup EXIT
 
 if findmnt -no OPTIONS /boot 2>/dev/null | tr ',' '\n' | grep -qx ro; then
-    if mount -o remount,rw /boot 2>/dev/null; then
+    if mount -o remount,bind,rw /boot 2>/dev/null || mount -o remount,rw /boot 2>/dev/null; then
         boot_was_ro=1
     else
         echo "WARNING: /boot is read-only; bootloader branding repair will skip unwritable entries" >&2

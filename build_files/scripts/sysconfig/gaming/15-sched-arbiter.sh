@@ -14,7 +14,7 @@ install -Dm0755 /ctx/kyth-sched-arbiter /usr/bin/kyth-sched-arbiter
 write_config /usr/lib/systemd/system/kyth-sched-arbiter.service <<'ARBSVCEOF'
 [Unit]
 Description=Kyth scheduler arbiter (single placement owner)
-After=multi-user.target
+After=local-fs.target
 Before=gamemode.service
 StartLimitIntervalSec=60
 StartLimitBurst=3
@@ -23,8 +23,6 @@ StartLimitBurst=3
 Type=oneshot
 ExecStart=/usr/bin/kyth-sched-arbiter apply
 RemainAfterExit=yes
-Restart=on-failure
-RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

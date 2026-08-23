@@ -45,7 +45,12 @@ rpm -q --whatprovides mesa-va-drivers
 rpm -q --whatprovides /usr/lib64/dri/radeonsi_drv_video.so
 test -e /usr/lib64/dri/radeonsi_drv_video.so
 
-# qemu-guest-agent is socket-activated on Fedora but the socket is only
-# created when running inside a VM. Enable it unconditionally — systemd
-# no-ops it on bare metal when the virtio-serial device is absent.
+# qemu-ga's Fedora unit is not conditioned on virtualization. Enabling
+# it unconditionally makes qemu-ga fail on bare metal (no virtio-serial).
+# Restrict the unit to VMs; keep it enabled so guests still get it.
+install -d /usr/lib/systemd/system/qemu-guest-agent.service.d
+cat > /usr/lib/systemd/system/qemu-guest-agent.service.d/10-kyth-vm-only.conf <<'QEMUGA'
+[Unit]
+ConditionVirtualization=vm
+QEMUGA
 systemctl enable qemu-guest-agent.service 2>/dev/null || true

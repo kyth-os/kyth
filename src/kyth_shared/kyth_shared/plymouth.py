@@ -229,7 +229,9 @@ def refresh() -> int:
         and "ro" in options.stdout.strip().split(",")
     )
     if boot_was_readonly:
-        remount = run_optional(["mount", "-o", "remount,rw", "/boot"])
+        remount = run_optional(["mount", "-o", "remount,bind,rw", "/boot"])
+        if remount is None or remount.returncode:
+            remount = run_optional(["mount", "-o", "remount,rw", "/boot"])
         if remount is None or remount.returncode:
             print(
                 "WARNING: /boot is read-only and could not be remounted; "

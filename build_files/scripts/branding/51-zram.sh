@@ -92,7 +92,7 @@ SWAPDEV
 write_config /usr/lib/systemd/system/kyth-boot-timing.service <<'BOOTTIMING'
 [Unit]
 Description=Kyth boot timing log (zram/udev)
-After=multi-user.target
+After=local-fs.target
 ConditionPathExists=/usr/bin/journalctl
 
 [Service]

@@ -2,10 +2,11 @@
 Description=Add Flathub remote for Flatpak
 Documentation=https://github.com/mrtrick37/kyth
 After=network-online.target
-# Requires= (not just Wants=) so systemd does not start this service when
-# there is no network — Wants= is advisory and allows the unit to start even
-# if network-online never becomes active (e.g. offline boot).
-Requires=network-online.target
+# Wants= (not Requires=): a failed/unreached network-online.target would
+# otherwise list this unit as failed on every offline boot. The ExecStart
+# loop already no-ops when Flathub is present and exits 0 if there is no
+# default route (see below).
+Wants=network-online.target
 # Flatpak remotes live in /var — only configurable at runtime, not build time.
 # This service is idempotent: --if-not-exists means it exits immediately if
 # Flathub is already configured (e.g. after the first successful run).
@@ -18,7 +19,9 @@ Type=oneshot
 RemainAfterExit=yes
 # Retry inside ExecStart: DNS can lag network-online at first boot, and
 # Restart= is not allowed on oneshot units with RemainAfterExit=yes.
-ExecStart=/bin/sh -c 'for i in $(seq 1 18); do flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo && exit 0; sleep 10; done; exit 1'
+# Offline / no default route: do not burn 3 minutes then fail the boot.
+ExecCondition=/usr/bin/bash -c 'ip -4 route show default | grep -q . || ip -6 route show default | grep -q .'
+ExecStart=/bin/sh -c 'for i in $(seq 1 18); do flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo && exit 0; sleep 10; done; exit 0'
 TimeoutStartSec=300
 # Mostly sleeping in the retry loop above, but can span minutes at boot —
 # deprioritized so it never competes with early login for cycles.
@@ -26,10 +29,11 @@ Nice=15
 IOSchedulingClass=idle
 MemoryMax=384M
 PrivateTmp=yes
-PrivateUsers=yes
+# PrivateUsers remaps root; remote-add must write /var/lib/flatpak as real uid 0.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=-/var/lib/flatpak -/var/cache/flatpak
 ProtectClock=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

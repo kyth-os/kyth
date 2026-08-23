@@ -1,6 +1,6 @@
 [Unit]
 Description=Kyth power arbiter (debounced EPP)
-After=multi-user.target
+After=local-fs.target
 
 [Service]
 Type=oneshot

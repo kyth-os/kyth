@@ -88,7 +88,9 @@ class SystemServiceHardeningTests(unittest.TestCase):
         mok = (ROOT / "build_files/kyth-enroll-mok.service").read_text()
         hw = (ROOT / "build_files/kyth-hw-setup.service").read_text()
         self.assertIn("ReadWritePaths=/sys/class/power_supply", battery)
-        self.assertIn("ReadWritePaths=/sys/firmware/efi/efivars", mok)
+        # '-' so a missing efivars mount (BIOS / no EFI) cannot fail
+        # namespace setup on every boot.
+        self.assertIn("ReadWritePaths=-/sys/firmware/efi/efivars", mok)
         # ProtectSystem=strict without these is EROFS on /etc/modprobe.d at boot.
         # Optional NVIDIA/scx/boot paths are '-' prefixed so a missing dir
         # cannot fail namespace setup on AMD-only hosts.

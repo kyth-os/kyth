@@ -10,7 +10,8 @@ RequiresMountsFor=/boot
 Type=oneshot
 RemainAfterExit=yes
 # remount,rw is EINVAL on the root-subvol bind; bind,rw is the working layout.
-ExecStart=/usr/bin/mount -o remount,bind,rw /boot
+# '-' so a missing /boot mount cannot fail sysinit.
+ExecStart=-/usr/libexec/kyth-finalize-staged prepare-boot
 
 [Install]
 WantedBy=sysinit.target

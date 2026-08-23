@@ -1,6 +1,6 @@
 [Unit]
 Description=Kyth scheduler arbiter (single placement owner)
-After=multi-user.target
+After=local-fs.target
 Before=gamemode.service
 StartLimitIntervalSec=60
 StartLimitBurst=3
@@ -16,13 +16,14 @@ Nice=15
 IOSchedulingClass=idle
 CPUQuota=25%
 MemoryMax=384M
-Restart=on-failure
-RestartSec=5
+# Restart= is not valid with Type=oneshot RemainAfterExit=yes.
 PrivateTmp=yes
-PrivateUsers=yes
+# PrivateUsers remaps root and cannot write /etc/gamemode.ini.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
+RuntimeDirectory=kyth
+ReadWritePaths=-/etc/gamemode.ini
 ProtectClock=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

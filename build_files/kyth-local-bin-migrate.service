@@ -6,16 +6,22 @@ ConditionPathExists=!/var/lib/kyth/migrations/local-bin-v1.done
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-local-bin-migrate
+RemainAfterExit=yes
 # Runs once ever (marker-gated), at boot — deprioritized so it never
 # competes with early login/session startup for cycles.
 Nice=15
 IOSchedulingClass=idle
 MemoryMax=384M
 PrivateTmp=yes
-PrivateUsers=yes
+# PrivateUsers remaps root and cannot rewrite /var/home/*/…autostart.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
+# Marker is /var/lib/kyth/migrations; binaries live on ostree-writable
+# /usr/local; user autostart files are under /var/home.
+StateDirectory=kyth/migrations
+StateDirectoryMode=0700
+ReadWritePaths=-/usr/local/bin -/var/home -/root
 ProtectClock=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

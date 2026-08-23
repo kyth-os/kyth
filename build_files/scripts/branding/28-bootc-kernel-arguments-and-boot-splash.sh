@@ -11,12 +11,13 @@ write_config /usr/lib/systemd/system/kyth-boot-splash-kargs.service <<'SPLASHKAR
 [Unit]
 Description=KythOS boot splash kernel argument migration
 ConditionPathExists=!/var/lib/kyth/boot-splash-kargs-v3
-After=local-fs.target
+After=local-fs.target kyth-boot-rw.service
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 TimeoutStartSec=60
-ExecStart=/usr/bin/bash -c 'set -e; mkdir -p /var/lib/kyth; if command -v grubby >/dev/null 2>&1; then grubby --update-kernel=ALL --remove-args="console=tty0 console=ttyS0,115200 amdgpu.ppfeaturemask=0xffffffff pcie_aspm=performance"; grubby --update-kernel=ALL --args="quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 threadirqs split_lock_detect=off rootflags=noatime,compress=zstd:1,ssd,discard=async,commit=30"; fi; touch /var/lib/kyth/boot-splash-kargs-v3'
+ExecStart=/usr/bin/bash -c 'set -e; mkdir -p /var/lib/kyth; /usr/libexec/kyth-finalize-staged prepare-boot >/dev/null 2>&1 || true; if command -v grubby >/dev/null 2>&1; then grubby --update-kernel=ALL --remove-args="console=tty0 console=ttyS0,115200 amdgpu.ppfeaturemask=0xffffffff pcie_aspm=performance" || true; grubby --update-kernel=ALL --args="quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 threadirqs split_lock_detect=off rootflags=noatime,compress=zstd:1,ssd,discard=async,commit=30" || true; fi; touch /var/lib/kyth/boot-splash-kargs-v3'
 
 [Install]
 WantedBy=multi-user.target
@@ -29,10 +30,11 @@ install -m 0755 /ctx/kyth-boot-branding-guard /usr/libexec/kyth-boot-branding-gu
 write_config /usr/lib/systemd/system/kyth-boot-branding.service <<'BOOTBRANDINGSERVICEEOF'
 [Unit]
 Description=Refresh KythOS bootloader branding
-After=local-fs.target
+After=local-fs.target kyth-boot-rw.service
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 TimeoutStartSec=60
 ExecStart=/usr/libexec/kyth-boot-branding-guard
 
@@ -62,11 +64,12 @@ install -m 0755 /ctx/kyth-refresh-boot-splash-initramfs /usr/libexec/kyth-refres
 write_config /usr/lib/systemd/system/kyth-boot-splash-initramfs.service <<'SPLASHINITRDEOF'
 [Unit]
 Description=Refresh KythOS boot splash initramfs
-After=local-fs.target ostree-remount.service
+After=local-fs.target ostree-remount.service kyth-boot-rw.service
 DefaultDependencies=no
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 TimeoutStartSec=300
 ExecStart=/usr/libexec/kyth-refresh-boot-splash-initramfs
 
@@ -85,7 +88,13 @@ ConditionPathExists=!/var/lib/kyth/first-boot-done
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/first-boot-done && plymouth message --text="After login, open Kyth Hub to finish installing your preferred software."'
+RemainAfterExit=yes
+StateDirectory=kyth
+# Write the sentinel first so a missing Plymouth daemon cannot fail
+# this unit on every subsequent boot.
+ExecStart=/usr/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/first-boot-done'
+ExecStart=-/usr/bin/plymouth --ping
+ExecStart=-/usr/bin/plymouth message --text="After login, open Kyth Hub to finish installing your preferred software."
 
 [Install]
 WantedBy=basic.target

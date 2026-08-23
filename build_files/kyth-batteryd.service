@@ -1,6 +1,6 @@
 [Unit]
 Description=Kyth Battery charge limit daemon
-After=multi-user.target
+After=local-fs.target
 StartLimitIntervalSec=60
 StartLimitBurst=3
 

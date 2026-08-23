@@ -26,5 +26,5 @@ MemoryHigh=384M
 MemoryMax=768M
 TimeoutStartSec=3600
 
-[Install]
-WantedBy=multi-user.target
+# Timer-activated only. WantedBy=multi-user.target would run a 1h scrub
+# on every boot when someone enables the service instead of the timer.

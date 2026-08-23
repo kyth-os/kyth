@@ -57,7 +57,6 @@ class BootStabilityUnitTests(unittest.TestCase):
             ROOT / "build_files/kyth-batteryd.service",
             ROOT / "build_files/rclone@.service",
             ROOT / "build_files/kyth-telem.service",
-            ROOT / "build_files/kyth-sched-arbiter.service",
         )
         for path in units:
             body = path.read_text(encoding="utf-8")
@@ -68,6 +67,20 @@ class BootStabilityUnitTests(unittest.TestCase):
         zram = (ROOT / "build_files/scripts/branding/51-zram.sh").read_text(encoding="utf-8")
         self.assertIn("StartLimitIntervalSec=60", zram)
         self.assertIn("StartLimitBurst=3", zram)
+        # oneshot + RemainAfterExit cannot use Restart=; keep a start-limit
+        # so a crash loop still cannot take the boot.
+        arbiter = (ROOT / "build_files/kyth-sched-arbiter.service").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("StartLimitIntervalSec=60", arbiter)
+        self.assertIn("StartLimitBurst=3", arbiter)
+        self.assertNotRegex(arbiter, r"^Restart=", re.M)
+        generated = (
+            ROOT / "build_files/scripts/sysconfig/gaming/15-sched-arbiter.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("After=local-fs.target", generated)
+        self.assertNotIn("Restart=on-failure", generated)
+        self.assertNotRegex(generated, r"^After=multi-user\.target$", re.M)
 
     def test_zram_setup_does_not_wait_for_udev_device(self) -> None:
         """After switch-root, udevd is down until sysinit; sysinit After=swap.
@@ -114,6 +127,111 @@ class BootStabilityUnitTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         dbus_unit = body.split("kyth-dbus-runtime-dir.service", 1)[1]
         self.assertIn("RemainAfterExit=yes", dbus_unit.split("DBUSRUNDIREOF", 1)[0])
+
+    def test_local_bin_migrate_can_write_state_and_homes(self) -> None:
+        body = (ROOT / "build_files/kyth-local-bin-migrate.service").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("RemainAfterExit=yes", body)
+        self.assertIn("StateDirectory=kyth/migrations", body)
+        self.assertIn("ReadWritePaths=-/usr/local/bin -/var/home -/root", body)
+        self.assertNotIn("PrivateUsers=yes", body)
+
+    def test_flathub_setup_skips_offline_and_can_write_flatpak_state(self) -> None:
+        body = (ROOT / "build_files/kyth-flathub-setup.service").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Wants=network-online.target", body)
+        self.assertNotIn("Requires=network-online.target", body)
+        self.assertIn("ExecCondition=", body)
+        self.assertIn("ReadWritePaths=-/var/lib/flatpak -/var/cache/flatpak", body)
+        self.assertNotIn("PrivateUsers=yes", body)
+        self.assertIn("exit 0", body.split("ExecStart=", 1)[1])
+
+    def test_default_flatpaks_do_not_fail_when_flathub_is_absent(self) -> None:
+        body = (ROOT / "build_files/kyth-default-flatpaks.service").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Wants=network-online.target kyth-flathub-setup.service", body)
+        self.assertNotIn("Requires=network-online.target", body)
+        self.assertIn("ExecCondition=", body)
+        self.assertIn("grep -qx flathub", body)
+
+    def test_qemu_guest_agent_is_vm_only(self) -> None:
+        body = (
+            ROOT / "build_files/scripts/packages/13-gpu-amd-and-qemu-guest.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("qemu-guest-agent.service.d", body)
+        self.assertIn("ConditionVirtualization=vm", body)
+
+    def test_boot_rw_uses_prepare_boot_and_cannot_fail_sysinit(self) -> None:
+        body = (
+            ROOT / "build_files/scripts/sysconfig/systemd/kyth-boot-rw.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ExecStart=-/usr/libexec/kyth-finalize-staged prepare-boot", body)
+        self.assertNotIn("mount -o remount,bind,rw /boot", body)
+
+    def test_splash_and_branding_wait_for_writable_boot(self) -> None:
+        body = BOOT_SPLASH.read_text(encoding="utf-8")
+        self.assertGreaterEqual(body.count("After=local-fs.target kyth-boot-rw.service"), 2)
+        self.assertIn("grubby --update-kernel=ALL --remove-args=", body)
+        self.assertIn("|| true", body)
+        self.assertIn("touch /var/lib/kyth/first-boot-done", body)
+        self.assertIn("ExecStart=-/usr/bin/plymouth", body)
+        self.assertLess(
+            body.find("touch /var/lib/kyth/first-boot-done"),
+            body.find('plymouth message --text="After login'),
+        )
+
+    def test_first_boot_plymouth_message_stamps_before_plymouth(self) -> None:
+        body = (
+            ROOT / "build_files/scripts/sysconfig/systemd/33-first-boot-plymouth-message.sh"
+        ).read_text(encoding="utf-8")
+        unit = body.split("FIRSTBOOTEOF", 1)[1].split("FIRSTBOOTEOF", 1)[0]
+        self.assertIn("touch /var/lib/kyth/.first-boot-complete", unit)
+        self.assertIn("ExecStart=-/usr/bin/plymouth", unit)
+        self.assertNotIn("ExecCondition=/usr/bin/plymouth --ping", unit)
+        self.assertLess(
+            unit.find("touch /var/lib/kyth/.first-boot-complete"),
+            unit.find("plymouth message"),
+        )
+
+    def test_wait_online_offline_exit_is_success(self) -> None:
+        body = (ROOT / "build_files/scripts/branding/31-ujust-recipes.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("NetworkManager-wait-online.service.d", body)
+        self.assertIn("SuccessExitStatus=1", body)
+
+    def test_storage_maint_is_timer_only(self) -> None:
+        body = (ROOT / "build_files/kyth-storage-maint.service").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("[Install]", body)
+        self.assertNotRegex(body, r"^WantedBy=", re.M)
+
+    def test_boot_timing_and_batteryd_avoid_multiuser_cycle(self) -> None:
+        timing = (ROOT / "build_files/scripts/branding/51-zram.sh").read_text(
+            encoding="utf-8"
+        )
+        battery = (ROOT / "build_files/kyth-batteryd.service").read_text(encoding="utf-8")
+        power = (ROOT / "build_files/kyth-power-arbiter.service").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("After=local-fs.target", timing)
+        self.assertNotRegex(timing, r"^After=multi-user\.target$", re.M)
+        self.assertIn("After=local-fs.target", battery)
+        self.assertNotIn("After=multi-user.target", battery)
+        self.assertIn("After=local-fs.target", power)
+        self.assertNotIn("After=multi-user.target", power)
+
+    def test_branding_guard_prefers_bind_rw(self) -> None:
+        guard = (ROOT / "build_files/kyth-boot-branding-guard").read_text(encoding="utf-8")
+        ply = (ROOT / "src/kyth_shared/kyth_shared/plymouth.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("remount,bind,rw /boot", guard)
+        self.assertIn('["mount", "-o", "remount,bind,rw", "/boot"]', ply)
 
 
 class InstallerMokFailClosedTests(unittest.TestCase):
