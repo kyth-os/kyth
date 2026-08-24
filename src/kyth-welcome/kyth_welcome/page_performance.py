@@ -12,7 +12,7 @@ from .qt import (
     QComboBox, QHBoxLayout, QLabel, QPushButton, QTimer, QVBoxLayout, QWidget, Qt, single_shot,
 )
 from .widgets import (
-    Page, ToggleSwitch, _make_card,
+    Page, ToggleSwitch, _make_card, _make_setting_row,
 )
 
 # 111-115 vm/net headless — no new welcome modules; PerformancePage reuses single _make_card rows, keeping 215 headroom
@@ -79,19 +79,12 @@ class PerformancePage(Page):
         apply_btn.clicked.connect(self._apply_scheduler)
         ctrl_col.addWidget(apply_btn)
 
-        auto_row = QHBoxLayout()
-        auto_row.setSpacing(8)
-        auto_label = QLabel("Auto-switch (kyth-sched)")
-        auto_label.setObjectName("card-copy")
-        auto_row.addWidget(auto_label)
         self._perf_auto_toggle = ToggleSwitch()
         self._perf_auto_toggle.toggled.connect(self._toggle_sched_daemon)
-        auto_row.addWidget(self._perf_auto_toggle)
-        auto_row.addStretch()
         # Game Boost card will be built below as separate section
         # Game Boost — single Game Night switch (17)
         self._add(self._make_game_boost_card())
-        ctrl_col.addLayout(auto_row)
+        ctrl_col.addWidget(_make_setting_row("Auto-switch (kyth-sched)", "", self._perf_auto_toggle))
 
         # One-click Gaming Preset (5/5) — stage cachyos + scx bore + mangohud together
         preset_btn = QPushButton("Apply Gaming Preset")

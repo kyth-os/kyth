@@ -9,8 +9,8 @@ from .core_base import restyle
 from .services.dbus_utils import is_systemd_unit_enabled
 from .services.launch import popen_privileged, reboot_to_apply
 from .services.privileged import AuthFrontend, systemctl_action
-from .qt import QCheckBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, Qt
-from .widgets import _make_card
+from .qt import QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, Qt
+from .widgets import ToggleSwitch, _make_card, _make_setting_row
 
 _logger = logging.getLogger(__name__)
 
@@ -54,10 +54,9 @@ class _AutoUpdateMixin:
         auto_ctrl_col = QVBoxLayout()
         auto_ctrl_col.setSpacing(8)
         auto_ctrl_col.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._au_enable_toggle = QCheckBox("Enabled")
-        self._au_enable_toggle.setObjectName("card-copy")
+        self._au_enable_toggle = ToggleSwitch()
         self._au_enable_toggle.stateChanged.connect(self._toggle_auto_update)
-        auto_ctrl_col.addWidget(self._au_enable_toggle)
+        auto_ctrl_col.addWidget(_make_setting_row("Enabled", "", self._au_enable_toggle))
         au_trigger_btn = QPushButton("Check Now")
         au_trigger_btn.setToolTip("Manually trigger the update watcher (requires authentication)")
         au_trigger_btn.clicked.connect(self._run_auto_update_now)

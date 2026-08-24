@@ -15,10 +15,10 @@ from ..services.phone_link import (
 from ..services.runtime import DataWorker, guard_disposed, release_worker_when_finished
 from ..services.launch import popen, systemsettings, kcmshell
 from ..qt import (
-    QCheckBox, QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QUrl, single_shot,
+    QComboBox, QDesktopServices, QHBoxLayout, QInputDialog, QLabel, QPushButton, QUrl, single_shot,
 )
 from ..widgets import (
-    _make_card,
+    ToggleSwitch, _make_card,
 )
 
 
@@ -124,7 +124,8 @@ class _ShortcutsPhoneMixin:
 
         dynamic_lock_row = QHBoxLayout()
         dynamic_lock_row.setSpacing(8)
-        self._dynamic_lock_check = QCheckBox("Dynamic Lock: lock this PC when the device leaves")
+        dynamic_lock_row.addWidget(QLabel("Dynamic Lock: lock this PC when the device leaves"))
+        self._dynamic_lock_check = ToggleSwitch()
         dynamic_lock_row.addWidget(self._dynamic_lock_check)
         dynamic_lock_row.addWidget(QLabel("Wait:"))
         self._dynamic_lock_grace = QComboBox()

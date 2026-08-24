@@ -7,10 +7,10 @@ from .services.runtime import release_worker_when_finished, guard_disposed
 from .services.diagnostics import command_stdout
 from .services.workers import GitHubIssueWorker
 from .qt import (
-    QButtonGroup, QCheckBox, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl,
+    QButtonGroup, QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTextEdit, QUrl,
 )
 from .widgets import (
-    Page, _make_card,
+    Page, ToggleSwitch, _make_card, _make_setting_row,
 )
 
 # ── Page: Feedback ────────────────────────────────────────────────────────────
@@ -102,11 +102,12 @@ class FeedbackPage(Page):
         self._desc_edit.setMinimumHeight(140)
         self._desc_edit.setMaximumHeight(240)
         form_layout.addWidget(self._desc_edit)
-        self._sysinfo_check = QCheckBox(
-            "Include system information (kernel, GPU, channel, image digest)"
-        )
-        self._sysinfo_check.setChecked(True)
-        form_layout.addWidget(self._sysinfo_check)
+        self._sysinfo_check = ToggleSwitch(checked=True)
+        form_layout.addWidget(_make_setting_row(
+            "Include system information",
+            "Kernel, GPU, channel, and image digest",
+            self._sysinfo_check,
+        ))
         self._add(form_card)
 
         # Submit area

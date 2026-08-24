@@ -14,7 +14,6 @@ import time
 from .core_base import restyle
 from .services.runtime import DataWorker, guard_disposed
 from .qt import (
-    QCheckBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -24,7 +23,7 @@ from .qt import (
     Qt,
     single_shot,
 )
-from .widgets import Page, _make_card
+from .widgets import Page, ToggleSwitch, _make_card, _make_setting_row
 
 # ---------------------------------------------------------------------------
 # helpers — run on background threads (DataWorker) so Hub never blocks
@@ -185,23 +184,27 @@ class GuardianPage(Page):
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        # Controls row
-        controls = QHBoxLayout()
-        controls.setSpacing(8)
-        self._enabled_chk = QCheckBox("Monitoring enabled")
+        # Controls
+        self._enabled_chk = ToggleSwitch()
         self._enabled_chk.setToolTip("When off, periodic checks are skipped. Manual checks still work.")
         self._enabled_chk.toggled.connect(self._on_toggle_enabled)
-        controls.addWidget(self._enabled_chk)
+        layout.addWidget(_make_setting_row(
+            "Monitoring enabled",
+            "Cheap checks every 15 minutes and on probe-cache changes",
+            self._enabled_chk,
+        ))
 
-        self._autofix_chk = QCheckBox("Automatically apply safe fixes")
+        self._autofix_chk = ToggleSwitch()
         self._autofix_chk.setToolTip(
             "Only fixed, reversible, unprivileged recipes can run automatically. "
             "Administrator and data-affecting actions always need confirmation."
         )
         self._autofix_chk.toggled.connect(self._on_toggle_autofix)
-        controls.addWidget(self._autofix_chk)
-        controls.addStretch()
-        layout.addLayout(controls)
+        layout.addWidget(_make_setting_row(
+            "Automatically apply safe fixes",
+            "Fixed, reversible, unprivileged recipes only — everything else asks first",
+            self._autofix_chk,
+        ))
 
         btns = QHBoxLayout()
         btns.setSpacing(8)

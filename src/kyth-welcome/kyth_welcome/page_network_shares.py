@@ -12,10 +12,10 @@ from .services.network import (
 from .services.privileged import helper_action, systemctl_action
 from .services.runtime import Worker
 from .qt import (
-    QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 from .widgets import (
-    Page, _make_card,
+    Page, ToggleSwitch, _make_card, _make_setting_row,
 )
 
 # ── Page: Network Shares ──────────────────────────────────────────────────────
@@ -114,9 +114,8 @@ class NetworkSharesPage(Page):
         right.addWidget(self._f_domain)
 
         right.addSpacing(4)
-        self._f_auto = QCheckBox("Auto-mount on boot")
-        self._f_auto.setChecked(True)
-        right.addWidget(self._f_auto)
+        self._f_auto = ToggleSwitch(checked=True)
+        right.addWidget(_make_setting_row("Auto-mount on boot", "", self._f_auto))
 
         form_row.addLayout(left, 1)
         form_row.addLayout(right, 1)
@@ -128,8 +127,10 @@ class NetworkSharesPage(Page):
         self._add_share_btn.setObjectName("primary")
         self._add_share_btn.clicked.connect(self._add_share)
         add_btn_row.addWidget(self._add_share_btn)
-        self._mount_now_chk = QCheckBox("Mount immediately")
-        self._mount_now_chk.setChecked(True)
+        mount_now_lbl = QLabel("Mount immediately")
+        mount_now_lbl.setObjectName("card-copy")
+        add_btn_row.addWidget(mount_now_lbl)
+        self._mount_now_chk = ToggleSwitch(checked=True)
         add_btn_row.addWidget(self._mount_now_chk)
         add_btn_row.addStretch()
         add_layout.addLayout(add_btn_row)
@@ -219,15 +220,14 @@ class NetworkSharesPage(Page):
         layout.addWidget(unc_lbl)
 
         # Auto-mount toggle
-        auto_chk = QCheckBox("Auto-mount on boot")
-        auto_chk.setChecked(share.get("auto_mount", False))
+        auto_chk = ToggleSwitch(checked=share.get("auto_mount", False))
         auto_chk.setEnabled(unit_exists)
         if not unit_exists:
             auto_chk.setToolTip("Reconnect this share to recreate its mount and credentials.")
         auto_chk.toggled.connect(
             lambda checked, s=share: self._toggle_auto_mount(s, checked)
         )
-        layout.addWidget(auto_chk)
+        layout.addWidget(_make_setting_row("Auto-mount on boot", "", auto_chk))
 
         # Action buttons
         btn_row = QHBoxLayout()

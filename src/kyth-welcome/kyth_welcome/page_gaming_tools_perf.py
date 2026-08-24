@@ -251,9 +251,12 @@ class _PerfTuningMixin:
         # R4: per-game persistence — save HDR + latency choice to gaming-per-game.toml
         per_game_row = QHBoxLayout()
         per_game_row.setSpacing(8)
-        from .qt import QCheckBox
+        from .widgets import ToggleSwitch
 
-        self._per_game_hdr_check = QCheckBox("HDR per game (KYTH_HDR=1)")
+        per_game_hdr_label = QLabel("HDR per game (KYTH_HDR=1)")
+        per_game_hdr_label.setObjectName("card-copy")
+        per_game_row.addWidget(per_game_hdr_label)
+        self._per_game_hdr_check = ToggleSwitch()
         self._per_game_hdr_check.setToolTip("Save HDR=1 for this app so kyth-gamescope adds --hdr-enabled on next launch")
         per_game_row.addWidget(self._per_game_hdr_check)
         self._per_game_save_btn = QPushButton("Save per-game")

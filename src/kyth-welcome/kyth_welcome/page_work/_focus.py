@@ -8,7 +8,7 @@ from ..services.flatpak import _is_flatpak_installed
 from ..qt import (
     QCheckBox, QComboBox, QDBusConnection, QDBusInterface, QHBoxLayout, QLabel, QPushButton,
 )
-from ..widgets import _make_card
+from ..widgets import ToggleSwitch, _make_card
 
 _logger = logging.getLogger(__name__)
 
@@ -34,11 +34,11 @@ class _FocusMixin:
         for label, minutes in (("25 minutes", 25), ("50 minutes", 50), ("90 minutes", 90)):
             self._focus_duration.addItem(label, minutes)
         options.addWidget(self._focus_duration)
-        self._focus_dnd = QCheckBox("Do Not Disturb")
-        self._focus_dnd.setChecked(True)
+        options.addWidget(QLabel("Do Not Disturb"))
+        self._focus_dnd = ToggleSwitch(checked=True)
         options.addWidget(self._focus_dnd)
-        self._focus_awake = QCheckBox("Keep PC awake")
-        self._focus_awake.setChecked(True)
+        options.addWidget(QLabel("Keep PC awake"))
+        self._focus_awake = ToggleSwitch(checked=True)
         options.addWidget(self._focus_awake)
         options.addStretch()
         layout.addLayout(options)
