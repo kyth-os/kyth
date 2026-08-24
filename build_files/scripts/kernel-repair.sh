@@ -37,7 +37,7 @@ if [ ! -s "/usr/lib/modules/${KVER}/vmlinuz" ]; then
 		cp --no-preserve=all "${src}" "/usr/lib/modules/${KVER}/vmlinuz"
 	else
 		echo "  vmlinuz not found in /boot, checking /usr/lib/kernel..."
-		src=$(find /usr/lib/kernel -name "vmlinuz*" 2>/dev/null | head -1)
+		src=$(find /usr/lib/kernel -name "vmlinuz-${KVER}" 2>/dev/null | head -1)
 		if [ -n "${src}" ] && [ -s "${src}" ]; then
 			echo "  Found vmlinuz at ${src}, copying..."
 			cp --no-preserve=all "${src}" "/usr/lib/modules/${KVER}/vmlinuz"

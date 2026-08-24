@@ -212,6 +212,14 @@ class BuildAssemblyContracts(unittest.TestCase):
                 self.assertIn('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"', body)
                 self.assertNotRegex(body, r'^\s*source\s+["\']lib/',)
 
+    def test_kernel_repair_usr_lib_kernel_fallback_is_version_qualified(self):
+        # The /boot lookup already searches "vmlinuz-${KVER}"; the /usr/lib/kernel
+        # fallback below it must match the same exact kernel version rather than
+        # grabbing the first vmlinuz* file it finds, or a repair could staple a
+        # mismatched vmlinuz onto this KVER's modules/headers and ship it silently.
+        script = (BUILD_FILES / "scripts/kernel-repair.sh").read_text(encoding="utf-8")
+        self.assertIn('find /usr/lib/kernel -name "vmlinuz-${KVER}"', script)
+
     def test_packaged_installer_is_the_only_installation_entry_point(self):
         self.assertFalse((BUILD_FILES / "kyth-install.sh").exists())
         self.assertFalse((BUILD_FILES / "kyth-manual-install.sh").exists())
