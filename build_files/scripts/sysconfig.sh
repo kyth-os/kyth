@@ -96,6 +96,17 @@ systemctl enable kyth-migrate-display-manager.service 2>/dev/null || true
 # at boot. Do not re-add a disable for it here; the two would silently fight
 # over the same unit depending on layer order.
 systemctl mask systemd-remount-fs.service
+# boot.automount: systemd-gpt-auto-generator speculatively claims /boot for the
+# EFI System Partition (nvme0n1p2) on GPT+ostree layouts where the ESP is not
+# actually meant to be mounted there — bootupd manages it on demand, and /boot
+# is really a bind mount of the root subvolume (its real dependency is
+# local-fs.target via the boot.mount symlink in local-fs.target.requires/,
+# unaffected by this mask). The stray automount conflicts with that bind mount
+# during boot ordering. `systemctl mask` writes to /etc, which depends on
+# ostree's 3-way /etc merge; masking directly under /usr/lib instead sits below
+# generator.late/ (where boot.automount is written) in unit load precedence,
+# so it wins without that dependency.
+ln -sf /dev/null /usr/lib/systemd/system/boot.automount
 systemctl disable packagekit.service 2>/dev/null || true
 systemctl disable rpm-ostree-countme.timer 2>/dev/null || true
 systemctl disable fedora-atomic-desktop-appstream-cache-refresh.service 2>/dev/null || true
