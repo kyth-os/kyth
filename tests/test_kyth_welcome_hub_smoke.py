@@ -31,6 +31,14 @@ class TestHubSmoke(unittest.TestCase):
         # Heavy offscreen smoke — skip under coverage to avoid OOM (run explicitly via `python -m unittest tests.test_kyth_welcome_hub_smoke`)
         if "coverage" in sys.modules:
             raise unittest.SkipTest("skip Hub offscreen smoke under coverage (run explicitly)")
+        # Same OOM risk applies to validate.sh's plain `unittest discover` on
+        # a live desktop (not under coverage, so the guard above doesn't
+        # fire) — validate.sh sets this itself when CI/GITHUB_ACTIONS aren't
+        # set, so CI still runs this at full strength; direct invocation
+        # (the pre-push hook's own explicit Hub-smoke step, or running this
+        # module by name) is unaffected since nothing else sets this var.
+        if os.environ.get("KYTH_SKIP_HEAVY_GUI_SMOKE") == "1":
+            raise unittest.SkipTest("skip Hub offscreen smoke on a live desktop (run explicitly)")
         # If another welcome test mocked kyth_welcome.qt, MainWindow will fail
         # to import real Qt symbols. Skip gracefully in discover.
         try:

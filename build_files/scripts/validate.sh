@@ -1,32 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Full validation pegging every core alongside Plasma/Browser/IDE starves
-# kwin_wayland and forces a session kill (ping timeout → SDDM). Deprioritize
-# when run directly on a live desktop; cgroup weight only bites under
-# contention — idle, this still runs at full speed. Gracefully fall back
-# if systemd-run --user is unavailable (e.g. CI).
-#
-# KYTH_VALIDATION_SCOPE is the only re-entry guard: it's set below, right
-# before re-exec'ing into the throttled scope, so this block only ever
-# runs once per invocation. It used to also skip re-exec whenever
-# $INVOCATION_ID was already set, on the theory that meant "already inside
-# a deprioritized unit" — but INVOCATION_ID is set by systemd on every
-# descendant of any systemd-launched process (a terminal, an IDE, an
-# agent's own sandboxed shell — anything with a systemd unit somewhere in
-# its ancestry), not specifically this scope. That silently skipped the
-# throttle for exactly the desktop shells most likely to run validate.sh
-# directly, letting it peg every core at full priority and reproducing the
-# kwin_wayland starvation this guard exists to prevent.
-if [[ -z "${KYTH_VALIDATION_SCOPE:-}" ]] && command -v systemd-run >/dev/null 2>&1; then
-	export KYTH_VALIDATION_SCOPE=1
-	if systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 -- "$0" "$@" 2>/dev/null; then
-		exit $?
-	fi
-	# systemd-run --user failed (no user manager, e.g. some CI runners) — continue at normal priority
-fi
-
 repo_root="$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/desktop-throttle.sh disable=SC1091
+source "${repo_root}/build_files/scripts/lib/desktop-throttle.sh"
+kyth_deprioritize_on_desktop "$@"
+
 cd "${repo_root}"
 
 tool_bin="$(./build_files/scripts/install-validation-tools.sh | tail -n 1)"
@@ -98,6 +77,19 @@ export XDG_CONFIG_HOME="${test_home}/config"
 export XDG_DATA_HOME="${test_home}/data"
 export XDG_STATE_HOME="${test_home}/state"
 mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}"
+# test_kyth_welcome_hub_smoke.py already skips itself under `coverage run`
+# (run-quality.sh) as "OOM-prone" — this plain `unittest discover` isn't
+# under coverage, so that guard doesn't fire here, and it's the one place
+# this suite runs full-strength on a live desktop rather than a CI runner.
+# CI sets CI/GITHUB_ACTIONS itself; anywhere else, skip it here the same
+# way — MemoryHigh/MemoryMax above contain it either way, this just avoids
+# leaning on that as the only guard. Direct invocation
+# (`python -m unittest tests.test_kyth_welcome_hub_smoke`, e.g. the
+# pre-push hook's own explicit Hub-smoke step) is unaffected — this only
+# reaches that one process's env, not a sibling command run afterward.
+if [[ -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]]; then
+	export KYTH_SKIP_HEAVY_GUI_SMOKE=1
+fi
 # Guard with timeout so CI doesn't hang on slow network/hardware probes; --foreground
 # lets the suite read from TTY and avoids timeout's process-group SIGTERM
 # killing the caller's session. 600s matches CI's 10m job timeout.

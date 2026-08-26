@@ -18,10 +18,18 @@ repo_root="$(git rev-parse --show-toplevel)"
 echo "[pre-push] Running full local validation (mirrors CI)..."
 # Deprioritized (not paused) relative to the interactive session: this box is
 # a live desktop, not a dedicated CI runner, and the old validate+coverage-
-# twice pipeline pegging every core alongside a running compositor/browser/
-# IDE made the desktop unresponsive enough to force a hard power-off. cgroup
-# CPU/IO weight only bites under actual contention — idle, this still runs
-# at full speed; it only yields once something else needs the cycles.
+# twice pipeline pegging every core (plus, uncapped, every byte of RAM)
+# alongside a running compositor/browser/IDE made the desktop unresponsive
+# enough to force a hard power-off. cgroup CPU/IO weight only bites under
+# actual contention — idle, this still runs at full speed; it only yields
+# once something else needs the cycles. MemoryHigh/MemoryMax cap this run's
+# own cgroup so a memory spike (the full test suite's Hub-smoke construction/
+# teardown is already flagged as OOM-prone — see
+# test_kyth_welcome_hub_smoke.py) gets reclaimed or OOM-killed inside this
+# scope instead of taking down sibling cgroups like the desktop session's.
+# Same properties as lib/desktop-throttle.sh (validate.sh/run-quality.sh use
+# that directly; this hook wraps several separate commands below instead of
+# re-exec'ing itself, so it builds its own array rather than sourcing it).
 scope=()
 if command -v systemd-run >/dev/null 2>&1; then
 	# Array, not a string handed to `bash -c`: systemd-run performs its own
@@ -31,7 +39,7 @@ if command -v systemd-run >/dev/null 2>&1; then
 	# Every word below is fully expanded by *this* shell first, so
 	# systemd-run only ever receives concrete paths — no $ or ${} tokens
 	# reach it at all.
-	scope=(systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 --)
+	scope=(systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 -p MemoryHigh=50% -p MemoryMax=70% --)
 fi
 "${scope[@]}" "${repo_root}/build_files/scripts/validate.sh"
 "${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh"
