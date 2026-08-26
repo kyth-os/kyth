@@ -11,6 +11,7 @@ from .page_registry import (
     destination_for_page,
     get_nav_groups,
     landing_for_page,
+    rank_search_results,
     resolve_page_key,
     section_for_page,
     visible_for_profile,
@@ -617,40 +618,12 @@ class MainWindow(QMainWindow):
                 widget.deleteLater()
 
     def _rank_search_results(self, text: str) -> list[tuple[str, int]]:
-        query = text.strip().lower()
-        if not query:
-            return []
-        ranked: list[tuple[str, int]] = []
-        for descriptor in self._page_descriptors:
-            key = descriptor.key
-            if key not in self._page_index_by_key:
-                continue
-            terms = [
-                descriptor.key,
-                descriptor.title,
-                descriptor.search_description,
-                *descriptor.search_terms,
-            ]
-            score = 0
-            for term in terms:
-                lower = term.lower()
-                if query == lower:
-                    score = max(score, 120)
-                elif lower.startswith(query):
-                    score = max(score, 90)
-                elif query in lower:
-                    score = max(score, 60)
-            haystack = " ".join(terms).lower()
-            words = [part for part in query.split() if part]
-            if words and all(word in haystack for word in words):
-                score = max(score, 45 + len(words))
-            for phrase, target_key in self._PROBLEM_ROUTES.items():
-                if key == target_key and (query in phrase or phrase in query):
-                    score = max(score, 130)
-            if score:
-                ranked.append((key, score))
-        # W4: stable tie-break — score desc then key asc (not title alpha which drifts with search_terms)
-        return sorted(ranked, key=lambda item: (-item[1], item[0]))[:5]
+        return rank_search_results(
+            text,
+            self._page_descriptors,
+            self._PROBLEM_ROUTES,
+            known_keys=set(self._page_index_by_key),
+        )
 
     def _update_search_results(self, text: str):
         self._clear_search_results()

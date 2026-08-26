@@ -7,11 +7,13 @@ from .core_base import (
 from .services.hardware import (
     _akmod_nvidia_built, _akmod_nvidia_installed, _detect_nvidia, _hw_setup_done, _hw_setup_service_state,
     _nvidia_module_loaded, _secureboot_state, nvidia_status_view,
+    gpu_switch_current_mode, gpu_switch_set_mode, gpu_switch_supported_modes,
+    is_hybrid_system, supergfxctl_available,
 )
 from .services.runtime import guard_disposed,  DataWorker, finish_worker
 from .services.privileged import helper_action
 from .qt import (
-    QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer,
+    QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTimer,
 )
 from .widgets import (
     CollapsibleLogPanel, Page, _make_card,
@@ -73,8 +75,38 @@ class NvidiaPage(Page):
         self._reboot_btn.hide()
         self._reboot_btn.clicked.connect(reboot)
         self._add(self._reboot_btn)
+
+        # ── Hybrid graphics — supergfxctl mode switch ────────────────────────
+        # Hidden by default: only shown once _fetch_status_facts confirms
+        # this machine actually has a second GPU to switch to. supergfxctl
+        # itself stays opt-in (ujust install-asus-tools) — detected here,
+        # never installed from this page.
+        self._gpu_switch_card, gpu_switch_layout = _make_card()
+        self._gpu_switch_card.hide()
+        gpu_switch_title = QLabel("Hybrid Graphics")
+        gpu_switch_title.setObjectName("card-title")
+        gpu_switch_layout.addWidget(gpu_switch_title)
+        self._gpu_switch_status = QLabel("Checking…")
+        self._gpu_switch_status.setObjectName("card-copy")
+        self._gpu_switch_status.setWordWrap(True)
+        gpu_switch_layout.addWidget(self._gpu_switch_status)
+        gpu_switch_row = QHBoxLayout()
+        gpu_switch_row.setSpacing(8)
+        self._gpu_mode_combo = QComboBox()
+        self._gpu_mode_combo.setMinimumWidth(160)
+        gpu_switch_row.addWidget(self._gpu_mode_combo)
+        self._gpu_apply_btn = QPushButton("Apply")
+        self._gpu_apply_btn.setObjectName("primary")
+        self._gpu_apply_btn.clicked.connect(self._apply_gpu_mode)
+        gpu_switch_row.addWidget(self._gpu_apply_btn)
+        gpu_switch_row.addStretch()
+        gpu_switch_layout.addLayout(gpu_switch_row)
+        self._add(self._gpu_switch_card)
+
         self._stretch()
 
+        self._gpu_mode_worker = None
+        self._gpu_modes_populated = False
         self._refresh_status()
 
     def showEvent(self, event):  # noqa: N802
@@ -95,6 +127,7 @@ class NvidiaPage(Page):
         _secureboot_state (mokutil) is also cached — missing mokutil -> unknown."""
         from kyth_shared.akmods_lock import akmods_build_in_progress
 
+        hybrid = is_hybrid_system()
         return {
             "has_gpu": _detect_nvidia(),
             "loaded": _nvidia_module_loaded(),
@@ -104,6 +137,10 @@ class NvidiaPage(Page):
             "svc_state": _hw_setup_service_state(),
             "secureboot": _secureboot_state(),
             "akmods_busy": akmods_build_in_progress(),
+            "hybrid": hybrid,
+            "supergfx_available": supergfxctl_available() if hybrid else False,
+            "gpu_mode": gpu_switch_current_mode() if hybrid else "",
+            "gpu_modes": gpu_switch_supported_modes() if hybrid else (),
         }
 
     def _refresh_status(self):
@@ -157,6 +194,63 @@ class NvidiaPage(Page):
 
         restyle(self._sub)
         restyle(self._status_lbl)
+
+        self._apply_gpu_switch_facts(facts)
+
+    def _apply_gpu_switch_facts(self, facts: dict) -> None:
+        self._gpu_switch_card.setVisible(bool(facts.get("hybrid")))
+        if not facts.get("hybrid"):
+            return
+        if not facts.get("supergfx_available"):
+            self._gpu_switch_status.setText(
+                "This machine has a second GPU to switch to, but supergfxctl isn't "
+                "installed. Run: ujust install-asus-tools"
+            )
+            self._gpu_mode_combo.setEnabled(False)
+            self._gpu_apply_btn.setEnabled(False)
+            restyle(self._gpu_switch_status)
+            return
+        self._gpu_mode_combo.setEnabled(True)
+        self._gpu_apply_btn.setEnabled(True)
+        mode = str(facts.get("gpu_mode") or "")
+        modes = facts.get("gpu_modes") or ()
+        if not self._gpu_modes_populated and modes:
+            self._gpu_mode_combo.clear()
+            self._gpu_mode_combo.addItems(list(modes))
+            self._gpu_modes_populated = True
+        if mode:
+            idx = self._gpu_mode_combo.findText(mode)
+            if idx >= 0:
+                self._gpu_mode_combo.setCurrentIndex(idx)
+            self._gpu_switch_status.setText(f"Current mode: {mode}")
+        else:
+            self._gpu_switch_status.setText("Pick a mode and apply.")
+        restyle(self._gpu_switch_status)
+
+    def _apply_gpu_mode(self) -> None:
+        if self._gpu_mode_worker is not None:
+            return
+        mode = self._gpu_mode_combo.currentText()
+        if not mode:
+            return
+        self._gpu_apply_btn.setEnabled(False)
+        self._gpu_switch_status.setText(f"Switching to {mode}…")
+        restyle(self._gpu_switch_status)
+
+        worker = DataWorker("gpu-switch-set-mode", lambda: gpu_switch_set_mode(mode))
+        self._gpu_mode_worker = worker
+        worker.result.connect(guard_disposed(lambda _key, result: self._on_gpu_mode_applied(result)))
+        worker.failed.connect(guard_disposed(lambda _key, message: self._on_gpu_mode_applied((False, str(message)))))
+        worker.finished.connect(lambda: setattr(self, "_gpu_mode_worker", None))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_gpu_mode_applied(self, result: object) -> None:
+        self._gpu_apply_btn.setEnabled(True)
+        ok, message = result if isinstance(result, tuple) and len(result) == 2 else (False, str(result))
+        self._gpu_switch_status.setText(message or ("Done." if ok else "Failed."))
+        self._gpu_switch_status.setObjectName("status-ok" if ok else "status-err")
+        restyle(self._gpu_switch_status)
 
     def _run_install(self):
         self._build_module()

@@ -73,6 +73,69 @@ install-openrgb: (_install-flatpak "org.openrgb.OpenRGB" "OpenRGB")
 [group('KythOS')]
 install-solaar: (_install-flatpak "io.github.pwr_solaar.solaar" "Solaar")
 
+# Install force-feedback wheel drivers (Thrustmaster/Logitech/Fanatec) and
+# Oversteer for sim racing. Opt-in and layered at runtime, same tradeoff as
+# install-asus-tools below: these are akmod sources from Terra, not baked
+# into the base image, so a bad package name here fails one wheel's driver
+# without breaking anyone else's build.
+[group('KythOS')]
+install-racing-wheel-drivers:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ KythOS Racing Wheel Drivers ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo
+
+    if command -v lsusb >/dev/null 2>&1; then
+        lsusb_out="$(lsusb 2>/dev/null || true)"
+        echo "$lsusb_out" | grep -qi '044f' && echo "  Thrustmaster device detected." || true
+        echo "$lsusb_out" | grep -qi '046d' && echo "  Logitech device detected." || true
+        echo "$lsusb_out" | grep -qi '0eb7' && echo "  Fanatec device detected." || true
+        echo
+    fi
+
+    echo "  Adding the Terra repo (source: repos.fyralabs.com, same as Bazzite's wheel drivers)…"
+    printf '%s\n' \
+        '[terra-racing-wheels]' \
+        'name=Terra Fyra Labs (racing wheel drivers)' \
+        'baseurl=https://repos.fyralabs.com/terra$releasever' \
+        'enabled=1' \
+        'type=rpm' \
+        'repo_gpgcheck=0' \
+        'gpgcheck=0' \
+        | sudo tee /etc/yum.repos.d/terra-racing-wheels.repo >/dev/null
+
+    installed=()
+    failed=()
+    for pkg in akmod-hid-tmff2 akmod-new-lg4ff akmod-hid-fanatecff akmod-t150-driver; do
+        echo "  → ${pkg}"
+        if sudo rpm-ostree install --idempotent --allow-inactive "${pkg}" 2>&1 | tail -n 3; then
+            installed+=("${pkg}")
+        else
+            echo "    not available — skipping"
+            failed+=("${pkg}")
+        fi
+    done
+
+    sudo dnf5 config-manager setopt terra-racing-wheels.enabled=0 2>/dev/null || \
+        sudo rm -f /etc/yum.repos.d/terra-racing-wheels.repo
+
+    echo
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if ((${#installed[@]} > 0)); then
+        echo "  Staged: ${installed[*]}"
+        echo "  Reboot for akmods to build the kernel module(s), then reconnect your wheel."
+    fi
+    if ((${#failed[@]} > 0)); then
+        echo "  Not found in Terra right now: ${failed[*]}"
+        echo "  Report at: ujust report-issue"
+    fi
+    echo
+    echo "  Configure force feedback with Oversteer:  ujust install-oversteer"
+
+# Install Oversteer — GUI for racing wheel force-feedback and range settings.
+[group('KythOS')]
+install-oversteer: (_install-flatpak "org.berarma.Oversteer" "Oversteer")
+
 # Install ASUS ROG/TUF Linux control tools (asusctl & supergfxctl).
 [group('KythOS')]
 install-asus-tools:

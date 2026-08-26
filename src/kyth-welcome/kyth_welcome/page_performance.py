@@ -26,6 +26,7 @@ class PerformancePage(Page):
         self._sched_status_worker = None
         self._clean_worker = None
         self._audit_worker = None
+        self._bpftune_worker = None
         self._page_header(
             "Gaming",
             "Scheduler & Performance",
@@ -129,6 +130,33 @@ class PerformancePage(Page):
         from .page_performance_cards_clean import make_clean_card
 
         self._add(make_clean_card(self))
+
+        # ── bpftune — experimental, opt-in, read-only here ───────────────────
+        # No toggle: enabling it means adding a third-party COPR and layering
+        # a package, a multi-step reboot-adjacent operation this page's other
+        # toggles (a plain systemctl enable/disable) aren't shaped for — see
+        # ujust enable-bpftune. This card only ever reports state.
+        bpftune_card, bpftune_layout = _make_card("card-accent-warn")
+        bpftune_title = QLabel("bpftune — experimental")
+        bpftune_title.setObjectName("card-title")
+        bpftune_layout.addWidget(bpftune_title)
+        bpftune_body = QLabel(
+            "Continuously auto-tunes kernel parameters via eBPF, unlike every "
+            "tunable above — it can fight Clean Perf, Master Gaming, or Net "
+            "latency instead of complementing them. Ships from a third-party "
+            "COPR, not an official Fedora/EPEL package."
+        )
+        bpftune_body.setObjectName("card-copy")
+        bpftune_body.setWordWrap(True)
+        bpftune_layout.addWidget(bpftune_body)
+        self._bpftune_status = QLabel("Checking…")
+        self._bpftune_status.setObjectName("prop-val-dim")
+        bpftune_layout.addWidget(self._bpftune_status)
+        bpftune_hint = QLabel("Install: ujust enable-bpftune  ·  Remove: ujust disable-bpftune")
+        bpftune_hint.setObjectName("caption-text")
+        bpftune_layout.addWidget(bpftune_hint)
+        self._add(bpftune_card)
+        single_shot(self, 0, self._refresh_bpftune_status)
 
         # ── Session history ────────────────────────────────────────────────────
         self._divider()
@@ -403,6 +431,34 @@ class PerformancePage(Page):
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             self._ai_status_lbl.setText(f"AI: failed — {exc}")
             restyle(self._ai_status_lbl)
+
+    def _refresh_bpftune_status(self) -> None:
+        if self._bpftune_worker is not None:
+            return
+        from .services.bpftune_status import bpftune_active, bpftune_installed
+
+        def _fetch() -> tuple[bool, bool]:
+            return bpftune_installed(), bpftune_active()
+
+        self._bpftune_worker = DataWorker("bpftune-status", _fetch)
+        self._bpftune_worker.result.connect(guard_disposed(lambda _k, r: self._apply_bpftune_status(r)))
+        self._bpftune_worker.failed.connect(lambda _k, _m: None)
+        self._bpftune_worker.finished.connect(lambda: setattr(self, "_bpftune_worker", None))
+        self._bpftune_worker.finished.connect(self._bpftune_worker.deleteLater)
+        self._bpftune_worker.start()
+
+    def _apply_bpftune_status(self, result: object) -> None:
+        installed, active = result if isinstance(result, tuple) and len(result) == 2 else (False, False)
+        if active:
+            self._bpftune_status.setText("Active")
+            self._bpftune_status.setObjectName("prop-val-green")
+        elif installed:
+            self._bpftune_status.setText("Installed, not running")
+            self._bpftune_status.setObjectName("prop-val")
+        else:
+            self._bpftune_status.setText("Not installed")
+            self._bpftune_status.setObjectName("prop-val-dim")
+        restyle(self._bpftune_status)
 
     def _refresh_clean_status(self) -> None:
         if self._clean_worker is not None:

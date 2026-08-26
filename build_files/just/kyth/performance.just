@@ -699,3 +699,43 @@ low-latency +args:
     #!/usr/bin/env bash
     set -euo pipefail
     exec /usr/bin/low-latency-run {{ args }}
+
+# EXPERIMENTAL: install bpftune, an eBPF daemon that continuously retunes
+# live kernel parameters (TCP buffers, neighbor tables, sysctls…) based on
+# observed load. Unlike every kyth-tunable, it is not declarative or
+# offline — it keeps adjusting things while running, which can fight
+# whatever the tunables above already set (Clean Perf / Master Gaming /
+# Net latency in particular). No official Fedora/EPEL package exists;
+# this layers it from a third-party COPR (crono/bpftune-gaming) on
+# request only — never automatically, and never enabled by default.
+[group('KythOS')]
+enable-bpftune:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ bpftune — EXPERIMENTAL ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  bpftune continuously auto-tunes kernel parameters via eBPF."
+    echo "  It is NOT one of KythOS's own declarative tunables and can fight"
+    echo "  with them (Clean Perf, Master Gaming, Net latency especially)."
+    echo "  Source: a third-party COPR (crono/bpftune-gaming), not an"
+    echo "  official Fedora/EPEL package."
+    echo
+    read -r -p "  Continue? [y/N] " reply
+    if [[ ! "${reply}" =~ ^[Yy]$ ]]; then
+        echo "  Cancelled — nothing changed."
+        exit 0
+    fi
+    sudo dnf5 copr enable -y crono/bpftune-gaming
+    sudo rpm-ostree install --idempotent bpftune
+    sudo dnf5 copr disable -y crono/bpftune-gaming
+    echo
+    echo "  Staged. Reboot, then: sudo systemctl enable --now bpftune.service"
+    echo "  To remove it later: ujust disable-bpftune"
+
+# Stop and remove bpftune (see enable-bpftune above).
+[group('KythOS')]
+disable-bpftune:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sudo systemctl disable --now bpftune.service 2>/dev/null || true
+    sudo rpm-ostree uninstall --idempotent bpftune
+    echo "Removed. Reboot to finish rolling it back."

@@ -51,6 +51,18 @@ rm -rf "${welcome_package_dir}"
 install -m 0755 "${_welcome_src}/kyth-welcome-launch" /usr/bin/kyth-welcome-launch
 install -m 0644 "${_welcome_src}/kyth-welcome.desktop" \
 	/usr/share/applications/kyth-welcome.desktop
+
+# Hub search in KRunner — one NoDisplay .desktop entry per Hub page, the
+# same mechanism KDE's own System Settings KCMs use to be searchable
+# without appearing in the app grid. No custom D-Bus runner/daemon needed:
+# krunner's existing "Applications" runner already indexes these via
+# Name/Comment/Keywords. Generated from page_registry.SEARCH_ITEMS so the
+# two can't drift apart.
+python3 -c "
+from kyth_welcome.krunner_desktop import write_desktop_entries
+write_desktop_entries('/usr/share/applications/kyth-hub')
+"
+
 unset _welcome_src _installer_src welcome_package_dir
 write_config /usr/share/applications/kyth-app-store.desktop <<'APPSTOREEOF'
 [Desktop Entry]

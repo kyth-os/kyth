@@ -201,6 +201,58 @@ def descriptors_from_nav_groups(nav_groups, search_metadata) -> list[PageDescrip
     return descriptors
 
 
+def rank_search_results(
+    text: str,
+    descriptors: "list[PageDescriptor]",
+    problem_routes: dict[str, str],
+    *,
+    known_keys: "set[str] | None" = None,
+) -> list[tuple[str, int]]:
+    """Score every descriptor against a query, best match first.
+
+    Pulled out of MainWindow._rank_search_results (windows.py) so the same
+    ranking runs for both the in-Hub search box and anything else that wants
+    "what page matches this text" without constructing a QMainWindow — the
+    Hub-search KRunner plugin (services/krunner_hub.py) is Qt-free and needs
+    exactly this. Kept Qt-free itself for that reason; MainWindow now calls
+    this instead of carrying its own copy.
+    """
+    query = text.strip().lower()
+    if not query:
+        return []
+    ranked: list[tuple[str, int]] = []
+    for descriptor in descriptors:
+        key = descriptor.key
+        if known_keys is not None and key not in known_keys:
+            continue
+        terms = [
+            descriptor.key,
+            descriptor.title,
+            descriptor.search_description,
+            *descriptor.search_terms,
+        ]
+        score = 0
+        for term in terms:
+            lower = term.lower()
+            if query == lower:
+                score = max(score, 120)
+            elif lower.startswith(query):
+                score = max(score, 90)
+            elif query in lower:
+                score = max(score, 60)
+        haystack = " ".join(terms).lower()
+        words = [part for part in query.split() if part]
+        if words and all(word in haystack for word in words):
+            score = max(score, 45 + len(words))
+        for phrase, target_key in problem_routes.items():
+            if key == target_key and (query in phrase or phrase in query):
+                score = max(score, 130)
+        if score:
+            ranked.append((key, score))
+    # W4: stable tie-break — score desc then key asc (not title alpha which drifts with search_terms)
+    return sorted(ranked, key=lambda item: (-item[1], item[0]))[:5]
+
+
 def visible_for_profile(descriptor: PageDescriptor, profile: str) -> bool:
     """Match MainWindow sidebar focus: gaming-only vs everyday/work Work Setup."""
     if descriptor.profile == "gaming":

@@ -51,6 +51,13 @@ from .bluetooth_audio import (
 from .collect import HardwareSummaryView, _collect_hardware_probes, hardware_summary_view
 from .controllers import ControllerStatusView, controller_status_view
 from .drives import _detect_controllers, _find_ntfs_drives
+from .gpu_switch import (
+    current_mode as gpu_switch_current_mode,
+    is_hybrid_system,
+    set_mode as gpu_switch_set_mode,
+    supergfxctl_available,
+    supported_modes as gpu_switch_supported_modes,
+)
 
 # pylint: disable=undefined-all-variable
 # HardwareProbeWorker/DataWorker/TrackedThread/Worker resolve lazily via
