@@ -10,6 +10,14 @@ source "${repo_root}/build_files/scripts/lib/desktop-throttle.sh"
 kyth_deprioritize_on_desktop "$@"
 
 cd "${repo_root}"
+# Same pinned tool bin validate.sh puts on PATH: the coverage-instrumented
+# suite run below is the same suite, and some tests shell out to those tools
+# (test_kyth_ujust_update runs `just --list`). CI's quality job gets this for
+# free because its "Install pinned validators" step writes GITHUB_PATH, so a
+# missing PATH here only ever bites locally — where it looks like a test bug.
+tool_bin="$(./build_files/scripts/install-validation-tools.sh | tail -n 1)"
+export PATH="${tool_bin}:${PATH}"
+
 quality_python="python3"
 if [[ -x .venv-quality/bin/python ]]; then
 	quality_python=".venv-quality/bin/python"
