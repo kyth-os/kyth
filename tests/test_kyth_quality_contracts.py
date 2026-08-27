@@ -1,5 +1,6 @@
-import unittest
 import ast
+import re
+import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,8 +18,17 @@ class QualityContractsTests(unittest.TestCase):
     def test_validation_publishes_coverage_even_on_failure(self):
         workflow = (ROOT / ".github/workflows/validation.yml").read_text()
         self.assertIn("./build_files/scripts/run-quality.sh", workflow)
-        quality_job = workflow.split("  quality:", 1)[1]
+        # Scope the slice to the quality job alone — sibling jobs (hub-shell)
+        # legitimately shell out to `just`, and they have no coverage artifact
+        # to strand, so a slice running to end-of-file would misfire on them.
+        quality_job = re.split(
+            r"^  [a-z][a-z0-9-]*:$",
+            workflow.split("  quality:\n", 1)[1],
+            maxsplit=1,
+            flags=re.MULTILINE,
+        )[0]
         self.assertNotIn("run: just ", quality_job)
+        self.assertIn("run-quality.sh", quality_job)
         self.assertIn("if: always()", workflow)
         self.assertIn("coverage.xml", workflow)
 
