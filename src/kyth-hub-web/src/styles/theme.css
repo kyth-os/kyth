@@ -1,0 +1,238 @@
+/* KythOS Hub — web theme.
+ *
+ * Visual language: inspired by Creative Tim's "Vision UI Dashboard" family
+ * (deep-navy glass cards, blue->cyan accent gradient, floating sidebar) —
+ * we don't have a PRO license for that template, so nothing here is copied
+ * from it. Every gradient stop, shadow, and radius below is our own value,
+ * arrived at by eye to read as "that kind of dashboard," not lifted from
+ * its stylesheet or assets. Status colors (--status-ok/warn/error) are
+ * unchanged from the original token set — those came from the current Qt
+ * build's ui_tokens.py and stay put so the two Hubs still agree on what
+ * "healthy" looks like.
+ */
+
+:root {
+  --ground: #0a0e27;
+  --ground-2: #060818;
+
+  --surface-solid: #131a3d;
+  --card-gradient: linear-gradient(127deg, rgba(22, 28, 62, 0.92) 19%, rgba(14, 18, 43, 0.55) 76%);
+  --surface-raised: #1b234d;
+  --surface-overlay: #232c58;
+  --hairline: rgba(226, 232, 255, 0.09);
+  --hairline-light: rgba(226, 232, 255, 0.2);
+
+  /* Primary accent — single hue-family ramp (deep blue -> cyan), used for
+     the one sequential encoding on this dashboard (gauges, area fill) as
+     well as brand chrome (active nav, primary buttons, icon badges). */
+  --accent-start: #2b6bff;
+  --accent-end: #23d5fb;
+  --accent: #2b6bff;
+  --accent-gradient: linear-gradient(135deg, var(--accent-start), var(--accent-end));
+  --accent-tint-bg: rgba(43, 107, 255, 0.14);
+  --accent-tint-border: rgba(43, 107, 255, 0.4);
+
+  /* Secondary accent — decorative only (hero glow, one nav highlight),
+     never used to encode data alongside the primary ramp. */
+  --violet-start: #7c3aed;
+  --violet-end: #d946ef;
+  --violet-gradient: linear-gradient(135deg, var(--violet-start), var(--violet-end));
+  --violet: #a855f7;
+
+  --status-ok: #10b981;
+  --status-warn: #f59e0b;
+  --status-error: #f7768e;
+
+  --text: #f8fafc;
+  --text-muted: #a3aed0;
+  --text-faint: #7b88b8;
+
+  --radius-card: 20px;
+  --radius-pill: 999px;
+  --radius-sm: 12px;
+  --radius-badge: 14px;
+
+  --shadow-card: 0 20px 40px -22px rgba(3, 6, 18, 0.8);
+  --shadow-glow-accent: 0 8px 22px -6px rgba(43, 107, 255, 0.55);
+  --shadow-glow-violet: 0 8px 22px -6px rgba(124, 58, 237, 0.5);
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  color: var(--text);
+  background: var(--ground);
+}
+
+/* Background mesh — fixed, low-opacity, never competes with foreground
+   content or blocks pointer events. Deliberately no external image asset:
+   an OS-shipped app can't depend on a CDN fetch at runtime, so the "nebula
+   glow" look is pure CSS gradients over the flat --ground color. */
+.bg-glow {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(50% 45% at 12% -8%, rgba(43, 107, 255, 0.22), transparent 60%),
+    radial-gradient(40% 38% at 100% 0%, rgba(124, 58, 237, 0.16), transparent 60%),
+    radial-gradient(55% 55% at 90% 65%, rgba(35, 213, 251, 0.08), transparent 60%),
+    radial-gradient(60% 50% at 10% 105%, rgba(43, 107, 255, 0.1), transparent 60%),
+    linear-gradient(180deg, var(--ground) 0%, var(--ground-2) 100%);
+}
+
+.app-shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.glass {
+  background: var(--card-gradient);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(24px);
+}
+
+.glass:hover {
+  border-color: var(--hairline-light);
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text);
+  margin: 0;
+}
+
+.card-copy {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.pill {
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pill-ok {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--status-ok);
+}
+
+.pill-warn {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--status-warn);
+}
+
+.pill-error {
+  background: rgba(247, 118, 142, 0.16);
+  color: var(--status-error);
+}
+
+.pill-dim {
+  background: var(--surface-overlay);
+  color: var(--text-faint);
+}
+
+.scroll-area {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-overlay) transparent;
+}
+
+.btn {
+  border: 1px solid var(--hairline);
+  background: var(--surface-raised);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    filter 0.15s ease;
+}
+
+.btn:hover {
+  border-color: var(--hairline-light);
+  background: var(--surface-overlay);
+}
+
+.btn-primary {
+  background: var(--accent-gradient);
+  border: none;
+  color: #04101c;
+  box-shadow: var(--shadow-glow-accent);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
+  background: var(--accent-gradient);
+}
+
+/* Icon badge — the small rounded-square gradient chip used on nav items
+   and stat tiles. Two variants: filled (active nav, stat tiles) and muted
+   (inactive nav) so the gradient stays reserved for "this is highlighted",
+   never decorative noise on every row. */
+.icon-badge {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-badge);
+  background: var(--accent-gradient);
+  box-shadow: var(--shadow-glow-accent);
+  color: #04101c;
+  flex-shrink: 0;
+}
+
+.icon-badge-sm {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.icon-badge-muted {
+  background: rgba(226, 232, 255, 0.06);
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.trend-up {
+  color: var(--status-ok);
+  font-weight: 700;
+}
+
+.trend-down {
+  color: var(--status-error);
+  font-weight: 700;
+}

@@ -1,0 +1,28 @@
+[package]
+name = "kyth-hub-shell"
+version = "0.1.0"
+description = "Native shell for the Kyth Hub web frontend"
+edition = "2021"
+rust-version = "1.77"
+
+# Not committing to a workspace layout yet — this is one crate hosting one
+# binary, no library split, until there's a second Rust consumer of the
+# probe-bridge glue that would justify pulling it out.
+[[bin]]
+name = "kyth-hub-shell"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"

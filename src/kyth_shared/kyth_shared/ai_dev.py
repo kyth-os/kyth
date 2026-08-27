@@ -35,6 +35,11 @@ packages=(
   ripgrep fd-find fzf code azure-cli gh
   flatpak-builder rclone duperemove trivy bat eza fastfetch zoxide
   evtest lm_sensors i2c-tools v4l-utils hyperfine tmux starship direnv git-delta gum p7zip p7zip-plugins cabextract libpst
+  # Linux build prerequisites for the Tauri (Rust) Kyth Hub shell
+  # (src/kyth-hub-web/src-tauri) — without these, `cargo check`/`cargo
+  # tauri dev` fails at the pkg-config step for libdbus-sys/webkit2gtk-sys
+  # rather than at anything specific to this repo's own code.
+  webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel gtk3-devel dbus-devel
 )
 if command -v dnf5 >/dev/null 2>&1; then
   sudo dnf5 install -y --skip-unavailable "${packages[@]}"

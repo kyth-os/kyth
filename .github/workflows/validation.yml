@@ -27,6 +27,7 @@ env:
   SHELLCHECK_SHA256: 6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
   ZIZMOR_VERSION: 1.25.2
   ZIZMOR_SHA256: aa1facd105f0d83fe5c55b1adcd9d7417de5d83aa27471f91dc0b66cf3803577
+  NODE_VERSION: "22"
 
 jobs:
   validation:
@@ -196,4 +197,69 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           PYTHONPATH: build_files/kyth-welcome:build_files/kyth_shared
         run: python3 -W error -m unittest tests.test_kyth_welcome_hub_smoke
+        shell: bash --noprofile --norc -euo pipefail {0}
+
+  hub-shell:
+    name: Hub web shell (React + Tauri) build check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: src/kyth-hub-web/package-lock.json
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable — this ref IS the version selector for this action, pinned to today's resolution of it
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry and build output
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src/kyth-hub-web/src-tauri/target
+          key: cargo-hub-shell-${{ runner.os }}-${{ hashFiles('src/kyth-hub-web/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-hub-shell-${{ runner.os }}-
+
+      - name: Cache apt (hub-shell)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-hub-shell-${{ hashFiles('.github/workflows/validation.yml') }}
+
+      - name: Install Tauri Linux build prerequisites
+        run: |
+          for attempt in 1 2 3; do
+            if sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15; then
+              break
+            fi
+            echo "::warning::apt-get update attempt $attempt failed, retrying..." >&2
+            sleep 5
+            if [[ $attempt -eq 3 ]]; then
+              echo "::error::apt-get update failed after 3 attempts" >&2
+              exit 1
+            fi
+          done
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev pkg-config build-essential
+        shell: bash --noprofile --norc -euo pipefail {0}
+
+      - name: Install pinned validators
+        run: ./build_files/scripts/install-validation-tools.sh
+        shell: bash --noprofile --norc -euo pipefail {0}
+
+      - name: Build frontend and cargo-check the Tauri shell
+        run: just check-hub-shell
         shell: bash --noprofile --norc -euo pipefail {0}

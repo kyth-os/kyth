@@ -63,6 +63,14 @@ test-coverage:
 check-optimization:
     python3 build_files/scripts/optimization-report.py --check
 
+# Build/typecheck the React + Tauri (Rust) Kyth Hub shell (src/kyth-hub-web).
+# Needs Node + a Rust toolchain + the Tauri Linux prerequisites (webkit2gtk,
+# gtk3, dbus, libsoup3 -devel) — all provisioned in the kyth-ai-dev box by
+# `ujust ai-dev-setup` (see kyth_shared/ai_dev.py's PROVISION_SCRIPT).
+[group('Quality')]
+check-hub-shell:
+    ./build_files/scripts/check-hub-web-shell.sh
+
 # Print source metrics; pass runtime=1 on a representative installed system.
 [group('Quality')]
 optimization-report runtime="0":
