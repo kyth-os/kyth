@@ -219,6 +219,14 @@ fn mok_status() -> MokStatusResponse {
     MokStatusResponse { sb_state: s.sb_state, enrolled: s.enrolled }
 }
 
+#[derive(serde::Serialize)]
+struct FontsReadyResponse { ready: bool, detail: String, }
+#[tauri::command]
+fn fonts_ready() -> FontsReadyResponse {
+    let (ready, detail) = kyth_shared::system::fonts_ready::fonts_ready();
+    FontsReadyResponse { ready, detail }
+}
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -251,7 +259,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status
+            branch_display_name, update_availability_view, mok_status, fonts_ready
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

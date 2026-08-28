@@ -447,3 +447,10 @@ export async function fetchMokStatus(): Promise<MokStatus | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<MokStatus>("mok_status"); } catch { return null; }
 }
+
+// Fonts ready — live fc-list check (N35)
+export interface FontsReady { ready: boolean; detail: string; }
+export async function fetchFontsReady(): Promise<FontsReady | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<FontsReady>("fonts_ready"); } catch { return null; }
+}
