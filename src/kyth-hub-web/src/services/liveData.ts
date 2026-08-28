@@ -514,3 +514,10 @@ export async function fetchPciByClass(deviceClass: string): Promise<string[] | n
   if (!inTauriShell()) return null;
   try { return await invoke<string[]>("pci_devices_by_class", { class: deviceClass }); } catch { return null; }
 }
+
+// Controllers live detect (lsusb + lsmod)
+export interface ControllersLive { usb_controllers: [string,string][]; input_nodes: string[]; xone_dongle: boolean; xone_loaded: boolean; xpadneo_loaded: boolean; hid_ps_loaded: boolean; dualsense_found: boolean; }
+export async function fetchControllersLive(): Promise<ControllersLive | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<ControllersLive>("controllers_detect"); } catch { return null; }
+}

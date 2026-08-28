@@ -6,6 +6,7 @@ pub mod fonts_ready;
 pub mod mesa_version;
 pub mod smb;
 pub mod btrfs_status;
+pub mod controllers;
 pub mod cloud_oauth;
 pub mod drivers;
 pub mod gaming_slice;

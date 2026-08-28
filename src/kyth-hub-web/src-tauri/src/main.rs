@@ -284,6 +284,30 @@ fn loaded_kernel_modules() -> Vec<String> { kyth_shared::system::drivers::get_lo
 #[tauri::command]
 fn pci_devices_by_class(class: String) -> Vec<String> { kyth_shared::system::drivers::get_pci_devices_by_class(&class) }
 
+#[tauri::command]
+fn controllers_detect() -> ControllersDetectResponse {
+    let d = kyth_shared::system::controllers::detect_controllers();
+    ControllersDetectResponse {
+        usb_controllers: d.usb_controllers,
+        input_nodes: d.input_nodes,
+        xone_dongle: d.xone_dongle,
+        xone_loaded: d.xone_loaded,
+        xpadneo_loaded: d.xpadneo_loaded,
+        hid_ps_loaded: d.hid_ps_loaded,
+        dualsense_found: d.dualsense_found,
+    }
+}
+#[derive(serde::Serialize)]
+struct ControllersDetectResponse {
+    usb_controllers: Vec<(String,String)>,
+    input_nodes: Vec<String>,
+    xone_dongle: bool,
+    xone_loaded: bool,
+    xpadneo_loaded: bool,
+    hid_ps_loaded: bool,
+    dualsense_found: bool,
+}
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -316,7 +340,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
