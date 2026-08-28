@@ -551,3 +551,10 @@ export async function applyPipewireQuantum(preset: string, dryRun = false): Prom
   if (!inTauriShell()) return null;
   try { return await invoke<{ ok: boolean; detail: string }>("apply_pipewire_quantum", { preset, dryRun }); } catch { return null; }
 }
+
+// Deployment history — bootc timeline (Repair)
+export interface DeploymentInfo { section: string; label: string; available: boolean; reference?: string | null; branch?: string | null; timestamp?: string | null; digest?: string | null; short_digest?: string | null; status_text: string; }
+export async function fetchDeploymentHistory(): Promise<DeploymentInfo[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<DeploymentInfo[]>("deployment_history"); } catch { return null; }
+}
