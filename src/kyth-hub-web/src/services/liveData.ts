@@ -572,3 +572,9 @@ export async function fetchUpdateStatus(): Promise<UpdateStatusLive | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<UpdateStatusLive>("update_status"); } catch { return null; }
 }
+
+// Process helpers — live session + ansi + disk bytes
+export async function fetchIsLiveSession(): Promise<boolean | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<boolean>("is_live_session"); } catch { return null; }
+}
