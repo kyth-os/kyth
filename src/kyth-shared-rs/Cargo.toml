@@ -8,7 +8,11 @@ description = "Rust port of src/kyth_shared — starts with the read-only module
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 rustix = { version = "0.38", features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+rusqlite = ["dep:rusqlite"]

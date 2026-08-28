@@ -613,6 +613,28 @@ export async function fetchNtfsDevices(): Promise<any[] | null> {
 
 // Boot runtime + desktop stack + updater (final reads)
 export interface BootRuntimeCheck { name: string; passed: boolean; detail: string; }
+export interface TelemetrySession {
+  game_name: string;
+  started_at: number | null;
+  duration_s: number | null;
+  avg_fps: number | null;
+  p1_low_fps: number | null;
+  stutter_count: number;
+  scheduler: string;
+  avg_latency_ms: number | null;
+  p99_latency_ms: number | null;
+}
+
+export async function fetchTelemetryRecent(limit = 7): Promise<TelemetrySession[] | null> {
+  if (!inTauriShell()) return null;
+  try {
+    const rows = await invoke<TelemetrySession[]>("telemetry_recent", { limit });
+    return rows;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchBootRuntimeChecks(): Promise<BootRuntimeCheck[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<BootRuntimeCheck[]>("boot_runtime_checks"); } catch { return null; }

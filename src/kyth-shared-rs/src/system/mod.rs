@@ -34,10 +34,4 @@ pub mod memory_pressure;
 pub mod snapshot;
 pub mod probe;
 pub mod storage;
-
-
-
-
-
-
-
+pub mod telemetry;
