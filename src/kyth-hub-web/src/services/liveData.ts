@@ -454,3 +454,13 @@ export async function fetchFontsReady(): Promise<FontsReady | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<FontsReady>("fonts_ready"); } catch { return null; }
 }
+
+// Mesa version — live glxinfo/rpm check (N41)
+export async function fetchMesaVersion(): Promise<string | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string>("mesa_version"); } catch { return null; }
+}
+export async function fetchMesaOverlayDryRun(): Promise<{ ok: boolean; detail: string } | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<{ ok: boolean; detail: string }>("mesa_overlay_dry_run"); } catch { return null; }
+}

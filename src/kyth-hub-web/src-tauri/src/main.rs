@@ -227,6 +227,16 @@ fn fonts_ready() -> FontsReadyResponse {
     FontsReadyResponse { ready, detail }
 }
 
+#[tauri::command]
+fn mesa_version() -> String { kyth_shared::system::mesa_version::mesa_version() }
+#[derive(serde::Serialize)]
+struct MesaOverlayResponse { ok: bool, detail: String, }
+#[tauri::command]
+fn mesa_overlay_dry_run() -> MesaOverlayResponse {
+    let (ok, detail) = kyth_shared::system::mesa_version::mesa_overlay_dry_run();
+    MesaOverlayResponse { ok, detail }
+}
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -259,7 +269,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
