@@ -565,3 +565,10 @@ export async function fetchRecoveryStatus(): Promise<RecoveryStatus | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<RecoveryStatus>("recovery_status"); } catch { return null; }
 }
+
+// Update status — TTL-bounded check_state (Updates)
+export interface UpdateStatusLive { booted?: string | null; staged: boolean; rollback: boolean; remote_digest?: string | null; blocked_reason?: string | null; retry_cmd?: string | null; check_state: string; detail: string; }
+export async function fetchUpdateStatus(): Promise<UpdateStatusLive | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<UpdateStatusLive>("update_status"); } catch { return null; }
+}

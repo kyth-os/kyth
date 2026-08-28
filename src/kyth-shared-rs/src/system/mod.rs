@@ -15,6 +15,7 @@ pub mod deployment_history;
 pub mod recovery_status;
 pub mod network_identity;
 pub mod pipewire;
+pub mod update_status;
 pub mod updates_unified;
 pub mod printing;
 pub mod memory_pressure;
