@@ -521,3 +521,10 @@ export async function fetchControllersLive(): Promise<ControllersLive | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<ControllersLive>("controllers_detect"); } catch { return null; }
 }
+
+// Hardware view summary — canonical ProbeService cached view (30s)
+export interface HardwareViewSummary { has_nvidia: boolean; is_hybrid: boolean; capabilities: string[]; }
+export async function fetchHardwareViewSummary(): Promise<HardwareViewSummary | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<HardwareViewSummary>("hardware_view_summary"); } catch { return null; }
+}

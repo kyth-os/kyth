@@ -308,6 +308,13 @@ struct ControllersDetectResponse {
     dualsense_found: bool,
 }
 
+#[tauri::command]
+fn hardware_view_summary() -> Option<HardwareViewSummaryResponse> {
+    kyth_shared::system::hardware_view::get_hardware_view_summary().map(|v| HardwareViewSummaryResponse { has_nvidia: v.has_nvidia, is_hybrid: v.is_hybrid, capabilities: v.capabilities })
+}
+#[derive(serde::Serialize)]
+struct HardwareViewSummaryResponse { has_nvidia: bool, is_hybrid: bool, capabilities: Vec<String>, }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -340,7 +347,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

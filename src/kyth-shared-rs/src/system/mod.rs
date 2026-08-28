@@ -10,6 +10,7 @@ pub mod controllers;
 pub mod cloud_oauth;
 pub mod drivers;
 pub mod gaming_slice;
+pub mod hardware_view;
 pub mod printing;
 pub mod memory_pressure;
 pub mod snapshot;
