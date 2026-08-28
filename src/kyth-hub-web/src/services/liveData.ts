@@ -440,3 +440,10 @@ export async function fetchUpdateAvailabilityView(args: { staged: boolean; check
   if (!inTauriShell()) return null;
   try { return await invoke<UpdateAvailabilityView>("update_availability_view", args); } catch { return null; }
 }
+
+// Mok verify — live mokutil Secure Boot + enrollment (N40)
+export interface MokStatus { sb_state: string; enrolled: string; }
+export async function fetchMokStatus(): Promise<MokStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<MokStatus>("mok_status"); } catch { return null; }
+}
