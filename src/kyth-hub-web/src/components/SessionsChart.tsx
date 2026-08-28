@@ -1,5 +1,6 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { sessionSeries } from "../data/mockDashboard";
+import { ChartFixtureNote } from "./ChartFixtureNote";
 
 // Single series bar form — one hue-family gradient (top-to-bottom, accent
 // ramp), 2px surface gap reads naturally from bar spacing here since
@@ -8,10 +9,15 @@ import { sessionSeries } from "../data/mockDashboard";
 export function SessionsChart() {
   return (
     <div className="glass" style={{ padding: 20, height: "100%", display: "flex", flexDirection: "column" }}>
-      <p className="card-title">Gaming sessions</p>
-      <p className="card-copy" style={{ marginTop: 2 }}>
-        Sessions per day, last 7 days
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <p className="card-title">Gaming sessions</p>
+          <p className="card-copy" style={{ marginTop: 2 }}>
+            Sessions per day, last 7 days
+          </p>
+        </div>
+        <span className="pill pill-dim">Sample data</span>
+      </div>
       <div style={{ flex: 1, marginTop: 12, minHeight: 160 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={sessionSeries} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
@@ -51,6 +57,7 @@ export function SessionsChart() {
           </div>
         ))}
       </div>
+      <ChartFixtureNote />
     </div>
   );
 }

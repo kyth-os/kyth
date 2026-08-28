@@ -1,5 +1,6 @@
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { performanceSeries } from "../data/mockDashboard";
+import { ChartFixtureNote } from "./ChartFixtureNote";
 
 // Single series -> no legend needed (the card title names it); recessive
 // dashed grid, thin 2px line, gradient fill anchored to the baseline,
@@ -13,10 +14,10 @@ export function PerformanceChart() {
         <div>
           <p className="card-title">Performance</p>
           <p className="card-copy" style={{ marginTop: 2 }}>
-            Average FPS captured by kyth-telem, last 7 days
+            Average FPS per day, last 7 days
           </p>
         </div>
-        <span className="pill pill-ok">+18% vs last week</span>
+        <span className="pill pill-dim">Sample data</span>
       </div>
       <div style={{ flex: 1, marginTop: 12, minHeight: 220 }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -56,6 +57,7 @@ export function PerformanceChart() {
           </AreaChart>
         </ResponsiveContainer>
       </div>
+      <ChartFixtureNote />
     </div>
   );
 }

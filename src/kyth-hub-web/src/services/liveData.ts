@@ -618,6 +618,17 @@ export async function fetchBootRuntimeChecks(): Promise<BootRuntimeCheck[] | nul
   try { return await invoke<BootRuntimeCheck[]>("boot_runtime_checks"); } catch { return null; }
 }
 
+// Current user's display name for the dashboard greeting. Empty string
+// means "no name available" — callers greet without a name rather than
+// substituting a placeholder person.
+export async function fetchUserName(): Promise<string | null> {
+  if (!inTauriShell()) return null;
+  try {
+    const name = await invoke<string>("current_user_name");
+    return name.trim() ? name : null;
+  } catch { return null; }
+}
+
 // Phase 2 mutating (Updates + Repair/Diagnostics)
 export async function invokeBootcUpgrade(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");

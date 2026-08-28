@@ -11,16 +11,21 @@ export function GaugeCard({
   displayValue,
   unitLabel,
   gaugeId,
+  pendingNote,
 }: {
   title: string;
   subtitle: string;
-  value: number;
+  value: number | null;
   max?: number;
   displayValue: string;
   unitLabel: string;
   gaugeId: string;
+  pendingNote?: string;
 }) {
-  const pct = Math.max(0, Math.min(1, value / max));
+  // A null value is "we have no reading", not "the reading is zero" — an
+  // empty arc with an em dash, never a number the subtitle would then
+  // attribute to a source we never queried.
+  const pct = value === null ? 0 : Math.max(0, Math.min(1, value / max));
   const radius = 54;
   const circumference = Math.PI * radius; // half circle
   const offset = circumference * (1 - pct);
@@ -56,13 +61,20 @@ export function GaugeCard({
             strokeDasharray={circumference}
             strokeDashoffset={offset}
           />
-          <text x="70" y="58" textAnchor="middle" fontSize="20" fontWeight={800} fill="var(--text)">
-            {displayValue}
+          <text
+            x="70"
+            y="58"
+            textAnchor="middle"
+            fontSize="20"
+            fontWeight={800}
+            fill={value === null ? "var(--text-faint)" : "var(--text)"}
+          >
+            {value === null ? "\u2014" : displayValue}
           </text>
         </svg>
       </div>
       <p className="card-copy" style={{ textAlign: "center", marginTop: -4 }}>
-        {unitLabel}
+        {value === null ? (pendingNote ?? "No reading available") : unitLabel}
       </p>
     </div>
   );
