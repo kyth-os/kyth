@@ -342,6 +342,15 @@ fn deployment_history() -> Vec<DeploymentInfoResponse> {
 #[derive(serde::Serialize)]
 struct DeploymentInfoResponse { section: String, label: String, available: bool, reference: Option<String>, branch: Option<String>, timestamp: Option<String>, digest: Option<String>, short_digest: Option<String>, status_text: String, }
 
+#[derive(serde::Serialize)]
+struct RecoveryStatusResponse { has_staged: bool, has_rollback: bool, quarantined_digest: String, quarantine_detail: String, watcher_staged: bool, clear_quarantine_cmd: String, banner: String, }
+#[tauri::command]
+fn recovery_status() -> RecoveryStatusResponse {
+    let s = kyth_shared::system::recovery_status::get_recovery_status();
+    let banner = kyth_shared::system::recovery_status::recovery_banner(&s);
+    RecoveryStatusResponse { has_staged: s.has_staged, has_rollback: s.has_rollback, quarantined_digest: s.quarantined_digest, quarantine_detail: s.quarantine_detail, watcher_staged: s.watcher_staged, clear_quarantine_cmd: s.clear_quarantine_cmd, banner }
+}
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -374,7 +383,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

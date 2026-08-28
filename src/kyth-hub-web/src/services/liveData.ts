@@ -558,3 +558,10 @@ export async function fetchDeploymentHistory(): Promise<DeploymentInfo[] | null>
   if (!inTauriShell()) return null;
   try { return await invoke<DeploymentInfo[]>("deployment_history"); } catch { return null; }
 }
+
+// Recovery status — staged/rollback/quarantined single view (Repair)
+export interface RecoveryStatus { has_staged: boolean; has_rollback: boolean; quarantined_digest: string; quarantine_detail: string; watcher_staged: boolean; clear_quarantine_cmd: string; banner: string; }
+export async function fetchRecoveryStatus(): Promise<RecoveryStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<RecoveryStatus>("recovery_status"); } catch { return null; }
+}

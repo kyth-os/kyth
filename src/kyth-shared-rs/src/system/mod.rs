@@ -12,6 +12,7 @@ pub mod drivers;
 pub mod gaming_slice;
 pub mod hardware_view;
 pub mod deployment_history;
+pub mod recovery_status;
 pub mod network_identity;
 pub mod pipewire;
 pub mod updates_unified;
