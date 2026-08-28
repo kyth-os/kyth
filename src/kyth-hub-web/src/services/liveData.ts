@@ -494,3 +494,13 @@ export async function fetchGamingSliceAvailable(): Promise<boolean | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<boolean>("is_gaming_slice_available"); } catch { return null; }
 }
+
+// Cloud OAuth + Printing (N36/N34)
+export async function fetchCloudOauthStatus(): Promise<{ ok: boolean; detail: string } | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<{ ok: boolean; detail: string }>("cloud_oauth_status"); } catch { return null; }
+}
+export async function fetchPrinterDiscover(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("ipp_discover"); } catch { return null; }
+}

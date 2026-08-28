@@ -264,6 +264,17 @@ fn gaming_slice_command(argv: Vec<String>, use_user: Option<bool>) -> Vec<String
 #[tauri::command]
 fn is_gaming_slice_available() -> bool { kyth_shared::system::gaming_slice::is_gaming_slice_available() }
 
+#[derive(serde::Serialize)]
+struct CloudOauthResponse { ok: bool, detail: String, }
+#[tauri::command]
+fn cloud_oauth_status() -> CloudOauthResponse { let (ok, detail)=kyth_shared::system::cloud_oauth::cloud_oauth_status(); CloudOauthResponse{ok, detail} }
+#[tauri::command]
+fn rclone_oauth_command(remote: String) -> Vec<String> { kyth_shared::system::cloud_oauth::rclone_oauth_command(&remote) }
+#[tauri::command]
+fn ipp_discover() -> Vec<String> { kyth_shared::system::printing::ipp_discover() }
+#[tauri::command]
+fn printer_setup_command() -> Vec<String> { kyth_shared::system::printing::printer_setup_command() }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -296,7 +307,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
