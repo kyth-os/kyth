@@ -18,7 +18,16 @@ If you are about to open a PR, stop and push to `testing` instead. Promotion to 
 
 ## Live-desktop validation
 
-`build_files/scripts/validate.sh` runs full `unittest discover` (600s) under
-`systemd-run --scope CPUWeight=20`. On a live Plasma desktop this still risks
-kwin starvation — local `--no-verify` push is intentional; CI `validation.yml`
-is the required gate before `build.yml`. Use targeted `python -m unittest tests.test_…` with `timeout` for pre-push smoke.
+`build_files/scripts/validate.sh` defaults to `--fast` on a live Plasma
+session (WAYLAND_DISPLAY/DISPLAY/KDE) — it skips the heavy 600s
+`unittest discover` and only runs linters/syntax/security gates under
+`systemd-run --scope CPUWeight=10 MemoryHigh=35% MemoryMax=55%`. The full
+suite is CI-gated (`validation.yml` → `build.yml`).
+
+- Local `git push` runs the pre-push hook in **fast mode** by default
+  (`validate.sh --fast` + `run-quality.sh --fast`, Hub smoke skipped).
+- Force heavy locally only when needed:
+  `KYTH_ALLOW_HEAVY_PRE_PUSH=1 git push` or
+  `KYTH_FORCE_FULL_VALIDATION=1 ./build_files/scripts/validate.sh --full`.
+- Targeted smoke: `timeout 60 python3 -m unittest tests.test_…`.
+- Bypass hook entirely (intentional): `KYTH_SKIP_PRE_PUSH_VALIDATION=1 git push` or `git push --no-verify`.

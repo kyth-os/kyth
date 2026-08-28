@@ -68,6 +68,28 @@ echo "Checked ${#js_files[@]} JavaScript files"
 echo "==> Committed-secret patterns"
 python3 build_files/scripts/check-committed-secrets.py
 
+# --fast skips the heavy 600s unittest discover on a live desktop.
+# Live-desktop auto-skip: full suite is CI-gated (validation.yml). Force
+# locally with --full or KYTH_FORCE_FULL_VALIDATION=1. `pre-push` defaults
+# to --fast so a plain `git push` never runs the suite on Plasma.
+validate_fast=0
+validate_force_full=0
+for _arg in "$@"; do
+    case "${_arg}" in
+        --fast) validate_fast=1 ;;
+        --full) validate_force_full=1 ;;
+    esac
+done
+if [[ ${validate_force_full} -eq 0 && -z "${KYTH_FORCE_FULL_VALIDATION:-}" && -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]]; then
+    if [[ -n "${WAYLAND_DISPLAY:-}" || -n "${DISPLAY:-}" || "${XDG_CURRENT_DESKTOP:-}" == *KDE* || "${XDG_SESSION_TYPE:-}" == "wayland" ]]; then
+        if [[ ${validate_fast} -eq 0 ]]; then
+            echo "[validate] Live desktop detected — defaulting to --fast (skipping heavy unittest discover)." >&2
+            echo "[validate] Full suite is CI-gated; force locally with: KYTH_FORCE_FULL_VALIDATION=1 ./build_files/scripts/validate.sh --full" >&2
+            validate_fast=1
+        fi
+    fi
+fi
+
 echo "==> Python unit tests"
 test_home="$(mktemp -d)"
 trap 'rm -rf -- "${test_home}"' EXIT
@@ -90,10 +112,14 @@ mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "
 if [[ -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]]; then
 	export KYTH_SKIP_HEAVY_GUI_SMOKE=1
 fi
-# Guard with timeout so CI doesn't hang on slow network/hardware probes; --foreground
-# lets the suite read from TTY and avoids timeout's process-group SIGTERM
-# killing the caller's session. 600s matches CI's 10m job timeout.
-PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer timeout --foreground 600 python3 -m unittest discover -s tests -b
+if [[ ${validate_fast} -eq 1 ]]; then
+	echo "==> Python unit tests SKIPPED (--fast / live-desktop guard) — CI validation.yml gates the full suite" >&2
+else
+	# Guard with timeout so CI doesn't hang on slow network/hardware probes; --foreground
+	# lets the suite read from TTY and avoids timeout's process-group SIGTERM
+	# killing the caller's session. 600s matches CI's 10m job timeout.
+	PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer timeout --foreground 600 python3 -m unittest discover -s tests -b
+fi
 
 echo "==> Structured configuration"
 while IFS= read -r -d '' file; do

@@ -30,7 +30,7 @@ kyth_deprioritize_on_desktop() {
 	fi
 	export KYTH_VALIDATION_SCOPE=1
 	if systemd-run --user --scope --collect --quiet \
-		-p CPUWeight=20 -p IOWeight=10 -p MemoryHigh=50% -p MemoryMax=70% \
+		-p CPUWeight=10 -p IOWeight=10 -p MemoryHigh=35% -p MemoryMax=55% \
 		-- "$0" "$@" 2>/dev/null; then
 		exit $?
 	fi

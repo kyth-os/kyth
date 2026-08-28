@@ -15,7 +15,12 @@ repo_root="$(git rev-parse --show-toplevel)"
 # parallel CI jobs (validate + quality + gui-smoke) in one local gate — ~17s
 # extra for coverage — so fsresize/plan_commit-style floor regressions are
 # caught before push instead of after.
-echo "[pre-push] Running full local validation (mirrors CI)..."
+if [[ "${KYTH_ALLOW_HEAVY_PRE_PUSH:-0}" == "1" ]]; then
+	echo "[pre-push] Running FULL local validation (heavy, opt-in via KYTH_ALLOW_HEAVY_PRE_PUSH=1)..." 
+else
+	echo "[pre-push] Running fast validation (lint/syntax/coverage-fast only) — full suite is CI-gated." 
+	echo "[pre-push] To force heavy locally: KYTH_ALLOW_HEAVY_PRE_PUSH=1 git push" 
+fi
 # Deprioritized (not paused) relative to the interactive session: this box is
 # a live desktop, not a dedicated CI runner, and the old validate+coverage-
 # twice pipeline pegging every core (plus, uncapped, every byte of RAM)
@@ -39,33 +44,37 @@ if command -v systemd-run >/dev/null 2>&1; then
 	# Every word below is fully expanded by *this* shell first, so
 	# systemd-run only ever receives concrete paths — no $ or ${} tokens
 	# reach it at all.
-	scope=(systemd-run --user --scope --collect --quiet -p CPUWeight=20 -p IOWeight=10 -p MemoryHigh=50% -p MemoryMax=70% --)
+	scope=(systemd-run --user --scope --collect --quiet -p CPUWeight=10 -p IOWeight=10 -p MemoryHigh=35% -p MemoryMax=55% --)
 fi
-"${scope[@]}" "${repo_root}/build_files/scripts/validate.sh"
-"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh"
+if [[ "${KYTH_ALLOW_HEAVY_PRE_PUSH:-0}" == "1" ]]; then
+	"${scope[@]}" "${repo_root}/build_files/scripts/validate.sh" --full
+	"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh"
+else
+	"${scope[@]}" "${repo_root}/build_files/scripts/validate.sh" --fast
+	"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh" --fast
+fi
 
 # P1-3: also catch System Hub regressions the CI gui-smoke job checks. Run
 # the same canonical module CI runs (tests/test_kyth_welcome_hub_smoke.py)
 # instead of a hand-rolled reimplementation that had drifted from it (stale
 # page count, no search/lifecycle coverage, hardcoded bare PySide6 import
 # that hard-fails on this host where only PyQt6 is installed system-wide).
-echo "[pre-push] Running Hub headless smoke (tests.test_kyth_welcome_hub_smoke)..."
-if [[ -x "${repo_root}/.venv-gui/bin/python" ]]; then
-	gui_python="${repo_root}/.venv-gui/bin/python"
+if [[ "${KYTH_ALLOW_HEAVY_PRE_PUSH:-0}" == "1" ]]; then
+	echo "[pre-push] Running Hub headless smoke (tests.test_kyth_welcome_hub_smoke)..."
+	if [[ -x "${repo_root}/.venv-gui/bin/python" ]]; then
+		gui_python="${repo_root}/.venv-gui/bin/python"
+	else
+		gui_python="python3"
+	fi
+	if ! "${gui_python}" -c "import PySide6" >/dev/null 2>&1; then
+		echo "[pre-push] PySide6 not importable via ${gui_python} — Hub smoke would silently skip, not pass." >&2
+		echo "[pre-push] Fix: python3 -m venv .venv-gui && .venv-gui/bin/pip install PySide6==6.11.1" >&2
+		exit 1
+	fi
+	PYTHONPATH="build_files/kyth-welcome:build_files/kyth_shared" QT_QPA_PLATFORM=offscreen \
+		KYTH_FORCE_HEAVY_GUI_SMOKE=1 \
+		"${scope[@]}" "${gui_python}" -W error -m unittest tests.test_kyth_welcome_hub_smoke
+	echo "[pre-push] Hub smoke passed"
 else
-	gui_python="python3"
+	echo "[pre-push] Hub smoke SKIPPED (fast mode) — CI gui-smoke job gates it. Force with KYTH_ALLOW_HEAVY_PRE_PUSH=1" >&2
 fi
-# The test module itself skips (exit 0) when PySide6 can't be imported, so a
-# missing interpreter would otherwise look like a green, unchecked gate.
-# Fail loudly instead of trusting a silent skip.
-if ! "${gui_python}" -c "import PySide6" >/dev/null 2>&1; then
-	echo "[pre-push] PySide6 not importable via ${gui_python} — Hub smoke would silently skip, not pass." >&2
-	echo "[pre-push] Fix: python3 -m venv .venv-gui && .venv-gui/bin/pip install PySide6==6.11.1" >&2
-	exit 1
-fi
-# The module skips itself on a live desktop unless forced — forcing is safe
-# here precisely because "${scope[@]}" caps this run's memory.
-PYTHONPATH="build_files/kyth-welcome:build_files/kyth_shared" QT_QPA_PLATFORM=offscreen \
-	KYTH_FORCE_HEAVY_GUI_SMOKE=1 \
-	"${scope[@]}" "${gui_python}" -W error -m unittest tests.test_kyth_welcome_hub_smoke
-echo "[pre-push] Hub smoke passed"
