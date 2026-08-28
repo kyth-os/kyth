@@ -142,28 +142,40 @@ fn storage_snapshot() -> StorageResponse {
 #[derive(Serialize)]
 struct JustRecipeResponse {
     name: String,
+    /// Parameters as `just --list` prints them. The section renders a row
+    /// with parameters as text rather than a button, because a launch
+    /// passes no arguments — so this field has to cross the bridge. It did
+    /// not, which left `switch-kernel flavor="fedora"` a one-click switch
+    /// off the CachyOS default under a label that only said its name.
+    params: String,
     comment: String,
 }
 
-/// `just --list` recipes, parsed like `page_just.py` — returns up to 100
-/// entries; frontend caps display at 30 like the Qt page did.
+/// `just --list` recipes, parsed like `page_just.py`. The whole list
+/// crosses the bridge (the shipped justfile has ~200); the frontend filters
+/// it and caps its own display at 30 like the Qt page did.
 #[tauri::command]
 fn just_list() -> Vec<JustRecipeResponse> {
     kyth_shared::system::just::just_list()
         .into_iter()
-        .map(|r| JustRecipeResponse { name: r.name, comment: r.comment })
+        .map(|r| JustRecipeResponse { name: r.name, params: r.params, comment: r.comment })
         .collect()
 }
 
 #[derive(Serialize)]
 struct JustRunResponse {
     launched: bool,
+    /// False when no terminal emulator was found: the recipe was spawned
+    /// with no tty, so it cannot prompt for its sudo password and its
+    /// output goes nowhere. The Hub says which of the two happened.
+    in_terminal: bool,
 }
 
 /// Fire-and-forget `just <recipe>` — mirrors `popen(["just", name])`.
 #[tauri::command]
 fn just_run(recipe: String) -> JustRunResponse {
-    JustRunResponse { launched: kyth_shared::system::just::just_run(&recipe) }
+    let launch = kyth_shared::system::just::just_launch(&recipe, &[]);
+    JustRunResponse { launched: launch.launched, in_terminal: launch.in_terminal }
 }
 /// Phase 2 mutating: bootc upgrade/rollback/switch — polkit-guarded via pkexec/systemd-run allowlist.
 #[tauri::command]
@@ -186,11 +198,12 @@ fn bootc_switch_branch(branch: String) -> Result<String, String> {
     // string, so nothing user-controlled reaches the argv.
     let channel = kyth_shared::system::bootc_policy::switch_channel_arg(&branch)
         .ok_or_else(|| "unknown channel".to_string())?;
-    std::process::Command::new("just")
-        .arg("switch-channel")
-        .arg(channel)
-        .spawn()
-        .map_err(|err| format!("could not start switch-channel: {err}"))?;
+    // Through `just_launch` rather than a raw `Command`, so this gets the
+    // justfile resolution `ujust` performs and the terminal the recipe's
+    // sudo prompt needs — a bare `just` here found no justfile at all.
+    if !kyth_shared::system::just::just_launch("switch-channel", &[channel]).launched {
+        return Err("could not start switch-channel".to_string());
+    }
     Ok(format!("switch to {channel} staged — reboot to activate"))
 }
 fn sanitize_upgrade() -> Result<(), String> {
@@ -202,8 +215,12 @@ fn sanitize_upgrade() -> Result<(), String> {
 fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
     let state = kyth_shared::guardian::load_state();
     if !kyth_shared::guardian::is_pending_recipe(&state, &recipe_id) { return Err("recipe not pending".to_string()); }
-    // launch via just recipe of same id if exists, else report queued
-    if kyth_shared::system::just::just_run(&recipe_id) { Ok(format!("{recipe_id} launched")) } else { Ok(format!("{recipe_id} queued")) }
+    // Guardian ids are dotted (`audio.restart`) and are not just recipes —
+    // handing them to `just_run` ran nothing and reported "launched" for
+    // every one of them, advisory notifications included. `execute_recipe`
+    // carries guardian.py's own eligibility gate and runs the recipe's argv.
+    let detail = kyth_shared::guardian::execute_recipe(&recipe_id)?;
+    Ok(format!("{}: {detail}", kyth_shared::guardian::recipe_title(&recipe_id)))
 }
 
 #[tauri::command]

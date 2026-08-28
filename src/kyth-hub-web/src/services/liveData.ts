@@ -438,11 +438,15 @@ export async function fetchJustList(): Promise<JustRecipe[] | null> {
     return raw ?? null;
   } catch { return null; }
 }
-export async function runJustRecipe(recipe: string): Promise<boolean | null> {
+// A launch normally opens a terminal window: the recipes use `sudo`, never
+// `pkexec`, so without a tty they have nowhere to prompt and nowhere to
+// print. `in_terminal` is false when no terminal emulator was found, and
+// the caller says so rather than claiming a window that does not exist.
+export interface JustLaunch { launched: boolean; in_terminal: boolean }
+export async function runJustRecipe(recipe: string): Promise<JustLaunch | null> {
   if (!inTauriShell()) return null;
   try {
-    const raw = await invoke<{ launched: boolean }>("just_run", { recipe });
-    return raw.launched;
+    return await invoke<JustLaunch>("just_run", { recipe });
   } catch { return null; }
 }
 

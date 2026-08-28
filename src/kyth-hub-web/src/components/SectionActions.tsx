@@ -67,9 +67,11 @@ export function ActionStatus({ status }: { status: string | null }) {
   );
 }
 
-/** A `just <recipe>` button. Recipes prompt for their own privilege and
- * run in their own terminal, so this only reports whether the spawn took —
- * same fire-and-forget contract kyth_shared::system::just::just_run has. */
+/** A `just <recipe>` button. The recipe runs in a terminal window, which is
+ * where it prompts for its sudo password and prints its output; this is
+ * fire-and-forget past the spawn, the same contract
+ * kyth_shared::system::just::just_launch has. When no terminal emulator is
+ * installed there is no window and no prompt, so say that instead. */
 export function RecipeButton({
   recipe,
   label,
@@ -87,9 +89,12 @@ export function RecipeButton({
       disabled={busy !== null}
       onClick={() =>
         run(recipe, `Starting ${recipe}…`, async () => {
-          const launched = await runJustRecipe(recipe);
-          if (launched === null) return "Not available outside the Hub shell.";
-          return launched ? `just ${recipe} is running in its own window.` : `Could not start just ${recipe}.`;
+          const launch = await runJustRecipe(recipe);
+          if (launch === null) return "Not available outside the Hub shell.";
+          if (!launch.launched) return `Could not start ${recipe}.`;
+          return launch.in_terminal
+            ? `${recipe} is running in its own terminal window — answer any password prompt there.`
+            : `${recipe} started in the background. No terminal is installed, so it cannot ask for a password or show output — run \`ujust ${recipe}\` in a terminal instead.`;
         })
       }
     />

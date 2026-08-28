@@ -8,8 +8,8 @@ import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 // (port of page_just.py). Falls back to preview note when not in Tauri
 // or `just` is not installed.
 //
-// Only recipes that take no arguments get a button: `just_run` spawns the
-// bare name, so a parameterized recipe would silently run its defaults.
+// Only recipes that take no arguments get a button: a launch passes no
+// arguments, so a parameterized recipe would silently run its defaults.
 // `switch-kernel flavor="fedora"` was one click from staging a switch off
 // the CachyOS default here. Those rows render as text instead.
 export function JustSection({ section }: { section: HubSection }) {
@@ -74,7 +74,7 @@ export function JustSection({ section }: { section: HubSection }) {
             </div>
             {matching.length > shown.length && (
               <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>
-                … and {matching.length - shown.length} more — narrow the filter, or run `just --list` in a terminal.
+                … and {matching.length - shown.length} more — narrow the filter, or run `ujust --list` in a terminal.
               </p>
             )}
             <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>

@@ -14,6 +14,12 @@ const riskTone: Record<string, string> = {
   confirm: "pill-warn",
 };
 
+// Guardian only executes safe/confirm recipes — advisory ones have no
+// command in guardian.py at all, they are notifications with recovery
+// advice. Offering "Run fix" for those was a button that could only ever
+// report "recipe is not eligible for automatic execution".
+const RUNNABLE_RISK = new Set(["safe", "confirm"]);
+
 const statusDot: Record<string, string> = {
   ok: "var(--status-ok)",
   warn: "var(--status-warn)",
@@ -66,17 +72,24 @@ export function GuardianSection({ section }: { section: HubSection }) {
                       borderBottom: "1px solid var(--hairline)",
                     }}
                   >
-                    <p style={{ margin: 0, fontSize: 13, fontWeight: 600, flex: 1 }}>{item.title}</p>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>{item.title}</p>
+                      {item.detail && (
+                        <p className="card-copy" style={{ margin: "2px 0 0", fontSize: 11.5 }}>{item.detail}</p>
+                      )}
+                    </div>
                     <span className={`pill ${riskTone[item.risk] ?? "pill-dim"}`} style={{ flexShrink: 0 }}>
                       {item.risk}
                     </span>
-                    <ActionButton
-                      label={busy === item.recipeId ? "Running…" : "Run fix"}
-                      disabled={busy !== null}
-                      onClick={() =>
-                        run(item.recipeId, `Running ${item.title}…`, () => invokeGuardianExecute(item.recipeId))
-                      }
-                    />
+                    {RUNNABLE_RISK.has(item.risk) && (
+                      <ActionButton
+                        label={busy === item.recipeId ? "Running…" : "Run fix"}
+                        disabled={busy !== null}
+                        onClick={() =>
+                          run(item.recipeId, `Running ${item.title}…`, () => invokeGuardianExecute(item.recipeId))
+                        }
+                      />
+                    )}
                   </div>
                 ))}
               </div>

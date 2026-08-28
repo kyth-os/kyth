@@ -86,9 +86,12 @@ class HubWebActionTests(unittest.TestCase):
         )
         self.assertIsNotNone(body, "bootc_switch_branch not found")
         text = body.group(0)
-        # It must delegate, not just format a reassuring string.
+        # It must delegate, not just format a reassuring string. It goes
+        # through just_launch rather than a raw Command so it inherits the
+        # justfile resolution a bare `just` does not have.
         self.assertIn("switch-channel", text)
-        self.assertIn("Command::new", text)
+        self.assertIn("just_launch", text)
+        self.assertNotIn('Command::new("just")', text)
         self.assertIn("switch_channel_arg", text)
         self.assertNotIn("queued — run bootc switch via polkit terminal", text)
 
