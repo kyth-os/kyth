@@ -412,3 +412,20 @@ export async function fetchSecurebootState(): Promise<string | null> {
 export async function fetchFirmwareCache(): Promise<unknown | null> {
   return fetchProbeSection<unknown>("firmware-cache");
 }
+
+// Just recipes — live `just --list` via Tauri (port of page_just.py).
+export interface JustRecipe { name: string; comment: string }
+export async function fetchJustList(): Promise<JustRecipe[] | null> {
+  if (!inTauriShell()) return null;
+  try {
+    const raw = await invoke<JustRecipe[]>("just_list");
+    return raw ?? null;
+  } catch { return null; }
+}
+export async function runJustRecipe(recipe: string): Promise<boolean | null> {
+  if (!inTauriShell()) return null;
+  try {
+    const raw = await invoke<{ launched: boolean }>("just_run", { recipe });
+    return raw.launched;
+  } catch { return null; }
+}

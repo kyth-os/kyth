@@ -135,6 +135,33 @@ fn storage_snapshot() -> StorageResponse {
     }
 }
 
+#[derive(Serialize)]
+struct JustRecipeResponse {
+    name: String,
+    comment: String,
+}
+
+/// `just --list` recipes, parsed like `page_just.py` — returns up to 100
+/// entries; frontend caps display at 30 like the Qt page did.
+#[tauri::command]
+fn just_list() -> Vec<JustRecipeResponse> {
+    kyth_shared::system::just::just_list()
+        .into_iter()
+        .map(|r| JustRecipeResponse { name: r.name, comment: r.comment })
+        .collect()
+}
+
+#[derive(Serialize)]
+struct JustRunResponse {
+    launched: bool,
+}
+
+/// Fire-and-forget `just <recipe>` — mirrors `popen(["just", name])`.
+#[tauri::command]
+fn just_run(recipe: String) -> JustRunResponse {
+    JustRunResponse { launched: kyth_shared::system::just::just_run(&recipe) }
+}
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -166,7 +193,7 @@ fn main() {
         }))
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
-            probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page
+            probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
