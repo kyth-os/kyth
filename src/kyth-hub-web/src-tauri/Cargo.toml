@@ -3,11 +3,8 @@ name = "kyth-hub-shell"
 version = "0.1.0"
 description = "Native shell for the Kyth Hub web frontend"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.82" # matches ../../kyth-shared-rs's MSRV (Option::is_none_or)
 
-# Not committing to a workspace layout yet — this is one crate hosting one
-# binary, no library split, until there's a second Rust consumer of the
-# probe-bridge glue that would justify pulling it out.
 [[bin]]
 name = "kyth-hub-shell"
 path = "src/main.rs"
@@ -20,6 +17,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Rust port of kyth_shared (see that crate's MIGRATION.md) — the four
+# bridge commands below call straight into it, no subprocess.
+kyth-shared = { path = "../../kyth-shared-rs" }
 
 [profile.release]
 panic = "abort"

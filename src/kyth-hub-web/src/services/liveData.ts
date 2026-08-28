@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { inTauriShell } from "./tauriEnv";
 
 // Real backend data, read through the Tauri shell's bridge commands (see
-// src-tauri/src/main.rs + src-tauri/backend/*.py). Every function here
+// src-tauri/src/main.rs, which calls straight into the kyth-shared Rust
+// crate — src/kyth-shared-rs — no subprocess). Every function here
 // returns null rather than throwing when the data isn't available —
 // running in a plain browser (npm run dev), no Tauri build, or (very
 // commonly on a dev machine) no on-disk state yet because kyth-probe /
@@ -20,10 +21,11 @@ export interface GuardianHistoryItem {
 
 export interface GuardianSnapshot {
   pendingCount: number;
+  pending: GuardianPendingItem[];
   history: GuardianHistoryItem[];
 }
 
-// Mirrors backend/guardian_bridge.py's JSON output shape exactly.
+// Mirrors main.rs's GuardianSnapshotResponse shape exactly.
 interface GuardianBridgeHistoryItem {
   timestamp: number;
   title: string;
@@ -31,8 +33,14 @@ interface GuardianBridgeHistoryItem {
   action: string;
   verified: boolean | null;
 }
+interface GuardianBridgePendingItem {
+  title: string;
+  detail: string;
+  risk: string;
+}
 interface GuardianBridgeResponse {
   pending_count: number;
+  pending: GuardianBridgePendingItem[];
   history: GuardianBridgeHistoryItem[];
 }
 
@@ -49,6 +57,7 @@ export async function fetchGuardianSnapshot(): Promise<GuardianSnapshot | null> 
     const raw = await invoke<GuardianBridgeResponse>("guardian_snapshot");
     return {
       pendingCount: raw.pending_count,
+      pending: raw.pending,
       history: raw.history.map((item) => ({
         timestamp: item.timestamp,
         title: item.title,
@@ -71,16 +80,30 @@ const CHANNEL_DISPLAY: Record<string, string> = {
   "testing-cachy": "Testing + CachyOS kernel",
 };
 
-interface ProbeBridgeResponse {
+interface ProbeBridgeResponse<T = unknown> {
   key: string;
-  data: string | null;
+  data: T | null;
   error: string | null;
+}
+
+/** Generic disk-backed probe section read — see main.rs's probe_backend
+ * command / kyth_shared::system::probe::read_section. Every probe_backend
+ * caller below is this same call with a different key and a typed
+ * reshape; this is just the shared plumbing. */
+async function fetchProbeSection<T>(key: string): Promise<T | null> {
+  if (!inTauriShell()) return null;
+  try {
+    const raw = await invoke<ProbeBridgeResponse<T>>("probe_backend", { section: key });
+    return raw.data ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchUpdateChannel(): Promise<string | null> {
   if (!inTauriShell()) return null;
   try {
-    const raw = await invoke<ProbeBridgeResponse>("probe_backend", { section: "bootc-branch" });
+    const raw = await invoke<ProbeBridgeResponse<string>>("probe_backend", { section: "bootc-branch" });
     if (!raw.data) return null;
     return CHANNEL_DISPLAY[raw.data] ?? raw.data;
   } catch {
@@ -136,6 +159,152 @@ export async function fetchStorageFree(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// Shape of one `status.booted` / `status.rollback` entry in `bootc status
+// --format=json`'s own output — see kyth_shared.system.bootc_query's
+// fetch_status_data(), which is a bare parse of that command, no
+// reshaping. Every field is optional: this is read straight off the
+// disk-backed probe cache (see kyth_shared::system::probe::read_section),
+// which only has this at all once kyth-probe.service has actually run on
+// a real KythOS install —
+// never on a plain dev checkout, which is the expected null case here.
+export interface BootcDeployment {
+  image?: string;
+  version?: string;
+  timestamp?: string;
+  imageDigest?: string;
+}
+
+export interface BootcSnapshot {
+  channel: string | null; // display name, e.g. "Testing"
+  booted: BootcDeployment | null;
+  rollback: BootcDeployment | null;
+}
+
+interface BootcStatusJsonEntry {
+  image?: { image?: { image?: string }; version?: string; timestamp?: string; imageDigest?: string };
+}
+
+interface BootcStatusJson {
+  status?: {
+    booted?: BootcStatusJsonEntry;
+    rollback?: BootcStatusJsonEntry;
+  };
+}
+
+function deploymentFrom(entry: BootcStatusJsonEntry | undefined): BootcDeployment | null {
+  const img = entry?.image;
+  if (!img) return null;
+  return {
+    image: img.image?.image,
+    version: img.version,
+    timestamp: img.timestamp,
+    imageDigest: img.imageDigest,
+  };
+}
+
+export async function fetchBootcSnapshot(): Promise<BootcSnapshot | null> {
+  if (!inTauriShell()) return null;
+  try {
+    const [statusRaw, channelRaw] = await Promise.all([
+      invoke<ProbeBridgeResponse>("probe_backend", { section: "bootc-status-data" }),
+      invoke<ProbeBridgeResponse<string>>("probe_backend", { section: "bootc-branch" }),
+    ]);
+    const data = statusRaw.data as unknown as BootcStatusJson | null;
+    if (!data) return null;
+    return {
+      channel: channelRaw.data ? (CHANNEL_DISPLAY[channelRaw.data] ?? channelRaw.data) : null,
+      booted: deploymentFrom(data.status?.booted),
+      rollback: deploymentFrom(data.status?.rollback),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Mirrors kyth_shared.system.controllers.detect_controllers()'s dict shape
+// exactly — read from the disk-backed "controllers-detect" probe section
+// (see probe.py's DISK_TTL), same as every fetchProbeSection call.
+export interface ControllerInfo {
+  usbControllers: { name: string; kind: string }[];
+  inputNodeCount: number;
+  driverLoaded: { xone: boolean; xpadneo: boolean; hidPlaystation: boolean };
+}
+
+interface ControllersDetectRaw {
+  usb_controllers: [string, string][];
+  input_nodes: string[];
+  xone_loaded: boolean;
+  xpadneo_loaded: boolean;
+  hid_ps_loaded: boolean;
+}
+
+export async function fetchControllers(): Promise<ControllerInfo | null> {
+  const raw = await fetchProbeSection<ControllersDetectRaw>("controllers-detect");
+  if (!raw) return null;
+  return {
+    usbControllers: raw.usb_controllers.map(([name, kind]) => ({ name, kind })),
+    inputNodeCount: raw.input_nodes.length,
+    driverLoaded: { xone: raw.xone_loaded, xpadneo: raw.xpadneo_loaded, hidPlaystation: raw.hid_ps_loaded },
+  };
+}
+
+// flatpak-apps and flatpak-updates are separate probe collectors with
+// separate TTLs (see probe.py) — genuinely independent, so each stays
+// nullable rather than collapsing a missing one to 0 (which would read as
+// "zero updates" instead of "unknown").
+export interface AppStoreSnapshot {
+  installedCount: number | null;
+  updatesAvailable: number | null;
+}
+
+export async function fetchAppStoreSnapshot(): Promise<AppStoreSnapshot | null> {
+  const [apps, updates] = await Promise.all([
+    fetchProbeSection<string[]>("flatpak-apps"),
+    fetchProbeSection<number>("flatpak-updates"),
+  ]);
+  if (apps == null && updates == null) return null;
+  return { installedCount: apps?.length ?? null, updatesAvailable: updates ?? null };
+}
+
+// Mirrors kyth_shared.system.probe's "hardware-summary" JSON-safe
+// projection (see probe.py's _collect_hardware_view — deliberately not the
+// raw HardwareView dataclass, which isn't JSON-serializable).
+export interface HardwareSnapshot {
+  gpuName: string | null;
+  hasNvidia: boolean | null;
+  isHybrid: boolean | null;
+  capabilities: string[];
+}
+
+interface HardwareSummaryRaw {
+  has_nvidia: boolean;
+  is_hybrid: boolean;
+  capabilities: string[];
+}
+
+export async function fetchHardwareSnapshot(): Promise<HardwareSnapshot | null> {
+  const [gpuName, summary] = await Promise.all([
+    fetchGpuName(),
+    fetchProbeSection<HardwareSummaryRaw>("hardware-summary"),
+  ]);
+  if (gpuName == null && summary == null) return null;
+  return {
+    gpuName,
+    hasNvidia: summary?.has_nvidia ?? null,
+    isHybrid: summary?.is_hybrid ?? null,
+    capabilities: summary?.capabilities ?? [],
+  };
+}
+
+// Mirrors main.rs's GuardianPendingResponse — the same
+// pending_recommendations() list Hub's own mission bar/sidebar badge reads,
+// now with a title (via RECIPES) and risk level attached for display.
+export interface GuardianPendingItem {
+  title: string;
+  detail: string;
+  risk: string;
 }
 
 /** "3h ago" / "2d ago" style relative time — Guardian history stores raw

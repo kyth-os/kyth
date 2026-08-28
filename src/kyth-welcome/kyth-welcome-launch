@@ -1,22 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Testing-channel dogfood: the React+Tauri Hub rewrite (src/kyth-hub-web,
+# built binary at /usr/bin/kyth-hub-shell) replaces the PySide6 Hub on
+# testing while it's actively iterated on — see that directory's README.
+# Both the channel check and the binary's presence are required, so this
+# is a no-op (falls through to the classic Hub below) on stable, on any
+# build that hasn't packaged the new binary yet, and if the channel can't
+# be determined at all. Same --page argv contract either way (main.rs
+# mirrors kyth_welcome's), so "$@" passes through unchanged below.
+target_bin="/usr/bin/kyth-welcome"
+if [[ -x /usr/bin/kyth-hub-shell ]]; then
+    channel="$(python3 -c "
+from kyth_shared.system.bootc import current_branch
+print(current_branch() or '')
+" 2>/dev/null || true)"
+    if [[ "${channel}" == testing* ]]; then
+        target_bin="/usr/bin/kyth-hub-shell"
+    fi
+fi
+
 log_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/kyth"
 if ! mkdir -p "${log_dir}" 2>/dev/null; then
-    exec /usr/bin/kyth-welcome "$@"
+    exec "${target_bin}" "$@"
 fi
 
 log_file="${log_dir}/kyth-welcome.log"
 status=0
 
 {
-    echo "==== $(date -Is) kyth-welcome launch ===="
+    echo "==== $(date -Is) kyth-welcome launch (${target_bin}) ===="
     echo "user=$(id -un 2>/dev/null || true) uid=$(id -u 2>/dev/null || true)"
     echo "DISPLAY=${DISPLAY-}"
     echo "WAYLAND_DISPLAY=${WAYLAND_DISPLAY-}"
     echo "XDG_SESSION_TYPE=${XDG_SESSION_TYPE-}"
     echo "QT_QPA_PLATFORM=${QT_QPA_PLATFORM-}"
-    /usr/bin/kyth-welcome "$@"
+    "${target_bin}" "$@"
     status=$?
     if [[ "${status}" -ne 0 ]]; then
         echo "kyth-welcome launch failed: exit ${status}"

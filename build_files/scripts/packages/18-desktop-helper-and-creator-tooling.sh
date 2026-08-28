@@ -20,6 +20,9 @@ dnf5 install -y --skip-unavailable \
 	xdg-desktop-portal \
 	xdg-desktop-portal-kde \
 	xdg-desktop-portal-gtk \
+	webkit2gtk4.1 \
+	gtk3 \
+	libsoup3 \
 	plymouth \
 	plymouth-plugin-script \
 	librsvg2-tools \
@@ -180,3 +183,9 @@ install_available_optional_packages desktop "${optional_desktop_packages[@]}"
 #   manual CUPS configuration.
 # input-remapper is already installed in the gaming packages block
 # (packages/06-gaming-core.sh).
+# webkit2gtk4.1/gtk3/libsoup3: runtime deps for /usr/bin/kyth-hub-shell (the
+# React+Tauri Kyth Hub rewrite, src/kyth-hub-web — built in the hub-web-builder
+# stage of the top-level Dockerfile). Installed unconditionally since the
+# binary itself ships on every channel; kyth-welcome-launch's runtime branch
+# check is what actually gates which channel launches it. dbus is not listed
+# here — it's already a hard dependency of the base Plasma desktop.

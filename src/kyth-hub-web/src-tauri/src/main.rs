@@ -4,24 +4,20 @@
 // deep-link contract the current PySide6 Hub has, just hosting the React
 // build instead of a QWidget tree).
 //
-// Scope, deliberately: this swaps the *shell* only. kyth_shared (the ~200
-// module Python library that does the actual host tuning) stays Python —
-// see backend/probe_bridge.py for how this process reaches it. Porting
-// kyth_shared itself to Rust is a separate, much bigger decision for
-// later, not something this file assumes.
+// The four bridge commands below used to shell out to backend/*.py
+// scripts (see git history if you need the old ones) — they now call
+// straight into the kyth-shared crate (../../kyth-shared-rs), no
+// subprocess, no JSON-over-stdout round trip. That crate is the first
+// slice of kyth_shared (the ~200-module Python library) ported to Rust —
+// see its MIGRATION.md for scope. Everything kyth_shared does that isn't
+// in that crate yet — most of it — stays Python for now; nothing here
+// assumes the rest gets ported on any particular timeline.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Mutex;
 
+use serde::Serialize;
 use tauri::{Emitter, Manager};
-
-/// Compile-time location of this crate (src-tauri/) — used only to derive
-/// dev-tree-relative defaults below, same spirit as web_shell.py's
-/// `_static_root()`: a source-tree-relative path for now, replaced with a
-/// real installed path once this ships (see that function's comment).
-const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// Page-key -> nothing here; route mapping now lives on the TS side
 /// (src/deepLink.ts) since the router already owns that table — this
@@ -37,71 +33,106 @@ fn extract_page_arg<S: AsRef<str>>(argv: &[S]) -> Option<String> {
         .map(|s| s.as_ref().to_string())
 }
 
-fn default_kyth_shared_pythonpath() -> PathBuf {
-    // src/kyth-hub-web/src-tauri -> src/kyth_shared (contains the
-    // importable `kyth_shared` package). Dev-tree default only, same as
-    // web_shell.py's KYTH_HUB_WEB_DIST override pattern below.
-    PathBuf::from(MANIFEST_DIR)
-        .join("..")
-        .join("..")
-        .join("kyth_shared")
+/// Same response shape the retired probe_bridge.py printed — the frontend
+/// (services/liveData.ts) already deserializes this, unchanged.
+#[derive(Serialize)]
+struct ProbeResponse {
+    key: String,
+    data: Option<serde_json::Value>,
+    error: Option<String>,
 }
 
-fn bridge_script_path(name: &str) -> PathBuf {
-    PathBuf::from(MANIFEST_DIR).join("backend").join(name)
-}
-
-/// Shells out to one backend/*.py bridge script with PYTHONPATH pointed at
-/// kyth_shared, parses its single-line JSON stdout. Shared by every bridge
-/// command below — each script owns its own read-only contract with
-/// kyth_shared (see their docstrings), this just runs the process.
-fn run_bridge(script: &str, args: &[&str]) -> Result<serde_json::Value, String> {
-    let pythonpath = std::env::var_os("KYTH_SHARED_PYTHONPATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_kyth_shared_pythonpath);
-
-    let output = Command::new("python3")
-        .arg(bridge_script_path(script))
-        .args(args)
-        .env("PYTHONPATH", &pythonpath)
-        .output()
-        .map_err(|e| format!("failed to spawn python3 ({script}): {e}"))?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
-    }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("{script} returned non-JSON output: {e}"))
-}
-
-/// Reads one disk-backed probe section (see kyth_shared.system.probe's
-/// DISK_TTL for valid keys) by shelling out to backend/probe_bridge.py.
-/// Read-only, and bounded by whatever read_section() itself does — no
-/// fresh system probing happens here (see that script's docstring).
+/// Reads one disk-backed probe section (see kyth_shared's DISK_TTL for
+/// valid keys). Read-only, bounded by whatever read_section does — no
+/// fresh system probing happens here.
 #[tauri::command]
-fn probe_backend(section: String) -> Result<serde_json::Value, String> {
-    run_bridge("probe_bridge.py", &[&section])
+fn probe_backend(section: String) -> ProbeResponse {
+    let data = kyth_shared::system::probe::read_section(&section);
+    ProbeResponse { key: section, data, error: None }
 }
 
-/// Guardian's pending-recommendation count + recent history, from disk —
-/// see backend/guardian_bridge.py's docstring for why this deliberately
-/// does NOT trigger a live symptom probe.
-#[tauri::command]
-fn guardian_snapshot() -> Result<serde_json::Value, String> {
-    run_bridge("guardian_bridge.py", &[])
+#[derive(Serialize)]
+struct GuardianPendingResponse {
+    title: String,
+    detail: String,
+    risk: String,
 }
 
-/// Raw first `lspci -nn` GPU line, if any — see backend/hardware_bridge.py.
+#[derive(Serialize)]
+struct GuardianHistoryResponse {
+    timestamp: f64,
+    title: String,
+    detail: String,
+    action: String,
+    verified: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct GuardianSnapshotResponse {
+    pending_count: usize,
+    pending: Vec<GuardianPendingResponse>,
+    history: Vec<GuardianHistoryResponse>,
+}
+
+/// Guardian's pending-recommendation list + recent history, from disk —
+/// deliberately does NOT trigger a live symptom probe (see
+/// kyth_shared::guardian's module docs for why that boundary matters).
 #[tauri::command]
-fn hardware_snapshot() -> Result<serde_json::Value, String> {
-    run_bridge("hardware_bridge.py", &[])
+fn guardian_snapshot() -> GuardianSnapshotResponse {
+    let state = kyth_shared::guardian::load_state();
+    let pending = kyth_shared::guardian::pending_recommendations(&state);
+    let pending_response = pending
+        .iter()
+        .map(|p| GuardianPendingResponse {
+            title: kyth_shared::guardian::recipe_title(&p.recipe_id),
+            detail: p.detail.clone(),
+            risk: kyth_shared::guardian::recipe_risk(&p.recipe_id),
+        })
+        .collect();
+
+    let history_response = kyth_shared::guardian::recent_history(&state, 8)
+        .into_iter()
+        .map(|item| GuardianHistoryResponse {
+            timestamp: item.timestamp,
+            title: item
+                .recipe_id
+                .as_deref()
+                .map(kyth_shared::guardian::recipe_title)
+                .unwrap_or_else(|| "Guardian".to_string()),
+            detail: item.detail,
+            action: item.action,
+            verified: item.verified,
+        })
+        .collect();
+
+    GuardianSnapshotResponse { pending_count: pending.len(), pending: pending_response, history: history_response }
+}
+
+#[derive(Serialize)]
+struct HardwareResponse {
+    gpu_line: Option<String>,
+}
+
+/// Raw first `lspci -nn` GPU line, if any.
+#[tauri::command]
+fn hardware_snapshot() -> HardwareResponse {
+    HardwareResponse { gpu_line: kyth_shared::system::gpu::lspci_gpu_lines().into_iter().next() }
+}
+
+#[derive(Serialize)]
+struct StorageResponse {
+    free_bytes: Option<u64>,
+    total_bytes: Option<u64>,
 }
 
 /// Free/total bytes on the same filesystem Guardian's own storage check
-/// looks at — see backend/storage_bridge.py.
+/// looks at.
 #[tauri::command]
-fn storage_snapshot() -> Result<serde_json::Value, String> {
-    run_bridge("storage_bridge.py", &[])
+fn storage_snapshot() -> StorageResponse {
+    match kyth_shared::system::storage::primary_disk_usage() {
+        Some(usage) => StorageResponse { free_bytes: Some(usage.free_bytes), total_bytes: Some(usage.total_bytes) },
+        None => StorageResponse { free_bytes: None, total_bytes: None },
+    }
 }
 
 /// One-shot pull for the page this process was launched with (`--page`,

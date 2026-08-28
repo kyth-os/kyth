@@ -1,4 +1,32 @@
 
+# ── Kyth Hub web shell (React + Tauri) builder stage ──────────────────────
+# Separate stage so the Rust/Node toolchain and Tauri Linux build
+# prerequisites (webkit2gtk-devel & co — see src/kyth-hub-web/README.md for
+# the same list in the local dev workflow) never land in the final image —
+# only the compiled binary does. tauri-build embeds the built frontend's
+# dist/ into the binary at compile time (see tauri.conf.json's
+# frontendDist), so nothing besides the one binary needs installing
+# alongside it in the final stage below.
+FROM registry.fedoraproject.org/fedora:44 AS hub-web-builder
+RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
+        cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \
+        webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel gtk3-devel dbus-devel && \
+    dnf5 clean all
+# kyth-shared-rs is a sibling of kyth-hub-web (src/kyth-shared-rs, not
+# under src/kyth-hub-web) — src-tauri's Cargo.toml depends on it via a
+# `../../kyth-shared-rs` path dependency, so it needs copying to the same
+# relative position here, not folded into the kyth-hub-web COPY above.
+COPY src/kyth-shared-rs /build/kyth-shared-rs
+COPY src/kyth-hub-web /build/kyth-hub-web
+WORKDIR /build/kyth-hub-web
+RUN --mount=type=cache,id=kyth-hub-web-npm,target=/root/.npm \
+    npm ci && npm run build
+WORKDIR /build/kyth-hub-web/src-tauri
+RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/registry \
+    --mount=type=cache,id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target \
+    cargo build --release --locked && \
+    cp target/release/kyth-hub-shell /build/kyth-hub-shell
+
 ARG BASE_IMAGE=localhost/kyth-base:stable
 # CI pins this to a digest-qualified ref (ghcr.io/...@sha256:...) via
 # --build-arg BASE_IMAGE="${STEPS_UPSTREAM_BASE_OUTPUTS_PINNED}" in
@@ -184,6 +212,13 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/syscon
 # finished filesystem into update-efficient published OCI layers.
 # Skipped gracefully when MOK_KEY is not set (local builds without a signing key).
 # Pass the private key via: --secret id=mok_key,env=MOK_KEY
+
+# The React+Tauri Hub rewrite's compiled binary — see the hub-web-builder
+# stage above. Ships on every channel; kyth-welcome-launch (installed below
+# via 23-kyth-helper-ctx-installs.sh) is what actually gates which channel
+# launches it instead of the classic kyth-welcome.
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-hub-shell /usr/bin/kyth-hub-shell
+
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \
     --mount=type=bind,source=src/kyth-welcome,target=/ctx/kyth-welcome \
