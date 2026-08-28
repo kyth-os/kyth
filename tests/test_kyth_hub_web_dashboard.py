@@ -31,6 +31,11 @@ PERF_CHART = (HUB_WEB / "components" / "PerformanceChart.tsx").read_text(encodin
 SESSIONS_CHART = (HUB_WEB / "components" / "SessionsChart.tsx").read_text(encoding="utf-8")
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
 MAIN_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+GUARDIAN_CARD = (HUB_WEB / "components" / "GuardianHistoryCard.tsx").read_text(encoding="utf-8")
+TOPBAR = (HUB_WEB / "components" / "Topbar.tsx").read_text(encoding="utf-8")
+RECOVERY_RS = (
+    ROOT / "src" / "kyth-shared-rs" / "src" / "system" / "recovery_status.rs"
+).read_text(encoding="utf-8")
 
 # Values that only ever existed in mockDashboard.ts. If one of these turns
 # up in a rendered tile again, a fixture is being shown as a system fact.
@@ -47,6 +52,8 @@ def _code_only(source: str) -> str:
 
 DASHBOARD_CODE = _code_only(DASHBOARD)
 HERO_CODE = _code_only(HERO_CARD)
+GUARDIAN_CODE = _code_only(GUARDIAN_CARD)
+TOPBAR_CODE = _code_only(TOPBAR)
 
 
 class DashboardHonestyTests(unittest.TestCase):
@@ -144,6 +151,69 @@ class IdentityReadTests(unittest.TestCase):
         body = LIVE_DATA.split("export async function fetchUserName")[1].split("\n}")[0]
         self.assertIn("return null", body)
         self.assertNotRegex(body, r"return \"[A-Za-z]")
+
+
+class GuardianHistoryHonestyTests(unittest.TestCase):
+    """The activity card had the same fallback bug the stat tiles did.
+
+    `events` defaulted to mockDashboard's `guardianHistory`, so a failed
+    Guardian read rendered four invented events as this machine's health
+    history — distinguished only by a missing badge.
+    """
+
+    def test_card_never_falls_back_to_the_history_fixture(self):
+        self.assertNotIn("guardianHistory", GUARDIAN_CODE)
+
+    def test_events_prop_is_required(self):
+        # An optional prop is what allows the default to come back.
+        self.assertNotIn("events?:", GUARDIAN_CODE)
+        self.assertIn("events: GuardianEvent[]", GUARDIAN_CODE)
+
+    def test_card_renders_an_empty_state(self):
+        self.assertIn("events.length === 0", GUARDIAN_CODE)
+
+    def test_dashboard_passes_a_concrete_list(self):
+        self.assertRegex(DASHBOARD_CODE, r"guardianEvents: GuardianEvent\[\]")
+        self.assertIn("?? []", DASHBOARD_CODE)
+
+
+class RecoveryDerivationTests(unittest.TestCase):
+    """`watcher_staged` is not a safeguard, so it must not count as one."""
+
+    def test_watcher_staged_is_merely_has_staged(self):
+        # Guards the premise: if the Rust ever gives watcher_staged its own
+        # meaning, this test fails and the dashboard maths gets revisited.
+        self.assertIn("watcher_staged: has_staged", _code_only(RECOVERY_RS))
+
+    def test_a_staged_update_is_not_counted_as_a_missing_safeguard(self):
+        self.assertNotIn("watcher_staged", DASHBOARD_CODE)
+
+    def test_safeguards_are_only_real_safety_properties(self):
+        self.assertIn("recovery.has_rollback", DASHBOARD_CODE)
+        self.assertIn("!recovery.quarantined_digest", DASHBOARD_CODE)
+
+    def test_safeguard_total_matches_the_number_counted(self):
+        self.assertIn("max={2}", DASHBOARD_CODE)
+        self.assertIn("of 2 safeguards ready", DASHBOARD_CODE)
+        self.assertNotIn("of 3 safeguards", DASHBOARD_CODE)
+
+    def test_empty_boot_checks_do_not_claim_we_never_looked(self):
+        note = DASHBOARD_CODE.split("pendingNote=")[1].split("\n")[0]
+        self.assertIn("bootChecks ?", note)
+
+
+class NotificationLabelTests(unittest.TestCase):
+    def test_unknown_guardian_state_is_not_announced_as_healthy(self):
+        # null means Guardian has not answered; a screen reader must not be
+        # told "nothing needs attention" before there is an answer.
+        # Split on the next prop, not "}": the label itself contains a
+        # template-literal "}" that would truncate the region under test.
+        label = TOPBAR_CODE.split("aria-label={")[-1].split("onClick=")[0]
+        self.assertIn("pendingCount === null", label)
+        self.assertLess(
+            label.index("pendingCount === null"),
+            label.index("nothing needs attention"),
+        )
 
 
 if __name__ == "__main__":

@@ -79,18 +79,20 @@ export function Dashboard() {
   const healthValue = bootChecks && totalChecks > 0 ? (passedChecks / totalChecks) * 100 : null;
 
   // Likewise a count of concrete safeguards that are actually in place,
-  // not an invented 0-10 stability figure.
-  const safeguards = recovery
-    ? [recovery.has_rollback, !recovery.quarantined_digest, !recovery.watcher_staged]
-    : null;
+  // not an invented 0-10 stability figure. Only genuine safety properties
+  // count: recovery_status.rs sets `watcher_staged` to the same value as
+  // `has_staged`, so a staged update is not a missing safeguard and must
+  // not drag this figure down.
+  const safeguards = recovery ? [recovery.has_rollback, !recovery.quarantined_digest] : null;
   const safeguardsReady = safeguards?.filter(Boolean).length ?? 0;
 
-  const guardianEvents: GuardianEvent[] | undefined = guardian?.history.map((item) => ({
-    title: item.title,
-    detail: item.detail || "No further detail recorded.",
-    status: item.status,
-    when: relativeTime(item.timestamp),
-  }));
+  const guardianEvents: GuardianEvent[] =
+    guardian?.history.map((item) => ({
+      title: item.title,
+      detail: item.detail || "No further detail recorded.",
+      status: item.status,
+      when: relativeTime(item.timestamp),
+    })) ?? [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
@@ -105,16 +107,16 @@ export function Dashboard() {
           value={healthValue}
           displayValue={`${passedChecks}/${totalChecks}`}
           unitLabel={`${passedChecks} of ${totalChecks} checks passing`}
-          pendingNote="Boot checks not read yet"
+          pendingNote={bootChecks ? "No boot checks reported" : "Boot checks not read yet"}
         />
         <GaugeCard
           gaugeId="stability"
           title="Recovery safeguards"
           subtitle="Rollback + quarantine state"
           value={safeguards ? safeguardsReady : null}
-          max={3}
-          displayValue={`${safeguardsReady}/3`}
-          unitLabel={`${safeguardsReady} of 3 safeguards ready`}
+          max={2}
+          displayValue={`${safeguardsReady}/2`}
+          unitLabel={`${safeguardsReady} of 2 safeguards ready`}
           pendingNote="Recovery status not read yet"
         />
       </div>

@@ -182,7 +182,9 @@ export function Topbar({ crumb }: { crumb: string }) {
         <button
           className="glass"
           aria-label={
-            pendingCount
+            pendingCount === null
+              ? "Guardian: checking"
+              : pendingCount
               ? `Guardian: ${pendingCount} item${pendingCount === 1 ? "" : "s"} need attention`
               : "Guardian: nothing needs attention"
           }

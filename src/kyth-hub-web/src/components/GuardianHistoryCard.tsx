@@ -1,4 +1,4 @@
-import { guardianHistory, type GuardianEvent } from "../data/mockDashboard";
+import type { GuardianEvent } from "../data/mockDashboard";
 
 const dot: Record<string, string> = {
   ok: "var(--status-ok)",
@@ -6,15 +6,15 @@ const dot: Record<string, string> = {
   error: "var(--status-error)",
 };
 
-// `events` defaults to the mock fixture; Dashboard passes real Guardian
-// history (via services/liveData.ts) when the Tauri bridge has some,
-// falling back to this component's own default otherwise — see
-// Dashboard.tsx. `live` just toggles the badge, no behavior change.
+// `events` is required and never defaults to a fixture: a failed or
+// not-yet-resolved Guardian read must render the empty state below, not
+// four fabricated events presented as this machine's health history.
+// Only mockDashboard's *type* is imported here. `live` toggles the badge.
 export function GuardianHistoryCard({
-  events = guardianHistory,
+  events,
   live = false,
 }: {
-  events?: GuardianEvent[];
+  events: GuardianEvent[];
   live?: boolean;
 }) {
   return (
