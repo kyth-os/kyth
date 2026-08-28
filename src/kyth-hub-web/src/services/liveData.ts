@@ -535,3 +535,9 @@ export async function fetchNetworkIdentityLive(): Promise<NetworkIdentityLive | 
   if (!inTauriShell()) return null;
   try { return await invoke<NetworkIdentityLive>("network_identity"); } catch { return null; }
 }
+
+// Updates unified — bootc/flatpak/firmware summary
+export async function fetchPendingUpdatesSummary(): Promise<Record<string,string> | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<Record<string,string>>("pending_updates_summary"); } catch { return null; }
+}

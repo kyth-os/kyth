@@ -323,6 +323,11 @@ fn network_identity() -> NetworkIdentityResponse {
 #[derive(serde::Serialize)]
 struct NetworkIdentityResponse { vpn_connected: bool, vpn_name: String, smb_mounts: i32, cloud_providers: Vec<String>, detail: String, }
 
+#[tauri::command]
+fn pending_updates_summary() -> std::collections::HashMap<String,String> { kyth_shared::system::updates_unified::pending_updates_summary() }
+#[tauri::command]
+fn rollback_command() -> Vec<String> { kyth_shared::system::updates_unified::rollback_command() }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -355,7 +360,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
