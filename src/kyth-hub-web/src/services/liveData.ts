@@ -597,3 +597,9 @@ export async function fetchCollectAvailability(branch?: string | null, useCached
   if (!inTauriShell()) return null;
   try { return await invoke<AvailabilityStatusLive>("collect_availability", { branch: branch ?? null, useCached }); } catch { return null; }
 }
+
+// Drives — NTFS lsblk (Move In)
+export async function fetchNtfsDevices(): Promise<any[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<any[]>("ntfs_devices"); } catch { return null; }
+}

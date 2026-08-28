@@ -389,6 +389,9 @@ fn collect_availability(branch: Option<String>, use_cached: Option<bool>) -> Ava
     AvailabilityStatusResponse { state: s.state, detail: s.detail, flatpak_count: s.flatpak_count, flatpak_detail: s.flatpak_detail, staged: s.staged, manifest_raw: s.manifest_raw, blocked_reason: s.blocked_reason }
 }
 
+#[tauri::command]
+fn ntfs_devices() -> Vec<serde_json::Value> { kyth_shared::system::drives::get_ntfs_devices() }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -421,7 +424,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
