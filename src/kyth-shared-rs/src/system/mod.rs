@@ -17,6 +17,7 @@ pub mod bootc;
 pub mod firmware;
 pub mod bootc_query;
 pub mod network_identity;
+pub mod registry;
 pub mod plasma_hdr;
 pub mod process;
 pub mod pipewire;
