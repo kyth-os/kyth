@@ -152,6 +152,7 @@ pub fn terminal_available() -> bool {
 /// had to be careful about what it handed us.
 fn is_bare_token(token: &str) -> bool {
     !token.is_empty()
+        && !token.starts_with('-')
         && token.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
