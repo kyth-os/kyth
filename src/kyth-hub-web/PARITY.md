@@ -28,8 +28,8 @@ Python `page_software.py` 7 mixins (Starter Packs, Flatpak Store, AppImages, Ins
 ### 4. kyth_shared → kyth-shared-rs coverage
 Python `src/kyth_shared/kyth_shared` `≈209` modules / `≈1494` defs vs Rust `src/kyth-shared-rs/src/system` `≈30` modules (≈14%). `MIGRATION.md` reserves write/collector paths (installer partitioning, SELinux, VPN connect, `zypp`/`dnf`, `collect_snapshot`, `execute_recipe`) — intentionally read-only first. Parity for UI does not require 100% of `kyth_shared` — only the UI-facing reads + the `≈8` mutating `just_*` recipes (`upgrade`, `rollback`, `switch-channel`, `guardian_execute`, `just_run`) already exposed.
 
-### 5. Launchers & single-instance
-Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`, `krunner_desktop.py`, `kyth-welcome.desktop`. Rust: `main.rs:PendingPage(Mutex<Option<String>>)` + `tauri-plugin-single-instance` + `take_pending_page` — contract matches, but `.desktop`/`systemd`/`installer` still point at `kyth-welcome` (Dockerfile `COPY --from=hub-web-builder /usr/bin/kyth-hub-shell` is additive). Switch when charts + library are live.
+### 5. Launchers & single-instance — NOW DEFAULT (kyth-welcome-launch switched)
+Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`, `krunner_desktop.py`, `kyth-welcome.desktop`. Rust: `main.rs:PendingPage(Mutex<Option<String>>)` + `tauri-plugin-single-instance` + `take_pending_page` — contract matches. `src/kyth-welcome/kyth-welcome-launch` now defaults to `/usr/bin/kyth-hub-shell` when executable, fallback to `kyth-welcome` only on old image/failed build; channel check removed (testing/stable both get Rust shell). `Dockerfile` `COPY --from=hub-web-builder /usr/bin/kyth-hub-shell` already additive, `23-kyth-helper-ctx-installs.sh` installs both .desktop files unchanged.
 
 ## Making React/Rust the main — steps
 
