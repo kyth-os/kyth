@@ -484,3 +484,13 @@ export async function fetchSnapshotCount(): Promise<number | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<number>("snapshot_count"); } catch { return null; }
 }
+
+// Gaming slice — per-game cgroup wrapper
+export async function fetchGamingSliceCommand(argv: string[], useUser?: boolean | null): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("gaming_slice_command", { argv, useUser: useUser ?? null }); } catch { return null; }
+}
+export async function fetchGamingSliceAvailable(): Promise<boolean | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<boolean>("is_gaming_slice_available"); } catch { return null; }
+}

@@ -257,6 +257,13 @@ fn memory_pressure() -> MemoryPressureResponse {
 #[tauri::command]
 fn snapshot_count() -> usize { kyth_shared::system::snapshot::snapshot_count() }
 
+#[tauri::command]
+fn gaming_slice_command(argv: Vec<String>, use_user: Option<bool>) -> Vec<String> {
+    kyth_shared::system::gaming_slice::gaming_slice_command(&argv, use_user)
+}
+#[tauri::command]
+fn is_gaming_slice_available() -> bool { kyth_shared::system::gaming_slice::is_gaming_slice_available() }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -289,7 +296,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

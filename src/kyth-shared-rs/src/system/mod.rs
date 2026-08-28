@@ -5,6 +5,7 @@ pub mod mok_verify;
 pub mod fonts_ready;
 pub mod mesa_version;
 pub mod smb;
+pub mod gaming_slice;
 pub mod memory_pressure;
 pub mod snapshot;
 pub mod probe;
