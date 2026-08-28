@@ -98,19 +98,22 @@ class JustInvocationTests(unittest.TestCase):
             body = re.search(rf"fn {command}\([^)]*\)[^{{]*{{(.*?)\n}}", MAIN_RS, re.S)
             self.assertIsNotNone(body, command)
             code = re.sub(r"//.*", "", body.group(1))
-            self.assertIn("describe_launch", code, command)
+            self.assertIn("launch_in_terminal", code, command)
             for claim in ("rolled back", "staged", "completed", "applied"):
                 self.assertNotIn(claim, code, f"{command} claims {claim!r} for a spawned window")
 
     def test_launch_wording_describes_the_window_not_the_result(self):
-        # describe_launch is the one place that wording lives, so it has to
-        # talk about the terminal and the password prompt, and refuse when
-        # there is no terminal rather than reporting an invisible success.
-        body = re.search(r"fn describe_launch\(.*?\n}", MAIN_RS, re.S)
+        # launch_in_terminal is the one place that wording lives, so it has
+        # to talk about the terminal and the password prompt — and refuse
+        # before spawning when there is no terminal, rather than starting a
+        # process that is doomed at the sudo prompt and then explaining it.
+        body = re.search(r"fn launch_in_terminal\(.*?\n}", MAIN_RS, re.S)
         self.assertIsNotNone(body)
         self.assertIn("terminal window", body.group(0))
         self.assertIn("password prompt", body.group(0))
         self.assertIn("no terminal emulator is installed", body.group(0))
+        guard = body.group(0).index("terminal_available")
+        self.assertLess(guard, body.group(0).index("just_launch"), "spawns before checking for a terminal")
 
     def test_parser_drops_lines_that_are_not_recipes(self):
         # Real `ujust --list` output carries a `[KythOS]` group heading and,

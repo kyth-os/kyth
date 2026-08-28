@@ -135,6 +135,14 @@ fn find_terminal() -> Option<&'static str> {
     TERMINALS.iter().copied().find(|term| Path::new(term).exists())
 }
 
+/// Whether a launch can get a terminal. A caller whose recipe is useless
+/// without one — anything that prompts for sudo — checks this first rather
+/// than spawning a process that is doomed at the prompt and then explaining
+/// that it is.
+pub fn terminal_available() -> bool {
+    find_terminal().is_some()
+}
+
 /// A recipe name (or a fixed argument) is safe to hand to `just` when it is
 /// a single bare token. Allowlist rather than a metacharacter blocklist: a
 /// just recipe name is alphanumerics, `-` and `_` (Guardian also passes

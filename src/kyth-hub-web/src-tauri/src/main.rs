@@ -177,22 +177,19 @@ fn just_run(recipe: String) -> JustRunResponse {
     let launch = kyth_shared::system::just::just_launch(&recipe, &[]);
     JustRunResponse { launched: launch.launched, in_terminal: launch.in_terminal }
 }
-/// Wording for a spawned recipe. All `just_launch` guarantees is that the
-/// window opened: the recipe has not run yet, nobody has answered its sudo
-/// prompt yet, and it can still fail there. So these never claim a finished
-/// system change — `then` is what the user does once the recipe succeeds.
-fn describe_launch(
-    recipe: &str,
-    launch: kyth_shared::system::just::JustLaunch,
-    then: &str,
-) -> Result<String, String> {
-    if !launch.launched {
-        return Err(format!("could not start {recipe}"));
-    }
-    if !launch.in_terminal {
+/// Run a recipe in its own terminal, and say only what that guarantees: the
+/// window opened. The recipe has not run yet, nobody has answered its sudo
+/// prompt yet, and it can still fail there — `then` is what the user does
+/// once it succeeds. Without a terminal the recipe has nowhere to prompt, so
+/// nothing is spawned at all.
+fn launch_in_terminal(recipe: &str, args: &[&str], then: &str) -> Result<String, String> {
+    if !kyth_shared::system::just::terminal_available() {
         return Err(format!(
             "no terminal emulator is installed, so {recipe} cannot ask for its password or show what it did — run `ujust {recipe}` in a terminal instead"
         ));
+    }
+    if !kyth_shared::system::just::just_launch(recipe, args).launched {
+        return Err(format!("could not start {recipe}"));
     }
     Ok(format!("{recipe} is running in its own terminal window — answer the password prompt there, then {then}"))
 }
@@ -201,11 +198,11 @@ fn describe_launch(
 #[tauri::command]
 fn bootc_upgrade() -> Result<String, String> {
     sanitize_upgrade()?;
-    describe_launch("upgrade", kyth_shared::system::just::just_launch("upgrade", &[]), "reboot to apply it")
+    launch_in_terminal("upgrade", &[], "reboot to apply it")
 }
 #[tauri::command]
 fn bootc_rollback() -> Result<String, String> {
-    describe_launch("rollback", kyth_shared::system::just::just_launch("rollback", &[]), "reboot into the previous deployment")
+    launch_in_terminal("rollback", &[], "reboot into the previous deployment")
 }
 #[tauri::command]
 fn bootc_switch_branch(branch: String) -> Result<String, String> {
@@ -221,11 +218,7 @@ fn bootc_switch_branch(branch: String) -> Result<String, String> {
     // Through `just_launch` rather than a raw `Command`, so this gets the
     // justfile resolution `ujust` performs and the terminal the recipe's
     // sudo prompt needs — a bare `just` here found no justfile at all.
-    describe_launch(
-        "switch-channel",
-        kyth_shared::system::just::just_launch("switch-channel", &[channel]),
-        &format!("reboot to activate {channel}"),
-    )
+    launch_in_terminal("switch-channel", &[channel], &format!("reboot to activate {channel}"))
 }
 fn sanitize_upgrade() -> Result<(), String> {
     // allowlist: only expose when bootc binary present; polkit prompt happens in the spawned just recipe (pkexec inside recipe)
