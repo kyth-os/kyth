@@ -14,7 +14,8 @@
 // assumes the rest gets ported on any particular timeline.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager};
@@ -25,6 +26,9 @@ use tauri::{Emitter, Manager};
 /// unchanged, whether that's at first launch (via `take_pending_page`) or
 /// on a later single-instance activation (via the "navigate" event).
 struct PendingPage(Mutex<Option<String>>);
+
+static APP_INSTALLS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+fn app_installs() -> &'static Mutex<HashMap<String, (String, String)>> { APP_INSTALLS.get_or_init(|| Mutex::new(HashMap::new())) }
 
 fn extract_page_arg<S: AsRef<str>>(argv: &[S]) -> Option<String> {
     argv.iter()
@@ -182,6 +186,12 @@ fn just_run(recipe: String) -> JustRunResponse {
 /// prompt yet, and it can still fail there — `then` is what the user does
 /// once it succeeds. Without a terminal the recipe has nowhere to prompt, so
 /// nothing is spawned at all.
+///
+/// Only these three refuse. `just_run` still spawns without a terminal and
+/// says so (`in_terminal` false), because for an ordinary recipe that is the
+/// user's only affordance in a stripped session. These three stage a change
+/// to what the machine boots, and a half-run `switch-channel` or `rollback`
+/// nobody can see the prompt for is worse than not starting it.
 fn launch_in_terminal(recipe: &str, args: &[&str], then: &str) -> Result<String, String> {
     if !kyth_shared::system::just::terminal_available() {
         return Err(format!(
@@ -453,6 +463,62 @@ fn familiar_apps() -> Vec<kyth_shared::system::software_catalog::FamiliarApp> {
 }
 
 #[tauri::command]
+fn appstream_search(query: String) -> Vec<kyth_shared::system::software_catalog::AppStreamApp> {
+    kyth_shared::system::software_catalog::appstream_search(&query)
+}
+
+#[tauri::command]
+fn appimage_list() -> Vec<kyth_shared::system::software_catalog::AppImageEntry> {
+    kyth_shared::system::software_catalog::appimages()
+}
+
+#[tauri::command]
+fn launch_appimage(path: String) -> Result<String, String> {
+    let allowed = kyth_shared::system::software_catalog::appimages().into_iter().any(|app| app.path == path && app.executable);
+    if !allowed { return Err("AppImage is not a discovered executable in an allowed user directory".to_string()); }
+    std::process::Command::new(&path).spawn().map(|_| "AppImage launched.".to_string()).map_err(|err| format!("could not launch AppImage: {err}"))
+}
+
+#[derive(serde::Serialize)]
+struct InstallStatus { id: String, state: String, detail: String }
+
+#[tauri::command]
+fn install_flatpak(app_id: String) -> Result<String, String> {
+    if app_id.is_empty() || app_id.len() > 200 || !app_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')) {
+        return Err("invalid Flatpak application id".to_string());
+    }
+    let job = format!("flatpak-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    app_installs().lock().unwrap().insert(job.clone(), ("running".into(), format!("Installing {app_id}…")));
+    let job_for_thread = job.clone();
+    std::thread::spawn(move || {
+        let result = std::process::Command::new("flatpak").args(["install", "--user", "-y", "flathub", &app_id]).output();
+        let (state, detail) = match result {
+            Ok(output) if output.status.success() => ("complete", "Installation complete.".to_string()),
+            Ok(output) => ("failed", String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect()),
+            Err(err) => ("failed", format!("Could not start Flatpak: {err}")),
+        };
+        app_installs().lock().unwrap().insert(job_for_thread, (state.into(), detail));
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+fn install_status(job: String) -> InstallStatus {
+    let (state, detail) = app_installs().lock().unwrap().get(&job).cloned().unwrap_or(("unknown".into(), "Installation job not found.".into()));
+    InstallStatus { id: job, state, detail }
+}
+
+#[tauri::command]
+fn protondb_lookup_many(app_ids: Vec<String>) -> Vec<kyth_shared::system::gaming_compat::ProtonDbResult> {
+    kyth_shared::system::gaming_compat::protondb_lookup_many(&app_ids)
+}
+
+#[tauri::command]
+fn anti_cheat_table() -> Vec<kyth_shared::system::gaming_compat::AntiCheatEntry> {
+    kyth_shared::system::gaming_compat::anti_cheat_table()
+}
+
+#[tauri::command]
 fn telemetry_recent(limit: Option<u32>) -> Vec<kyth_shared::system::telemetry::SessionRow> {
     kyth_shared::system::telemetry::recent_sessions(limit.unwrap_or(15) as usize)
 }
@@ -564,7 +630,7 @@ fn main() {
         }))
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
-            probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, take_pending_page, just_list, just_run,
+            probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, appstream_search, appimage_list, launch_appimage, install_flatpak, install_status, protondb_lookup_many, anti_cheat_table, take_pending_page, just_list, just_run,
             bootc_upgrade, bootc_rollback, bootc_switch_branch, guardian_execute_recipe, branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available, current_user_name, open_feedback_issue
         ])
         .run(tauri::generate_context!())

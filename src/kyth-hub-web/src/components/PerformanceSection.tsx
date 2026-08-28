@@ -12,6 +12,7 @@ export function PerformanceSection({ section }: { section: HubSection }) {
   const [audit, setAudit] = useState<AuditCache | null>(null);
   const [audioPresets, setAudioPresets] = useState<string[] | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [pendingPreset, setPendingPreset] = useState<string | null>(null);
   const { status, busy, run } = useSectionAction();
   useEffect(() => {
     let c = false;
@@ -64,18 +65,39 @@ export function PerformanceSection({ section }: { section: HubSection }) {
               {audioPresets.map((preset) => (
                 <ActionButton
                   key={preset}
-                  label={busy === `pw-${preset}` ? `Applying ${preset}…` : preset}
-                  disabled={busy !== null}
+                  label={pendingPreset === preset ? "Preview ready — confirm below" : busy === `pw-${preset}` ? `Previewing ${preset}…` : preset}
+                  disabled={busy !== null || pendingPreset !== null}
                   onClick={() =>
                     run(`pw-${preset}`, `Applying ${preset}…`, async () => {
-                      const res = await applyPipewireQuantum(preset, false);
+                      const res = await applyPipewireQuantum(preset, true);
                       if (!res) return "Not available outside the Hub shell.";
+                      if (res.ok) setPendingPreset(preset);
                       return res.detail;
                     })
                   }
                 />
               ))}
             </div>
+            {pendingPreset && (
+              <div style={{ marginTop: 12, padding: 12, border: "1px solid var(--status-warn)", borderRadius: 10 }}>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>Apply {pendingPreset} audio latency?</p>
+                <p className="card-copy" style={{ margin: "4px 0 10px", fontSize: 12 }}>
+                  This writes the PipeWire user configuration and takes effect after PipeWire reloads. Confirm only if you want to change the current profile.
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <ActionButton
+                    label={busy === `pw-apply-${pendingPreset}` ? "Applying…" : "Confirm"}
+                    disabled={busy !== null}
+                    onClick={() => run(`pw-apply-${pendingPreset}`, `Applying ${pendingPreset}…`, async () => {
+                      const res = await applyPipewireQuantum(pendingPreset, false);
+                      setPendingPreset(null);
+                      return res?.detail ?? "Not available outside the Hub shell.";
+                    })}
+                  />
+                  <ActionButton label="Cancel" disabled={busy !== null} onClick={() => setPendingPreset(null)} />
+                </div>
+              </div>
+            )}
           </>
         )}
         <ActionStatus status={status} />

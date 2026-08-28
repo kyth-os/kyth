@@ -783,6 +783,34 @@ export async function fetchFamiliarApps(): Promise<FamiliarApp[] | null> {
   try { return await invoke<FamiliarApp[]>("familiar_apps"); } catch { return null; }
 }
 
+export interface AppStreamApp { id: string; name: string; summary: string }
+export interface AppImageEntry { name: string; path: string; executable: boolean }
+export interface InstallStatus { id: string; state: "running" | "complete" | "failed" | "unknown"; detail: string }
+export async function searchAppStream(query: string): Promise<AppStreamApp[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<AppStreamApp[]>("appstream_search", { query }); } catch { return null; }
+}
+export async function fetchAppImages(): Promise<AppImageEntry[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<AppImageEntry[]>("appimage_list"); } catch { return null; }
+}
+export async function launchAppImage(path: string): Promise<string> { return await invoke<string>("launch_appimage", { path }); }
+export async function installFlatpak(appId: string): Promise<string> { return await invoke<string>("install_flatpak", { appId }); }
+export async function fetchInstallStatus(id: string): Promise<InstallStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<InstallStatus>("install_status", { job: id }); } catch { return null; }
+}
+export interface ProtonDbResult { app_id: string; tier: string; detail: string }
+export interface AntiCheatEntry { game: string; status: string; detail: string }
+export async function fetchProtonDbMany(appIds: string[]): Promise<ProtonDbResult[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<ProtonDbResult[]>("protondb_lookup_many", { appIds }); } catch { return null; }
+}
+export async function fetchAntiCheatTable(): Promise<AntiCheatEntry[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<AntiCheatEntry[]>("anti_cheat_table"); } catch { return null; }
+}
+
 /** Feedback's send path — opens a prefilled kyth-os/kyth issue via
  * xdg-open. Throws like the other mutating wrappers so useSectionAction
  * can surface the failure. */

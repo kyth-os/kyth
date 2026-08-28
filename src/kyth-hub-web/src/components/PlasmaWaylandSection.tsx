@@ -19,6 +19,7 @@ export function PlasmaWaylandSection({ section }: { section: HubSection }) {
   const [presets, setPresets] = useState<string[] | null>(null);
   const [stack, setStack] = useState<string[] | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [pendingPreset, setPendingPreset] = useState<string | null>(null);
   const { status, busy, run } = useSectionAction();
 
   useEffect(() => {
@@ -96,22 +97,43 @@ export function PlasmaWaylandSection({ section }: { section: HubSection }) {
             recover with <code>ujust list-presets</code> from a TTY, or reboot.
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {presets.map((preset) => (
-              <ActionButton
-                key={preset}
-                label={busy === preset ? `Applying ${preset}…` : preset}
-                disabled={busy !== null}
-                onClick={() =>
-                  run(preset, `Applying ${preset}…`, async () => {
-                    const res = await applyPlasmaPreset(preset, false);
-                    if (!res) return "Not available outside the Hub shell.";
-                    return res.detail;
-                  })
-                }
-              />
-            ))}
+              {presets.map((preset) => (
+                <ActionButton
+                  key={preset}
+                  label={pendingPreset === preset ? "Preview ready — confirm below" : busy === `preview-${preset}` ? `Checking ${preset}…` : preset}
+                  disabled={busy !== null || pendingPreset !== null}
+                  onClick={() =>
+                    run(`preview-${preset}`, `Checking ${preset}…`, async () => {
+                      const res = await applyPlasmaPreset(preset, true);
+                      if (!res) return "Not available outside the Hub shell.";
+                      if (res.ok) setPendingPreset(preset);
+                      return res.detail;
+                    })
+                  }
+                />
+              ))}
             <RecipeButton recipe="list-presets" label="List all presets" busy={busy} run={run} />
-          </div>
+            </div>
+          {pendingPreset && (
+            <div style={{ marginTop: 12, padding: 12, border: "1px solid var(--status-warn)", borderRadius: 10 }}>
+              <p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>Apply {pendingPreset} display preset?</p>
+              <p className="card-copy" style={{ margin: "4px 0 10px", fontSize: 12 }}>
+                This changes the current Wayland display configuration. Confirm only if the preview matches your display; an unsupported HDR mode can blank the screen.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <ActionButton
+                  label={busy === `apply-${pendingPreset}` ? "Applying…" : "Confirm"}
+                  disabled={busy !== null}
+                  onClick={() => run(`apply-${pendingPreset}`, `Applying ${pendingPreset}…`, async () => {
+                    const res = await applyPlasmaPreset(pendingPreset, false);
+                    setPendingPreset(null);
+                    return res?.detail ?? "Not available outside the Hub shell.";
+                  })}
+                />
+                <ActionButton label="Cancel" disabled={busy !== null} onClick={() => setPendingPreset(null)} />
+              </div>
+            </div>
+          )}
           <ActionStatus status={status} />
         </div>
       )}

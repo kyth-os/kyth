@@ -5,6 +5,9 @@
 //! place can evolve curated app IDs without touching widget code.
 
 use serde::Serialize;
+use std::path::PathBuf;
+use std::process::Command;
+use std::os::unix::fs::PermissionsExt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CatalogApp {
@@ -64,6 +67,55 @@ pub struct FamiliarApp {
     pub windows_name: String,
     pub description: String,
     pub flatpak_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AppStreamApp {
+    pub id: String,
+    pub name: String,
+    pub summary: String,
+}
+
+/// Query the installed Flathub catalog. This is intentionally bounded and
+/// read-only; Flatpak remains the authority for what is currently available.
+pub fn appstream_search(query: &str) -> Vec<AppStreamApp> {
+    let query = query.trim();
+    if query.is_empty() || query.len() > 80 || !query.chars().all(|c| c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace()) { return Vec::new(); }
+    let Ok(output) = Command::new("flatpak").args(["search", "--columns=application,name,summary", query]).output() else { return Vec::new(); };
+    if !output.status.success() { return Vec::new(); }
+    String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| {
+        let mut fields = line.split('\t');
+        let id = fields.next()?.trim();
+        let name = fields.next()?.trim();
+        let summary = fields.next().unwrap_or("").trim();
+        if id.is_empty() || !id.contains('.') { return None; }
+        Some(AppStreamApp { id: id.to_string(), name: name.to_string(), summary: summary.to_string() })
+    }).take(30).collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AppImageEntry {
+    pub name: String,
+    pub path: String,
+    pub executable: bool,
+}
+
+pub fn appimages() -> Vec<AppImageEntry> {
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/root"));
+    let dirs = [home.join("Applications"), home.join(".local/bin"), home.join("Downloads")];
+    let mut result = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue; };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("appimage")) {
+                let executable = std::fs::metadata(&path).map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false);
+                result.push(AppImageEntry { name: path.file_stem().unwrap_or_default().to_string_lossy().to_string(), path: path.display().to_string(), executable });
+            }
+        }
+    }
+    result.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    result
 }
 
 /// Curated “Windows → Koji” map — same list as `FAMILIAR_APPS` in Python, trimmed to

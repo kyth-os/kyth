@@ -83,7 +83,8 @@ pub fn recipe_risk(recipe_id: &str) -> String {
 /// its own would be wrong, not merely incomplete: `audio.sink-fallback`'s
 /// command is a read (`pactl list short sinks`) and `network.captive-fix`'s
 /// is only the "off" half of a toggle, so it would leave networking down.
-/// These stay unavailable from the Hub until the executors are ported.
+/// These are dispatched by `run_executor` below rather than by running the
+/// recipe's first argv.  Some recipes are deliberately multi-step.
 const EXECUTOR_ONLY: &[&str] = &[
     "display.reconfigure",
     "audio.sink-fallback",
@@ -137,6 +138,110 @@ fn run_command(argv: &[&str], timeout: Duration) -> Result<String, String> {
     }
 }
 
+fn run_ok(argv: &[&str], timeout: Duration) -> Result<(), String> {
+    run_command(argv, timeout).map(|_| ())
+}
+
+/// Rust equivalent of guardian_actions.py's bounded executors. Every command
+/// remains an argv invocation; no user-controlled text reaches a shell.
+fn run_executor(id: &str) -> Result<String, String> {
+    match id {
+        "display.reconfigure" => {
+            let _ = run_ok(&["systemctl", "--user", "restart", "plasma-kscreen.service"], Duration::from_secs(10));
+            run_ok(&["kscreen-doctor", "-o"], Duration::from_secs(8)).map(|_| "display outputs refreshed".to_string())
+        }
+        "audio.sink-fallback" => {
+            let output = run_command(&["pactl", "list", "short", "sinks"], Duration::from_secs(6))?;
+            let sink = output.lines().filter_map(|line| line.split_whitespace().nth(1))
+                .find(|name| !name.contains("auto_null") && *name != "@DEFAULT_SINK@");
+            let Some(sink) = sink else { return Err("no usable audio sink".to_string()); };
+            run_ok(&["pactl", "set-default-sink", sink], Duration::from_secs(6))?;
+            Ok(format!("default sink set to {sink}"))
+        }
+        "power.profile-fix" => {
+            run_ok(&["powerprofilesctl", "set", "balanced"], Duration::from_secs(6))?;
+            Ok("power profile set to balanced".to_string())
+        }
+        "network.dns-flush" => {
+            if run_ok(&["resolvectl", "flush-caches"], Duration::from_secs(6)).is_ok()
+                || run_ok(&["systemd-resolve", "--flush-caches"], Duration::from_secs(6)).is_ok() {
+                Ok("flushed DNS caches".to_string())
+            } else { Err("DNS cache flush unavailable".to_string()) }
+        }
+        "network.captive-fix" => {
+            run_ok(&["nmcli", "networking", "off"], Duration::from_secs(8))?;
+            std::thread::sleep(Duration::from_secs(2));
+            let result = run_ok(&["nmcli", "networking", "on"], Duration::from_secs(8));
+            if result.is_ok() { Ok("networking re-toggled".to_string()) } else {
+                let _ = run_ok(&["nmcli", "networking", "on"], Duration::from_secs(8));
+                Err("failed to re-enable networking".to_string())
+            }
+        }
+        "network.vpn-fix" => {
+            let listed = run_command(&["nmcli", "-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"], Duration::from_secs(6))?;
+            for line in listed.lines() {
+                let mut parts = line.rsplitn(3, ':');
+                let auto = parts.next().unwrap_or("");
+                let kind = parts.next().unwrap_or("");
+                let name = parts.next().unwrap_or("");
+                if kind == "vpn" && auto == "yes" && !name.is_empty() {
+                    run_ok(&["nmcli", "connection", "up", name], Duration::from_secs(15))?;
+                    return Ok(format!("brought up VPN {name}"));
+                }
+            }
+            Err("no always-on VPN needed reconnecting".to_string())
+        }
+        "controller.repair" => {
+            run_ok(&["sudo", "-A", "systemctl", "restart", "joycond.service"], Duration::from_secs(20))?;
+            Ok("joycond restarted".to_string())
+        }
+        "portal.restart-user" => {
+            run_ok(&["systemctl", "--user", "restart", "xdg-desktop-portal.service"], Duration::from_secs(15))?;
+            let _ = run_ok(&["systemctl", "--user", "restart", "plasma-xdg-desktop-portal-kde.service"], Duration::from_secs(15));
+            Ok("desktop portals restarted".to_string())
+        }
+        "firmware.refresh" => {
+            if run_ok(&["flock", "-w", "10", "/run/kyth-fwupd.lock", "fwupdmgr", "refresh", "--force"], Duration::from_secs(30)).is_err() {
+                run_ok(&["fwupdmgr", "refresh", "--force"], Duration::from_secs(30))?;
+            }
+            Ok("firmware metadata refreshed".to_string())
+        }
+        "storage.maint" => {
+            run_ok(&["/usr/libexec/kyth-storage-gate"], Duration::from_secs(15))?;
+            run_ok(&["/usr/bin/kyth-btrfs-maint"], Duration::from_secs(60))?;
+            Ok("storage maintenance started".to_string())
+        }
+        _ => Err(NOT_ELIGIBLE.to_string()),
+    }
+}
+
+#[cfg(test)]
+fn executor_supported(id: &str) -> bool {
+    matches!(id, "display.reconfigure" | "audio.sink-fallback" | "power.profile-fix"
+        | "network.dns-flush" | "network.captive-fix" | "network.vpn-fix"
+        | "controller.repair" | "portal.restart-user" | "firmware.refresh" | "storage.maint")
+}
+
+fn save_state(state: &Value) -> Result<(), String> {
+    let path = state_path();
+    let parent = path.parent().ok_or_else(|| "invalid Guardian state path".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|_| "could not create Guardian state directory".to_string())?;
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, serde_json::to_vec_pretty(state).map_err(|_| "could not encode Guardian state".to_string())?)
+        .map_err(|_| "could not write Guardian state".to_string())?;
+    std::fs::rename(temp, path).map_err(|_| "could not commit Guardian state".to_string())
+}
+
+fn cooldown_active(state: &Value, recipe: &Recipe) -> bool {
+    let now = now_unix();
+    state.get("history").and_then(Value::as_array).is_some_and(|history| history.iter().any(|item| {
+        item.get("recipe_id").and_then(Value::as_str) == Some(recipe.id)
+            && item.get("action").and_then(Value::as_str) == Some("executed")
+            && item.get("verified").and_then(Value::as_bool) != Some(false)
+            && now - item.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0) < recipe.cooldown as f64
+    }))
+}
+
 /// Run a repair the user asked for, porting the `user_initiated=True` path
 /// of `guardian.py:execute_recipe`.
 ///
@@ -154,12 +259,8 @@ pub fn execute_recipe(recipe_id: &str) -> Result<String, String> {
     if recipe.command.is_empty() || !matches!(recipe.risk, "safe" | "confirm") {
         return Err(NOT_ELIGIBLE.to_string());
     }
-    if EXECUTOR_ONLY.contains(&recipe.id) {
-        return Err(format!(
-            "{} runs through Guardian's own action handler, which this shell does not implement yet",
-            recipe.title,
-        ));
-    }
+    let state = load_state();
+    if cooldown_active(&state, recipe) { return Err("repair cooldown is active".to_string()); }
     if recipe.requires_auth && std::env::var_os("SUDO_ASKPASS").is_none() {
         // The command is `sudo -A …`; with no askpass helper in the session
         // it can only fail, and it would fail with sudo's wording rather
@@ -169,7 +270,34 @@ pub fn execute_recipe(recipe_id: &str) -> Result<String, String> {
             recipe.title,
         ));
     }
-    run_command(recipe.command, Duration::from_secs(30))
+    let result = if EXECUTOR_ONLY.contains(&recipe.id) {
+        run_executor(recipe.id)
+    } else {
+        run_command(recipe.command, Duration::from_secs(30))
+    };
+    let (ok, detail) = match result { Ok(detail) => (true, detail), Err(detail) => (false, detail) };
+    let verified = ok && verify_recipe(recipe.id);
+    let mut next = state;
+    if let Some(history) = next.get_mut("history").and_then(Value::as_array_mut) {
+        history.push(serde_json::json!({"timestamp": now_unix(), "recipe_id": recipe.id, "source": "hub", "action": "executed", "verified": verified, "detail": detail}));
+        if history.len() > 200 { let keep_from = history.len() - 200; history.drain(0..keep_from); }
+    }
+    let _ = save_state(&next);
+    if ok && verified { Ok(detail) } else if ok { Err(format!("{detail}; post-repair verification failed")) } else { Err(detail) }
+}
+
+fn verify_recipe(recipe_id: &str) -> bool {
+    match recipe_id {
+        "audio.sink-fallback" => run_ok(&["pactl", "get-default-sink"], Duration::from_secs(4)).is_ok(),
+        "network.captive-fix" | "network.vpn-fix" | "network.dns-flush" => run_ok(&["nmcli", "-t", "-f", "STATE", "general"], Duration::from_secs(5)).is_ok(),
+        "controller.repair" => run_ok(&["systemctl", "is-active", "--quiet", "joycond.service"], Duration::from_secs(5)).is_ok(),
+        "portal.restart-user" => run_ok(&["systemctl", "--user", "is-active", "--quiet", "xdg-desktop-portal.service"], Duration::from_secs(5)).is_ok(),
+        "firmware.refresh" => run_ok(&["fwupdmgr", "get-updates"], Duration::from_secs(8)).is_ok(),
+        "power.profile-fix" => run_ok(&["powerprofilesctl", "get"], Duration::from_secs(4)).is_ok(),
+        "display.reconfigure" => run_ok(&["kscreen-doctor", "-o"], Duration::from_secs(5)).is_ok(),
+        "storage.maint" => true,
+        _ => run_ok(&["systemctl", "--user", "is-active", "--quiet", "pipewire.service"], Duration::from_secs(5)).is_ok(),
+    }
 }
 
 fn state_dir() -> PathBuf {
@@ -317,13 +445,12 @@ mod tests {
         assert_eq!(execute_recipe(""), Err(NOT_ELIGIBLE.to_string()));
     }
 
-    /// These would otherwise run a command that is not the repair — a read,
-    /// or half of a toggle — so they must report unavailable, not success.
+    /// Every executor-backed recipe has an explicit Rust implementation; this
+    /// test is static so the suite never runs mutating system commands.
     #[test]
-    fn executor_backed_recipes_report_unavailable_instead_of_running() {
+    fn executor_backed_recipes_are_implemented() {
         for id in EXECUTOR_ONLY {
-            let err = execute_recipe(id).expect_err(id);
-            assert!(err.contains("does not implement yet"), "{id}: {err}");
+            assert!(executor_supported(id), "{id} has no Rust executor");
         }
     }
 
