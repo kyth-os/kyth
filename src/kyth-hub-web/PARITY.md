@@ -6,7 +6,7 @@ Python Hub is authoritative until this file says otherwise. Build is `check-hub-
 
 | Destination | Sections (Python `DESTINATION_SECTIONS`) | React `HubSection` status | Live data |
 |---|---|---|---|
-| Home | Welcome (Dashboard) | `Dashboard.tsx` live — Guardian/Channel/GPU/Storage/User/BootChecks/Recovery via `liveData.ts` → `main.rs:kyth-shared` | live, charts still fixture |
+| Home | Welcome (Dashboard) | `Dashboard.tsx` live — Guardian/Channel/GPU/Storage/User/BootChecks/Recovery via `liveData.ts` → `main.rs:kyth-shared` | live, telemetry charts live when sessions exist |
 | Play | Gaming, Performance, Compatibility, Controllers | `Play.tsx` → 4 sections, all `LiveSectionCard` | Gaming/Performance/Compatibility/Controllers read `audit-cache`/`controllers-detect` probe |
 | Apps | App Store, Work Setup | `Apps.tsx` → 2 sections | App Store `flatpak-apps`, Work Setup probe |
 | This PC | Guardian, Update, Hardware, Plasma Wayland, Diagnostics, Repair, NVIDIA, Kernel, Channels, Just, Feedback (11) | `ThisPc.tsx` → 11 sections | All 11 have `liveData.ts` fetchers + `main.rs` bridge |
@@ -16,8 +16,8 @@ Python Hub is authoritative until this file says otherwise. Build is `check-hub-
 
 ## What is still not 100%
 
-### 1. Charts — the only remaining fixture
-`PerformanceChart.tsx`/`SessionsChart.tsx` render `mockDashboard.ts:performanceSeries/sessionSeries` with `pill-dim Sample data` + `ChartFixtureNote` ("kyth-telem's `~/.local/share/kyth/telemetry.db` reader not ported — `kyth-shared-rs` needs `rusqlite`"). Python `page_performance.py` + `kyth_shared.telemetry.recent_sessions` already reads it. Fix: add `kyth-shared-rs::system::telemetry::recent_sessions` (read-only sqlite), expose `telemetry_recent` Tauri command, `liveData.ts:fetchTelemetrySeries`, charts show `Live` when data present else `Preview` with note.
+### 1. Charts — live telemetry wired
+`PerformanceChart.tsx`/`SessionsChart.tsx` read `kyth-telem` sessions through `liveData.ts:fetchTelemetryRecent` → `telemetry_recent` → `kyth-shared-rs::system::telemetry::recent_sessions` (read-only sqlite). They show `Live` when usable session data exists and an explicit no-data state otherwise; they never render the old `mockDashboard.ts` series.
 
 ### 2. Gaming library/migration/setup sub-tabs — PARTIAL LIVE (GamingSection + library scan)
 Python `page_gaming.py` composes 6 mixins (`page_gaming_dashboard/setup/library/fixes/tools/migration`) each with workers (`DataWorker`, `WindowsLibraryWorker`, `ProtonDbBatchWorker`). React `GamingSection.tsx` only shows `audit` master pills. Now `GamingSection` shows `gaming_library` scan (Steam/Heroic/Lutris/Bottles) via `gaming_library.rs` + `fetchGamingLibrary`; still TODO: migration checklist, ProtonDB batch and `compatibility` (`protondb`, `anticheat`) bridges.

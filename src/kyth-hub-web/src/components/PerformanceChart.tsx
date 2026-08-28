@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fetchTelemetryRecent, type TelemetrySession } from "../services/liveData";
-import { ChartFixtureNote } from "./ChartFixtureNote";
 import { inTauriShell } from "../services/tauriEnv";
 
 // Dashboard FPS chart — now live. When telemetry.db is absent (dev checkout, no kyth-telem runs)
-// it shows Preview + ChartFixtureNote with no fake numbers. When data exists, it aggregates
-// recent_sessions by day and shows Live badge.
+// it shows Preview with no fake numbers. When data exists, it aggregates recent_sessions by day
+// and shows a Live badge.
 export function PerformanceChart() {
   const [sessions, setSessions] = useState<TelemetrySession[] | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -25,19 +24,19 @@ export function PerformanceChart() {
   // Aggregate avg_fps by calendar day (last 7 days) — matches Python recent_sessions grouping.
   const data = (() => {
     if (!isLive || !sessions) return [];
-    const byDay = new Map<string, { sum: number; count: number; day: string }>();
+    const byDay = new Map<string, { key: string; sum: number; count: number; day: string }>();
     for (const s of sessions) {
       if (s.avg_fps == null || s.started_at == null) continue;
       const d = new Date(s.started_at * 1000);
       const key = d.toISOString().slice(0, 10);
       const day = d.toLocaleDateString(undefined, { weekday: "short" });
-      const cur = byDay.get(key) || { sum: 0, count: 0, day };
+      const cur = byDay.get(key) || { key, sum: 0, count: 0, day };
       cur.sum += s.avg_fps;
       cur.count += 1;
       byDay.set(key, cur);
     }
     return Array.from(byDay.values())
-      .sort((a, b) => a.day.localeCompare(b.day))
+      .sort((a, b) => a.key.localeCompare(b.key))
       .slice(-7)
       .map((v) => ({ day: v.day, fps: Math.round(v.sum / v.count) }));
   })();
@@ -91,7 +90,11 @@ export function PerformanceChart() {
           </div>
         )}
       </div>
-      {!showLiveData && <ChartFixtureNote />}
+      {!showLiveData && loaded && (
+        <p className="card-copy" style={{ marginTop: 12, fontSize: 11.5 }}>
+          No telemetry sessions with FPS data are available yet.
+        </p>
+      )}
     </div>
   );
 }

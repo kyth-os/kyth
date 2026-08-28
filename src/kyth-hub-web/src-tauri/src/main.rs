@@ -407,7 +407,6 @@ fn update_status() -> UpdateStatusResponse {
 struct UpdateStatusResponse { booted: Option<String>, staged: bool, rollback: bool, remote_digest: Option<String>, blocked_reason: Option<String>, retry_cmd: Option<String>, check_state: String, detail: String, }
 
 #[tauri::command]
-#[tauri::command]
 fn gaming_library() -> Vec<kyth_shared::system::gaming_library::LauncherEntry> {
     kyth_shared::system::gaming_library::gaming_library_scan()
 }

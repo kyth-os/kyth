@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { fetchTelemetryRecent, type TelemetrySession } from "../services/liveData";
-import { ChartFixtureNote } from "./ChartFixtureNote";
 import { inTauriShell } from "../services/tauriEnv";
 
 export function SessionsChart() {
@@ -21,18 +20,18 @@ export function SessionsChart() {
   const isLive = sessions !== null && sessions.length > 0;
   const data = (() => {
     if (!isLive || !sessions) return [];
-    const byDay = new Map<string, { count: number; day: string }>();
+    const byDay = new Map<string, { key: string; count: number; day: string }>();
     for (const s of sessions) {
       if (s.started_at == null) continue;
       const d = new Date(s.started_at * 1000);
       const key = d.toISOString().slice(0, 10);
       const day = d.toLocaleDateString(undefined, { weekday: "short" });
-      const cur = byDay.get(key) || { count: 0, day };
+      const cur = byDay.get(key) || { key, count: 0, day };
       cur.count += 1;
       byDay.set(key, cur);
     }
     return Array.from(byDay.values())
-      .sort((a, b) => a.day.localeCompare(b.day))
+      .sort((a, b) => a.key.localeCompare(b.key))
       .slice(-7)
       .map((v) => ({ day: v.day, sessions: v.count }));
   })();
@@ -81,7 +80,11 @@ export function SessionsChart() {
           </div>
         )}
       </div>
-      {!showLiveData && <ChartFixtureNote />}
+      {!showLiveData && loaded && (
+        <p className="card-copy" style={{ marginTop: 12, fontSize: 11.5 }}>
+          No telemetry sessions are available yet.
+        </p>
+      )}
       {showLiveData && (
         <div style={{ display: "flex", gap: 20, marginTop: 14 }}>
           {[

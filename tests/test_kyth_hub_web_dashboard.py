@@ -8,10 +8,9 @@ they never had ("From Guardian's last check" over a hardcoded 95), the
 performance card claimed a "+18% vs last week" comparison against data it
 never fetched, and HeroCard greeted every user as "Mark".
 
-The telemetry charts are the one place fixtures remain, and that is
-deliberate: kyth-telem collects real sessions, but its reader has no Rust
-port yet (see ChartFixtureNote). Those cards must therefore *say* they are
-samples rather than silently imply live data.
+The telemetry charts read real sessions through the Rust bridge when the
+shell is available, and explicitly show a no-data state otherwise. They must
+not silently fall back to the old mock series.
 
 TypeScript can't catch any of this — a fixture is a well-typed value — so
 these are static checks over the shipped sources.
@@ -117,24 +116,24 @@ class DashboardHonestyTests(unittest.TestCase):
         # A derived comparison over a series that is never fetched.
         self.assertNotIn("vs last week", _code_only(PERF_CHART))
 
-    def test_fixture_charts_declare_themselves(self):
+    def test_charts_use_the_live_telemetry_bridge(self):
         for name, source in (("PerformanceChart", PERF_CHART), ("SessionsChart", SESSIONS_CHART)):
             code = _code_only(source)
-            self.assertIn("ChartFixtureNote", code, f"{name} must label its fixture data")
-            self.assertIn("Sample data", code, f"{name} must carry the sample badge")
+            self.assertIn("fetchTelemetryRecent", code, f"{name} must read the telemetry bridge")
+            self.assertIn('"Live"', code, f"{name} must identify live data")
+            self.assertIn('"Preview"', code, f"{name} must identify the no-data state")
 
-    def test_chart_note_does_not_claim_an_empty_read(self):
-        # Rendered copy only — the file's own comment names the phrasing to
-        # avoid, so checking the raw source would match that explanation.
-        note = _code_only((HUB_WEB / "components" / "ChartFixtureNote.tsx").read_text(encoding="utf-8"))
-        # kyth-telem may well have sessions on disk; we simply never look.
-        for false_claim in ("No sessions yet", "no sessions recorded", "No sessions recorded"):
-            self.assertNotIn(false_claim, note)
-        self.assertIn("isn't", note.replace("’", "'"))
+    def test_charts_do_not_import_fixture_series(self):
+        for name, source in (("PerformanceChart", PERF_CHART), ("SessionsChart", SESSIONS_CHART)):
+            code = _code_only(source)
+            self.assertNotIn("mockDashboard", code, f"{name} must not render dashboard fixtures")
+            self.assertNotIn("ChartFixtureNote", code, f"{name} must not claim its data is a fixture")
 
-    def test_performance_chart_drops_unearned_provenance(self):
-        # It claimed capture by kyth-telem while drawing fixture numbers.
-        self.assertNotIn("captured by kyth-telem", _code_only(PERF_CHART))
+    def test_live_chart_no_data_copy_does_not_claim_a_fixture_read(self):
+        for source in (PERF_CHART, SESSIONS_CHART):
+            code = _code_only(source)
+            self.assertNotIn("Sample figures", code)
+            self.assertNotIn("isn't wired", code)
 
 
 class IdentityReadTests(unittest.TestCase):
