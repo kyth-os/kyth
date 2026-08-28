@@ -38,11 +38,34 @@ class HubWebServerTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.server.stop()
-        cls.tmp.cleanup()
-        for f in cls.secret_dir.glob("*"):
-            f.unlink()
-        cls.secret_dir.rmdir()
+        try:
+            cls.server.stop()
+        except Exception:
+            pass
+        try:
+            cls.tmp.cleanup()
+        except Exception:
+            pass
+        try:
+            sd = getattr(cls, "secret_dir", None)
+            if sd is not None and sd.exists():
+                for f in sd.glob("*"):
+                    try:
+                        f.unlink()
+                    except FileNotFoundError:
+                        pass
+                try:
+                    sd.rmdir()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    import shutil
+                    try:
+                        shutil.rmtree(sd, ignore_errors=True)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     def _get(self, path: str, host: str = "127.0.0.1") -> tuple[int, bytes]:
         req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", headers={"Host": host})
