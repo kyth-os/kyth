@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import type { StatTile } from "../data/mockDashboard";
+import type { StatTile } from "../data/dashboardTypes";
 import { IconShield, IconRefresh, IconDatabase, IconChip } from "./icons";
 
 const toneClass: Record<NonNullable<StatTile["deltaTone"]>, string> = {

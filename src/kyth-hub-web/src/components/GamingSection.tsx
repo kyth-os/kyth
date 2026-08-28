@@ -1,7 +1,16 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchAuditCache, fetchGamingLibrary, type AuditCache, type LauncherEntry } from "../services/liveData";
+import {
+  commandText,
+  fetchAuditCache,
+  fetchGamingLibrary,
+  fetchGamingSliceAvailable,
+  fetchGamingSliceCommand,
+  type AuditCache,
+  type LauncherEntry,
+} from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
+import { ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
 
 // "Play > Gaming" — audit master profile + live launcher library scan.
 // Previously only audit pills; now also shows which launchers are installed
@@ -9,13 +18,25 @@ import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 export function GamingSection({ section }: { section: HubSection }) {
   const [audit, setAudit] = useState<AuditCache | null>(null);
   const [launchers, setLaunchers] = useState<LauncherEntry[] | null>(null);
+  const [sliceAvailable, setSliceAvailable] = useState<boolean | null>(null);
+  const [sliceCommand, setSliceCommand] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const { status, busy, run } = useSectionAction();
   useEffect(() => {
     let c = false;
-    Promise.all([fetchAuditCache(), fetchGamingLibrary()]).then(([a, l]) => {
+    Promise.all([
+      fetchAuditCache(),
+      fetchGamingLibrary(),
+      fetchGamingSliceAvailable(),
+      // Rendered as the string you paste into Steam's launch options, so
+      // %command% is the argv placeholder rather than a real program.
+      fetchGamingSliceCommand(["%command%"]).then(commandText),
+    ]).then(([a, l, avail, cmd]) => {
       if (!c) {
         setAudit(a);
         setLaunchers(l);
+        setSliceAvailable(avail);
+        setSliceCommand(cmd);
         setLoaded(true);
       }
     });
@@ -51,6 +72,22 @@ export function GamingSection({ section }: { section: HubSection }) {
       ) : (
         <SectionFallbackNote loaded={loaded} />
       )}
+
+      <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          <span className={`pill ${sliceAvailable ? "pill-ok" : "pill-dim"}`}>
+            gaming slice: {sliceAvailable == null ? "unknown" : sliceAvailable ? "available" : "unavailable"}
+          </span>
+        </div>
+        {sliceAvailable && (
+          <CommandLine label="Steam launch options — runs the game in its own cgroup" command={sliceCommand} />
+        )}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+          <RecipeButton recipe="gaming-mode" label="Switch to gaming mode" busy={busy} run={run} />
+          <RecipeButton recipe="gaming-stack-status" label="Gaming stack status" busy={busy} run={run} />
+        </div>
+        <ActionStatus status={status} />
+      </div>
     </LiveSectionCard>
   );
 }

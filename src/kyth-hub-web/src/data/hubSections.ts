@@ -20,7 +20,7 @@ import {
 // invented for the web prototype. Section keys and grouping match
 // DESTINATION_SECTIONS exactly, so this is the same information
 // architecture as the Qt Hub, just not wired to live kyth_shared data yet
-// (see mockDashboard.ts for the same "shaped like real data, marked as a
+// (see LiveSectionCard.tsx for the same "real data, marked as such"
 // fixture" convention this follows).
 export interface HubSection {
   key: string;

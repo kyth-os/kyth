@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { StatTile, GuardianEvent } from "../data/mockDashboard";
+import type { StatTile, GuardianEvent } from "../data/dashboardTypes";
 import { StatTileRow } from "../components/StatTileRow";
 import { HeroCard } from "../components/HeroCard";
 import { GaugeCard } from "../components/GaugeCard";
@@ -21,11 +21,10 @@ import {
 } from "../services/liveData";
 
 // Every value on this page comes from a live read or renders as "no
-// reading yet". Nothing here falls back to mockDashboard's fixtures:
-// a failed fetch used to leave the mock tile in place, so "412 GB" and
-// "RX 7900 XTX" rendered as though they were this machine's facts. Only
-// the two charts still draw fixture data, and they say so on the card —
-// see the note in PerformanceChart/SessionsChart for the prerequisite.
+// reading yet" — including both charts, which read telemetry_recent. The
+// fixtures this page used to fall back to are gone (see dashboardTypes.ts):
+// a failed fetch left the mock tile in place, so "412 GB" and "RX 7900 XTX"
+// rendered as though they were this machine's facts.
 const PENDING = "—";
 
 export function Dashboard() {

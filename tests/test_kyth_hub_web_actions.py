@@ -22,12 +22,32 @@ HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
 MAIN_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
 
+HUB_SECTIONS = (HUB_WEB / "data" / "hubSections.ts").read_text(encoding="utf-8")
+
 # The mutating wrappers, and the section each one belongs to.
 MUTATING_WRAPPERS = {
     "invokeBootcUpgrade": "UpdatesSection.tsx",
     "invokeBootcRollback": "UpdatesSection.tsx",
     "invokeBootcSwitchBranch": "ChannelsSection.tsx",
     "invokeGuardianExecute": "GuardianSection.tsx",
+    "invokeOpenFeedbackIssue": "FeedbackSection.tsx",
+}
+
+# Bridge commands with no liveData.ts wrapper on purpose. Each needs a
+# reason, because "no wrapper" is exactly what the orphan check below is
+# meant to catch — an entry here is a deliberate exception, not a TODO.
+UNWRAPPED_COMMANDS = {
+    # Plumbing the generic fetchProbeSection helper drives, not a section.
+    "probe_backend": "read through fetchProbeSection, not a named wrapper",
+    # Consumed by the deep-link path in App.tsx, not by a section.
+    "take_pending_page": "deep-link bootstrap, invoked from App.tsx",
+    # CHANNEL_DISPLAY in liveData.ts is the one authority for channel
+    # labels, and it is synchronous, which its two callers need.
+    "branch_display_name": "superseded by the synchronous CHANNEL_DISPLAY map",
+    # Text/byte helpers with no display of their own.
+    "strip_ansi": "text helper, no section renders raw command output",
+    "disk_write_bytes": "installer progress helper, no Hub surface",
+    "amd64_manifest_entry": "registry parsing detail behind collect_availability",
 }
 
 
@@ -82,6 +102,95 @@ class HubWebActionTests(unittest.TestCase):
         self.assertIn("recipe_id: string;", LIVE_DATA)
         self.assertIn("recipeId: string;", LIVE_DATA)
         self.assertIn("recipeId: item.recipe_id", LIVE_DATA)
+
+
+class HubWebCoverageTests(unittest.TestCase):
+    """Every backend read has to reach a section, and every section a page.
+
+    The mutating-action gap the tests above cover recurred at a larger
+    scale once the bridge grew to ~60 commands: 31 liveData.ts fetchers
+    existed that no component ever called, so sections rendered a
+    "Preview" badge while their backend sat finished behind them. Same
+    blind spot as before — an unused export typechecks — so it is checked
+    the same way.
+    """
+
+    def test_no_live_data_export_is_orphaned(self):
+        exports = re.findall(r"^export (?:async function|function|const) (\w+)", LIVE_DATA, re.M)
+        self.assertGreater(len(exports), 40, "liveData.ts exports not parsed — did the file format change?")
+        sources = _ui_sources()
+        orphans = [
+            name
+            for name in exports
+            if not any(re.search(rf"\b{name}\b", text) for text in sources.values())
+        ]
+        self.assertEqual(
+            [],
+            sorted(orphans),
+            "these liveData.ts reads are wired to the backend but no section renders them",
+        )
+
+    def test_every_bridge_command_has_a_wrapper_or_a_documented_exemption(self):
+        handler = re.search(r"generate_handler!\[(.*?)\]", MAIN_RS, re.S)
+        self.assertIsNotNone(handler, "generate_handler! block not found")
+        commands = [c.strip() for c in handler.group(1).replace("\n", " ").split(",") if c.strip()]
+        self.assertGreater(len(commands), 50, "command list not parsed — did main.rs change shape?")
+        missing = [
+            command
+            for command in commands
+            if command not in UNWRAPPED_COMMANDS and not re.search(rf'"{command}"', LIVE_DATA)
+        ]
+        self.assertEqual(
+            [],
+            sorted(missing),
+            "these bridge commands have no liveData.ts wrapper; add one or document the exemption",
+        )
+
+    def test_exemptions_still_name_real_commands(self):
+        # A stale exemption would silently hide a genuinely orphaned command.
+        handler = re.search(r"generate_handler!\[(.*?)\]", MAIN_RS, re.S).group(1)
+        commands = {c.strip() for c in handler.replace("\n", " ").split(",") if c.strip()}
+        self.assertEqual(set(), set(UNWRAPPED_COMMANDS) - commands)
+
+    def test_every_section_key_has_a_component(self):
+        # HubPage renders nothing for a key with no component, which reads
+        # as a blank tab rather than an error.
+        keys = re.findall(r'key: "([^"]+)"', HUB_SECTIONS)
+        self.assertGreaterEqual(len(keys), 20, "hubSections.ts keys not parsed")
+        wired = set()
+        for page in ("Play.tsx", "Apps.tsx", "ThisPc.tsx", "MoveIn.tsx"):
+            text = (HUB_WEB / "pages" / page).read_text(encoding="utf-8")
+            block = re.search(r"sectionContent=\{\{(.*?)\}\}", text, re.S)
+            self.assertIsNotNone(block, f"{page} has no sectionContent map")
+            wired.update(re.findall(r'^\s*"?([^":\n]+?)"?:\s*\w+Section', block.group(1), re.M))
+        self.assertEqual(set(), set(keys) - wired, "section keys with no component wired in their page")
+
+    def test_every_recipe_button_names_a_real_recipe(self):
+        # RecipeButton spawns `just <name>` fire-and-forget: a typo gives a
+        # button that reports success and does nothing, which is exactly the
+        # failure mode this file exists to catch.
+        shipped = set()
+        for path in (ROOT / "build_files" / "just").rglob("*.just"):
+            shipped.update(
+                re.findall(r"^([a-z][a-z0-9-]*)(?:\s+[^:\n]*)?:(?!=)", path.read_text(encoding="utf-8"), re.M)
+            )
+        self.assertGreater(len(shipped), 50, "no just recipes parsed — did build_files/just move?")
+        referenced = set()
+        for text in _ui_sources().values():
+            referenced.update(re.findall(r'recipe="([^"]+)"', text))
+        self.assertTrue(referenced, "no RecipeButton call sites found")
+        self.assertEqual(set(), referenced - shipped, "RecipeButton names a recipe that does not exist")
+
+    def test_no_section_still_advertises_itself_as_a_preview(self):
+        # The retired SectionPreviewCard told the user a section "exists
+        # and works in the current Qt Hub today". The Qt Hub is gone, so
+        # that copy would now be a lie about shipped behaviour.
+        self.assertFalse(
+            (HUB_WEB / "components" / "SectionPreviewCard.tsx").exists(),
+            "SectionPreviewCard is unreachable — every section key has a component",
+        )
+        for name, text in _ui_sources().items():
+            self.assertNotIn("in the current Qt Hub today", text, f"{name} still points users at the retired Qt Hub")
 
 
 if __name__ == "__main__":

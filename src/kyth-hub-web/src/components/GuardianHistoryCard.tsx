@@ -1,4 +1,4 @@
-import type { GuardianEvent } from "../data/mockDashboard";
+import type { GuardianEvent } from "../data/dashboardTypes";
 
 const dot: Record<string, string> = {
   ok: "var(--status-ok)",
@@ -9,7 +9,7 @@ const dot: Record<string, string> = {
 // `events` is required and never defaults to a fixture: a failed or
 // not-yet-resolved Guardian read must render the empty state below, not
 // four fabricated events presented as this machine's health history.
-// Only mockDashboard's *type* is imported here. `live` toggles the badge.
+// `live` toggles the badge; the events come from guardian_snapshot.
 export function GuardianHistoryCard({
   events,
   live = false,

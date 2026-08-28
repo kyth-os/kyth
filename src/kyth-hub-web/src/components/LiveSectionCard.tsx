@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { HubSection } from "../data/hubSections";
 
 // Shared shell for every HubPage section that has real content behind it
-// (see HubPage.tsx's customContent) — icon/title/description header plus a
+// (see HubPage.tsx's sectionContent) — icon/title/description header plus a
 // Live/Preview badge, with the body left to the caller. Factored out once
 // UpdatesSection and ControllersSection turned out to be pixel-identical
 // except for their data and body — new sections should use this rather
@@ -41,16 +41,16 @@ export function LiveSectionCard({
   );
 }
 
-/** Standard "why is this empty" note for a section with no live data yet —
- * distinguishes "the fetch resolved and there's genuinely nothing cached"
- * from "still on the always-mock prototype path", same distinction every
- * section's fallback copy already made individually. */
+/** Standard "why is this empty" note for a section whose reads came back
+ * with nothing. The two cases are genuinely different and worth telling
+ * apart: the fetch resolved and there's nothing on disk yet, versus the
+ * fetch never happened because this isn't running inside the Hub shell. */
 export function SectionFallbackNote({ loaded }: { loaded: boolean }) {
   return (
     <p className="card-copy" style={{ marginTop: 20, fontSize: 12 }}>
       {loaded
-        ? "No probe data on disk yet — kyth-probe.service populates this on a real KythOS install."
-        : "Not wired to live system data in the web prototype yet — this section exists and works in the current Qt Hub today."}
+        ? "Nothing to report yet — kyth-probe.service fills this in on a real KythOS install."
+        : "Reading system state needs the Hub's own window; a plain browser tab can't get at it."}
     </p>
   );
 }

@@ -468,6 +468,40 @@ fn desktop_stack_checks() -> Vec<String> { kyth_shared::system::desktop_stack::d
 #[tauri::command]
 fn updater_available() -> bool { kyth_shared::system::updater::updater_available() }
 
+/// Opens a prefilled `kyth-os/kyth` issue in the user's browser — the
+/// Feedback section's actual send path. Host and repo are fixed here
+/// rather than passed in; only the title and body travel from the
+/// frontend, and both are percent-encoded before they reach `xdg-open`,
+/// so this can't be pointed at an arbitrary URL.
+#[tauri::command]
+fn open_feedback_issue(title: String, body: String) -> Result<String, String> {
+    let url = format!(
+        "https://github.com/kyth-os/kyth/issues/new?title={}&body={}",
+        percent_encode(&title),
+        percent_encode(&body)
+    );
+    std::process::Command::new("xdg-open")
+        .arg(&url)
+        .spawn()
+        .map_err(|err| format!("could not open browser: {err}"))?;
+    Ok("Opened a prefilled issue in your browser.".to_string())
+}
+
+/// Minimal RFC 3986 unreserved-set encoder — enough for a query string,
+/// and not worth a `percent-encoding` dependency for one call site.
+fn percent_encode(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -500,7 +534,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, take_pending_page, just_list, just_run,
-            bootc_upgrade, bootc_rollback, bootc_switch_branch, guardian_execute_recipe, branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available, current_user_name
+            bootc_upgrade, bootc_rollback, bootc_switch_branch, guardian_execute_recipe, branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available, current_user_name, open_feedback_issue
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

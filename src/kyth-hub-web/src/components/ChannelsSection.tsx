@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchUpdateChannel, invokeBootcSwitchBranch } from "../services/liveData";
+import { fetchChannelRaw, fetchUpdateChannel, invokeBootcSwitchBranch } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
@@ -12,17 +12,23 @@ const SWITCHABLE_CHANNELS = [
   { key: "testing", label: "Testing" },
 ] as const;
 
+// `stable` is spelled `latest` in the image tag, so the raw bootc-branch
+// value has to be mapped back before it can mark a button as current.
+const TAG_FOR_CHANNEL: Record<string, string> = { stable: "latest", testing: "testing" };
+
 // "This PC > Update channel" — same bootc-branch read as UpdatesSection,
 // framed as the channel switcher state rather than the deployment view.
 export function ChannelsSection({ section }: { section: HubSection }) {
   const [channel, setChannel] = useState<string | null>(null);
+  const [rawTag, setRawTag] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
   useEffect(() => {
     let cancelled = false;
-    fetchUpdateChannel().then((c) => {
+    Promise.all([fetchUpdateChannel(), fetchChannelRaw()]).then(([c, raw]) => {
       if (!cancelled) {
         setChannel(c);
+        setRawTag(raw);
         setLoaded(true);
       }
     });
@@ -43,14 +49,19 @@ export function ChannelsSection({ section }: { section: HubSection }) {
               Switching stages the new image; the change applies on reboot.
             </p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {SWITCHABLE_CHANNELS.map(({ key, label }) => (
-                <ActionButton
-                  key={key}
-                  label={busy === key ? `Switching to ${label}…` : `Switch to ${label}`}
-                  disabled={busy !== null}
-                  onClick={() => run(key, `Switching to ${label}…`, () => invokeBootcSwitchBranch(key))}
-                />
-              ))}
+              {SWITCHABLE_CHANNELS.map(({ key, label }) => {
+                const current = rawTag != null && rawTag.startsWith(TAG_FOR_CHANNEL[key]);
+                return (
+                  <ActionButton
+                    key={key}
+                    label={
+                      busy === key ? `Switching to ${label}…` : current ? `${label} (current)` : `Switch to ${label}`
+                    }
+                    disabled={busy !== null || current}
+                    onClick={() => run(key, `Switching to ${label}…`, () => invokeBootcSwitchBranch(key))}
+                  />
+                );
+              })}
             </div>
             <ActionStatus status={status} />
           </div>

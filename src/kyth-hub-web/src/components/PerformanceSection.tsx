@@ -1,17 +1,24 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchAuditCache, type AuditCache } from "../services/liveData";
+import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, type AuditCache } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
+import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
-// "Play > Performance" — scheduler / memory tunables from audit-cache.
+// "Play > Performance" — scheduler / memory tunables from audit-cache,
+// plus the two things you can actually change from here: the system
+// performance profile (via its ujust recipe) and the PipeWire quantum,
+// which is the audio-latency knob that matters for gaming.
 export function PerformanceSection({ section }: { section: HubSection }) {
   const [audit, setAudit] = useState<AuditCache | null>(null);
+  const [audioPresets, setAudioPresets] = useState<string[] | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const { status, busy, run } = useSectionAction();
   useEffect(() => {
     let c = false;
-    fetchAuditCache().then((a) => {
+    Promise.all([fetchAuditCache(), fetchAudioPresets()]).then(([a, p]) => {
       if (!c) {
         setAudit(a);
+        setAudioPresets(p);
         setLoaded(true);
       }
     });
@@ -20,7 +27,7 @@ export function PerformanceSection({ section }: { section: HubSection }) {
     };
   }, []);
   return (
-    <LiveSectionCard section={section} live={audit !== null}>
+    <LiveSectionCard section={section} live={audit !== null || audioPresets !== null}>
       {audit ? (
         <div style={{ marginTop: 20 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -33,6 +40,42 @@ export function PerformanceSection({ section }: { section: HubSection }) {
       ) : (
         <SectionFallbackNote loaded={loaded} />
       )}
+
+      <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
+        <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
+          Power profile
+        </p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+          <RecipeButton recipe="performance-mode" label="Performance" busy={busy} run={run} />
+          <RecipeButton recipe="balanced-mode" label="Balanced" busy={busy} run={run} />
+          <RecipeButton recipe="system-audit" label="Run full audit" busy={busy} run={run} />
+        </div>
+
+        {audioPresets && audioPresets.length > 0 && (
+          <>
+            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 18 }}>
+              Audio latency (PipeWire quantum)
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+              {audioPresets.map((preset) => (
+                <ActionButton
+                  key={preset}
+                  label={busy === `pw-${preset}` ? `Applying ${preset}…` : preset}
+                  disabled={busy !== null}
+                  onClick={() =>
+                    run(`pw-${preset}`, `Applying ${preset}…`, async () => {
+                      const res = await applyPipewireQuantum(preset, false);
+                      if (!res) return "Not available outside the Hub shell.";
+                      return res.detail;
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </>
+        )}
+        <ActionStatus status={status} />
+      </div>
     </LiveSectionCard>
   );
 }

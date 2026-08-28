@@ -9,7 +9,7 @@ export function Play() {
   return (
     <HubPage
       sections={PLAY_SECTIONS}
-      customContent={{
+      sectionContent={{
         Controllers: ControllersSection,
         Gaming: GamingSection,
         Performance: PerformanceSection,

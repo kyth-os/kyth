@@ -3,14 +3,20 @@ import { inTauriShell } from "./tauriEnv";
 
 // Real backend data, read through the Tauri shell's bridge commands (see
 // src-tauri/src/main.rs, which calls straight into the kyth-shared Rust
-// crate — src/kyth-shared-rs — no subprocess). Every function here
-// returns null rather than throwing when the data isn't available —
-// running in a plain browser (npm run dev), no Tauri build, or (very
-// commonly on a dev machine) no on-disk state yet because kyth-probe /
-// Guardian have never run. Callers fall back to the existing mock fixtures
-// on null, same "prototype during migration" posture as mockDashboard.ts —
-// the difference here is these paths are real when the data exists,
-// not always-mock.
+// crate — src/kyth-shared-rs — no subprocess). Every read here returns
+// null rather than throwing when the data isn't available — running in a
+// plain browser (npm run dev), no Tauri build, or (very commonly on a dev
+// machine) no on-disk state yet because kyth-probe / Guardian have never
+// run. Callers render an honest empty state on null; there are no fixtures
+// left to fall back to.
+//
+// Two conventions the sections rely on:
+//   - Cheap, disk-backed reads run on mount. Anything that waits on the
+//     network, on fwupd, or on mokutil sits behind an explicit button, so
+//     switching tabs never blocks on it.
+//   - The mutating wrappers at the bottom throw instead of returning null,
+//     so useSectionAction can report the failure rather than leaving a
+//     button that appears to have done something.
 
 export interface GuardianHistoryItem {
   timestamp: number;
@@ -412,12 +418,13 @@ export async function fetchAuditCache(): Promise<AuditCache | null> {
   return raw;
 }
 
-// secureboot-state + firmware-cache — small scalars, same DISK_TTL family.
+// secureboot-state — the cheap disk-cached Secure Boot scalar. Read on
+// mount; CompatibilitySection escalates to live mokutil (fetchMokStatus)
+// only when the user asks, because mokutil is slow enough to stall a tab
+// switch. The "firmware-cache" section is deliberately not wrapped —
+// fetchFirmwareUpdatesCount is the readable form of the same thing.
 export async function fetchSecurebootState(): Promise<string | null> {
   return fetchProbeSection<string>("secureboot-state");
-}
-export async function fetchFirmwareCache(): Promise<unknown | null> {
-  return fetchProbeSection<unknown>("firmware-cache");
 }
 
 // Just recipes — live `just --list` via Tauri (port of page_just.py).
@@ -437,11 +444,12 @@ export async function runJustRecipe(recipe: string): Promise<boolean | null> {
   } catch { return null; }
 }
 
-// bootc_policy — pure presentation helpers now in Rust (was TS CHANNEL_DISPLAY duplicate)
-export async function fetchBranchDisplayName(tag: string | null): Promise<string | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string>("branch_display_name", { tag }); } catch { return null; }
-}
+// Update card view-model — the Rust port of the Qt Update page's
+// "what should this card say" logic. UpdatesSection feeds it the live
+// update_status + collect_availability reads rather than recomputing the
+// copy in TS. (The sibling branch_display_name command stays unwrapped on
+// purpose: CHANNEL_DISPLAY above is the one authority for channel labels,
+// and it's synchronous, which the two fetchers that use it need.)
 export interface UpdateAvailabilityView { card_style: string; icon_text: string; icon_style: string; title: string; body: string; update_btn_visible: boolean; restart_btn_visible: boolean; }
 export async function fetchUpdateAvailabilityView(args: { staged: boolean; check_state: string; flatpak_count: number; check_ts: string; check_ts_details: string; staged_ts?: string | null }): Promise<UpdateAvailabilityView | null> {
   if (!inTauriShell()) return null;
@@ -536,11 +544,26 @@ export async function fetchHardwareViewSummary(): Promise<HardwareViewSummary | 
   try { return await invoke<HardwareViewSummary>("hardware_view_summary"); } catch { return null; }
 }
 
-// Network identity live (VPN/SMB/cloud) — replaces probe-cache network-summary with live nmcli + mounts
-export interface NetworkIdentityLive { vpn_connected: boolean; vpn_name: string; smb_mounts: number; cloud_providers: string[]; detail: string; }
-export async function fetchNetworkIdentityLive(): Promise<NetworkIdentityLive | null> {
+// Network identity live (VPN/SMB/cloud) — live nmcli + mounts, reshaped to
+// the same NetworkSummary the cached "network-summary" probe read returns
+// so the three Move In sections can swap one for the other. Mount reads the
+// cache; a Refresh button reads this.
+interface NetworkIdentityLive { vpn_connected: boolean; vpn_name: string; smb_mounts: number; cloud_providers: string[]; detail: string; }
+async function fetchNetworkIdentityLive(): Promise<NetworkIdentityLive | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<NetworkIdentityLive>("network_identity"); } catch { return null; }
+}
+
+export async function fetchNetworkSummaryLive(): Promise<NetworkSummary | null> {
+  const raw = await fetchNetworkIdentityLive();
+  if (!raw) return null;
+  return {
+    vpnConnected: raw.vpn_connected,
+    vpnName: raw.vpn_name,
+    smbMounts: raw.smb_mounts,
+    cloudProviders: raw.cloud_providers,
+    detail: raw.detail,
+  };
 }
 
 // Updates unified — bootc/flatpak/firmware summary
@@ -605,10 +628,21 @@ export async function fetchCollectAvailability(branch?: string | null, useCached
   try { return await invoke<AvailabilityStatusLive>("collect_availability", { branch: branch ?? null, useCached }); } catch { return null; }
 }
 
-// Drives — NTFS lsblk (Move In)
-export async function fetchNtfsDevices(): Promise<any[] | null> {
+// Drives — live `lsblk -J` blockdevices (Move In's "Rescan drives"). The
+// cached fetchNtfsDrives above is what the section reads on mount; this is
+// the escalation when the user has just plugged something in. Typed to the
+// lsblk column set get_ntfs_devices() asks for, not `any`.
+export interface NtfsDevice {
+  name?: string;
+  fstype?: string | null;
+  label?: string | null;
+  uuid?: string | null;
+  mountpoint?: string | null;
+  children?: NtfsDevice[];
+}
+export async function fetchNtfsDevices(): Promise<NtfsDevice[] | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<any[]>("ntfs_devices"); } catch { return null; }
+  try { return await invoke<NtfsDevice[]>("ntfs_devices"); } catch { return null; }
 }
 
 // Boot runtime + desktop stack + updater (final reads)
@@ -679,4 +713,74 @@ export async function invokeBootcSwitchBranch(branch: string): Promise<string> {
 export async function invokeGuardianExecute(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   return await invoke<string>("guardian_execute_recipe", { recipeId });
+}
+
+// ---------------------------------------------------------------------
+// Command-text reads. Several kyth-shared helpers return argv rather than
+// running anything (smb_mount_command, rclone_oauth_command, ...). The Hub
+// shows those as copyable one-liners instead of spawning them: a generic
+// "run this argv" bridge command would be a new privilege surface, and the
+// argv these produce need a terminal the user can see anyway. Where a
+// `just` recipe covers the same ground, the section pairs the text with a
+// runJustRecipe button — that path already exists and prompts for its own
+// privilege.
+// ---------------------------------------------------------------------
+
+/** Joins an argv into something safe to paste into a shell. */
+export function commandText(argv: string[] | null): string | null {
+  if (!argv || argv.length === 0) return null;
+  return argv.map((part) => (/^[\w.:/=@-]+$/.test(part) ? part : JSON.stringify(part))).join(" ");
+}
+
+export async function fetchRcloneOauthCommand(remote: string): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("rclone_oauth_command", { remote }); } catch { return null; }
+}
+export async function fetchPrinterSetupCommand(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("printer_setup_command"); } catch { return null; }
+}
+export async function fetchRollbackCommand(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("rollback_command"); } catch { return null; }
+}
+export async function fetchFirmwareDevicesCommand(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("firmware_devices_command"); } catch { return null; }
+}
+
+// Plasma HDR/VRR presets — apply_plasma_preset is the mutating half of the
+// pair fetchPlasmaPresets lists (same shape as the PipeWire pair above).
+export async function applyPlasmaPreset(preset: string, dryRun = false): Promise<{ ok: boolean; detail: string } | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<{ ok: boolean; detail: string }>("apply_plasma_preset", { preset, dryRun }); } catch { return null; }
+}
+
+// Driver/desktop introspection (Hardware, Desktop & displays).
+export async function fetchLoadedKernelModules(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("loaded_kernel_modules"); } catch { return null; }
+}
+export async function fetchDesktopStackChecks(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("desktop_stack_checks"); } catch { return null; }
+}
+export async function fetchUpdaterAvailable(): Promise<boolean | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<boolean>("updater_available"); } catch { return null; }
+}
+
+// "Windows app -> Flatpak" chooser backing the App Store search box.
+export interface FamiliarApp { windows_name: string; description: string; flatpak_id: string }
+export async function fetchFamiliarApps(): Promise<FamiliarApp[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<FamiliarApp[]>("familiar_apps"); } catch { return null; }
+}
+
+/** Feedback's send path — opens a prefilled kyth-os/kyth issue via
+ * xdg-open. Throws like the other mutating wrappers so useSectionAction
+ * can surface the failure. */
+export async function invokeOpenFeedbackIssue(title: string, body: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("not in Tauri");
+  return await invoke<string>("open_feedback_issue", { title, body });
 }

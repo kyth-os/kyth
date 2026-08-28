@@ -16,7 +16,7 @@ export function ThisPc() {
   return (
     <HubPage
       sections={THIS_PC_SECTIONS}
-      customContent={{
+      sectionContent={{
         Update: UpdatesSection,
         Guardian: GuardianSection,
         Hardware: HardwareSection,

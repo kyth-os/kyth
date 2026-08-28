@@ -9,7 +9,7 @@ export function MoveIn() {
   return (
     <HubPage
       sections={MOVE_IN_SECTIONS}
-      customContent={{
+      sectionContent={{
         VPN: VpnSection,
         "Network Shares": NetworkSharesSection,
         "Cloud Storage": CloudStorageSection,

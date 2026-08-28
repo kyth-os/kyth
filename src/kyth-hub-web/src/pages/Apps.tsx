@@ -4,5 +4,13 @@ import { AppStoreSection } from "../components/AppStoreSection";
 import { WorkSetupSection } from "../components/WorkSetupSection";
 
 export function Apps() {
-  return <HubPage sections={APPS_SECTIONS} customContent={{ "App Store": AppStoreSection, "Work Setup": WorkSetupSection }} />;
+  return (
+    <HubPage
+      sections={APPS_SECTIONS}
+      sectionContent={{
+        "App Store": AppStoreSection,
+        "Work Setup": WorkSetupSection,
+      }}
+    />
+  );
 }

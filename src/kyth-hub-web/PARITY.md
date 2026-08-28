@@ -1,18 +1,26 @@
 # Kyth Hub Parity — Python (Qt/PySide6) → React/Rust (Tauri)
 
-Python Hub is authoritative until this file says otherwise. Build is `check-hub-web-shell.sh` (npm ci → npm build → cargo test → cargo build → asset-embed assert) and `validation.yml` pins `PySide6==6.11.1`.
+**The React/Rust Hub is the only Hub the user sees.** `kyth-welcome-launch` prefers `/usr/bin/kyth-hub-shell`; the Qt Hub remains in the tree only as a fallback for an old image and as the source of the headless `kyth-probe`/`kyth-guardian` services. Build is `check-hub-web-shell.sh` (npm ci → npm build → cargo test → cargo build → asset-embed assert) and `validation.yml` pins `PySide6==6.11.1`.
 
 ## Destination → Section map (single source: `src/kyth-hub-web/src/data/hubSections.ts` ↔ `src/kyth-welcome/page_registry.py:DESTINATION_SECTIONS`)
 
 | Destination | Sections (Python `DESTINATION_SECTIONS`) | React `HubSection` status | Live data |
 |---|---|---|---|
 | Home | Welcome (Dashboard) | `Dashboard.tsx` live — Guardian/Channel/GPU/Storage/User/BootChecks/Recovery via `liveData.ts` → `main.rs:kyth-shared` | live, telemetry charts live when sessions exist |
-| Play | Gaming, Performance, Compatibility, Controllers | `Play.tsx` → 4 sections, all `LiveSectionCard` | Gaming/Performance/Compatibility/Controllers read `audit-cache`/`controllers-detect` probe |
-| Apps | App Store, Work Setup | `Apps.tsx` → 2 sections | App Store `flatpak-apps`, Work Setup probe |
-| This PC | Guardian, Update, Hardware, Plasma Wayland, Diagnostics, Repair, NVIDIA, Kernel, Channels, Just, Feedback (11) | `ThisPc.tsx` → 11 sections | All 11 have `liveData.ts` fetchers + `main.rs` bridge |
-| Move In | Move Files, Cloud Storage, Network Shares, VPN | `MoveIn.tsx` → 4 sections | Move Files `ntfs-drives`, Cloud `network-summary`, Shares `smb_browse`, VPN probe |
+| Play | Gaming, Performance, Compatibility, Controllers | `Play.tsx` → 4 sections, all `LiveSectionCard` with actions | Gaming: `audit-cache` + `gaming_library` + `gaming_slice`. Performance: `audit-cache` + PipeWire quantum presets. Compatibility: `secureboot-state` + `mesa_version` on mount, `mok_status`/`mesa_overlay_dry_run` on demand. Controllers: `controllers-detect` cache + live `controllers_detect` rescan |
+| Apps | App Store, Work Setup | `Apps.tsx` → 2 sections | App Store: `flatpak-apps`/`flatpak-updates` + `starter_packs` + `familiar_apps` chooser. Work Setup: `fonts_ready` + `network-summary` on mount, `ipp_discover` on demand |
+| This PC | Guardian, Update, Hardware, Plasma Wayland, Diagnostics, Repair, NVIDIA, Kernel, Channels, Just, Feedback (11) | `ThisPc.tsx` → 11 sections, all with actions | Updates: `update_status`/`pending_updates_summary` on mount, `collect_availability` → `update_availability_view` on demand. Repair: `recovery_status` + `deployment_history` + `snapshot_count` + `btrfs_health` + `memory_pressure`. Hardware: `hardware-summary` on mount, `pci_devices_by_class`/`loaded_kernel_modules`/`firmware_updates_count` on demand. Plasma: `display-detect` + `plasma_presets` + `desktop_stack_checks`. Diagnostics: `audit-cache` + `boot_runtime_checks` + `is_live_session`. Feedback: prefilled `kyth-os/kyth` issue via `open_feedback_issue` |
+| Move In | Move Files, Cloud Storage, Network Shares, VPN | `MoveIn.tsx` → 4 sections, all with actions | Move Files: `ntfs-drives` cache + live `ntfs_devices` rescan. Cloud: `network-summary` + `cloud_oauth_status` + `rclone_oauth_command`. Shares: `smb_browse`/`smb_mount_command`. VPN: `network-summary` + live `network_identity` refresh. All three network sections escalate to `network_identity` on Refresh |
 
 `26` page keys total (`Welcome` + `5` landings + `21` sections + `1` Dashboard alias) — `page_registry.py:SEARCH_ITEMS` and `src/kyth-hub-web/src/search.ts` share same keys after `destinations.ts` single-source fix.
+
+## Conventions the sections follow
+
+- **Nothing renders a fixture.** `services/liveData.ts` returns `null` on failure, and the section shows an honest empty state. `mockDashboard.ts` is now `dashboardTypes.ts` and holds only types; `SectionPreviewCard.tsx` is deleted.
+- **Cheap reads on mount, expensive reads on a button.** `mokutil` (~seconds), `fwupd` (20s timeout), `collect_availability` (15s deadline), `ipp_discover`/`smb_browse` (network) and the live driver scan all sit behind an explicit button so switching tabs never stalls.
+- **Where a cached and a live read both exist, mount uses the cache and a Refresh/Rescan button escalates to live.** The live result wins once it exists (Controllers, Move Files, the three network sections, Hardware).
+- **`*_command` helpers return argv and are rendered as copyable text, not spawned.** A generic "run this argv" bridge command would be a new privilege surface. Where a ujust recipe covers the same ground, the section pairs the text with a `RecipeButton` — that path goes through `just_run`, which validates the recipe name and lets the recipe do its own privilege prompt.
+- **`tests/test_kyth_hub_web_actions.py` is the gate.** It fails the build if any `liveData.ts` export is orphaned, if any `generate_handler!` command lacks a wrapper without a documented exemption, if a section key has no component, or if a `RecipeButton` names a recipe that does not exist in `build_files/just/`.
 
 ## What is still not 100%
 
@@ -22,8 +30,8 @@ Python Hub is authoritative until this file says otherwise. Build is `check-hub-
 ### 2. Gaming library/migration/setup sub-tabs — PARTIAL LIVE (GamingSection + library scan)
 Python `page_gaming.py` composes 6 mixins (`page_gaming_dashboard/setup/library/fixes/tools/migration`) each with workers (`DataWorker`, `WindowsLibraryWorker`, `ProtonDbBatchWorker`). React `GamingSection.tsx` only shows `audit` master pills. Now `GamingSection` shows `gaming_library` scan (Steam/Heroic/Lutris/Bottles) via `gaming_library.rs` + `fetchGamingLibrary`; still TODO: migration checklist, ProtonDB batch and `compatibility` (`protondb`, `anticheat`) bridges.
 
-### 3. Software sub-tabs — PARTIAL LIVE (AppStoreSection + starter packs)
-Python `page_software.py` 7 mixins (Starter Packs, Flatpak Store, AppImages, Installed, Developer, Security, Creator) with `software_catalogs.py` (`STARTER_PACKS`, `SEC_BOX`, `FAMILAR_APPS`). React `AppStoreSection` only shows `installedCount/updatesAvailable`. Now `AppStoreSection` shows `starter_packs` via `software_catalog.rs` + `fetchStarterPacks` + flatpak counts; still TODO: `familiar_apps`, `appstream` full catalog, AppImages.
+### 3. Software sub-tabs — PARTIAL LIVE (AppStoreSection + starter packs + familiar apps)
+Python `page_software.py` 7 mixins (Starter Packs, Flatpak Store, AppImages, Installed, Developer, Security, Creator) with `software_catalogs.py` (`STARTER_PACKS`, `SEC_BOX`, `FAMILAR_APPS`). React `AppStoreSection` only shows `installedCount/updatesAvailable`. Now `AppStoreSection` shows `starter_packs` and the `familiar_apps` "what did you use on Windows" chooser via `software_catalog.rs`, alongside flatpak counts; packs and matches render a copyable `flatpak install` line and the three recipe-backed installers run directly. Still TODO: `appstream` full catalog, AppImages, and in-Hub install progress (there is no non-interactive install bridge).
 
 ### 4. kyth_shared → kyth-shared-rs coverage
 Python `src/kyth_shared/kyth_shared` `≈209` modules / `≈1494` defs vs Rust `src/kyth-shared-rs/src/system` `≈30` modules (≈14%). `MIGRATION.md` reserves write/collector paths (installer partitioning, SELinux, VPN connect, `zypp`/`dnf`, `collect_snapshot`, `execute_recipe`) — intentionally read-only first. Parity for UI does not require 100% of `kyth_shared` — only the UI-facing reads + the `≈8` mutating `just_*` recipes (`upgrade`, `rollback`, `switch-channel`, `guardian_execute`, `just_run`) already exposed.
@@ -31,13 +39,9 @@ Python `src/kyth_shared/kyth_shared` `≈209` modules / `≈1494` defs vs Rust `
 ### 5. Launchers & single-instance — NOW DEFAULT (kyth-welcome-launch switched)
 Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`, `krunner_desktop.py`, `kyth-welcome.desktop`. Rust: `main.rs:PendingPage(Mutex<Option<String>>)` + `tauri-plugin-single-instance` + `take_pending_page` — contract matches. `src/kyth-welcome/kyth-welcome-launch` now defaults to `/usr/bin/kyth-hub-shell` when executable, fallback to `kyth-welcome` only on old image/failed build; channel check removed (testing/stable both get Rust shell). `Dockerfile` `COPY --from=hub-web-builder /usr/bin/kyth-hub-shell` already additive, `23-kyth-helper-ctx-installs.sh` installs both .desktop files unchanged.
 
-## Making React/Rust the main — steps
+## Remaining work
 
-1. **Live-ify charts** — port `telemetry::recent_sessions`, expose `telemetry_recent`, update `PerformanceChart/SessionsChart` to `liveData` with `Live/Preview` badge (this file's #1).
-2. **Port gaming/software library readers** — `gaming_slice`, `appstream`, `installed-apps` reads (read-only).
-3. **Port search index single source** — `destinations.ts` already single source; verify `search.ts` ↔ `page_registry.py:rank_search_results` tie-break `score desc, key asc (W4)` parity with unit test.
-4. **Switch launchers** — `.desktop`, `kyth-welcome-launch` → `kyth-hub-shell --page`, behind `KYTH_USE_PYTHON_HUB=1` fallback for one release.
-5. **CI** — `just check-hub-shell` in `validation.yml` alongside `test_kyth_welcome_hub_smoke.py` (already `13 passed` under `KYTH_FORCE_HEAVY_GUI_SMOKE=1`).
-6. **Retire Python UI** — remove `src/kyth-welcome` from image; keep `src/kyth_shared` for `kyth-probe`/`kyth-guardian` headless services until Rust ports exist.
-
-This file is the gate — do not delete Python Hub until #1-#3 are `live` and #4 is behind flag.
+1. **Gaming sub-tabs** — migration checklist, ProtonDB batch lookups, anti-cheat table (this file's #2).
+2. **Software catalog** — `appstream` search and AppImages; an install path with progress rather than a copyable command (#3).
+3. **`kyth_shared` → `kyth-shared-rs`** — the write/collector paths `MIGRATION.md` reserves (#4).
+4. **Retire the Qt Hub from the image** — `src/kyth-welcome` is no longer the default launcher target; removing it from the `Dockerfile` is a separate change, and `src/kyth_shared` stays regardless for `kyth-probe`/`kyth-guardian`.
