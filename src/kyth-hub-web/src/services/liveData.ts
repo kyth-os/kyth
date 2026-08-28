@@ -464,3 +464,13 @@ export async function fetchMesaOverlayDryRun(): Promise<{ ok: boolean; detail: s
   if (!inTauriShell()) return null;
   try { return await invoke<{ ok: boolean; detail: string }>("mesa_overlay_dry_run"); } catch { return null; }
 }
+
+// SMB — Aurora autodiscover parity (N33)
+export async function fetchSmbBrowse(host?: string | null): Promise<{ ok: boolean; detail: string } | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<{ ok: boolean; detail: string }>("smb_browse", { host: host ?? null }); } catch { return null; }
+}
+export async function fetchSmbMountCommand(share: string): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("smb_mount_command", { share }); } catch { return null; }
+}

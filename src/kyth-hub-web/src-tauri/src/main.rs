@@ -237,6 +237,16 @@ fn mesa_overlay_dry_run() -> MesaOverlayResponse {
     MesaOverlayResponse { ok, detail }
 }
 
+#[derive(serde::Serialize)]
+struct SmbBrowseResponse { ok: bool, detail: String, }
+#[tauri::command]
+fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
+    let (ok, detail) = kyth_shared::system::smb::smb_browse_dry_run(host.as_deref());
+    SmbBrowseResponse { ok, detail }
+}
+#[tauri::command]
+fn smb_mount_command(share: String) -> Vec<String> { kyth_shared::system::smb::smb_mount_command(&share) }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -269,7 +279,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
