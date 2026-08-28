@@ -247,6 +247,16 @@ fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
 #[tauri::command]
 fn smb_mount_command(share: String) -> Vec<String> { kyth_shared::system::smb::smb_mount_command(&share) }
 
+#[derive(serde::Serialize)]
+struct MemoryPressureResponse { status: String, detail: String, }
+#[tauri::command]
+fn memory_pressure() -> MemoryPressureResponse {
+    let (status, detail) = kyth_shared::system::memory_pressure::memory_pressure_status();
+    MemoryPressureResponse { status, detail }
+}
+#[tauri::command]
+fn snapshot_count() -> usize { kyth_shared::system::snapshot::snapshot_count() }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -279,7 +289,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

@@ -474,3 +474,13 @@ export async function fetchSmbMountCommand(share: string): Promise<string[] | nu
   if (!inTauriShell()) return null;
   try { return await invoke<string[]>("smb_mount_command", { share }); } catch { return null; }
 }
+
+// Memory pressure + snapshot count (Diagnostics/Repair)
+export async function fetchMemoryPressure(): Promise<{ status: string; detail: string } | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<{ status: string; detail: string }>("memory_pressure"); } catch { return null; }
+}
+export async function fetchSnapshotCount(): Promise<number | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<number>("snapshot_count"); } catch { return null; }
+}
