@@ -584,3 +584,9 @@ export async function fetchFirmwareUpdatesCount(): Promise<number | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<number>("firmware_updates_count"); } catch { return null; }
 }
+
+// Plasma HDR/VRR presets
+export async function fetchPlasmaPresets(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("plasma_presets"); } catch { return null; }
+}
