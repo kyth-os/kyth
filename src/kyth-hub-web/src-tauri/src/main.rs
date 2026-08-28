@@ -315,6 +315,14 @@ fn hardware_view_summary() -> Option<HardwareViewSummaryResponse> {
 #[derive(serde::Serialize)]
 struct HardwareViewSummaryResponse { has_nvidia: bool, is_hybrid: bool, capabilities: Vec<String>, }
 
+#[tauri::command]
+fn network_identity() -> NetworkIdentityResponse {
+    let n = kyth_shared::system::network_identity::get_network_identity();
+    NetworkIdentityResponse { vpn_connected: n.vpn_connected, vpn_name: n.vpn_name, smb_mounts: n.smb_mounts, cloud_providers: n.cloud_providers, detail: n.detail }
+}
+#[derive(serde::Serialize)]
+struct NetworkIdentityResponse { vpn_connected: bool, vpn_name: String, smb_mounts: i32, cloud_providers: Vec<String>, detail: String, }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -347,7 +355,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

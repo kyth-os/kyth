@@ -528,3 +528,10 @@ export async function fetchHardwareViewSummary(): Promise<HardwareViewSummary | 
   if (!inTauriShell()) return null;
   try { return await invoke<HardwareViewSummary>("hardware_view_summary"); } catch { return null; }
 }
+
+// Network identity live (VPN/SMB/cloud) — replaces probe-cache network-summary with live nmcli + mounts
+export interface NetworkIdentityLive { vpn_connected: boolean; vpn_name: string; smb_mounts: number; cloud_providers: string[]; detail: string; }
+export async function fetchNetworkIdentityLive(): Promise<NetworkIdentityLive | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<NetworkIdentityLive>("network_identity"); } catch { return null; }
+}
