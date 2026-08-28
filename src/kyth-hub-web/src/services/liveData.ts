@@ -223,6 +223,48 @@ export async function fetchBootcSnapshot(): Promise<BootcSnapshot | null> {
   }
 }
 
+// kernel-flavor and nvidia-detect are both plain scalars already in
+// DISK_TTL — no new backend needed, just fetchProbeSection with the right
+// key and type.
+export async function fetchKernelFlavor(): Promise<string | null> {
+  return fetchProbeSection<string>("kernel-flavor");
+}
+
+export async function fetchNvidiaDetected(): Promise<boolean | null> {
+  return fetchProbeSection<boolean>("nvidia-detect");
+}
+
+// Mirrors kyth_shared.system.probe's "network-summary" JSON-safe
+// projection exactly (see probe.py's _collect_network_identity) — covers
+// VPN, Network Shares, and Cloud Storage sections from one probe read.
+export interface NetworkSummary {
+  vpnConnected: boolean;
+  vpnName: string;
+  smbMounts: number;
+  cloudProviders: string[];
+  detail: string;
+}
+
+interface NetworkSummaryRaw {
+  vpn_connected: boolean;
+  vpn_name: string;
+  smb_mounts: number;
+  cloud_providers: string[];
+  detail: string;
+}
+
+export async function fetchNetworkSummary(): Promise<NetworkSummary | null> {
+  const raw = await fetchProbeSection<NetworkSummaryRaw>("network-summary");
+  if (!raw) return null;
+  return {
+    vpnConnected: raw.vpn_connected,
+    vpnName: raw.vpn_name,
+    smbMounts: raw.smb_mounts,
+    cloudProviders: raw.cloud_providers,
+    detail: raw.detail,
+  };
+}
+
 // Mirrors kyth_shared.system.controllers.detect_controllers()'s dict shape
 // exactly — read from the disk-backed "controllers-detect" probe section
 // (see probe.py's DISK_TTL), same as every fetchProbeSection call.
