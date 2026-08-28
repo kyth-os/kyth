@@ -26,8 +26,17 @@ pub mod update_availability;
 pub mod update_status;
 pub mod updates_unified;
 pub mod printing;
+pub mod boot_runtime;
+pub mod desktop_stack;
+pub mod updater;
 pub mod memory_pressure;
 pub mod snapshot;
 pub mod probe;
 pub mod storage;
+
+
+
+
+
+
 

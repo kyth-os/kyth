@@ -603,3 +603,10 @@ export async function fetchNtfsDevices(): Promise<any[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<any[]>("ntfs_devices"); } catch { return null; }
 }
+
+// Boot runtime + desktop stack + updater (final reads)
+export interface BootRuntimeCheck { name: string; passed: boolean; detail: string; }
+export async function fetchBootRuntimeChecks(): Promise<BootRuntimeCheck[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<BootRuntimeCheck[]>("boot_runtime_checks"); } catch { return null; }
+}

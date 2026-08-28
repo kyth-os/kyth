@@ -392,6 +392,15 @@ fn collect_availability(branch: Option<String>, use_cached: Option<bool>) -> Ava
 #[tauri::command]
 fn ntfs_devices() -> Vec<serde_json::Value> { kyth_shared::system::drives::get_ntfs_devices() }
 
+#[tauri::command]
+fn boot_runtime_checks() -> Vec<BootRuntimeCheckResponse> { kyth_shared::system::boot_runtime::boot_runtime_checks().into_iter().map(|c| BootRuntimeCheckResponse{name:c.name, passed:c.passed, detail:c.detail}).collect() }
+#[derive(serde::Serialize)]
+struct BootRuntimeCheckResponse { name: String, passed: bool, detail: String, }
+#[tauri::command]
+fn desktop_stack_checks() -> Vec<String> { kyth_shared::system::desktop_stack::desktop_stack_checks() }
+#[tauri::command]
+fn updater_available() -> bool { kyth_shared::system::updater::updater_available() }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -424,7 +433,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
