@@ -504,3 +504,13 @@ export async function fetchPrinterDiscover(): Promise<string[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<string[]>("ipp_discover"); } catch { return null; }
 }
+
+// Btrfs + drivers (Repair/Hardware)
+export async function fetchBtrfsHealth(): Promise<{ status: string; detail: string } | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<{ status: string; detail: string }>("btrfs_health"); } catch { return null; }
+}
+export async function fetchPciByClass(deviceClass: string): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("pci_devices_by_class", { class: deviceClass }); } catch { return null; }
+}

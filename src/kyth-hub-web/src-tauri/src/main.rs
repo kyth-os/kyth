@@ -275,6 +275,15 @@ fn ipp_discover() -> Vec<String> { kyth_shared::system::printing::ipp_discover()
 #[tauri::command]
 fn printer_setup_command() -> Vec<String> { kyth_shared::system::printing::printer_setup_command() }
 
+#[derive(serde::Serialize)]
+struct BtrfsHealthResponse { status: String, detail: String, }
+#[tauri::command]
+fn btrfs_health() -> BtrfsHealthResponse { let (status, detail)=kyth_shared::system::btrfs_status::btrfs_health_summary(); BtrfsHealthResponse{status, detail} }
+#[tauri::command]
+fn loaded_kernel_modules() -> Vec<String> { kyth_shared::system::drivers::get_loaded_kernel_modules().into_iter().collect() }
+#[tauri::command]
+fn pci_devices_by_class(class: String) -> Vec<String> { kyth_shared::system::drivers::get_pci_devices_by_class(&class) }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -307,7 +316,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
