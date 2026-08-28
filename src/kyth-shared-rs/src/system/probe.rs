@@ -24,6 +24,7 @@ pub fn disk_ttl() -> HashMap<&'static str, f64> {
         ("flatpak-updates", 180.0),
         ("nvidia-detect", 300.0),
         ("controllers-detect", 120.0),
+        ("display-detect", 30.0),
         ("hardware-probes", 30.0),
         ("ntfs-drives", 30.0),
         ("secureboot-state", 300.0),

@@ -6,6 +6,11 @@ import { HardwareSection } from "../components/HardwareSection";
 import { KernelSection } from "../components/KernelSection";
 import { NvidiaSection } from "../components/NvidiaSection";
 import { RepairSection } from "../components/RepairSection";
+import { ChannelsSection } from "../components/ChannelsSection";
+import { PlasmaWaylandSection } from "../components/PlasmaWaylandSection";
+import { DiagnosticsSection } from "../components/DiagnosticsSection";
+import { JustSection } from "../components/JustSection";
+import { FeedbackSection } from "../components/FeedbackSection";
 
 export function ThisPc() {
   return (
@@ -18,6 +23,11 @@ export function ThisPc() {
         Kernel: KernelSection,
         NVIDIA: NvidiaSection,
         Repair: RepairSection,
+        Channels: ChannelsSection,
+        "Plasma Wayland": PlasmaWaylandSection,
+        Diagnostics: DiagnosticsSection,
+        Just: JustSection,
+        Feedback: FeedbackSection,
       }}
     />
   );

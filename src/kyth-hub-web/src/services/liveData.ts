@@ -361,3 +361,54 @@ export function relativeTime(unixSeconds: number): string {
   const days = Math.round(hours / 24);
   return `${days}d ago`;
 }
+
+// Channels reuses bootc-branch (already cached for Update) — same data,
+// different framing: ChannelSection shows the switcher state vs. Update's
+// deployment view.
+export async function fetchChannelRaw(): Promise<string | null> {
+  return fetchProbeSection<string>("bootc-branch");
+}
+
+// display-detect (capabilities/profiles) was collected but never readable
+// via disk cache until the DISK_TTL fix above — now it's a normal
+// fetchProbeSection like hardware-summary.
+export interface DisplayDetect {
+  capabilities: string[];
+  profiles: string[];
+}
+export async function fetchDisplayDetect(): Promise<DisplayDetect | null> {
+  return fetchProbeSection<DisplayDetect>("display-detect");
+}
+
+// ntfs-drives — other-system NTFS/BitLocker partitions from lsblk, via
+// probe_cached("ntfs-drives") in kyth_welcome/services/hardware/drives.py
+// (also written to the shared probe-cache.json so Hub can read it).
+export interface NtfsDrive {
+  dev: string;
+  name: string;
+  size: string;
+  label: string;
+  mount: string;
+  is_bitlocker: boolean;
+}
+export async function fetchNtfsDrives(): Promise<NtfsDrive[] | null> {
+  return fetchProbeSection<NtfsDrive[]>("ntfs-drives");
+}
+
+// audit-cache — 46-140 perf audit (gaming + scheduler + memory tunables)
+// plus systemd-analyze line. Written by kyth_shared.perf_audit via
+// update_sections({"audit-cache": data}); large, loosely-typed by design.
+export type AuditCache = Record<string, unknown> & { ts?: number; systemd_analyze?: string; master?: string };
+export async function fetchAuditCache(): Promise<AuditCache | null> {
+  const raw = await fetchProbeSection<AuditCache>("audit-cache");
+  if (!raw || typeof raw !== "object") return null;
+  return raw;
+}
+
+// secureboot-state + firmware-cache — small scalars, same DISK_TTL family.
+export async function fetchSecurebootState(): Promise<string | null> {
+  return fetchProbeSection<string>("secureboot-state");
+}
+export async function fetchFirmwareCache(): Promise<unknown | null> {
+  return fetchProbeSection<unknown>("firmware-cache");
+}
