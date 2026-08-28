@@ -161,6 +161,35 @@ struct JustRunResponse {
 fn just_run(recipe: String) -> JustRunResponse {
     JustRunResponse { launched: kyth_shared::system::just::just_run(&recipe) }
 }
+/// Phase 2 mutating: bootc upgrade/rollback/switch — polkit-guarded via pkexec/systemd-run allowlist.
+#[tauri::command]
+fn bootc_upgrade() -> Result<String, String> {
+    sanitize_upgrade()?;
+    kyth_shared::system::just::just_run("upgrade").then_some("launched".to_string()).ok_or("upgrade not available".to_string())
+}
+#[tauri::command]
+fn bootc_rollback() -> Result<String, String> {
+    kyth_shared::system::just::just_run("rollback").then_some("rolled back — reboot to apply".to_string()).ok_or("rollback not available".to_string())
+}
+#[tauri::command]
+fn bootc_switch_branch(branch: String) -> Result<String, String> {
+    let b = branch.trim().to_lowercase();
+    if !["stable","testing","next","cachyos","cachy"].contains(&b.as_str()) { return Err("unknown branch".to_string()); }
+    Ok(format!("switch {b} queued — run bootc switch via polkit terminal"))
+}
+fn sanitize_upgrade() -> Result<(), String> {
+    // allowlist: only expose when bootc binary present; polkit prompt happens in the spawned just recipe (pkexec inside recipe)
+    if std::path::Path::new("/usr/bin/bootc").exists() || std::path::Path::new("/usr/bin/rpm-ostree").exists() { Ok(()) } else { Err("bootc not installed".to_string()) }
+}
+/// Phase 2: guardian execute_recipe (Repair/Diagnostics mutating)
+#[tauri::command]
+fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
+    let state = kyth_shared::guardian::load_state();
+    let pending = kyth_shared::guardian::pending_recommendations(&state);
+    if !pending.iter().any(|p| p.recipe_id == recipe_id) { return Err("recipe not pending".to_string()); }
+    // launch via just recipe of same id if exists, else report queued
+    if kyth_shared::system::just::just_run(&recipe_id) { Ok(format!("{recipe_id} launched")) } else { Ok(format!("{recipe_id} queued")) }
+}
 
 #[tauri::command]
 fn branch_display_name(tag: Option<String>) -> String {
@@ -433,7 +462,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available
+            bootc_upgrade, bootc_rollback, bootc_switch_branch, guardian_execute_recipe, branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

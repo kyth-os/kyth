@@ -610,3 +610,21 @@ export async function fetchBootRuntimeChecks(): Promise<BootRuntimeCheck[] | nul
   if (!inTauriShell()) return null;
   try { return await invoke<BootRuntimeCheck[]>("boot_runtime_checks"); } catch { return null; }
 }
+
+// Phase 2 mutating (Updates + Repair/Diagnostics)
+export async function invokeBootcUpgrade(): Promise<string> {
+  if (!inTauriShell()) throw new Error("not in Tauri");
+  return await invoke<string>("bootc_upgrade");
+}
+export async function invokeBootcRollback(): Promise<string> {
+  if (!inTauriShell()) throw new Error("not in Tauri");
+  return await invoke<string>("bootc_rollback");
+}
+export async function invokeBootcSwitchBranch(branch: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("not in Tauri");
+  return await invoke<string>("bootc_switch_branch", { branch });
+}
+export async function invokeGuardianExecute(recipeId: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("not in Tauri");
+  return await invoke<string>("guardian_execute_recipe", { recipeId });
+}
