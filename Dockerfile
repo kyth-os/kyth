@@ -15,9 +15,13 @@ ARG BASE_IMAGE=localhost/kyth-base:stable
 # prerequisites (webkit2gtk-devel & co — see src/kyth-hub-web/README.md for
 # the same list in the local dev workflow) never land in the final image —
 # only the compiled binary does (COPY --from'd into the main stage further
-# down). tauri-build embeds the built frontend's dist/ into the binary at
-# compile time (see tauri.conf.json's frontendDist), so nothing besides
-# the one binary needs installing alongside it.
+# down). The frontend's dist/ is embedded into the binary at compile time
+# (see tauri.conf.json's frontendDist), so nothing besides the one binary
+# needs installing alongside it — but only because src-tauri/Cargo.toml
+# makes `custom-protocol` a default feature. Without it Tauri generates a
+# *dev* context that ignores frontendDist and points the webview at devUrl,
+# and the plain `cargo build --release` below has no way to opt in the way
+# `tauri build` does. See that Cargo.toml's [features] comment.
 FROM registry.fedoraproject.org/fedora:44 AS hub-web-builder
 RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
         cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \

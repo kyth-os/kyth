@@ -21,6 +21,19 @@ serde_json = "1"
 # bridge commands below call straight into it, no subprocess.
 kyth-shared = { path = "../../kyth-shared-rs" }
 
+[features]
+# Tauri picks dev-vs-production at compile time from this feature, not from
+# the cargo profile: tauri-macros' context.rs sets `dev: cfg!(not(feature =
+# "custom-protocol"))`, and a `dev` context throws away frontendDist and
+# points the webview at tauri.conf.json's devUrl instead. `tauri build`
+# passes the feature; the plain `cargo build --release` the image's
+# hub-web-builder stage runs does not, so it has to be a default here or the
+# shipped binary opens on "Could not connect to localhost: Connection
+# refused". `npm run tauri:dev` still gets the dev server — the Tauri CLI
+# builds with --no-default-features.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [profile.release]
 panic = "abort"
 codegen-units = 1
