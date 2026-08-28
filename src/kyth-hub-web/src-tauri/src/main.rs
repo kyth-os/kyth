@@ -162,6 +162,50 @@ fn just_run(recipe: String) -> JustRunResponse {
     JustRunResponse { launched: kyth_shared::system::just::just_run(&recipe) }
 }
 
+#[tauri::command]
+fn branch_display_name(tag: Option<String>) -> String {
+    kyth_shared::system::bootc_policy::branch_display_name(tag.as_deref())
+}
+
+#[derive(Serialize)]
+struct UpdateAvailabilityViewResponse {
+    card_style: String,
+    icon_text: String,
+    icon_style: String,
+    title: String,
+    body: String,
+    update_btn_visible: bool,
+    restart_btn_visible: bool,
+}
+
+#[tauri::command]
+fn update_availability_view(
+    staged: bool,
+    check_state: String,
+    flatpak_count: u32,
+    check_ts: String,
+    check_ts_details: String,
+    staged_ts: Option<String>,
+) -> UpdateAvailabilityViewResponse {
+    let v = kyth_shared::system::bootc_policy::update_availability_view(
+        staged,
+        &check_state,
+        flatpak_count,
+        &check_ts,
+        &check_ts_details,
+        staged_ts.as_deref(),
+    );
+    UpdateAvailabilityViewResponse {
+        card_style: v.card_style,
+        icon_text: v.icon_text,
+        icon_style: v.icon_style,
+        title: v.title,
+        body: v.body,
+        update_btn_visible: v.update_btn_visible,
+        restart_btn_visible: v.restart_btn_visible,
+    }
+}
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -193,7 +237,8 @@ fn main() {
         }))
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
-            probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run
+            probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
+            branch_display_name, update_availability_view
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

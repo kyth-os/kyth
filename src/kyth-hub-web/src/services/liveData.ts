@@ -429,3 +429,14 @@ export async function runJustRecipe(recipe: string): Promise<boolean | null> {
     return raw.launched;
   } catch { return null; }
 }
+
+// bootc_policy — pure presentation helpers now in Rust (was TS CHANNEL_DISPLAY duplicate)
+export async function fetchBranchDisplayName(tag: string | null): Promise<string | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string>("branch_display_name", { tag }); } catch { return null; }
+}
+export interface UpdateAvailabilityView { card_style: string; icon_text: string; icon_style: string; title: string; body: string; update_btn_visible: boolean; restart_btn_visible: boolean; }
+export async function fetchUpdateAvailabilityView(args: { staged: boolean; check_state: string; flatpak_count: number; check_ts: string; check_ts_details: string; staged_ts?: string | null }): Promise<UpdateAvailabilityView | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<UpdateAvailabilityView>("update_availability_view", args); } catch { return null; }
+}
