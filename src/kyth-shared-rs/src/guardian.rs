@@ -277,3 +277,55 @@ mod tests {
         assert_eq!(recent_history(&state, 8), Vec::new());
     }
 }
+
+/// Is `recipe_id` currently a pending recommendation?
+///
+/// The authorization gate for acting on a Guardian recommendation: only a
+/// recipe Guardian is *currently recommending* may be executed, so a
+/// caller can't be talked into running an arbitrary recipe id by whatever
+/// hands it the string. Kept here next to the list it derives from, and
+/// kept pure — executing is the caller's job (MIGRATION.md notes
+/// `execute_recipe` is deliberately not ported to this crate).
+pub fn is_pending_recipe(state: &Value, recipe_id: &str) -> bool {
+    pending_recommendations(state).iter().any(|p| p.recipe_id == recipe_id)
+}
+
+#[cfg(test)]
+mod pending_gate_tests {
+    use super::{is_pending_recipe, now_unix};
+    use serde_json::json;
+
+    fn state_with(action: &str) -> serde_json::Value {
+        json!({
+            "schema_version": 1,
+            "history": [
+                { "timestamp": now_unix(), "recipe_id": "audio.restart", "action": action, "detail": "d" }
+            ],
+            "occurrences": {},
+        })
+    }
+
+    #[test]
+    fn allows_a_currently_recommended_recipe() {
+        assert!(is_pending_recipe(&state_with("recommended"), "audio.restart"));
+    }
+
+    #[test]
+    fn rejects_a_recipe_that_is_not_recommended() {
+        assert!(!is_pending_recipe(&state_with("executed"), "audio.restart"));
+    }
+
+    #[test]
+    fn rejects_an_unknown_or_empty_recipe_id() {
+        let state = state_with("recommended");
+        for id in ["", "network.reset", "audio.restart\n", "../../etc/passwd"] {
+            assert!(!is_pending_recipe(&state, id), "{id:?} must not pass the gate");
+        }
+    }
+
+    #[test]
+    fn rejects_everything_when_there_is_no_history() {
+        let empty = json!({ "schema_version": 1, "history": [], "occurrences": {} });
+        assert!(!is_pending_recipe(&empty, "audio.restart"));
+    }
+}

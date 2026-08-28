@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchBootcSnapshot, relativeTime, type BootcSnapshot } from "../services/liveData";
+import {
+  fetchBootcSnapshot,
+  invokeBootcRollback,
+  invokeBootcUpgrade,
+  relativeTime,
+  type BootcSnapshot,
+} from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
+import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
 function shortDigest(digest: string | undefined): string | null {
   if (!digest) return null;
@@ -21,6 +28,7 @@ function ago(timestamp: string | undefined): string | null {
 export function UpdatesSection({ section }: { section: HubSection }) {
   const [snapshot, setSnapshot] = useState<BootcSnapshot | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const { status, busy, run } = useSectionAction();
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +80,24 @@ export function UpdatesSection({ section }: { section: HubSection }) {
         </div>
       ) : (
         <SectionFallbackNote loaded={loaded} />
+      )}
+      {snapshot?.booted && (
+        <div style={{ marginTop: 24, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <ActionButton
+              label={busy === "upgrade" ? "Checking…" : "Check for updates"}
+              disabled={busy !== null}
+              onClick={() => run("upgrade", "Starting upgrade…", invokeBootcUpgrade)}
+            />
+            <ActionButton
+              label={busy === "rollback" ? "Rolling back…" : "Roll back"}
+              // Nothing to roll back to until a previous deployment exists.
+              disabled={busy !== null || !snapshot.rollback}
+              onClick={() => run("rollback", "Rolling back…", invokeBootcRollback)}
+            />
+          </div>
+          <ActionStatus status={status} />
+        </div>
       )}
     </LiveSectionCard>
   );

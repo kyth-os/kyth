@@ -34,6 +34,7 @@ interface GuardianBridgeHistoryItem {
   verified: boolean | null;
 }
 interface GuardianBridgePendingItem {
+  recipe_id: string;
   title: string;
   detail: string;
   risk: string;
@@ -57,7 +58,12 @@ export async function fetchGuardianSnapshot(): Promise<GuardianSnapshot | null> 
     const raw = await invoke<GuardianBridgeResponse>("guardian_snapshot");
     return {
       pendingCount: raw.pending_count,
-      pending: raw.pending,
+      pending: raw.pending.map((item) => ({
+        recipeId: item.recipe_id,
+        title: item.title,
+        detail: item.detail,
+        risk: item.risk,
+      })),
       history: raw.history.map((item) => ({
         timestamp: item.timestamp,
         title: item.title,
@@ -344,6 +350,7 @@ export async function fetchHardwareSnapshot(): Promise<HardwareSnapshot | null> 
 // pending_recommendations() list Hub's own mission bar/sidebar badge reads,
 // now with a title (via RECIPES) and risk level attached for display.
 export interface GuardianPendingItem {
+  recipeId: string;
   title: string;
   detail: string;
   risk: string;

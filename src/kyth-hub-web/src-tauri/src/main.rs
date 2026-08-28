@@ -53,6 +53,9 @@ fn probe_backend(section: String) -> ProbeResponse {
 
 #[derive(Serialize)]
 struct GuardianPendingResponse {
+    // recipe_id is what guardian_execute_recipe gates on, so it has to
+    // reach the frontend for a "run this fix" button to exist at all.
+    recipe_id: String,
     title: String,
     detail: String,
     risk: String,
@@ -84,6 +87,7 @@ fn guardian_snapshot() -> GuardianSnapshotResponse {
     let pending_response = pending
         .iter()
         .map(|p| GuardianPendingResponse {
+            recipe_id: p.recipe_id.clone(),
             title: kyth_shared::guardian::recipe_title(&p.recipe_id),
             detail: p.detail.clone(),
             risk: kyth_shared::guardian::recipe_risk(&p.recipe_id),
@@ -173,9 +177,21 @@ fn bootc_rollback() -> Result<String, String> {
 }
 #[tauri::command]
 fn bootc_switch_branch(branch: String) -> Result<String, String> {
-    let b = branch.trim().to_lowercase();
-    if !["stable","testing","next","cachyos","cachy"].contains(&b.as_str()) { return Err("unknown branch".to_string()); }
-    Ok(format!("switch {b} queued — run bootc switch via polkit terminal"))
+    // Allowlist, then spawn the same `just switch-channel` recipe a user
+    // would run by hand — the recipe stages the switch via kyth-bootc-guard
+    // and does its own sudo prompt, so this matches how bootc_upgrade and
+    // bootc_rollback delegate rather than touching bootc directly.
+    //
+    // switch_channel_arg returns a fixed literal, never the caller's
+    // string, so nothing user-controlled reaches the argv.
+    let channel = kyth_shared::system::bootc_policy::switch_channel_arg(&branch)
+        .ok_or_else(|| "unknown channel".to_string())?;
+    std::process::Command::new("just")
+        .arg("switch-channel")
+        .arg(channel)
+        .spawn()
+        .map_err(|err| format!("could not start switch-channel: {err}"))?;
+    Ok(format!("switch to {channel} staged — reboot to activate"))
 }
 fn sanitize_upgrade() -> Result<(), String> {
     // allowlist: only expose when bootc binary present; polkit prompt happens in the spawned just recipe (pkexec inside recipe)
@@ -185,8 +201,7 @@ fn sanitize_upgrade() -> Result<(), String> {
 #[tauri::command]
 fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
     let state = kyth_shared::guardian::load_state();
-    let pending = kyth_shared::guardian::pending_recommendations(&state);
-    if !pending.iter().any(|p| p.recipe_id == recipe_id) { return Err("recipe not pending".to_string()); }
+    if !kyth_shared::guardian::is_pending_recipe(&state, &recipe_id) { return Err("recipe not pending".to_string()); }
     // launch via just recipe of same id if exists, else report queued
     if kyth_shared::system::just::just_run(&recipe_id) { Ok(format!("{recipe_id} launched")) } else { Ok(format!("{recipe_id} queued")) }
 }

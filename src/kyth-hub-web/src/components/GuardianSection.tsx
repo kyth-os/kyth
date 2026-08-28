@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchGuardianSnapshot, relativeTime, type GuardianSnapshot } from "../services/liveData";
+import {
+  fetchGuardianSnapshot,
+  invokeGuardianExecute,
+  relativeTime,
+  type GuardianSnapshot,
+} from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
+import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
 const riskTone: Record<string, string> = {
   safe: "pill-ok",
@@ -22,6 +28,7 @@ const statusDot: Record<string, string> = {
 export function GuardianSection({ section }: { section: HubSection }) {
   const [snapshot, setSnapshot] = useState<GuardianSnapshot | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const { status, busy, run } = useSectionAction();
 
   useEffect(() => {
     let cancelled = false;
@@ -63,10 +70,18 @@ export function GuardianSection({ section }: { section: HubSection }) {
                     <span className={`pill ${riskTone[item.risk] ?? "pill-dim"}`} style={{ flexShrink: 0 }}>
                       {item.risk}
                     </span>
+                    <ActionButton
+                      label={busy === item.recipeId ? "Running…" : "Run fix"}
+                      disabled={busy !== null}
+                      onClick={() =>
+                        run(item.recipeId, `Running ${item.title}…`, () => invokeGuardianExecute(item.recipeId))
+                      }
+                    />
                   </div>
                 ))}
               </div>
             )}
+            <ActionStatus status={status} />
           </div>
 
           {snapshot.history.length > 0 && (

@@ -370,3 +370,55 @@ mod tests {
         assert_eq!(parse_update_phase("unknown line xyz", "update"), None);
     }
 }
+
+/// Normalize a requested update channel to the argument `ujust
+/// switch-channel` actually accepts, or `None` if it isn't a channel.
+///
+/// The recipe's own `case` (system-updates.just) takes `stable|latest|
+/// testing` and exits 1 on anything else — `next`/`cachyos`/`cachy` are
+/// kernel flavors belonging to `switch-kernel`, not channels, so accepting
+/// them here would only stage a call the recipe rejects.
+///
+/// Pure policy on purpose: the spawn stays in the caller (see MIGRATION.md
+/// on why this crate holds no mutating functions). Returning a fixed
+/// literal rather than the caller's string is also what makes passing it
+/// to a subprocess safe by construction.
+pub fn switch_channel_arg(channel: &str) -> Option<&'static str> {
+    match channel.trim().to_lowercase().as_str() {
+        "stable" | "latest" => Some("stable"),
+        "testing" => Some("testing"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod switch_channel_tests {
+    use super::switch_channel_arg;
+
+    #[test]
+    fn accepts_the_channels_the_recipe_accepts() {
+        assert_eq!(switch_channel_arg("stable"), Some("stable"));
+        assert_eq!(switch_channel_arg("latest"), Some("stable"));
+        assert_eq!(switch_channel_arg("testing"), Some("testing"));
+    }
+
+    #[test]
+    fn is_forgiving_about_case_and_padding() {
+        assert_eq!(switch_channel_arg("  Testing "), Some("testing"));
+        assert_eq!(switch_channel_arg("STABLE"), Some("stable"));
+    }
+
+    #[test]
+    fn rejects_kernel_flavors_which_belong_to_switch_kernel() {
+        for flavor in ["next", "cachyos", "cachy", "fedora"] {
+            assert_eq!(switch_channel_arg(flavor), None, "{flavor} is not a channel");
+        }
+    }
+
+    #[test]
+    fn rejects_empty_and_injection_shaped_input() {
+        for bad in ["", "   ", "testing; rm -rf /", "stable && reboot", "../../etc"] {
+            assert_eq!(switch_channel_arg(bad), None, "{bad:?} must not pass");
+        }
+    }
+}
