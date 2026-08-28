@@ -35,3 +35,5 @@ pub mod snapshot;
 pub mod probe;
 pub mod storage;
 pub mod telemetry;
+pub mod gaming_library;
+pub mod software_catalog;

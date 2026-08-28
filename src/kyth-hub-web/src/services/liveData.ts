@@ -635,6 +635,18 @@ export async function fetchTelemetryRecent(limit = 7): Promise<TelemetrySession[
   }
 }
 
+
+export interface LauncherEntry { id: string; label: string; installed: boolean; library_count: number | null; path: string; }
+export async function fetchGamingLibrary(): Promise<LauncherEntry[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<LauncherEntry[]>("gaming_library"); } catch { return null; }
+}
+export interface StarterPack { name: string; desc: string; apps: { id: string; label: string; selected: boolean; description: string }[]; }
+export async function fetchStarterPacks(): Promise<StarterPack[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<StarterPack[]>("starter_packs"); } catch { return null; }
+}
+
 export async function fetchBootRuntimeChecks(): Promise<BootRuntimeCheck[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<BootRuntimeCheck[]>("boot_runtime_checks"); } catch { return null; }

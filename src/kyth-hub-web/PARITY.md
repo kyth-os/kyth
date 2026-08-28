@@ -19,11 +19,11 @@ Python Hub is authoritative until this file says otherwise. Build is `check-hub-
 ### 1. Charts — the only remaining fixture
 `PerformanceChart.tsx`/`SessionsChart.tsx` render `mockDashboard.ts:performanceSeries/sessionSeries` with `pill-dim Sample data` + `ChartFixtureNote` ("kyth-telem's `~/.local/share/kyth/telemetry.db` reader not ported — `kyth-shared-rs` needs `rusqlite`"). Python `page_performance.py` + `kyth_shared.telemetry.recent_sessions` already reads it. Fix: add `kyth-shared-rs::system::telemetry::recent_sessions` (read-only sqlite), expose `telemetry_recent` Tauri command, `liveData.ts:fetchTelemetrySeries`, charts show `Live` when data present else `Preview` with note.
 
-### 2. Gaming library/migration/setup sub-tabs
-Python `page_gaming.py` composes 6 mixins (`page_gaming_dashboard/setup/library/fixes/tools/migration`) each with workers (`DataWorker`, `WindowsLibraryWorker`, `ProtonDbBatchWorker`). React `GamingSection.tsx` only shows `audit` master pills. Needs `library-scan` (`steam`/`epic`/`gog` scan via `kyth_shared.gaming.*`) and `compatibility` (`protondb`, `anticheat`) bridges.
+### 2. Gaming library/migration/setup sub-tabs — PARTIAL LIVE (GamingSection + library scan)
+Python `page_gaming.py` composes 6 mixins (`page_gaming_dashboard/setup/library/fixes/tools/migration`) each with workers (`DataWorker`, `WindowsLibraryWorker`, `ProtonDbBatchWorker`). React `GamingSection.tsx` only shows `audit` master pills. Now `GamingSection` shows `gaming_library` scan (Steam/Heroic/Lutris/Bottles) via `gaming_library.rs` + `fetchGamingLibrary`; still TODO: migration checklist, ProtonDB batch and `compatibility` (`protondb`, `anticheat`) bridges.
 
-### 3. Software sub-tabs
-Python `page_software.py` 7 mixins (Starter Packs, Flatpak Store, AppImages, Installed, Developer, Security, Creator) with `software_catalogs.py` (`STARTER_PACKS`, `SEC_BOX`, `FAMILAR_APPS`). React `AppStoreSection` only shows `installedCount/updatesAvailable`. Needs `appstream` catalog (`flatpak` bridge) + `curated_appimages` + `starter-packs` commands.
+### 3. Software sub-tabs — PARTIAL LIVE (AppStoreSection + starter packs)
+Python `page_software.py` 7 mixins (Starter Packs, Flatpak Store, AppImages, Installed, Developer, Security, Creator) with `software_catalogs.py` (`STARTER_PACKS`, `SEC_BOX`, `FAMILAR_APPS`). React `AppStoreSection` only shows `installedCount/updatesAvailable`. Now `AppStoreSection` shows `starter_packs` via `software_catalog.rs` + `fetchStarterPacks` + flatpak counts; still TODO: `familiar_apps`, `appstream` full catalog, AppImages.
 
 ### 4. kyth_shared → kyth-shared-rs coverage
 Python `src/kyth_shared/kyth_shared` `≈209` modules / `≈1494` defs vs Rust `src/kyth-shared-rs/src/system` `≈30` modules (≈14%). `MIGRATION.md` reserves write/collector paths (installer partitioning, SELinux, VPN connect, `zypp`/`dnf`, `collect_snapshot`, `execute_recipe`) — intentionally read-only first. Parity for UI does not require 100% of `kyth_shared` — only the UI-facing reads + the `≈8` mutating `just_*` recipes (`upgrade`, `rollback`, `switch-channel`, `guardian_execute`, `just_run`) already exposed.

@@ -407,6 +407,22 @@ fn update_status() -> UpdateStatusResponse {
 struct UpdateStatusResponse { booted: Option<String>, staged: bool, rollback: bool, remote_digest: Option<String>, blocked_reason: Option<String>, retry_cmd: Option<String>, check_state: String, detail: String, }
 
 #[tauri::command]
+#[tauri::command]
+fn gaming_library() -> Vec<kyth_shared::system::gaming_library::LauncherEntry> {
+    kyth_shared::system::gaming_library::gaming_library_scan()
+}
+
+#[tauri::command]
+fn starter_packs() -> Vec<kyth_shared::system::software_catalog::StarterPack> {
+    kyth_shared::system::software_catalog::starter_packs()
+}
+
+#[tauri::command]
+fn familiar_apps() -> Vec<kyth_shared::system::software_catalog::FamiliarApp> {
+    kyth_shared::system::software_catalog::familiar_apps()
+}
+
+#[tauri::command]
 fn telemetry_recent(limit: Option<u32>) -> Vec<kyth_shared::system::telemetry::SessionRow> {
     kyth_shared::system::telemetry::recent_sessions(limit.unwrap_or(15) as usize)
 }
@@ -484,7 +500,7 @@ fn main() {
         }))
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
-            probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, telemetry_recent, take_pending_page, just_list, just_run,
+            probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, take_pending_page, just_list, just_run,
             bootc_upgrade, bootc_rollback, bootc_switch_branch, guardian_execute_recipe, branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available, current_user_name
         ])
         .run(tauri::generate_context!())
