@@ -541,3 +541,13 @@ export async function fetchPendingUpdatesSummary(): Promise<Record<string,string
   if (!inTauriShell()) return null;
   try { return await invoke<Record<string,string>>("pending_updates_summary"); } catch { return null; }
 }
+
+// PipeWire quantum presets (N32)
+export async function fetchAudioPresets(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("available_audio_presets"); } catch { return null; }
+}
+export async function applyPipewireQuantum(preset: string, dryRun = false): Promise<{ ok: boolean; detail: string } | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<{ ok: boolean; detail: string }>("apply_pipewire_quantum", { preset, dryRun }); } catch { return null; }
+}

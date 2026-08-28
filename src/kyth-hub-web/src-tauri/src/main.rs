@@ -328,6 +328,13 @@ fn pending_updates_summary() -> std::collections::HashMap<String,String> { kyth_
 #[tauri::command]
 fn rollback_command() -> Vec<String> { kyth_shared::system::updates_unified::rollback_command() }
 
+#[tauri::command]
+fn available_audio_presets() -> Vec<String> { kyth_shared::system::pipewire::available_audio_presets() }
+#[derive(serde::Serialize)]
+struct PipewireApplyResponse { ok: bool, detail: String, }
+#[tauri::command]
+fn apply_pipewire_quantum(preset: String, dry_run: bool) -> PipewireApplyResponse { let (ok, detail)=kyth_shared::system::pipewire::apply_pipewire_quantum(&preset, dry_run); PipewireApplyResponse{ok, detail} }
+
 /// One-shot pull for the page this process was launched with (`--page`,
 /// e.g. from a desktop file or CLI deep link). Pulled by the frontend on
 /// mount rather than pushed as an event, to avoid a race against the
@@ -360,7 +367,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, take_pending_page, just_list, just_run,
-            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command
+            branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");
