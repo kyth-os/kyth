@@ -13,6 +13,11 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 pub struct JustRecipe {
     pub name: String,
+    /// Parameters as `just --list` prints them (`flavor="fedora"`), empty for
+    /// a recipe that takes none. `just_run` spawns the name with no arguments,
+    /// so a non-empty `params` means running it from the Hub would silently
+    /// use the defaults — the listing renders those rows as text, not buttons.
+    pub params: String,
     pub comment: String,
 }
 
@@ -30,21 +35,22 @@ fn parse_just_list(stdout: &str) -> Vec<JustRecipe> {
         if line.starts_with("Available recipes:") {
             continue;
         }
-        // `just --list` indents with 4 spaces; after trim we have `name  # comment`
-        // Split at first whitespace, like `ln.split(None,1)` in Python.
+        // `just --list` indents with 4 spaces; after trim we have
+        // `name [params]  # comment`. Split at first whitespace for the name
+        // (like `ln.split(None,1)` in Python), then at the first `#` to keep
+        // parameters out of the comment — page_just.py folded them together,
+        // but the React listing needs them apart to decide button vs text.
         let mut parts = line.splitn(2, char::is_whitespace);
         let name = parts.next().unwrap_or("").trim().to_string();
         if name.is_empty() {
             continue;
         }
-        let comment = parts
-            .next()
-            .unwrap_or("")
-            .trim()
-            .trim_start_matches('#')
-            .trim()
-            .to_string();
-        out.push(JustRecipe { name, comment });
+        let rest = parts.next().unwrap_or("").trim();
+        let (params, comment) = match rest.split_once('#') {
+            Some((before, after)) => (before.trim().to_string(), after.trim().to_string()),
+            None => (rest.to_string(), String::new()),
+        };
+        out.push(JustRecipe { name, params, comment });
         if out.len() >= 100 {
             break;
         }
@@ -105,11 +111,27 @@ mod tests {
         let v = parse_just_list(out);
         assert_eq!(v.len(), 3);
         assert_eq!(v[0].name, "build");
+        assert_eq!(v[0].params, "");
         assert_eq!(v[0].comment, "Build the full KythOS image.");
         assert_eq!(v[1].name, "lint");
         assert_eq!(v[1].comment, "Run checks");
         assert_eq!(v[2].name, "foo");
+        assert_eq!(v[2].params, "");
         assert_eq!(v[2].comment, "");
+    }
+
+    #[test]
+    fn parse_keeps_parameters_out_of_the_comment() {
+        // `just switch-kernel` with no argument means `fedora`. The listing
+        // has to surface that, or a row in the Hub becomes a one-click switch
+        // off the CachyOS default under a label that only says the name.
+        let out = "Available recipes:\n    switch-kernel flavor=\"fedora\"   # Switch the installed kernel.\n    gaming-mode  # Gaming profile\n";
+        let v = parse_just_list(out);
+        assert_eq!(v[0].name, "switch-kernel");
+        assert_eq!(v[0].params, "flavor=\"fedora\"");
+        assert_eq!(v[0].comment, "Switch the installed kernel.");
+        assert_eq!(v[1].params, "");
+        assert_eq!(v[1].comment, "Gaming profile");
     }
 
     #[test]

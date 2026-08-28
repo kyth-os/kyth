@@ -7,6 +7,11 @@ import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 // "This PC > Recipes (Just)" — now live via Tauri `just_list`/`just_run`
 // (port of page_just.py). Falls back to preview note when not in Tauri
 // or `just` is not installed.
+//
+// Only recipes that take no arguments get a button: `just_run` spawns the
+// bare name, so a parameterized recipe would silently run its defaults.
+// `switch-kernel flavor="fedora"` was one click from staging a switch off
+// the CachyOS default here. Those rows render as text instead.
 export function JustSection({ section }: { section: HubSection }) {
   const [recipes, setRecipes] = useState<JustRecipe[] | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -55,7 +60,13 @@ export function JustSection({ section }: { section: HubSection }) {
               {shown.map((r) => (
                 <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--hairline)" }}>
                   <div style={{ minWidth: 190 }}>
-                    <RecipeButton recipe={r.name} label={r.name} busy={busy} run={run} />
+                    {r.params ? (
+                      <code style={{ fontSize: 12 }}>
+                        {r.name} <span className="card-copy">{r.params}</span>
+                      </code>
+                    ) : (
+                      <RecipeButton recipe={r.name} label={r.name} busy={busy} run={run} />
+                    )}
                   </div>
                   <span className="card-copy" style={{ fontSize: 12, flex: 1 }}>{r.comment}</span>
                 </div>
@@ -66,6 +77,9 @@ export function JustSection({ section }: { section: HubSection }) {
                 … and {matching.length - shown.length} more — narrow the filter, or run `just --list` in a terminal.
               </p>
             )}
+            <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>
+              Recipes that take arguments are shown as text — run those in a terminal, where you choose the argument.
+            </p>
             <ActionStatus status={status} />
           </div>
         ) : (

@@ -428,7 +428,9 @@ export async function fetchSecurebootState(): Promise<string | null> {
 }
 
 // Just recipes — live `just --list` via Tauri (port of page_just.py).
-export interface JustRecipe { name: string; comment: string }
+// `params` is non-empty when the recipe takes arguments. runJustRecipe
+// spawns the bare name, so those rows must not become buttons.
+export interface JustRecipe { name: string; params: string; comment: string }
 export async function fetchJustList(): Promise<JustRecipe[] | null> {
   if (!inTauriShell()) return null;
   try {

@@ -45,8 +45,12 @@ export function PerformanceSection({ section }: { section: HubSection }) {
         <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
           Power profile
         </p>
+        <p className="card-copy" style={{ fontSize: 12, margin: "6px 0 0" }}>
+          The gaming profile sets EPP to performance and also halves animation speed and turns off blur; Balanced puts
+          both back.
+        </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-          <RecipeButton recipe="gaming-mode" label="Performance" busy={busy} run={run} />
+          <RecipeButton recipe="gaming-mode" label="Performance (gaming profile)" busy={busy} run={run} />
           <RecipeButton recipe="balanced-mode" label="Balanced" busy={busy} run={run} />
           <RecipeButton recipe="system-audit" label="Run full audit" busy={busy} run={run} />
         </div>

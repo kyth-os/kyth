@@ -223,6 +223,22 @@ class HubWebCoverageTests(unittest.TestCase):
             referenced.update(re.findall(r'recipe="([^"]+)"', text))
         self.assertEqual(set(), set(PARAMETERIZED_RECIPE_BUTTONS) - referenced)
 
+    def test_just_listing_does_not_button_parameterized_recipes(self):
+        # JustSection builds its buttons from `just --list` at runtime, so
+        # the recipe name is a variable and the two checks above cannot see
+        # it: a "kernel" filter put a one-click `switch-kernel` — which
+        # defaults to Fedora — in front of the user. The gate has to be in
+        # the row itself, on the `params` field just_list now returns.
+        text = (HUB_WEB / "components" / "JustSection.tsx").read_text(encoding="utf-8")
+        self.assertIn("r.params", text, "JustSection ignores whether a recipe takes arguments")
+        row = re.search(r"\{r\.params \?(.*?)\)\}", text, re.S)
+        self.assertIsNotNone(row, "JustSection does not branch on r.params")
+        has_params, no_params = row.group(1).split(") : (", 1)
+        self.assertNotIn("RecipeButton", has_params, "parameterized recipes still get a button")
+        self.assertIn("RecipeButton", no_params, "argument-free recipes lost their button")
+        # The field has to survive the bridge, or the branch is always false.
+        self.assertIn("params: string", LIVE_DATA)
+
     def test_open_feedback_issue_encodes_caller_input(self):
         # Both halves are caller-supplied. Unencoded, a title containing `&`
         # or `#` would rewrite the query string, and the issue URL is opened
