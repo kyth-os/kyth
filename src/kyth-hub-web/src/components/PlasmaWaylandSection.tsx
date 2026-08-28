@@ -91,7 +91,9 @@ export function PlasmaWaylandSection({ section }: { section: HubSection }) {
             HDR / VRR preset
           </p>
           <p className="card-copy" style={{ fontSize: 12, margin: "6px 0 12px" }}>
-            Applies to the current Wayland session; some changes need the session restarted.
+            Applies to the current Wayland session; some changes need the session restarted. A preset the display
+            cannot do (HDR on an SDR panel) can leave a black screen, and there is no way back from inside the Hub —
+            recover with <code>ujust list-presets</code> from a TTY, or reboot.
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {presets.map((preset) => (

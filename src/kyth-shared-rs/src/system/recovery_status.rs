@@ -39,7 +39,7 @@ pub fn get_recovery_status() -> RecoveryStatus {
             }
         }
     }
-    let clear_cmd = if !quarantined.is_empty() { format!("ujust clear-quarantine --digest {}", quarantined) } else { String::new() };
+    let clear_cmd = if !quarantined.is_empty() { format!("sudo kyth-boot-health clear-quarantine --digest {}", quarantined) } else { String::new() };
     RecoveryStatus { has_staged, has_rollback, quarantined_digest: quarantined, quarantine_detail: detail, watcher_staged: has_staged, clear_quarantine_cmd: clear_cmd }
 }
 

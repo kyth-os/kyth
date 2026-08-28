@@ -51,6 +51,16 @@ UNWRAPPED_COMMANDS = {
 }
 
 
+# Recipes that take parameters but whose *defaults* are what the button
+# promises. Everything else parameterized belongs in a CommandLine — see
+# test_recipe_buttons_do_not_use_parameterized_recipes.
+PARAMETERIZED_RECIPE_BUTTONS = {
+    # `gaming-audit mode=""` — the empty default is the full read-only audit,
+    # which is exactly what "Gaming stack audit" says it does.
+    "gaming-audit": 'mode=""',
+}
+
+
 def _ui_sources() -> dict[str, str]:
     sources = {}
     for sub in ("components", "pages"):
@@ -162,7 +172,9 @@ class HubWebCoverageTests(unittest.TestCase):
             text = (HUB_WEB / "pages" / page).read_text(encoding="utf-8")
             block = re.search(r"sectionContent=\{\{(.*?)\}\}", text, re.S)
             self.assertIsNotNone(block, f"{page} has no sectionContent map")
-            wired.update(re.findall(r'^\s*"?([^":\n]+?)"?:\s*\w+Section', block.group(1), re.M))
+            # Not line-anchored: a formatter collapsing the map onto one
+            # line must not fail this test for a cosmetic reason.
+            wired.update(quoted or bare for quoted, bare in re.findall(r'(?:^|[{,])\s*(?:"([^"\n]+)"|([\w-]+))\s*:\s*\w+Section', block.group(1)))
         self.assertEqual(set(), set(keys) - wired, "section keys with no component wired in their page")
 
     def test_every_recipe_button_names_a_real_recipe(self):
@@ -180,6 +192,49 @@ class HubWebCoverageTests(unittest.TestCase):
             referenced.update(re.findall(r'recipe="([^"]+)"', text))
         self.assertTrue(referenced, "no RecipeButton call sites found")
         self.assertEqual(set(), referenced - shipped, "RecipeButton names a recipe that does not exist")
+
+    def test_recipe_buttons_do_not_use_parameterized_recipes(self):
+        # `just_run` spawns `just <name>` with no arguments, so a recipe with
+        # parameters runs its *defaults*, which need not match the button.
+        # `switch-kernel flavor="fedora"` shipped under a "Switch kernel"
+        # button and staged a switch off the CachyOS default; the name check
+        # above cannot see it, because the name is real. Parameterized
+        # recipes belong in a CommandLine, where the argument is visible.
+        signatures = {}
+        for path in (ROOT / "build_files" / "just").rglob("*.just"):
+            for match in re.finditer(
+                r"^([a-z][a-z0-9-]*)((?:\s+[^:\n]*)?):(?!=)", path.read_text(encoding="utf-8"), re.M
+            ):
+                signatures[match.group(1)] = match.group(2).strip()
+        self.assertGreater(len(signatures), 50, "no just recipes parsed — did build_files/just move?")
+        referenced = set()
+        for text in _ui_sources().values():
+            referenced.update(re.findall(r'recipe="([^"]+)"', text))
+        offenders = {
+            name: signatures[name]
+            for name in referenced
+            if signatures.get(name) and name not in PARAMETERIZED_RECIPE_BUTTONS
+        }
+        self.assertEqual({}, offenders, "RecipeButton runs a recipe whose defaults it cannot show")
+
+    def test_parameterized_button_allowlist_is_not_stale(self):
+        referenced = set()
+        for text in _ui_sources().values():
+            referenced.update(re.findall(r'recipe="([^"]+)"', text))
+        self.assertEqual(set(), set(PARAMETERIZED_RECIPE_BUTTONS) - referenced)
+
+    def test_open_feedback_issue_encodes_caller_input(self):
+        # Both halves are caller-supplied. Unencoded, a title containing `&`
+        # or `#` would rewrite the query string, and the issue URL is opened
+        # in the user's browser, so the target must stay a fixed literal.
+        body = re.search(r"fn open_feedback_issue\(.*?\n\}", MAIN_RS, re.S)
+        self.assertIsNotNone(body, "open_feedback_issue not found")
+        text = body.group(0)
+        self.assertIn("https://github.com/kyth-os/kyth/issues/new", text)
+        self.assertIn("percent_encode(&title)", text)
+        self.assertIn("percent_encode(&body)", text)
+        # No raw interpolation of either argument into the URL.
+        self.assertNotRegex(text, r"\{title\}|\{body\}")
 
     def test_no_section_still_advertises_itself_as_a_preview(self):
         # The retired SectionPreviewCard told the user a section "exists

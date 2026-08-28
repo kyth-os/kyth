@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { fetchKernelFlavor } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { CommandLine } from "./SectionActions";
 
 const FLAVOR_LABEL: Record<string, string> = {
   fedora: "Fedora (default)",
@@ -14,7 +14,6 @@ const FLAVOR_LABEL: Record<string, string> = {
 export function KernelSection({ section }: { section: HubSection }) {
   const [flavor, setFlavor] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
 
   useEffect(() => {
     let cancelled = false;
@@ -45,13 +44,13 @@ export function KernelSection({ section }: { section: HubSection }) {
       <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
         <p className="card-copy" style={{ fontSize: 12, margin: "0 0 12px" }}>
           The CachyOS kernel is the gaming default; Fedora's is the conservative fallback. Switching stages a new
-          deployment and takes effect on reboot.
+          deployment and takes effect on reboot, so it runs from a terminal where you can read what it stages and
+          answer the sudo prompt — the flavour is part of the command, and a bare <code>switch-kernel</code> would
+          silently mean Fedora.
         </p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <RecipeButton recipe="switch-kernel" label="Switch kernel" busy={busy} run={run} />
-          <RecipeButton recipe="kargs-apply" label="Apply kernel arguments" busy={busy} run={run} />
-        </div>
-        <ActionStatus status={status} />
+        <CommandLine label="Switch to the CachyOS kernel" command="ujust switch-kernel cachy" />
+        <CommandLine label="Switch to the Fedora kernel" command="ujust switch-kernel fedora" />
+        <CommandLine label="Kernel arguments (status, or balanced/performance/gaming)" command="ujust kargs-apply status" />
       </div>
     </LiveSectionCard>
   );

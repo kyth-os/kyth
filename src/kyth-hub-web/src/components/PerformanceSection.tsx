@@ -46,7 +46,7 @@ export function PerformanceSection({ section }: { section: HubSection }) {
           Power profile
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-          <RecipeButton recipe="performance-mode" label="Performance" busy={busy} run={run} />
+          <RecipeButton recipe="gaming-mode" label="Performance" busy={busy} run={run} />
           <RecipeButton recipe="balanced-mode" label="Balanced" busy={busy} run={run} />
           <RecipeButton recipe="system-audit" label="Run full audit" busy={busy} run={run} />
         </div>

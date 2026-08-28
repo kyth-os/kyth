@@ -156,9 +156,6 @@ export function RepairSection({ section }: { section: HubSection }) {
           />
           <RecipeButton recipe="update-health" label="Update health report" busy={busy} run={run} />
           <RecipeButton recipe="resume-check" label="Check suspend/resume" busy={busy} run={run} />
-          {recovery?.quarantined_digest && (
-            <RecipeButton recipe="retry-quarantined-update" label="Retry quarantined update" busy={busy} run={run} />
-          )}
           <ActionButton
             label={busy === "recheck" ? "Re-reading…" : "Re-check"}
             disabled={busy !== null}
@@ -176,7 +173,7 @@ export function RepairSection({ section }: { section: HubSection }) {
         </div>
         <CommandLine label="Rollback from a terminal" command={rollbackCmd} />
         {recovery?.clear_quarantine_cmd && (
-          <CommandLine label="Clear the quarantine" command={recovery.clear_quarantine_cmd} />
+          <CommandLine label="Retry the quarantined update (clears the quarantine)" command={recovery.clear_quarantine_cmd} />
         )}
         <ActionStatus status={status} />
       </div>

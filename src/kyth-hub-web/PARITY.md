@@ -20,7 +20,7 @@
 - **Cheap reads on mount, expensive reads on a button.** `mokutil` (~seconds), `fwupd` (20s timeout), `collect_availability` (15s deadline), `ipp_discover`/`smb_browse` (network) and the live driver scan all sit behind an explicit button so switching tabs never stalls.
 - **Where a cached and a live read both exist, mount uses the cache and a Refresh/Rescan button escalates to live.** The live result wins once it exists (Controllers, Move Files, the three network sections, Hardware).
 - **`*_command` helpers return argv and are rendered as copyable text, not spawned.** A generic "run this argv" bridge command would be a new privilege surface. Where a ujust recipe covers the same ground, the section pairs the text with a `RecipeButton` — that path goes through `just_run`, which validates the recipe name and lets the recipe do its own privilege prompt.
-- **`tests/test_kyth_hub_web_actions.py` is the gate.** It fails the build if any `liveData.ts` export is orphaned, if any `generate_handler!` command lacks a wrapper without a documented exemption, if a section key has no component, or if a `RecipeButton` names a recipe that does not exist in `build_files/just/`.
+- **`tests/test_kyth_hub_web_actions.py` is the gate.** It fails the build if any `liveData.ts` export is orphaned, if any `generate_handler!` command lacks a wrapper without a documented exemption, if a section key has no component, or if a `RecipeButton` names a recipe that does not exist in `build_files/just/` — or names one that takes parameters. `just_run` spawns `just <name>` with no arguments, so a parameterized recipe runs its defaults, which need not be what the button says: `switch-kernel flavor="fedora"` under a "Switch kernel" button staged a switch *off* the CachyOS default. Those belong in a `CommandLine`, where the argument is visible.
 
 ## What is still not 100%
 
@@ -44,4 +44,5 @@ Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`,
 1. **Gaming sub-tabs** — migration checklist, ProtonDB batch lookups, anti-cheat table (this file's #2).
 2. **Software catalog** — `appstream` search and AppImages; an install path with progress rather than a copyable command (#3).
 3. **`kyth_shared` → `kyth-shared-rs`** — the write/collector paths `MIGRATION.md` reserves (#4).
-4. **Retire the Qt Hub from the image** — `src/kyth-welcome` is no longer the default launcher target; removing it from the `Dockerfile` is a separate change, and `src/kyth_shared` stays regardless for `kyth-probe`/`kyth-guardian`.
+4. **Preset dry runs** — `apply_plasma_preset` and `apply_pipewire_quantum` both take a `dry_run` flag the Hub never sets: every button hard-applies. The display presets are the risk (an HDR preset on an SDR panel is a black screen with no in-Hub way back), so the section copy names the TTY recovery for now; a preview-then-confirm pass would be better.
+5. **Retire the Qt Hub from the image** — `src/kyth-welcome` is no longer the default launcher target; removing it from the `Dockerfile` is a separate change, and `src/kyth_shared` stays regardless for `kyth-probe`/`kyth-guardian`.
