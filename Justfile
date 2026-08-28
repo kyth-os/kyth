@@ -34,12 +34,23 @@ check-dockerfile check_base_image=default_base_image:
         --build-arg BASE_IMAGE={{ check_base_image }} \
         .
 
-# Run Python unit tests.
+# Run Python unit tests (deprioritized + memory-capped on a live desktop).
 [group('Quality')]
-test:
+test *args:
+    ./build_files/scripts/run-tests.sh {{ args }}
+
+# Run the heavy Hub construction smoke explicitly, inside a memory cap.
+[group('Quality')]
+test-hub-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
-    python3 -m pytest -q
+    gui_python=python3
+    [[ -x .venv-gui/bin/python ]] && gui_python=.venv-gui/bin/python
+    PYTHONPATH=build_files/kyth-welcome:build_files/kyth_shared \
+    QT_QPA_PLATFORM=offscreen KYTH_FORCE_HEAVY_GUI_SMOKE=1 \
+    systemd-run --user --scope --collect --quiet \
+        -p CPUWeight=20 -p IOWeight=10 -p MemoryHigh=25% -p MemoryMax=40% \
+        -- "${gui_python}" -m unittest tests.test_kyth_welcome_hub_smoke
 
 # Verify codecs/drivers are baked (Nobara-style one-click, no post-install dnf)
 [group('Quality')]

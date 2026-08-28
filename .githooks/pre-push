@@ -63,6 +63,9 @@ if ! "${gui_python}" -c "import PySide6" >/dev/null 2>&1; then
 	echo "[pre-push] Fix: python3 -m venv .venv-gui && .venv-gui/bin/pip install PySide6==6.11.1" >&2
 	exit 1
 fi
+# The module skips itself on a live desktop unless forced — forcing is safe
+# here precisely because "${scope[@]}" caps this run's memory.
 PYTHONPATH="build_files/kyth-welcome:build_files/kyth_shared" QT_QPA_PLATFORM=offscreen \
+	KYTH_FORCE_HEAVY_GUI_SMOKE=1 \
 	"${scope[@]}" "${gui_python}" -W error -m unittest tests.test_kyth_welcome_hub_smoke
 echo "[pre-push] Hub smoke passed"
