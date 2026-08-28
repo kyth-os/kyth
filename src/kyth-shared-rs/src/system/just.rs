@@ -35,6 +35,13 @@ fn parse_just_list(stdout: &str) -> Vec<JustRecipe> {
         if line.starts_with("Available recipes:") {
             continue;
         }
+        // Every kyth recipe carries `[group('KythOS')]`, so real `just --list`
+        // output puts a `[KythOS]` heading line above them. It parses as a
+        // name with no parameters, which used to give it a button that spawns
+        // `just [KythOS]` and fails. Headings are never runnable.
+        if line.starts_with('[') && line.ends_with(']') {
+            continue;
+        }
         // `just --list` indents with 4 spaces; after trim we have
         // `name [params]  # comment`. Split at first whitespace for the name
         // (like `ln.split(None,1)` in Python), then at the first `#` to keep
@@ -90,9 +97,13 @@ pub fn just_run(recipe: &str) -> bool {
     // constraint `just` itself enforces, but we gate here to avoid injection
     // via Tauri's string arg (e.g. `name="foo; rm -rf /"`). Qt's `Worker`
     // passed `["just", name]` as argv too, so this matches its safety.
-    if recipe.is_empty()
-        || recipe.contains(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '`' | '$' | '(' | ')' | '<' | '>' | '\\' | '"' | '\'' ))
-    {
+    // Allowlist rather than a metacharacter blocklist: a just recipe name is
+    // alphanumerics, `-` and `_` (guardian also passes dotted ids like
+    // `audio.restart`, which simply do not resolve). The blocklist this
+    // replaces let `[KythOS]` through, because brackets are not shell
+    // metacharacters — harmless to spawn, but it meant nothing upstream had
+    // to be careful about what it handed us.
+    if recipe.is_empty() || !recipe.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
         return false;
     }
     match Command::new("just").arg(recipe).spawn() {
@@ -146,5 +157,29 @@ mod tests {
         assert!(!just_run("foo && bar"));
         assert!(!just_run(""));
         assert!(!just_run("foo bar"));
+        assert!(!just_run("[KythOS]"));
+    }
+
+    /// Captured from `just --justfile build_files/just/kyth.just --list`
+    /// (just 1.58) — the heading is what `[group('KythOS')]` produces, and
+    /// the two parameter forms are the ones the shipped recipes use.
+    #[test]
+    fn parse_real_list_output() {
+        let out = concat!(
+            "Available recipes:\n",
+            "    [KythOS]\n",
+            "    ai-dev-enter\n",
+            "    gaming-audit mode=\"\"                   # Perf audit\n",
+            "    retry-quarantined-update digest        # Usage: ujust retry-quarantined-update sha256:...\n",
+            "    switch-kernel flavor=\"fedora\"          # ujust switch-kernel cachy\n",
+        );
+        let v = parse_just_list(out);
+        let names: Vec<&str> = v.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["ai-dev-enter", "gaming-audit", "retry-quarantined-update", "switch-kernel"]);
+        assert_eq!(v[0].params, "");
+        assert_eq!(v[1].params, "mode=\"\"");
+        assert_eq!(v[2].params, "digest");
+        assert_eq!(v[3].params, "flavor=\"fedora\"");
+        assert_eq!(v[3].comment, "ujust switch-kernel cachy");
     }
 }
