@@ -76,5 +76,5 @@ if [[ "${KYTH_ALLOW_HEAVY_PRE_PUSH:-0}" == "1" ]]; then
 		"${scope[@]}" "${gui_python}" -W error -m unittest tests.test_kyth_welcome_hub_smoke
 	echo "[pre-push] Hub smoke passed"
 else
-	echo "[pre-push] Hub smoke SKIPPED (fast mode) — CI gui-smoke job gates it. Force with KYTH_ALLOW_HEAVY_PRE_PUSH=1" >&2
+	echo "[pre-push] Hub smoke SKIPPED (fast mode) — CI gui-smoke job gates it. Force with KYTH_ALLOW_HEAVY_PRE_PUSH=1"
 fi

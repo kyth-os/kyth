@@ -83,8 +83,8 @@ done
 if [[ ${validate_force_full} -eq 0 && -z "${KYTH_FORCE_FULL_VALIDATION:-}" && -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]]; then
     if [[ -n "${WAYLAND_DISPLAY:-}" || -n "${DISPLAY:-}" || "${XDG_CURRENT_DESKTOP:-}" == *KDE* || "${XDG_SESSION_TYPE:-}" == "wayland" ]]; then
         if [[ ${validate_fast} -eq 0 ]]; then
-            echo "[validate] Live desktop detected — defaulting to --fast (skipping heavy unittest discover)." >&2
-            echo "[validate] Full suite is CI-gated; force locally with: KYTH_FORCE_FULL_VALIDATION=1 ./build_files/scripts/validate.sh --full" >&2
+            echo "[validate] Live desktop detected — defaulting to --fast (skipping heavy unittest discover)."
+            echo "[validate] Full suite is CI-gated; force locally with: KYTH_FORCE_FULL_VALIDATION=1 ./build_files/scripts/validate.sh --full"
             validate_fast=1
         fi
     fi
@@ -113,7 +113,7 @@ if [[ -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]]; then
 	export KYTH_SKIP_HEAVY_GUI_SMOKE=1
 fi
 if [[ ${validate_fast} -eq 1 ]]; then
-	echo "==> Python unit tests SKIPPED (--fast / live-desktop guard) — CI validation.yml gates the full suite" >&2
+	echo "==> Python unit tests SKIPPED (--fast / live-desktop guard) — CI validation.yml gates the full suite"
 else
 	# Guard with timeout so CI doesn't hang on slow network/hardware probes; --foreground
 	# lets the suite read from TTY and avoids timeout's process-group SIGTERM
