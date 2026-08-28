@@ -578,3 +578,9 @@ export async function fetchIsLiveSession(): Promise<boolean | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<boolean>("is_live_session"); } catch { return null; }
 }
+
+// Firmware — fwupd counts (Hardware)
+export async function fetchFirmwareUpdatesCount(): Promise<number | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<number>("firmware_updates_count"); } catch { return null; }
+}

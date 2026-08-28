@@ -14,6 +14,7 @@ pub mod hardware_view;
 pub mod deployment_history;
 pub mod recovery_status;
 pub mod bootc;
+pub mod firmware;
 pub mod bootc_query;
 pub mod network_identity;
 pub mod process;
