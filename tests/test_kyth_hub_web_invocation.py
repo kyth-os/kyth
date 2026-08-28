@@ -88,6 +88,37 @@ class JustInvocationTests(unittest.TestCase):
         self.assertIn("in_terminal", LIVE_DATA)
         self.assertIn("launch.in_terminal", SECTION_ACTIONS)
 
+    def test_bootc_commands_do_not_claim_a_finished_change(self):
+        # `just_launch` returns when the terminal window opens: the recipe
+        # has not run and its sudo prompt is unanswered. These three used to
+        # return "rolled back — reboot to apply" and "switch to X staged —
+        # reboot to activate" at that moment, which is the same "reports
+        # success for something that did nothing" bug in prose form.
+        for command in ("bootc_upgrade", "bootc_rollback", "bootc_switch_branch"):
+            body = re.search(rf"fn {command}\([^)]*\)[^{{]*{{(.*?)\n}}", MAIN_RS, re.S)
+            self.assertIsNotNone(body, command)
+            code = re.sub(r"//.*", "", body.group(1))
+            self.assertIn("describe_launch", code, command)
+            for claim in ("rolled back", "staged", "completed", "applied"):
+                self.assertNotIn(claim, code, f"{command} claims {claim!r} for a spawned window")
+
+    def test_launch_wording_describes_the_window_not_the_result(self):
+        # describe_launch is the one place that wording lives, so it has to
+        # talk about the terminal and the password prompt, and refuse when
+        # there is no terminal rather than reporting an invisible success.
+        body = re.search(r"fn describe_launch\(.*?\n}", MAIN_RS, re.S)
+        self.assertIsNotNone(body)
+        self.assertIn("terminal window", body.group(0))
+        self.assertIn("password prompt", body.group(0))
+        self.assertIn("no terminal emulator is installed", body.group(0))
+
+    def test_parser_drops_lines_that_are_not_recipes(self):
+        # Real `ujust --list` output carries a `[KythOS]` group heading and,
+        # for upstream's long distrobox signatures, doc comments on their own
+        # line. Both parse as recipes unless dropped.
+        self.assertIn("line.starts_with('[') && line.ends_with(']')", JUST_RS)
+        self.assertIn("line.starts_with('#')", JUST_RS)
+
     def test_recipes_use_sudo_so_a_terminal_is_required(self):
         # The premise of the terminal wrapper. If recipes ever move to
         # pkexec, the graphical agent can prompt and this can be revisited.

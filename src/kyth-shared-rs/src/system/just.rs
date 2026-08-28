@@ -87,6 +87,14 @@ fn parse_just_list(stdout: &str) -> Vec<JustRecipe> {
         if line.starts_with('[') && line.ends_with(']') {
             continue;
         }
+        // When a recipe's signature is long, `just --list` prints its doc
+        // comment on the line above instead of beside it. That line is not a
+        // recipe — parsed as one it becomes a row named `#`, and ublue's
+        // `distrobox-assemble`/`distrobox-new` produce two of them, so the
+        // listing also got duplicate React keys.
+        if line.starts_with('#') {
+            continue;
+        }
         // `just --list` indents with 4 spaces; after trim we have
         // `name [params]  # comment`. Split at first whitespace for the name
         // (like `ln.split(None,1)` in Python), then at the first `#` to keep
@@ -318,6 +326,23 @@ mod tests {
             launch_argv(None, "switch-channel", &["stable"]),
             vec!["just", "switch-channel", "stable"],
         );
+    }
+
+    /// Captured from a `just --list` (just 1.58) over ublue's justfile with
+    /// kyth's import appended — i.e. what `ujust --list` prints on the image,
+    /// not kyth's recipes alone. Upstream's long distrobox signatures push
+    /// their doc comments onto their own line.
+    #[test]
+    fn parse_drops_doc_comments_printed_on_their_own_line() {
+        let out = concat!(
+            "Available recipes:\n",
+            "    device-info                            # Gather device info to a pastebin\n",
+            "    # Create a new custom distrobox\n",
+            "    distrobox-new IMAGE=\"prompt\" NAME=\"prompt\" HOMEDIR=\"\" # [alias: distrobox]\n",
+        );
+        let v = parse_just_list(out);
+        let names: Vec<&str> = v.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["device-info", "distrobox-new"]);
     }
 
     /// Captured from `just --justfile build_files/just/kyth.just --list`
