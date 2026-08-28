@@ -7,9 +7,10 @@ opens Home instead of the requested page. That is how `--page "App Store"`
 (shipped in 23-kyth-helper-ctx-installs.sh) and 19 krunner entries regressed
 when deepLink.ts's route table only listed the 5 rail destinations.
 
-deepLink.ts derives its table from hubSections.ts, so checking the data
-source covers every emitted key is enough — and it stays stable across
-refactors of the mapping code itself, which parsing the TS logic would not.
+deepLink.ts derives its table from data/destinations.ts, which in turn
+lists the section arrays from hubSections.ts, so checking the data source
+covers every emitted key is enough — and it stays stable across refactors
+of the mapping code itself, which parsing the TS logic would not.
 """
 from __future__ import annotations
 
@@ -47,6 +48,7 @@ from kyth_welcome.krunner_desktop import build_entries  # noqa: E402
 HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
 SECTIONS_TS = (HUB_WEB / "data" / "hubSections.ts").read_text(encoding="utf-8")
 DEEP_LINK_TS = (HUB_WEB / "deepLink.ts").read_text(encoding="utf-8")
+DESTINATIONS_TS = (HUB_WEB / "data" / "destinations.ts").read_text(encoding="utf-8")
 HUB_PAGE_TSX = (HUB_WEB / "pages" / "HubPage.tsx").read_text(encoding="utf-8")
 CTX_INSTALLS_SH = (
     ROOT / "build_files" / "scripts" / "branding" / "23-kyth-helper-ctx-installs.sh"
@@ -66,6 +68,7 @@ def _code_only(source: str) -> str:
 
 
 DEEP_LINK_CODE = _code_only(DEEP_LINK_TS)
+DESTINATIONS_CODE = _code_only(DESTINATIONS_TS)
 HUB_PAGE_CODE = _code_only(HUB_PAGE_TSX)
 
 
@@ -74,8 +77,14 @@ def _section_keys() -> set[str]:
 
 
 def _destination_keys() -> set[str]:
-    """Rail destinations from deepLink.ts's DESTINATIONS table literal."""
-    keys = set(re.findall(r'\["([^"]+)",\s*"(?:/[a-z-]*)"', DEEP_LINK_CODE))
+    """Rail destinations from the shared DESTINATIONS table literal.
+
+    The table moved to data/destinations.ts when the search box needed the
+    same "what pages exist and where" list deep links use; Welcome is still
+    seeded by deepLink.ts's own route table, since it is a route with no
+    sections rather than a destination.
+    """
+    keys = set(re.findall(r'key:\s*"([^"]+)",\s*route:\s*"/[a-z-]*"', DESTINATIONS_CODE))
     if re.search(r'\{\s*Welcome:\s*"/"', DEEP_LINK_CODE):
         keys.add("Welcome")
     return keys
@@ -111,14 +120,16 @@ class HubWebDeepLinkTests(unittest.TestCase):
 
     def test_sections_are_derived_not_hardcoded_in_the_route_table(self):
         # Guards the regression's actual cause: if someone re-lists sections
-        # by hand in deepLink.ts, adding a section to hubSections.ts stops
-        # being enough and the next key silently falls back to Home.
+        # by hand, adding a section to hubSections.ts stops being enough and
+        # the next key silently falls back to Home.
         for array in ("PLAY_SECTIONS", "APPS_SECTIONS", "THIS_PC_SECTIONS", "MOVE_IN_SECTIONS"):
-            self.assertIn(array, DEEP_LINK_CODE)
+            self.assertIn(array, DESTINATIONS_CODE)
+        self.assertIn("DESTINATIONS", DEEP_LINK_CODE)
         for key in sorted(_section_keys()):
-            self.assertNotIn(
-                f'"{key}"', DEEP_LINK_CODE, f"{key} hardcoded rather than derived"
-            )
+            for name, code in (("deepLink.ts", DEEP_LINK_CODE), ("destinations.ts", DESTINATIONS_CODE)):
+                self.assertNotIn(
+                    f'"{key}"', code, f"{key} hardcoded in {name} rather than derived"
+                )
 
     def test_section_deep_links_and_hub_page_agree_on_the_query_param(self):
         # Two halves of one contract: deepLink.ts writes ?section=, HubPage

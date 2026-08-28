@@ -1,13 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { inTauriShell } from "./services/tauriEnv";
-import {
-  APPS_SECTIONS,
-  MOVE_IN_SECTIONS,
-  PLAY_SECTIONS,
-  THIS_PC_SECTIONS,
-  type HubSection,
-} from "./data/hubSections";
+import { DESTINATIONS } from "./data/destinations";
 
 // Mirrors web_shell.py's _ROUTE_FOR_PAGE table (the QWebEngineView-shell
 // prototype this replaces) — same page-key contract the current Qt Hub's
@@ -20,16 +14,9 @@ import {
 // and 23-kyth-helper-ctx-installs.sh ships `--page "App Store"`, so a key
 // this table misses doesn't error — it silently lands on Home. Deriving
 // keeps that from happening the next time a section is added.
-const DESTINATIONS: Array<[key: string, route: string, sections: HubSection[]]> = [
-  ["Play", "/play", PLAY_SECTIONS],
-  ["Apps", "/apps", APPS_SECTIONS],
-  ["This PC", "/this-pc", THIS_PC_SECTIONS],
-  ["Move In", "/move-in", MOVE_IN_SECTIONS],
-];
-
 function buildRouteTable(): Record<string, string> {
   const table: Record<string, string> = { Welcome: "/" };
-  for (const [dest, route, sections] of DESTINATIONS) {
+  for (const { key: dest, route, sections } of DESTINATIONS) {
     table[dest] = route;
     // HubPage reads ?section= (see its useSearchParams call) — a section is
     // a tab within its destination, not a route of its own.
@@ -47,7 +34,7 @@ const ROUTE_FOR_PAGE = buildRouteTable();
 // to keep the contract explicit rather than accidental.
 const WELCOME_ALIASES = new Set(["home", "hub", "kyth hub", "system hub", "pulse", "kyth pulse"]);
 
-function routeForPage(page: string): string {
+export function routeForPage(page: string): string {
   const text = page.trim();
   if (!text) return "/";
   if (text in ROUTE_FOR_PAGE) return ROUTE_FOR_PAGE[text];
