@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchNtfsDevices, fetchNtfsDrives, type NtfsDevice, type NtfsDrive } from "../services/liveData";
+import { fetchNtfsDevices, fetchNtfsDrives, runPrivilegedAction, type NtfsDevice, type NtfsDrive } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -32,6 +32,8 @@ function ntfsPartitions(devices: NtfsDevice[]): NtfsDrive[] {
 export function MoveFilesSection({ section }: { section: HubSection }) {
   const [drives, setDrives] = useState<NtfsDrive[] | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [unlockDevice, setUnlockDevice] = useState<NtfsDrive | null>(null);
+  const [unlockKey, setUnlockKey] = useState("");
   const { status, busy, run } = useSectionAction();
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +63,7 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{drv.dev}</span>
                 <span className="card-copy" style={{ fontSize: 12 }}>{drv.label || drv.size || "unlabelled"}</span>
                 {drv.mount && <span className="card-copy" style={{ fontSize: 12 }}>mounted at {drv.mount}</span>}
+                {drv.is_bitlocker && <ActionButton label="Unlock…" disabled={busy !== null} onClick={() => { setUnlockDevice(drv); setUnlockKey(""); }} />}
               </div>
             ))}
           </div>
@@ -72,6 +75,9 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
       )}
 
       <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
+        <p className="card-copy" style={{ fontSize: 12, margin: "0 0 12px" }}>
+          Migration helpers inspect the Windows volume first; copying stays in a visible terminal so paths and permissions are clear.
+        </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <ActionButton
             label={busy === "rescan" ? "Rescanning…" : "Rescan drives"}
@@ -86,9 +92,22 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
               })
             }
           />
-          <RecipeButton recipe="windows-verify" label="Check the Windows install" busy={busy} run={run} />
+          <ActionButton label={busy === "windows-verify" ? "Checking…" : "Check the Windows install"} disabled={busy !== null} onClick={() => run("windows-verify", "Checking Windows install…", () => runPrivilegedAction("windows_verify"))} />
           <RecipeButton recipe="fix-dualboot-clock" label="Fix dual-boot clock" busy={busy} run={run} />
+          <RecipeButton recipe="setup-boot-windows-steam" label="Prepare Windows + Steam" busy={busy} run={run} />
+          <RecipeButton recipe="reclaim-windows" label="Reclaim Windows space" busy={busy} run={run} />
+          <RecipeButton recipe="install-ludusavi" label="Install save migration" busy={busy} run={run} />
+          <RecipeButton recipe="install-ms-fonts" label="Install Microsoft fonts" busy={busy} run={run} />
         </div>
+        {unlockDevice && <div style={{ marginTop: 14, padding: 12, border: "1px solid var(--hairline)", borderRadius: 10 }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>Unlock {unlockDevice.dev}</p>
+          <p className="card-copy" style={{ fontSize: 12, marginTop: 5 }}>The key is sent only to the local privileged service and is not logged.</p>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <input type="password" value={unlockKey} onChange={(event) => setUnlockKey(event.target.value)} placeholder="BitLocker password or recovery key" style={{ flex: 1, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)" }} />
+            <ActionButton label="Unlock" disabled={busy !== null || unlockKey.length < 8} onClick={() => run("unlock", "Unlocking BitLocker volume…", async () => { const result = await runPrivilegedAction("bitlocker_unlock", { device: unlockDevice.dev, key: unlockKey }); setUnlockDevice(null); setUnlockKey(""); return result; })} />
+            <ActionButton label="Cancel" disabled={busy !== null} onClick={() => setUnlockDevice(null)} />
+          </div>
+        </div>}
         <ActionStatus status={status} />
       </div>
     </LiveSectionCard>

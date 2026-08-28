@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchKernelFlavor } from "../services/liveData";
+import { fetchKernelFlavor, runPrivilegedAction } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { CommandLine } from "./SectionActions";
+import { ActionButton, ActionStatus, CommandLine, useSectionAction } from "./SectionActions";
 
 const FLAVOR_LABEL: Record<string, string> = {
   fedora: "Fedora (default)",
@@ -14,6 +14,7 @@ const FLAVOR_LABEL: Record<string, string> = {
 export function KernelSection({ section }: { section: HubSection }) {
   const [flavor, setFlavor] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const { status, busy, run } = useSectionAction();
 
   useEffect(() => {
     let cancelled = false;
@@ -50,6 +51,10 @@ export function KernelSection({ section }: { section: HubSection }) {
         </p>
         <CommandLine label="Switch to the CachyOS kernel" command="ujust switch-kernel cachy" />
         <CommandLine label="Switch to the Fedora kernel" command="ujust switch-kernel fedora" />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+          {(["cachy", "fedora"] as const).map((target) => <ActionButton key={target} label={busy === `kernel-${target}` ? "Staging…" : `Switch to ${FLAVOR_LABEL[target]}`} disabled={busy !== null || flavor === target} onClick={() => run(`kernel-${target}`, `Staging ${target} kernel…`, () => runPrivilegedAction("kernel_switch", { flavor: target }))} />)}
+        </div>
+        <ActionStatus status={status} />
         <CommandLine label="Kernel arguments (status, or balanced/performance/gaming)" command="ujust kargs-apply status" />
       </div>
     </LiveSectionCard>

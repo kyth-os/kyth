@@ -81,6 +81,32 @@ export async function fetchGuardianSnapshot(): Promise<GuardianSnapshot | null> 
     return null;
   }
 }
+export async function runGuardianCheck(investigate = false): Promise<string> {
+  return await invoke<string>("guardian_check", { investigate });
+}
+export async function waitGuardianCheck(job: string): Promise<string> {
+  for (let i = 0; i < 180; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    const state = await invoke<InstallStatus>("guardian_check_status", { job });
+    if (state.state === "complete") return state.detail;
+    if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
+  }
+  throw new Error("Guardian is still running; refresh the page in a moment.");
+}
+export async function runGuardianControl(action: string): Promise<string> {
+  const job = await invoke<string>("guardian_control", { action });
+  return await waitGuardianCheck(job);
+}
+export async function runPrivilegedAction(operation: string, payload: Record<string, string> = {}): Promise<string> {
+  const job = await invoke<string>("privileged_action", { operation, payload });
+  for (let i = 0; i < 1800; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    const state = await invoke<InstallStatus>("privileged_action_status", { job });
+    if (state.state === "complete") return state.detail;
+    if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
+  }
+  throw new Error("Privileged operation is still running; check the system status shortly.");
+}
 
 // Mirrors kyth_shared.system.bootc_policy.branch_display_name() — small
 // enough to duplicate as a presentation-only mapping here rather than
@@ -793,6 +819,29 @@ export async function searchAppStream(query: string): Promise<AppStreamApp[] | n
 export async function fetchAppImages(): Promise<AppImageEntry[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<AppImageEntry[]>("appimage_list"); } catch { return null; }
+}
+
+export interface InstalledFlatpak { id: string; name: string; version: string; branch: string; arch: string; scope: "user" | "system"; }
+export async function fetchInstalledFlatpaks(): Promise<InstalledFlatpak[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<InstalledFlatpak[]>("installed_flatpaks"); } catch { return null; }
+}
+export async function makeAppImageExecutable(path: string): Promise<string> {
+  return await invoke<string>("make_appimage_executable", { path });
+}
+export async function importAppImage(path: string): Promise<string> {
+  return await invoke<string>("import_appimage", { path });
+}
+export async function uninstallFlatpak(id: string): Promise<string> {
+  const job = await invoke<string>("uninstall_flatpak", { appId: id });
+  for (let i = 0; i < 120; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    const state = await fetchInstallStatus(job);
+    if (!state || state.state === "running") continue;
+    if (state.state === "complete") return state.detail;
+    throw new Error(state.detail);
+  }
+  throw new Error("Uninstall is still running; refresh Flatpak in a moment.");
 }
 export async function launchAppImage(path: string): Promise<string> { return await invoke<string>("launch_appimage", { path }); }
 export async function installFlatpak(appId: string): Promise<string> { return await invoke<string>("install_flatpak", { appId }); }

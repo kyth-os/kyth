@@ -3,6 +3,9 @@ import type { HubSection } from "../data/hubSections";
 import {
   fetchGuardianSnapshot,
   invokeGuardianExecute,
+  runGuardianCheck,
+  waitGuardianCheck,
+  runGuardianControl,
   relativeTime,
   type GuardianSnapshot,
 } from "../services/liveData";
@@ -48,6 +51,14 @@ export function GuardianSection({ section }: { section: HubSection }) {
       cancelled = true;
     };
   }, []);
+
+  async function refreshGuardian(investigate: boolean): Promise<string> {
+    const job = await runGuardianCheck(investigate);
+    await waitGuardianCheck(job);
+    const next = await fetchGuardianSnapshot();
+    if (next) setSnapshot(next);
+    return investigate ? "Guardian investigation finished." : "Guardian health check finished.";
+  }
 
   return (
     <LiveSectionCard section={section} live={snapshot !== null}>
@@ -132,6 +143,14 @@ export function GuardianSection({ section }: { section: HubSection }) {
               </div>
             </div>
           )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <ActionButton label={busy === "guardian-check" ? "Checking…" : "Run health check"} disabled={busy !== null} onClick={() => run("guardian-check", "Running Guardian health check…", () => refreshGuardian(false))} />
+            <ActionButton label={busy === "guardian-investigate" ? "Investigating…" : "Investigate"} disabled={busy !== null} onClick={() => run("guardian-investigate", "Running deeper Guardian investigation…", () => refreshGuardian(true))} />
+            <ActionButton label={busy === "guardian-enable" ? "Enabling…" : "Enable Guardian"} disabled={busy !== null} onClick={() => run("guardian-enable", "Enabling Guardian…", () => runGuardianControl("enable"))} />
+            <ActionButton label={busy === "guardian-disable" ? "Disabling…" : "Disable Guardian"} disabled={busy !== null} onClick={() => run("guardian-disable", "Disabling Guardian…", () => runGuardianControl("disable"))} />
+            <ActionButton label={busy === "guardian-autofix-on" ? "Enabling…" : "Enable safe auto-fix"} disabled={busy !== null} onClick={() => run("guardian-autofix-on", "Enabling safe automatic fixes…", () => runGuardianControl("autofix-on"))} />
+            <ActionButton label={busy === "guardian-autofix-off" ? "Disabling…" : "Disable auto-fix"} disabled={busy !== null} onClick={() => run("guardian-autofix-off", "Disabling automatic fixes…", () => runGuardianControl("autofix-off"))} />
+          </div>
         </div>
       ) : (
         <SectionFallbackNote loaded={loaded} />

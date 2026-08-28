@@ -37,6 +37,11 @@ install -m 0644 /ctx/kyth-guardian.path /usr/lib/systemd/user/kyth-guardian.path
 install -m 0755 /ctx/kyth-guardian /usr/bin/kyth-guardian
 install -Dm0644 /ctx/config/guardian-model.json /usr/share/kyth/guardian-model.json
 
+# Narrow root-owned Unix-socket boundary for future privileged Hub actions.
+install -m 0755 /ctx/kyth-privileged /usr/bin/kyth-privileged
+install -m 0644 /ctx/kyth-privileged.service /usr/lib/systemd/system/kyth-privileged.service
+systemctl enable kyth-privileged.service 2>/dev/null || true
+
 # tmpfs + persistent system cache dir
 mkdir -p /var/cache/kyth
 # Ensure unit names match WantedBy installs (user units ship as kyth-probe.*)

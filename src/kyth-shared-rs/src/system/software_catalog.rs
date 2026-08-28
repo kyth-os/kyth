@@ -100,6 +100,78 @@ pub struct AppImageEntry {
     pub executable: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledFlatpak {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub branch: String,
+    pub arch: String,
+    pub scope: String,
+}
+
+/// Return installed applications only.  This is deliberately read-only; the
+/// Hub uses it to make uninstall choices explicit instead of accepting an
+/// arbitrary application id from the webview.
+pub fn installed_flatpaks() -> Vec<InstalledFlatpak> {
+    let mut apps = Vec::new();
+    for (scope, scope_arg) in [("user", "--user"), ("system", "--system")] {
+        let Ok(output) = Command::new("flatpak")
+            .args(["list", scope_arg, "--app", "--columns=application,name,version,branch,arch"])
+            .output() else { continue; };
+        if !output.status.success() { continue; }
+        apps.extend(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\t').map(str::trim);
+            let id = fields.next()?.to_string();
+            if id.is_empty() || !id.contains('.') { return None; }
+            Some(InstalledFlatpak {
+                id,
+                name: fields.next().unwrap_or("").to_string(),
+                version: fields.next().unwrap_or("").to_string(),
+                branch: fields.next().unwrap_or("").to_string(),
+                arch: fields.next().unwrap_or("").to_string(),
+                scope: scope.to_string(),
+            })
+        }));
+    }
+    apps.sort_by_key(|app| app.name.to_lowercase());
+    apps
+}
+
+/// Make a discovered AppImage runnable.  Restrict the path to the three
+/// directories that appimages() scans so the webview cannot chmod an
+/// arbitrary user file.
+pub fn make_appimage_executable(path: &str) -> Result<String, String> {
+    let requested = PathBuf::from(path);
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/root"));
+    let allowed = [home.join("Applications"), home.join(".local/bin"), home.join("Downloads")];
+    let canonical = requested.canonicalize().map_err(|_| "AppImage does not exist".to_string())?;
+    if !canonical.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("appimage"))
+        || !allowed.iter().any(|dir| canonical.starts_with(dir))
+    {
+        return Err("AppImage must be inside Applications, .local/bin, or Downloads".to_string());
+    }
+    let metadata = std::fs::metadata(&canonical).map_err(|_| "Could not inspect AppImage".to_string())?;
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(permissions.mode() | 0o111);
+    std::fs::set_permissions(&canonical, permissions).map_err(|err| format!("Could not make AppImage executable: {err}"))?;
+    Ok(format!("{} is executable now.", canonical.display()))
+}
+
+pub fn import_appimage(path: &str) -> Result<String, String> {
+    let source = PathBuf::from(path).canonicalize().map_err(|_| "AppImage does not exist".to_string())?;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/root"));
+    let allowed = [home.join("Applications"), home.join(".local/bin"), home.join("Downloads")];
+    if !source.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("appimage")) || !allowed.iter().any(|dir| source.starts_with(dir)) { return Err("Choose an AppImage from Applications, .local/bin, or Downloads".to_string()); }
+    let target_dir = home.join("Applications");
+    std::fs::create_dir_all(&target_dir).map_err(|err| format!("Could not create Applications folder: {err}"))?;
+    let target = target_dir.join(source.file_name().ok_or_else(|| "AppImage has no filename".to_string())?);
+    if source != target { std::fs::copy(&source, &target).map_err(|err| format!("Could not import AppImage: {err}"))?; }
+    make_appimage_executable(target.to_string_lossy().as_ref())
+}
+
 pub fn appimages() -> Vec<AppImageEntry> {
     let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/root"));
     let dirs = [home.join("Applications"), home.join(".local/bin"), home.join("Downloads")];

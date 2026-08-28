@@ -7,9 +7,10 @@ import {
   fetchMokStatus,
   fetchSecurebootState,
   type MokStatus,
+  runPrivilegedAction,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
 // "Play > Compatibility" — Secure Boot / anti-cheat readiness plus the
 // Mesa version Proton actually runs against.
@@ -86,7 +87,7 @@ export function CompatibilitySection({ section }: { section: HubSection }) {
               })
             }
           />
-          <RecipeButton recipe="enroll-secureboot" label="Enroll KythOS key" busy={busy} run={run} />
+          <ActionButton label={busy === "enroll" ? "Enrolling…" : "Enroll KythOS key"} disabled={busy !== null} onClick={() => run("enroll", "Enrolling KythOS Secure Boot key…", () => runPrivilegedAction("secureboot_enroll"))} />
           <ActionButton
             label={busy === "mesa" ? "Testing…" : "Test Mesa overlay"}
             disabled={busy !== null}

@@ -15,6 +15,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
@@ -29,6 +31,10 @@ struct PendingPage(Mutex<Option<String>>);
 
 static APP_INSTALLS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
 fn app_installs() -> &'static Mutex<HashMap<String, (String, String)>> { APP_INSTALLS.get_or_init(|| Mutex::new(HashMap::new())) }
+static GUARDIAN_CHECKS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+fn guardian_checks() -> &'static Mutex<HashMap<String, (String, String)>> { GUARDIAN_CHECKS.get_or_init(|| Mutex::new(HashMap::new())) }
+static PRIVILEGED_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+fn privileged_jobs() -> &'static Mutex<HashMap<String, (String, String)>> { PRIVILEGED_JOBS.get_or_init(|| Mutex::new(HashMap::new())) }
 
 fn extract_page_arg<S: AsRef<str>>(argv: &[S]) -> Option<String> {
     argv.iter()
@@ -114,6 +120,58 @@ fn guardian_snapshot() -> GuardianSnapshotResponse {
         .collect();
 
     GuardianSnapshotResponse { pending_count: pending.len(), pending: pending_response, history: history_response }
+}
+
+/// Ask the existing Python Guardian service for a fresh check, then let the
+/// frontend re-read the disk-backed snapshot.  The Rust shell does not port
+/// the live probe sweep; Python remains the authority for that behavior.
+#[tauri::command]
+fn guardian_check(investigate: bool) -> Result<String, String> {
+    if !std::path::Path::new("/usr/bin/kyth-guardian").exists() { return Err("Guardian service is not installed".to_string()); }
+    let job = format!("guardian-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    guardian_checks().lock().unwrap().insert(job.clone(), ("running".into(), "Guardian check is running…".into()));
+    let job_for_thread = job.clone();
+    std::thread::spawn(move || {
+        let action = if investigate { "investigate" } else { "check" };
+        let result = std::process::Command::new("/usr/bin/kyth-guardian").args(["--json", action]).output();
+        let (state, detail) = match result {
+            Ok(output) if output.status.success() => ("complete", "Guardian check complete.".to_string()),
+            Ok(output) => { let detail = String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect(); ("failed", detail) }
+            Err(err) => ("failed", format!("Could not start Guardian: {err}")),
+        };
+        guardian_checks().lock().unwrap().insert(job_for_thread, (state.into(), detail));
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+fn guardian_check_status(job: String) -> InstallStatus {
+    let (state, detail) = guardian_checks().lock().unwrap().get(&job).cloned().unwrap_or(("unknown".into(), "Guardian job not found.".into()));
+    InstallStatus { id: job, state, detail }
+}
+
+#[tauri::command]
+fn guardian_control(action: String) -> Result<String, String> {
+    let args: &[&str] = match action.as_str() {
+        "enable" => &["enable"],
+        "disable" => &["disable"],
+        "autofix-on" => &["auto-fix", "on"],
+        "autofix-off" => &["auto-fix", "off"],
+        _ => return Err("Guardian control is not allowlisted".to_string()),
+    };
+    let job = format!("guardian-control-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    guardian_checks().lock().unwrap().insert(job.clone(), ("running".into(), format!("Running Guardian {action}…")));
+    let job_for_thread = job.clone();
+    std::thread::spawn(move || {
+        let result = std::process::Command::new("/usr/bin/kyth-guardian").args(args).output();
+        let (state, detail) = match result {
+            Ok(output) if output.status.success() => ("complete", String::from_utf8_lossy(&output.stdout).trim().to_string()),
+            Ok(output) => ("failed", String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect()),
+            Err(err) => ("failed", format!("Could not start Guardian: {err}")),
+        };
+        guardian_checks().lock().unwrap().insert(job_for_thread, (state.into(), if detail.is_empty() { "Guardian control complete.".into() } else { detail }));
+    });
+    Ok(job)
 }
 
 #[derive(Serialize)]
@@ -473,6 +531,105 @@ fn appimage_list() -> Vec<kyth_shared::system::software_catalog::AppImageEntry> 
 }
 
 #[tauri::command]
+fn installed_flatpaks() -> Vec<kyth_shared::system::software_catalog::InstalledFlatpak> {
+    kyth_shared::system::software_catalog::installed_flatpaks()
+}
+
+#[tauri::command]
+fn uninstall_flatpak(app_id: String) -> Result<String, String> {
+    if app_id.is_empty() || !app_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') {
+        return Err("invalid Flatpak application id".to_string());
+    }
+    let scope = kyth_shared::system::software_catalog::installed_flatpaks().into_iter().find(|app| app.id == app_id).map(|app| app.scope).ok_or_else(|| "that Flatpak is not installed".to_string())?;
+    let job = format!("flatpak-uninstall-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    app_installs().lock().unwrap().insert(job.clone(), ("running".into(), format!("Uninstalling {app_id}…")));
+    let job_for_thread = job.clone();
+    std::thread::spawn(move || {
+        let result: Result<(bool, String), String> = if scope == "system" {
+            privileged_flatpak_uninstall(&app_id).map(|detail| (true, detail))
+        } else {
+            std::process::Command::new("flatpak").args(["uninstall", "--user", "-y", &app_id]).output().map(|output| {
+                if output.status.success() { (true, format!("Uninstalled {app_id}.")) }
+                else { (false, String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect()) }
+            }).map_err(|err| err.to_string())
+        };
+        let (state, detail) = match result {
+            Ok((true, detail)) => ("complete", detail),
+            Ok((false, detail)) => ("failed", detail),
+            Err(err) => ("failed", format!("Could not uninstall Flatpak: {err}")),
+        };
+        app_installs().lock().unwrap().insert(job_for_thread, (state.into(), detail));
+    });
+    Ok(job)
+}
+
+fn privileged_flatpak_uninstall(app_id: &str) -> Result<String, String> {
+    let mut stream = UnixStream::connect("/run/kyth/privileged.sock").map_err(|_| "privileged service is unavailable".to_string())?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(610))).ok();
+    stream.write_all(format!("{{\"operation\":\"flatpak_uninstall\",\"app_id\":\"{app_id}\"}}\n").as_bytes()).map_err(|err| format!("could not contact privileged service: {err}"))?;
+    let mut response = String::new();
+    BufReader::new(stream).read_line(&mut response).map_err(|err| format!("could not read privileged service: {err}"))?;
+    let value: serde_json::Value = serde_json::from_str(&response).map_err(|err| format!("invalid privileged service response: {err}"))?;
+    if value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) { Ok(value.get("detail").and_then(serde_json::Value::as_str).unwrap_or("Uninstall complete.").to_string()) } else { Err(value.get("detail").and_then(serde_json::Value::as_str).unwrap_or("privileged uninstall failed").to_string()) }
+}
+
+#[tauri::command]
+fn privileged_action(operation: String, payload: serde_json::Value) -> Result<String, String> {
+    let request = match operation.as_str() {
+        "firmware_update" | "nvidia_install" | "windows_verify" | "secureboot_enroll" => serde_json::json!({"operation": operation}),
+        "kernel_switch" => {
+            let flavor = payload.get("flavor").and_then(serde_json::Value::as_str).ok_or_else(|| "kernel flavor is required".to_string())?;
+            if !matches!(flavor, "fedora" | "cachy") { return Err("kernel flavor must be fedora or cachy".to_string()); }
+            serde_json::json!({"operation": "kernel_switch", "flavor": flavor})
+        }
+        "bitlocker_unlock" => {
+            let device = payload.get("device").and_then(serde_json::Value::as_str).ok_or_else(|| "block device is required".to_string())?;
+            let key = payload.get("key").and_then(serde_json::Value::as_str).ok_or_else(|| "BitLocker key is required".to_string())?;
+            serde_json::json!({"operation": "bitlocker_unlock", "device": device, "key": key})
+        }
+        _ => return Err("privileged operation is not allowlisted".to_string()),
+    };
+    let job = format!("privileged-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    privileged_jobs().lock().unwrap().insert(job.clone(), ("running".into(), format!("Running {operation}…")));
+    let job_for_thread = job.clone();
+    std::thread::spawn(move || {
+        let result = send_privileged_request(request);
+        let (state, detail) = match result {
+            Ok(detail) => ("complete", detail),
+            Err(detail) => ("failed", detail),
+        };
+        privileged_jobs().lock().unwrap().insert(job_for_thread, (state.into(), detail));
+    });
+    Ok(job)
+}
+
+fn send_privileged_request(request: serde_json::Value) -> Result<String, String> {
+    let mut stream = UnixStream::connect("/run/kyth/privileged.sock").map_err(|_| "privileged service is unavailable".to_string())?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(910))).ok();
+    stream.write_all(format!("{}\n", request).as_bytes()).map_err(|err| format!("could not contact privileged service: {err}"))?;
+    let mut response = String::new();
+    BufReader::new(stream).read_line(&mut response).map_err(|err| format!("could not read privileged service: {err}"))?;
+    let value: serde_json::Value = serde_json::from_str(&response).map_err(|err| format!("invalid privileged service response: {err}"))?;
+    if value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false) { Ok(value.get("detail").and_then(serde_json::Value::as_str).unwrap_or("Operation complete.").to_string()) } else { Err(value.get("detail").and_then(serde_json::Value::as_str).unwrap_or("privileged operation failed").to_string()) }
+}
+
+#[tauri::command]
+fn privileged_action_status(job: String) -> InstallStatus {
+    let (state, detail) = privileged_jobs().lock().unwrap().get(&job).cloned().unwrap_or(("unknown".into(), "Privileged job not found.".into()));
+    InstallStatus { id: job, state, detail }
+}
+
+#[tauri::command]
+fn make_appimage_executable(path: String) -> Result<String, String> {
+    kyth_shared::system::software_catalog::make_appimage_executable(&path)
+}
+
+#[tauri::command]
+fn import_appimage(path: String) -> Result<String, String> {
+    kyth_shared::system::software_catalog::import_appimage(&path)
+}
+
+#[tauri::command]
 fn launch_appimage(path: String) -> Result<String, String> {
     let allowed = kyth_shared::system::software_catalog::appimages().into_iter().any(|app| app.path == path && app.executable);
     if !allowed { return Err("AppImage is not a discovered executable in an allowed user directory".to_string()); }
@@ -630,7 +787,7 @@ fn main() {
         }))
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
-            probe_backend, guardian_snapshot, hardware_snapshot, storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, appstream_search, appimage_list, launch_appimage, install_flatpak, install_status, protondb_lookup_many, anti_cheat_table, take_pending_page, just_list, just_run,
+            probe_backend, guardian_snapshot, guardian_check, guardian_check_status, guardian_control, privileged_action, privileged_action_status, hardware_snapshot, storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, appstream_search, appimage_list, installed_flatpaks, uninstall_flatpak, make_appimage_executable, import_appimage, launch_appimage, install_flatpak, install_status, protondb_lookup_many, anti_cheat_table, take_pending_page, just_list, just_run,
             bootc_upgrade, bootc_rollback, bootc_switch_branch, guardian_execute_recipe, branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available, current_user_name, open_feedback_issue
         ])
         .run(tauri::generate_context!())

@@ -169,6 +169,7 @@ export function HardwareSection({ section }: { section: HubSection }) {
             }
           />
           <RecipeButton recipe="firmware-update" label="Apply firmware updates" busy={busy} run={run} />
+          <RecipeButton recipe="enroll-secureboot" label="Enroll Secure Boot key" busy={busy} run={run} />
           <RecipeButton recipe="device-info" label="Full device report" busy={busy} run={run} />
         </div>
         <CommandLine label="List firmware devices" command={firmwareCmd} />

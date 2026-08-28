@@ -20,6 +20,20 @@ import { ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./Sec
 // Previously only audit pills; now also shows which launchers are installed
 // and library counts, matching page_gaming_library.py's Steam/Heroic scan.
 export function GamingSection({ section }: { section: HubSection }) {
+  const launcherRecipes = [
+    ["install-steam", "Steam"], ["install-heroic", "Heroic"], ["install-lutris", "Lutris"],
+    ["install-bottles", "Bottles"], ["install-prismlauncher", "Prism Launcher"], ["install-itch", "Itch.io"],
+    ["install-epic-launcher", "Epic Games"], ["install-battlenet", "Battle.net"], ["install-ea-app", "EA App"], ["install-ubisoft-connect", "Ubisoft Connect"],
+  ] as const;
+  const fixRecipes = [
+    ["health-check", "Gaming health check"], ["preheat-shaders", "Preheat shaders"], ["enable-obs-capture", "Enable OBS capture"],
+    ["game-boost", "Game boost"], ["controller-check", "Check controllers"], ["export-steam-games", "Export Steam library"],
+  ] as const;
+  const toolRecipes = [
+    ["install-obs", "OBS Studio"], ["install-gpu-screen-recorder", "GPU Screen Recorder"],
+    ["install-goverlay", "GOverlay"], ["install-mangojuice", "MangoJuice"], ["install-umu", "UMU"],
+    ["install-lact", "LACT"], ["install-piper", "Piper"], ["install-solaar", "Solaar"],
+  ] as const;
   const [audit, setAudit] = useState<AuditCache | null>(null);
   const [launchers, setLaunchers] = useState<LauncherEntry[] | null>(null);
   const [sliceAvailable, setSliceAvailable] = useState<boolean | null>(null);
@@ -115,6 +129,19 @@ export function GamingSection({ section }: { section: HubSection }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
           <RecipeButton recipe="gaming-mode" label="Switch to gaming mode" busy={busy} run={run} />
           <RecipeButton recipe="gaming-stack-status" label="Gaming stack status" busy={busy} run={run} />
+        </div>
+        <div style={{ marginTop: 22 }}>
+          <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Gaming setup</p>
+          <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Install a launcher or tool in its own terminal window. The recipe shows its own prompts and output.</p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            {launcherRecipes.map(([recipe, label]) => <RecipeButton key={recipe} recipe={recipe} label={label} busy={busy} run={run} />)}
+          </div>
+        </div>
+        <div style={{ marginTop: 22 }}>
+          <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Fixes and tools</p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            {[...fixRecipes, ...toolRecipes].map(([recipe, label]) => <RecipeButton key={recipe} recipe={recipe} label={label} busy={busy} run={run} />)}
+          </div>
         </div>
         <ActionStatus status={status} />
       </div>

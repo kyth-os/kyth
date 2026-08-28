@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchNvidiaDetected } from "../services/liveData";
+import { fetchNvidiaDetected, runPrivilegedAction } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -43,7 +43,7 @@ export function NvidiaSection({ section }: { section: HubSection }) {
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <RecipeButton recipe="nvidia-status" label="Driver status" busy={busy} run={run} />
-            <RecipeButton recipe="install-nvidia-driver" label="Install NVIDIA driver" busy={busy} run={run} />
+            <button disabled={busy !== null} onClick={() => run("nvidia", "Installing NVIDIA driver…", () => runPrivilegedAction("nvidia_install"))} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600 }}>Install NVIDIA driver</button>
           </div>
           <ActionStatus status={status} />
         </div>

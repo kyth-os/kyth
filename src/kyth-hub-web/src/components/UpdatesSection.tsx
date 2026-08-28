@@ -164,6 +164,7 @@ export function UpdatesSection({ section }: { section: HubSection }) {
             onClick={() => run("upgrade", "Starting upgrade…", invokeBootcUpgrade)}
           />
           {updateStatus?.staged && <RecipeButton recipe="apply-staged" label="Restart to apply" busy={busy} run={run} />}
+          <RecipeButton recipe="update-health" label="Update health report" busy={busy} run={run} />
           <ActionButton
             label={busy === "rollback" ? "Rolling back…" : "Roll back"}
             // Nothing to roll back to until a previous deployment exists.

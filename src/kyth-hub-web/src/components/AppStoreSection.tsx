@@ -8,12 +8,17 @@ import {
   installFlatpak,
   fetchInstallStatus,
   launchAppImage,
+  fetchInstalledFlatpaks,
+  uninstallFlatpak,
+  makeAppImageExecutable,
+  importAppImage,
   fetchStarterPacks,
   type AppStoreSnapshot,
   type FamiliarApp,
   type AppImageEntry,
   type AppStreamApp,
   type StarterPack,
+  type InstalledFlatpak,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
@@ -35,6 +40,9 @@ export function AppStoreSection({ section }: { section: HubSection }) {
   const [familiar, setFamiliar] = useState<FamiliarApp[] | null>(null);
   const [appImages, setAppImages] = useState<AppImageEntry[] | null>(null);
   const [catalog, setCatalog] = useState<AppStreamApp[] | null>(null);
+  const [installed, setInstalled] = useState<InstalledFlatpak[] | null>(null);
+  const [packSelections, setPackSelections] = useState<Record<string, string[]>>({});
+  const [appImagePath, setAppImagePath] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
   const [query, setQuery] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -42,12 +50,14 @@ export function AppStoreSection({ section }: { section: HubSection }) {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchAppStoreSnapshot(), fetchStarterPacks(), fetchFamiliarApps(), fetchAppImages()]).then(([s, p, f, images]) => {
+    Promise.all([fetchAppStoreSnapshot(), fetchStarterPacks(), fetchFamiliarApps(), fetchAppImages(), fetchInstalledFlatpaks()]).then(([s, p, f, images, apps]) => {
       if (!cancelled) {
         setSnapshot(s);
         setPacks(p);
+        setPackSelections(Object.fromEntries((p ?? []).map((pack) => [pack.name, pack.apps.filter((app) => app.selected).map((app) => app.id)])));
         setFamiliar(f);
         setAppImages(images);
+        setInstalled(apps);
         setLoaded(true);
       }
     });
@@ -76,6 +86,13 @@ export function AppStoreSection({ section }: { section: HubSection }) {
     throw new Error("Installation is still running; check Flatpak in a moment.");
   }
 
+  async function installPack(pack: StarterPack): Promise<string> {
+    const ids = packSelections[pack.name] ?? [];
+    if (ids.length === 0) throw new Error("Select at least one app first.");
+    for (const id of ids) await install(id);
+    return `${pack.name} starter pack installed.`;
+  }
+
   const matches = useMemo(() => {
     if (!familiar) return [];
     const needle = query.trim().toLowerCase();
@@ -83,7 +100,7 @@ export function AppStoreSection({ section }: { section: HubSection }) {
     return familiar.filter((app) => app.windows_name.toLowerCase().includes(needle)).slice(0, 6);
   }, [familiar, query]);
 
-  const live = snapshot !== null || packs !== null || familiar !== null || appImages !== null;
+  const live = snapshot !== null || packs !== null || familiar !== null || appImages !== null || installed !== null;
   return (
     <LiveSectionCard section={section} live={live}>
       {live ? (
@@ -155,11 +172,12 @@ export function AppStoreSection({ section }: { section: HubSection }) {
                     <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>{pack.desc}</p>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                       {pack.apps.map((a) => (
-                        <span key={a.id} className={`pill ${a.selected ? "pill-ok" : "pill-dim"}`} title={a.description}>
-                          {a.label}
-                        </span>
+                        <label key={a.id} className="pill pill-dim" title={a.description} style={{ cursor: "pointer" }}>
+                          <input type="checkbox" checked={(packSelections[pack.name] ?? []).includes(a.id)} onChange={(event) => setPackSelections((current) => ({ ...current, [pack.name]: event.target.checked ? [...(current[pack.name] ?? []), a.id] : (current[pack.name] ?? []).filter((id) => id !== a.id) }))} /> {a.label}
+                        </label>
                       ))}
                     </div>
+                    <button disabled={busy !== null} onClick={() => run(`pack-${pack.name}`, `Installing ${pack.name}…`, () => installPack(pack))} style={{ marginTop: 10, padding: "6px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>{busy === `pack-${pack.name}` ? "Installing…" : "Install selected"}</button>
                     <CommandLine
                       label="Install this pack"
                       command={installCommand(pack.apps.filter((a) => a.selected).map((a) => a.id))}
@@ -184,7 +202,24 @@ export function AppStoreSection({ section }: { section: HubSection }) {
 
           {appImages && appImages.length > 0 && <div style={{ marginTop: 22 }}>
             <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>AppImages found</p>
-            {appImages.map((app) => <div key={app.path} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}><p className="card-copy" style={{ flex: 1, fontSize: 12, margin: 0 }}>{app.name} — {app.executable ? "ready to run" : "not executable yet"}</p>{app.executable && <button disabled={busy !== null} onClick={() => run(`launch-${app.path}`, `Launching ${app.name}…`, () => launchAppImage(app.path))} style={{ padding: "5px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>Launch</button>}</div>)}
+            {appImages.map((app) => <div key={app.path} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}><p className="card-copy" style={{ flex: 1, fontSize: 12, margin: 0 }}>{app.name} — {app.executable ? "ready to run" : "not executable yet"}</p>{app.executable ? <button disabled={busy !== null} onClick={() => run(`launch-${app.path}`, `Launching ${app.name}…`, () => launchAppImage(app.path))} style={{ padding: "5px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>Launch</button> : <button disabled={busy !== null} onClick={() => run(`chmod-${app.path}`, `Making ${app.name} executable…`, async () => { const result = await makeAppImageExecutable(app.path); setAppImages((current) => current?.map((item) => item.path === app.path ? { ...item, executable: true } : item) ?? current); return result; })} style={{ padding: "5px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>Make executable</button>}</div>)}
+          </div>}
+
+          <div style={{ marginTop: 22 }}>
+            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Import an AppImage</p>
+            <p className="card-copy" style={{ fontSize: 12, marginTop: 5 }}>Enter a path from Downloads, Applications, or .local/bin. It is copied into Applications and made executable.</p>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <input value={appImagePath} onChange={(event) => setAppImagePath(event.target.value)} placeholder="/home/you/Downloads/app.AppImage" style={{ flex: 1, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 12 }} />
+              <button disabled={busy !== null || !appImagePath.trim()} onClick={() => run("import-appimage", "Importing AppImage…", async () => { const result = await importAppImage(appImagePath.trim()); setAppImagePath(""); const fresh = await fetchAppImages(); if (fresh) setAppImages(fresh); return result; })} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>Import</button>
+            </div>
+          </div>
+
+          {installed && <div style={{ marginTop: 22 }}>
+            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Installed Flatpaks</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
+              {installed.map((app) => <div key={`${app.scope}:${app.id}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", border: "1px solid var(--hairline)", borderRadius: 9 }}><span style={{ flex: 1, fontSize: 12 }}><strong>{app.name || app.id}</strong><span className="card-copy"> — {app.id} · {app.scope}</span></span><button disabled={busy !== null} onClick={() => run(`uninstall-${app.scope}-${app.id}`, `Uninstalling ${app.name || app.id}…`, async () => { const result = await uninstallFlatpak(app.id); setInstalled((current) => current?.filter((item) => !(item.id === app.id && item.scope === app.scope)) ?? current); return result; })} style={{ padding: "5px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>Uninstall</button></div>)}
+              {installed.length === 0 && <p className="card-copy" style={{ fontSize: 12 }}>No installed Flatpak applications found.</p>}
+            </div>
           </div>}
         </div>
       ) : (
