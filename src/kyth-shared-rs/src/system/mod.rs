@@ -21,6 +21,7 @@ pub mod registry;
 pub mod plasma_hdr;
 pub mod process;
 pub mod pipewire;
+pub mod update_availability;
 pub mod update_status;
 pub mod updates_unified;
 pub mod printing;
