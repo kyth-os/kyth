@@ -6,15 +6,19 @@ import subprocess
 from pathlib import Path
 
 from .compat import phase_dependency
+from ..executor import ExecutorCommand, PrivilegedExecutor
 
 
 def configure_hostname_timezone(etc, state, log, *, format_error) -> None:
     run_command = phase_dependency("run_command")
     as_root = phase_dependency("_as_root")
+    executor = PrivilegedExecutor(run_command=run_command, as_root=as_root)
     hostname_path = str(Path(etc, "hostname"))
     try:
-        run_command(
-            as_root(["/usr/bin/tee", hostname_path]),
+        executor.run(
+            ExecutorCommand.from_argv(
+                ["/usr/bin/tee", hostname_path], "write installed hostname"
+            ),
             input=f"{state['hostname']}\n", text=True,
             stdout=subprocess.DEVNULL, check=True,
         )
@@ -24,8 +28,13 @@ def configure_hostname_timezone(etc, state, log, *, format_error) -> None:
 
     localtime_path = str(Path(etc, "localtime"))
     try:
-        run_command(
-            as_root(["ln", "-snf", f"/usr/share/zoneinfo/{state['timezone']}", localtime_path]),
+        executor.run(
+            ExecutorCommand.from_argv(
+                [
+                    "ln", "-snf", f"/usr/share/zoneinfo/{state['timezone']}", localtime_path,
+                ],
+                "set installed timezone",
+            ),
             check=True,
         )
     except OSError as exc:
@@ -34,12 +43,18 @@ def configure_hostname_timezone(etc, state, log, *, format_error) -> None:
 
     locale = state.get("locale", "en_US.UTF-8")
     keymap = state.get("keymap", "us")
-    run_command(
-        as_root(["/usr/bin/tee", str(Path(etc, "locale.conf"))]),
+    executor.run(
+        ExecutorCommand.from_argv(
+            ["/usr/bin/tee", str(Path(etc, "locale.conf"))],
+            "write installed locale",
+        ),
         input=f"LANG={locale}\n", text=True, stdout=subprocess.DEVNULL, check=True,
     )
-    run_command(
-        as_root(["/usr/bin/tee", str(Path(etc, "vconsole.conf"))]),
+    executor.run(
+        ExecutorCommand.from_argv(
+            ["/usr/bin/tee", str(Path(etc, "vconsole.conf"))],
+            "write installed keyboard layout",
+        ),
         input=f"KEYMAP={keymap}\n", text=True, stdout=subprocess.DEVNULL, check=True,
     )
     log(f"Locale   : {locale}")
@@ -52,11 +67,14 @@ def create_installer_user(
 ) -> None:
     run_command = phase_dependency("run_command")
     as_root = phase_dependency("_as_root")
+    executor = PrivilegedExecutor(run_command=run_command, as_root=as_root)
     log(f"Creating user: {username}")
     try:
         creator(
             deploy_root, config_root, username, password_hash, log,
-            run=lambda argv, **kw: run_command(as_root(argv), **kw),
+            run=lambda argv, **kw: executor.run(
+                ExecutorCommand.from_argv(argv, "update installed account database"), **kw
+            ),
         )
         ensure_accounts(deploy_root, log)
         progress(97)

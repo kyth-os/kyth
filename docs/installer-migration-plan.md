@@ -168,7 +168,8 @@ Before replacing Chromium in the image:
 ## Open decisions
 
 - Whether the Unix-socket service initially wraps Python directly or uses a
-  small Rust transport adapter.
+  small Rust transport adapter. **Decided:** wrap the existing Python backend
+  directly for Phase 3; a Rust transport adapter remains a later optimization.
 - Whether Calamares remains an optional build path or is retired after the
   custom installer reaches parity.
 - Whether the first React milestone preserves SSE or moves directly to socket
@@ -178,8 +179,8 @@ Before replacing Chromium in the image:
 
 - Phase 0 — API contract: complete. See [`installer-api-contract.md`](installer-api-contract.md).
 - Phase 1 — React frontend: complete as a standalone package in [`src/kyth-installer-web/`](../src/kyth-installer-web/). Typecheck and production build pass. The Python HTTP/SSE backend and legacy WebUI remain available as the runtime fallback.
-- Phase 2 — Tauri shell: implementation started. `kyth-installer-shell` embeds the React build, runs as the desktop user, and connects to the fixed loopback Python backend with per-run tokens. Chromium remains the fallback until live-image acceptance.
-- Phase 3 — Unix-socket transport: started. `UnixSocketServer` can expose the existing authenticated HTTP/SSE handler over an explicitly configured private socket with restrictive permissions and Linux peer-UID checks, and the Tauri shell has typed allowlisted request/event commands; loopback remains the production default until live-image validation.
+- Phase 2 — Tauri shell: implementation complete behind the live-image gate. `kyth-installer-shell` embeds the React build, runs as the desktop user, and connects through the typed transport adapter. Chromium remains the fallback until live-image acceptance.
+- Phase 3 — Unix-socket transport: implementation complete behind the live-image gate. `kyth-installerd` exposes the existing authenticated HTTP/SSE handler over the private socket with restrictive permissions and Linux peer-UID checks; the launcher owns the per-run token file and service lifecycle, and the Tauri shell uses typed allowlisted request/event commands. Development remains on loopback; the live image opts into the socket path.
 
 ## Remaining plan
 
@@ -193,25 +194,45 @@ Before replacing Chromium in the image:
 
 ### Phase 3 — Unix-socket privileged service
 
-- Add a root-owned service entrypoint and activate the socket transport in the installer launcher.
-- Activate the socket transport in the live-image launcher only after the native adapter passes live-media validation; do not expose a generic filesystem or command bridge.
-- Replace loopback HTTP access with a root-owned Unix-socket service.
-- Use socket ownership/permissions and peer credentials, retaining the one-time session token as defense in depth.
+- **Done:** Add a root-owned service entrypoint and activate the socket transport in the installer launcher.
+- **Done:** Replace loopback HTTP access with a root-owned Unix-socket service in the live-image configuration; development keeps the loopback fallback.
+- **Done:** Use socket ownership/permissions and peer credentials, retaining the per-run session token as defense in depth.
+- Validate the activated service and Tauri client in a built live ISO before removing the compatibility fallback.
 - Preserve the frozen logical API, SSE/event semantics, validation, journal, and recovery behavior.
-- Decide whether the first service wraps Python directly or uses a small Rust transport adapter.
+- **Decided:** the first service wraps Python directly; a Rust transport adapter is deferred until the backend parity work in Phase 4.
 
 ### Phase 4 — Selective Rust migration
 
+The first slice is now implemented: the Tauri shell performs pure request
+normalization and install-plan projection before calling the privileged Python
+service. The service remains authoritative and repeats all storage-dependent
+checks before any mutation. Shared Rust/Python parity fixtures now cover all
+five modes and representative rejection branches.
+The Rust shell also parses explicit `lsblk` snapshots into typed disk and
+partition records; the same fixture is exercised through the Python discovery
+functions to pin safety-relevant output.
+
 Port components only after behavioral parity and focused tests exist:
 
-- request and install-plan validation
-- disk and partition discovery
-- partition journal and storage guards
-- transaction/recovery state
-- command runner and cancellation
-- mount lifecycle
-- bootc installation/configuration
-- Secure Boot and MOK handling
+- **Done as a preflight:** request and install-plan normalization (Rust shell;
+  Python server-side validation remains authoritative). Shared parity cases
+  live in `src/kyth-installer-web/src-tauri/testdata/installer_plan_cases.json`.
+- **Done as a parser:** disk and partition discovery from explicit `lsblk` snapshots; runtime probing and protected-disk policy remain Python-owned.
+- **Done as metadata/validation:** partition journal model, serialization, and safety checks; disk mutation remains Python-owned.
+- **Done as a decoder/classifier:** transaction/recovery state and Rescue guidance; durable writes and recovery actions remain Python-owned.
+- **Done as a pure model:** streaming command output framing, bounded failure
+  tails, independent I/O/network/absolute timeout decisions, and cooperative
+  cancellation; shared Rust/Python fixtures cover framing and failure tails,
+  while process execution and privilege boundaries remain Python-owned.
+- **Done as a pure state model:** mount registration, release, LIFO cleanup
+  ordering, and cleanup-state clearing; mount/unmount syscalls remain
+  Python-owned behind the privileged service.
+- **Done as an operation plan:** bootc install argv and non-secret installed
+  configuration are validated and projected by Rust; the privileged Python
+  service remains the executor and repeats live-state checks.
+- **Done as a pure decision model:** Rust and Python agree on Secure Boot/MOK
+  states and import-result classification; `mokutil`, passwords, and firmware
+  interactions remain Python-owned.
 
 ### Phase 5 — VM destructive-path acceptance
 
@@ -236,6 +257,8 @@ Port components only after behavioral parity and focused tests exist:
 
 ## Next session starting point
 
-Continue Phase 3: add the root-owned service entrypoint, then wire the Tauri
-shell to the fixed Unix socket through typed request and event commands while
-keeping loopback HTTP as the compatibility fallback until live-image testing.
+Use the focused parity fixtures to keep the typed executor, bootc/configuration,
+and Secure Boot models aligned, then proceed to VM destructive-path acceptance.
+Keep Python authoritative for process execution, filesystem changes, durable
+transaction writes, recovery actions, mount/unmount syscalls, bootc, and Secure
+Boot until the live-image and safety gates pass.

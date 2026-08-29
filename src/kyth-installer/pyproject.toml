@@ -11,6 +11,7 @@ dependencies = ["kyth-shared>=0.1,<0.2"]
 
 [project.scripts]
 kyth-installer = "kyth_installer.app:main"
+kyth-installerd = "kyth_installer.daemon:main"
 kyth-partition-install = "kyth_installer.partition_cli:main"
 
 [tool.setuptools.packages.find]

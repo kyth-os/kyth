@@ -5,6 +5,7 @@ from __future__ import annotations
 from kyth_shared import get_rx_bytes
 
 from ..config import SKIP_FETCH_CHECK
+from ..executor import ExecutorCommand, PrivilegedExecutor
 from ..imagesrc import _friendly_network_error
 from ..streaming import StreamingCommandRunner
 
@@ -54,8 +55,6 @@ def _run_cmd(
     except ImportError:
         from ..system import _as_root  # type: ignore
 
-    full_cmd = _as_root(cmd)
-
     def error_factory(returncode: int, recent_output: list[str], argv: list[str]) -> Exception:
         lowered = "\n".join(recent_output).lower()
         network_tokens = (
@@ -79,15 +78,19 @@ def _run_cmd(
         detail = "\n".join(recent_output[-10:]) or "No command output was captured."
         return RuntimeError(f"Command failed (exit {returncode}):\n  {' '.join(argv)}\n\n{detail}")
 
-    StreamingCommandRunner(
+    executor = PrivilegedExecutor(
+        run_command=None,  # streaming does not use the scalar runner
+        as_root=_as_root,
+        stream_runner_factory=StreamingCommandRunner,
+    )
+    executor.stream(
+        ExecutorCommand.from_argv(cmd, "bootc image installation", timeout=absolute_timeout),
         rx_bytes=get_rx_bytes,
         publish=publish or (lambda _event: None),
-    ).run(
-        full_cmd,
-        pct_start,
-        pct_end,
-        log,
-        progress,
+        pct_start=pct_start,
+        pct_end=pct_end,
+        log=log,
+        progress=progress,
         stall_timeout=stall_timeout,
         absolute_timeout=absolute_timeout,
         error_factory=error_factory,

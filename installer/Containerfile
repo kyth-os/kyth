@@ -66,6 +66,8 @@ RUN --mount=type=bind,source=installer/build.sh,target=/src/installer/build.sh \
     --mount=type=bind,source=build_files/kyth-installer,target=/src/build_files/kyth-installer \
     --mount=type=bind,source=build_files/kyth_shared,target=/src/build_files/kyth_shared \
     --mount=type=bind,source=build_files/kyth-launch-installer,target=/src/build_files/kyth-launch-installer \
+    --mount=type=bind,source=build_files/kyth-installerd,target=/src/build_files/kyth-installerd \
+    --mount=type=bind,source=build_files/kyth-installerd.service,target=/src/build_files/kyth-installerd.service \
     env BASE_IMAGE="${BASE_IMAGE}" INSTALL_SOURCE_IMAGE="${INSTALL_SOURCE_IMAGE}" \
     SOURCE_TAG="${SOURCE_TAG}" CALAMARES="${CALAMARES}" \
     bash /src/installer/build.sh; \

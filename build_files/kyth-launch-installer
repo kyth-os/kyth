@@ -22,6 +22,9 @@ LAUNCH_LOG="/tmp/kyth-installer-launch.log"
 export KYTH_SOURCE_IMAGE="${KYTH_SOURCE_IMAGE:-ghcr.io/kyth-os/kyth:latest}"
 export KYTH_TARGET_IMAGE="${KYTH_TARGET_IMAGE:-${KYTH_SOURCE_IMAGE}}"
 export KYTH_SOURCE_DIGEST="${KYTH_SOURCE_DIGEST:-}"
+export KYTH_INSTALLER_SOCKET="${KYTH_INSTALLER_SOCKET:-}"
+export KYTH_INSTALLER_SOCKET_GROUP="${KYTH_INSTALLER_SOCKET_GROUP:-}"
+export KYTH_INSTALLER_TOKEN_FILE="${KYTH_INSTALLER_TOKEN_FILE:-/run/kyth-installer/session-token}"
 # Live installations always perform the fetch/source preflight. Development
 # tests invoke the Python entry point directly when they need to bypass it.
 export KYTH_INSTALL_SKIP_FETCH_CHECK=0

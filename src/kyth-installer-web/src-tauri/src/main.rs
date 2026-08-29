@@ -6,6 +6,18 @@
 // command bridge.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod installer_plan;
+mod installer_journal;
+mod installer_storage;
+mod installer_recovery;
+mod installer_transaction;
+mod installer_stream;
+mod installer_mount;
+mod installer_bootc;
+mod installer_configuration;
+mod installer_secure_boot;
+mod installer_executor;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
@@ -50,6 +62,27 @@ fn installer_connection(state: tauri::State<InstallerTokens>) -> Result<Installe
         .map_err(|_| "installer connection state unavailable".to_string())?
         .clone()
         .ok_or_else(|| "installer shell was not given backend tokens".to_string())
+}
+
+#[tauri::command]
+fn installer_validate_plan(request: serde_json::Value) -> Result<installer_plan::InstallerPlan, String> {
+    let input: installer_plan::InstallerPlanInput = serde_json::from_value(request)
+        .map_err(|error| format!("invalid installer request: {error}"))?;
+    installer_plan::build_plan(input)
+}
+
+#[tauri::command]
+fn installer_recovery_guidance(status: String) -> installer_recovery::RecoveryGuidance {
+    installer_recovery::rescue_guidance(Some(&status))
+}
+
+#[tauri::command]
+fn installer_execution_plan(
+    request: serde_json::Value,
+) -> Result<installer_executor::InstallerExecutionPlan, String> {
+    let input: installer_executor::InstallerExecutionInput = serde_json::from_value(request)
+        .map_err(|error| format!("invalid installer execution request: {error}"))?;
+    installer_executor::build_plan(input)
 }
 
 fn connection(state: &tauri::State<InstallerTokens>) -> Result<InstallerConnection, String> {
@@ -211,7 +244,7 @@ fn main() {
         }))
         .manage(InstallerTokens(Mutex::new(Some(tokens))))
         .manage(InstallerStream(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![installer_connection, installer_request, installer_stream, installer_stream_stop])
+        .invoke_handler(tauri::generate_handler![installer_connection, installer_validate_plan, installer_recovery_guidance, installer_execution_plan, installer_request, installer_stream, installer_stream_stop])
         .run(tauri::generate_context!())
         .expect("error while running the KythOS installer shell");
 }

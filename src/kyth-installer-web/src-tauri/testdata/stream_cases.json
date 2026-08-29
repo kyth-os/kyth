@@ -1,0 +1,46 @@
+[
+  {
+    "name": "crlf_duplicate_partial",
+    "chunks_hex": ["66697273740d0a66697273740a7365636f6e64"],
+    "expected_feed": ["first"],
+    "expected_finish": ["second"],
+    "expected_python_events": ["first", "second"],
+    "exit_code": 0
+  },
+  {
+    "name": "split_utf8",
+    "chunks_hex": ["636166c3", "a90a"],
+    "expected_feed": ["café"],
+    "expected_finish": [],
+    "expected_python_events": ["café"],
+    "exit_code": 0
+  },
+  {
+    "name": "trim_blank_and_duplicate_lines",
+    "chunks_hex": ["20207472696d20200a0a7472696d0d6c617374"],
+    "expected_feed": ["trim"],
+    "expected_finish": ["last"],
+    "expected_python_events": ["trim", "last"],
+    "exit_code": 0
+  },
+  {
+    "name": "failure_tail_is_bounded",
+    "chunks_hex": [
+      "6c696e652d32340a6c696e652d32350a6c696e652d32360a6c696e652d32370a",
+      "6c696e652d32380a6c696e652d32390a6c696e652d33300a6c696e652d33310a",
+      "6c696e652d33320a6c696e652d33330a6c696e652d33340a"
+    ],
+    "expected_feed": [
+      "line-24", "line-25", "line-26", "line-27", "line-28", "line-29",
+      "line-30", "line-31", "line-32", "line-33", "line-34"
+    ],
+    "expected_finish": [],
+    "expected_python_events": [
+      "line-24", "line-25", "line-26", "line-27", "line-28", "line-29",
+      "line-30", "line-31", "line-32", "line-33", "line-34"
+    ],
+    "expected_error_contains": ["line-25", "line-34"],
+    "expected_error_excludes": ["line-24"],
+    "exit_code": 2
+  }
+]

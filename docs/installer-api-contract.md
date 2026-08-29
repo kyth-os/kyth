@@ -16,7 +16,9 @@ mode `0600`, or `0660` when `KYTH_INSTALLER_SOCKET_GROUP` is configured. API
 authentication remains the session token, and mutating socket requests also
 require a valid Linux `SO_PEERCRED` result. The socket path and route set are
 fixed by the launcher/native shell; there is no generic filesystem or command
-bridge.
+bridge. In the live image, the root launcher writes the per-run session token
+to `/run/kyth-installer/session-token` with mode `0600`, starts the
+`kyth-installerd.service`, and removes the token after the shell exits.
 
 The initial `GET /` request must include the one-use `bootstrap_token` query parameter. A successful request sets:
 

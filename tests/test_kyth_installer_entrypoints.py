@@ -46,6 +46,24 @@ class InstallerEntrypointTests(unittest.TestCase):
         self.assertIn("/src/build_files/kyth_shared", build_script)
         self.assertNotIn("/usr/kyth_shared", build_script)
 
+    def test_installer_socket_service_is_packaged_but_not_boot_enabled(self):
+        unit = (ROOT / "build_files" / "kyth-installerd.service").read_text()
+        build = (ROOT / "installer" / "build.sh").read_text()
+        self.assertIn("kyth-installerd = \"kyth_installer.daemon:main\"", (INSTALLER_ROOT / "pyproject.toml").read_text())
+        self.assertIn("kyth-installerd.service", build)
+        self.assertIn("ConditionPathExists=/run/kyth-installer/session-token", unit)
+        self.assertIn("User=root", unit)
+        self.assertIn("Group=root", unit)
+        self.assertIn("--socket-group liveuser", unit)
+        self.assertNotIn("systemctl enable kyth-installerd.service", build)
+
+    def test_launcher_preserves_only_fixed_installer_transport_settings(self):
+        launcher = (ROOT / "build_files" / "kyth-launch-installer").read_text()
+        sudoers = (ROOT / "installer" / "build.sh").read_text()
+        for name in ("KYTH_INSTALLER_SOCKET", "KYTH_INSTALLER_SOCKET_GROUP", "KYTH_INSTALLER_TOKEN_FILE"):
+            self.assertIn(f'export {name}=', launcher)
+            self.assertIn(name, sudoers)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,52 @@
+[
+  {
+    "name": "single-btrfs-root",
+    "table_type": "gpt",
+    "disk_size_bytes": 214748364800,
+    "partitions": [
+      {"name": "/dev/sda2", "size_bytes": 68719476736, "start_bytes": 2097152, "fstype": "btrfs", "label": "", "parttype": "", "mountpoints": [], "efi": false, "current": false, "in_use": false, "read_only": false, "alongside_candidate": true, "ntfs_resize_candidate": false}
+    ],
+    "ops": [
+      {"kind": "set_mountpoint", "params": {"partition": "/dev/sda2", "mountpoint": "/"}}
+    ],
+    "expected_errors": []
+  },
+  {
+    "name": "duplicate-root-mountpoint",
+    "table_type": "gpt",
+    "disk_size_bytes": 214748364800,
+    "partitions": [
+      {"name": "/dev/sda2", "size_bytes": 68719476736, "start_bytes": 2097152, "fstype": "btrfs", "label": "", "parttype": "", "mountpoints": [], "efi": false, "current": false, "in_use": false, "read_only": false, "alongside_candidate": true, "ntfs_resize_candidate": false},
+      {"name": "/dev/sda3", "size_bytes": 68719476736, "start_bytes": 68721573888, "fstype": "btrfs", "label": "", "parttype": "", "mountpoints": [], "efi": false, "current": false, "in_use": false, "read_only": false, "alongside_candidate": true, "ntfs_resize_candidate": false}
+    ],
+    "ops": [
+      {"kind": "set_mountpoint", "params": {"partition": "/dev/sda2", "mountpoint": "/"}},
+      {"kind": "set_mountpoint", "params": {"partition": "/dev/sda3", "mountpoint": "/"}}
+    ],
+    "expected_errors": ["assigned more than once"]
+  },
+  {
+    "name": "overlapping-create",
+    "table_type": "gpt",
+    "disk_size_bytes": 214748364800,
+    "partitions": [
+      {"name": "/dev/sda2", "size_bytes": 68719476736, "start_bytes": 2097152, "fstype": "btrfs", "label": "", "parttype": "", "mountpoints": [], "efi": false, "current": false, "in_use": false, "read_only": false, "alongside_candidate": true, "ntfs_resize_candidate": false}
+    ],
+    "ops": [
+      {"kind": "create", "params": {"start_bytes": 2097152, "size_bytes": 68719476736, "fs_type": "btrfs", "mountpoint": "/"}}
+    ],
+    "expected_errors": ["overlaps with existing region"]
+  },
+  {
+    "name": "in-use-root",
+    "table_type": "gpt",
+    "disk_size_bytes": 214748364800,
+    "partitions": [
+      {"name": "/dev/sda2", "size_bytes": 68719476736, "start_bytes": 2097152, "fstype": "btrfs", "label": "", "parttype": "", "mountpoints": [], "efi": false, "current": true, "in_use": true, "read_only": false, "alongside_candidate": false, "ntfs_resize_candidate": false}
+    ],
+    "ops": [
+      {"kind": "set_mountpoint", "params": {"partition": "/dev/sda2", "mountpoint": "/"}}
+    ],
+    "expected_errors": ["currently mounted or in use"]
+  }
+]

@@ -41,8 +41,10 @@ python3 -m pip install \
 	--prefix=/usr \
 	"${installer_package_root}/kyth_shared" \
 	"${installer_package_root}/kyth-installer"
+install -m 0755 /src/build_files/kyth-installerd /usr/bin/kyth-installerd
 rm -rf "${installer_package_root}"
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
+install -Dm644 /src/build_files/kyth-installerd.service /usr/lib/systemd/system/kyth-installerd.service
 install -Dm755 /src/build_files/scripts/plymouth-branding-guard.sh \
 	/usr/libexec/kyth-plymouth-branding-guard
 
@@ -77,7 +79,7 @@ expected_digest="${INSTALL_SOURCE_IMAGE##*@}"
 release_digest="${embedded_digest}"
 [[ "${expected_digest}" == sha256:* ]] && release_digest="${expected_digest}"
 target_image="ghcr.io/kyth-os/kyth:${SOURCE_TAG}"
-printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\n' \
+printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\nKYTH_INSTALLER_SOCKET=/run/kyth-installer/api.sock\nKYTH_INSTALLER_SOCKET_GROUP=liveuser\nKYTH_INSTALLER_TOKEN_FILE=/run/kyth-installer/session-token\n' \
 	"${target_image}" "${embedded_digest}" >/etc/kyth-installer.env
 printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"%s","source_image":"%s"}\n' \
 	"${embedded_digest}" "${release_digest}" "${target_image}" "${INSTALL_SOURCE_IMAGE}" \
@@ -372,7 +374,7 @@ systemctl enable var-tmp.mount
 # authentication. Preserve only the display and image-selection environment
 # needed by the root backend to hand Chromium back to liveuser.
 install -Dm440 /dev/stdin /etc/sudoers.d/liveuser-live <<'EOF'
-Defaults:liveuser env_keep += "DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XDG_SESSION_TYPE LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE QT_QUICK_BACKEND KYTH_SOURCE_IMAGE KYTH_TARGET_IMAGE KYTH_SOURCE_DIGEST"
+Defaults:liveuser env_keep += "DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XDG_SESSION_TYPE LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE QT_QUICK_BACKEND KYTH_SOURCE_IMAGE KYTH_TARGET_IMAGE KYTH_SOURCE_DIGEST KYTH_INSTALLER_SOCKET KYTH_INSTALLER_SOCKET_GROUP KYTH_INSTALLER_TOKEN_FILE"
 liveuser ALL=(root) NOPASSWD: /usr/bin/kyth-installer ""
 EOF
 # Validate sudoers syntax — fail the ISO build instead of shipping a broken file.

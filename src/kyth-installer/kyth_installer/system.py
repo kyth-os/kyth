@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Optional
 
 from .runner import run_command
+from .executor import ExecutorCommand, PrivilegedExecutor
+from .secure_boot import classify_import, plan_mok
 from kyth_shared import accounts as _accounts
 
 # Canonical modules
@@ -147,61 +149,95 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
     Returns one of: skipped, enrolled, pending, staged, failed.
     """
     force_stage = os.environ.get("KYTH_STAGE_MOK", "0").lower() in ("1", "true", "yes", "on")
+    executor = PrivilegedExecutor(run_command=run_command, as_root=_as_root)
+
+    def run_mok(argv: list[str], description: str, **kwargs):
+        return executor.run(
+            ExecutorCommand.from_argv(argv, description, timeout=kwargs.pop("timeout", 30)),
+            **kwargs,
+        )
+
     if kernel != "cachy" and not force_stage:
-        log("Secure Boot: standard KythOS kernel selected — custom-kernel MOK enrollment not staged")
-        return "skipped"
+        decision = plan_mok(kernel=kernel, force_stage=force_stage)
+        log(f"Secure Boot: {decision.message}")
+        return decision.state
 
     cert_der = Path("/usr/share/kyth/secureboot/kyth-secureboot.der")
     if not cert_der.exists():
-        log("Secure Boot: cert not found in live image — skipping enrollment staging")
-        return "skipped"
+        decision = plan_mok(
+            kernel=kernel, force_stage=force_stage, certificate_present=False,
+        )
+        log(f"Secure Boot: {decision.message}")
+        return decision.state
 
     mokutil = shutil.which("mokutil")
     if not mokutil:
-        log("Secure Boot: mokutil not found — skipping enrollment staging")
-        return "skipped"
+        decision = plan_mok(
+            kernel=kernel, force_stage=force_stage, certificate_present=True,
+        )
+        log(f"Secure Boot: {decision.message}")
+        return decision.state
 
     try:
-        result = run_command(
-            _as_root([mokutil, "--sb-state"]),
+        result = run_mok(
+            [mokutil, "--sb-state"],
+            "check Secure Boot state",
             capture_output=True, text=True, timeout=5,
         )
         if "SecureBoot enabled" not in result.stdout:
-            log("Secure Boot: not currently enabled — enrollment staging skipped")
+            decision = plan_mok(
+                kernel=kernel, force_stage=force_stage,
+                certificate_present=True, mokutil_present=True,
+                secure_boot="disabled",
+            )
+            log(f"Secure Boot: {decision.message}")
             log("Secure Boot: if you enable it later, run 'ujust enroll-secureboot'")
-            return "skipped"
+            return decision.state
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Secure Boot: could not check state ({exc}) — skipping enrollment staging")
         return "skipped"
 
     try:
-        enrolled = run_command(
-            _as_root([mokutil, "--list-enrolled"]),
+        enrolled = run_mok(
+            [mokutil, "--list-enrolled"],
+            "list enrolled KythOS Secure Boot keys",
             capture_output=True, text=True, timeout=5,
         )
         if "KythOS Secure Boot" in enrolled.stdout:
-            log("Secure Boot: KythOS key already enrolled")
-            return "enrolled"
+            decision = plan_mok(
+                kernel=kernel, force_stage=force_stage,
+                certificate_present=True, mokutil_present=True,
+                secure_boot="enabled", enrolled="yes",
+            )
+            log(f"Secure Boot: {decision.message}")
+            return decision.state
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Secure Boot: could not check enrolled keys ({exc}) — continuing")
 
     try:
-        pending = run_command(
-            _as_root([mokutil, "--list-new"]),
+        pending = run_mok(
+            [mokutil, "--list-new"],
+            "list pending KythOS Secure Boot keys",
             capture_output=True, text=True, timeout=5,
         )
         if "KythOS Secure Boot" in pending.stdout:
-            log("Secure Boot: enrollment already staged — confirm it on next boot")
-            return "pending"
+            decision = plan_mok(
+                kernel=kernel, force_stage=force_stage,
+                certificate_present=True, mokutil_present=True,
+                secure_boot="enabled", enrolled="no", pending="yes",
+            )
+            log(f"Secure Boot: {decision.message}")
+            return decision.state
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
         log(f"Secure Boot: could not check staged keys ({exc}) — continuing")
 
     try:
-        result = run_command(
-            _as_root([mokutil, "--import", str(cert_der), "--stdin-passwd"]),
+        result = run_mok(
+            [mokutil, "--import", str(cert_der), "--stdin-passwd"],
+            "stage KythOS Secure Boot key enrollment",
             input=f"{mok_password}\n", text=True, capture_output=True, timeout=15,
         )
-        if result.returncode == 0:
+        if classify_import(result.returncode) == "staged":
             log("Secure Boot: enrollment staged — confirm it on first boot before the KythOS performance kernel starts")
             return "staged"
         log(f"Secure Boot: mokutil import failed (exit {result.returncode}): {result.stderr.strip()}")
@@ -228,4 +264,3 @@ def _hash_password(password: str) -> str:
     if not password_hash.startswith("$6$"):
         raise RuntimeError("Password hashing returned an invalid SHA-512 crypt value")
     return password_hash
-

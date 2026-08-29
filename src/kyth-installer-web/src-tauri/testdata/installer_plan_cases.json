@@ -1,0 +1,92 @@
+[
+  {
+    "name": "wipe-default-mode",
+    "input": {"disk": "sda", "install_mode": " Wipe "},
+    "expected": {
+      "mode": "wipe",
+      "disk": "/dev/sda",
+      "target_partition": null,
+      "resize_partition": null,
+      "resize_bytes": 0,
+      "free_region_start": null,
+      "free_region_end": null
+    }
+  },
+  {
+    "name": "alongside-target",
+    "input": {"disk": "/dev/nvme0n1", "install_mode": "alongside", "target_partition": "nvme0n1p5"},
+    "expected": {
+      "mode": "alongside",
+      "disk": "/dev/nvme0n1",
+      "target_partition": "/dev/nvme0n1p5",
+      "resize_partition": null,
+      "resize_bytes": 0,
+      "free_region_start": null,
+      "free_region_end": null
+    }
+  },
+  {
+    "name": "ntfs-resize-target-fallback",
+    "input": {"disk": "/dev/sda", "install_mode": "resize_ntfs", "target_partition": "/dev/sda2", "resize_gib": 40},
+    "expected": {
+      "mode": "resize_ntfs",
+      "disk": "/dev/sda",
+      "target_partition": null,
+      "resize_partition": "/dev/sda2",
+      "resize_bytes": 42949672960,
+      "free_region_start": null,
+      "free_region_end": null
+    }
+  },
+  {
+    "name": "free-space-region",
+    "input": {"disk": "/dev/sda", "install_mode": "free_space", "free_region_start": 1048576, "free_region_end": 35433480192},
+    "expected": {
+      "mode": "free_space",
+      "disk": "/dev/sda",
+      "target_partition": null,
+      "resize_partition": null,
+      "resize_bytes": 0,
+      "free_region_start": 1048576,
+      "free_region_end": 35433480192
+    }
+  },
+  {
+    "name": "manual-target",
+    "input": {"disk": "/dev/sda", "install_mode": "manual", "target_partition": "/dev/sda2"},
+    "expected": {
+      "mode": "manual",
+      "disk": "/dev/sda",
+      "target_partition": "/dev/sda2",
+      "resize_partition": null,
+      "resize_bytes": 0,
+      "free_region_start": null,
+      "free_region_end": null
+    }
+  },
+  {
+    "name": "reject-unsupported-mode",
+    "input": {"disk": "sda", "install_mode": "unsupported"},
+    "error_contains": "Unsupported install mode"
+  },
+  {
+    "name": "reject-missing-disk",
+    "input": {"install_mode": "wipe"},
+    "error_contains": "No target disk"
+  },
+  {
+    "name": "reject-missing-alongside-target",
+    "input": {"disk": "sda", "install_mode": "alongside"},
+    "error_contains": "No target partition"
+  },
+  {
+    "name": "reject-small-resize",
+    "input": {"disk": "sda", "install_mode": "resize_ntfs", "target_partition": "sda2", "resize_gib": 1},
+    "error_contains": "at least 32 GiB"
+  },
+  {
+    "name": "reject-reversed-free-region",
+    "input": {"disk": "sda", "install_mode": "free_space", "free_region_start": 10, "free_region_end": 5},
+    "error_contains": "No free space region"
+  }
+]

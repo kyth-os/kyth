@@ -1,0 +1,88 @@
+[
+  {
+    "name": "standard-kernel",
+    "input": {
+      "kernel": "fedora",
+      "certificate_present": true,
+      "mokutil_present": true,
+      "secure_boot": "enabled",
+      "enrolled": "no",
+      "pending": "no"
+    },
+    "expected": {"state": "skipped", "action": "none"}
+  },
+  {
+    "name": "missing-certificate",
+    "input": {
+      "kernel": "cachy",
+      "certificate_present": false,
+      "mokutil_present": true
+    },
+    "expected": {"state": "skipped", "action": "none"}
+  },
+  {
+    "name": "missing-mokutil",
+    "input": {
+      "kernel": "cachy",
+      "certificate_present": true,
+      "mokutil_present": false
+    },
+    "expected": {"state": "skipped", "action": "none"}
+  },
+  {
+    "name": "secure-boot-disabled",
+    "input": {
+      "kernel": "cachy",
+      "certificate_present": true,
+      "mokutil_present": true,
+      "secure_boot": "disabled"
+    },
+    "expected": {"state": "skipped", "action": "none"}
+  },
+  {
+    "name": "secure-boot-state-unknown",
+    "input": {
+      "kernel": "cachy",
+      "certificate_present": true,
+      "mokutil_present": true,
+      "secure_boot": "unknown"
+    },
+    "expected": {"state": "unknown", "action": "probe"}
+  },
+  {
+    "name": "already-enrolled",
+    "input": {
+      "kernel": "cachy",
+      "certificate_present": true,
+      "mokutil_present": true,
+      "secure_boot": "enabled",
+      "enrolled": "yes",
+      "pending": "no"
+    },
+    "expected": {"state": "enrolled", "action": "none"}
+  },
+  {
+    "name": "enrollment-pending",
+    "input": {
+      "kernel": "cachy",
+      "certificate_present": true,
+      "mokutil_present": true,
+      "secure_boot": "enabled",
+      "enrolled": "no",
+      "pending": "yes"
+    },
+    "expected": {"state": "pending", "action": "none"}
+  },
+  {
+    "name": "ready-to-import",
+    "input": {
+      "kernel": "cachy",
+      "certificate_present": true,
+      "mokutil_present": true,
+      "secure_boot": "enabled",
+      "enrolled": "no",
+      "pending": "no"
+    },
+    "expected": {"state": "ready", "action": "import-certificate"}
+  }
+]

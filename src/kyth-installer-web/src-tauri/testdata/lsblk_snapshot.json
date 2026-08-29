@@ -1,0 +1,55 @@
+{
+  "blockdevices": [
+    {
+      "name": "/dev/sda",
+      "size": 214748364800,
+      "type": "disk",
+      "model": "Example SSD",
+      "rota": false,
+      "tran": "nvme",
+      "rm": false,
+      "ro": false,
+      "pttype": "gpt",
+      "children": [
+        {
+          "name": "/dev/sda1",
+          "size": 1073741824,
+          "type": "part",
+          "fstype": "vfat",
+          "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+          "mountpoints": ["/boot/efi"],
+          "start": 2048,
+          "ro": false
+        },
+        {
+          "name": "/dev/sda2",
+          "size": 214748364800,
+          "type": "part",
+          "fstype": "ntfs",
+          "parttype": "e7bbf7e4-2e3c-4a05-9c2f-8b7b4f2a0e8f",
+          "mountpoints": [null],
+          "start": 2099200,
+          "ro": false,
+          "children": [
+            {
+              "name": "/dev/mapper/example",
+              "type": "crypt",
+              "mountpoint": "/mnt"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "/dev/sdb",
+      "size": 107374182400,
+      "type": "disk",
+      "model": "Protected disk",
+      "rota": true,
+      "tran": "usb",
+      "rm": true,
+      "ro": false,
+      "pttype": "gpt"
+    }
+  ]
+}

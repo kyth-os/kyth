@@ -95,7 +95,18 @@ export const installerApi = {
   pending: () => request<PendingOperation[]>("/api/disk/pending"),
   filesystems: () => request<Array<{ id: string; name?: string }>>("/api/disk/filesystems"),
   report: () => request<TransactionReport>("/api/report"),
-  rescueProbe: () => request<RescueProbe>("/api/rescue/probe"),
+  rescueProbe: async () => {
+    const probe = await request<RescueProbe>("/api/rescue/probe");
+    const status = probe.transaction?.status;
+    if (inTauriShell() && status) {
+      const guidance = await invoke<NonNullable<RescueProbe["rescue_guidance"]>>("installer_recovery_guidance", { status });
+      probe.rescue_guidance = guidance;
+    }
+    return probe;
+  },
+  validatePlan: async (body: InstallRequest): Promise<void> => {
+    if (inTauriShell()) await invoke("installer_validate_plan", { request: body });
+  },
   start: (body: InstallRequest) => post<{ started: boolean }>("/api/start", body),
   cancel: () => post<{ ok: boolean; message?: string }>("/api/cancel", {}),
   reboot: () => post<{ ok: boolean }>("/api/reboot", {}),

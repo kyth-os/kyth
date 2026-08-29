@@ -36,7 +36,7 @@ export function InstallerApp() {
   const update = <K extends keyof InstallRequest>(key: K, value: InstallRequest[K]) => setRequest((current) => ({ ...current, [key]: value }));
   const start = async () => {
     setError(""); setBusy(true);
-    try { await installerApi.start(request); setStep("install"); setEvents([]); subscribeToInstallEvents(handleEvent, () => setError("Installer connection interrupted. Check the transaction report before retrying.")); }
+    try { await installerApi.validatePlan(request); await installerApi.start(request); setStep("install"); setEvents([]); subscribeToInstallEvents(handleEvent, () => setError("Installer connection interrupted. Check the transaction report before retrying.")); }
     catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   const handleEvent = (event: InstallerEvent) => { setEvents((current) => [...current, event]); if (event.type === "phase") setPhase(event.phase); if (event.type === "progress") setProgress(event.value); if (event.type === "done") setStep("done"); if (event.type === "error") setError(event.message); };

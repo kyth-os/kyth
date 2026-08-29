@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from .context import InstallationState, InstallRequest
+from .disk import _normal_device_path
 from .plan_types import InstallPlan
 
 
@@ -26,8 +27,8 @@ def install_plan_from_state(state: InstallationState | InstallRequest) -> Instal
     request = as_request(state)
     return InstallPlan(
         mode=normalized_install_mode(request),
-        disk=request.disk,
-        target_partition=request.target_partition,
+        disk=_normal_device_path(request.disk),
+        target_partition=_normal_device_path(request.target_partition),
     )
 
 

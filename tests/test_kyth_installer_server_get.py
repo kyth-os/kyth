@@ -12,6 +12,7 @@ import stat
 import struct
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -71,6 +72,26 @@ class ParseCookieAndRouteTests(unittest.TestCase):
 
 
 class UnixSocketServerTests(unittest.TestCase):
+    @staticmethod
+    def _request(path: Path, request: bytes) -> bytes:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            client.settimeout(3)
+            client.connect(str(path))
+            client.sendall(request)
+            chunks = []
+            while True:
+                try:
+                    chunk = client.recv(65536)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            client.close()
+
     def test_requires_absolute_socket_path(self):
         with self.assertRaisesRegex(ValueError, "absolute"):
             server.UnixSocketServer("relative.sock", server.Handler)
@@ -100,6 +121,27 @@ class UnixSocketServerTests(unittest.TestCase):
         with patch.object(server, "_peer_uid", return_value=123):
             self.assertFalse(handler._require_same_origin_context())
         handler.send_error.assert_called_once_with(403, "Forbidden")
+
+    def test_authenticated_http_route_works_over_unix_socket(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api.sock"
+            context = InstallerContext()
+            unix_server = server.UnixSocketServer(path, server.Handler, context=context)
+            thread = threading.Thread(target=unix_server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = (
+                    b"GET /api/disk/filesystems HTTP/1.0\r\n"
+                    b"X-Kyth-Session-Token: " + config.SESSION_TOKEN.encode("ascii") + b"\r\n\r\n"
+                )
+                response = self._request(path, request)
+                header, body = response.split(b"\r\n\r\n", 1)
+                self.assertIn(b"200", header.splitlines()[0])
+                self.assertEqual(json.loads(body), server.FILESYSTEM_OPTIONS)
+            finally:
+                unix_server.shutdown()
+                unix_server.server_close()
+                thread.join(timeout=3)
 
 
 class ServerIndexTests(unittest.TestCase):
