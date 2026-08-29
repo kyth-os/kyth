@@ -265,6 +265,62 @@ class InstallerAppCoverageTests(unittest.TestCase):
         command = spawn.call_args.args[0]
         self.assertEqual(command[:5], ["sudo", "-u", "alice", "env", "DISPLAY=:0"])
 
+    def test_gui_main_uses_unix_service_and_cleans_up(self):
+        proc = mock.MagicMock()
+        run_calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            socket_path = Path(tmp) / "api.sock"
+            socket_path.touch()
+            token_path = Path(tmp) / "session-token"
+            with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
+                app, "SOCKET_PATH", socket_path
+            ), mock.patch.object(app, "SESSION_TOKEN_FILE", token_path), mock.patch.object(
+                app, "_write_session_token"
+            ) as write_token, mock.patch.object(
+                app, "run_command", side_effect=lambda *args, **kwargs: run_calls.append((args, kwargs))
+            ), mock.patch.object(app.shutil, "which", side_effect=lambda name: "/usr/bin/kyth-installer-shell" if name == "kyth-installer-shell" else None), mock.patch.object(
+                app, "spawn_command", return_value=proc
+            ) as spawn, mock.patch.object(app.time, "sleep"), mock.patch.object(
+                app.time, "monotonic", return_value=0
+            ), mock.patch("subprocess.run", return_value=SimpleNamespace(stdout="")), mock.patch.dict(
+                os.environ, {}, clear=True
+            ):
+                app.main()
+
+        write_token.assert_called_once_with(token_path, app.SESSION_TOKEN)
+        self.assertEqual([call[0][0] for call in run_calls], [
+            ["systemctl", "start", "kyth-installerd.service"],
+            ["systemctl", "stop", "kyth-installerd.service"],
+        ])
+        self.assertIn("--socket-path", spawn.call_args.args[0])
+        proc.wait.assert_called_once()
+
+    def test_gui_main_removes_token_when_unix_service_fails_to_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            socket_path = Path(tmp) / "api.sock"
+            token_path = Path(tmp) / "session-token"
+            with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
+                app, "SOCKET_PATH", socket_path
+            ), mock.patch.object(app, "SESSION_TOKEN_FILE", token_path), mock.patch.object(
+                app, "_write_session_token"
+            ), mock.patch.object(app, "run_command", side_effect=RuntimeError("start failed")):
+                with self.assertRaisesRegex(RuntimeError, "start failed"):
+                    app.main()
+
+    def test_gui_main_fails_and_removes_token_when_unix_socket_never_appears(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            socket_path = Path(tmp) / "api.sock"
+            token_path = Path(tmp) / "session-token"
+            with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
+                app, "SOCKET_PATH", socket_path
+            ), mock.patch.object(app, "SESSION_TOKEN_FILE", token_path), mock.patch.object(
+                app, "_write_session_token"
+            ), mock.patch.object(app, "run_command"), mock.patch.object(
+                app.time, "monotonic", side_effect=[0, 10]
+            ), mock.patch.object(app.time, "sleep"):
+                with self.assertRaisesRegex(RuntimeError, "did not create"):
+                    app.main()
+
     def test_headless_answer_file_error_calls_parser_error(self):
         with mock.patch.object(app, "_load_answer_file", side_effect=OSError("boom")) as loader:
             with mock.patch.object(sys, "argv", ["prog", "--headless", "--answer-file", "/tmp/answers.json"]):

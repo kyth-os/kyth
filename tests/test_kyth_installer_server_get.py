@@ -155,6 +155,63 @@ class ServerIndexTests(unittest.TestCase):
         handler.send_error.assert_called_once_with(403, "Forbidden")
 
 
+class ServerTransportAuthTests(unittest.TestCase):
+    def test_end_headers_emits_cors_headers_for_tauri_origin(self):
+        handler = _make_handler("/api/config")
+        handler.headers["Origin"] = "http://tauri.localhost"
+        with patch.object(server.BaseHTTPRequestHandler, "end_headers") as parent_end_headers:
+            server.Handler.end_headers(handler)
+        names = [call.args[0] for call in handler.send_header.call_args_list]
+        self.assertIn("Access-Control-Allow-Origin", names)
+        parent_end_headers.assert_called_once()
+
+    def test_options_accepts_tauri_origin_and_rejects_other_origins(self):
+        allowed = _make_handler("/", host=f"127.0.0.1:{config.PORT}")
+        allowed.headers["Origin"] = "http://tauri.localhost"
+        allowed.do_OPTIONS()
+        allowed.send_response.assert_called_once_with(204)
+
+        rejected = _make_handler("/", host=f"127.0.0.1:{config.PORT}")
+        rejected.headers["Origin"] = "https://evil.example"
+        rejected.do_OPTIONS()
+        rejected.send_error.assert_called_once_with(403, "Forbidden")
+
+    def test_stream_query_token_and_unix_peer_authenticate(self):
+        stream = _make_handler(f"/api/stream?session_token={config.SESSION_TOKEN}")
+        self.assertTrue(stream._require_auth())
+
+        peer = _make_handler("/api/config")
+        peer.server = SimpleNamespace(transport="unix", peer_uid=456, context=InstallerContext())
+        peer.connection = object()
+        with patch.object(server, "_peer_uid", return_value=456):
+            self.assertTrue(peer._require_same_origin_context())
+
+    def test_trusted_local_url_requires_exact_loopback_port(self):
+        self.assertTrue(server.Handler._is_trusted_local_url(f"http://127.0.0.1:{config.PORT}/"))
+        self.assertFalse(server.Handler._is_trusted_local_url("https://127.0.0.1:7777/"))
+        self.assertFalse(server.Handler._is_trusted_local_url("not a URL"))
+
+    def test_locale_timezone_keymap_and_rescue_routes_dispatch(self):
+        routes = (
+            ("/api/timezones", "list_timezones"),
+            ("/api/locales", "list_locales"),
+            ("/api/keymaps", "list_keymaps"),
+        )
+        for path, function_name in routes:
+            with self.subTest(path=path):
+                handler = _make_handler(path, host=f"127.0.0.1:{config.PORT}")
+                handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+                with patch.object(server, function_name, return_value=[path]):
+                    handler.do_GET()
+                self.assertEqual(json.loads(handler.wfile.getvalue()), [path])
+
+        rescue = _make_handler("/api/rescue/probe", host=f"127.0.0.1:{config.PORT}")
+        rescue.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+        with patch.object(rescue, "_rescue_probe", return_value={"read_only": True}):
+            rescue.do_GET()
+        self.assertEqual(json.loads(rescue.wfile.getvalue()), {"read_only": True})
+
+
 class ServerStaticAssetTests(unittest.TestCase):
     def test_style_css_requires_session_auth(self):
         handler = _make_handler("/style.css", host=f"127.0.0.1:{config.PORT}")
