@@ -1,5 +1,6 @@
 import json
 import os
+import runpy
 import sys
 import tempfile
 import unittest
@@ -236,6 +237,47 @@ class InstallerAppCoverageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "chmod 600"):
                 app._load_answer_file(str(path))
 
+    def test_write_session_token_creates_a_private_file_and_rejects_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token_path = Path(tmp) / "session-token"
+            app._write_session_token(token_path, "token-value")
+            self.assertEqual(token_path.read_text(), "token-value")
+            self.assertEqual(token_path.stat().st_mode & 0o777, 0o600)
+
+            link_path = Path(tmp) / "token-link"
+            link_path.symlink_to(token_path)
+            with self.assertRaisesRegex(RuntimeError, "must not be a symlink"):
+                app._write_session_token(link_path, "replacement")
+
+    def test_headless_warns_for_command_line_password(self):
+        service = mock.MagicMock()
+        service.start_install.return_value = {"started": False, "message": "invalid"}
+        with mock.patch.object(sys, "argv", ["prog", "--headless", "--password", "secret"]), mock.patch.object(
+            app, "InstallerService", return_value=service
+        ), mock.patch("sys.stderr") as stderr:
+            with self.assertRaises(SystemExit) as raised:
+                app.run_headless()
+        self.assertEqual(raised.exception.code, 1)
+        self.assertTrue(any("/proc/cmdline" in str(call) for call in stderr.write.call_args_list))
+
+    def test_headless_renders_done_and_failed_lifecycle_events(self):
+        for event, lifecycle, exit_code in (
+            ({"type": "done", "mok_state": "enrolled"}, InstallLifecycle.DONE, 0),
+            ({}, InstallLifecycle.FAILED, 1),
+        ):
+            context = InstallerContext()
+            if event:
+                context.events.publish(event)
+            context.lifecycle = lifecycle
+            service = mock.MagicMock()
+            service.start_install.return_value = {"started": True}
+            with mock.patch.object(sys, "argv", ["prog", "--headless"]), mock.patch.object(
+                app, "InstallerContext", return_value=context
+            ), mock.patch.object(app, "InstallerService", return_value=service), mock.patch("builtins.print"):
+                with self.assertRaises(SystemExit) as raised:
+                    app.run_headless()
+            self.assertEqual(raised.exception.code, exit_code)
+
     def test_gui_main_launches_chromium_and_handles_interrupt(self):
         server = mock.MagicMock()
         proc = mock.MagicMock()
@@ -294,6 +336,84 @@ class InstallerAppCoverageTests(unittest.TestCase):
         ])
         self.assertIn("--socket-path", spawn.call_args.args[0])
         proc.wait.assert_called_once()
+
+    def test_gui_main_waits_for_unix_socket_and_ignores_cleanup_unlink_errors(self):
+        proc = mock.MagicMock()
+        with tempfile.TemporaryDirectory() as tmp:
+            socket_path = Path(tmp) / "api.sock"
+            token_path = Path(tmp) / "session-token"
+            with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
+                app, "SOCKET_PATH", socket_path
+            ), mock.patch.object(app, "SESSION_TOKEN_FILE", token_path), mock.patch.object(
+                app, "_write_session_token"
+            ), mock.patch.object(app, "run_command"), mock.patch.object(
+                app.shutil, "which", return_value="/usr/bin/kyth-installer-shell"
+            ), mock.patch.object(app, "spawn_command", return_value=proc), mock.patch.object(
+                app.time, "monotonic", side_effect=[0, 1, 10]
+            ), mock.patch.object(app.time, "sleep"), mock.patch.object(
+                Path, "unlink", side_effect=OSError("cleanup failed")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "did not create"):
+                    app.main()
+
+    def test_gui_main_rejects_socket_transport_without_installer_shell(self):
+        proc = mock.MagicMock()
+        with tempfile.TemporaryDirectory() as tmp:
+            socket_path = Path(tmp) / "api.sock"
+            socket_path.touch()
+            token_path = Path(tmp) / "session-token"
+            with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
+                app, "SOCKET_PATH", socket_path
+            ), mock.patch.object(app, "SESSION_TOKEN_FILE", token_path), mock.patch.object(
+                app, "_write_session_token"
+            ), mock.patch.object(app, "run_command"), mock.patch.object(
+                app.shutil, "which", return_value=None
+            ), mock.patch.object(app, "spawn_command", return_value=proc):
+                with self.assertRaisesRegex(RuntimeError, "required when Unix transport"):
+                    app.main()
+
+    def test_gui_main_resolves_session_owner_from_loginctl_xdg_and_sudo(self):
+        proc = mock.MagicMock()
+        cases = (
+            ({}, [SimpleNamespace(stdout="c1"), SimpleNamespace(stdout="alice")], "alice"),
+            ({"XDG_RUNTIME_DIR": "/run/user/1000"}, [SimpleNamespace(stdout="")], "alice"),
+            ({"SUDO_USER": "alice"}, [SimpleNamespace(stdout="")], "alice"),
+        )
+        for environment, loginctl_results, expected_user in cases:
+            with self.subTest(environment=environment):
+                with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
+                    app, "_Server"
+                ), mock.patch.object(app.threading, "Thread"), mock.patch.object(app.time, "sleep"), mock.patch.object(
+                    app.shutil, "which", return_value="/usr/bin/chromium"
+                ), mock.patch.object(app, "spawn_command", return_value=proc) as spawn, mock.patch(
+                    "subprocess.run", side_effect=loginctl_results
+                ), mock.patch("pwd.getpwuid", return_value=SimpleNamespace(pw_name="alice")), mock.patch(
+                    "pwd.getpwnam", return_value=SimpleNamespace(pw_name="alice")
+                ), mock.patch.dict(os.environ, environment, clear=True):
+                    app.main()
+                self.assertEqual(spawn.call_args.args[0][1], "-u")
+                self.assertEqual(spawn.call_args.args[0][2], expected_user)
+
+    def test_gui_main_falls_back_when_session_owner_probes_fail(self):
+        proc = mock.MagicMock()
+        with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
+            app, "_Server"
+        ), mock.patch.object(app.threading, "Thread"), mock.patch.object(app.time, "sleep"), mock.patch.object(
+            app.shutil, "which", return_value="/usr/bin/chromium"
+        ), mock.patch.object(app, "spawn_command", return_value=proc), mock.patch(
+            "subprocess.run", side_effect=OSError("loginctl unavailable")
+        ), mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/not-a-uid"}, clear=True):
+            app.main()
+
+    def test_module_entrypoint_dispatches_to_main(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            answer_file = Path(tmp) / "answers.json"
+            answer_file.write_text("{}")
+            answer_file.chmod(0o644)
+            with mock.patch.object(sys, "argv", ["kyth-installer", "--headless", "--answer-file", str(answer_file)]):
+                with self.assertRaises(SystemExit) as raised:
+                    runpy.run_module("kyth_installer.app", run_name="__main__")
+            self.assertEqual(raised.exception.code, 2)
 
     def test_gui_main_removes_token_when_unix_service_fails_to_start(self):
         with tempfile.TemporaryDirectory() as tmp:
