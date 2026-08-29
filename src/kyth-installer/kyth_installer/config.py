@@ -31,6 +31,9 @@ PORT         = 7777
 # logical API to a Unix socket without changing route semantics.
 SOCKET_PATH = Path(os.environ.get("KYTH_INSTALLER_SOCKET", "")) if os.environ.get("KYTH_INSTALLER_SOCKET") else None
 SOCKET_GROUP = os.environ.get("KYTH_INSTALLER_SOCKET_GROUP", "").strip()
+SESSION_TOKEN_FILE = Path(
+    os.environ.get("KYTH_INSTALLER_TOKEN_FILE", "/run/kyth-installer/session-token")
+)
 SESSION_TOKEN = secrets.token_urlsafe(32)
 _bootstrap_token: Optional[str] = None
 _bootstrap_lock = threading.Lock()

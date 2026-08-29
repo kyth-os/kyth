@@ -13,11 +13,12 @@ import stat
 import sys
 import threading
 import time
+from pathlib import Path
 
 from . import config
-from .config import PORT, SESSION_TOKEN, SOCKET_GROUP, SOCKET_PATH
+from .config import PORT, SESSION_TOKEN, SESSION_TOKEN_FILE, SOCKET_GROUP, SOCKET_PATH
 from .context import InstallerContext, InstallLifecycle
-from .runner import spawn_command
+from .runner import run_command, spawn_command
 from .server import Handler, UnixSocketServer, _Server
 from .services.installer_service import InstallerService
 
@@ -49,6 +50,23 @@ def _load_answer_file(path_value: str) -> dict:
     if unknown:
         raise ValueError(f"Unknown installer answer-file fields: {', '.join(unknown)}")
     return payload
+
+
+def _write_session_token(path: os.PathLike[str] | str, token: str) -> None:
+    """Create the root-only credential consumed by kyth-installerd."""
+    token_path = os.fspath(path)
+    parent = os.path.dirname(token_path)
+    os.makedirs(parent, mode=0o750, exist_ok=True)
+    if os.path.lexists(token_path) and os.path.islink(token_path):
+        raise RuntimeError("installer session token path must not be a symlink")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(token_path, flags, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, token.encode("ascii"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def run_headless() -> None:
@@ -170,13 +188,31 @@ def main() -> None:
 
     config._bootstrap_token = secrets.token_urlsafe(32)
 
+    backend_server = None
+    socket_service_started = False
+    token_file = None
     if SOCKET_PATH is not None:
-        server = UnixSocketServer(SOCKET_PATH, Handler, socket_group=SOCKET_GROUP)
+        token_file = SESSION_TOKEN_FILE
+        try:
+            _write_session_token(token_file, SESSION_TOKEN)
+            run_command(["systemctl", "start", "kyth-installerd.service"], check=True, timeout=30)
+            socket_service_started = True
+            deadline = time.monotonic() + 5
+            while not SOCKET_PATH.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not SOCKET_PATH.exists():
+                raise RuntimeError("kyth-installerd did not create its Unix socket")
+        except (OSError, RuntimeError, ValueError):
+            try:
+                Path(token_file).unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
     else:
-        server = _Server(("127.0.0.1", PORT), Handler)
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-    time.sleep(0.3)
+        backend_server = _Server(("127.0.0.1", PORT), Handler)
+        t = threading.Thread(target=backend_server.serve_forever, daemon=True)
+        t.start()
+        time.sleep(0.3)
 
     # The installer runs as root (bootc requires it), but Chromium must run as
     # the desktop user so it can connect to the X display. Prefer the session
@@ -232,6 +268,12 @@ def main() -> None:
         if SOCKET_PATH is not None:
             gui_cmd.extend(["--socket-path", str(SOCKET_PATH)])
     else:
+        if SOCKET_PATH is not None:
+            if socket_service_started:
+                run_command(["systemctl", "stop", "kyth-installerd.service"], check=False, timeout=30)
+            if token_file is not None:
+                Path(token_file).unlink(missing_ok=True)
+            raise RuntimeError("kyth-installer-shell is required when Unix transport is enabled")
         chromium_bin = next(
             (b for b in ("chromium", "chromium-browser", "chromium-bin") if shutil.which(b)),
             "chromium",
@@ -252,33 +294,42 @@ def main() -> None:
             "--window-size=1280,800",
             "--window-position=0,0",
         ]
-    if sudo_user:
-        gui_env = []
-        for key in (
-            "DISPLAY",
-            "WAYLAND_DISPLAY",
-            "XAUTHORITY",
-            "XDG_RUNTIME_DIR",
-            "DBUS_SESSION_BUS_ADDRESS",
-            "XDG_SESSION_TYPE",
-            "QT_QUICK_BACKEND",
-            "LIBGL_ALWAYS_SOFTWARE",
-            "GALLIUM_DRIVER",
-            "MESA_LOADER_DRIVER_OVERRIDE",
-        ):
-            value = os.environ.get(key)
-            if value:
-                gui_env.append(f"{key}={value}")
-        proc = spawn_command(["sudo", "-u", sudo_user, "env", *gui_env, *gui_cmd])
-    else:
-        proc = spawn_command(gui_cmd)
-
-    # Wait for the GUI shell to exit so the process and port are released cleanly.
-    # This means re-launching the installer from the desktop always gets a fresh server.
     try:
-        proc.wait()
-    except KeyboardInterrupt:
-        proc.terminate()
+        if sudo_user:
+            gui_env = []
+            for key in (
+                "DISPLAY",
+                "WAYLAND_DISPLAY",
+                "XAUTHORITY",
+                "XDG_RUNTIME_DIR",
+                "DBUS_SESSION_BUS_ADDRESS",
+                "XDG_SESSION_TYPE",
+                "QT_QUICK_BACKEND",
+                "LIBGL_ALWAYS_SOFTWARE",
+                "GALLIUM_DRIVER",
+                "MESA_LOADER_DRIVER_OVERRIDE",
+            ):
+                value = os.environ.get(key)
+                if value:
+                    gui_env.append(f"{key}={value}")
+            proc = spawn_command(["sudo", "-u", sudo_user, "env", *gui_env, *gui_cmd])
+        else:
+            proc = spawn_command(gui_cmd)
+
+        # Wait for the GUI shell to exit so the service/socket is released cleanly.
+        # This means re-launching the installer always gets a fresh backend session.
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            proc.terminate()
+    finally:
+        if backend_server is not None:
+            backend_server.shutdown()
+            backend_server.server_close()
+        if socket_service_started:
+            run_command(["systemctl", "stop", "kyth-installerd.service"], check=False, timeout=30)
+        if token_file is not None:
+            Path(token_file).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
