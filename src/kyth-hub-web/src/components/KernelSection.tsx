@@ -45,8 +45,8 @@ export function KernelSection({ section }: { section: HubSection }) {
       <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
         <p className="card-copy" style={{ fontSize: 12, margin: "0 0 12px" }}>
           The CachyOS kernel is the gaming default; Fedora's is the conservative fallback. Switching stages a new
-          deployment and takes effect on reboot, so it runs from a terminal where you can read what it stages and
-          answer the sudo prompt — the flavour is part of the command, and a bare <code>switch-kernel</code> would
+          deployment and takes effect on reboot. Progress stays in this Hub window, and authentication appears in a
+          normal desktop dialog — the flavour is part of the command, and a bare <code>switch-kernel</code> would
           silently mean Fedora.
         </p>
         <CommandLine label="Switch to the CachyOS kernel" command="ujust switch-kernel cachy" />

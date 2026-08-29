@@ -29,7 +29,7 @@ function ago(timestamp: string | undefined): string | null {
   return relativeTime(ms / 1000);
 }
 
-// The real "This PC > Updates" content — reads the same bootc-status-data /
+// The real "Updates" page content — reads the same bootc-status-data /
 // bootc-branch probe sections the retired Qt Hub's Update page read,
 // through the Tauri probe_backend bridge (see services/liveData.ts).
 //

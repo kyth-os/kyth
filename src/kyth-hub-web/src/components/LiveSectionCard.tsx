@@ -17,14 +17,14 @@ export function LiveSectionCard({
   children: ReactNode;
 }) {
   return (
-    <div className="glass" style={{ padding: 28 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+    <div className="glass section-card">
+      <div className="section-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span className="icon-badge" style={{ width: 52, height: 52 }}>
+          <span className="icon-badge section-icon">
             <section.Icon width={24} height={24} stroke="#04101c" />
           </span>
           <div>
-            <p className="card-title" style={{ fontSize: 18 }}>
+            <p className="card-title section-heading">
               {section.title}
             </p>
             <p className="card-copy" style={{ marginTop: 6, maxWidth: 460 }}>
@@ -32,11 +32,11 @@ export function LiveSectionCard({
             </p>
           </div>
         </div>
-        <span className={`pill ${live ? "pill-ok" : "pill-dim"}`} style={{ flexShrink: 0 }}>
+        <span className={`pill section-status ${live ? "pill-ok" : "pill-dim"}`}>
           {live ? "Live" : "Preview"}
         </span>
       </div>
-      {children}
+      <div className="section-body">{children}</div>
     </div>
   );
 }
@@ -47,10 +47,16 @@ export function LiveSectionCard({
  * fetch never happened because this isn't running inside the Hub shell. */
 export function SectionFallbackNote({ loaded }: { loaded: boolean }) {
   return (
-    <p className="card-copy" style={{ marginTop: 20, fontSize: 12 }}>
-      {loaded
-        ? "Nothing to report yet — kyth-probe.service fills this in on a real KythOS install."
-        : "Reading system state needs the Hub's own window; a plain browser tab can't get at it."}
-    </p>
+    <div className="empty-state">
+      <span className="empty-state-mark">{loaded ? "·" : "…"}</span>
+      <div>
+        <p className="card-title" style={{ fontSize: 13 }}>{loaded ? "No reading yet" : "Reading system status"}</p>
+        <p className="card-copy" style={{ marginTop: 3, fontSize: 12 }}>
+          {loaded
+            ? "kyth-probe.service fills this in on a real KythOS install."
+            : "The Hub is checking this device now."}
+        </p>
+      </div>
+    </div>
   );
 }

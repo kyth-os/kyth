@@ -454,8 +454,9 @@ export async function fetchSecurebootState(): Promise<string | null> {
 }
 
 // Just recipes — live `just --list` via Tauri (port of page_just.py).
-// `params` is non-empty when the recipe takes arguments. runJustRecipe
-// spawns the bare name, so those rows must not become buttons.
+// `params` is non-empty when the recipe takes arguments. The Hub only offers
+// buttons for no-argument recipes until it has a safe, user-friendly form for
+// choosing those arguments.
 export interface JustRecipe { name: string; params: string; comment: string }
 export async function fetchJustList(): Promise<JustRecipe[] | null> {
   if (!inTauriShell()) return null;
@@ -464,16 +465,27 @@ export async function fetchJustList(): Promise<JustRecipe[] | null> {
     return raw ?? null;
   } catch { return null; }
 }
-// A launch normally opens a terminal window: the recipes use `sudo`, never
-// `pkexec`, so without a tty they have nowhere to prompt and nowhere to
-// print. `in_terminal` is false when no terminal emulator was found, and
-// the caller says so rather than claiming a window that does not exist.
-export interface JustLaunch { launched: boolean; in_terminal: boolean }
-export async function runJustRecipe(recipe: string): Promise<JustLaunch | null> {
-  if (!inTauriShell()) return null;
-  try {
-    return await invoke<JustLaunch>("just_run", { recipe });
-  } catch { return null; }
+// Recipes run as captured background jobs. KDE's graphical askpass helper is
+// used by the Rust shell for sudo, so there is no terminal window to find or
+// explain to a new user.
+async function waitJustJob(job: string): Promise<string> {
+  for (let i = 0; i < 1800; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    const state = await invoke<InstallStatus>("just_run_status", { job });
+    if (state.state === "complete") return state.detail;
+    if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
+  }
+  throw new Error("This action is still running; check the status here again in a moment.");
+}
+
+async function runJustJob(recipe: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("This action is only available in the Hub app.");
+  const job = await invoke<string>("just_run", { recipe });
+  return await waitJustJob(job);
+}
+
+export async function runJustRecipe(recipe: string): Promise<string> {
+  return await runJustJob(recipe);
 }
 
 // Update card view-model — the Rust port of the Qt Update page's
@@ -732,15 +744,18 @@ export async function fetchUserName(): Promise<string | null> {
 // Phase 2 mutating (Updates + Repair/Diagnostics)
 export async function invokeBootcUpgrade(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
-  return await invoke<string>("bootc_upgrade");
+  const job = await invoke<string>("bootc_upgrade");
+  return await waitJustJob(job);
 }
 export async function invokeBootcRollback(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
-  return await invoke<string>("bootc_rollback");
+  const job = await invoke<string>("bootc_rollback");
+  return await waitJustJob(job);
 }
 export async function invokeBootcSwitchBranch(branch: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
-  return await invoke<string>("bootc_switch_branch", { branch });
+  const job = await invoke<string>("bootc_switch_branch", { branch });
+  return await waitJustJob(job);
 }
 export async function invokeGuardianExecute(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");

@@ -41,13 +41,16 @@ export const APPS_SECTIONS: HubSection[] = [
   { key: "Work Setup", title: "Work Setup", description: "Set up office, mail, focus sessions, and workday conveniences.", Icon: IconMonitor },
 ];
 
+export const UPDATES_SECTIONS: HubSection[] = [
+  { key: "Update", title: "Updates", description: "Check OS updates, staged images, rollback status, and auto-update settings.", Icon: IconRefresh },
+];
+
 // Guardian..Repair are the Qt Hub's primary This PC tabs; NVIDIA..Feedback
 // live under its "More" tab (see page_registry.py's comment on
-// DESTINATION_SECTIONS). The web prototype flattens both into one row —
-// same 11 sections, no nested "More" menu yet.
+// DESTINATION_SECTIONS). Updates has its own destination in the web Hub;
+// This PC keeps the remaining ten sections flattened into one row.
 export const THIS_PC_SECTIONS: HubSection[] = [
   { key: "Guardian", title: "Guardian", description: "Self-healing: automatic health checks, safe fixes, history, and optional local AI diagnosis.", Icon: IconShield },
-  { key: "Update", title: "Updates", description: "Check OS updates, staged images, rollback status, and auto-update settings.", Icon: IconRefresh },
   { key: "Hardware", title: "Hardware", description: "Inspect graphics, displays, audio, Bluetooth, storage, and device health.", Icon: IconChip },
   { key: "Plasma Wayland", title: "Desktop & displays", description: "Check portals, PipeWire capture, display settings, shortcuts, and Plasma session repair.", Icon: IconMonitor },
   { key: "Diagnostics", title: "Health Report", description: "Run system checks and gather useful troubleshooting information.", Icon: IconDatabase },

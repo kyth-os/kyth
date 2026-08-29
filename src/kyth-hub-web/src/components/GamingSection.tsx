@@ -132,7 +132,7 @@ export function GamingSection({ section }: { section: HubSection }) {
         </div>
         <div style={{ marginTop: 22 }}>
           <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Gaming setup</p>
-          <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Install a launcher or tool in its own terminal window. The recipe shows its own prompts and output.</p>
+          <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Install a launcher or tool from this window. Progress, prompts, and the result stay in the Hub.</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
             {launcherRecipes.map(([recipe, label]) => <RecipeButton key={recipe} recipe={recipe} label={label} busy={busy} run={run} />)}
           </div>

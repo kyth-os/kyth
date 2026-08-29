@@ -1,6 +1,5 @@
 import { HubPage } from "./HubPage";
 import { THIS_PC_SECTIONS } from "../data/hubSections";
-import { UpdatesSection } from "../components/UpdatesSection";
 import { GuardianSection } from "../components/GuardianSection";
 import { HardwareSection } from "../components/HardwareSection";
 import { KernelSection } from "../components/KernelSection";
@@ -17,7 +16,6 @@ export function ThisPc() {
     <HubPage
       sections={THIS_PC_SECTIONS}
       sectionContent={{
-        Update: UpdatesSection,
         Guardian: GuardianSection,
         Hardware: HardwareSection,
         Kernel: KernelSection,

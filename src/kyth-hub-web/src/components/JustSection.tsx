@@ -74,11 +74,11 @@ export function JustSection({ section }: { section: HubSection }) {
             </div>
             {matching.length > shown.length && (
               <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>
-                … and {matching.length - shown.length} more — narrow the filter, or run `ujust --list` in a terminal.
+                … and {matching.length - shown.length} more — narrow the filter to find a recipe.
               </p>
             )}
             <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>
-              Recipes that take arguments are shown as text — run those in a terminal, where you choose the argument.
+              Recipes that take arguments are shown as text until the Hub has a safe form for choosing the argument.
             </p>
             <ActionStatus status={status} />
           </div>

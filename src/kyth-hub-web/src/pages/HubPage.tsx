@@ -3,8 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import type { HubSection } from "../data/hubSections";
 import { HubTabs } from "../components/HubTabs";
 
-// Shared shell for the four Pulse-rail destinations (Play/Apps/This
-// PC/Move In) — a tab row over that destination's real section list, plus
+// Shared shell for the Hub destinations — a tab row over that destination's
+// real section list, plus
 // content for whichever section is selected. Every section key has a
 // component in `sectionContent`; the null branch below is a safety net for
 // a key added to hubSections.ts without one, which
@@ -17,9 +17,11 @@ import { HubTabs } from "../components/HubTabs";
 export function HubPage({
   sections,
   sectionContent,
+  showTabs = true,
 }: {
   sections: HubSection[];
   sectionContent: Record<string, ComponentType<{ section: HubSection }>>;
+  showTabs?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("section");
@@ -31,8 +33,8 @@ export function HubPage({
   const onSelect = (key: string) => setSearchParams({ section: key }, { replace: true });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <HubTabs sections={sections} activeKey={active.key} onSelect={onSelect} />
+    <div className="page-content" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {showTabs && <HubTabs sections={sections} activeKey={active.key} onSelect={onSelect} />}
       {Content ? <Content section={active} /> : null}
     </div>
   );

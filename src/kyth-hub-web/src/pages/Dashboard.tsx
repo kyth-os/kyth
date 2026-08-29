@@ -94,10 +94,8 @@ export function Dashboard() {
     })) ?? [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
-      <StatTileRow tiles={tiles} />
-
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 16 }}>
+    <div className="page-content" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div className="dashboard-grid">
         <HeroCard name={userName} pendingCount={guardian ? guardian.pendingCount : null} />
         <GaugeCard
           gaugeId="health"
@@ -120,7 +118,9 @@ export function Dashboard() {
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16, minHeight: 300 }}>
+      <StatTileRow tiles={tiles} />
+
+      <div className="chart-grid">
         <PerformanceChart />
         <SessionsChart />
       </div>

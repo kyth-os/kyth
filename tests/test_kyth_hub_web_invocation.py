@@ -81,39 +81,35 @@ class JustInvocationTests(unittest.TestCase):
         ]
         self.assertEqual(offenders, [], f"spawn just through system::just instead: {offenders}")
 
-    def test_launch_reports_a_terminal_only_when_one_was_used(self):
-        # The recipes use sudo, never pkexec, so without a tty they cannot
-        # prompt — the Hub must not claim a window it did not open.
-        self.assertIn("in_terminal", MAIN_RS)
-        self.assertIn("in_terminal", LIVE_DATA)
-        self.assertIn("launch.in_terminal", SECTION_ACTIONS)
+    def test_recipe_launches_are_captured_in_the_hub(self):
+        # Recipe actions own a background process and expose its captured
+        # result through the Hub status row; no terminal wrapper is part of
+        # the user-facing path.
+        self.assertIn("command_for", JUST_RS)
+        self.assertIn("start_just_job", MAIN_RS)
+        self.assertIn("just_run_status", MAIN_RS)
+        self.assertIn("just_run_status", LIVE_DATA)
+        self.assertNotIn("launch_in_terminal", MAIN_RS)
+        self.assertNotIn("in_terminal", LIVE_DATA)
+        self.assertNotIn("terminal window", SECTION_ACTIONS)
 
     def test_bootc_commands_do_not_claim_a_finished_change(self):
-        # `just_launch` returns when the terminal window opens: the recipe
-        # has not run and its sudo prompt is unanswered. These three used to
-        # return "rolled back — reboot to apply" and "switch to X staged —
-        # reboot to activate" at that moment, which is the same "reports
-        # success for something that did nothing" bug in prose form.
+        # These commands return a job and the frontend waits for the captured
+        # result, rather than claiming a change when a terminal merely opens.
         for command in ("bootc_upgrade", "bootc_rollback", "bootc_switch_branch"):
             body = re.search(rf"fn {command}\([^)]*\)[^{{]*{{(.*?)\n}}", MAIN_RS, re.S)
             self.assertIsNotNone(body, command)
             code = re.sub(r"//.*", "", body.group(1))
-            self.assertIn("launch_in_terminal", code, command)
+            self.assertIn("start_just_job", code, command)
             for claim in ("rolled back", "staged", "completed", "applied"):
                 self.assertNotIn(claim, code, f"{command} claims {claim!r} for a spawned window")
 
-    def test_launch_wording_describes_the_window_not_the_result(self):
-        # launch_in_terminal is the one place that wording lives, so it has
-        # to talk about the terminal and the password prompt — and refuse
-        # before spawning when there is no terminal, rather than starting a
-        # process that is doomed at the sudo prompt and then explaining it.
-        body = re.search(r"fn launch_in_terminal\(.*?\n}", MAIN_RS, re.S)
-        self.assertIsNotNone(body)
-        self.assertIn("terminal window", body.group(0))
-        self.assertIn("password prompt", body.group(0))
-        self.assertIn("no terminal emulator is installed", body.group(0))
-        guard = body.group(0).index("terminal_available")
-        self.assertLess(guard, body.group(0).index("just_launch"), "spawns before checking for a terminal")
+    def test_recipe_runner_has_no_terminal_wrapper(self):
+        self.assertNotIn("TERMINALS", JUST_RS)
+        self.assertNotIn("KEEP_OPEN", JUST_RS)
+        self.assertNotIn("konsole", JUST_RS)
+        self.assertNotIn("xterm", JUST_RS)
+        self.assertIn("SUDO_ASKPASS", MAIN_RS)
 
     def test_parser_drops_lines_that_are_not_recipes(self):
         # Real `ujust --list` output carries a `[KythOS]` group heading and,
@@ -122,9 +118,9 @@ class JustInvocationTests(unittest.TestCase):
         self.assertIn("line.starts_with('[') && line.ends_with(']')", JUST_RS)
         self.assertIn("line.starts_with('#')", JUST_RS)
 
-    def test_recipes_use_sudo_so_a_terminal_is_required(self):
-        # The premise of the terminal wrapper. If recipes ever move to
-        # pkexec, the graphical agent can prompt and this can be revisited.
+    def test_recipes_use_graphical_askpass_without_a_terminal(self):
+        # Plain sudo recipes can use KDE's askpass helper when the Hub gives
+        # them no tty, so their output can stay inside the app.
         recipes = list((ROOT / "build_files" / "just" / "kyth").glob("*.just"))
         self.assertTrue(recipes)
         text = "\n".join(path.read_text(encoding="utf-8") for path in recipes)
@@ -133,7 +129,7 @@ class JustInvocationTests(unittest.TestCase):
 
 class BridgeFieldTests(unittest.TestCase):
     # Frontend interface -> the Rust struct that has to serialize it.
-    BRIDGE_TYPES = {"JustRecipe": "JustRecipeResponse", "JustLaunch": "JustRunResponse"}
+    BRIDGE_TYPES = {"JustRecipe": "JustRecipeResponse", "InstallStatus": "InstallStatus"}
 
     def test_bridge_structs_carry_every_field_the_frontend_reads(self):
         for ts_name, rust_name in self.BRIDGE_TYPES.items():

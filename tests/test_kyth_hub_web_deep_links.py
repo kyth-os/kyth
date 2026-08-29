@@ -5,7 +5,7 @@ installed, and the Tauri shell forwards it again to deepLink.ts. Nothing in
 that chain validates the key: an unknown one falls back to "/" and silently
 opens Home instead of the requested page. That is how `--page "App Store"`
 (shipped in 23-kyth-helper-ctx-installs.sh) and 19 krunner entries regressed
-when deepLink.ts's route table only listed the 5 rail destinations.
+when deepLink.ts's route table only listed the rail destinations.
 
 deepLink.ts derives its table from data/destinations.ts, which in turn
 lists the section arrays from hubSections.ts, so checking the data source
@@ -49,6 +49,7 @@ HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
 SECTIONS_TS = (HUB_WEB / "data" / "hubSections.ts").read_text(encoding="utf-8")
 DEEP_LINK_TS = (HUB_WEB / "deepLink.ts").read_text(encoding="utf-8")
 DESTINATIONS_TS = (HUB_WEB / "data" / "destinations.ts").read_text(encoding="utf-8")
+SIDEBAR_TSX = (HUB_WEB / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
 HUB_PAGE_TSX = (HUB_WEB / "pages" / "HubPage.tsx").read_text(encoding="utf-8")
 CTX_INSTALLS_SH = (
     ROOT / "build_files" / "scripts" / "branding" / "23-kyth-helper-ctx-installs.sh"
@@ -115,14 +116,19 @@ class HubWebDeepLinkTests(unittest.TestCase):
     def test_destinations_cover_the_full_pulse_rail(self):
         self.assertEqual(
             _destination_keys(),
-            {"Welcome", "Play", "Apps", "This PC", "Move In"},
+            {"Welcome", "Play", "Apps", "This PC", "Move In", "Updates"},
         )
+
+    def test_updates_is_the_last_left_rail_destination(self):
+        entries = re.findall(r'\{ to: "([^"]+)", label: "([^"]+)",', SIDEBAR_TSX)
+        self.assertTrue(entries)
+        self.assertEqual(entries[-1], ("/updates", "Updates"))
 
     def test_sections_are_derived_not_hardcoded_in_the_route_table(self):
         # Guards the regression's actual cause: if someone re-lists sections
         # by hand, adding a section to hubSections.ts stops being enough and
         # the next key silently falls back to Home.
-        for array in ("PLAY_SECTIONS", "APPS_SECTIONS", "THIS_PC_SECTIONS", "MOVE_IN_SECTIONS"):
+        for array in ("PLAY_SECTIONS", "APPS_SECTIONS", "THIS_PC_SECTIONS", "MOVE_IN_SECTIONS", "UPDATES_SECTIONS"):
             self.assertIn(array, DESTINATIONS_CODE)
         self.assertIn("DESTINATIONS", DEEP_LINK_CODE)
         for key in sorted(_section_keys()):

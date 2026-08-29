@@ -87,10 +87,10 @@ class HubWebActionTests(unittest.TestCase):
         self.assertIsNotNone(body, "bootc_switch_branch not found")
         text = body.group(0)
         # It must delegate, not just format a reassuring string. It goes
-        # through just_launch rather than a raw Command so it inherits the
-        # justfile resolution a bare `just` does not have.
+        # through the captured just job runner rather than a raw Command so
+        # it inherits the justfile resolution a bare `just` does not have.
         self.assertIn("switch-channel", text)
-        self.assertIn("just_launch", text)
+        self.assertIn("start_just_job", text)
         self.assertNotIn('Command::new("just")', text)
         self.assertIn("switch_channel_arg", text)
         self.assertNotIn("queued — run bootc switch via polkit terminal", text)
@@ -171,7 +171,7 @@ class HubWebCoverageTests(unittest.TestCase):
         keys = re.findall(r'key: "([^"]+)"', HUB_SECTIONS)
         self.assertGreaterEqual(len(keys), 20, "hubSections.ts keys not parsed")
         wired = set()
-        for page in ("Play.tsx", "Apps.tsx", "ThisPc.tsx", "MoveIn.tsx"):
+        for page in ("Play.tsx", "Apps.tsx", "ThisPc.tsx", "MoveIn.tsx", "Updates.tsx"):
             text = (HUB_WEB / "pages" / page).read_text(encoding="utf-8")
             block = re.search(r"sectionContent=\{\{(.*?)\}\}", text, re.S)
             self.assertIsNotNone(block, f"{page} has no sectionContent map")

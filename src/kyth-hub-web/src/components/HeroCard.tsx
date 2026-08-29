@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { IconShield } from "./icons";
 
 // `name` null means the identity read gave us nothing (not in the Tauri
 // shell, or no GECOS/login name) — greet without a name rather than
@@ -23,42 +24,23 @@ export function HeroCard({
   const navigate = useNavigate();
 
   return (
-    <div
-      className="glass"
-      style={{
-        padding: 24,
-        position: "relative",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        minHeight: 220,
-        background: "linear-gradient(127deg, rgba(43,107,255,0.22) 0%, rgba(22,28,62,0.92) 55%, rgba(14,18,43,0.85) 100%)",
-      }}
-    >
+    <div className="glass dashboard-card hero-card">
       {/* Abstract gradient orb — stands in for the moodboard's photo hero
           without pretending to be a real render; pure CSS, no asset. */}
       <div
-        style={{
-          position: "absolute",
-          right: -70,
-          top: -70,
-          width: 280,
-          height: 280,
-          borderRadius: "50%",
-          background: "conic-gradient(from 200deg, var(--accent-start), var(--violet-start), var(--accent-end), var(--accent-start))",
-          filter: "blur(8px)",
-          opacity: 0.4,
-        }}
+        className="hero-orb"
       />
       <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: "radial-gradient(120% 100% at 0% 100%, rgba(14,18,43,0.9) 40%, transparent 70%)",
-        }}
+        className="hero-wash"
       />
       <div style={{ position: "relative", zIndex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span className="hero-status">
+            <IconShield width={14} height={14} strokeWidth={2.2} />
+            {pendingCount === null ? "Checking protection" : pendingCount === 0 ? "Protected" : "Review needed"}
+          </span>
+          <span className="card-copy" style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>KythOS</span>
+        </div>
         <p className="card-copy">Welcome back{name ? "," : ""}</p>
         {name && (
           <h2 style={{ margin: "4px 0 0", fontSize: 26, fontWeight: 800, letterSpacing: -0.5 }}>{name}</h2>

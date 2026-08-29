@@ -32,9 +32,9 @@ export function GaugeCard({
   const gradientId = `gauge-${gaugeId}`;
 
   return (
-    <div className="glass" style={{ padding: 20, display: "flex", flexDirection: "column", height: "100%" }}>
+    <div className="glass dashboard-card gauge-card" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <p className="card-title">{title}</p>
-      <p className="card-copy" style={{ marginTop: 2 }}>
+      <p className="card-copy metric-subtitle" style={{ marginTop: 2 }}>
         {subtitle}
       </p>
       <div style={{ display: "grid", placeItems: "center", flex: 1, marginTop: 8 }}>

@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
@@ -35,6 +36,8 @@ static GUARDIAN_CHECKS: OnceLock<Mutex<HashMap<String, (String, String)>>> = Onc
 fn guardian_checks() -> &'static Mutex<HashMap<String, (String, String)>> { GUARDIAN_CHECKS.get_or_init(|| Mutex::new(HashMap::new())) }
 static PRIVILEGED_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
 fn privileged_jobs() -> &'static Mutex<HashMap<String, (String, String)>> { PRIVILEGED_JOBS.get_or_init(|| Mutex::new(HashMap::new())) }
+static JUST_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+fn just_jobs() -> &'static Mutex<HashMap<String, (String, String)>> { JUST_JOBS.get_or_init(|| Mutex::new(HashMap::new())) }
 
 fn extract_page_arg<S: AsRef<str>>(argv: &[S]) -> Option<String> {
     argv.iter()
@@ -224,53 +227,84 @@ fn just_list() -> Vec<JustRecipeResponse> {
         .collect()
 }
 
-#[derive(Serialize)]
-struct JustRunResponse {
-    launched: bool,
-    /// False when no terminal emulator was found: the recipe was spawned
-    /// with no tty, so it cannot prompt for its sudo password and its
-    /// output goes nowhere. The Hub says which of the two happened.
-    in_terminal: bool,
+fn just_output_detail(recipe: &str, output: &std::process::Output) -> String {
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
+        if !text.is_empty() { text.push('\n'); }
+        text.push_str(&stderr);
+    }
+    let text = kyth_shared::system::process::strip_ansi(text.trim());
+    let detail: String = text.chars().rev().take(800).collect::<String>().chars().rev().collect();
+    if !detail.trim().is_empty() {
+        return if output.status.success() {
+            format!("{recipe} complete — {}", detail.trim())
+        } else {
+            format!("{recipe} could not be completed — {}", detail.trim())
+        };
+    }
+    if output.status.success() {
+        format!("{recipe} complete.")
+    } else {
+        match output.status.code() {
+            Some(code) => format!("{recipe} could not be completed (exit code {code})."),
+            None => format!("{recipe} stopped before it could complete."),
+        }
+    }
 }
 
-/// Fire-and-forget `just <recipe>` — mirrors `popen(["just", name])`.
-#[tauri::command]
-fn just_run(recipe: String) -> JustRunResponse {
-    let launch = kyth_shared::system::just::just_launch(&recipe, &[]);
-    JustRunResponse { launched: launch.launched, in_terminal: launch.in_terminal }
+/// Start a validated `just` recipe in the background and retain a concise
+/// captured result for the Hub. Authentication uses KDE's graphical askpass
+/// helper when it is installed, so sudo does not need an interactive tty.
+fn start_just_job(recipe: &str, args: &[&str]) -> Result<String, String> {
+    let argv = kyth_shared::system::just::command_for(recipe, args)
+        .ok_or_else(|| "recipe or argument is not allowlisted".to_string())?;
+    let job = format!("just-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    just_jobs().lock().unwrap().insert(job.clone(), ("running".into(), format!("Running {recipe}…")));
+    let job_for_thread = job.clone();
+    let recipe_for_thread = recipe.to_string();
+    std::thread::spawn(move || {
+        let mut command = Command::new(&argv[0]);
+        command.args(&argv[1..]);
+        kyth_shared::system::just::configure_command(&mut command);
+        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+            command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+        }
+        let result = command.stdout(Stdio::piped()).stderr(Stdio::piped()).output();
+        let (state, detail) = match result {
+            Ok(output) => {
+                let state = if output.status.success() { "complete" } else { "failed" };
+                (state.to_string(), just_output_detail(&recipe_for_thread, &output))
+            }
+            Err(err) => ("failed".to_string(), format!("Could not start {recipe_for_thread}: {err}")),
+        };
+        just_jobs().lock().unwrap().insert(job_for_thread, (state, detail));
+    });
+    Ok(job)
 }
-/// Run a recipe in its own terminal, and say only what that guarantees: the
-/// window opened. The recipe has not run yet, nobody has answered its sudo
-/// prompt yet, and it can still fail there — `then` is what the user does
-/// once it succeeds. Without a terminal the recipe has nowhere to prompt, so
-/// nothing is spawned at all.
-///
-/// Only these three refuse. `just_run` still spawns without a terminal and
-/// says so (`in_terminal` false), because for an ordinary recipe that is the
-/// user's only affordance in a stripped session. These three stage a change
-/// to what the machine boots, and a half-run `switch-channel` or `rollback`
-/// nobody can see the prompt for is worse than not starting it.
-fn launch_in_terminal(recipe: &str, args: &[&str], then: &str) -> Result<String, String> {
-    if !kyth_shared::system::just::terminal_available() {
-        return Err(format!(
-            "no terminal emulator is installed, so {recipe} cannot ask for its password or show what it did — run `ujust {recipe}` in a terminal instead"
-        ));
-    }
-    if !kyth_shared::system::just::just_launch(recipe, args).launched {
-        return Err(format!("could not start {recipe}"));
-    }
-    Ok(format!("{recipe} is running in its own terminal window — answer the password prompt there, then {then}"))
+
+/// Start a no-argument recipe. The process is owned by the Hub and its
+/// progress/result is returned through `just_run_status`.
+#[tauri::command]
+fn just_run(recipe: String) -> Result<String, String> {
+    start_just_job(&recipe, &[])
+}
+
+#[tauri::command]
+fn just_run_status(job: String) -> InstallStatus {
+    let (state, detail) = just_jobs().lock().unwrap().get(&job).cloned().unwrap_or(("unknown".into(), "Recipe job not found.".into()));
+    InstallStatus { id: job, state, detail }
 }
 
 /// Phase 2 mutating: bootc upgrade/rollback/switch — polkit-guarded via pkexec/systemd-run allowlist.
 #[tauri::command]
 fn bootc_upgrade() -> Result<String, String> {
     sanitize_upgrade()?;
-    launch_in_terminal("upgrade", &[], "reboot to apply it")
+    start_just_job("upgrade", &[])
 }
 #[tauri::command]
 fn bootc_rollback() -> Result<String, String> {
-    launch_in_terminal("rollback", &[], "reboot into the previous deployment")
+    start_just_job("rollback", &[])
 }
 #[tauri::command]
 fn bootc_switch_branch(branch: String) -> Result<String, String> {
@@ -283,10 +317,10 @@ fn bootc_switch_branch(branch: String) -> Result<String, String> {
     // string, so nothing user-controlled reaches the argv.
     let channel = kyth_shared::system::bootc_policy::switch_channel_arg(&branch)
         .ok_or_else(|| "unknown channel".to_string())?;
-    // Through `just_launch` rather than a raw `Command`, so this gets the
-    // justfile resolution `ujust` performs and the terminal the recipe's
-    // sudo prompt needs — a bare `just` here found no justfile at all.
-    launch_in_terminal("switch-channel", &[channel], &format!("reboot to activate {channel}"))
+    // Through the validated just runner rather than a raw Command, so this
+    // gets the justfile resolution `ujust` performs without opening a
+    // terminal window.
+    start_just_job("switch-channel", &[channel])
 }
 fn sanitize_upgrade() -> Result<(), String> {
     // allowlist: only expose when bootc binary present; polkit prompt happens in the spawned just recipe (pkexec inside recipe)
@@ -637,7 +671,11 @@ fn launch_appimage(path: String) -> Result<String, String> {
 }
 
 #[derive(serde::Serialize)]
-struct InstallStatus { id: String, state: String, detail: String }
+struct InstallStatus {
+    id: String,
+    state: String,
+    detail: String,
+}
 
 #[tauri::command]
 fn install_flatpak(app_id: String) -> Result<String, String> {
@@ -790,7 +828,7 @@ fn main() {
         }))
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
-            probe_backend, guardian_snapshot, guardian_check, guardian_check_status, guardian_control, privileged_action, privileged_action_status, hardware_snapshot, storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, appstream_search, appimage_list, installed_flatpaks, uninstall_flatpak, make_appimage_executable, import_appimage, launch_appimage, install_flatpak, install_status, protondb_lookup_many, anti_cheat_table, take_pending_page, just_list, just_run,
+            probe_backend, guardian_snapshot, guardian_check, guardian_check_status, guardian_control, privileged_action, privileged_action_status, hardware_snapshot, storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, appstream_search, appimage_list, installed_flatpaks, uninstall_flatpak, make_appimage_executable, import_appimage, launch_appimage, install_flatpak, install_status, protondb_lookup_many, anti_cheat_table, take_pending_page, just_list, just_run, just_run_status,
             bootc_upgrade, bootc_rollback, bootc_switch_branch, guardian_execute_recipe, branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available, current_user_name, open_feedback_issue
         ])
         .run(tauri::generate_context!())

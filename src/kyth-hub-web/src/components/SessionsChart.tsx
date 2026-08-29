@@ -40,7 +40,7 @@ export function SessionsChart() {
   const total = data.reduce((acc, cur) => acc + cur.sessions, 0);
 
   return (
-    <div className="glass" style={{ padding: 20, height: "100%", display: "flex", flexDirection: "column" }}>
+    <div className="glass dashboard-card chart-card" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <p className="card-title">Gaming sessions</p>

@@ -7,8 +7,8 @@ import { runJustRecipe } from "../services/liveData";
  * Factored out for the same reason LiveSectionCard was — Updates, Channels
  * and Guardian each need identical busy/status handling around a single
  * `invoke` that returns a human-readable string (or throws one). The
- * backend commands are the gate, not this: each validates its own input
- * and delegates to a `just` recipe that does its own privilege prompt. */
+ * backend commands are the gate, not this: each validates its own input,
+ * runs in the background, and keeps progress in the Hub. */
 export function useSectionAction() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -40,18 +40,9 @@ export function ActionButton({
 }) {
   return (
     <button
+      className="action-button"
       onClick={onClick}
       disabled={disabled}
-      style={{
-        padding: "7px 16px",
-        borderRadius: 999,
-        border: "1px solid var(--hairline)",
-        background: "var(--card)",
-        fontWeight: 600,
-        fontSize: 12.5,
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-      }}
     >
       {label}
     </button>
@@ -61,17 +52,15 @@ export function ActionButton({
 export function ActionStatus({ status }: { status: string | null }) {
   if (!status) return null;
   return (
-    <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
+    <p className="card-copy action-status" style={{ fontSize: 12, marginTop: 12 }}>
       {status}
     </p>
   );
 }
 
-/** A `just <recipe>` button. The recipe runs in a terminal window, which is
- * where it prompts for its sudo password and prints its output; this is
- * fire-and-forget past the spawn, the same contract
- * kyth_shared::system::just::just_launch has. When no terminal emulator is
- * installed there is no window and no prompt, so say that instead. */
+/** A `just <recipe>` button. The recipe runs as a captured background job;
+ * password authentication, when needed, is a normal graphical askpass dialog
+ * and progress/results stay in the Hub. */
 export function RecipeButton({
   recipe,
   label,
@@ -88,14 +77,7 @@ export function RecipeButton({
       label={busy === recipe ? `Starting ${recipe}…` : label}
       disabled={busy !== null}
       onClick={() =>
-        run(recipe, `Starting ${recipe}…`, async () => {
-          const launch = await runJustRecipe(recipe);
-          if (launch === null) return "Not available outside the Hub shell.";
-          if (!launch.launched) return `Could not start ${recipe}.`;
-          return launch.in_terminal
-            ? `${recipe} is running in its own terminal window — answer any password prompt there.`
-            : `${recipe} started in the background. No terminal is installed, so it cannot ask for a password or show output — run \`ujust ${recipe}\` in a terminal instead.`;
-        })
+        run(recipe, `Starting ${recipe}…`, () => runJustRecipe(recipe))
       }
     />
   );

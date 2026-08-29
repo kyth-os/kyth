@@ -66,45 +66,21 @@ export function Topbar({ crumb }: { crumb: string }) {
 
   return (
     <header
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "22px 8px 18px",
-      }}
+      className="topbar"
     >
       <div>
-        <p
-          style={{
-            margin: 0,
-            fontSize: 11,
-            color: "var(--text-faint)",
-            fontWeight: 700,
-            letterSpacing: 0.6,
-            textTransform: "uppercase",
-          }}
-        >
+        <p className="page-eyebrow">
           Kyth Hub / {crumb}
         </p>
-        <h1 style={{ margin: "4px 0 0", fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>{crumb}</h1>
+        <h1 className="page-title">{crumb}</h1>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div ref={boxRef} style={{ position: "relative", width: 220 }}>
-          <div
-            className="glass"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "9px 14px",
-              borderRadius: 12,
-              boxShadow: "none",
-            }}
-          >
+      <div className="topbar-actions">
+        <div ref={boxRef} className="search-shell" style={{ position: "relative" }}>
+          <div className="glass search-box">
             <IconSearch width={15} height={15} color="var(--text-faint)" />
             <input
-              placeholder="Search settings…"
+              placeholder="Search Hub…"
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
@@ -180,7 +156,7 @@ export function Topbar({ crumb }: { crumb: string }) {
           )}
         </div>
         <button
-          className="glass"
+          className="glass icon-button"
           aria-label={
             pendingCount === null
               ? "Guardian: checking"
@@ -189,16 +165,7 @@ export function Topbar({ crumb }: { crumb: string }) {
               : "Guardian: nothing needs attention"
           }
           onClick={() => navigate(routeForPage("Guardian"))}
-          style={{
-            width: 38,
-            height: 38,
-            display: "grid",
-            placeItems: "center",
-            cursor: "pointer",
-            border: "1px solid var(--hairline)",
-            boxShadow: "none",
-            position: "relative",
-          }}
+          style={{ width: 40, height: 40, display: "grid", placeItems: "center", cursor: "pointer", position: "relative" }}
         >
           <IconBell width={16} height={16} />
           {!!pendingCount && (

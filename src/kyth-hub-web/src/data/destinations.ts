@@ -3,10 +3,11 @@ import {
   MOVE_IN_SECTIONS,
   PLAY_SECTIONS,
   THIS_PC_SECTIONS,
+  UPDATES_SECTIONS,
   type HubSection,
 } from "./hubSections";
 
-/** The four destinations and the sections each one owns.
+/** The destinations and the sections each one owns.
  *
  * Single source of truth for "what pages exist and where they live":
  * deepLink.ts builds its `--page` route table from this, and search.ts
@@ -25,4 +26,5 @@ export const DESTINATIONS: Destination[] = [
   { key: "Apps", route: "/apps", sections: APPS_SECTIONS },
   { key: "This PC", route: "/this-pc", sections: THIS_PC_SECTIONS },
   { key: "Move In", route: "/move-in", sections: MOVE_IN_SECTIONS },
+  { key: "Updates", route: "/updates", sections: UPDATES_SECTIONS },
 ];

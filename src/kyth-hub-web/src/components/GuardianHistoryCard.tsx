@@ -18,7 +18,7 @@ export function GuardianHistoryCard({
   live?: boolean;
 }) {
   return (
-    <div className="glass" style={{ padding: 20 }}>
+    <div className="glass dashboard-card activity-card" style={{ padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <p className="card-title">Guardian activity</p>
