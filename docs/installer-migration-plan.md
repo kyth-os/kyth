@@ -1,6 +1,6 @@
 # Installer Migration Plan
 
-**Status:** Proposed  
+**Status:** In progress
 **Scope:** Migrate the KythOS installer to the React/Tauri style used by the System Hub.
 
 ## Context
@@ -179,6 +179,7 @@ Before replacing Chromium in the image:
 - Phase 0 — API contract: complete. See [`installer-api-contract.md`](installer-api-contract.md).
 - Phase 1 — React frontend: complete as a standalone package in [`src/kyth-installer-web/`](../src/kyth-installer-web/). Typecheck and production build pass. The Python HTTP/SSE backend and legacy WebUI remain available as the runtime fallback.
 - Phase 2 — Tauri shell: implementation started. `kyth-installer-shell` embeds the React build, runs as the desktop user, and connects to the fixed loopback Python backend with per-run tokens. Chromium remains the fallback until live-image acceptance.
+- Phase 3 — Unix-socket transport: started. `UnixSocketServer` can expose the existing authenticated HTTP/SSE handler over an explicitly configured private socket with restrictive permissions and Linux peer-UID checks, and the Tauri shell has typed allowlisted request/event commands; loopback remains the production default until live-image validation.
 
 ## Remaining plan
 
@@ -192,6 +193,8 @@ Before replacing Chromium in the image:
 
 ### Phase 3 — Unix-socket privileged service
 
+- Add a root-owned service entrypoint and activate the socket transport in the installer launcher.
+- Activate the socket transport in the live-image launcher only after the native adapter passes live-media validation; do not expose a generic filesystem or command bridge.
 - Replace loopback HTTP access with a root-owned Unix-socket service.
 - Use socket ownership/permissions and peer credentials, retaining the one-time session token as defense in depth.
 - Preserve the frozen logical API, SSE/event semantics, validation, journal, and recovery behavior.
@@ -233,4 +236,6 @@ Port components only after behavioral parity and focused tests exist:
 
 ## Next session starting point
 
-Begin with Phase 2: inspect the System Hub Tauri shell and create the installer shell/package integration without changing the privileged installer backend.
+Continue Phase 3: add the root-owned service entrypoint, then wire the Tauri
+shell to the fixed Unix socket through typed request and event commands while
+keeping loopback HTTP as the compatibility fallback until live-image testing.

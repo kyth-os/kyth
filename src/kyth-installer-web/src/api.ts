@@ -1,5 +1,6 @@
 import type { Config, Disk, FreeRegion, InstallRequest, InstallerEvent, Partition, PendingOperation, RescueProbe, TransactionReport } from "./types";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { inTauriShell } from "./services/tauriEnv";
 
 declare global { interface Window { __KYTH_SESSION_TOKEN__?: string; } }
@@ -8,6 +9,13 @@ interface InstallerConnection {
   base_url: string;
   bootstrap_token: string;
   session_token: string;
+  transport: "http" | "unix";
+  socket_path?: string;
+}
+
+interface InstallerNativeResponse {
+  status: number;
+  body: string;
 }
 
 let connection: InstallerConnection | null = null;
@@ -18,10 +26,12 @@ async function ensureConnection(): Promise<void> {
   if (!inTauriShell() || connection) return;
   if (!connectionPromise) {
     connectionPromise = invoke<InstallerConnection>("installer_connection").then(async (value) => {
-      const response = await fetch(`${value.base_url}/?bootstrap_token=${encodeURIComponent(value.bootstrap_token)}`, {
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) throw new Error(`Installer backend bootstrap failed (${response.status})`);
+      if (value.transport === "http") {
+        const response = await fetch(`${value.base_url}/?bootstrap_token=${encodeURIComponent(value.bootstrap_token)}`, {
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) throw new Error(`Installer backend bootstrap failed (${response.status})`);
+      }
       connection = value;
     });
   }
@@ -43,18 +53,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body) headers.set("Content-Type", "application/json");
   const token = connection?.session_token ?? window.__KYTH_SESSION_TOKEN__;
   if (token) headers.set("X-Kyth-Session-Token", token);
-  const response = await fetch(apiUrl(path), {
-    ...init,
-    headers,
-    credentials: inTauriShell() ? "omit" : "same-origin",
-  });
-  const text = await response.text();
+  let status: number;
+  let text: string;
+  if (connection?.transport === "unix") {
+    const native = await invoke<InstallerNativeResponse>("installer_request", {
+      method: init?.method ?? "GET",
+      path,
+      body: typeof init?.body === "string" ? init.body : null,
+    });
+    status = native.status;
+    text = native.body;
+  } else {
+    const response = await fetch(apiUrl(path), {
+      ...init,
+      headers,
+      credentials: inTauriShell() ? "omit" : "same-origin",
+    });
+    status = response.status;
+    text = await response.text();
+  }
   let payload: unknown = text;
   try { payload = text ? JSON.parse(text) : {}; } catch { /* preserve plain-text errors */ }
-  if (!response.ok) {
+  if (status < 200 || status >= 300) {
     const record = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
-    const message = record.message ?? record.error ?? (text || `Request failed (${response.status})`);
-    throw new InstallerApiError(response.status, String(message), payload);
+    const message = record.message ?? record.error ?? (text || `Request failed (${status})`);
+    throw new InstallerApiError(status, String(message), payload);
   }
   return payload as T;
 }
@@ -91,8 +114,26 @@ export const installerApi = {
 export function subscribeToInstallEvents(onEvent: (event: InstallerEvent) => void, onDisconnect: () => void): () => void {
   let source: EventSource | undefined;
   let closed = false;
+  let unlistenEvent: (() => void) | undefined;
+  let unlistenError: (() => void) | undefined;
   void ensureConnection().then(() => {
     if (closed) return;
+    if (connection?.transport === "unix") {
+      void Promise.all([
+        listen<InstallerEvent>("installer-event", (event) => onEvent(event.payload)),
+        listen<string>("installer-stream-error", () => onDisconnect()),
+      ]).then(([removeEvent, removeError]) => {
+        if (closed) {
+          removeEvent();
+          removeError();
+          return;
+        }
+        unlistenEvent = removeEvent;
+        unlistenError = removeError;
+        return invoke("installer_stream");
+      }).catch(() => onDisconnect());
+      return;
+    }
     // EventSource cannot set a header; use the session token in the URL for
     // this read-only stream. Mutating requests always use the header below.
     const streamToken = connection?.session_token;
@@ -105,5 +146,11 @@ export function subscribeToInstallEvents(onEvent: (event: InstallerEvent) => voi
     };
     source.onerror = () => onDisconnect();
   }).catch(onDisconnect);
-  return () => { closed = true; source?.close(); };
+  return () => {
+    closed = true;
+    source?.close();
+    unlistenEvent?.();
+    unlistenError?.();
+    if (connection?.transport === "unix") void invoke("installer_stream_stop").catch(() => undefined);
+  };
 }

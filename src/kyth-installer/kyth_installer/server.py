@@ -1,6 +1,11 @@
 """Authenticated local HTTP transport for the installer application."""
 
 import json
+import grp
+import os
+import socket
+import stat
+import struct
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -163,6 +168,13 @@ class Handler(BaseHTTPRequestHandler):
             return False
 
     def _require_same_origin_context(self) -> bool:
+        if getattr(getattr(self, "server", None), "transport", "") == "unix":
+            peer_uid = _peer_uid(self.connection)
+            expected_uid = getattr(self.server, "peer_uid", None)
+            if peer_uid is None or (expected_uid is not None and peer_uid != expected_uid):
+                self.send_error(403, "Forbidden")
+                return False
+            return True
         # The server only binds to 127.0.0.1 so no remote host can reach it.
         # Checking the Host header is sufficient to prevent DNS-rebinding.
         host = (self.headers.get("Host", "") or "").strip().lower()
@@ -430,3 +442,90 @@ class _Server(ThreadingHTTPServer):
     def __init__(self, server_address, handler_class, context: InstallerContext | None = None):
         self.context = context or InstallerContext()
         super().__init__(server_address, handler_class)
+
+
+def _peer_uid(connection: socket.socket) -> int | None:
+    """Return the Linux uid on the other end of a Unix socket, if available."""
+    try:
+        raw = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+        _pid, uid, _gid = struct.unpack("3i", raw)
+        return uid
+    except (OSError, ValueError, struct.error, AttributeError):
+        return None
+
+
+class UnixSocketServer(ThreadingHTTPServer):
+    """Serve the existing authenticated HTTP API over a private Unix socket.
+
+    This is intentionally an HTTP transport adapter: routes, JSON payloads,
+    SSE behavior, and session-token authentication remain owned by ``Handler``.
+    The socket is only enabled by an explicit path, and mutating requests also
+    require the configured peer uid in addition to the session token.
+    """
+
+    address_family = socket.AF_UNIX
+    allow_reuse_address = False
+    daemon_threads = True
+    transport = "unix"
+
+    def __init__(
+        self,
+        socket_path: str | os.PathLike[str],
+        handler_class,
+        context: InstallerContext | None = None,
+        *,
+        peer_uid: int | None = None,
+        socket_group: str = "",
+    ):
+        self.socket_path = Path(socket_path)
+        if not self.socket_path.is_absolute():
+            raise ValueError("installer Unix socket path must be absolute")
+        self.peer_uid = peer_uid
+        self.socket_group = socket_group.strip()
+        self.context = context or InstallerContext()
+        self._prepare_socket_path()
+        try:
+            super().__init__(str(self.socket_path), handler_class)
+            self._secure_socket()
+        except Exception:
+            self._remove_socket_if_owned()
+            raise
+
+    def _prepare_socket_path(self) -> None:
+        parent = self.socket_path.parent
+        parent.mkdir(parents=True, mode=0o750, exist_ok=True)
+        if self.socket_group:
+            gid = self._socket_group_id()
+            os.chown(parent, -1, gid)
+            os.chmod(parent, 0o750)
+        parent_stat = parent.stat()
+        if parent_stat.st_mode & stat.S_IWOTH:
+            raise RuntimeError(f"installer socket parent is world-writable: {parent}")
+        if os.path.lexists(self.socket_path):
+            current = os.lstat(self.socket_path)
+            if not stat.S_ISSOCK(current.st_mode):
+                raise RuntimeError(f"installer socket path is not a socket: {self.socket_path}")
+            self.socket_path.unlink()
+
+    def _secure_socket(self) -> None:
+        mode = 0o660 if self.socket_group else 0o600
+        os.chmod(self.socket_path, mode)
+        if self.socket_group:
+            os.chown(self.socket_path, -1, self._socket_group_id())
+
+    def _socket_group_id(self) -> int:
+        try:
+            return grp.getgrnam(self.socket_group).gr_gid
+        except KeyError as exc:
+            raise RuntimeError(f"installer socket group does not exist: {self.socket_group}") from exc
+
+    def _remove_socket_if_owned(self) -> None:
+        try:
+            if os.path.lexists(self.socket_path) and stat.S_ISSOCK(os.lstat(self.socket_path).st_mode):
+                self.socket_path.unlink()
+        except OSError:
+            pass
+
+    def server_close(self) -> None:
+        super().server_close()
+        self._remove_socket_if_owned()

@@ -15,10 +15,10 @@ import threading
 import time
 
 from . import config
-from .config import PORT, SESSION_TOKEN
+from .config import PORT, SESSION_TOKEN, SOCKET_GROUP, SOCKET_PATH
 from .context import InstallerContext, InstallLifecycle
 from .runner import spawn_command
-from .server import Handler, _Server
+from .server import Handler, UnixSocketServer, _Server
 from .services.installer_service import InstallerService
 
 
@@ -170,7 +170,10 @@ def main() -> None:
 
     config._bootstrap_token = secrets.token_urlsafe(32)
 
-    server = _Server(("127.0.0.1", PORT), Handler)
+    if SOCKET_PATH is not None:
+        server = UnixSocketServer(SOCKET_PATH, Handler, socket_group=SOCKET_GROUP)
+    else:
+        server = _Server(("127.0.0.1", PORT), Handler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     time.sleep(0.3)
@@ -226,6 +229,8 @@ def main() -> None:
             "--bootstrap-token", config._bootstrap_token,
             "--session-token", SESSION_TOKEN,
         ]
+        if SOCKET_PATH is not None:
+            gui_cmd.extend(["--socket-path", str(SOCKET_PATH)])
     else:
         chromium_bin = next(
             (b for b in ("chromium", "chromium-browser", "chromium-bin") if shutil.which(b)),

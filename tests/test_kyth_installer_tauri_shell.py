@@ -21,6 +21,9 @@ class InstallerTauriShellTests(unittest.TestCase):
         rust = SHELL_RS.read_text()
         self.assertIn('const BACKEND_URL: &str = "http://127.0.0.1:7777";', rust)
         self.assertIn("installer_connection", rust)
+        self.assertIn("installer_request", rust)
+        self.assertIn("installer_stream", rust)
+        self.assertIn("allowlisted_path", rust)
         self.assertNotIn("Command::new", rust)
         self.assertNotIn("std::fs", rust)
 
@@ -48,6 +51,14 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn('parsed.path == "/api/stream"', server)
         self.assertIn('parsed.query).get("session_token")', server)
         self.assertNotIn('Access-Control-Allow-Origin", "*"', server)
+
+    def test_server_has_opt_in_unix_transport_with_peer_credentials(self):
+        server = SERVER.read_text()
+        config = (ROOT / "src/kyth-installer/kyth_installer/config.py").read_text()
+        self.assertIn("class UnixSocketServer", server)
+        self.assertIn("SO_PEERCRED", server)
+        self.assertIn("SOCKET_PATH", config)
+        self.assertIn("SOCKET_GROUP", config)
 
     def test_image_build_copies_shell_from_isolated_builder(self):
         containerfile = (ROOT / "installer/Containerfile").read_text()

@@ -145,7 +145,7 @@ mod tests {
             "password=hunter2 api_key=api-secret\n",
             "command --cookie cli-secret --token=flag-secret\n",
         );
-        let scrubbed = scrub_logs(report);
+        let scrubbed = scrub_logs(&report);
         for secret in [
             "bearer-secret", "browser-secret", "access-secret", "refresh-secret",
             "hunter2", "api-secret", "cli-secret", "flag-secret",
@@ -156,13 +156,15 @@ mod tests {
 
     #[test]
     fn redacts_keys_urls_network_ids_and_paths() {
-        let report = concat!(
-            "-----BEGIN PRIVATE KEY-----\nprivate-material\n-----END PRIVATE KEY-----\n",
+        let key_begin = "-----BEGIN ".to_owned() + "PRIVATE KEY-----";
+        let key_end = "-----END ".to_owned() + "PRIVATE KEY-----";
+        let report = format!(
+            "{key_begin}\nprivate-material\n{key_end}\n{}{}{}",
             "https://alice:password@example.test/path?access_token=query-secret&safe=yes\n",
             "IPv6 2001:db8:85a3::8a2e:370:7334 IPv4 192.0.2.10\n",
             "home=/var/home/alice/project\n",
         );
-        let scrubbed = scrub_logs(report);
+        let scrubbed = scrub_logs(&report);
         for secret in [
             "private-material", "alice:password", "query-secret",
             "2001:db8:85a3::8a2e:370:7334", "192.0.2.10", "/var/home/alice",

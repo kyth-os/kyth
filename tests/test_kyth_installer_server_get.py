@@ -6,6 +6,10 @@ file follows the same Handler.__new__() construction pattern for GET.
 """
 import io
 import json
+import os
+import socket
+import stat
+import struct
 import sys
 import tempfile
 import unittest
@@ -45,6 +49,57 @@ class ParseCookieAndRouteTests(unittest.TestCase):
         cookies = server._parse_cookie_header("a=1; no-value; b = two ")
         self.assertEqual(cookies, {"a": "1", "b": "two"})
         self.assertEqual(server._parse_cookie_header(""), {})
+
+    def test_peer_uid_decodes_linux_socket_credentials(self):
+        test_case = self
+
+        class Peer:
+            def getsockopt(self, level, option, size):
+                test_case.assertEqual(level, socket.SOL_SOCKET)
+                test_case.assertEqual(option, socket.SO_PEERCRED)
+                test_case.assertEqual(size, struct.calcsize("3i"))
+                return struct.pack("3i", 123, 456, 789)
+
+        self.assertEqual(server._peer_uid(Peer()), 456)
+
+    def test_peer_uid_fails_closed_when_credentials_are_unavailable(self):
+        class Peer:
+            def getsockopt(self, *_args):
+                raise OSError("not a Unix socket")
+
+        self.assertIsNone(server._peer_uid(Peer()))
+
+
+class UnixSocketServerTests(unittest.TestCase):
+    def test_requires_absolute_socket_path(self):
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            server.UnixSocketServer("relative.sock", server.Handler)
+
+    def test_rejects_existing_non_socket_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api.sock"
+            path.write_text("not a socket")
+            with self.assertRaisesRegex(RuntimeError, "not a socket"):
+                server.UnixSocketServer(path, server.Handler)
+
+    def test_socket_is_restricted_and_removed_on_close(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api.sock"
+            unix_server = server.UnixSocketServer(path, server.Handler)
+            try:
+                self.assertTrue(stat.S_ISSOCK(path.stat().st_mode))
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            finally:
+                unix_server.server_close()
+            self.assertFalse(os.path.lexists(path))
+
+    def test_socket_mutations_require_expected_peer_uid(self):
+        handler = _make_handler("/api/config", host="ignored")
+        handler.server = SimpleNamespace(transport="unix", peer_uid=456, context=InstallerContext())
+        handler.connection = object()
+        with patch.object(server, "_peer_uid", return_value=123):
+            self.assertFalse(handler._require_same_origin_context())
+        handler.send_error.assert_called_once_with(403, "Forbidden")
 
 
 class ServerIndexTests(unittest.TestCase):

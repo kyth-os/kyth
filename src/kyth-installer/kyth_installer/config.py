@@ -25,6 +25,12 @@ TRANSACTION_FILE = Path(
     os.environ.get("KYTH_INSTALLER_TRANSACTION", "/run/kyth-installer/transaction.json")
 )
 PORT         = 7777
+# Phase 3 transport target.  The loopback HTTP server remains the default
+# until the Tauri client has its native socket adapter and the live-image gate
+# passes.  A non-empty override lets the privileged service bind the same
+# logical API to a Unix socket without changing route semantics.
+SOCKET_PATH = Path(os.environ.get("KYTH_INSTALLER_SOCKET", "")) if os.environ.get("KYTH_INSTALLER_SOCKET") else None
+SOCKET_GROUP = os.environ.get("KYTH_INSTALLER_SOCKET_GROUP", "").strip()
 SESSION_TOKEN = secrets.token_urlsafe(32)
 _bootstrap_token: Optional[str] = None
 _bootstrap_lock = threading.Lock()
@@ -96,4 +102,3 @@ def _validate_installer_paths() -> None:
             raise
         except (OSError, ValueError, AttributeError):  # noqa: BLE001 -- narrow: stat/permission check failures
             continue
-

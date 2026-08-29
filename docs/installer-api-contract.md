@@ -10,6 +10,14 @@ This document describes the behavior that a replacement frontend must consume. I
 
 The current transport is HTTP on loopback (`127.0.0.1:<PORT>`, with `PORT` supplied by installer configuration). The server must not be exposed on a non-loopback interface.
 
+The Phase 3 transport adapter may serve the same HTTP framing over an explicitly
+configured Unix socket (`KYTH_INSTALLER_SOCKET`). The socket is created with
+mode `0600`, or `0660` when `KYTH_INSTALLER_SOCKET_GROUP` is configured. API
+authentication remains the session token, and mutating socket requests also
+require a valid Linux `SO_PEERCRED` result. The socket path and route set are
+fixed by the launcher/native shell; there is no generic filesystem or command
+bridge.
+
 The initial `GET /` request must include the one-use `bootstrap_token` query parameter. A successful request sets:
 
 ```http
