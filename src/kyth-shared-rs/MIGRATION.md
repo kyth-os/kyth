@@ -11,7 +11,7 @@ before mutating.
 
 ## What's ported so far
 
-Exactly the four read-only bridges the Kyth Hub's Tauri shell
+The read-only bridges and pure helpers the Kyth Hub's Tauri shell
 (`src/kyth-hub-web/src-tauri`) used to shell out to Python subprocesses
 for — see `src/kyth-hub-web/src-tauri/src/main.rs`'s `probe_backend`,
 `guardian_snapshot`, `hardware_snapshot`, `storage_snapshot` commands:
@@ -22,6 +22,8 @@ for — see `src/kyth-hub-web/src-tauri/src/main.rs`'s `probe_backend`,
 | `guardian` | `kyth_shared.guardian` | `collect_symptoms()`/`inspect()` — the live probe sweep (a dozen-plus subprocess calls across audio/network/bluetooth/portal/...). Also not ported: `execute_recipe`, `save_state`, anything that acts. |
 | `system::gpu` | `kyth_shared.system.gpu` | `loaded_kernel_modules`, `rpm_package_installed`, `query_nvidia_smi` — only `lspci_gpu_lines` had a caller. |
 | `system::storage` | (new — was inline Python in the retired `storage_bridge.py`, not really "kyth_shared") | — |
+| `system::boot_health` | read/policy surface of `kyth_shared.boot_health` | State transitions, atomic persistence, boot verification, and rollback remain Python-owned. |
+| `diagnostics_scrub` | `kyth_shared.diagnostics_scrub.scrub_logs` | Collection, upload, and report composition remain outside the crate. |
 
 Every function ported is a pure read against on-disk state or a single
 cheap subprocess call (`lspci`) — nothing here needs root, nothing mutates

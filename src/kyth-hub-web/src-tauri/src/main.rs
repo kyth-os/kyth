@@ -729,6 +729,9 @@ fn updater_available() -> bool { kyth_shared::system::updater::updater_available
 /// so this can't be pointed at an arbitrary URL.
 #[tauri::command]
 fn open_feedback_issue(title: String, body: String) -> Result<String, String> {
+    // Keep the public-report boundary safe even if a future caller bypasses
+    // the retired Python Feedback page's scrub step.
+    let body = kyth_shared::diagnostics_scrub::scrub_logs(&body);
     let url = format!(
         "https://github.com/kyth-os/kyth/issues/new?title={}&body={}",
         percent_encode(&title),

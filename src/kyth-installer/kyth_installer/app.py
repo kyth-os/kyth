@@ -1,6 +1,7 @@
-"""Entry point: generates the one-time bootstrap token, starts the HTTP
-server in a background thread, and launches Chromium in app/kiosk mode
-pointed at it.
+"""Entry point: starts the authenticated HTTP backend and GUI frontend.
+
+The installed image prefers the unprivileged Tauri shell; Chromium remains a
+compatibility fallback for older images while the shell is live-ISO validated.
 """
 
 import argparse
@@ -14,7 +15,7 @@ import threading
 import time
 
 from . import config
-from .config import PORT
+from .config import PORT, SESSION_TOKEN
 from .context import InstallerContext, InstallLifecycle
 from .runner import spawn_command
 from .server import Handler, _Server
@@ -218,29 +219,34 @@ def main() -> None:
                 return cand
         return ""
     sudo_user = _session_owner()
-    chromium_bin = next(
-        (b for b in ("chromium", "chromium-browser", "chromium-bin") if shutil.which(b)),
-        "chromium",
-    )
-    # --no-sandbox is required in the live ISO's overlayfs environment where
-    # unprivileged user namespaces (needed by Chromium's sandbox) may be
-    # unavailable. --disable-gpu is intentionally omitted: it kills the renderer
-    # in Fedora's Chromium build (blank gray window). Software GL is provided by
-    # Mesa llvmpipe via LIBGL_ALWAYS_SOFTWARE forwarded from the live session env.
-    chromium_cmd = [
-        chromium_bin,
-        f"--app=http://127.0.0.1:{PORT}/?bootstrap_token={config._bootstrap_token}",
-        "--disable-dev-shm-usage",
-        "--disable-extensions",
-        "--disable-translate",
-        "--no-first-run",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--test-type",
-        "--password-store=basic",
-        "--window-size=1280,800",
-        "--window-position=0,0",
-    ]
+    installer_shell = shutil.which("kyth-installer-shell")
+    if installer_shell:
+        gui_cmd = [
+            installer_shell,
+            "--bootstrap-token", config._bootstrap_token,
+            "--session-token", SESSION_TOKEN,
+        ]
+    else:
+        chromium_bin = next(
+            (b for b in ("chromium", "chromium-browser", "chromium-bin") if shutil.which(b)),
+            "chromium",
+        )
+        # --no-sandbox remains only on the legacy Chromium fallback. The
+        # Tauri shell is unprivileged and uses WebKitGTK's normal sandbox.
+        gui_cmd = [
+            chromium_bin,
+            f"--app=http://127.0.0.1:{PORT}/?bootstrap_token={config._bootstrap_token}",
+            "--disable-dev-shm-usage",
+            "--disable-extensions",
+            "--disable-translate",
+            "--no-first-run",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--test-type",
+            "--password-store=basic",
+            "--window-size=1280,800",
+            "--window-position=0,0",
+        ]
     if sudo_user:
         gui_env = []
         for key in (
@@ -258,11 +264,11 @@ def main() -> None:
             value = os.environ.get(key)
             if value:
                 gui_env.append(f"{key}={value}")
-        proc = spawn_command(["sudo", "-u", sudo_user, "env", *gui_env, *chromium_cmd])
+        proc = spawn_command(["sudo", "-u", sudo_user, "env", *gui_env, *gui_cmd])
     else:
-        proc = spawn_command(chromium_cmd)
+        proc = spawn_command(gui_cmd)
 
-    # Wait for Chromium to exit so the process and port are released cleanly.
+    # Wait for the GUI shell to exit so the process and port are released cleanly.
     # This means re-launching the installer from the desktop always gets a fresh server.
     try:
         proc.wait()

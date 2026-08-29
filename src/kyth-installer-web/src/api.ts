@@ -1,17 +1,53 @@
 import type { Config, Disk, FreeRegion, InstallRequest, InstallerEvent, Partition, PendingOperation, RescueProbe, TransactionReport } from "./types";
+import { invoke } from "@tauri-apps/api/core";
+import { inTauriShell } from "./services/tauriEnv";
 
 declare global { interface Window { __KYTH_SESSION_TOKEN__?: string; } }
+
+interface InstallerConnection {
+  base_url: string;
+  bootstrap_token: string;
+  session_token: string;
+}
+
+let connection: InstallerConnection | null = null;
+let connectionPromise: Promise<void> | null = null;
+
+/** Bootstrap the embedded UI against the root-owned Python backend once. */
+async function ensureConnection(): Promise<void> {
+  if (!inTauriShell() || connection) return;
+  if (!connectionPromise) {
+    connectionPromise = invoke<InstallerConnection>("installer_connection").then(async (value) => {
+      const response = await fetch(`${value.base_url}/?bootstrap_token=${encodeURIComponent(value.bootstrap_token)}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`Installer backend bootstrap failed (${response.status})`);
+      connection = value;
+    });
+  }
+  await connectionPromise;
+}
+
+function apiUrl(path: string): string {
+  return `${connection?.base_url ?? ""}${path}`;
+}
 
 export class InstallerApiError extends Error {
   constructor(public readonly status: number, message: string, public readonly details?: unknown) { super(message); }
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  await ensureConnection();
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
   if (init?.body) headers.set("Content-Type", "application/json");
-  if (window.__KYTH_SESSION_TOKEN__) headers.set("X-Kyth-Session-Token", window.__KYTH_SESSION_TOKEN__);
-  const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
+  const token = connection?.session_token ?? window.__KYTH_SESSION_TOKEN__;
+  if (token) headers.set("X-Kyth-Session-Token", token);
+  const response = await fetch(apiUrl(path), {
+    ...init,
+    headers,
+    credentials: inTauriShell() ? "omit" : "same-origin",
+  });
   const text = await response.text();
   let payload: unknown = text;
   try { payload = text ? JSON.parse(text) : {}; } catch { /* preserve plain-text errors */ }
@@ -53,10 +89,21 @@ export const installerApi = {
 };
 
 export function subscribeToInstallEvents(onEvent: (event: InstallerEvent) => void, onDisconnect: () => void): () => void {
-  const source = new EventSource("/api/stream", { withCredentials: true });
-  source.onmessage = (message) => {
-    try { onEvent(JSON.parse(message.data) as InstallerEvent); } catch { onDisconnect(); source.close(); }
-  };
-  source.onerror = () => onDisconnect();
-  return () => source.close();
+  let source: EventSource | undefined;
+  let closed = false;
+  void ensureConnection().then(() => {
+    if (closed) return;
+    // EventSource cannot set a header; use the session token in the URL for
+    // this read-only stream. Mutating requests always use the header below.
+    const streamToken = connection?.session_token;
+    const streamPath = streamToken
+      ? `/api/stream?session_token=${encodeURIComponent(streamToken)}`
+      : "/api/stream";
+    source = new EventSource(apiUrl(streamPath), { withCredentials: true });
+    source.onmessage = (message) => {
+      try { onEvent(JSON.parse(message.data) as InstallerEvent); } catch { onDisconnect(); source?.close(); }
+    };
+    source.onerror = () => onDisconnect();
+  }).catch(onDisconnect);
+  return () => { closed = true; source?.close(); };
 }

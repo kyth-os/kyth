@@ -15,4 +15,5 @@
 //! `guardian::load_state`'s docs for why that boundary matters).
 
 pub mod guardian;
+pub mod diagnostics_scrub;
 pub mod system;

@@ -252,6 +252,7 @@ class HubWebCoverageTests(unittest.TestCase):
         self.assertIn("https://github.com/kyth-os/kyth/issues/new", text)
         self.assertIn("percent_encode(&title)", text)
         self.assertIn("percent_encode(&body)", text)
+        self.assertIn("kyth_shared::diagnostics_scrub::scrub_logs", text)
         # No raw interpolation of either argument into the URL.
         self.assertNotRegex(text, r"\{title\}|\{body\}")
 

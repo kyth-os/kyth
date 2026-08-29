@@ -24,6 +24,8 @@ INSTALL_SOURCE_IMAGE=${INSTALL_SOURCE_IMAGE:-${BASE_IMAGE}}
 mount -o remount,rw /proc/sys
 
 # ── KythOS installer Python packages ──────────────────────────────────────────
+# The React/Tauri shell is copied by Containerfile from its isolated builder
+# stage. This script still owns the Python compatibility backend and launcher.
 # Install through their package metadata so entry points, dependencies, and
 # package data are verified by the same mechanism used by development builds.
 # /src is a read-only BuildKit bind mount, while setuptools writes build
@@ -86,6 +88,8 @@ printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"
 # intentionally deferred to Flatpak first-boot setup.
 dnf install -y \
 	chromium \
+	webkit2gtk4.1 \
+	gtk3 \
 	dracut-live \
 	grub2-efi-x64-cdboot \
 	livesys-scripts

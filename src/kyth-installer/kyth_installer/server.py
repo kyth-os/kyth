@@ -113,6 +113,30 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def end_headers(self) -> None:
+        origin = (self.headers.get("Origin", "") or "").strip()
+        if origin in {
+            "http://tauri.localhost", "https://tauri.localhost",
+            "http://localhost", "https://localhost",
+        }:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Credentials", "true")
+            self.send_header("Access-Control-Allow-Headers", "Accept, Content-Type, X-Kyth-Session-Token")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Vary", "Origin")
+        super().end_headers()
+
+    def do_OPTIONS(self) -> None:
+        origin = (self.headers.get("Origin", "") or "").strip()
+        if origin not in {
+            "http://tauri.localhost", "https://tauri.localhost",
+            "http://localhost", "https://localhost",
+        }:
+            self.send_error(403, "Forbidden")
+            return
+        self.send_response(204)
+        self.end_headers()
+
     def _require_auth(self) -> bool:
         # Check header
         if self.headers.get("X-Kyth-Session-Token", "") == SESSION_TOKEN:
@@ -120,6 +144,12 @@ class Handler(BaseHTTPRequestHandler):
         # Check cookie
         cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
         if cookies.get("bootstrap_auth") == SESSION_TOKEN:
+            return True
+        # EventSource cannot set X-Kyth-Session-Token. The Tauri shell uses a
+        # short-lived loopback URL for this read-only stream only; no POST
+        # accepts credentials from a query string.
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/stream" and parse_qs(parsed.query).get("session_token") == [SESSION_TOKEN]:
             return True
         self.send_error(403, "Forbidden")
         return False

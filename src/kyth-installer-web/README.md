@@ -9,4 +9,15 @@ npm install
 npm run dev
 ```
 
-The package is not installed into the live image yet. Image integration and the Tauri shell are Phase 2 work.
+The package is embedded in the unprivileged `kyth-installer-shell` Tauri
+window during Phase 2. The shell keeps the Python installer backend as the
+compatibility service on `127.0.0.1:7777`; it has no disk, filesystem, or
+generic command bridge. Chromium remains the launcher fallback on images that
+do not yet contain the shell.
+
+For local development, run the backend on port 7777 and use:
+
+```bash
+npm install
+npm run tauri:dev
+```

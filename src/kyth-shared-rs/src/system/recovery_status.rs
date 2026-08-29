@@ -1,7 +1,5 @@
 //! Port of `kyth_shared.system.recovery_status` — staged/rollback/quarantined single view.
 
-use std::collections::HashMap;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryStatus {
     pub has_staged: bool,
@@ -29,16 +27,20 @@ pub fn get_recovery_status() -> RecoveryStatus {
     let history = crate::system::deployment_history::deployment_history();
     let has_staged = history.iter().find(|d| d.section=="staged").map(|d| d.available).unwrap_or(false);
     let has_rollback = history.iter().find(|d| d.section=="rollback").map(|d| d.available).unwrap_or(false);
-    // quarantine: /var/lib/kyth/boot-health.json contains quarantined digest?
-    let mut quarantined = String::new();
-    let mut detail = String::new();
-    if let Ok(text) = std::fs::read_to_string("/var/lib/kyth/boot-health.json") {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-            if let Some(q) = v.get("quarantined_digest").and_then(|x| x.as_str()) {
-                if !q.is_empty() { quarantined = q.to_string(); detail = "boot quarantine active".to_string(); }
-            }
-        }
-    }
+    // Python stores quarantines as a digest-keyed map, not a scalar
+    // `quarantined_digest`. Decode that same state through the shared port so
+    // the Repair page and boot-health CLI agree on the newest record.
+    let state = crate::system::boot_health::read_default_state();
+    let (quarantined, detail) = state.newest_quarantine().map_or_else(
+        || (String::new(), String::new()),
+        |record| {
+            (
+                record.digest.clone(),
+                crate::system::boot_health::quarantine_reason(&state, &record.digest)
+                    .unwrap_or_else(|| record.reason.clone()),
+            )
+        },
+    );
     let clear_cmd = if !quarantined.is_empty() { format!("sudo kyth-boot-health clear-quarantine --digest {}", quarantined) } else { String::new() };
     RecoveryStatus { has_staged, has_rollback, quarantined_digest: quarantined, quarantine_detail: detail, watcher_staged: has_staged, clear_quarantine_cmd: clear_cmd }
 }

@@ -14,9 +14,9 @@ import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 /** The system details worth attaching to a report — deliberately only what
  * is already visible elsewhere in the Hub (channel, version, kernel, and
  * how many Guardian items are outstanding). Nothing here is collected
- * specially for the report, and the user sees the exact text before it
- * leaves: the send path opens a prefilled GitHub issue in the browser
- * rather than posting anything itself. */
+ * specially for the report, and the send path sanitizes it at the Rust
+ * boundary before opening a prefilled GitHub issue in the browser rather
+ * than posting anything itself. */
 function detailsBlock(bootc: BootcSnapshot | null, kernel: string | null, guardian: GuardianSnapshot | null): string {
   const lines = [
     `Channel: ${bootc?.channel ?? "unknown"}`,
@@ -28,9 +28,10 @@ function detailsBlock(bootc: BootcSnapshot | null, kernel: string | null, guardi
 }
 
 // "This PC > Feedback" — writes the report, attaches the same system
-// details the Hub already shows, and hands it to the browser as a
-// prefilled kyth-os/kyth issue (see main.rs's open_feedback_issue, which
-// fixes the host and repo so only the text travels).
+// details the Hub already shows, sanitizes it at the Rust boundary, and hands
+// it to the browser as a prefilled kyth-os/kyth issue (see main.rs's
+// open_feedback_issue, which fixes the host and repo so only sanitized text
+// travels).
 export function FeedbackSection({ section }: { section: HubSection }) {
   const [snap, setSnap] = useState<GuardianSnapshot | null>(null);
   const [bootc, setBootc] = useState<BootcSnapshot | null>(null);

@@ -9,10 +9,29 @@
 #     -t kyth-live:build -f installer/Containerfile .
 
 ARG BASE_IMAGE=ghcr.io/kyth-os/kyth:latest
+
+# ── React/Tauri installer shell builder ─────────────────────────────────────
+# Keep Node/Rust/WebKit development dependencies out of the live image. The
+# resulting shell is an unprivileged WebKitGTK window; the Python installer
+# remains the root-owned compatibility backend for this phase.
+FROM registry.fedoraproject.org/fedora:44 AS installer-web-builder
+RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
+        cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \
+        webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel gtk3-devel dbus-devel && \
+    dnf5 clean all
+COPY src/kyth-installer-web /build/kyth-installer-web
+WORKDIR /build/kyth-installer-web
+RUN rm -f node_modules && npm ci && npm run build
+WORKDIR /build/kyth-installer-web/src-tauri
+RUN cargo build --release --locked && \
+    cp target/release/kyth-installer-shell /build/kyth-installer-shell
+
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG INSTALL_SOURCE_IMAGE=${BASE_IMAGE}
 ARG SOURCE_TAG=latest
+
+COPY --from=installer-web-builder /build/kyth-installer-shell /usr/bin/kyth-installer-shell
 
 # Replace inherited repo files with a minimal known-good set. Keep [updates]
 # enabled so live-only packages (notably Chromium, the installer's kiosk

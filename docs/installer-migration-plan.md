@@ -178,16 +178,17 @@ Before replacing Chromium in the image:
 
 - Phase 0 — API contract: complete. See [`installer-api-contract.md`](installer-api-contract.md).
 - Phase 1 — React frontend: complete as a standalone package in [`src/kyth-installer-web/`](../src/kyth-installer-web/). Typecheck and production build pass. The Python HTTP/SSE backend and legacy WebUI remain available as the runtime fallback.
+- Phase 2 — Tauri shell: implementation started. `kyth-installer-shell` embeds the React build, runs as the desktop user, and connects to the fixed loopback Python backend with per-run tokens. Chromium remains the fallback until live-image acceptance.
 
 ## Remaining plan
 
-### Phase 2 — Tauri installer shell
+### Phase 2 — Tauri installer shell (in progress)
 
-- Add an unprivileged Tauri shell around the React build.
+- Add an unprivileged Tauri shell around the React build. **Done:** `src/kyth-installer-web/src-tauri/` embeds the production assets and exposes only the fixed backend connection/token handoff.
 - Embed production assets; do not use a development server or `--no-sandbox`.
-- Preserve single-instance/startup routing behavior from System Hub.
-- Expose no unrestricted command, filesystem, or disk-writing bridge.
-- Add WebKitGTK/runtime dependencies to the installer image and replace the Chromium launcher only after live-ISO validation.
+- Preserve single-instance/startup routing behavior from System Hub. **Done:** the shell uses the single-instance plugin and the launcher passes bootstrap/session tokens.
+- Expose no unrestricted command, filesystem, or disk-writing bridge. **Done:** the shell has one typed connection command and no OS command/file APIs.
+- Add WebKitGTK/runtime dependencies to the installer image and replace the Chromium launcher only after live-ISO validation. **Build wiring done;** launcher keeps Chromium as a safe compatibility fallback until the live-ISO gate passes.
 
 ### Phase 3 — Unix-socket privileged service
 
