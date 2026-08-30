@@ -63,15 +63,21 @@ _run-vm $target_image $tag $type:
 
 # Run a virtual machine from a QCOW2 image
 [group('Run Virtual Machine')]
-run-vm-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "qcow2")
+run-vm-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag:
+    just build
+    just _run-vm "{{ target_image }}" "{{ tag }}" "qcow2"
 
 # Run a virtual machine from a RAW image
 [group('Run Virtual Machine')]
-run-vm-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "raw")
+run-vm-raw $target_image=("localhost/" + image_name) $tag=default_tag:
+    just build
+    just _run-vm "{{ target_image }}" "{{ tag }}" "raw"
 
 # Run a virtual machine from an ISO
 [group('Run Virtual Machine')]
-run-vm-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "iso")
+run-vm-iso $target_image=("localhost/" + image_name) $tag=default_tag:
+    just build
+    just _run-vm "{{ target_image }}" "{{ tag }}" "iso"
 
 # Boot the live ISO in a VM (BIOS, web UI at http://localhost:PORT).
 [group('Run Virtual Machine')]
