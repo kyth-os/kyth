@@ -24,6 +24,13 @@ struct ConnectionArgs {
     session_token: String,
 }
 
+#[derive(serde::Deserialize)]
+struct FreeRegionRecord {
+    start_bytes: u64,
+    end_bytes: u64,
+    size_bytes: u64,
+}
+
 #[derive(Clone)]
 struct InstallState {
     disk: String,
@@ -299,19 +306,16 @@ fn stream_install_events(weak: Weak<InstallerWindow>, config: ConnectionArgs) {
     });
 }
 
-fn disk_inventory(value: &serde_json::Value) -> (String, String) {
-    let Some(disks) = value.as_array() else {
-        return ("Installer returned no disk inventory".to_string(), "Disk details are unavailable.".to_string());
-    };
+fn disk_inventory(disks: &[installer_storage::DiskRecord]) -> (String, String) {
     if disks.is_empty() {
-        return ("No install targets reported yet".to_string(), "Connect installation media or attach a writable disk.".to_string());
+        return ("Installer returned no disk inventory".to_string(), "Disk details are unavailable.".to_string());
     }
     let mut details = Vec::new();
     for disk in disks.iter().take(6) {
-        let name = disk.get("name").and_then(serde_json::Value::as_str).unwrap_or("unnamed device");
-        let model = disk.get("model").and_then(serde_json::Value::as_str).filter(|value| !value.trim().is_empty()).unwrap_or("Unknown model");
-        let size = disk.get("size_bytes").and_then(serde_json::Value::as_u64).map(|bytes| kyth_shared::transfer::human_bytes(bytes as f64)).unwrap_or_else(|| "size unavailable".to_string());
-        let current = disk.get("current").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let name = disk.name.as_str();
+        let model = if disk.model.trim().is_empty() { "Unknown model" } else { disk.model.as_str() };
+        let size = kyth_shared::transfer::human_bytes(disk.size_bytes as f64);
+        let current = disk.current;
         details.push(if current {
             format!("{name} · {model} · {size} · current system disk")
         } else {
@@ -322,16 +326,16 @@ fn disk_inventory(value: &serde_json::Value) -> (String, String) {
     (format!("{} install target(s) available", disks.len()), details.join("\n"))
 }
 
-fn disk_names(value: &Value) -> [String; 6] {
+fn disk_names(disks: &[installer_storage::DiskRecord]) -> [String; 6] {
     let mut names = std::array::from_fn(|_| String::new());
-    if let Some(disks) = value.as_array() {
-        for (slot, disk) in disks.iter().take(names.len()).enumerate() {
-            if let Some(name) = disk.get("name").and_then(Value::as_str) {
-                names[slot] = name.to_string();
-            }
-        }
+    for (slot, disk) in disks.iter().take(names.len()).enumerate() {
+        names[slot] = disk.name.clone();
     }
     names
+}
+
+fn typed_disks(value: Value) -> Result<Vec<installer_storage::DiskRecord>, String> {
+    serde_json::from_value(value).map_err(|_| "Installer returned an invalid disk inventory".to_string())
 }
 
 fn storage_snapshot(config: &ConnectionArgs, disk: &str) -> (String, [String; 6], [String; 6]) {
@@ -348,14 +352,13 @@ fn storage_snapshot(config: &ConnectionArgs, disk: &str) -> (String, [String; 6]
     let mut detail_lines = Vec::new();
 
     if let Ok((200, value)) = partitions {
-        if let Some(items) = value.as_array() {
+        if let Ok(items) = serde_json::from_value::<Vec<installer_storage::PartitionRecord>>(value) {
             for (slot, part) in items.iter().take(6).enumerate() {
-                let name = part.get("name").and_then(Value::as_str).unwrap_or("unnamed partition");
-                let fs = part.get("fstype").and_then(Value::as_str).filter(|value| !value.is_empty()).unwrap_or("unknown filesystem");
-                let size = part.get("size_bytes").and_then(Value::as_u64).map(|bytes| kyth_shared::transfer::human_bytes(bytes as f64)).unwrap_or_else(|| "size unavailable".to_string());
-                let suffix = if part.get("current").and_then(Value::as_bool).unwrap_or(false) { " · current" } else if part.get("in_use").and_then(Value::as_bool).unwrap_or(false) { " · in use" } else if part.get("efi").and_then(Value::as_bool).unwrap_or(false) { " · EFI" } else { "" };
-                let selectable = !part.get("current").and_then(Value::as_bool).unwrap_or(false)
-                    && !part.get("in_use").and_then(Value::as_bool).unwrap_or(false);
+                let name = part.name.as_str();
+                let fs = if part.fstype.is_empty() { "unknown filesystem" } else { part.fstype.as_str() };
+                let size = kyth_shared::transfer::human_bytes(part.size_bytes as f64);
+                let suffix = if part.current { " · current" } else if part.in_use { " · in use" } else if part.efi { " · EFI" } else { "" };
+                let selectable = !part.current && !part.in_use;
                 if selectable {
                     partition_names[slot] = name.to_string();
                 }
@@ -364,11 +367,11 @@ fn storage_snapshot(config: &ConnectionArgs, disk: &str) -> (String, [String; 6]
         }
     }
     if let Ok((200, value)) = free_regions {
-        if let Some(items) = value.as_array() {
+        if let Ok(items) = serde_json::from_value::<Vec<FreeRegionRecord>>(value) {
             for (slot, region) in items.iter().take(6).enumerate() {
-                let start = region.get("start_bytes").and_then(Value::as_u64).unwrap_or(0);
-                let end = region.get("end_bytes").and_then(Value::as_u64).unwrap_or(0);
-                let size = region.get("size_bytes").and_then(Value::as_u64).map(|bytes| kyth_shared::transfer::human_bytes(bytes as f64)).unwrap_or_else(|| "size unavailable".to_string());
+                let start = region.start_bytes;
+                let end = region.end_bytes;
+                let size = kyth_shared::transfer::human_bytes(region.size_bytes as f64);
                 free_names[slot] = format!("{start}:{end} · {size}");
             }
         }
@@ -477,8 +480,13 @@ fn connection_snapshot(config: &ConnectionArgs) -> (String, String, String, Stri
     };
     let (disk_summary, disk_details, names) = match get_json(config, "/api/disks") {
         Ok((200, value)) => {
-            let (summary, details) = disk_inventory(&value);
-            (summary, details, disk_names(&value))
+            match typed_disks(value) {
+                Ok(disks) => {
+                    let (summary, details) = disk_inventory(&disks);
+                    (summary, details, disk_names(&disks))
+                }
+                Err(error) => (error, "Disk details are unavailable.".to_string(), std::array::from_fn(|_| String::new())),
+            }
         }
         Ok(_) => ("Disk inventory is not available yet".to_string(), "The installer service did not return a disk list.".to_string(), std::array::from_fn(|_| String::new())),
         Err(_) => ("Connect to see available install targets".to_string(), "Disk details will appear here when the service is ready.".to_string(), std::array::from_fn(|_| String::new())),
