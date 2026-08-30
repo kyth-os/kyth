@@ -49,8 +49,8 @@ class InstallerTauriShellTests(unittest.TestCase):
             self.assertIn(control, slint)
         self.assertIn('install_mode != "manual"', rust)
         self.assertIn('install-mode != "manual"', slint)
-        self.assertIn("!part.get(\"current\")", rust)
-        self.assertIn("!part.get(\"in_use\")", rust)
+        self.assertIn("!part.current", rust)
+        self.assertIn("!part.in_use", rust)
 
     def test_native_install_uses_the_authenticated_event_stream(self):
         rust = NATIVE_RS.read_text()
