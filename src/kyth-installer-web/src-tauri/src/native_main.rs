@@ -431,8 +431,9 @@ fn pending_snapshot(config: &ConnectionArgs) -> String {
 fn transaction_snapshot(config: &ConnectionArgs) -> String {
     match get_json(config, "/api/report") {
         Ok((200, value)) if value.as_object().is_some_and(|object| !object.is_empty()) => installer_transaction::decode(&value.to_string()).map(|decoded| {
-            let mut result = format!("{} · {}", decoded.state.status, decoded.state.phase);
+            let mut result = format!("{} · {} · {}", decoded.state.status, decoded.state.phase, decoded.guidance.severity);
             if !decoded.state.message.trim().is_empty() { result.push_str(&format!(" · {}", decoded.state.message)); }
+            result.push_str(&format!("\n{}", decoded.guidance.message));
             result
         }).unwrap_or_else(|_| "Transaction report is not available yet".to_string()),
         Ok((200, _)) => "No install transaction recorded".to_string(),

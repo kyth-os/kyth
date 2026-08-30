@@ -383,8 +383,10 @@ fn gaming_launchers_text() -> String {
 fn software_catalog_text() -> String {
     let installed = kyth_shared::system::software_catalog::installed_flatpaks();
     let appimages = kyth_shared::system::software_catalog::appimages();
-    let packs = kyth_shared::system::software_catalog::starter_packs().len();
-    format!("Catalog · {} installed Flatpak(s) · {} AppImage(s) · {packs} starter packs", installed.len(), appimages.len())
+    let packs = kyth_shared::system::software_catalog::starter_packs();
+    let image_names = appimages.iter().take(3).map(|image| image.name.as_str()).collect::<Vec<_>>().join(", ");
+    let pack_names = packs.iter().map(|pack| pack.name.as_str()).collect::<Vec<_>>().join(", ");
+    format!("Catalog · {} installed Flatpak(s) · {} AppImage(s) · {} starter packs\nAppImages · {}\nPacks · {}", installed.len(), appimages.len(), packs.len(), if image_names.is_empty() { "none discovered" } else { image_names.as_str() }, pack_names)
 }
 
 fn guardian_status_text() -> String {
