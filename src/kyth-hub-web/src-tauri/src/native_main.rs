@@ -377,6 +377,20 @@ fn gaming_launchers_text() -> String {
     }
 }
 
+fn software_catalog_text() -> String {
+    let installed = kyth_shared::system::software_catalog::installed_flatpaks();
+    let appimages = kyth_shared::system::software_catalog::appimages();
+    let packs = kyth_shared::system::software_catalog::starter_packs().len();
+    format!("Catalog · {} installed Flatpak(s) · {} AppImage(s) · {packs} starter packs", installed.len(), appimages.len())
+}
+
+fn guardian_status_text() -> String {
+    let state = kyth_shared::guardian::load_state();
+    let pending = kyth_shared::guardian::pending_recommendations(&state).len();
+    let quarantined = state.quarantined.len();
+    format!("Guardian · {pending} pending recommendation(s) · {quarantined} quarantined item(s)")
+}
+
 fn initial_page() -> String {
     let requested = initial_requested_page();
     landing_for_page(requested.as_deref().unwrap_or("Home")).to_string()
@@ -546,6 +560,8 @@ fn refresh_section(weak: Weak<HubWindow>, section: String) {
         let (status, detail) = section_status(&section);
         let capabilities = (section == "Hardware").then(hardware_capabilities_text).unwrap_or_default();
         let launchers = (section == "Gaming").then(gaming_launchers_text).unwrap_or_default();
+        let software = (section == "App Store").then(software_catalog_text).unwrap_or_default();
+        let guardian = (section == "Guardian").then(guardian_status_text).unwrap_or_default();
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = weak.upgrade() {
                 if window.get_selected_section().as_str() != section {
@@ -555,6 +571,8 @@ fn refresh_section(weak: Weak<HubWindow>, section: String) {
                 window.set_section_detail(SharedString::from(detail));
                 window.set_hardware_capabilities(SharedString::from(capabilities));
                 window.set_gaming_launchers(SharedString::from(launchers));
+                window.set_software_catalog(SharedString::from(software));
+                window.set_guardian_status(SharedString::from(guardian));
             }
         });
     });
@@ -585,6 +603,8 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_section_detail(SharedString::from("Native section status is read in the background."));
     window.set_hardware_capabilities(SharedString::from("Capabilities · Reading hardware view…"));
     window.set_gaming_launchers(SharedString::from("Launchers · Reading gaming inventory…"));
+    window.set_software_catalog(SharedString::from("Catalog · Reading software inventory…"));
+    window.set_guardian_status(SharedString::from("Guardian · Reading recommendations…"));
 
     let action_weak = window.as_weak();
     window.on_page_action(move |action| {
@@ -625,6 +645,8 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_section_detail(SharedString::from("Native section status is read in the background."));
             window.set_hardware_capabilities(SharedString::from("Capabilities · Reading hardware view…"));
             window.set_gaming_launchers(SharedString::from("Launchers · Reading gaming inventory…"));
+            window.set_software_catalog(SharedString::from("Catalog · Reading software inventory…"));
+            window.set_guardian_status(SharedString::from("Guardian · Reading recommendations…"));
             refresh_status(navigation_weak.clone(), page.to_string());
             refresh_section(navigation_weak.clone(), sections[0].to_string());
         }
@@ -637,6 +659,8 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_section_detail(SharedString::from("Native section status is read in the background."));
             window.set_hardware_capabilities(SharedString::from("Capabilities · Reading hardware view…"));
             window.set_gaming_launchers(SharedString::from("Launchers · Reading gaming inventory…"));
+            window.set_software_catalog(SharedString::from("Catalog · Reading software inventory…"));
+            window.set_guardian_status(SharedString::from("Guardian · Reading recommendations…"));
             refresh_section(section_weak.clone(), section.to_string());
         }
     });

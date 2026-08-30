@@ -95,6 +95,15 @@ class HubWebActionTests(unittest.TestCase):
         self.assertIn("gaming-launchers", NATIVE_SLINT)
         self.assertIn('selected-page == "Play" && selected-section == "Gaming"', NATIVE_SLINT)
 
+    def test_native_software_and_guardian_sections_surface_rust_reads(self):
+        self.assertIn("installed_flatpaks", NATIVE_RS)
+        self.assertIn("fn software_catalog_text()", NATIVE_RS)
+        self.assertIn("fn guardian_status_text()", NATIVE_RS)
+        self.assertIn("set_software_catalog", NATIVE_RS)
+        self.assertIn("set_guardian_status", NATIVE_RS)
+        self.assertIn('selected-page == "Apps" && selected-section == "App Store"', NATIVE_SLINT)
+        self.assertIn('selected-page == "This PC" && selected-section == "Guardian"', NATIVE_SLINT)
+
     def test_every_mutating_wrapper_is_reachable_from_the_ui(self):
         sources = _ui_sources()
         for wrapper, expected_file in MUTATING_WRAPPERS.items():
