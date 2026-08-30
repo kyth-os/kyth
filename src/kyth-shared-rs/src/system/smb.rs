@@ -1,7 +1,6 @@
 //! Port of `kyth_shared.system.smb` — Aurora autodiscover parity (N33).
 //! avahi-browse / smbclient discovery + gio mount, no auto-mount on boot.
 
-use std::process::Command;
 use std::time::Duration;
 
 pub fn smb_discover_command(host: Option<&str>) -> Vec<String> {
@@ -17,38 +16,15 @@ pub fn smb_mount_command(share: &str) -> Vec<String> {
 }
 
 fn run_with_timeout(cmd: &[String], timeout: Duration) -> Option<(i32, String, String)> {
-    use std::process::Stdio;
     if cmd.is_empty() {
         return None;
     }
-    let mut child = Command::new(&cmd[0])
-        .args(&cmd[1..])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let out = child.wait_with_output().ok()?;
-                return Some((
-                    status.code().unwrap_or(-1),
-                    String::from_utf8_lossy(&out.stdout).to_string(),
-                    String::from_utf8_lossy(&out.stderr).to_string(),
-                ));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return None,
-        }
-    }
+    let output = super::process::run_bounded(cmd, timeout).ok()?;
+    Some((
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    ))
 }
 
 pub fn smb_browse_dry_run(host: Option<&str>) -> (bool, String) {
@@ -59,7 +35,8 @@ pub fn smb_browse_dry_run(host: Option<&str>) -> (bool, String) {
         Some((_, _, _)) => (false, format!("{} failed", cmd.join(" "))),
         None => {
             // distinguish not-installed
-            let exists = Command::new(&cmd[0]).arg("--help").output().is_ok();
+            let help = vec![cmd[0].clone(), "--help".into()];
+            let exists = super::process::run_bounded(&help, Duration::from_secs(3)).is_ok();
             if !exists {
                 (false, format!("{} not installed", cmd[0]))
             } else {

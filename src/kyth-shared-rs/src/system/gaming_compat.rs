@@ -1,6 +1,6 @@
 //! Small, honest gaming compatibility helpers for the Hub.
 use serde::Serialize;
-use std::process::Command;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProtonDbResult { pub app_id: String, pub tier: String, pub detail: String }
@@ -8,7 +8,8 @@ pub struct ProtonDbResult { pub app_id: String, pub tier: String, pub detail: St
 pub fn protondb_lookup(app_id: &str) -> Option<ProtonDbResult> {
     if app_id.len() > 12 || !app_id.chars().all(|c| c.is_ascii_digit()) { return None; }
     let url = format!("https://www.protondb.com/api/v1/reports/summaries/{app_id}.json");
-    let output = Command::new("curl").args(["-fsSL", "--max-time", "6", &url]).output().ok()?;
+    let argv = ["curl".to_string(), "-fsSL".to_string(), "--max-time".to_string(), "6".to_string(), url];
+    let output = crate::system::process::run_bounded(&argv, Duration::from_secs(8)).ok()?;
     if !output.status.success() { return None; }
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
     let tier = json.get("tier")?.as_str()?.to_string();

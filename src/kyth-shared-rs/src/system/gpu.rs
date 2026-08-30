@@ -6,10 +6,11 @@
 //! the Python original; ported as-is, not "fixed", since changing that
 //! behavior isn't this port's job).
 
-use std::process::Command;
+use std::time::Duration;
 
 pub fn lspci_gpu_lines() -> Vec<String> {
-    let Ok(output) = Command::new("lspci").arg("-nn").output() else {
+    let argv = ["lspci", "-nn"].into_iter().map(str::to_string).collect::<Vec<_>>();
+    let Ok(output) = super::process::run_bounded(&argv, Duration::from_secs(5)) else {
         return Vec::new();
     };
     if !output.status.success() {

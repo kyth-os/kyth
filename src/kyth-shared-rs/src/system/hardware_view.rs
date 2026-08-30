@@ -1,9 +1,7 @@
-//! Port of `kyth_shared.system.hardware_view` — canonical hardware view (first slice).
-//! Full `Evaluation`/`Inventory` requires `hardware_policy` port (toml matching,
-//! sysfs parsing) — this slice ports the ProbeService-cached shape the Hub
-//! actually renders: `has_nvidia`/`is_hybrid`/`capabilities` + applied state,
-//! all from the `hardware-summary` probe cache (30s TTL). The live
-//! `evaluate_system()` path stays Python until `hardware_policy` is ported.
+//! Port of `kyth_shared.system.hardware_view` — canonical hardware view.
+//! Prefer the ProbeService cache so normal Hub navigation remains cheap; when
+//! the cache is unavailable, fall back to the Rust read-only hardware policy
+//! evaluator. Policy application and modprobe writes remain Python-owned.
 
 use std::collections::HashMap;
 
@@ -19,18 +17,29 @@ pub struct HardwareViewSummary {
 
 pub fn get_hardware_view_summary() -> Option<HardwareViewSummary> {
     // Read via existing probe helper — reuses DISK_TTL 30s and cache_read_paths()
-    let raw = crate::system::probe::read_section("hardware-summary")?;
-    let obj = raw.as_object()?;
-    let has_nvidia = obj.get("has_nvidia").and_then(|v| v.as_bool()).unwrap_or(false);
-    let is_hybrid = obj.get("is_hybrid").and_then(|v| v.as_bool()).unwrap_or(false);
-    let capabilities = obj
-        .get("capabilities")
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|e| e.as_str().map(|s| s.to_string())).collect())
-        .unwrap_or_default();
-    // applied state is not in hardware-summary; start empty (Python's read_applied_state() fallback)
-    let applied = HashMap::new();
-    Some(HardwareViewSummary { has_nvidia, is_hybrid, capabilities, applied })
+    if let Some(raw) = crate::system::probe::read_section("hardware-summary") {
+        let obj = raw.as_object()?;
+        let has_nvidia = obj.get("has_nvidia").and_then(|v| v.as_bool()).unwrap_or(false);
+        let is_hybrid = obj.get("is_hybrid").and_then(|v| v.as_bool()).unwrap_or(false);
+        let capabilities = obj
+            .get("capabilities")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|e| e.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        return Some(HardwareViewSummary { has_nvidia, is_hybrid, capabilities, applied: HashMap::new() });
+    }
+
+    let evaluation = crate::system::hardware_policy::evaluate_system().ok()?;
+    let has_nvidia = evaluation.inventory.pci.iter().any(|device| {
+        device.vendor == "10de" && device.class_code.starts_with("03")
+    });
+    let is_hybrid = evaluation.capabilities.iter().any(|cap| cap == "gpu.hybrid" || cap == "gpu.offload");
+    Some(HardwareViewSummary {
+        has_nvidia,
+        is_hybrid,
+        capabilities: evaluation.capabilities,
+        applied: HashMap::new(),
+    })
 }
 
 #[cfg(test)]

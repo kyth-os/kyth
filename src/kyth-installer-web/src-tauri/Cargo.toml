@@ -9,14 +9,22 @@ rust-version = "1.82"
 name = "kyth-installer-shell"
 path = "src/main.rs"
 
+[[bin]]
+name = "kyth-installer-native"
+path = "src/native_main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+slint-build = "1.16.0"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
+slint = "1.16.0"
+# Shared Rust formatting and read-only contracts for the native shell.
+kyth-shared = { path = "../../kyth-shared-rs" }
 
 [features]
 default = ["custom-protocol"]

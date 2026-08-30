@@ -1,6 +1,5 @@
 //! Port of `kyth_shared.system.updater` — fetch JSON metadata for latest release.
 
-use std::process::Command;
 use std::time::Duration;
 
 pub fn updater_available() -> bool {
@@ -9,23 +8,9 @@ pub fn updater_available() -> bool {
 }
 
 fn run_with_timeout(cmd: &[String], timeout: Duration) -> Option<(i32, String)> {
-    use std::process::Stdio;
     if cmd.is_empty() { return None; }
-    let mut child = Command::new(&cmd[0]).args(&cmd[1..]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(s)) => {
-                let out = child.wait_with_output().ok()?;
-                return Some((s.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).to_string()));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout { let _ = child.kill(); let _ = child.wait(); return None; }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return None,
-        }
-    }
+    let output = super::process::run_bounded(cmd, timeout).ok()?;
+    Some((output.status.code().unwrap_or(-1), String::from_utf8_lossy(&output.stdout).to_string()))
 }
 
 pub fn fetch_updater_metadata() -> Option<String> {

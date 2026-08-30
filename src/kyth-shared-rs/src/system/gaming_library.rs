@@ -69,7 +69,19 @@ pub fn gaming_library_scan() -> Vec<LauncherEntry> {
 }
 
 fn which_exists(bin: &str) -> bool {
-    std::process::Command::new("which").arg(bin).output().map(|o| o.status.success()).unwrap_or(false)
+    let Some(path) = std::env::var_os("PATH") else { return false; };
+    std::env::split_paths(&path).any(|directory| {
+        let candidate = directory.join(bin);
+        let Ok(metadata) = std::fs::metadata(candidate) else { return false; };
+        if !metadata.is_file() { return false; }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        { true }
+    })
 }
 
 #[cfg(test)]

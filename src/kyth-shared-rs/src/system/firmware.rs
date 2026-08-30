@@ -1,27 +1,13 @@
 //! Port of `kyth_shared.system.firmware` — fwupd helpers.
 
-use std::process::Command;
 use std::time::Duration;
+use super::runtime_output::count_fwupd_updates;
 
 fn run_with_timeout(cmd: &[String], timeout: Duration) -> Option<(i32, String)> {
-    use std::process::Stdio;
     if cmd.is_empty() { return None; }
-    let mut child = Command::new(&cmd[0]).args(&cmd[1..]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(s)) => {
-                let out = child.wait_with_output().ok()?;
-                let combined = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-                return Some((s.code().unwrap_or(-1), combined.trim().to_string()));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout { let _ = child.kill(); let _ = child.wait(); return None; }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return None,
-        }
-    }
+    let output = super::process::run_bounded(cmd, timeout).ok()?;
+    let combined = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    Some((output.status.code().unwrap_or(-1), combined.trim().to_string()))
 }
 
 pub fn firmware_refresh_commands() -> Vec<Vec<String>> {
@@ -46,11 +32,7 @@ pub fn check_firmware_updates(timeout: u64) -> i32 {
     match run_with_timeout(&cmd, Duration::from_secs(timeout)) {
         Some((2, _)) => 0,
         Some((0, stdout)) if stdout.trim().is_empty() => 0,
-        Some((0, stdout)) => {
-            // count_fwupd_updates from runtime_output: count lines with "Update" or devices
-            // Simplified: count occurrences of "Version:" or "Update" ?
-            stdout.lines().filter(|l| l.to_lowercase().contains("update") || l.contains("Version:")).count() as i32
-        }
+        Some((0, stdout)) => count_fwupd_updates(&stdout) as i32,
         _ => 0,
     }
 }

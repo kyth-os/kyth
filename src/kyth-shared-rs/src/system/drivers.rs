@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::process::Command;
+use std::time::Duration;
 
 pub fn get_loaded_kernel_modules() -> HashSet<String> {
     let mut set = HashSet::new();
@@ -21,7 +21,8 @@ pub fn is_module_loaded(module: &str) -> bool {
 }
 
 pub fn get_pci_devices_by_class(class: &str) -> Vec<String> {
-    let out = Command::new("lspci").arg("-nn").output();
+    let argv = ["lspci", "-nn"].into_iter().map(str::to_string).collect::<Vec<_>>();
+    let out = super::process::run_bounded(&argv, Duration::from_secs(5));
     if let Ok(o) = out {
         if o.status.success() {
             let lower = class.to_lowercase();

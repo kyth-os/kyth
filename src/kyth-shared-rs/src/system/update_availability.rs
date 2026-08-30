@@ -22,36 +22,33 @@ pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> Availabil
         } else { 0 };
         return AvailabilityStatus { state: "staged".to_string(), detail: "A staged image is ready to boot.".to_string(), flatpak_count: flatpak.max(0), flatpak_detail: String::new(), staged: true, manifest_raw: String::new(), blocked_reason: String::new() };
     }
-    let b = branch.map(|s| s.to_string()).or_else(|| crate::system::bootc::current_branch()).unwrap_or_else(|| "latest".to_string());
-    // Registry check — simplified: use bootc status digest vs probe registry digest if present, else uptodate
-    let _ = b;
+    let b = branch.map(str::to_string).or_else(crate::system::bootc::current_branch).unwrap_or_else(|| "latest".to_string());
+    let status_data = crate::system::probe::read_section("bootc-status-data")
+        .or_else(|| crate::system::bootc_query::fetch_status_data());
+    let Some(status_data) = status_data else {
+        return AvailabilityStatus { state: "error".to_string(), detail: "Could not read bootc status.".to_string(), flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::new(), blocked_reason: String::new() };
+    };
+    let registry = crate::system::registry::check_registry_update(&status_data, &b, crate::system::bootc_policy::REGISTRY);
+    if registry.state == "error" {
+        return AvailabilityStatus { state: "error".to_string(), detail: registry.detail, flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() };
+    }
     // Flatpak count with nmcli skip if disconnected
     let nm = run_nmcli_state();
     if matches!(nm.as_deref(), Some("disconnected") | Some("asleep") | Some("unknown")) {
-        return AvailabilityStatus { state: "uptodate".to_string(), detail: String::new(), flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::new(), blocked_reason: String::new() };
+        return AvailabilityStatus { state: registry.state, detail: registry.detail, flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() };
     }
-    let flatpak_count = crate::system::probe::read_section("flatpak-updates").and_then(|v| v.as_i64()).map(|n| n as i32).unwrap_or(0).max(0);
-    AvailabilityStatus { state: "uptodate".to_string(), detail: String::new(), flatpak_count, flatpak_detail: String::new(), staged: false, manifest_raw: String::new(), blocked_reason: String::new() }
+    let flatpak_count = crate::system::probe::read_section("flatpak-updates")
+        .and_then(|v| v.as_i64())
+        .map(|n| n as i32)
+        .unwrap_or(0)
+        .max(0);
+    AvailabilityStatus { state: registry.state, detail: registry.detail, flatpak_count, flatpak_detail: String::new(), staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() }
 }
 
 fn run_nmcli_state() -> Option<String> {
-    use std::process::{Command, Stdio};
-    let mut child = Command::new("nmcli").args(["-t","-f","STATE","general"]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(s)) => {
-                let out = child.wait_with_output().ok()?;
-                if s.success() { return Some(String::from_utf8_lossy(&out.stdout).trim().to_lowercase()); }
-                return None;
-            }
-            Ok(None) => {
-                if start.elapsed() > Duration::from_secs(2) { let _ = child.kill(); let _ = child.wait(); return None; }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return None,
-        }
-    }
+    let argv = ["nmcli", "-t", "-f", "STATE", "general"].into_iter().map(String::from).collect::<Vec<_>>();
+    let output = super::process::run_bounded(&argv, Duration::from_secs(2)).ok()?;
+    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_lowercase())
 }
 
 #[cfg(test)]

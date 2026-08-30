@@ -4,7 +4,6 @@
 //! --list-enrolled` → KythOS Secure Boot enrolled check. 5s timeout each,
 //! `FileNotFound` → unknown/mokutil not installed.
 
-use std::process::Command;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -16,36 +15,14 @@ pub struct MokStatus {
 }
 
 fn run_with_timeout(cmd: &str, args: &[&str], timeout: Duration) -> Option<(i32, String, String)> {
-    use std::process::Stdio;
-    let mut child = Command::new(cmd)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
-    // Simple timeout via wait_timeout pattern: poll with elapsed
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().ok()?;
-                let code = status.code().unwrap_or(-1);
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let _ = stderr;
-                return Some((code, stdout, String::new()));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return None,
-        }
-    }
+    let mut argv = vec![cmd.to_string()];
+    argv.extend(args.iter().map(|arg| (*arg).to_string()));
+    let output = super::process::run_bounded(&argv, timeout).ok()?;
+    Some((
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    ))
 }
 
 pub fn mok_status() -> MokStatus {
@@ -55,10 +32,13 @@ pub fn mok_status() -> MokStatus {
             // Check if mokutil missing vs timeout — try to detect FileNotFound
             // `run_with_timeout` returns None on spawn failure or timeout. Distinguish
             // by probing existence via `which`-like check: attempt spawn and see error kind.
-            // Simpler: try Command::new("mokutil").output() error mapping done implicitly
+            // A bounded help probe distinguishes a missing binary from a timed-out probe.
             // as unknown / mokutil not installed mirrors Python's FileNotFound branch.
-            // We'll probe via std::process::Command existence check.
-            let exists = Command::new("mokutil").arg("--help").output().is_ok();
+            // A non-zero help exit still counts as an installed binary.
+            let exists = super::process::run_bounded(
+                &["mokutil", "--help"].into_iter().map(String::from).collect::<Vec<_>>(),
+                Duration::from_secs(2),
+            ).is_ok();
             if !exists {
                 return MokStatus { sb_state: "unknown".to_string(), enrolled: "mokutil not installed".to_string() };
             }
@@ -87,7 +67,7 @@ pub fn mok_status() -> MokStatus {
 }
 
 // Test helper: parse logic without spawning
-fn parse_sb(stdout: &str, code: i32) -> &'static str {
+pub fn parse_sb(stdout: &str, code: i32) -> &'static str {
     let lower = stdout.to_lowercase();
     if code == 0 && lower.contains("secureboot enabled") {
         "enabled"

@@ -1,5 +1,11 @@
 # KythOS installer web frontend
 
+The native migration foundation lives beside the existing frontend in
+`src-tauri/src/native_main.rs` and `src-tauri/ui/installer.slint`.
+`kyth-installer-native` provides the unprivileged Slint shell and bounded
+installer-service connection status; the existing Tauri flow remains the
+compatibility path until every guarded installer step has native parity.
+
 Phase 1 React/TypeScript frontend for the installer migration. It consumes the frozen API in [`docs/installer-api-contract.md`](../../docs/installer-api-contract.md) and intentionally leaves the Python HTTP/SSE backend and legacy WebUI untouched.
 
 Run locally with the Python installer service available on `127.0.0.1:8642`:

@@ -543,6 +543,17 @@ export async function fetchSnapshotCount(): Promise<number | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<number>("snapshot_count"); } catch { return null; }
 }
+export interface SnapshotRow {
+  id: string;
+  timestamp: string;
+  type: string;
+  description: string;
+  healthy?: boolean | null;
+}
+export async function fetchSnapshotTimeline(limit = 20): Promise<SnapshotRow[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<SnapshotRow[]>("snapshot_timeline", { limit }); } catch { return null; }
+}
 
 // Gaming slice — per-game cgroup wrapper
 export async function fetchGamingSliceCommand(argv: string[], useUser?: boolean | null): Promise<string[] | null> {
@@ -808,9 +819,10 @@ export async function fetchLoadedKernelModules(): Promise<string[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<string[]>("loaded_kernel_modules"); } catch { return null; }
 }
-export async function fetchDesktopStackChecks(): Promise<string[] | null> {
+export interface DesktopStackCheck { name: string; passed: boolean; detail: string; advisory: boolean; }
+export async function fetchDesktopStackChecks(): Promise<DesktopStackCheck[] | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<string[]>("desktop_stack_checks"); } catch { return null; }
+  try { return await invoke<DesktopStackCheck[]>("desktop_stack_checks"); } catch { return null; }
 }
 export async function fetchUpdaterAvailable(): Promise<boolean | null> {
   if (!inTauriShell()) return null;

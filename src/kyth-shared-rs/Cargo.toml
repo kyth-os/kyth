@@ -3,12 +3,18 @@ name = "kyth-shared"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.82" # Option::is_none_or
-description = "Rust port of src/kyth_shared — starts with the read-only modules the Kyth Hub shell needs; see MIGRATION.md for scope."
+description = "Rust port of src/kyth_shared — Hub-facing reads and explicitly gated actions; see MIGRATION.md for scope."
+
+[[bin]]
+name = "release-identity"
+path = "src/release_identity_bin.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
+sha2 = "0.10"
+toml = "0.8"
 rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 rustix = { version = "0.38", features = ["fs", "process"] }
 
@@ -17,3 +23,4 @@ tempfile = "3"
 
 [features]
 rusqlite = ["dep:rusqlite"]
+telemetry-writer = ["rusqlite"]

@@ -17,8 +17,9 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{Emitter, Manager};
@@ -136,7 +137,8 @@ fn guardian_check(investigate: bool) -> Result<String, String> {
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let action = if investigate { "investigate" } else { "check" };
-        let result = std::process::Command::new("/usr/bin/kyth-guardian").args(["--json", action]).output();
+        let argv = vec!["/usr/bin/kyth-guardian".into(), "--json".into(), action.into()];
+        let result = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(120));
         let (state, detail) = match result {
             Ok(output) if output.status.success() => ("complete", "Guardian check complete.".to_string()),
             Ok(output) => { let detail = String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect(); ("failed", detail) }
@@ -166,7 +168,8 @@ fn guardian_control(action: String) -> Result<String, String> {
     guardian_checks().lock().unwrap().insert(job.clone(), ("running".into(), format!("Running Guardian {action}…")));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
-        let result = std::process::Command::new("/usr/bin/kyth-guardian").args(args).output();
+        let argv = std::iter::once("/usr/bin/kyth-guardian".to_string()).chain(args.iter().map(|arg| (*arg).to_string())).collect::<Vec<_>>();
+        let result = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(120));
         let (state, detail) = match result {
             Ok(output) if output.status.success() => ("complete", String::from_utf8_lossy(&output.stdout).trim().to_string()),
             Ok(output) => ("failed", String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect()),
@@ -259,6 +262,8 @@ fn just_output_detail(recipe: &str, output: &std::process::Output) -> String {
 fn start_just_job(recipe: &str, args: &[&str]) -> Result<String, String> {
     let argv = kyth_shared::system::just::command_for(recipe, args)
         .ok_or_else(|| "recipe or argument is not allowlisted".to_string())?;
+    kyth_shared::commands::normalize_command(&argv)
+        .map_err(|_| "recipe produced an invalid command".to_string())?;
     let job = format!("just-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
     just_jobs().lock().unwrap().insert(job.clone(), ("running".into(), format!("Running {recipe}…")));
     let job_for_thread = job.clone();
@@ -266,11 +271,17 @@ fn start_just_job(recipe: &str, args: &[&str]) -> Result<String, String> {
     std::thread::spawn(move || {
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
+        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+        let sanitized = kyth_shared::commands::environment_for(
+            kyth_shared::commands::EnvironmentPolicy::Sanitized,
+            &inherited,
+        );
+        command.env_clear().envs(sanitized);
         kyth_shared::system::just::configure_command(&mut command);
         if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
             command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
         }
-        let result = command.stdout(Stdio::piped()).stderr(Stdio::piped()).output();
+        let result = kyth_shared::system::process::run_bounded_command(command, Duration::from_secs(900));
         let (state, detail) = match result {
             Ok(output) => {
                 let state = if output.status.success() { "complete" } else { "failed" };
@@ -436,6 +447,10 @@ fn memory_pressure() -> MemoryPressureResponse {
 }
 #[tauri::command]
 fn snapshot_count() -> usize { kyth_shared::system::snapshot::snapshot_count() }
+#[tauri::command]
+fn snapshot_timeline(limit: Option<usize>) -> Vec<kyth_shared::system::snapshot::SnapshotRow> {
+    kyth_shared::system::snapshot::snapshot_timeline(limit.unwrap_or(20).min(100))
+}
 
 #[tauri::command]
 fn gaming_slice_command(argv: Vec<String>, use_user: Option<bool>) -> Vec<String> {
@@ -582,7 +597,8 @@ fn uninstall_flatpak(app_id: String) -> Result<String, String> {
         let result: Result<(bool, String), String> = if scope == "system" {
             privileged_flatpak_uninstall(&app_id).map(|detail| (true, detail))
         } else {
-            std::process::Command::new("flatpak").args(["uninstall", "--user", "-y", &app_id]).output().map(|output| {
+            let argv = vec!["flatpak".into(), "uninstall".into(), "--user".into(), "-y".into(), app_id.clone()];
+            kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(600)).map(|output| {
                 if output.status.success() { (true, format!("Uninstalled {app_id}.")) }
                 else { (false, String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect()) }
             }).map_err(|err| err.to_string())
@@ -686,7 +702,8 @@ fn install_flatpak(app_id: String) -> Result<String, String> {
     app_installs().lock().unwrap().insert(job.clone(), ("running".into(), format!("Installing {app_id}…")));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
-        let result = std::process::Command::new("flatpak").args(["install", "--user", "-y", "flathub", &app_id]).output();
+        let argv = vec!["flatpak".into(), "install".into(), "--user".into(), "-y".into(), "flathub".into(), app_id.clone()];
+        let result = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(600));
         let (state, detail) = match result {
             Ok(output) if output.status.success() => ("complete", "Installation complete.".to_string()),
             Ok(output) => ("failed", String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect()),
@@ -756,7 +773,7 @@ fn boot_runtime_checks() -> Vec<BootRuntimeCheckResponse> { kyth_shared::system:
 #[derive(serde::Serialize)]
 struct BootRuntimeCheckResponse { name: String, passed: bool, detail: String, }
 #[tauri::command]
-fn desktop_stack_checks() -> Vec<String> { kyth_shared::system::desktop_stack::desktop_stack_checks() }
+fn desktop_stack_checks() -> Vec<kyth_shared::system::desktop_stack::StackCheck> { kyth_shared::system::desktop_stack::desktop_stack_checks() }
 #[tauri::command]
 fn updater_available() -> bool { kyth_shared::system::updater::updater_available() }
 
@@ -829,7 +846,7 @@ fn main() {
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
             probe_backend, guardian_snapshot, guardian_check, guardian_check_status, guardian_control, privileged_action, privileged_action_status, hardware_snapshot, storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, appstream_search, appimage_list, installed_flatpaks, uninstall_flatpak, make_appimage_executable, import_appimage, launch_appimage, install_flatpak, install_status, protondb_lookup_many, anti_cheat_table, take_pending_page, just_list, just_run, just_run_status,
-            bootc_upgrade, bootc_rollback, bootc_switch_branch, guardian_execute_recipe, branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available, current_user_name, open_feedback_issue
+            bootc_upgrade, bootc_rollback, bootc_switch_branch, guardian_execute_recipe, branch_display_name, update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, snapshot_timeline, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, recovery_status, update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, collect_availability, ntfs_devices, boot_runtime_checks, desktop_stack_checks, updater_available, current_user_name, open_feedback_issue
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

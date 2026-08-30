@@ -1,29 +1,12 @@
 //! Port of `kyth_shared.system.printing` — Mint IPP parity (N34).
 
-use std::process::Command;
 use std::time::Duration;
 
 fn run_with_timeout(cmd: &str, args: &[&str], timeout: Duration) -> Option<(i32, String)> {
-    use std::process::Stdio;
-    let mut child = Command::new(cmd).args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(s)) => {
-                let out = child.wait_with_output().ok()?;
-                return Some((s.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).to_string()));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return None,
-        }
-    }
+    let mut argv = vec![cmd.to_string()];
+    argv.extend(args.iter().map(|arg| (*arg).to_string()));
+    let output = super::process::run_bounded(&argv, timeout).ok()?;
+    Some((output.status.code().unwrap_or(-1), String::from_utf8_lossy(&output.stdout).to_string()))
 }
 
 pub fn ipp_discover() -> Vec<String> {

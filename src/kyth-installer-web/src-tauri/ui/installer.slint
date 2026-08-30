@@ -1,0 +1,85 @@
+import { Button } from "std-widgets.slint";
+
+export component InstallerWindow inherits Window {
+    width: 1120px;
+    height: 720px;
+    title: "KythOS Installer";
+    background: #0b1020;
+
+    in-out property <string> status-text: "Installer backend not connected";
+    in-out property <string> disk-summary: "Connect to see available install targets";
+    in-out property <string> disk-details: "Disk inventory will appear after the installer service connects.";
+    in-out property <string> transaction-text: "No install transaction recorded";
+    in-out property <string> selected-step: "Welcome";
+    in-out property <string> step-title: "Welcome to KythOS";
+    in-out property <string> step-detail: "Install the immutable gaming and development desktop with guarded, reviewable steps.";
+    in-out property <string> step-status: "Reading native step status…";
+    in-out property <string> step-progress: "Step 1 of 5";
+    in-out property <string> next-label: "Continue";
+    in-out property <bool> back-enabled: false;
+    callback connect();
+    callback select-step(string);
+    callback next-step();
+    callback previous-step();
+
+    Rectangle {
+        background: #0b1020;
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle {
+                width: 236px;
+                background: #111a2e;
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 12px;
+                    Text { text: "KythOS"; color: #f5f7ff; font-size: 24px; font-weight: 700; }
+                    Text { text: "System Installer"; color: #91a0bd; font-size: 13px; }
+                    Rectangle { height: 20px; }
+                    Button { text: "1  Welcome"; clicked => { selected-step = "Welcome"; select-step("Welcome"); } }
+                    Button { text: "2  Select disk"; clicked => { selected-step = "Select disk"; select-step("Select disk"); } }
+                    Button { text: "3  Configure"; clicked => { selected-step = "Configure"; select-step("Configure"); } }
+                    Button { text: "4  Review"; clicked => { selected-step = "Review"; select-step("Review"); } }
+                    Button { text: "5  Install"; clicked => { selected-step = "Install"; select-step("Install"); } }
+                    Rectangle { vertical-stretch: 1; }
+                    Text { text: "Native Rust UI"; color: #60718f; font-size: 11px; }
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                background: #0b1020;
+                VerticalLayout {
+                    padding: 32px;
+                    spacing: 18px;
+                    HorizontalLayout { Text { text: step-title; color: #f5f7ff; font-size: 30px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: step-progress; color: #55d6bd; font-size: 12px; vertical-alignment: center; } }
+                    Text { text: step-detail; color: #9fb1d1; font-size: 15px; wrap: word-wrap; }
+                    Text { text: step-status; color: #55d6bd; font-size: 13px; wrap: word-wrap; }
+                    Rectangle { height: 18px; }
+                    Rectangle {
+                        height: 218px;
+                        background: #17243d;
+                        border-radius: 16px;
+                        VerticalLayout {
+                            padding: 22px;
+                            spacing: 8px;
+                            Text { text: "Connection status"; color: #9fb1d1; font-size: 13px; }
+                            Text { text: status-text; color: #f5f7ff; font-size: 20px; font-weight: 600; wrap: word-wrap; }
+                            Text { text: disk-summary; color: #9fb1d1; font-size: 14px; wrap: word-wrap; }
+                            Text { text: disk-details; color: #d8e2f5; font-size: 13px; wrap: word-wrap; vertical-stretch: 1; }
+                            Text { text: "Transaction state"; color: #9fb1d1; font-size: 12px; }
+                            Text { text: transaction-text; color: #d9f8f0; font-size: 13px; wrap: word-wrap; }
+                            Text { text: "The native shell never owns disk or boot mutations; those remain behind the installer service."; color: #7f90af; font-size: 12px; wrap: word-wrap; }
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    HorizontalLayout {
+                        Button { text: "‹  Back"; enabled: back-enabled; clicked => { previous-step(); } }
+                        Button { text: next-label; clicked => { next-step(); } }
+                        Button { text: "Connect to installer"; clicked => { connect(); } }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: "Review every destructive step before applying"; color: #60718f; font-size: 12px; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+    }
+}

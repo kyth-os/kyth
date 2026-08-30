@@ -10,8 +10,7 @@
 //! eligibility gate `guardian.py:execute_recipe` applies.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
@@ -105,36 +104,21 @@ fn run_command(argv: &[&str], timeout: Duration) -> Result<String, String> {
     // Same shape as `system::printing::run_with_timeout`, but keeping stderr
     // too — `guardian.py:_run` reports stderr first, and a failed systemctl
     // says nothing on stdout.
-    let mut child = Command::new(argv[0])
-        .args(&argv[1..])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| "repair failed to start".to_string())?;
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let out = child.wait_with_output().map_err(|_| "repair failed to start".to_string())?;
-                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                let mut detail = if stderr.is_empty() { stdout } else { stderr };
-                detail.truncate(400);
-                if status.success() {
-                    return Ok(if detail.is_empty() { "done".to_string() } else { detail });
-                }
-                return Err(if detail.is_empty() { "repair failed".to_string() } else { detail });
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err("repair timed out".to_string());
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return Err("repair failed to start".to_string()),
-        }
+    let argv = argv.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>();
+    let out = crate::system::process::run_bounded(&argv, timeout)
+        .map_err(|error| if error.kind() == std::io::ErrorKind::TimedOut {
+            "repair timed out".to_string()
+        } else {
+            "repair failed to start".to_string()
+        })?;
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let mut detail = if stderr.is_empty() { stdout } else { stderr };
+    detail.truncate(400);
+    if out.status.success() {
+        Ok(if detail.is_empty() { "done".to_string() } else { detail })
+    } else {
+        Err(if detail.is_empty() { "repair failed".to_string() } else { detail })
     }
 }
 
@@ -547,9 +531,9 @@ mod tests {
 /// The authorization gate for acting on a Guardian recommendation: only a
 /// recipe Guardian is *currently recommending* may be executed, so a
 /// caller can't be talked into running an arbitrary recipe id by whatever
-/// hands it the string. Kept here next to the list it derives from, and
-/// kept pure — executing is the caller's job (MIGRATION.md notes
-/// `execute_recipe` is deliberately not ported to this crate).
+/// hands it the string. Kept here next to the list it derives from; the
+/// explicit execution path applies this gate before dispatching a fixed
+/// recipe command.
 pub fn is_pending_recipe(state: &Value, recipe_id: &str) -> bool {
     pending_recommendations(state).iter().any(|p| p.recipe_id == recipe_id)
 }

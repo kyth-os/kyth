@@ -1,9 +1,10 @@
 //! Port of `kyth_shared.system.drives` — NTFS/sanitize + mount helpers.
 
 use std::path::Path;
+use std::time::Duration;
 
 // Simplified allow-list without regex crate: manual prefix checks
-fn sanitize_dev_path(raw: &str) -> Option<String> {
+pub fn sanitize_dev_path(raw: &str) -> Option<String> {
     if raw.is_empty() { return None; }
     let c = Path::new(raw).canonicalize().ok()?.to_string_lossy().to_string();
     if c.starts_with("/dev/sd") || c.starts_with("/dev/nvme") || c.starts_with("/dev/vd") || c.starts_with("/dev/mmcblk") {
@@ -13,7 +14,7 @@ fn sanitize_dev_path(raw: &str) -> Option<String> {
     None
 }
 
-fn sanitize_mount(raw: &str) -> Option<String> {
+pub fn sanitize_mount(raw: &str) -> Option<String> {
     const PREFIX: &str = "/var/mnt/ntfs_";
     if raw.is_empty() || !raw.starts_with(PREFIX) { return None; }
     let c = Path::new(raw).canonicalize().ok()?.to_string_lossy().to_string();
@@ -22,8 +23,11 @@ fn sanitize_mount(raw: &str) -> Option<String> {
 }
 
 pub fn get_ntfs_devices() -> Vec<serde_json::Value> {
-    use std::process::Command;
-    let out = Command::new("lsblk").args(["-J","-o","NAME,FSTYPE,LABEL,UUID,MOUNTPOINT"]).output();
+    let argv = ["lsblk", "-J", "-o", "NAME,FSTYPE,LABEL,UUID,MOUNTPOINT"]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let out = super::process::run_bounded(&argv, Duration::from_secs(5));
     if let Ok(o) = out {
         if o.status.success() {
             if let Ok(s) = String::from_utf8(o.stdout) {

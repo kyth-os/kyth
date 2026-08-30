@@ -9,11 +9,13 @@ import {
   fetchRecoveryStatus,
   fetchRollbackCommand,
   fetchSnapshotCount,
+  fetchSnapshotTimeline,
   invokeBootcRollback,
   relativeTime,
   type BootcSnapshot,
   type DeploymentInfo,
   type RecoveryStatus,
+  type SnapshotRow,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
@@ -38,6 +40,7 @@ export function RepairSection({ section }: { section: HubSection }) {
   const [snapshot, setSnapshot] = useState<BootcSnapshot | null>(null);
   const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
   const [history, setHistory] = useState<DeploymentInfo[] | null>(null);
+  const [timeline, setTimeline] = useState<SnapshotRow[] | null>(null);
   const [snapshots, setSnapshots] = useState<number | null>(null);
   const [btrfs, setBtrfs] = useState<{ status: string; detail: string } | null>(null);
   const [memory, setMemory] = useState<{ status: string; detail: string } | null>(null);
@@ -52,15 +55,17 @@ export function RepairSection({ section }: { section: HubSection }) {
       fetchRecoveryStatus(),
       fetchDeploymentHistory(),
       fetchSnapshotCount(),
+      fetchSnapshotTimeline(20),
       fetchBtrfsHealth(),
       fetchMemoryPressure(),
       fetchRollbackCommand().then(commandText),
-    ]).then(([snap, rec, hist, count, fs, mem, cmd]) => {
+    ]).then(([snap, rec, hist, count, rows, fs, mem, cmd]) => {
       if (!cancelled) {
         setSnapshot(snap);
         setRecovery(rec);
         setHistory(hist);
         setSnapshots(count);
+        setTimeline(rows);
         setBtrfs(fs);
         setMemory(mem);
         setRollbackCmd(cmd);
@@ -137,6 +142,28 @@ export function RepairSection({ section }: { section: HubSection }) {
                     <span className="card-copy" style={{ fontSize: 11.5, flexShrink: 0 }}>
                       {ago(entry.timestamp) ?? entry.short_digest ?? ""}
                     </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {timeline && timeline.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
+                Snapshots &amp; deployments
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8, marginTop: 8 }}>
+                {timeline.map((entry) => (
+                  <div
+                    key={`${entry.type}-${entry.id}`}
+                    style={{ padding: "11px 12px", border: "1px solid var(--hairline)", borderRadius: 10, background: "var(--surface-raised)" }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                      <span className={`pill ${entry.type === "snapshot" ? "pill-dim" : "pill-ok"}`}>{entry.type}</span>
+                      <span className="card-copy" style={{ fontSize: 11 }}>{ago(entry.timestamp) ?? entry.id}</span>
+                    </div>
+                    <p style={{ margin: "9px 0 0", fontSize: 12.5, lineHeight: 1.35 }}>{entry.description || "No description"}</p>
                   </div>
                 ))}
               </div>

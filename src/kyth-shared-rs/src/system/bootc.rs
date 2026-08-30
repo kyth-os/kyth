@@ -1,14 +1,22 @@
 //! Port of `kyth_shared.system.bootc` — thin cache wrappers around bootc_query/policy.
 
-use std::collections::HashSet;
-
 pub fn branch_from_ref(r: Option<&str>) -> Option<String> {
     crate::system::bootc_policy::branch_from_ref(r)
 }
 
 pub fn current_branch() -> Option<String> {
-    // probe_cached bootc-branch — read from probe cache
-    crate::system::probe::read_section("bootc-branch").and_then(|v| v.as_str().map(|s| s.to_string()))
+    // Prefer the probe cache, then mirror Python's cache-miss behavior by
+    // deriving the branch from the current bootc status response.
+    if let Some(branch) = crate::system::probe::read_section("bootc-branch")
+        .and_then(|v| v.as_str().map(str::to_string))
+    {
+        return Some(branch);
+    }
+    let status = crate::system::probe::read_section("bootc-status-data")
+        .or_else(crate::system::bootc_query::fetch_status_data)?;
+    crate::system::bootc_query::image_reference_from_status(&status)
+        .as_deref()
+        .and_then(|reference| branch_from_ref(Some(reference)))
 }
 
 pub fn current_kernel_flavor() -> String {
@@ -24,36 +32,23 @@ pub fn current_kernel_flavor() -> String {
 }
 
 fn run_with_timeout(cmd: &[String], timeout: std::time::Duration) -> Option<(i32, String)> {
-    use std::process::{Command, Stdio};
-    let mut child = Command::new(&cmd[0]).args(&cmd[1..]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(s)) => {
-                let out = child.wait_with_output().ok()?;
-                return Some((s.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).to_string()));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout { let _ = child.kill(); let _ = child.wait(); return None; }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(_) => return None,
-        }
-    }
+    if cmd.is_empty() { return None; }
+    let output = super::process::run_bounded(cmd, timeout).ok()?;
+    Some((output.status.code().unwrap_or(-1), String::from_utf8_lossy(&output.stdout).to_string()))
 }
 
 pub fn has_staged_update() -> bool {
-    if let Some(v) = crate::system::probe::read_section("bootc-status-data") {
-        return v.get("status").and_then(|s| s.get("staged")).is_some();
-    }
-    false
+    crate::system::probe::read_section("bootc-status-data")
+        .or_else(crate::system::bootc_query::fetch_status_data)
+        .and_then(|v| v.get("status").and_then(|s| s.get("staged")).cloned())
+        .is_some()
 }
 
 pub fn has_rollback_deployment() -> bool {
-    if let Some(v) = crate::system::probe::read_section("bootc-status-data") {
-        return v.get("status").and_then(|s| s.get("rollback")).is_some();
-    }
-    false
+    crate::system::probe::read_section("bootc-status-data")
+        .or_else(crate::system::bootc_query::fetch_status_data)
+        .and_then(|v| v.get("status").and_then(|s| s.get("rollback")).cloned())
+        .is_some()
 }
 
 #[cfg(test)]

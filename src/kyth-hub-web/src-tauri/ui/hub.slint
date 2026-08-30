@@ -1,0 +1,153 @@
+import { Button } from "std-widgets.slint";
+
+export component HubWindow inherits Window {
+    width: 1280px;
+    height: 800px;
+    title: "Kyth Hub";
+    background: #0b1020;
+
+    in-out property <string> selected-page: "Home";
+    in-out property <string> status-text: "Reading system status…";
+    in-out property <string> page-summary: "Your system at a glance";
+    in-out property <string> page-detail: "Native status, recovery, and performance information stays in one calm workspace.";
+    in-out property <string> card-one-title: "Recovery";
+    in-out property <string> card-one-value: "Ready";
+    in-out property <string> card-one-detail: "Safe by default";
+    in-out property <string> card-two-title: "Performance";
+    in-out property <string> card-two-value: "Ready";
+    in-out property <string> card-two-detail: "Ready when you are";
+    in-out property <string> next-action-text: "Suggested next step · Reading local policy…";
+    in-out property <string> selected-section: "Recovery";
+    in-out property <string> section-status: "Reading section status…";
+    in-out property <string> section-detail: "Native section status is read in the background.";
+    in-out property <string> section-one: "Recovery";
+    in-out property <string> section-two: "Performance";
+    in-out property <string> section-three: "Hardware";
+    in-out property <string> section-four: "Diagnostics";
+    in-out property <string> section-five: "";
+    in-out property <string> section-six: "";
+    in-out property <string> section-seven: "";
+    in-out property <string> section-eight: "";
+    in-out property <string> section-nine: "";
+    in-out property <string> section-ten: "";
+    callback navigate(string);
+    callback refresh();
+    callback select-section(string);
+
+    Rectangle {
+        background: #0b1020;
+        HorizontalLayout {
+            spacing: 0px;
+
+            Rectangle {
+                width: 236px;
+                background: #111a2e;
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "KythOS";
+                        color: #f5f7ff;
+                        font-size: 24px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: "System Hub";
+                        color: #91a0bd;
+                        font-size: 13px;
+                    }
+                    Rectangle { height: 20px; }
+
+                    Button { text: "⌂   Home"; clicked => { selected-page = "Home"; navigate("Home"); } }
+                    Button { text: "◈   Play"; clicked => { selected-page = "Play"; navigate("Play"); } }
+                    Button { text: "▦   Apps"; clicked => { selected-page = "Apps"; navigate("Apps"); } }
+                    Button { text: "▣   This PC"; clicked => { selected-page = "This PC"; navigate("This PC"); } }
+                    Button { text: "⇄   Move In"; clicked => { selected-page = "Move In"; navigate("Move In"); } }
+                    Rectangle { height: 1px; background: #263654; }
+                    Button { text: "↻   Updates"; clicked => { selected-page = "Updates"; navigate("Updates"); } }
+                    Rectangle { vertical-stretch: 1; }
+                    Text { text: "Native Rust UI"; color: #60718f; font-size: 11px; }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                background: #0b1020;
+                VerticalLayout {
+                    padding: 32px;
+                    spacing: 18px;
+
+                    HorizontalLayout {
+                        height: 42px;
+                        VerticalLayout { spacing: 2px; Text { text: selected-page; color: #f5f7ff; font-size: 28px; font-weight: 700; } Text { text: "KythOS system workspace"; color: #7183a3; font-size: 12px; } }
+                        Rectangle { horizontal-stretch: 1; }
+                        Button { text: "Refresh"; clicked => { refresh(); } }
+                    }
+
+                    Rectangle {
+                        height: 130px;
+                        background: #17243d;
+                        border-radius: 16px;
+                        VerticalLayout {
+                            padding: 22px;
+                            spacing: 8px;
+                            HorizontalLayout { Text { text: page-summary; color: #9fb1d1; font-size: 13px; } Rectangle { horizontal-stretch: 1; } Rectangle { width: 62px; height: 24px; background: #1b5d52; border-radius: 12px; Text { text: "LIVE"; color: #d7fff4; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } } }
+                            Text { text: status-text; color: #f5f7ff; font-size: 22px; font-weight: 600; wrap: word-wrap; }
+                            Text { text: page-detail; color: #7f90af; font-size: 12px; wrap: word-wrap; }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 48px;
+                        background: #132a3d;
+                        border-radius: 12px;
+                        HorizontalLayout {
+                            padding-left: 18px;
+                            padding-right: 18px;
+                            spacing: 10px;
+                            Text { text: "●"; color: #55d6bd; font-size: 16px; vertical-alignment: center; }
+                            Text { text: next-action-text; color: #d9f8f0; font-size: 13px; vertical-alignment: center; wrap: word-wrap; }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 14px;
+                        Rectangle { horizontal-stretch: 1; height: 140px; background: #121d33; border-radius: 14px; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-one-title; color: #9fb1d1; font-size: 13px; } Text { text: card-one-value; color: #f5f7ff; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-one-detail; color: #aebddd; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Live from the local system state"; color: #60718f; font-size: 11px; } } }
+                        Rectangle { horizontal-stretch: 1; height: 140px; background: #121d33; border-radius: 14px; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-two-title; color: #9fb1d1; font-size: 13px; } Text { text: card-two-value; color: #f5f7ff; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-two-detail; color: #aebddd; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Open the section for details and actions"; color: #60718f; font-size: 11px; } } }
+                    }
+                    Rectangle {
+                        height: 238px;
+                        background: #17243d;
+                        border-radius: 14px;
+                        VerticalLayout {
+                            padding: 18px;
+                            spacing: 9px;
+                            HorizontalLayout { Text { text: "Explore this workspace"; color: #f5f7ff; font-size: 15px; font-weight: 600; } Rectangle { horizontal-stretch: 1; } Text { text: selected-section; color: #55d6bd; font-size: 12px; vertical-alignment: center; } }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { horizontal-stretch: 1; text: section-one; clicked => { selected-section = section-one; select-section(section-one); } }
+                                Button { horizontal-stretch: 1; text: section-two; clicked => { selected-section = section-two; select-section(section-two); } }
+                                Button { horizontal-stretch: 1; text: section-three; clicked => { selected-section = section-three; select-section(section-three); } }
+                                Button { horizontal-stretch: 1; text: section-four; clicked => { selected-section = section-four; select-section(section-four); } }
+                                Button { horizontal-stretch: 1; text: section-five; enabled: section-five != ""; clicked => { selected-section = section-five; select-section(section-five); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { horizontal-stretch: 1; text: section-six; enabled: section-six != ""; clicked => { selected-section = section-six; select-section(section-six); } }
+                                Button { horizontal-stretch: 1; text: section-seven; enabled: section-seven != ""; clicked => { selected-section = section-seven; select-section(section-seven); } }
+                                Button { horizontal-stretch: 1; text: section-eight; enabled: section-eight != ""; clicked => { selected-section = section-eight; select-section(section-eight); } }
+                                Button { horizontal-stretch: 1; text: section-nine; enabled: section-nine != ""; clicked => { selected-section = section-nine; select-section(section-nine); } }
+                                Button { horizontal-stretch: 1; text: section-ten; enabled: section-ten != ""; clicked => { selected-section = section-ten; select-section(section-ten); } }
+                            }
+                            Text { text: section-status; color: #f5f7ff; font-size: 17px; font-weight: 600; wrap: word-wrap; }
+                            Text { text: section-detail; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    Text { text: "Kyth Hub is migrating to native Rust pages. Existing Tauri pages remain available during parity work."; color: #60718f; font-size: 12px; }
+                }
+            }
+        }
+    }
+}

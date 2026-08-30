@@ -6,14 +6,30 @@
 //! flags as high-risk. See `MIGRATION.md` (repo root of this crate) for
 //! the actual scope and how more of `kyth_shared` moves over.
 //!
-//! This first slice ports exactly what was already proven safe as
-//! read-only bridges shelled out to from the Kyth Hub's Tauri shell
-//! (`src-tauri/backend/*.py`) — now retired in favor of calling these
-//! modules directly, in-process, no subprocess/JSON round trip. Every
-//! module here is read-only against real on-disk/system state: nothing
-//! mutates, nothing needs root, nothing runs a "live" probe sweep (see
-//! `guardian::load_state`'s docs for why that boundary matters).
+//! This slice ports the Hub-facing reads and selected, explicit user actions
+//! that used to cross the Tauri/Python boundary — now called directly from
+//! the crate, without a subprocess/JSON bridge. Most modules are read-only;
+//! a small number of bounded action paths (notably Guardian repairs) are
+//! intentionally user-triggered and policy-gated. Nothing here replaces the
+//! live Python probe sweep or the installer/high-risk writer paths.
 
 pub mod guardian;
+pub mod doctor;
 pub mod diagnostics_scrub;
+pub mod atomic_io;
+pub mod health;
+pub mod config_loader;
+pub mod diagnostic_report;
+pub mod release_identity;
+pub mod release_publish;
+pub mod build_metadata;
+pub mod build_checks;
+pub mod build_metrics;
+pub mod commands;
+pub mod sarif;
+pub mod repos;
+pub mod transfer;
+pub mod secret_scan;
+pub mod setup_transfer;
+pub mod desktop_polish;
 pub mod system;

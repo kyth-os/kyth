@@ -4,6 +4,36 @@
 //! format_elapsed/eta/progress.
 
 use std::fs;
+use std::io;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
+
+/// Run an already-validated argv with captured output and a hard wall-clock
+/// limit. It never invokes a shell and kills a child that outlives its bound.
+pub fn run_bounded(argv: &[String], timeout: Duration) -> io::Result<Output> {
+    let (program, args) = argv
+        .split_first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "command must not be empty"))?;
+    let mut command = Command::new(program);
+    command.args(args);
+    run_bounded_command(command, timeout)
+}
+
+pub fn run_bounded_command(mut command: Command, timeout: Duration) -> io::Result<Output> {
+    let mut child = command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait()? {
+            Some(_) => return child.wait_with_output(),
+            None if started.elapsed() <= timeout => std::thread::sleep(Duration::from_millis(25)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "command exceeded its time limit"));
+            }
+        }
+    }
+}
 
 pub fn is_live_session() -> bool {
     fs::read_to_string("/proc/cmdline").map(|s| s.contains("kyth.live")).unwrap_or(false)
@@ -93,10 +123,24 @@ fn human_bytes(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     #[test]
     fn strip() { assert_eq!(strip_ansi("\x1b[31mred\x1b[0m"), "red"); }
     #[test]
     fn elapsed() { assert_eq!(format_elapsed(70), "1m 10s"); assert_eq!(format_elapsed(5), "5s"); }
     #[test]
     fn eta() { assert_eq!(format_eta(90), "~1m 30s remaining"); }
+
+    #[test]
+    fn bounded_runner_captures_a_static_argv_without_a_shell() {
+        let output = run_bounded(&["sh".into(), "-c".into(), "printf ok".into()], Duration::from_secs(2)).unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"ok");
+    }
+
+    #[test]
+    fn bounded_runner_terminates_a_stalled_child() {
+        let error = run_bounded(&["sh".into(), "-c".into(), "sleep 1".into()], Duration::from_millis(50)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    }
 }

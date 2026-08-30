@@ -1,14 +1,11 @@
 //! Port of `kyth_shared.system.fonts_ready` — msttcorefonts parity (N35).
 //! Checks Noto Sans + Arial via fc-list; mirrors Python's 5s timeout each.
 
-use std::process::Command;
 use std::time::Duration;
 
 fn run_fc(pattern: &str) -> Option<String> {
-    let out = Command::new("fc-list")
-        .arg(pattern)
-        .output()
-        .ok()?;
+    let argv = ["fc-list".to_string(), pattern.to_string()];
+    let out = super::process::run_bounded(&argv, Duration::from_secs(5)).ok()?;
     if out.status.success() {
         Some(String::from_utf8_lossy(&out.stdout).to_string())
     } else {

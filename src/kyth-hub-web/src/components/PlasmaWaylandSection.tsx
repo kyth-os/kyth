@@ -6,6 +6,7 @@ import {
   fetchDisplayDetect,
   fetchPlasmaPresets,
   type DisplayDetect,
+  type DesktopStackCheck,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
@@ -17,7 +18,7 @@ import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./Se
 export function PlasmaWaylandSection({ section }: { section: HubSection }) {
   const [data, setData] = useState<DisplayDetect | null>(null);
   const [presets, setPresets] = useState<string[] | null>(null);
-  const [stack, setStack] = useState<string[] | null>(null);
+  const [stack, setStack] = useState<DesktopStackCheck[] | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pendingPreset, setPendingPreset] = useState<string | null>(null);
   const { status, busy, run } = useSectionAction();
@@ -70,7 +71,9 @@ export function PlasmaWaylandSection({ section }: { section: HubSection }) {
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                 {stack.length > 0 ? (
                   stack.map((check) => (
-                    <span key={check} className="pill pill-ok">{check}</span>
+                    <span key={check.name} className={`pill ${check.passed ? (check.advisory ? "pill-warn" : "pill-ok") : "pill-warn"}`} title={check.detail}>
+                      {check.name}: {check.passed ? "OK" : "Needs attention"}
+                    </span>
                   ))
                 ) : (
                   <span className="pill pill-warn">no desktop units reported active</span>

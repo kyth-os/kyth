@@ -6,8 +6,13 @@
 
 use serde::Serialize;
 use std::path::PathBuf;
-use std::process::Command;
 use std::os::unix::fs::PermissionsExt;
+use std::time::Duration;
+
+fn command_output(argv: &[&str], timeout: Duration) -> Option<std::process::Output> {
+    let args = argv.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>();
+    crate::system::process::run_bounded(&args, timeout).ok()
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CatalogApp {
@@ -76,21 +81,25 @@ pub struct AppStreamApp {
     pub summary: String,
 }
 
-/// Query the installed Flathub catalog. This is intentionally bounded and
-/// read-only; Flatpak remains the authority for what is currently available.
-pub fn appstream_search(query: &str) -> Vec<AppStreamApp> {
-    let query = query.trim();
-    if query.is_empty() || query.len() > 80 || !query.chars().all(|c| c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace()) { return Vec::new(); }
-    let Ok(output) = Command::new("flatpak").args(["search", "--columns=application,name,summary", query]).output() else { return Vec::new(); };
-    if !output.status.success() { return Vec::new(); }
-    String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| {
+pub fn parse_appstream_results(raw: &str) -> Vec<AppStreamApp> {
+    raw.lines().filter_map(|line| {
         let mut fields = line.split('\t');
         let id = fields.next()?.trim();
         let name = fields.next()?.trim();
         let summary = fields.next().unwrap_or("").trim();
         if id.is_empty() || !id.contains('.') { return None; }
-        Some(AppStreamApp { id: id.to_string(), name: name.to_string(), summary: summary.to_string() })
+        Some(AppStreamApp { id: id.into(), name: name.into(), summary: summary.into() })
     }).take(30).collect()
+}
+
+/// Query the installed Flathub catalog. This is intentionally bounded and
+/// read-only; Flatpak remains the authority for what is currently available.
+pub fn appstream_search(query: &str) -> Vec<AppStreamApp> {
+    let query = query.trim();
+    if query.is_empty() || query.len() > 80 || !query.chars().all(|c| c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace()) { return Vec::new(); }
+    let Some(output) = command_output(&["flatpak", "search", "--columns=application,name,summary", query], Duration::from_secs(10)) else { return Vec::new(); };
+    if !output.status.success() { return Vec::new(); }
+    parse_appstream_results(&String::from_utf8_lossy(&output.stdout))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -110,31 +119,31 @@ pub struct InstalledFlatpak {
     pub scope: String,
 }
 
+pub fn parse_installed_flatpaks(raw: &str, scope: &str) -> Vec<InstalledFlatpak> {
+    raw.lines().filter_map(|line| {
+        let mut fields = line.split('\t').map(str::trim);
+        let id = fields.next()?.to_string();
+        if id.is_empty() || !id.contains('.') { return None; }
+        Some(InstalledFlatpak {
+            id,
+            name: fields.next().unwrap_or("").into(),
+            version: fields.next().unwrap_or("").into(),
+            branch: fields.next().unwrap_or("").into(),
+            arch: fields.next().unwrap_or("").into(),
+            scope: scope.into(),
+        })
+    }).collect()
+}
+
 /// Return installed applications only.  This is deliberately read-only; the
 /// Hub uses it to make uninstall choices explicit instead of accepting an
 /// arbitrary application id from the webview.
 pub fn installed_flatpaks() -> Vec<InstalledFlatpak> {
     let mut apps = Vec::new();
     for (scope, scope_arg) in [("user", "--user"), ("system", "--system")] {
-        let Ok(output) = Command::new("flatpak")
-            .args(["list", scope_arg, "--app", "--columns=application,name,version,branch,arch"])
-            .output() else { continue; };
+        let Some(output) = command_output(&["flatpak", "list", scope_arg, "--app", "--columns=application,name,version,branch,arch"], Duration::from_secs(10)) else { continue; };
         if !output.status.success() { continue; }
-        apps.extend(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split('\t').map(str::trim);
-            let id = fields.next()?.to_string();
-            if id.is_empty() || !id.contains('.') { return None; }
-            Some(InstalledFlatpak {
-                id,
-                name: fields.next().unwrap_or("").to_string(),
-                version: fields.next().unwrap_or("").to_string(),
-                branch: fields.next().unwrap_or("").to_string(),
-                arch: fields.next().unwrap_or("").to_string(),
-                scope: scope.to_string(),
-            })
-        }));
+        apps.extend(parse_installed_flatpaks(&String::from_utf8_lossy(&output.stdout), scope));
     }
     apps.sort_by_key(|app| app.name.to_lowercase());
     apps
@@ -204,4 +213,24 @@ pub fn familiar_apps() -> Vec<FamiliarApp> {
         FamiliarApp { windows_name: "Chrome".to_string(), description: "Use Brave Browser for a familiar Chromium experience.".to_string(), flatpak_id: "com.brave.Browser".to_string() },
         FamiliarApp { windows_name: "GeForce Experience".to_string(), description: "NVIDIA driver settings live in the Control Center — no extra app needed.".to_string(), flatpak_id: "".to_string() },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_appstream_rows_and_skips_non_ids() {
+        let apps = parse_appstream_results("Application\tName\tSummary\norg.example.App\tDemo\tA test app\ninvalid\tIgnored\tNo ID\n");
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].id, "org.example.App");
+    }
+
+    #[test]
+    fn parses_installed_flatpaks_with_explicit_scope() {
+        let apps = parse_installed_flatpaks("org.example.App\tDemo\t1.0\tstable\tx86_64\nheader\tbad\n", "user");
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].scope, "user");
+        assert_eq!(apps[0].version, "1.0");
+    }
 }

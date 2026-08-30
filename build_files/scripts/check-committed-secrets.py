@@ -30,8 +30,13 @@ def main() -> int:
             continue
         if path.suffix.lower() in binary_suffixes:
             continue
-        # Don't flag the check script's own pattern literals
-        if name == "build_files/scripts/check-committed-secrets.py":
+        # Don't flag the detector implementations' own pattern literals.
+        # Both copies intentionally contain the high-confidence signatures
+        # they enforce; neither is a credential-bearing application file.
+        if name in {
+            "build_files/scripts/check-committed-secrets.py",
+            "src/kyth-shared-rs/src/secret_scan.rs",
+        }:
             continue
         try:
             text = path.read_text(encoding="utf-8")

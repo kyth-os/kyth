@@ -22,10 +22,13 @@ pub fn recovery_banner(s: &RecoveryStatus) -> String {
 }
 
 pub fn get_recovery_status() -> RecoveryStatus {
-    // Read via probe/cache + boot health — simplified live version:
-    // has_staged/has_rollback via deployment_history, quarantined via file existence
+    // Read via probe/cache + the cross-process watcher snapshot + boot health.
+    // The watcher writes this file; this path never mutates it.
     let history = crate::system::deployment_history::deployment_history();
-    let has_staged = history.iter().find(|d| d.section=="staged").map(|d| d.available).unwrap_or(false);
+    let watcher_staged = crate::system::update_status::read_update_snapshot(600)
+        .map(|snapshot| !snapshot.staged_digest.is_empty())
+        .unwrap_or(false);
+    let has_staged = history.iter().find(|d| d.section=="staged").map(|d| d.available).unwrap_or(false) || watcher_staged;
     let has_rollback = history.iter().find(|d| d.section=="rollback").map(|d| d.available).unwrap_or(false);
     // Python stores quarantines as a digest-keyed map, not a scalar
     // `quarantined_digest`. Decode that same state through the shared port so
@@ -42,7 +45,7 @@ pub fn get_recovery_status() -> RecoveryStatus {
         },
     );
     let clear_cmd = if !quarantined.is_empty() { format!("sudo kyth-boot-health clear-quarantine --digest {}", quarantined) } else { String::new() };
-    RecoveryStatus { has_staged, has_rollback, quarantined_digest: quarantined, quarantine_detail: detail, watcher_staged: has_staged, clear_quarantine_cmd: clear_cmd }
+    RecoveryStatus { has_staged, has_rollback, quarantined_digest: quarantined, quarantine_detail: detail, watcher_staged, clear_quarantine_cmd: clear_cmd }
 }
 
 #[cfg(test)]
