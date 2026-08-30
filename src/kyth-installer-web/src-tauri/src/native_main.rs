@@ -195,6 +195,98 @@ fn post_json(config: &ConnectionArgs, path: &str, body: Value) -> Result<(u16, V
     Ok((code, value))
 }
 
+fn stream_install_events(weak: Weak<InstallerWindow>, config: ConnectionArgs) {
+    std::thread::spawn(move || {
+        let Some(socket_path) = config.socket_path.as_deref() else { return; };
+        let mut stream = match UnixStream::connect(socket_path) {
+            Ok(stream) => stream,
+            Err(_) => return,
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+        let request = format!(
+            "GET /api/stream HTTP/1.1\r\nHost: kyth-installer.local\r\nX-Kyth-Session-Token: {}\r\nAccept: text/event-stream\r\n\r\n",
+            config.session_token,
+        );
+        if stream.write_all(request.as_bytes()).is_err() { return; }
+        let mut reader = BufReader::new(stream);
+        let mut status = String::new();
+        if reader.read_line(&mut status).is_err() || !status.contains(" 200 ") { return; }
+        loop {
+            let mut header = String::new();
+            match reader.read_line(&mut header) {
+                Ok(0) => return,
+                Ok(_) if header == "\r\n" || header == "\n" => break,
+                Ok(_) => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::TimedOut || error.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(_) => return,
+            }
+        }
+
+        let mut data = String::new();
+        for _ in 0..1800 {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => return,
+                Ok(_) => {
+                    if let Some(payload) = line.strip_prefix("data: ") {
+                        data.push_str(payload.trim_end());
+                    } else if (line == "\r\n" || line == "\n") && !data.is_empty() {
+                        let parsed = serde_json::from_str::<Value>(&data);
+                        data.clear();
+                        let Ok(event) = parsed else { continue; };
+                        let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
+                        let terminal = matches!(event_type, "done" | "error");
+                        let _ = slint::invoke_from_event_loop({
+                            let weak = weak.clone();
+                            let event = event.clone();
+                            move || {
+                                if let Some(window) = weak.upgrade() {
+                                    match event.get("type").and_then(Value::as_str).unwrap_or("") {
+                                        "log" => {
+                                            if let Some(text) = event.get("text").and_then(Value::as_str) {
+                                                window.set_event_log(SharedString::from(text));
+                                            }
+                                        }
+                                        "progress" => {
+                                            if let Some(value) = event.get("value").and_then(Value::as_f64) {
+                                                window.set_progress(value as f32);
+                                            }
+                                        }
+                                        "phase" => {
+                                            if let Some(phase) = event.get("phase").and_then(Value::as_str) {
+                                                window.set_step_status(SharedString::from(format!("Installer phase: {phase}")));
+                                                window.set_event_log(SharedString::from(format!("Installer service is applying the {phase} phase…")));
+                                            }
+                                        }
+                                        "done" => {
+                                            window.set_progress(100.0);
+                                            window.set_transaction_text(SharedString::from("Installation complete"));
+                                            window.set_event_log(SharedString::from("Installation complete. Remove the installation media before rebooting."));
+                                            window.set_busy(false);
+                                            window.set_selected_step(SharedString::from("Done"));
+                                        }
+                                        "error" => {
+                                            let message = response_message(&event, "Installation failed");
+                                            window.set_error_text(SharedString::from(message.as_str()));
+                                            window.set_event_log(SharedString::from("Installation failed; inspect Rescue & diagnostics."));
+                                            window.set_busy(false);
+                                            window.set_selected_step(SharedString::from("Rescue"));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        });
+                        if terminal { return; }
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::TimedOut || error.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(_) => return,
+            }
+        }
+    });
+}
+
 fn disk_inventory(value: &serde_json::Value) -> (String, String) {
     let Some(disks) = value.as_array() else {
         return ("Installer returned no disk inventory".to_string(), "Disk details are unavailable.".to_string());
@@ -506,6 +598,7 @@ fn start_install(weak: Weak<InstallerWindow>, config: ConnectionArgs, request: V
                         }
                     }
                 });
+                stream_install_events(weak.clone(), config.clone());
                 for _ in 0..1800 {
                     std::thread::sleep(Duration::from_secs(1));
                     let snapshot = get_json(&config, "/api/report");

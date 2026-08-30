@@ -43,6 +43,13 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn("!part.get(\"current\")", rust)
         self.assertIn("!part.get(\"in_use\")", rust)
 
+    def test_native_install_uses_the_authenticated_event_stream(self):
+        rust = NATIVE_RS.read_text()
+        for marker in ("stream_install_events", "GET /api/stream", "text/event-stream", "data: ", "1800"):
+            self.assertIn(marker, rust)
+        for event_type in ("log", "progress", "phase", "done", "error"):
+            self.assertIn(f'"{event_type}"', rust)
+
     def test_shell_embeds_assets_and_has_no_privileged_bridge(self):
         config = json.loads((INSTALLER_WEB / "src-tauri/tauri.conf.json").read_text())
         self.assertEqual(config["build"]["frontendDist"], "../dist")
