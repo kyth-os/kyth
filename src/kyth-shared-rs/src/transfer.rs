@@ -4,6 +4,8 @@
 //! not own network polling or UI state; callers can use the deterministic
 //! formatters from native Rust surfaces without crossing into Python.
 
+use std::collections::VecDeque;
+
 pub fn parse_size_bytes(size: &str) -> u64 {
     let mut parts = size.split_whitespace();
     let Some(value) = parts.next().and_then(|value| value.parse::<f64>().ok()) else {
@@ -55,6 +57,24 @@ pub fn human_bytes_pair(downloaded: u64, total: u64) -> (String, String) {
     (downloaded.to_string(), format!("{total} B"))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferProgress { pub downloaded: u64, pub total: u64, pub speed: u64, pub eta_sec: u64 }
+
+/// Pure rolling transfer model matching Python's `NetStatsTracker`.
+pub struct NetStatsTracker { total: u64, rx_start: u64, rx_prev: u64, time_prev: f64, samples: VecDeque<f64> }
+
+impl NetStatsTracker {
+    pub fn new(total: u64, rx_start: u64, time_start: f64) -> Self { Self { total, rx_start, rx_prev: 0, time_prev: time_start, samples: VecDeque::with_capacity(5) } }
+    pub fn tick_at(&mut self, rx_now: u64, time_now: f64) -> TransferProgress {
+        let downloaded = rx_now.saturating_sub(self.rx_start).min(self.total);
+        let dt = time_now - self.time_prev;
+        if dt > 0.0 && self.rx_prev > 0 { let delta = rx_now.saturating_sub(self.rx_prev); if delta > 0 { if self.samples.len() == 5 { self.samples.pop_front(); } self.samples.push_back(delta as f64 / dt); } }
+        self.rx_prev = rx_now; self.time_prev = time_now;
+        let speed = if self.samples.is_empty() { 0 } else { (self.samples.iter().sum::<f64>() / self.samples.len() as f64) as u64 };
+        TransferProgress { downloaded, total: self.total, speed, eta_sec: if speed == 0 { 0 } else { self.total.saturating_sub(downloaded) / speed } }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,5 +93,15 @@ mod tests {
         assert_eq!(human_bytes(1.0), "1 B");
         assert_eq!(human_bytes_pair(1_400_000, 1_500_000), ("1.3".into(), "1.4 MB".into()));
         assert_eq!(human_bytes_pair(10, 12), ("10".into(), "12 B".into()));
+    }
+
+    #[test]
+    fn tracks_rolling_transfer_rate_without_polling() {
+        let mut tracker = NetStatsTracker::new(1_000, 100, 0.0);
+        assert_eq!(tracker.tick_at(100, 1.0).speed, 0);
+        let progress = tracker.tick_at(300, 3.0);
+        assert_eq!(progress.downloaded, 200);
+        assert_eq!(progress.speed, 100);
+        assert_eq!(progress.eta_sec, 8);
     }
 }
