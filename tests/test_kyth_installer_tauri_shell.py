@@ -59,6 +59,11 @@ class InstallerTauriShellTests(unittest.TestCase):
         for event_type in ("log", "progress", "phase", "done", "error"):
             self.assertIn(f'"{event_type}"', rust)
 
+    def test_native_shell_decodes_transaction_reports_with_the_shared_rust_model(self):
+        rust = NATIVE_RS.read_text()
+        self.assertIn("mod installer_transaction;", rust)
+        self.assertIn("installer_transaction::decode", rust)
+
     def test_native_shell_carries_manual_partition_actions_to_the_service(self):
         rust = NATIVE_RS.read_text()
         slint = NATIVE_SLINT.read_text()

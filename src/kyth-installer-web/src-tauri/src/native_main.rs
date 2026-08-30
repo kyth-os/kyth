@@ -7,6 +7,7 @@
 slint::include_modules!();
 
 mod installer_plan;
+mod installer_transaction;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
 use serde_json::{json, Value};
@@ -419,16 +420,11 @@ fn pending_snapshot(config: &ConnectionArgs) -> String {
 
 fn transaction_snapshot(config: &ConnectionArgs) -> String {
     match get_json(config, "/api/report") {
-        Ok((200, value)) if value.as_object().is_some_and(|object| !object.is_empty()) => {
-            let status = value.get("status").and_then(serde_json::Value::as_str).unwrap_or("unknown");
-            let phase = value.get("phase").and_then(serde_json::Value::as_str).filter(|phase| !phase.is_empty());
-            let message = value.get("message").and_then(serde_json::Value::as_str).filter(|message| !message.trim().is_empty());
-            let mut result = format!("{status}{}", phase.map_or(String::new(), |phase| format!(" · {phase}")));
-            if let Some(message) = message {
-                result.push_str(&format!(" · {message}"));
-            }
+        Ok((200, value)) if value.as_object().is_some_and(|object| !object.is_empty()) => installer_transaction::decode(&value.to_string()).map(|decoded| {
+            let mut result = format!("{} · {}", decoded.state.status, decoded.state.phase);
+            if !decoded.state.message.trim().is_empty() { result.push_str(&format!(" · {}", decoded.state.message)); }
             result
-        }
+        }).unwrap_or_else(|_| "Transaction report is not available yet".to_string()),
         Ok((200, _)) => "No install transaction recorded".to_string(),
         Ok(_) => "Transaction report is not available yet".to_string(),
         Err(_) => "Transaction state will appear when the service is ready".to_string(),
