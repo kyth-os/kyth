@@ -229,7 +229,8 @@ fn section_status(section: &str) -> (String, String) {
         "Performance" => {
             let audit = kyth_shared::system::probe::read_section("audit-cache");
             let profile = audit.as_ref().and_then(|value| value.get("master")).and_then(serde_json::Value::as_str).unwrap_or("not cached");
-            (format!("Performance profile · {profile}"), "Open the full performance page to inspect scheduler, power, audio, and tuning state.".into())
+            let preset = kyth_shared::system::role_preset::load(kyth_shared::system::role_preset::config_path::<&str>(None));
+            (format!("Performance profile · {profile}"), format!("Preset preview · {} · {} Flatpak(s) · {} Distrobox(es) · {} editor extension(s)", preset.profile.as_str(), preset.flatpaks.len(), preset.distroboxes.len(), preset.vscode_extensions.len()))
         }
         "Compatibility" => {
             let secure_boot = kyth_shared::system::probe::read_section("secureboot-state").and_then(|value| value.as_str().map(str::to_string)).unwrap_or_else(|| "not cached".into());
@@ -312,8 +313,10 @@ fn section_status(section: &str) -> (String, String) {
             (kyth_shared::system::recovery_status::recovery_banner(&recovery), if recovery.quarantined_digest.is_empty() { "Rollback and staged deployment state are read from the shared recovery view.".into() } else { recovery.quarantine_detail })
         }
         "History" => {
-            let count = kyth_shared::system::deployment_history::deployment_history().len();
-            (format!("{count} deployment entr{}", if count == 1 { "y" } else { "ies" }), "Deployment history is read-only in the native surface.".into())
+            let history = kyth_shared::system::deployment_history::deployment_history();
+            let count = history.len();
+            let detail = history.iter().filter(|item| item.available).map(|item| format!("{}: {}", item.label, item.short_digest.as_deref().unwrap_or("unknown digest"))).collect::<Vec<_>>().join(" · ");
+            (format!("{count} deployment entr{}", if count == 1 { "y" } else { "ies" }), if detail.is_empty() { "No deployment entries are currently available.".into() } else { detail })
         }
         "NVIDIA" => match kyth_shared::system::hardware_view::get_hardware_view_summary() {
             Some(view) if view.has_nvidia => ("NVIDIA graphics detected".into(), if view.is_hybrid { "Hybrid graphics path is available for inspection." } else { "Open the driver section to inspect the installed stack." }.into()),
