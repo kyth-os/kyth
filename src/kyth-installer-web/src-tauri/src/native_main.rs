@@ -654,10 +654,10 @@ fn response_message(value: &Value, fallback: &str) -> String {
         .to_string()
 }
 
-fn validate_install_request(request: &Value) -> Result<(), String> {
+fn validated_install_plan(request: &Value) -> Result<installer_plan::InstallerPlan, String> {
     let plan: installer_plan::InstallerPlanInput = serde_json::from_value(request.clone())
         .map_err(|error| format!("Invalid installer request: {error}"))?;
-    installer_plan::build_plan(plan)?;
+    let plan = installer_plan::build_plan(plan)?;
     let hostname = request.get("hostname").and_then(Value::as_str).unwrap_or_default();
     let username = request.get("username").and_then(Value::as_str).unwrap_or_default();
     let locale = request.get("locale").and_then(Value::as_str).unwrap_or_default();
@@ -666,7 +666,19 @@ fn validate_install_request(request: &Value) -> Result<(), String> {
     if !fields.is_valid() {
         return Err("Enter a valid hostname, username, locale, and keyboard layout.".to_string());
     }
-    Ok(())
+    Ok(plan)
+}
+
+fn install_plan_summary(plan: &installer_plan::InstallerPlan) -> String {
+    let target = plan.target_partition.as_deref().unwrap_or(plan.disk.as_str());
+    match plan.mode.as_str() {
+        "wipe" => format!("Review · erase and install on {}", plan.disk),
+        "alongside" => format!("Review · install alongside {} on {}", target, plan.disk),
+        "resize_ntfs" => format!("Review · shrink {} by {} GiB", plan.resize_partition.as_deref().unwrap_or("selected partition"), plan.resize_bytes / (1024 * 1024 * 1024)),
+        "free_space" => format!("Review · use selected free space on {}", plan.disk),
+        "manual" => format!("Review · apply staged manual layout on {}", plan.disk),
+        _ => "Review · plan requires validation".to_string(),
+    }
 }
 
 fn manual_action(
@@ -1065,12 +1077,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 window.set_error_text(SharedString::from("Select a valid target, complete the required confirmations, and choose a supported guided install mode."));
                 return;
             }
-            if let Err(error) = validate_install_request(&request) {
-                window.set_error_text(SharedString::from(error));
-                return;
-            }
+            let plan = match validated_install_plan(&request) {
+                Ok(plan) => plan,
+                Err(error) => { window.set_error_text(SharedString::from(error)); return; }
+            };
             window.set_busy(true);
             window.set_error_text(SharedString::from(""));
+            window.set_event_log(SharedString::from(install_plan_summary(&plan)));
             start_install(start_weak.clone(), start_config.clone(), request);
         }
     });

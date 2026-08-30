@@ -32,10 +32,11 @@ class InstallerTauriShellTests(unittest.TestCase):
     def test_native_shell_validates_the_typed_plan_before_starting(self):
         rust = NATIVE_RS.read_text()
         self.assertIn("mod installer_plan;", rust)
-        self.assertIn("fn validate_install_request", rust)
+        self.assertIn("fn validated_install_plan", rust)
         self.assertIn("installer_plan::build_plan", rust)
         self.assertIn("installer_validation::validate", rust)
-        self.assertIn("validate_install_request(&request)", rust)
+        self.assertIn("install_plan_summary", rust)
+        self.assertIn("validated_install_plan(&request)", rust)
 
     def test_native_shell_carries_guided_storage_choices_into_the_request(self):
         rust = NATIVE_RS.read_text()
