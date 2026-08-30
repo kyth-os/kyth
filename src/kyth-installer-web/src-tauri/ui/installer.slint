@@ -1,4 +1,4 @@
-import { Button, CheckBox, LineEdit } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit } from "std-widgets.slint";
 
 export component InstallerWindow inherits Window {
     width: 1120px;
@@ -21,6 +21,9 @@ export component InstallerWindow inherits Window {
     in-out property <string> timezone: "UTC";
     in-out property <string> locale: "en_US.UTF-8";
     in-out property <string> keymap: "us";
+    in-out property <[string]> timezone-options: ["UTC"];
+    in-out property <[string]> locale-options: ["en_US.UTF-8"];
+    in-out property <[string]> keymap-options: ["us"];
     in-out property <string> storage-details: "Select a disk to inspect its partitions and free space.";
     in-out property <string> partition-one: "";
     in-out property <string> partition-two: "";
@@ -184,11 +187,11 @@ export component InstallerWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 8px;
                                 Text { text: "Timezone"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
-                                LineEdit { text <=> timezone; placeholder-text: "UTC"; }
+                                ComboBox { model: timezone-options; selected(value) => { timezone = value; } }
                                 Text { text: "Locale"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
-                                LineEdit { text <=> locale; placeholder-text: "en_US.UTF-8"; }
+                                ComboBox { model: locale-options; selected(value) => { locale = value; } }
                                 Text { text: "Keyboard"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
-                                LineEdit { text <=> keymap; placeholder-text: "us"; }
+                                ComboBox { model: keymap-options; selected(value) => { keymap = value; } }
                             }
                             CheckBox { text: "I have backed up anything I want to keep."; checked <=> confirm-backup; }
                             CheckBox { text: "I understand the selected target may be erased."; checked <=> confirm-erase; }

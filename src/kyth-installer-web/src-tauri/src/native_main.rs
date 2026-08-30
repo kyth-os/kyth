@@ -8,7 +8,7 @@
 
 slint::include_modules!();
 
-use slint::{ComponentHandle, SharedString, Weak};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::io::{BufRead, BufReader, Write};
@@ -392,6 +392,13 @@ fn array_count(config: &ConnectionArgs, path: &str) -> Option<usize> {
     get_json(config, path).ok().and_then(|(status, value)| (status == 200).then(|| value.as_array().map_or(0, Vec::len)))
 }
 
+fn string_options(config: &ConnectionArgs, path: &str, fallback: &str) -> Vec<SharedString> {
+    match get_json(config, path) {
+        Ok((200, value)) => value.as_array().map(|items| items.iter().filter_map(Value::as_str).map(SharedString::from).collect()).filter(|items: &Vec<SharedString>| !items.is_empty()).unwrap_or_else(|| vec![SharedString::from(fallback)]),
+        _ => vec![SharedString::from(fallback)],
+    }
+}
+
 fn step_snapshot(config: &ConnectionArgs, step: &str) -> String {
     match step {
         "Configure" => {
@@ -489,6 +496,21 @@ fn refresh_step(weak: Weak<InstallerWindow>, config: ConnectionArgs, step: Strin
                 if window.get_selected_step().as_str() == step {
                     window.set_step_status(SharedString::from(status));
                 }
+            }
+        });
+    });
+}
+
+fn refresh_choices(weak: Weak<InstallerWindow>, config: ConnectionArgs) {
+    std::thread::spawn(move || {
+        let timezones = string_options(&config, "/api/timezones", "UTC");
+        let locales = string_options(&config, "/api/locales", "en_US.UTF-8");
+        let keymaps = string_options(&config, "/api/keymaps", "us");
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(window) = weak.upgrade() {
+                window.set_timezone_options(ModelRc::new(VecModel::from(timezones)));
+                window.set_locale_options(ModelRc::new(VecModel::from(locales)));
+                window.set_keymap_options(ModelRc::new(VecModel::from(keymaps)));
             }
         });
     });
@@ -830,6 +852,7 @@ fn main() -> Result<(), slint::PlatformError> {
         rescue_probe(rescue_weak.clone(), rescue_config.clone());
     });
     refresh_step(window.as_weak(), config.clone(), "Welcome".to_string());
+    refresh_choices(window.as_weak(), config.clone());
     refresh_connection(weak, config);
     window.run()
 }
