@@ -91,6 +91,12 @@ class HubWebActionTests(unittest.TestCase):
         self.assertIn('page-action("upgrade")', NATIVE_SLINT)
         self.assertIn('page-action("rollback")', NATIVE_SLINT)
 
+    def test_native_guardian_action_uses_the_guarded_rust_policy(self):
+        self.assertIn('page-action("guardian")', NATIVE_SLINT)
+        self.assertIn('action == "guardian"', NATIVE_RS)
+        self.assertIn("pending_recommendations", NATIVE_RS)
+        self.assertIn("execute_recipe", NATIVE_RS)
+
     def test_native_hardware_section_surfaces_rust_capabilities(self):
         self.assertIn("get_hardware_view_summary", NATIVE_RS)
         self.assertIn("fn hardware_capabilities_text()", NATIVE_RS)

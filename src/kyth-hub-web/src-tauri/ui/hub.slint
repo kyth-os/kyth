@@ -126,6 +126,13 @@ export component HubWindow inherits Window {
                     }
 
                     HorizontalLayout {
+                        visible: selected-page == "This PC" && selected-section == "Guardian";
+                        spacing: 8px;
+                        Button { text: "Run pending safe repair"; clicked => { page-action("guardian"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
                         spacing: 14px;
                         Rectangle { horizontal-stretch: 1; height: 140px; background: #121d33; border-radius: 14px; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-one-title; color: #9fb1d1; font-size: 13px; } Text { text: card-one-value; color: #f5f7ff; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-one-detail; color: #aebddd; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Live from the local system state"; color: #60718f; font-size: 11px; } } }
                         Rectangle { horizontal-stretch: 1; height: 140px; background: #121d33; border-radius: 14px; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-two-title; color: #9fb1d1; font-size: 13px; } Text { text: card-two-value; color: #f5f7ff; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-two-detail; color: #aebddd; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Open the section for details and actions"; color: #60718f; font-size: 11px; } } }

@@ -465,6 +465,21 @@ fn page_action_detail(recipe: &str, output: &std::process::Output) -> String {
 }
 
 fn run_page_action(weak: Weak<HubWindow>, action: String) {
+    if action == "guardian" {
+        let _ = slint::invoke_from_event_loop({
+            let weak = weak.clone();
+            move || if let Some(window) = weak.upgrade() { window.set_action_status(SharedString::from("Checking Guardian policy…")); }
+        });
+        std::thread::spawn(move || {
+            let state = kyth_shared::guardian::load_state();
+            let result = kyth_shared::guardian::pending_recommendations(&state).first()
+                .map(|item| kyth_shared::guardian::execute_recipe(&item.recipe_id))
+                .unwrap_or_else(|| Err("No pending Guardian repair is available.".to_string()));
+            let detail = result.unwrap_or_else(|error| format!("Guardian repair not run · {error}"));
+            let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() { window.set_action_status(SharedString::from(detail)); });
+        });
+        return;
+    }
     let (recipe, label) = match action.as_str() {
         "upgrade" => ("upgrade", "Starting update…"),
         "rollback" => ("rollback", "Starting rollback…"),
