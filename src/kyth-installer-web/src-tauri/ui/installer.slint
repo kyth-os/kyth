@@ -1,8 +1,8 @@
-import { Button } from "std-widgets.slint";
+import { Button, CheckBox, LineEdit } from "std-widgets.slint";
 
 export component InstallerWindow inherits Window {
     width: 1120px;
-    height: 720px;
+    height: 900px;
     title: "KythOS Installer";
     background: #0b1020;
 
@@ -10,6 +10,26 @@ export component InstallerWindow inherits Window {
     in-out property <string> disk-summary: "Connect to see available install targets";
     in-out property <string> disk-details: "Disk inventory will appear after the installer service connects.";
     in-out property <string> transaction-text: "No install transaction recorded";
+    in-out property <string> error-text: "";
+    in-out property <string> selected-disk: "";
+    in-out property <string> install-mode: "wipe";
+    in-out property <string> kernel: "fedora";
+    in-out property <string> disk-one: "";
+    in-out property <string> disk-two: "";
+    in-out property <string> disk-three: "";
+    in-out property <string> disk-four: "";
+    in-out property <string> disk-five: "";
+    in-out property <string> disk-six: "";
+    in-out property <string> hostname: "kyth";
+    in-out property <string> username: "";
+    in-out property <string> password: "";
+    in-out property <bool> confirm-backup: false;
+    in-out property <bool> confirm-erase: false;
+    in-out property <bool> confirm-current: false;
+    in-out property <bool> start-enabled: false;
+    in-out property <bool> busy: false;
+    in-out property <float> progress: 0;
+    in-out property <string> event-log: "Waiting for installer events…";
     in-out property <string> selected-step: "Welcome";
     in-out property <string> step-title: "Welcome to KythOS";
     in-out property <string> step-detail: "Install the immutable gaming and development desktop with guarded, reviewable steps.";
@@ -21,6 +41,13 @@ export component InstallerWindow inherits Window {
     callback select-step(string);
     callback next-step();
     callback previous-step();
+    callback select-disk(string);
+    callback select-mode(string);
+    callback select-kernel(string);
+    callback start-install();
+    callback cancel-install();
+    callback reboot();
+    callback rescue-probe();
 
     Rectangle {
         background: #0b1020;
@@ -55,7 +82,7 @@ export component InstallerWindow inherits Window {
                     Text { text: step-status; color: #55d6bd; font-size: 13px; wrap: word-wrap; }
                     Rectangle { height: 18px; }
                     Rectangle {
-                        height: 218px;
+                        height: 280px;
                         background: #17243d;
                         border-radius: 16px;
                         VerticalLayout {
@@ -70,11 +97,70 @@ export component InstallerWindow inherits Window {
                             Text { text: "The native shell never owns disk or boot mutations; those remain behind the installer service."; color: #7f90af; font-size: 12px; wrap: word-wrap; }
                         }
                     }
+                    Text { text: error-text; color: #ff9d9d; font-size: 13px; wrap: word-wrap; visible: error-text != ""; }
+                    Rectangle {
+                        background: #121d33;
+                        border-radius: 14px;
+                        VerticalLayout {
+                            padding: 18px;
+                            spacing: 8px;
+                            Text { text: "Install request"; color: #f5f7ff; font-size: 15px; font-weight: 600; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: "Target"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                Button { text: disk-one; enabled: disk-one != ""; clicked => { selected-disk = disk-one; select-disk(disk-one); } }
+                                Button { text: disk-two; enabled: disk-two != ""; clicked => { selected-disk = disk-two; select-disk(disk-two); } }
+                                Button { text: disk-three; enabled: disk-three != ""; clicked => { selected-disk = disk-three; select-disk(disk-three); } }
+                                Button { text: disk-four; enabled: disk-four != ""; clicked => { selected-disk = disk-four; select-disk(disk-four); } }
+                                Button { text: disk-five; enabled: disk-five != ""; clicked => { selected-disk = disk-five; select-disk(disk-five); } }
+                                Button { text: disk-six; enabled: disk-six != ""; clicked => { selected-disk = disk-six; select-disk(disk-six); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: "Mode"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                Button { text: "Erase disk"; clicked => { install-mode = "wipe"; select-mode("wipe"); } }
+                                Button { text: "Keep Windows"; clicked => { install-mode = "resize_ntfs"; select-mode("resize_ntfs"); } }
+                                Button { text: "Replace partition"; clicked => { install-mode = "alongside"; select-mode("alongside"); } }
+                                Button { text: "Free space"; clicked => { install-mode = "free_space"; select-mode("free_space"); } }
+                                Button { text: "Manual"; clicked => { install-mode = "manual"; select-mode("manual"); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: "Kernel"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                Button { text: "Fedora"; clicked => { kernel = "fedora"; select-kernel("fedora"); } }
+                                Button { text: "CachyOS"; clicked => { kernel = "cachyos"; select-kernel("cachyos"); } }
+                                Text { text: "Hostname"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                LineEdit { text <=> hostname; placeholder-text: "kyth"; }
+                                Text { text: "User"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                LineEdit { text <=> username; placeholder-text: "Username"; }
+                                Text { text: "Password"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                LineEdit { text <=> password; input-type: password; placeholder-text: "Password"; }
+                            }
+                            CheckBox { text: "I have backed up anything I want to keep."; checked <=> confirm-backup; }
+                            CheckBox { text: "I understand the selected target may be erased."; checked <=> confirm-erase; }
+                            CheckBox { text: "I verified the target and am booted from installation media."; checked <=> confirm-current; }
+                        }
+                    }
+                    Rectangle {
+                        background: #17243d;
+                        border-radius: 14px;
+                        VerticalLayout {
+                            padding: 18px;
+                            spacing: 8px;
+                            Text { text: "Install activity"; color: #f5f7ff; font-size: 15px; font-weight: 600; }
+                            ProgressIndicator { progress: progress / 100.0; }
+                            Text { text: event-log; color: #d8e2f5; font-size: 12px; wrap: word-wrap; }
+                        }
+                    }
                     Rectangle { vertical-stretch: 1; }
                     HorizontalLayout {
                         Button { text: "‹  Back"; enabled: back-enabled; clicked => { previous-step(); } }
                         Button { text: next-label; clicked => { next-step(); } }
                         Button { text: "Connect to installer"; clicked => { connect(); } }
+                        Button { text: "Start install"; enabled: start-enabled && !busy; clicked => { start-install(); } }
+                        Button { text: "Cancel"; enabled: busy; clicked => { cancel-install(); } }
+                        Button { text: "Rescue probe"; clicked => { rescue-probe(); } }
+                        Button { text: "Reboot"; enabled: selected-step == "Done"; clicked => { reboot(); } }
                         Rectangle { horizontal-stretch: 1; }
                         Text { text: "Review every destructive step before applying"; color: #60718f; font-size: 12px; vertical-alignment: center; }
                     }

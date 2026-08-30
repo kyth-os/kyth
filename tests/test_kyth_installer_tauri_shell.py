@@ -9,11 +9,26 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 INSTALLER_WEB = ROOT / "src/kyth-installer-web"
 SHELL_RS = INSTALLER_WEB / "src-tauri/src/main.rs"
+NATIVE_RS = INSTALLER_WEB / "src-tauri/src/native_main.rs"
+NATIVE_SLINT = INSTALLER_WEB / "src-tauri/ui/installer.slint"
 LAUNCHER = ROOT / "src/kyth-installer/kyth_installer/app.py"
 SERVER = ROOT / "src/kyth-installer/kyth_installer/server.py"
 
 
 class InstallerTauriShellTests(unittest.TestCase):
+    def test_native_shell_owns_the_first_parity_slice(self):
+        rust = NATIVE_RS.read_text()
+        slint = NATIVE_SLINT.read_text()
+        for route in ("/api/start", "/api/cancel", "/api/reboot", "/api/rescue/logs-to-usb"):
+            self.assertIn(route, rust)
+        for field in ("install_mode", "hostname", "username", "password", "confirm_backup", "confirm_erase", "confirm_current"):
+            self.assertIn(field, rust)
+        for control in ("LineEdit", "CheckBox", "select-disk", "select-mode", "select-kernel", "start-install", "cancel-install", "rescue-probe", "reboot"):
+            self.assertIn(control, slint)
+        self.assertIn("post_json", rust)
+        self.assertIn("ALLOWED", rust)
+        self.assertIn("request_from_window", rust)
+
     def test_shell_embeds_assets_and_has_no_privileged_bridge(self):
         config = json.loads((INSTALLER_WEB / "src-tauri/tauri.conf.json").read_text())
         self.assertEqual(config["build"]["frontendDist"], "../dist")
@@ -71,6 +86,9 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn("AS installer-web-builder", containerfile)
         self.assertIn("npm ci && npm run build", containerfile)
         self.assertIn("cargo build --release --locked", containerfile)
+        self.assertIn("--bin kyth-installer-native", containerfile)
+        self.assertIn("/build/kyth-installer-native", containerfile)
+        self.assertIn("/usr/bin/kyth-installer-native", containerfile)
         self.assertIn("COPY --from=installer-web-builder", containerfile)
         build = (ROOT / "installer/build.sh").read_text()
         self.assertIn("webkit2gtk4.1", build)
