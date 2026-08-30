@@ -1,7 +1,8 @@
-"""React Hub deep links — every --page key that ships must resolve.
+"""Hub deep links — every --page key that ships must resolve.
 
 kyth-welcome-launch forwards `--page KEY` unchanged to whichever Hub is
-installed, and the Tauri shell forwards it again to deepLink.ts. Nothing in
+installed. The native Slint shell and the compatibility Tauri shell both
+consume the same argument. Nothing in
 that chain validates the key: an unknown one falls back to "/" and silently
 opens Home instead of the requested page. That is how `--page "App Store"`
 (shipped in 23-kyth-helper-ctx-installs.sh) and 19 krunner entries regressed
@@ -51,6 +52,7 @@ DEEP_LINK_TS = (HUB_WEB / "deepLink.ts").read_text(encoding="utf-8")
 DESTINATIONS_TS = (HUB_WEB / "data" / "destinations.ts").read_text(encoding="utf-8")
 SIDEBAR_TSX = (HUB_WEB / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
 HUB_PAGE_TSX = (HUB_WEB / "pages" / "HubPage.tsx").read_text(encoding="utf-8")
+LAUNCHER_SH = (ROOT / "src" / "kyth-welcome" / "kyth-welcome-launch").read_text(encoding="utf-8")
 CTX_INSTALLS_SH = (
     ROOT / "build_files" / "scripts" / "branding" / "23-kyth-helper-ctx-installs.sh"
 ).read_text(encoding="utf-8")
@@ -96,6 +98,11 @@ def _resolvable_keys() -> set[str]:
 
 
 class HubWebDeepLinkTests(unittest.TestCase):
+    def test_native_hub_is_the_default_with_explicit_react_rollback(self):
+        self.assertIn('target_bin="/usr/bin/kyth-hub-native"', LAUNCHER_SH)
+        self.assertIn('KYTH_USE_REACT_UI:-0', LAUNCHER_SH)
+        self.assertIn('target_bin="/usr/bin/kyth-hub-shell"', LAUNCHER_SH)
+
     def test_every_krunner_page_key_resolves(self):
         emitted = {
             _PAGE_ARG_RE.search(content).group(1) for content in build_entries().values()

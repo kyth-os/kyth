@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# React+Tauri Hub (src/kyth-hub-web, built binary at /usr/bin/kyth-hub-shell) is the default Hub — falls back to PySide6 Hub only if Tauri binary is absent (old image, failed build). Same --page contract (main.rs mirrors page_registry). Keep kyth-welcome installed as fallback until src/kyth-welcome is deleted.
-target_bin="/usr/bin/kyth-hub-shell"
+# Native Slint Hub is the default UI. The React/Tauri shell remains an explicit
+# compatibility fallback for older images or a controlled rollback while the
+# remaining native feature pages are completed. All three binaries preserve the
+# same --page contract.
+target_bin="/usr/bin/kyth-hub-native"
+if [[ "${KYTH_USE_REACT_UI:-0}" == "1" || ! -x "${target_bin}" ]]; then
+    target_bin="/usr/bin/kyth-hub-shell"
+fi
 if [[ ! -x "${target_bin}" ]]; then
     target_bin="/usr/bin/kyth-welcome"
 fi

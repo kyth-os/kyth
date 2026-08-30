@@ -1,12 +1,18 @@
-# Kyth Hub Parity — Python (Qt/PySide6) → React/Rust
+# Kyth Hub Parity — Python (Qt/PySide6) → Rust/Slint
 
-Native UI migration is underway: `src-tauri/src/native_main.rs` and
+The native UI migration is active: `src-tauri/src/native_main.rs` and
 `src-tauri/ui/hub.slint` provide the Slint shell and direct Rust status reads.
-The Tauri/React shell remains the compatibility path until the landing pages
-and guarded actions have native parity; packaging switches only after that
-validation gate.
+The native Slint binary is now the default launcher. The Tauri/React shell is
+kept as a controlled compatibility fallback with `KYTH_USE_REACT_UI=1` until
+the remaining feature pages and guarded actions have native parity.
 
-**The React/Rust Hub is the only Hub the user sees.** `kyth-welcome-launch` prefers `/usr/bin/kyth-hub-shell`; the Qt Hub remains in the tree only as a fallback for an old image and as the source of the headless `kyth-probe`/`kyth-guardian` services. Build is `check-hub-web-shell.sh` (npm ci → npm build → cargo test → cargo build → asset-embed assert) and `validation.yml` pins `PySide6==6.11.1`.
+**The native Rust/Slint Hub is now the default Hub the user sees.**
+`kyth-welcome-launch` prefers `/usr/bin/kyth-hub-native`, then falls back to
+`/usr/bin/kyth-hub-shell` when the native binary is unavailable or
+`KYTH_USE_REACT_UI=1`, and finally to the old Qt Hub on older images. The Qt
+Hub remains in the tree as an old-image fallback and as the source of the
+headless `kyth-probe`/`kyth-guardian` services. The React/Tauri build remains
+covered by `check-hub-web-shell.sh` until the compatibility path is retired.
 
 ## Destination → Section map (single source: `src/kyth-hub-web/src/data/hubSections.ts` ↔ `src/kyth-welcome/page_registry.py:DESTINATION_SECTIONS`)
 
@@ -54,8 +60,8 @@ Python `page_software.py` 7 mixins (Starter Packs, Flatpak Store, AppImages, Ins
 ### 5. kyth_shared → kyth-shared-rs coverage
 Python `src/kyth_shared/kyth_shared` `≈209` modules / `≈1494` defs vs Rust `src/kyth-shared-rs/src/system` `≈31` modules (≈15%). The Rust hardware-policy slice now evaluates read-only inventory and selectors, while `MIGRATION.md` reserves policy application and other collector/high-risk writer paths (installer partitioning, SELinux, VPN connect, `zypp`/`dnf`, and `collect_snapshot`). The Hub's explicit Guardian repair path is ported with the same eligibility, cooldown, verification, and fixed-command policy as Python; the live Guardian sweep and service state writer remain Python-owned. Parity for UI does not require 100% of `kyth_shared` — only the UI-facing reads plus the small set of explicitly exposed mutating actions.
 
-### 6. Launchers & single-instance — NOW DEFAULT (kyth-welcome-launch switched)
-Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`, `krunner_desktop.py`, `kyth-welcome.desktop`. Rust: `main.rs:PendingPage(Mutex<Option<String>>)` + `tauri-plugin-single-instance` + `take_pending_page` — contract matches. `src/kyth-welcome/kyth-welcome-launch` now defaults to `/usr/bin/kyth-hub-shell` when executable, fallback to `kyth-welcome` only on old image/failed build; channel check removed (testing/stable both get Rust shell). `Dockerfile` `COPY --from=hub-web-builder /usr/bin/kyth-hub-shell` already additive, `23-kyth-helper-ctx-installs.sh` installs both .desktop files unchanged.
+### 6. Launchers & single-instance — NATIVE UI NOW DEFAULT
+Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`, `krunner_desktop.py`, `kyth-welcome.desktop`. Rust: the native Slint shell accepts `--page <key>` and preserves the same destination contract. `src/kyth-welcome/kyth-welcome-launch` now defaults to `/usr/bin/kyth-hub-native`; `KYTH_USE_REACT_UI=1` selects the React/Tauri compatibility shell, and older images fall through to `/usr/bin/kyth-welcome`. `Dockerfile` already ships both Rust binaries, and `23-kyth-helper-ctx-installs.sh` installs the unchanged desktop entries.
 
 ## Remaining work
 
