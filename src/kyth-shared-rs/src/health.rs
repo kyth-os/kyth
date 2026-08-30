@@ -114,6 +114,14 @@ pub fn from_check(component: impl Into<String>, level: &str, evidence: impl Into
     }
 }
 
+/// Project a read-only smoke report into the support-safe health schema.
+pub fn from_smoke_report(generated_at: impl Into<String>, report: &crate::system::smoke_check::Report) -> HealthReport {
+    HealthReport::create_at(generated_at, report.results.iter().map(|row| {
+        let level = match row.level { crate::system::smoke_check::Level::Pass => "PASS", crate::system::smoke_check::Level::Warn => "WARN", crate::system::smoke_check::Level::Fail => "FAIL" };
+        from_check(&row.name, level, &row.detail, &row.section)
+    }))
+}
+
 fn rfc3339_now() -> String {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -151,6 +159,15 @@ mod tests {
         let result = from_check("PipeWire", "WARN", "not running", "Audio");
         assert_eq!(result.severity, "warning");
         assert!(result.remediation.contains("restart audio"));
+    }
+
+    #[test]
+    fn projects_smoke_rows_without_collecting() {
+        let mut smoke = crate::system::smoke_check::Report::default();
+        smoke.warned("Firmware", "metadata stale", "Updates");
+        let report = from_smoke_report("2026-01-01T00:00:00Z", &smoke);
+        assert_eq!(report.overall, "warning");
+        assert_eq!(report.results[0].section, "Updates");
     }
 
     #[test]
