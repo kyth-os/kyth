@@ -389,6 +389,12 @@ fn software_catalog_text() -> String {
     format!("Catalog · {} installed Flatpak(s) · {} AppImage(s) · {} starter packs\nAppImages · {}\nPacks · {}", installed.len(), appimages.len(), packs.len(), if image_names.is_empty() { "none discovered" } else { image_names.as_str() }, pack_names)
 }
 
+fn appstream_search_text(query: &str) -> String {
+    let results = kyth_shared::system::software_catalog::appstream_search(query);
+    if results.is_empty() { return "No catalog results found, or the catalog is unavailable.".to_string(); }
+    results.iter().take(10).map(|app| format!("{} · {} — {}", app.id, app.name, app.summary)).collect::<Vec<_>>().join("\n")
+}
+
 fn guardian_status_text() -> String {
     let state = kyth_shared::guardian::load_state();
     let recommendations = kyth_shared::guardian::pending_recommendations(&state);
@@ -635,6 +641,15 @@ fn main() -> Result<(), slint::PlatformError> {
     let action_weak = window.as_weak();
     window.on_page_action(move |action| {
         run_page_action(action_weak.clone(), action.to_string());
+    });
+    let search_weak = window.as_weak();
+    window.on_appstream_search(move |query| {
+        let weak = search_weak.clone();
+        let query = query.to_string();
+        std::thread::spawn(move || {
+            let results = appstream_search_text(&query);
+            let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() { window.set_appstream_results(SharedString::from(results)); });
+        });
     });
 
     let refresh_weak = window.as_weak();

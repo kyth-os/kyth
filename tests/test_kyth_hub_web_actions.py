@@ -120,6 +120,11 @@ class HubWebActionTests(unittest.TestCase):
         self.assertIn('selected-page == "Apps" && selected-section == "App Store"', NATIVE_SLINT)
         self.assertIn('selected-page == "This PC" && selected-section == "Guardian"', NATIVE_SLINT)
 
+    def test_native_apps_surface_has_bounded_appstream_search(self):
+        self.assertIn("appstream_search", NATIVE_RS)
+        self.assertIn("appstream-search(appstream-query)", NATIVE_SLINT)
+        self.assertIn("appstream-results", NATIVE_SLINT)
+
     def test_every_mutating_wrapper_is_reachable_from_the_ui(self):
         sources = _ui_sources()
         for wrapper, expected_file in MUTATING_WRAPPERS.items():

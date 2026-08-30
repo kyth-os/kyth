@@ -23,6 +23,8 @@ export component HubWindow inherits Window {
     in-out property <string> hardware-capabilities: "Capabilities · Reading hardware view…";
     in-out property <string> gaming-launchers: "Launchers · Reading gaming inventory…";
     in-out property <string> software-catalog: "Catalog · Reading software inventory…";
+    in-out property <string> appstream-query: "";
+    in-out property <string> appstream-results: "Search the Flatpak catalog from the native Apps surface.";
     in-out property <string> guardian-status: "Guardian · Reading recommendations…";
     in-out property <string> section-one: "Recovery";
     in-out property <string> section-two: "Performance";
@@ -166,6 +168,8 @@ export component HubWindow inherits Window {
                             Text { visible: selected-page == "This PC" && selected-section == "Hardware"; text: hardware-capabilities; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
                             Text { visible: selected-page == "Play" && selected-section == "Gaming"; text: gaming-launchers; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
                             Text { visible: selected-page == "Apps" && selected-section == "App Store"; text: software-catalog; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
+                            HorizontalLayout { visible: selected-page == "Apps" && selected-section == "App Store"; spacing: 8px; LineEdit { horizontal-stretch: 1; text <=> appstream-query; placeholder-text: "Search Flatpak catalog"; } Button { text: "Search"; clicked => { appstream-search(appstream-query); } } }
+                            Text { visible: selected-page == "Apps" && selected-section == "App Store"; text: appstream-results; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
                             Text { visible: selected-page == "This PC" && selected-section == "Guardian"; text: guardian-status; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
                         }
                     }
