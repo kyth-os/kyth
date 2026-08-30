@@ -229,7 +229,7 @@ fn section_status(section: &str) -> (String, String) {
         "Performance" => {
             let audit = kyth_shared::system::probe::read_section("audit-cache");
             let profile = audit.as_ref().and_then(|value| value.get("master")).and_then(serde_json::Value::as_str).unwrap_or("not cached");
-            let preset = kyth_shared::system::role_preset::load(kyth_shared::system::role_preset::config_path::<&str>(None));
+            let preset = kyth_shared::system::role_preset::load(kyth_shared::system::role_preset::config_path(None::<&str>));
             (format!("Performance profile · {profile}"), format!("Preset preview · {} · {} Flatpak(s) · {} Distrobox(es) · {} editor extension(s)", preset.profile.as_str(), preset.flatpaks.len(), preset.distroboxes.len(), preset.vscode_extensions.len()))
         }
         "Compatibility" => {
@@ -399,7 +399,7 @@ fn guardian_status_text() -> String {
     let state = kyth_shared::guardian::load_state();
     let recommendations = kyth_shared::guardian::pending_recommendations(&state);
     let pending = recommendations.len();
-    let quarantined = state.quarantined.len();
+    let quarantined = kyth_shared::system::boot_health::read_default_state().quarantined.len();
     let names = recommendations.iter().take(3).map(|item| item.recipe_id.as_str()).collect::<Vec<_>>().join(", ");
     if names.is_empty() {
         format!("Guardian · clear · {quarantined} quarantined item(s)")
