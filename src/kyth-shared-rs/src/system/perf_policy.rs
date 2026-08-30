@@ -12,6 +12,22 @@ pub const POLICY_TTL_S: u64 = 30;
 pub const DEFAULT_SCX_FOR_GAMING: &str = "scx_rusty";
 pub const DEFAULT_SCX_FOR_DESKTOP: &str = "scx_bpfland";
 
+/// Parse the `avg10=` field from `/proc/pressure/cpu` or cgroup pressure text.
+pub fn pressure_avg10(text: &str) -> Option<f64> {
+    text.split_whitespace()
+        .find_map(|part| part.strip_prefix("avg10=")?.parse::<f64>().ok())
+}
+
+/// Parse a battery capacity file, preserving the daemon's integer contract.
+pub fn battery_percent(text: &str) -> Option<i64> {
+    text.trim().parse::<i64>().ok()
+}
+
+/// Normalize the successful `powerprofilesctl get` output used by the daemon.
+pub fn power_profile(success: bool, stdout: &str) -> String {
+    if success && !stdout.trim().is_empty() { stdout.trim().to_ascii_lowercase() } else { "unknown".into() }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PerfSample {
     pub is_gaming: bool,
@@ -193,5 +209,14 @@ mod tests {
         assert!(!should_rollback(&policy, Some(110.0), Some(100.0)));
         assert!(should_rollback(&policy, Some(110.1), Some(100.0)));
         assert!(!should_rollback(&policy, None, Some(100.0)));
+    }
+
+    #[test]
+    fn parses_read_only_daemon_inputs_without_collecting_them() {
+        assert_eq!(pressure_avg10("some avg10=0.12 avg60=0.30"), Some(0.12));
+        assert_eq!(battery_percent(" 42\n"), Some(42));
+        assert_eq!(power_profile(true, " Performance\n"), "performance");
+        assert_eq!(power_profile(false, "performance"), "unknown");
+        assert_eq!(pressure_avg10("some avg60=0.30"), None);
     }
 }

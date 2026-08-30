@@ -4,7 +4,7 @@
 //! script. These helpers keep metric calculation and report shape reusable.
 
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct StaticMetrics {
@@ -40,19 +40,53 @@ pub fn static_metrics(
     }
 }
 
+/// Return the optimization-budget failures in the same stable text shape as
+/// `optimization-report.py --check`.
+pub fn budget_failures(static_metrics: &StaticMetrics, budgets: &Value) -> Vec<String> {
+    let values = serde_json::to_value(static_metrics).unwrap_or_default();
+    budgets
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, limit)| {
+            let actual = values.get(name).and_then(Value::as_u64)?;
+            let limit = limit.as_u64()?;
+            (actual > limit).then(|| format!("{name}: {actual} exceeds budget {limit}"))
+        })
+        .collect()
+}
+
+/// Assemble the complete optimization report, optionally including already
+/// collected runtime metrics. Measurement, filesystem traversal, and report
+/// writes remain outside this pure projection.
+pub fn report_with_runtime(
+    source_revision: &str,
+    static_metrics: &StaticMetrics,
+    budgets: &Value,
+    artifacts: &Value,
+    runtime: Option<&Value>,
+) -> Value {
+    let mut report = serde_json::Map::from_iter([
+        ("schema_version".into(), Value::from(1)),
+        ("source_revision".into(), Value::String(source_revision.into())),
+        ("static".into(), serde_json::to_value(static_metrics).unwrap_or_default()),
+        ("budgets".into(), budgets.clone()),
+        ("artifacts".into(), artifacts.clone()),
+    ]);
+    if let Some(runtime) = runtime {
+        report.insert("runtime".into(), runtime.clone());
+    }
+    Value::Object(report)
+}
+
 pub fn report(source_revision: &str, static_metrics: &StaticMetrics, budgets: &Value, artifacts: &Value) -> Value {
-    json!({
-        "schema_version": 1,
-        "source_revision": source_revision,
-        "static": static_metrics,
-        "budgets": budgets,
-        "artifacts": artifacts,
-    })
+    report_with_runtime(source_revision, static_metrics, budgets, artifacts, None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn counts_only_the_default_collector_block() {
@@ -69,5 +103,15 @@ mod tests {
         assert_eq!(value["schema_version"], 1);
         assert_eq!(value["static"]["probe_collector_count"], 1);
         assert_eq!(value["source_revision"], "local");
+    }
+
+    #[test]
+    fn projects_budget_failures_and_optional_runtime_metrics() {
+        let metrics = static_metrics([4, 9, 2], "def default_collectors(): ProbeCollector(x)", 3, 8);
+        let budgets = json!({"installer_js_max_file_bytes": 8, "probe_collector_count": 1, "unknown": 0});
+        assert_eq!(budget_failures(&metrics, &budgets), vec!["installer_js_max_file_bytes: 9 exceeds budget 8"]);
+        let report = report_with_runtime("local", &metrics, &budgets, &json!({}), Some(&json!({"probe_duration_ms": 12.5})));
+        assert_eq!(report["runtime"]["probe_duration_ms"], 12.5);
+        assert_eq!(report["static"]["system_hub_python_modules"], 8);
     }
 }

@@ -14,6 +14,9 @@
 //! live Python probe sweep or the installer/high-risk writer paths.
 
 pub mod guardian;
+pub mod containers;
+pub mod cloud_idempotent;
+pub mod work_migration;
 pub mod doctor;
 pub mod diagnostics_scrub;
 pub mod atomic_io;
@@ -29,6 +32,7 @@ pub mod commands;
 pub mod sarif;
 pub mod repos;
 pub mod transfer;
+pub mod url_encode;
 pub mod secret_scan;
 pub mod setup_transfer;
 pub mod desktop_polish;

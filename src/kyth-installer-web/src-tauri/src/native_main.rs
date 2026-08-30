@@ -7,6 +7,8 @@
 slint::include_modules!();
 
 mod installer_plan;
+mod installer_storage;
+mod installer_recovery;
 mod installer_transaction;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
@@ -862,7 +864,7 @@ fn start_install(weak: Weak<InstallerWindow>, config: ConnectionArgs, request: V
                     let lifecycle = report.get("lifecycle").and_then(Value::as_str).unwrap_or("").to_string();
                     let phase = report.get("phase").and_then(Value::as_str).unwrap_or("").to_string();
                     let message = response_message(&report, "Installation is in progress…");
-                    let terminal = matches!(lifecycle, "done" | "failed") || phase == "complete";
+                    let terminal = matches!(lifecycle.as_str(), "done" | "failed") || phase == "complete";
                     let progress = if terminal { 100.0 } else if phase == "secure_boot" { 90.0 } else if phase == "configure" { 75.0 } else if phase == "image" { 50.0 } else if phase == "storage" { 20.0 } else { 5.0 };
                     let _ = slint::invoke_from_event_loop({
                         let weak = weak.clone();
@@ -1133,4 +1135,37 @@ fn main() -> Result<(), slint::PlatformError> {
     refresh_choices(window.as_weak(), config.clone());
     refresh_connection(weak, config);
     window.run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installer_steps_round_trip_in_order() {
+        for (index, expected) in [(0, "Welcome"), (1, "Select disk"), (2, "Configure"), (3, "Review"), (4, "Install")] {
+            assert_eq!(step_name(index), expected);
+            if index > 0 { assert_eq!(step_index(expected), index); }
+        }
+    }
+
+    #[test]
+    fn disk_inventory_is_read_only_and_friendly() {
+        let value = serde_json::json!([
+            {"name":"/dev/nvme0n1", "model":"Kyth Disk", "size_bytes":1073741824_u64, "ssd":true, "transport":"nvme", "removable":false, "partition_table":"gpt", "current":true},
+            {"name":"/dev/sdb", "model":"", "size_bytes":2147483648_u64, "ssd":false, "transport":"usb", "removable":true, "partition_table":"gpt", "current":false}
+        ]);
+        let disks = typed_disks(value).expect("fixture disk inventory should decode");
+        let (summary, details) = disk_inventory(&disks);
+        assert_eq!(summary, "2 install target(s) available");
+        assert!(details.contains("current system disk"));
+        assert!(details.contains("Unknown model"));
+        assert!(details.contains("2.0 GB"));
+    }
+
+    #[test]
+    fn malformed_or_empty_disk_responses_fail_closed() {
+        assert!(typed_disks(serde_json::json!(null)).is_err());
+        assert_eq!(disk_inventory(&[]).0, "Installer returned no disk inventory");
+    }
 }

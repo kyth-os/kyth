@@ -27,6 +27,13 @@ pub(crate) struct PartitionJournal {
     pub irreversible_completed: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ManualMount {
+    pub partition: String,
+    pub mountpoint: String,
+    pub fstype: String,
+}
+
 impl PartitionJournal {
     pub(crate) fn new(disk: &str) -> Result<Self, String> {
         let disk = normalize_device_path(disk)
@@ -117,6 +124,105 @@ fn last_mountpoint_indices(journal: &PartitionJournal) -> HashMap<String, usize>
         }
     }
     last
+}
+
+/// Project non-root manual mounts from a committed journal and a fresh,
+/// read-only partition snapshot.
+///
+/// This mirrors `kyth_installer.plan_query.get_manual_mounts`. It does not
+/// inspect or mutate devices; the caller supplies post-commit discovery data
+/// and remains responsible for deciding when to invoke it.
+pub(crate) fn manual_mounts(
+    journal: &PartitionJournal,
+    current_parts: &[PartitionRecord],
+) -> Result<Vec<ManualMount>, String> {
+    if !journal.committed {
+        return Ok(Vec::new());
+    }
+    if journal.disk.trim().is_empty() {
+        return Err("Committed partition journal has no target disk.".to_string());
+    }
+
+    let discovered: HashMap<&str, &PartitionRecord> = current_parts
+        .iter()
+        .map(|part| (part.name.as_str(), part))
+        .collect();
+    let created: HashSet<String> = journal
+        .ops
+        .iter()
+        .filter(|operation| operation.kind == "create")
+        .map(|operation| value_string(&operation.params, "partition"))
+        .filter(|partition| !partition.is_empty())
+        .collect();
+
+    let mut mounts = Vec::new();
+    let mut assigned_mountpoints = HashSet::new();
+    let mut assigned_partitions = HashSet::new();
+    for operation in &journal.ops {
+        if !matches!(operation.kind.as_str(), "create" | "set_mountpoint") {
+            continue;
+        }
+        if !operation.params.is_object() {
+            return Err("Committed partition journal contains malformed operations.".to_string());
+        }
+        let mountpoint = value_string(&operation.params, "mountpoint");
+        let partition = value_string(&operation.params, "partition");
+        if mountpoint.is_empty()
+            || matches!(mountpoint.as_str(), "/" | "/boot/efi")
+            || partition.is_empty()
+        {
+            continue;
+        }
+        if !discovered.contains_key(partition.as_str()) && !created.contains(&partition) {
+            return Err(format!(
+                "Manual mount target {partition} disappeared after partition commit."
+            ));
+        }
+        if !assigned_mountpoints.insert(mountpoint.clone()) {
+            return Err(format!(
+                "Manual mount point {mountpoint} is assigned more than once."
+            ));
+        }
+        if !assigned_partitions.insert(partition.clone()) {
+            return Err(format!(
+                "Manual partition {partition} has multiple mount assignments."
+            ));
+        }
+
+        let mut fstype = if operation.kind == "create" {
+            value_string(&operation.params, "fs_type")
+        } else {
+            String::new()
+        };
+        for format_operation in &journal.ops {
+            if format_operation.kind != "format" {
+                continue;
+            }
+            if !format_operation.params.is_object() {
+                return Err("Committed partition journal contains malformed operations.".to_string());
+            }
+            if value_string(&format_operation.params, "partition") == partition {
+                fstype = value_string(&format_operation.params, "fs_type");
+                break;
+            }
+        }
+        if fstype.is_empty() {
+            fstype = discovered
+                .get(partition.as_str())
+                .map(|part| part.fstype.clone())
+                .unwrap_or_default();
+        }
+        mounts.push(ManualMount {
+            partition,
+            mountpoint,
+            fstype: if fstype.is_empty() {
+                "btrfs".to_string()
+            } else {
+                fstype
+            },
+        });
+    }
+    Ok(mounts)
 }
 
 /// Validate staged journal metadata against an explicit, read-only snapshot.
@@ -388,6 +494,90 @@ mod tests {
         let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
         assert!(journal.mark_committed(Some("../../etc/passwd")).is_err());
         assert!(!journal.committed);
+    }
+
+    #[test]
+    fn projects_committed_manual_mounts_and_format_overrides() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/home"}),
+        );
+        journal.add_op(
+            "format",
+            json!({"partition": "/dev/sda2", "fs_type": "xfs"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda3", "mountpoint": "swap"}),
+        );
+        journal.mark_committed(None).expect("commit metadata");
+
+        let mounts = manual_mounts(
+            &journal,
+            &[
+                partition("/dev/sda2", "ext4", false),
+                partition("/dev/sda3", "swap", false),
+            ],
+        )
+        .expect("manual mount projection");
+        assert_eq!(mounts[0].fstype, "xfs");
+        assert_eq!(mounts[1].fstype, "swap");
+    }
+
+    #[test]
+    fn manual_mount_projection_skips_root_and_fails_closed() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda3", "mountpoint": "/boot/efi"}),
+        );
+        journal.mark_committed(None).expect("commit metadata");
+        assert!(manual_mounts(&journal, &[]).expect("root mounts are skipped").is_empty());
+
+        let mut stale = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        stale.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda9", "mountpoint": "/home"}),
+        );
+        stale.mark_committed(None).expect("commit metadata");
+        assert!(manual_mounts(&stale, &[])
+            .expect_err("stale target must fail closed")
+            .contains("disappeared"));
+
+        let mut malformed = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        malformed.add_op("set_mountpoint", Value::Null);
+        malformed.mark_committed(None).expect("commit metadata");
+        assert!(manual_mounts(&malformed, &[])
+            .expect_err("malformed operation must fail closed")
+            .contains("malformed"));
+    }
+
+    #[test]
+    fn manual_mount_projection_rejects_duplicate_assignments() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/home"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda3", "mountpoint": "/home"}),
+        );
+        journal.mark_committed(None).expect("commit metadata");
+        let error = manual_mounts(
+            &journal,
+            &[
+                partition("/dev/sda2", "btrfs", false),
+                partition("/dev/sda3", "btrfs", false),
+            ],
+        )
+        .expect_err("duplicate mountpoint must fail closed");
+        assert!(error.contains("assigned more than once"));
     }
 
     #[test]

@@ -24,7 +24,7 @@ pub struct QuarantineRecord {
     pub last_failed_at: i64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BootHealthState {
     pub current_digest: String,
@@ -42,6 +42,28 @@ pub struct BootHealthState {
     pub rollback_attempted_for: String,
     pub last_rollback_error: String,
     pub last_rollback_at: i64,
+}
+
+impl Default for BootHealthState {
+    fn default() -> Self {
+        Self {
+            current_digest: String::new(),
+            last_healthy_digest: String::new(),
+            pending_digest: String::new(),
+            status: "unknown".into(),
+            failures: 0,
+            last_failure_boot_id: String::new(),
+            last_reason: String::new(),
+            last_recovered_digest: String::new(),
+            last_recovery_at: 0,
+            rollout_ring: "follow-image".into(),
+            updated_at: 0,
+            quarantined: HashMap::new(),
+            rollback_attempted_for: String::new(),
+            last_rollback_error: String::new(),
+            last_rollback_at: 0,
+        }
+    }
 }
 
 impl BootHealthState {
@@ -146,6 +168,112 @@ pub fn quarantine_reason(state: &BootHealthState, digest: &str) -> Option<String
     })
 }
 
+/// Record that an image was staged without performing any persistence.
+pub fn record_staged(state: &BootHealthState, digest: &str, rollout_ring: &str, now: i64) -> BootHealthState {
+    let mut updated = state.clone();
+    updated.pending_digest = digest.into();
+    updated.rollout_ring = rollout_ring.into();
+    updated.updated_at = now;
+    updated
+}
+
+/// Record one failed boot, deduplicated by deployment and boot identifier.
+///
+/// This is intentionally a pure state transition. The coordinator or the
+/// existing Python service owns locking and persistence; no rollback command
+/// is started here.
+pub fn record_failure(
+    state: &BootHealthState,
+    digest: &str,
+    boot_id: &str,
+    reason: &str,
+    threshold: i64,
+    now: i64,
+) -> BootHealthState {
+    let same_deployment = state.current_digest == digest;
+    let mut failures = if same_deployment { state.failures } else { 0 };
+    if !(same_deployment && state.last_failure_boot_id == boot_id) { failures += 1; }
+
+    let mut quarantined = state.quarantined.clone();
+    if failures >= threshold {
+        let first_failed_at = quarantined.get(digest).map_or(now, |record| record.first_failed_at);
+        quarantined.insert(digest.into(), QuarantineRecord {
+            digest: digest.into(),
+            failures,
+            reason: reason.into(),
+            first_failed_at,
+            last_failed_at: now,
+        });
+    }
+    // Keep the field-by-field shape aligned with the Python constructor. In
+    // particular, rollback_attempted_for must survive unrelated failures so
+    // a bad rollback target cannot create a ping-pong loop.
+    BootHealthState {
+        current_digest: digest.into(),
+        last_healthy_digest: state.last_healthy_digest.clone(),
+        pending_digest: if state.pending_digest == digest { String::new() } else { state.pending_digest.clone() },
+        status: if quarantined.contains_key(digest) { "quarantined" } else { "unhealthy" }.into(),
+        failures,
+        last_failure_boot_id: boot_id.into(),
+        last_reason: reason.into(),
+        last_recovered_digest: state.last_recovered_digest.clone(),
+        last_recovery_at: state.last_recovery_at,
+        rollout_ring: state.rollout_ring.clone(),
+        updated_at: now,
+        quarantined,
+        rollback_attempted_for: state.rollback_attempted_for.clone(),
+        last_rollback_error: state.last_rollback_error.clone(),
+        last_rollback_at: state.last_rollback_at,
+    }
+}
+
+/// Mark a deployment healthy and clear its quarantine record.
+pub fn mark_healthy(state: &BootHealthState, digest: &str, now: i64) -> BootHealthState {
+    let mut quarantined = state.quarantined.clone();
+    quarantined.remove(digest);
+    let recovered_digest = if state.current_digest != digest && state.quarantined.contains_key(&state.current_digest) {
+        state.current_digest.clone()
+    } else {
+        String::new()
+    };
+    BootHealthState {
+        current_digest: digest.into(),
+        last_healthy_digest: digest.into(),
+        pending_digest: if state.pending_digest == digest { String::new() } else { state.pending_digest.clone() },
+        status: if recovered_digest.is_empty() { "healthy" } else { "recovered" }.into(),
+        failures: 0,
+        last_failure_boot_id: String::new(),
+        last_reason: if recovered_digest.is_empty() { state.last_reason.clone() } else { format!("Automatically recovered from quarantined digest {recovered_digest}") },
+        last_recovered_digest: if recovered_digest.is_empty() { state.last_recovered_digest.clone() } else { recovered_digest.clone() },
+        last_recovery_at: if recovered_digest.is_empty() { state.last_recovery_at } else { now },
+        rollout_ring: state.rollout_ring.clone(),
+        updated_at: now,
+        quarantined,
+        rollback_attempted_for: state.rollback_attempted_for.clone(),
+        last_rollback_error: state.last_rollback_error.clone(),
+        last_rollback_at: state.last_rollback_at,
+    }
+}
+
+/// Record a one-shot rollback attempt without executing it.
+pub fn note_rollback_attempted(state: &BootHealthState, digest: &str, error: Option<&str>, now: i64) -> BootHealthState {
+    let mut updated = state.clone();
+    updated.rollback_attempted_for = digest.into();
+    updated.last_rollback_error = error.unwrap_or_default().into();
+    updated.last_rollback_at = now;
+    updated.updated_at = now;
+    updated
+}
+
+/// Remove one quarantine record while preserving the rest of the state.
+pub fn clear_quarantine(state: &BootHealthState, digest: &str, now: i64) -> BootHealthState {
+    let mut updated = state.clone();
+    updated.quarantined.remove(digest);
+    if updated.current_digest == digest && updated.status == "quarantined" { updated.status = "unhealthy".into(); }
+    updated.updated_at = now;
+    updated
+}
+
 const VALID_ROLLOUT_RINGS: [&str; 4] = ["follow-image", "canary", "testing", "stable"];
 
 pub fn image_ring(reference: &str) -> Option<&'static str> {
@@ -205,6 +333,49 @@ mod tests {
         let path = directory.path().join("boot-health.json");
         fs::write(&path, "not json").unwrap();
         assert_eq!(read_state(path), BootHealthState::default());
+    }
+
+    #[test]
+    fn default_state_matches_python_defaults() {
+        let state = BootHealthState::default();
+        assert_eq!(state.status, "unknown");
+        assert_eq!(state.rollout_ring, "follow-image");
+        assert_eq!(state.failures, 0);
+    }
+
+    #[test]
+    fn transitions_dedupe_failures_and_quarantine_at_the_threshold() {
+        let digest = "sha256:aaa";
+        let mut state = record_staged(&BootHealthState::default(), digest, "testing", 1);
+        state = record_failure(&state, digest, "boot-1", "display failed", 3, 2);
+        let duplicate = record_failure(&state, digest, "boot-1", "display failed", 3, 3);
+        assert_eq!(duplicate.failures, 1);
+        state = record_failure(&duplicate, digest, "boot-2", "display failed", 3, 4);
+        state = record_failure(&state, digest, "boot-3", "display failed", 3, 5);
+        assert_eq!(state.status, "quarantined");
+        assert_eq!(state.quarantined[digest].first_failed_at, 5);
+        assert_eq!(state.quarantined[digest].last_failed_at, 5);
+        assert!(state.pending_digest.is_empty());
+    }
+
+    #[test]
+    fn recovery_clears_quarantine_and_records_a_changed_digest() {
+        let first = "sha256:first";
+        let second = "sha256:second";
+        let mut state = BootHealthState::default();
+        for (index, boot) in ["boot-1", "boot-2", "boot-3"].into_iter().enumerate() {
+            state = record_failure(&state, first, boot, "failed", 3, index as i64);
+        }
+        state = note_rollback_attempted(&state, first, Some("rollback failed"), 4);
+        let recovered = mark_healthy(&state, second, 5);
+        assert_eq!(recovered.status, "recovered");
+        assert_eq!(recovered.last_recovered_digest, first);
+        assert!(recovered.quarantined.contains_key(first));
+        assert_eq!(recovered.rollback_attempted_for, first);
+        assert_eq!(recovered.last_rollback_error, "rollback failed");
+        let cleared = clear_quarantine(&recovered, first, 6);
+        assert_eq!(cleared.status, "recovered");
+        assert!(!cleared.quarantined.contains_key(first));
     }
 
     #[test]

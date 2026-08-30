@@ -39,7 +39,7 @@ struct LsblkDevice {
     children: Vec<LsblkDevice>,
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct DiskRecord {
     pub name: String,
     pub size_bytes: u64,

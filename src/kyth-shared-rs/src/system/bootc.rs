@@ -5,16 +5,14 @@ pub fn branch_from_ref(r: Option<&str>) -> Option<String> {
 }
 
 pub fn current_branch() -> Option<String> {
-    // Prefer the probe cache, then mirror Python's cache-miss behavior by
-    // deriving the branch from the current bootc status response.
+    // Prefer the probe cache, then mirror Python's complete image-reference
+    // fallback chain (structured status, text status, rpm-ostree).
     if let Some(branch) = crate::system::probe::read_section("bootc-branch")
         .and_then(|v| v.as_str().map(str::to_string))
     {
         return Some(branch);
     }
-    let status = crate::system::probe::read_section("bootc-status-data")
-        .or_else(crate::system::bootc_query::fetch_status_data)?;
-    crate::system::bootc_query::image_reference_from_status(&status)
+    crate::system::bootc_query::image_reference()
         .as_deref()
         .and_then(|reference| branch_from_ref(Some(reference)))
 }

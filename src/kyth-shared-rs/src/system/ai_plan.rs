@@ -99,10 +99,75 @@ pub fn generate_plan(snapshot: &Value, boot_state: Option<&BootStateView>, evalu
 }
 
 pub fn plan_from_json(value: &Value) -> Option<AiPlan> {
-    serde_json::from_value(value.clone()).ok().map(|mut plan: AiPlan| {
-        plan.actions.sort_by_key(|action| action.priority);
-        plan
+    let object = value.as_object()?;
+    let actions = object
+        .get("actions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(parse_action)
+        .collect::<Vec<_>>();
+    let mut actions = actions;
+    actions.sort_by_key(|action| action.priority);
+
+    Some(AiPlan {
+        actions,
+        summary: json_string(object.get("summary").unwrap_or(&Value::String(String::new()))),
+        offline: object.get("offline").map(json_bool).unwrap_or(true),
+        model: object.get("model").and_then(Value::as_str).map(str::to_owned),
     })
+}
+
+/// Match `AiPlan.from_dict`: malformed action entries are ignored while the
+/// rest of an otherwise usable plan remains available to the Hub.
+fn parse_action(value: &Value) -> Option<AiAction> {
+    let object = value.as_object()?;
+    let id = object.get("id").map(json_string)?;
+    let label = object.get("label").map(json_string)?;
+    let command = match object.get("command") {
+        None => Vec::new(),
+        Some(Value::Null) => return None,
+        Some(Value::Array(values)) => values.iter().map(json_string).collect(),
+        Some(Value::String(value)) => value.chars().map(|value| value.to_string()).collect(),
+        Some(Value::Object(values)) => values.keys().cloned().collect(),
+        Some(_) => return None,
+    };
+    let reason = object.get("reason").map(json_string).unwrap_or_default();
+    let priority = match object.get("priority") {
+        None => 100,
+        Some(value) => json_integer(value)?,
+    };
+    Some(AiAction { id, label, command, reason, priority })
+}
+
+fn json_string(value: &Value) -> String {
+    match value {
+        Value::String(value) => value.clone(),
+        Value::Null => "None".into(),
+        Value::Bool(value) => if *value { "True" } else { "False" }.into(),
+        Value::Number(value) => value.to_string(),
+        Value::Array(_) | Value::Object(_) => value.to_string(),
+    }
+}
+
+fn json_integer(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(value) => value.as_i64(),
+        Value::String(value) => value.parse().ok(),
+        Value::Bool(value) => Some(i64::from(*value)),
+        _ => None,
+    }
+}
+
+fn json_bool(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64().is_some_and(|value| value != 0.0),
+        Value::String(_) => true,
+        Value::Array(values) => !values.is_empty(),
+        Value::Object(values) => !values.is_empty(),
+    }
 }
 
 #[cfg(test)]
@@ -134,5 +199,42 @@ mod tests {
         let value = serde_json::json!({"actions":[{"id":"late","label":"Late","command":[],"reason":"","priority":90},{"id":"early","label":"Early","command":[],"reason":"","priority":10}],"summary":"x","offline":true,"model":null});
         let plan = plan_from_json(&value).unwrap();
         assert_eq!(plan.actions[0].id, "early");
+    }
+
+    #[test]
+    fn ignores_malformed_actions_and_applies_python_defaults() {
+        let value = serde_json::json!({
+            "actions": [
+                {"id": "ok", "label": "Keep", "priority": "7", "command": ["ujust", "repair"]},
+                {"id": "missing-label"},
+                "not an action",
+                {"id": "defaults", "label": "Defaults", "reason": true}
+            ],
+            "summary": 42,
+            "offline": false,
+            "model": "local"
+        });
+        let plan = plan_from_json(&value).unwrap();
+        assert_eq!(plan.actions.len(), 2);
+        assert_eq!(plan.actions[0].id, "ok");
+        assert_eq!(plan.actions[0].priority, 7);
+        assert_eq!(plan.actions[1].priority, 100);
+        assert_eq!(plan.actions[1].reason, "True");
+        assert_eq!(plan.summary, "42");
+        assert!(!plan.offline);
+        assert_eq!(plan.model.as_deref(), Some("local"));
+    }
+
+    #[test]
+    fn preserves_python_iterable_commands_and_skips_type_errors() {
+        let value = serde_json::json!({"actions":[
+            {"id":"chars","label":"Chars","command":"ok"},
+            {"id":"bad","label":"Bad","command":true},
+            {"id":"null","label":"Null","command":null},
+            {"id":"priority","label":"Priority","priority":null}
+        ]});
+        let plan = plan_from_json(&value).unwrap();
+        assert_eq!(plan.actions.len(), 1);
+        assert_eq!(plan.actions[0].command, vec!["o", "k"]);
     }
 }

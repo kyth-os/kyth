@@ -7,9 +7,35 @@
 
 use regex::RegexBuilder;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const DEFAULT_APP_DB_PATH: &str = "/usr/share/kyth/exe-handler-apps.json";
+
+/// Normalize an installer filename before application-database lookup.
+/// This mirrors `desktop.exe_handler.normalise_filename` and intentionally
+/// strips only well-known wrapper, platform, and release suffixes.
+pub fn normalise_filename(filename: &str) -> String {
+    let path = PathBuf::from(filename);
+    let basename = path.file_name().and_then(|name| name.to_str()).unwrap_or(filename);
+    let stem = Path::new(basename).file_stem().and_then(|name| name.to_str()).unwrap_or(basename).to_ascii_lowercase();
+    let separator = RegexBuilder::new(r"[\s.]+").build().expect("valid filename separator regex");
+    let mut stem = separator.replace_all(&stem, "-").into_owned();
+    let wrapper = RegexBuilder::new(r"(?i)^(setup|install|installer|update|updater|launcher)[-_]+").build().expect("valid wrapper regex");
+    let wrapper_suffix = RegexBuilder::new(r"(?i)[-_]+(setup|install|installer|update|updater|launcher)$").build().expect("valid wrapper suffix regex");
+    let token = RegexBuilder::new(r"(?i)[-_]+(x64|x86|x86_64|amd64|win64|win32|windows|pc|arm64|online|offline|stable|v?\d[\d.]*)$").build().expect("valid installer token regex");
+    for _ in 0..4 {
+        let old = stem.clone();
+        stem = wrapper.replace(&stem, "").into_owned();
+        stem = wrapper_suffix.replace(&stem, "").into_owned();
+        stem = token.replace(&stem, "").into_owned();
+        if stem == old { break; }
+    }
+    stem
+}
+
+pub fn is_rpm_installer(filename: &str) -> bool {
+    filename.to_ascii_lowercase().ends_with(".rpm")
+}
 
 const EMBEDDED_APP_DB: &str = include_str!("../../../../build_files/exe-handler-apps.json");
 
@@ -105,5 +131,14 @@ mod tests {
         let pattern = r"visual.?studio(?!.*code)";
         assert!(!matches_pattern(pattern, "Visual Studio Code"));
         assert!(matches_pattern(pattern, "Visual Studio"));
+    }
+
+    #[test]
+    fn normalizes_installer_names_and_detects_rpm() {
+        assert_eq!(normalise_filename("Setup_Discord-1.2.3-x64.exe"), "discord");
+        assert_eq!(normalise_filename("steam_installer_win32.exe"), "steam");
+        assert_eq!(normalise_filename("Package.rpm"), "package");
+        assert!(is_rpm_installer("FOO.RPM"));
+        assert!(!is_rpm_installer("foo.exe"));
     }
 }

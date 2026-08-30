@@ -189,7 +189,7 @@ export component InstallerWindow inherits Window {
                                 Text { text: "User"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
                                 LineEdit { text <=> username; placeholder-text: "Username"; }
                                 Text { text: "Password"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
-                                LineEdit { text <=> password; input-type: password; placeholder-text: "Password"; }
+                                LineEdit { text <=> password; input-type: InputType.password; placeholder-text: "Password"; }
                             }
                             HorizontalLayout {
                                 spacing: 8px;
@@ -250,7 +250,18 @@ export component InstallerWindow inherits Window {
                             padding: 18px;
                             spacing: 8px;
                             Text { text: "Install activity"; color: #f5f7ff; font-size: 15px; font-weight: 600; }
-                            ProgressIndicator { progress: progress / 100.0; }
+                            Rectangle {
+                                height: 8px;
+                                background: #0d172a;
+                                border-radius: 4px;
+                                clip: true;
+                                Rectangle {
+                                    width: parent.width * progress / 100.0;
+                                    height: parent.height;
+                                    background: #55d6bd;
+                                    border-radius: 4px;
+                                }
+                            }
                             Text { text: event-log; color: #d8e2f5; font-size: 12px; wrap: word-wrap; }
                         }
                     }

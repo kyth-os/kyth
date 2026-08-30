@@ -6,7 +6,7 @@
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub const LABEL_UPSTREAM: &str = "org.kyth.build.upstream-base";
@@ -18,6 +18,30 @@ const REQUIRED_LABELS: [&str; 4] = [LABEL_UPSTREAM, LABEL_FLAVOR, LABEL_KERNEL, 
 
 fn text(value: Option<&Value>) -> String {
     value.map_or_else(String::new, |value| value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string()))
+}
+
+fn number(value: Option<&Value>) -> Option<f64> {
+    value.and_then(|value| match value {
+        Value::Number(value) => value.as_f64(),
+        Value::String(value) => value.parse::<f64>().ok(),
+        _ => None,
+    })
+}
+
+fn coverage_percent(report: &Value, filename: &str) -> Option<f64> {
+    let files = report.get("files").and_then(Value::as_object)?;
+    let alternate = if let Some(rest) = filename.strip_prefix("build_files/") {
+        format!("src/{rest}")
+    } else if let Some(rest) = filename.strip_prefix("src/") {
+        format!("build_files/{rest}")
+    } else {
+        String::new()
+    };
+    let result = [Some(filename), (!alternate.is_empty()).then_some(alternate.as_str())]
+        .into_iter()
+        .flatten()
+        .find_map(|name| files.get(name)?.get("summary").and_then(|summary| number(summary.get("percent_covered"))));
+    result
 }
 
 /// Return sorted RPM NVRAs from a Syft-style SBOM document.
@@ -55,6 +79,12 @@ pub fn safe_release_tag(tag: &str) -> bool {
         && tag.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '+' | '-'))
 }
 
+/// Validate the exact digest contract enforced by `validate-digest.sh`.
+pub fn valid_sha256_digest(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("sha256:") else { return false; };
+    hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 pub fn copr_latest_nvr(payload: &Value) -> Option<String> {
     let package = payload.get("builds")?.get("latest_succeeded")?.get("source_package")?;
     let version = text(package.get("version")).trim().to_string();
@@ -83,25 +113,35 @@ pub fn artifact_metrics(oci_manifest: Option<&Value>, rpm_manifest: Option<&str>
 /// Raise coverage floors to the whole-number portion of measured coverage.
 /// Missing report entries are intentionally left unchanged.
 pub fn raised_coverage_floors(floors: &BTreeMap<String, f64>, report: &Value) -> BTreeMap<String, f64> {
-    let files = report.get("files").and_then(Value::as_object);
     floors
         .iter()
         .map(|(filename, floor)| {
-            let mut names = vec![filename.clone()];
-            if let Some(rest) = filename.strip_prefix("build_files/") {
-                names.push(format!("src/{rest}"));
-            } else if let Some(rest) = filename.strip_prefix("src/") {
-                names.push(format!("build_files/{rest}"));
-            }
-            let actual = names.iter().find_map(|name| {
-                files
-                    .and_then(|files| files.get(name))
-                    .and_then(|file| file.get("summary"))
-                    .and_then(|summary| summary.get("percent_covered"))
-                    .and_then(Value::as_f64)
-            });
+            let actual = coverage_percent(report, filename);
             let raised = actual.map_or(*floor, |actual| (*floor).max(actual.trunc()));
             (filename.clone(), raised)
+        })
+        .collect()
+}
+
+/// Return critical-coverage failures without reading files or deciding the
+/// process exit status.
+///
+/// `changed` mirrors the script's `--changed-only` set. The report lookup
+/// accepts the packaged `build_files/` ↔ source-tree `src/` alias used by CI.
+/// Missing report entries are failures; callers can present the returned
+/// strings and choose their own exit policy.
+pub fn coverage_failures(
+    floors: &BTreeMap<String, f64>,
+    report: &Value,
+    changed: Option<&BTreeSet<String>>,
+) -> Vec<String> {
+    floors
+        .iter()
+        .filter(|(filename, _)| changed.is_none_or(|changed| changed.contains(*filename)))
+        .filter_map(|(filename, minimum)| match coverage_percent(report, filename) {
+            None => Some(format!("{filename}: absent from coverage report")),
+            Some(actual) if actual < *minimum => Some(format!("{filename}: {actual:.1}% is below {minimum:.1}%")),
+            Some(_) => None,
         })
         .collect()
 }
@@ -209,6 +249,9 @@ mod tests {
     fn validates_release_tags_and_parses_copr_nvr() {
         assert!(safe_release_tag("v9.1+build-2"));
         assert!(!safe_release_tag("../unsafe"));
+        assert!(valid_sha256_digest(&format!("sha256:{}", "a".repeat(64))));
+        assert!(!valid_sha256_digest("sha256:ABC"));
+        assert!(!valid_sha256_digest("sha256:abc"));
         let payload = serde_json::json!({"builds":{"latest_succeeded":{"source_package":{"version":"6.12", "release":"4.fc42"}}}});
         assert_eq!(copr_latest_nvr(&payload).as_deref(), Some("6.12-4.fc42"));
     }
@@ -235,8 +278,24 @@ mod tests {
     #[test]
     fn coverage_floor_lookup_accepts_packaged_source_aliases() {
         let floors = BTreeMap::from([("build_files/kyth_shared/kyth_shared/health.py".into(), 80.0)]);
-        let report = serde_json::json!({"files":{"src/kyth_shared/kyth_shared/health.py":{"summary":{"percent_covered":91.4}}}});
+        let report = serde_json::json!({"files":{"src/kyth_shared/kyth_shared/health.py":{"summary":{"percent_covered":"91.4"}}}});
         assert_eq!(raised_coverage_floors(&floors, &report)["build_files/kyth_shared/kyth_shared/health.py"], 91.0);
+    }
+
+    #[test]
+    fn reports_missing_and_below_floor_entries_and_honors_changed_only() {
+        let floors = BTreeMap::from([
+            ("a.py".into(), 80.0),
+            ("missing.py".into(), 90.0),
+            ("untouched.py".into(), 50.0),
+        ]);
+        let report = serde_json::json!({"files":{"a.py":{"summary":{"percent_covered":79.94}}}});
+        let changed = BTreeSet::from(["a.py".to_string(), "missing.py".to_string()]);
+        assert_eq!(coverage_failures(&floors, &report, Some(&changed)), vec![
+            "a.py: 79.9% is below 80.0%",
+            "missing.py: absent from coverage report",
+        ]);
+        assert!(coverage_failures(&floors, &report, None).iter().any(|failure| failure.starts_with("untouched.py:")));
     }
 
     #[test]

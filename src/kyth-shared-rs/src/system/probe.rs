@@ -109,6 +109,26 @@ pub fn read_section(key: &str) -> Option<Value> {
     read_section_in(key, &cache_read_paths())
 }
 
+/// Return a cache document with selected sections removed.
+///
+/// This is the pure transformation used by hotplug and post-mutation
+/// invalidation. The caller owns serialization, locking, and persistence.
+/// With `keys == None`, only known disk-backed sections are removed; unrelated
+/// metadata is preserved just like the Python probe service.
+pub fn invalidate_sections(document: &Value, keys: Option<&[&str]>, updated_at: f64) -> Option<Value> {
+    let mut document = document.as_object()?.clone();
+    let sections = document.get_mut("sections")?.as_object_mut()?;
+    let remove_all = keys.is_none();
+    let requested = keys.map(|keys| keys.iter().copied().collect::<std::collections::HashSet<_>>());
+    let before = sections.len();
+    sections.retain(|key, _| {
+        if remove_all { !disk_ttl().contains_key(key.as_str()) } else { !requested.as_ref().is_some_and(|keys| keys.contains(key.as_str())) }
+    });
+    if sections.len() == before { return None; }
+    document.insert("generated_at".into(), Value::from(updated_at));
+    Some(Value::Object(document))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +202,31 @@ mod tests {
             read_section_in("bootc-branch", &[older_path, newer_path]),
             Some(json!("fresh-value"))
         );
+    }
+
+    #[test]
+    fn invalidates_selected_sections_without_touching_unrelated_cache_data() {
+        let document = json!({
+            "version": 2,
+            "generated_at": 1,
+            "sections": {
+                "controllers-detect": {"ts": 1, "data": []},
+                "custom": {"ts": 1, "data": "keep"}
+            }
+        });
+        let updated = invalidate_sections(&document, Some(&["controllers-detect"]), 42.0).unwrap();
+        assert!(updated["sections"].get("controllers-detect").is_none());
+        assert_eq!(updated["sections"]["custom"]["data"], "keep");
+        assert_eq!(updated["generated_at"], 42.0);
+        assert!(invalidate_sections(&updated, Some(&["controllers-detect"]), 43.0).is_none());
+    }
+
+    #[test]
+    fn invalidates_all_known_sections_but_preserves_unknown_sections() {
+        let document = json!({"sections":{"audit-cache":{},"custom":{}},"metadata":"keep"});
+        let updated = invalidate_sections(&document, None, 9.0).unwrap();
+        assert!(updated["sections"].get("audit-cache").is_none());
+        assert!(updated["sections"].get("custom").is_some());
+        assert_eq!(updated["metadata"], "keep");
     }
 }

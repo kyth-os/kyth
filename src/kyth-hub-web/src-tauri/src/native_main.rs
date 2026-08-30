@@ -48,6 +48,38 @@ fn system_status() -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageStatusBadge {
+    Healthy,
+    ActionReady,
+    NeedsAttention,
+    Checking,
+}
+
+impl PageStatusBadge {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Healthy => "HEALTHY",
+            Self::ActionReady => "ACTION READY",
+            Self::NeedsAttention => "NEEDS ATTENTION",
+            Self::Checking => "CHECKING",
+        }
+    }
+}
+
+fn page_status_badge(status: &str) -> PageStatusBadge {
+    if status.is_empty() {
+        return PageStatusBadge::Checking;
+    }
+    if status.contains("attention") || status.contains("unavailable") || status.contains("not cached") || status.contains("not available") {
+        return PageStatusBadge::NeedsAttention;
+    }
+    if status.contains("staged") || status.contains("available") || status.contains("recommendation") {
+        return PageStatusBadge::ActionReady;
+    }
+    PageStatusBadge::Healthy
+}
+
 fn page_status(page: &str) -> String {
     match page {
         "Play" => {
@@ -229,8 +261,23 @@ fn section_status(section: &str) -> (String, String) {
         "Performance" => {
             let audit = kyth_shared::system::probe::read_section("audit-cache");
             let profile = audit.as_ref().and_then(|value| value.get("master")).and_then(serde_json::Value::as_str).unwrap_or("not cached");
+            let preview = audit.as_ref().map(|value| {
+                kyth_shared::system::perf_audit::format_audit(&value)
+                    .lines()
+                    .skip(1)
+                    .take(4)
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            });
             let preset = kyth_shared::system::role_preset::load(kyth_shared::system::role_preset::config_path(None::<&str>));
-            (format!("Performance profile · {profile}"), format!("Preset preview · {} · {} Flatpak(s) · {} Distrobox(es) · {} editor extension(s)", preset.profile.as_str(), preset.flatpaks.len(), preset.distroboxes.len(), preset.vscode_extensions.len()))
+            let preset_detail = format!("Preset preview · {} · {} Flatpak(s) · {} Distrobox(es) · {} editor extension(s)", preset.profile.as_str(), preset.flatpaks.len(), preset.distroboxes.len(), preset.vscode_extensions.len());
+            (
+                format!("Performance profile · {profile}"),
+                preview.map_or_else(
+                    || preset_detail.clone(),
+                    |preview| format!("{preset_detail} · {preview} · Open the full performance page for the remaining audit buckets."),
+                ),
+            )
         }
         "Compatibility" => {
             let secure_boot = kyth_shared::system::probe::read_section("secureboot-state").and_then(|value| value.as_str().map(str::to_string)).unwrap_or_else(|| "not cached".into());
@@ -563,6 +610,7 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
 fn refresh_status(weak: Weak<HubWindow>, page: String) {
     std::thread::spawn(move || {
         let result = page_status(&page);
+        let badge = page_status_badge(&result).label().to_string();
         let (summary, detail) = page_copy(&page);
         let cards = page_cards(&page);
         let values = page_values(&page);
@@ -582,6 +630,7 @@ fn refresh_status(weak: Weak<HubWindow>, page: String) {
                 window.set_card_two_detail(SharedString::from(cards[1].1));
                 window.set_next_action_text(SharedString::from(next_action));
                 window.set_status_text(SharedString::from(result));
+                window.set_status_badge(SharedString::from(badge));
             }
         });
     });
@@ -631,6 +680,7 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_next_action_text(SharedString::from("Suggested next step · Reading local policy…"));
     window.set_status_text(SharedString::from("Reading system status…"));
     window.set_action_status(SharedString::from(""));
+    window.set_status_badge(SharedString::from("CHECKING"));
     window.set_section_status(SharedString::from("Reading section status…"));
     window.set_section_detail(SharedString::from("Native section status is read in the background."));
     window.set_hardware_capabilities(SharedString::from("Capabilities · Reading hardware view…"));
@@ -658,6 +708,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let page = window.get_selected_page().to_string();
             let section = window.get_selected_section().to_string();
             window.set_status_text(SharedString::from("Refreshing system status…"));
+            window.set_status_badge(SharedString::from("CHECKING"));
             window.set_section_status(SharedString::from("Refreshing section status…"));
             refresh_status(refresh_weak.clone(), page);
             refresh_section(refresh_weak.clone(), section);
@@ -682,6 +733,7 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_next_action_text(SharedString::from("Suggested next step · Reading local policy…"));
             window.set_status_text(SharedString::from("Reading system status…"));
             window.set_action_status(SharedString::from(""));
+            window.set_status_badge(SharedString::from("CHECKING"));
             window.set_section_status(SharedString::from("Reading section status…"));
             window.set_section_detail(SharedString::from("Native section status is read in the background."));
             window.set_hardware_capabilities(SharedString::from("Capabilities · Reading hardware view…"));
@@ -708,4 +760,38 @@ fn main() -> Result<(), slint::PlatformError> {
     refresh_status(window.as_weak(), page);
     refresh_section(window.as_weak(), section);
     window.run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deep_links_land_on_the_same_native_workspace() {
+        assert_eq!(landing_for_page("Performance"), "Play");
+        assert_eq!(landing_for_page("App Store"), "Apps");
+        assert_eq!(landing_for_page("Repair"), "This PC");
+        assert_eq!(landing_for_page("VPN"), "Move In");
+        assert_eq!(landing_for_page("Updates"), "Updates");
+        assert_eq!(landing_for_page("unknown"), "Home");
+    }
+
+    #[test]
+    fn every_native_workspace_has_a_primary_section_and_updates_are_separate() {
+        for page in ["Home", "Play", "Apps", "This PC", "Move In", "Updates"] {
+            assert!(!page_sections(page)[0].is_empty(), "{page} has no primary section");
+        }
+        assert_eq!(&page_sections("Updates")[..5], ["Updates", "Deployment", "Recovery", "History", ""]);
+        assert_eq!(page_sections("This PC")[9], "Feedback");
+    }
+
+    #[test]
+    fn native_status_badges_are_honest_about_cached_state() {
+        assert_eq!(page_status_badge("System checks look good").label(), "HEALTHY");
+        assert_eq!(page_status_badge("Update staged · restart when ready").label(), "ACTION READY");
+        assert_eq!(page_status_badge("Update status unavailable · source failed").label(), "NEEDS ATTENTION");
+        assert_eq!(page_status_badge("2 desktop check(s) need attention").label(), "NEEDS ATTENTION");
+        assert_eq!(page_status_badge("Application inventory is not cached yet").label(), "NEEDS ATTENTION");
+        assert_eq!(page_status_badge("").label(), "CHECKING");
+    }
 }

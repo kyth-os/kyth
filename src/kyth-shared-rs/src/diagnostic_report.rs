@@ -65,6 +65,30 @@ fn level_text(level: DiagnosticLevel) -> &'static str {
     match level { DiagnosticLevel::Pass => "PASS", DiagnosticLevel::Warn => "WARN", DiagnosticLevel::Fail => "FAIL" }
 }
 
+/// Build a prefilled GitHub issue URL from already-scrubbed report text.
+///
+/// This function only projects query data. Callers must scrub diagnostics and
+/// allowlist the repository before opening the returned URL in a browser.
+pub fn github_issue_url(repo_url: &str, title: &str, body: &str, label: Option<&str>) -> String {
+    let body = if body.chars().count() > 5500 {
+        let clipped: String = body.chars().take(5500).collect();
+        format!("{clipped}\n\n[Report body truncated for the browser URL. A full local draft was saved by kyth-report-issue.]")
+    } else {
+        body.to_string()
+    };
+    let mut url = format!(
+        "{}/issues/new?title={}&body={}",
+        repo_url.trim_end_matches('/'),
+        crate::url_encode::percent_encode(title),
+        crate::url_encode::percent_encode(&body),
+    );
+    if let Some(label) = label.filter(|label| !label.is_empty()) {
+        url.push_str("&labels=");
+        url.push_str(&crate::url_encode::percent_encode(label));
+    }
+    url
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +111,13 @@ mod tests {
         report.passed("Audio", "ready");
         assert_eq!(report.render(), "PASS  Audio                        ready");
         assert!(serde_json::to_string(&report).unwrap().contains("PASS"));
+    }
+
+    #[test]
+    fn builds_encoded_issue_url_and_bounds_browser_body() {
+        let url = github_issue_url("https://github.com/kyth-os/kyth/", "A & bug", &"x".repeat(5501), Some("bug report"));
+        assert!(url.starts_with("https://github.com/kyth-os/kyth/issues/new?title=A%20%26%20bug&body="));
+        assert!(url.contains("labels=bug%20report"));
+        assert!(url.contains("Report%20body%20truncated"));
     }
 }

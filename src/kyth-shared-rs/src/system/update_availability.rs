@@ -13,6 +13,24 @@ pub struct AvailabilityStatus {
     pub blocked_reason: String,
 }
 
+/// Project the availability state into the stable Updates-page view model.
+/// Collection remains separate so native callers can render a terminal state
+/// without taking ownership of network or package-manager orchestration.
+pub fn availability_view(
+    status: &AvailabilityStatus,
+    check_ts: &str,
+    staged_ts: Option<&str>,
+) -> crate::system::bootc_policy::UpdateAvailabilityView {
+    crate::system::bootc_policy::update_availability_view(
+        status.staged,
+        &status.state,
+        status.flatpak_count.max(0) as u32,
+        check_ts,
+        &status.detail,
+        staged_ts,
+    )
+}
+
 pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> AvailabilityStatus {
     // staged takes precedence — no registry call needed
     let staged = crate::system::bootc::has_staged_update();
@@ -58,5 +76,23 @@ mod tests {
     fn collect_returns() {
         let s = collect_availability(None, true);
         assert!(["staged","uptodate","available","error"].contains(&s.state.as_str()));
+    }
+
+    #[test]
+    fn projects_terminal_update_state_for_the_native_view() {
+        let status = AvailabilityStatus {
+            state: "available".into(),
+            detail: "2026-08-29".into(),
+            flatpak_count: 2,
+            flatpak_detail: String::new(),
+            staged: false,
+            manifest_raw: String::new(),
+            blocked_reason: String::new(),
+        };
+        let view = availability_view(&status, "now", None);
+        assert_eq!(view.title, "Update available");
+        assert!(view.update_btn_visible);
+        assert!(!view.restart_btn_visible);
+        assert!(view.body.contains("2 Flatpak updates"));
     }
 }

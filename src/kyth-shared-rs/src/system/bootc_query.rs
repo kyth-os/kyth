@@ -91,13 +91,26 @@ pub fn fetch_status_data() -> Option<Value> {
     if active_operation().is_some() { return None; }
     for cmd in status_commands(true) {
         if let Some((0, stdout)) = run_with_timeout(&cmd, Duration::from_secs(10)) {
-            if let Ok(v) = serde_json::from_str::<Value>(&stdout) { return Some(v); }
+            if let Some(value) = parse_status_data(&stdout) { return Some(value); }
         }
     }
     None
 }
 
+/// Decode the structured status response and reject valid JSON that is not an
+/// object, matching the Python `parse_json_object` contract.
+pub fn parse_status_data(raw: &str) -> Option<Value> {
+    let value = serde_json::from_str::<Value>(raw).ok()?;
+    value.is_object().then_some(value)
+}
+
 pub fn image_reference_from_status(data: &Value) -> Option<String> {
+    image_reference_from_status_with_output(data, "")
+}
+
+/// Resolve an image reference from structured bootc data, then from the
+/// human-readable status output used by older bootc versions.
+pub fn image_reference_from_status_with_output(data: &Value, status_output: &str) -> Option<String> {
     // Try status.booted.image.reference etc.
     for path in [
         vec!["status", "booted", "image", "reference"],
@@ -124,7 +137,33 @@ pub fn image_reference_from_status(data: &Value) -> Option<String> {
             return Some(s.trim().to_string());
         }
     }
+    if !status_output.is_empty() {
+        let pattern = Regex::new(r"(ghcr\.io/kyth-os/kyth(?::[A-Za-z0-9._-]+)?(?:@sha256:[a-fA-F0-9]+)?)").ok()?;
+        if let Some(reference) = pattern.captures(status_output).and_then(|captures| captures.get(1)) {
+            return Some(reference.as_str().to_string());
+        }
+    }
     None
+}
+
+/// Read the current image reference through the same bounded fallbacks as
+/// the Python compatibility layer. This is observation only: no update or
+/// deployment command is issued.
+pub fn image_reference() -> Option<String> {
+    let data = crate::system::probe::read_section("bootc-status-data")
+        .or_else(fetch_status_data)
+        .unwrap_or(Value::Object(serde_json::Map::new()));
+    if let Some(reference) = image_reference_from_status_with_output(&data, "") {
+        return Some(reference);
+    }
+    let status_output = fetch_status_text();
+    if let Some(reference) = image_reference_from_status_with_output(&data, &status_output) {
+        return Some(reference);
+    }
+    let command = vec!["rpm-ostree".to_string(), "status".to_string()];
+    run_with_timeout(&command, Duration::from_secs(10))
+        .filter(|(code, _)| *code == 0)
+        .and_then(|(_, output)| image_reference_from_status_with_output(&Value::Object(serde_json::Map::new()), &output))
 }
 
 pub fn image_digest_from_status(data: &Value, section: &str) -> Option<String> {
@@ -164,6 +203,20 @@ mod tests {
     fn image_ref() {
         let v = json!({"status":{"booted":{"image":{"reference":"ghcr.io/kyth-os/kyth:latest"}}}});
         assert_eq!(image_reference_from_status(&v), Some("ghcr.io/kyth-os/kyth:latest".to_string()));
+    }
+
+    #[test]
+    fn image_ref_falls_back_to_human_readable_status_output() {
+        let output = "Image: ghcr.io/kyth-os/kyth:testing@sha256:abcdef1234\n";
+        assert_eq!(image_reference_from_status_with_output(&Value::Null, output), Some("ghcr.io/kyth-os/kyth:testing@sha256:abcdef1234".into()));
+        assert!(image_reference_from_status_with_output(&Value::Null, "Image: quay.io/example/other:latest").is_none());
+    }
+
+    #[test]
+    fn status_json_fallback_rejects_non_object_documents() {
+        assert!(parse_status_data("[]").is_none());
+        assert!(parse_status_data("{bad").is_none());
+        assert_eq!(parse_status_data(r#"{"status":{}}"#).unwrap()["status"], json!({}));
     }
 
     #[test]

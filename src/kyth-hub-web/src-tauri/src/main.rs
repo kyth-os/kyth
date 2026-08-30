@@ -787,31 +787,17 @@ fn open_feedback_issue(title: String, body: String) -> Result<String, String> {
     // Keep the public-report boundary safe even if a future caller bypasses
     // the retired Python Feedback page's scrub step.
     let body = kyth_shared::diagnostics_scrub::scrub_logs(&body);
-    let url = format!(
-        "https://github.com/kyth-os/kyth/issues/new?title={}&body={}",
-        percent_encode(&title),
-        percent_encode(&body)
+    let url = kyth_shared::diagnostic_report::github_issue_url(
+        "https://github.com/kyth-os/kyth",
+        &title,
+        &body,
+        None,
     );
     std::process::Command::new("xdg-open")
         .arg(&url)
         .spawn()
         .map_err(|err| format!("could not open browser: {err}"))?;
     Ok("Opened a prefilled issue in your browser.".to_string())
-}
-
-/// Minimal RFC 3986 unreserved-set encoder — enough for a query string,
-/// and not worth a `percent-encoding` dependency for one call site.
-fn percent_encode(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    for byte in raw.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
 
 /// One-shot pull for the page this process was launched with (`--page`,

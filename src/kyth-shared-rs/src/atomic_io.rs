@@ -10,6 +10,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::de::DeserializeOwned;
+
 fn refuse_symlink(path: &Path) -> std::io::Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
@@ -69,6 +71,15 @@ pub fn atomic_write_json<T: serde::Serialize>(path: impl AsRef<Path>, value: &T,
     atomic_write_bytes(path, &content, mode)
 }
 
+/// Read JSON state or return the supplied fallback when a file is missing,
+/// malformed, or temporarily unavailable during recovery.
+pub fn read_json_or_default<T: DeserializeOwned>(path: impl AsRef<Path>, default: T) -> T {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or(default)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +88,9 @@ mod tests {
 
     #[derive(Serialize)]
     struct Example { value: &'static str }
+
+    #[derive(serde::Deserialize)]
+    struct LoadedExample { value: String }
 
     #[test]
     fn replaces_and_syncs_text() {
@@ -93,6 +107,28 @@ mod tests {
         let path = directory.path().join("state.json");
         atomic_write_json(&path, &Example { value: "ok" }, Some(0o600)).unwrap();
         assert_eq!(fs::read_to_string(path).unwrap(), "{\n  \"value\": \"ok\"\n}\n");
+    }
+
+    #[test]
+    fn reads_valid_json_and_falls_back_on_missing_or_malformed_state() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        fs::write(&path, r#"{"value":"loaded"}"#).unwrap();
+        let loaded: LoadedExample = read_json_or_default(
+            &path,
+            LoadedExample { value: "default".to_string() },
+        );
+        assert_eq!(loaded.value, "loaded");
+        fs::write(&path, "not json").unwrap();
+        let fallback: LoadedExample = read_json_or_default(
+            &path,
+            LoadedExample { value: "default".to_string() },
+        );
+        assert_eq!(fallback.value, "default");
+        assert_eq!(
+            read_json_or_default(directory.path().join("missing.json"), 7_u32),
+            7
+        );
     }
 
     #[cfg(unix)]
