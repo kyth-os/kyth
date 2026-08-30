@@ -25,7 +25,11 @@ impl Report {
     pub fn failed(&mut self, name: impl Into<String>, detail: impl Into<String>, section: impl Into<String>) { self.record(Level::Fail, name, detail, section); }
     pub fn warnings(&self) -> usize { self.results.iter().filter(|row| row.level == Level::Warn).count() }
     pub fn failures(&self) -> usize { self.results.iter().filter(|row| row.level == Level::Fail).count() }
-    pub fn exit_code(&self) -> i32 { if self.failures() > 0 { 2 } else if self.warnings() > 0 { 1 } else { 0 } }
+    pub fn exit_code(&self) -> i32 { self.exit_code_with_strict(true) }
+    /// Python's smoke check treats warnings as advisory unless `--strict` is requested.
+    pub fn exit_code_with_strict(&self, strict: bool) -> i32 {
+        if self.failures() > 0 { 2 } else if self.warnings() > 0 && strict { 1 } else { 0 }
+    }
 }
 
 pub fn path_check(path: impl AsRef<Path>, label: impl Into<String>, executable: bool, absent: bool, section: impl Into<String>) -> ResultRow {
@@ -91,6 +95,7 @@ mod tests {
         report.record(row.level, row.name, row.detail, row.section);
         assert_eq!(report.warnings(), 1);
         assert_eq!(report.exit_code(), 1);
+        assert_eq!(report.exit_code_with_strict(false), 0);
         assert_eq!(path_check(directory.path().join("missing"), "Required", false, false, "Tools").level, Level::Fail);
     }
 }
