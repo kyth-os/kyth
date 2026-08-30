@@ -169,6 +169,15 @@ class HubWebDeepLinkTests(unittest.TestCase):
         self.assertIn("let section = initial_section(&page);", NATIVE_RS)
         self.assertIn("window.set_selected_section(SharedString::from(section.as_str()));", NATIVE_RS)
 
+    def test_native_installed_acceptance_contract_keeps_migrated_surfaces(self):
+        slint = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "ui" / "hub.slint").read_text(encoding="utf-8")
+        self.assertIn('target_bin="/usr/bin/kyth-hub-native"', LAUNCHER_SH)
+        self.assertIn('KYTH_USE_REACT_UI:-0', LAUNCHER_SH)
+        for page, section in (("This PC", "Hardware"), ("Play", "Gaming"), ("Apps", "App Store"), ("This PC", "Guardian")):
+            self.assertIn(f'selected-page == "{page}" && selected-section == "{section}"', slint)
+        for action in ('page-action("upgrade")', 'page-action("rollback")'):
+            self.assertIn(action, slint)
+
 
 if __name__ == "__main__":
     unittest.main()
