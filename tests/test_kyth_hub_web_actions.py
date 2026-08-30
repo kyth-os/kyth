@@ -81,6 +81,13 @@ class HubWebActionTests(unittest.TestCase):
         self.assertIn('page-action("upgrade")', NATIVE_SLINT)
         self.assertIn('page-action("rollback")', NATIVE_SLINT)
 
+    def test_native_hardware_section_surfaces_rust_capabilities(self):
+        self.assertIn("get_hardware_view_summary", NATIVE_RS)
+        self.assertIn("fn hardware_capabilities_text()", NATIVE_RS)
+        self.assertIn("set_hardware_capabilities", NATIVE_RS)
+        self.assertIn("hardware-capabilities", NATIVE_SLINT)
+        self.assertIn('selected-page == "This PC" && selected-section == "Hardware"', NATIVE_SLINT)
+
     def test_every_mutating_wrapper_is_reachable_from_the_ui(self):
         sources = _ui_sources()
         for wrapper, expected_file in MUTATING_WRAPPERS.items():
