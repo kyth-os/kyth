@@ -6,6 +6,8 @@
 
 slint::include_modules!();
 
+mod installer_plan;
+
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -652,6 +654,21 @@ fn response_message(value: &Value, fallback: &str) -> String {
         .to_string()
 }
 
+fn validate_install_request(request: &Value) -> Result<(), String> {
+    let plan: installer_plan::InstallerPlanInput = serde_json::from_value(request.clone())
+        .map_err(|error| format!("Invalid installer request: {error}"))?;
+    installer_plan::build_plan(plan)?;
+    let hostname = request.get("hostname").and_then(Value::as_str).unwrap_or_default();
+    let username = request.get("username").and_then(Value::as_str).unwrap_or_default();
+    let locale = request.get("locale").and_then(Value::as_str).unwrap_or_default();
+    let keymap = request.get("keymap").and_then(Value::as_str).unwrap_or_default();
+    let fields = kyth_shared::system::installer_validation::validate(hostname, username, locale, keymap);
+    if !fields.is_valid() {
+        return Err("Enter a valid hostname, username, locale, and keyboard layout.".to_string());
+    }
+    Ok(())
+}
+
 fn manual_action(
     weak: Weak<InstallerWindow>,
     config: ConnectionArgs,
@@ -1046,6 +1063,10 @@ fn main() -> Result<(), slint::PlatformError> {
             let ready = start_state.lock().map(|state| state.can_start()).unwrap_or(false);
             if !ready {
                 window.set_error_text(SharedString::from("Select a valid target, complete the required confirmations, and choose a supported guided install mode."));
+                return;
+            }
+            if let Err(error) = validate_install_request(&request) {
+                window.set_error_text(SharedString::from(error));
                 return;
             }
             window.set_busy(true);
