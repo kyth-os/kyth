@@ -31,6 +31,13 @@ struct FreeRegionRecord {
     size_bytes: u64,
 }
 
+#[derive(serde::Deserialize)]
+struct PendingOperation {
+    kind: String,
+    #[serde(default)]
+    params: serde_json::Map<String, Value>,
+}
+
 #[derive(Clone)]
 struct InstallState {
     disk: String,
@@ -388,15 +395,15 @@ fn storage_snapshot(config: &ConnectionArgs, disk: &str) -> (String, [String; 6]
 fn pending_snapshot(config: &ConnectionArgs) -> String {
     match get_json(config, "/api/disk/pending") {
         Ok((200, value)) => {
-            let Some(operations) = value.as_array() else {
+            let Ok(operations) = serde_json::from_value::<Vec<PendingOperation>>(value) else {
                 return "Pending partition operations are unavailable.".to_string();
             };
             if operations.is_empty() {
                 return "No pending partition operations.".to_string();
             }
             let lines = operations.iter().take(8).enumerate().map(|(index, operation)| {
-                let kind = operation.get("kind").and_then(Value::as_str).unwrap_or("operation");
-                let params = operation.get("params").cloned().unwrap_or_else(|| json!({}));
+                let kind = operation.kind.as_str();
+                let params = &operation.params;
                 let detail = match kind {
                     "new_table" => params.get("table_type").and_then(Value::as_str).unwrap_or("gpt").to_uppercase(),
                     "create" => format!(
