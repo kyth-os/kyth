@@ -447,7 +447,7 @@ fn array_count(config: &ConnectionArgs, path: &str) -> Option<usize> {
 
 fn string_options(config: &ConnectionArgs, path: &str, fallback: &str) -> Vec<SharedString> {
     match get_json(config, path) {
-        Ok((200, value)) => value.as_array().map(|items| items.iter().filter_map(Value::as_str).map(SharedString::from).collect()).filter(|items: &Vec<SharedString>| !items.is_empty()).unwrap_or_else(|| vec![SharedString::from(fallback)]),
+        Ok((200, value)) => serde_json::from_value::<Vec<String>>(value).ok().map(|items| items.into_iter().map(SharedString::from).collect::<Vec<_>>()).filter(|items: &Vec<SharedString>| !items.is_empty()).unwrap_or_else(|| vec![SharedString::from(fallback)]),
         _ => vec![SharedString::from(fallback)],
     }
 }
@@ -930,8 +930,9 @@ fn rescue_probe(weak: Weak<InstallerWindow>, config: ConnectionArgs) {
             if let Some(window) = weak.upgrade() {
                 match result {
                     Ok((200, value)) => {
-                        let guidance = value.get("rescue_guidance").map_or_else(|| "Rescue probe completed".to_string(), |item| response_message(item, "Rescue probe completed"));
-                        let log = value.get("log_tail").and_then(Value::as_str).unwrap_or("(no installer log available)");
+                        let probe: RescueProbeResponse = serde_json::from_value(value).unwrap_or_default();
+                        let guidance = probe.rescue_guidance.map_or_else(|| "Rescue probe completed".to_string(), |item| item.message);
+                        let log = if probe.log_tail.trim().is_empty() { "(no installer log available)" } else { probe.log_tail.as_str() };
                         window.set_event_log(SharedString::from(format!("{guidance}\n\n{log}")));
                         window.set_error_text(SharedString::from(""));
                     }
@@ -941,6 +942,20 @@ fn rescue_probe(weak: Weak<InstallerWindow>, config: ConnectionArgs) {
             }
         });
     });
+}
+
+#[derive(Default, serde::Deserialize)]
+struct RescueProbeResponse {
+    #[serde(default)]
+    rescue_guidance: Option<RescueGuidanceResponse>,
+    #[serde(default)]
+    log_tail: String,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct RescueGuidanceResponse {
+    #[serde(default)]
+    message: String,
 }
 
 fn main() -> Result<(), slint::PlatformError> {
