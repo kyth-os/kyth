@@ -164,29 +164,24 @@ fn cached_array_len(section: &str) -> Option<usize> {
 }
 
 fn page_values(page: &str) -> [String; 2] {
+    let snapshot = kyth_shared::system::hub_snapshot::collect();
     match page {
-        "Play" => {
-            let launchers = kyth_shared::system::gaming_library::gaming_library_scan();
-            let installed = launchers.iter().filter(|launcher| launcher.installed).count();
-            let entries: usize = launchers.iter().filter_map(|launcher| launcher.library_count).sum();
-            [format!("{installed} ready"), format!("{entries} library entries")]
-        }
-        "Apps" => {
-            let installed = cached_array_len("flatpak-apps").map(|count| format!("{count} installed")).unwrap_or_else(|| "Not cached".into());
-            let updates = kyth_shared::system::probe::read_section("flatpak-updates").and_then(|value| value.as_i64()).map(|count| format!("{count} available")).unwrap_or_else(|| "Not cached".into());
-            [installed, updates]
-        }
-        "This PC" => {
-            let capabilities = kyth_shared::system::hardware_view::get_hardware_view_summary().map(|view| view.capabilities.len()).unwrap_or(0);
-            let failed = kyth_shared::system::desktop_stack::desktop_stack_checks().iter().filter(|check| !check.passed && !check.advisory).count();
-            [format!("{capabilities} capabilities"), if failed == 0 { "All checks pass".into() } else { format!("{failed} need attention") }]
-        }
-        "Move In" => {
-            let summary = kyth_shared::system::probe::read_section("network-summary");
-            let shares = summary.as_ref().and_then(|value| value.get("smb_mounts")).and_then(|value| value.as_i64()).unwrap_or(0);
-            let providers = summary.as_ref().and_then(|value| value.get("cloud_providers")).and_then(|value| value.as_array()).map(|items| items.len()).unwrap_or(0);
-            [format!("{shares} shares"), format!("{providers} cloud providers")]
-        }
+        "Play" => [
+            format!("{} ready", snapshot.gaming.installed_launchers),
+            if snapshot.gaming.session_count == 0 { format!("{} library entries", snapshot.gaming.library_entries) } else { format!("{} recent sessions", snapshot.gaming.session_count) },
+        ],
+        "Apps" => [
+            format!("{} installed", snapshot.software.installed_flatpaks),
+            format!("{} available", snapshot.software.available_flatpak_updates),
+        ],
+        "This PC" => [
+            format!("Health {}/100", snapshot.doctor_score),
+            if snapshot.guardian_pending == 0 { "Guardian clear".into() } else { format!("{} Guardian items", snapshot.guardian_pending) },
+        ],
+        "Move In" => [
+            format!("{} Windows drives", snapshot.move_in.ntfs_drives),
+            format!("{} cloud providers", snapshot.move_in.cloud_providers),
+        ],
         "Updates" => {
             let status = kyth_shared::system::update_status::check_update_status();
             [match status.check_state.as_str() { "available" => "Available".into(), "error" => "Unavailable".into(), _ => "Up to date".into() }, if status.rollback { "Rollback ready".into() } else if status.staged { "Restart required".into() } else { "No restart needed".into() }]

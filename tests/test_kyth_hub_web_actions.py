@@ -72,6 +72,16 @@ def _ui_sources() -> dict[str, str]:
 
 
 class HubWebActionTests(unittest.TestCase):
+    def test_native_page_cards_consume_the_typed_hub_snapshot(self):
+        self.assertIn("hub_snapshot::collect", NATIVE_RS)
+        for field in (
+            "snapshot.gaming.installed_launchers",
+            "snapshot.software.installed_flatpaks",
+            "snapshot.doctor_score",
+            "snapshot.move_in.ntfs_drives",
+        ):
+            self.assertIn(field, NATIVE_RS)
+
     def test_native_updates_surface_has_guarded_recipe_actions(self):
         for recipe in ("upgrade", "rollback"):
             self.assertIn(f'"{recipe}"', NATIVE_RS)

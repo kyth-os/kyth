@@ -37,6 +37,7 @@ pub mod snapshot_autoclean;
 pub mod probe;
 pub mod storage;
 pub mod telemetry;
+pub mod hub_snapshot;
 pub mod gaming_library;
 pub mod software_catalog;
 pub mod gaming_compat;
