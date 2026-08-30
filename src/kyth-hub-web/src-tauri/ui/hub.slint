@@ -1,4 +1,4 @@
-import { Button } from "std-widgets.slint";
+import { Button, LineEdit } from "std-widgets.slint";
 
 export component HubWindow inherits Window {
     width: 1280px;
@@ -41,6 +41,7 @@ export component HubWindow inherits Window {
     callback refresh();
     callback select-section(string);
     callback page-action(string);
+    callback appstream-search(string);
 
     Rectangle {
         background: #0b1020;
