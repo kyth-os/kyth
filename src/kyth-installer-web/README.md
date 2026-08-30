@@ -5,8 +5,8 @@ The native migration is being built in `src-tauri/src/native_main.rs` and
 request flow: disk selection, install mode/kernel choices, account fields,
 confirmation gates, guided partition/free-space selection, and fixed-route
 start/cancel/reboot/rescue calls. The existing Tauri flow remains the
-compatibility path until manual partitioning, configuration choices, and live
-event streaming have native parity.
+compatibility path until manual partitioning, service-backed configuration
+choice lists, and live event streaming have native parity.
 
 Phase 1 React/TypeScript frontend for the installer migration. It consumes the frozen API in [`docs/installer-api-contract.md`](../../docs/installer-api-contract.md) and intentionally leaves the Python HTTP/SSE backend and legacy WebUI untouched.
 

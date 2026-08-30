@@ -469,6 +469,9 @@ fn request_from_window(window: &InstallerWindow, state: &Arc<Mutex<InstallState>
     request.resize_gib = window.get_resize_gib().parse().unwrap_or(0);
     request.kernel = window.get_kernel().to_string();
     request.hostname = window.get_hostname().to_string();
+    request.timezone = window.get_timezone().to_string();
+    request.locale = window.get_locale().to_string();
+    request.keymap = window.get_keymap().to_string();
     request.username = window.get_username().to_string();
     request.password = window.get_password().to_string();
     request.confirm_backup = window.get_confirm_backup();
@@ -602,6 +605,9 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_install_mode(SharedString::from("wipe"));
     window.set_kernel(SharedString::from("fedora"));
     window.set_hostname(SharedString::from("kyth"));
+    window.set_timezone(SharedString::from("UTC"));
+    window.set_locale(SharedString::from("en_US.UTF-8"));
+    window.set_keymap(SharedString::from("us"));
     apply_step(&window, "Welcome");
     let weak = window.as_weak();
     let connect_weak = weak.clone();

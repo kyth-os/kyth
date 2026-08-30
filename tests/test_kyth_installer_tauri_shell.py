@@ -36,7 +36,7 @@ class InstallerTauriShellTests(unittest.TestCase):
             self.assertIn(route, rust)
         for field in ("target_partition", "free_region_start", "free_region_end", "resize_gib"):
             self.assertIn(f'"{field}"', rust)
-        for control in ("storage-details", "partition-one", "free-region-one", "select-target-partition", "select-free-region", "resize-gib"):
+        for control in ("storage-details", "partition-one", "free-region-one", "select-target-partition", "select-free-region", "resize-gib", "timezone", "locale", "keymap"):
             self.assertIn(control, slint)
         self.assertIn('install_mode != "manual"', rust)
         self.assertIn('install-mode != "manual"', slint)
