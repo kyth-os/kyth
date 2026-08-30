@@ -50,6 +50,28 @@ class InstallerTauriShellTests(unittest.TestCase):
         for event_type in ("log", "progress", "phase", "done", "error"):
             self.assertIn(f'"{event_type}"', rust)
 
+    def test_native_shell_carries_manual_partition_actions_to_the_service(self):
+        rust = NATIVE_RS.read_text()
+        slint = NATIVE_SLINT.read_text()
+        for route in (
+            "/api/disk/new-table",
+            "/api/disk/create",
+            "/api/disk/delete",
+            "/api/disk/resize",
+            "/api/disk/format",
+            "/api/disk/set-mountpoint",
+            "/api/disk/pending/remove",
+            "/api/disk/commit",
+            "/api/disk/rollback",
+        ):
+            self.assertIn(route, rust)
+        for action in ("new-table", "create", "delete", "resize", "format", "mountpoint", "remove-pending", "rollback", "commit"):
+            self.assertIn(f'"{action}"', rust)
+            self.assertIn(f'manual-action("{action}")', slint)
+        for field in ("manual-filesystem", "manual-mountpoint", "manual-size-gib", "manual-committed"):
+            self.assertIn(field, slint)
+        self.assertIn('install_mode != "manual" || self.manual_committed', rust)
+
     def test_shell_embeds_assets_and_has_no_privileged_bridge(self):
         config = json.loads((INSTALLER_WEB / "src-tauri/tauri.conf.json").read_text())
         self.assertEqual(config["build"]["frontendDist"], "../dist")

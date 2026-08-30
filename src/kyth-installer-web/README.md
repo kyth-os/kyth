@@ -6,9 +6,13 @@ request flow: disk selection, install mode/kernel choices, account fields,
 confirmation gates, guided partition/free-space selection, and fixed-route
 start/cancel/reboot/rescue calls. Native install requests now also attach to
 the authenticated installer SSE stream for live logs, phases, progress, and
-terminal state. The existing Tauri flow remains the compatibility path until
-manual partitioning and service-backed configuration choice lists have native
-parity.
+terminal state. Manual partition editing now uses the same authenticated,
+fixed-route service API as the compatibility UI, including staged create,
+delete, format, mountpoint, resize, rollback, and commit operations. The
+native editor also lists staged operations and can remove an individual
+pending operation before commit. The existing Tauri flow remains the
+compatibility path for systems that do not yet
+ship the native binary.
 
 Phase 1 React/TypeScript frontend for the installer migration. It consumes the frozen API in [`docs/installer-api-contract.md`](../../docs/installer-api-contract.md) and intentionally leaves the Python HTTP/SSE backend and legacy WebUI untouched.
 

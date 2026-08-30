@@ -2,9 +2,7 @@
 //!
 //! The root-owned Python installer service remains the only process allowed
 //! to perform storage/boot operations. This native shell owns the request
-//! model and fixed-route transport for the guarded installer flow. Manual
-//! partition editing and live event streaming are intentionally still being
-//! ported before it replaces the Tauri shell.
+//! model and fixed-route transport for the guarded installer flow.
 
 slint::include_modules!();
 
@@ -42,6 +40,7 @@ struct InstallState {
     confirm_backup: bool,
     confirm_erase: bool,
     confirm_current: bool,
+    manual_committed: bool,
 }
 
 impl Default for InstallState {
@@ -64,6 +63,7 @@ impl Default for InstallState {
             confirm_backup: false,
             confirm_erase: false,
             confirm_current: false,
+            manual_committed: false,
         }
     }
 }
@@ -97,7 +97,7 @@ impl InstallState {
             && !self.password.is_empty()
             && self.confirm_backup
             && self.confirm_erase
-            && self.install_mode != "manual"
+            && (self.install_mode != "manual" || self.manual_committed)
             && (self.install_mode != "wipe" || self.confirm_current)
             && (self.install_mode != "alongside" || !self.target_partition.is_empty())
             && (self.install_mode != "free_space" || self.free_region_end > self.free_region_start)
@@ -157,6 +157,15 @@ fn post_json(config: &ConnectionArgs, path: &str, body: Value) -> Result<(u16, V
         "/api/cancel",
         "/api/reboot",
         "/api/rescue/logs-to-usb",
+        "/api/disk/new-table",
+        "/api/disk/create",
+        "/api/disk/delete",
+        "/api/disk/resize",
+        "/api/disk/format",
+        "/api/disk/set-mountpoint",
+        "/api/disk/pending/remove",
+        "/api/disk/commit",
+        "/api/disk/rollback",
     ];
     if !ALLOWED.contains(&path) {
         return Err("Installer route is not allowlisted".to_string());
@@ -370,6 +379,42 @@ fn storage_snapshot(config: &ConnectionArgs, disk: &str) -> (String, [String; 6]
     (details, partition_names, free_names)
 }
 
+fn pending_snapshot(config: &ConnectionArgs) -> String {
+    match get_json(config, "/api/disk/pending") {
+        Ok((200, value)) => {
+            let Some(operations) = value.as_array() else {
+                return "Pending partition operations are unavailable.".to_string();
+            };
+            if operations.is_empty() {
+                return "No pending partition operations.".to_string();
+            }
+            let lines = operations.iter().take(8).enumerate().map(|(index, operation)| {
+                let kind = operation.get("kind").and_then(Value::as_str).unwrap_or("operation");
+                let params = operation.get("params").cloned().unwrap_or_else(|| json!({}));
+                let detail = match kind {
+                    "new_table" => params.get("table_type").and_then(Value::as_str).unwrap_or("gpt").to_uppercase(),
+                    "create" => format!(
+                        "{} GiB {} {}",
+                        params.get("size_bytes").and_then(Value::as_u64).map(|bytes| bytes / (1024 * 1024 * 1024)).unwrap_or(0),
+                        params.get("fs_type").and_then(Value::as_str).unwrap_or("partition"),
+                        params.get("mountpoint").and_then(Value::as_str).unwrap_or(""),
+                    ),
+                    "delete" | "resize" | "format" | "set_mountpoint" => params.get("partition").and_then(Value::as_str).unwrap_or("partition").to_string(),
+                    _ => String::new(),
+                };
+                format!("#{index} {kind} {detail}")
+            }).collect::<Vec<_>>();
+            if operations.len() > lines.len() {
+                format!("{}\n… and {} more", lines.join("\n"), operations.len() - lines.len())
+            } else {
+                lines.join("\n")
+            }
+        }
+        Ok(_) => "Pending partition operations are unavailable.".to_string(),
+        Err(_) => "Pending partition operations will appear when the service is ready.".to_string(),
+    }
+}
+
 fn transaction_snapshot(config: &ConnectionArgs) -> String {
     match get_json(config, "/api/report") {
         Ok((200, value)) if value.as_object().is_some_and(|object| !object.is_empty()) => {
@@ -467,6 +512,7 @@ fn refresh_connection(weak: Weak<InstallerWindow>, config: ConnectionArgs) {
 fn refresh_storage(weak: Weak<InstallerWindow>, config: ConnectionArgs, disk: String) {
     std::thread::spawn(move || {
         let (details, partitions, free_regions) = storage_snapshot(&config, &disk);
+        let pending = pending_snapshot(&config);
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = weak.upgrade() {
                 if window.get_selected_disk().as_str() != disk { return; }
@@ -483,6 +529,7 @@ fn refresh_storage(weak: Weak<InstallerWindow>, config: ConnectionArgs, disk: St
                 window.set_free_region_four(SharedString::from(free_regions[3].as_str()));
                 window.set_free_region_five(SharedString::from(free_regions[4].as_str()));
                 window.set_free_region_six(SharedString::from(free_regions[5].as_str()));
+                window.set_manual_pending(SharedString::from(pending));
             }
         });
     });
@@ -591,6 +638,7 @@ fn request_from_window(window: &InstallerWindow, state: &Arc<Mutex<InstallState>
     request.confirm_backup = window.get_confirm_backup();
     request.confirm_erase = window.get_confirm_erase();
     request.confirm_current = window.get_confirm_current();
+    request.manual_committed = window.get_manual_committed();
     request.as_request()
 }
 
@@ -602,6 +650,150 @@ fn response_message(value: &Value, fallback: &str) -> String {
         .filter(|message| !message.trim().is_empty())
         .unwrap_or(fallback)
         .to_string()
+}
+
+fn manual_action(
+    weak: Weak<InstallerWindow>,
+    config: ConnectionArgs,
+    state: Arc<Mutex<InstallState>>,
+    action: String,
+    disk: String,
+    partition: String,
+    filesystem: String,
+    mountpoint: String,
+    size_gib: u64,
+    pending_index: i64,
+    free_region_start: u64,
+    free_region_end: u64,
+) {
+    std::thread::spawn(move || {
+        let failure_weak = weak.clone();
+        let fail = move |message: String| {
+            let failure_weak = failure_weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(window) = failure_weak.upgrade() {
+                    window.set_error_text(SharedString::from(message));
+                }
+            });
+        };
+        if disk.trim().is_empty() {
+            fail("Select a disk before editing its partition layout.".to_string());
+            return;
+        }
+        let (path, body): (&'static str, Value) = match action.as_str() {
+            "new-table" => ("/api/disk/new-table", json!({
+                "disk": disk.clone(),
+                "table_type": "gpt",
+            })),
+            "create" => {
+                let Some(size_bytes) = size_gib.checked_mul(1024 * 1024 * 1024).filter(|value| *value > 0) else {
+                    fail("Enter a positive partition size in GiB.".to_string());
+                    return;
+                };
+                if free_region_end <= free_region_start {
+                    fail("Select a free-space region before creating a partition.".to_string());
+                    return;
+                }
+                if size_bytes > free_region_end - free_region_start {
+                    fail("The requested partition is larger than the selected free-space region.".to_string());
+                    return;
+                }
+                ("/api/disk/create", json!({
+                    "disk": disk.clone(),
+                    "start_bytes": free_region_start,
+                    "size_bytes": size_bytes,
+                    "fs_type": filesystem,
+                    "label": "",
+                    "mountpoint": mountpoint,
+                }))
+            }
+            "delete" => {
+                if partition.trim().is_empty() {
+                    fail("Select a partition to delete.".to_string());
+                    return;
+                }
+                ("/api/disk/delete", json!({"disk": disk.clone(), "partition": partition}))
+            }
+            "format" => {
+                if partition.trim().is_empty() {
+                    fail("Select a partition to format.".to_string());
+                    return;
+                }
+                ("/api/disk/format", json!({
+                    "disk": disk.clone(),
+                    "partition": partition,
+                    "fs_type": filesystem,
+                    "label": "",
+                }))
+            }
+            "mountpoint" => {
+                if partition.trim().is_empty() {
+                    fail("Select a partition before setting its mountpoint.".to_string());
+                    return;
+                }
+                ("/api/disk/set-mountpoint", json!({
+                    "disk": disk.clone(),
+                    "partition": partition,
+                    "mountpoint": mountpoint,
+                }))
+            }
+            "resize" => {
+                let Some(size_bytes) = size_gib.checked_mul(1024 * 1024 * 1024).filter(|value| *value > 0) else {
+                    fail("Enter a positive partition size in GiB.".to_string());
+                    return;
+                };
+                if partition.trim().is_empty() {
+                    fail("Select a partition to shrink.".to_string());
+                    return;
+                }
+                ("/api/disk/resize", json!({
+                    "disk": disk.clone(),
+                    "partition": partition,
+                    "new_size_bytes": size_bytes,
+                }))
+            }
+            "remove-pending" => {
+                if pending_index < 0 {
+                    fail("Enter a non-negative pending operation index.".to_string());
+                    return;
+                }
+                ("/api/disk/pending/remove", json!({
+                    "disk": disk.clone(),
+                    "index": pending_index,
+                }))
+            }
+            "rollback" => ("/api/disk/rollback", json!({"disk": disk.clone()})),
+            "commit" => ("/api/disk/commit", json!({"disk": disk.clone()})),
+            _ => {
+                fail("Unknown manual partition action.".to_string());
+                return;
+            }
+        };
+        let result = post_json(&config, path, body);
+        match result {
+            Ok((status, value)) if (200..300).contains(&status) && value.get("ok").and_then(Value::as_bool).unwrap_or(true) => {
+                let committed = action == "commit";
+                if let Ok(mut current) = state.lock() {
+                    current.manual_committed = committed;
+                }
+                let message = response_message(&value, "Manual partition request completed");
+                let refresh_disk = disk.clone();
+                let _ = slint::invoke_from_event_loop({
+                    let weak = weak.clone();
+                    move || {
+                        if let Some(window) = weak.upgrade() {
+                            window.set_manual_committed(committed);
+                            window.set_error_text(SharedString::from(""));
+                            window.set_event_log(SharedString::from(message));
+                        }
+                    }
+                });
+                refresh_storage(weak, config, refresh_disk);
+            }
+            Ok((_status, value)) => fail(response_message(&value, "Installer rejected the manual partition request")),
+            Err(error) => fail(error),
+        }
+    });
 }
 
 fn start_install(weak: Weak<InstallerWindow>, config: ConnectionArgs, request: Value) {
@@ -770,11 +962,13 @@ fn main() -> Result<(), slint::PlatformError> {
             state.target_partition.clear();
             state.free_region_start = 0;
             state.free_region_end = 0;
+            state.manual_committed = false;
         }
         if let Some(window) = disk_weak.upgrade() {
             window.set_target_partition(SharedString::from(""));
             window.set_free_region_start(SharedString::from("0"));
             window.set_free_region_end(SharedString::from("0"));
+            window.set_manual_committed(false);
         }
         refresh_storage(disk_weak.clone(), disk_config.clone(), disk.to_string());
     });
@@ -812,6 +1006,29 @@ fn main() -> Result<(), slint::PlatformError> {
         if let Some(window) = free_weak.upgrade() {
             window.set_free_region_start(SharedString::from(start.to_string()));
             window.set_free_region_end(SharedString::from(end.to_string()));
+        }
+    });
+    let manual_state = state.clone();
+    let manual_weak = window.as_weak();
+    let manual_config = config.clone();
+    window.on_manual_action(move |action| {
+        if let Some(window) = manual_weak.upgrade() {
+            let free_region_start = window.get_free_region_start().parse::<u64>().unwrap_or(0);
+            let free_region_end = window.get_free_region_end().parse::<u64>().unwrap_or(0);
+            manual_action(
+                manual_weak.clone(),
+                manual_config.clone(),
+                manual_state.clone(),
+                action.to_string(),
+                window.get_selected_disk().to_string(),
+                window.get_target_partition().to_string(),
+                window.get_manual_filesystem().to_string(),
+                window.get_manual_mountpoint().to_string(),
+                window.get_manual_size_gib().parse::<u64>().unwrap_or(0),
+                window.get_manual_pending_index().parse::<i64>().unwrap_or(-1),
+                free_region_start,
+                free_region_end,
+            );
         }
     });
     let kernel_state = state.clone();

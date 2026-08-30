@@ -24,6 +24,12 @@ export component InstallerWindow inherits Window {
     in-out property <[string]> timezone-options: ["UTC"];
     in-out property <[string]> locale-options: ["en_US.UTF-8"];
     in-out property <[string]> keymap-options: ["us"];
+    in-out property <string> manual-filesystem: "btrfs";
+    in-out property <string> manual-mountpoint: "/";
+    in-out property <string> manual-size-gib: "32";
+    in-out property <string> manual-pending-index: "0";
+    in-out property <string> manual-pending: "No pending partition operations.";
+    in-out property <bool> manual-committed: false;
     in-out property <string> storage-details: "Select a disk to inspect its partitions and free space.";
     in-out property <string> partition-one: "";
     in-out property <string> partition-two: "";
@@ -49,7 +55,7 @@ export component InstallerWindow inherits Window {
     in-out property <bool> confirm-backup: false;
     in-out property <bool> confirm-erase: false;
     in-out property <bool> confirm-current: false;
-    in-out property <bool> start-enabled: selected-disk != "" && username != "" && password != "" && confirm-backup && confirm-erase && install-mode != "manual" && (install-mode != "wipe" || confirm-current) && (install-mode != "alongside" || target-partition != "") && (install-mode != "free_space" || free-region-end != free-region-start);
+    in-out property <bool> start-enabled: selected-disk != "" && username != "" && password != "" && confirm-backup && confirm-erase && (install-mode != "manual" || manual-committed) && (install-mode != "wipe" || confirm-current) && (install-mode != "alongside" || target-partition != "") && (install-mode != "free_space" || free-region-end != free-region-start);
     in-out property <bool> busy: false;
     in-out property <float> progress: 0;
     in-out property <string> event-log: "Waiting for installer events…";
@@ -67,6 +73,7 @@ export component InstallerWindow inherits Window {
     callback select-disk(string);
     callback select-target-partition(string);
     callback select-free-region(string);
+    callback manual-action(string);
     callback select-mode(string);
     callback select-kernel(string);
     callback start-install();
@@ -147,7 +154,7 @@ export component InstallerWindow inherits Window {
                                 Button { text: "Keep Windows"; clicked => { install-mode = "resize_ntfs"; select-mode("resize_ntfs"); } }
                                 Button { text: "Replace partition"; clicked => { install-mode = "alongside"; select-mode("alongside"); } }
                                 Button { text: "Free space"; clicked => { install-mode = "free_space"; select-mode("free_space"); } }
-                                Button { text: "Manual (coming soon)"; enabled: false; }
+                                Button { text: "Manual"; clicked => { install-mode = "manual"; select-mode("manual"); } }
                             }
                             Text { text: storage-details; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
                             HorizontalLayout {
@@ -192,6 +199,44 @@ export component InstallerWindow inherits Window {
                                 ComboBox { model: locale-options; selected(value) => { locale = value; } }
                                 Text { text: "Keyboard"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
                                 ComboBox { model: keymap-options; selected(value) => { keymap = value; } }
+                            }
+                            Rectangle {
+                                visible: install-mode == "manual";
+                                background: #0d172a;
+                                border-radius: 10px;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 6px;
+                                    Text { text: "Manual partition editor"; color: #f5f7ff; font-size: 13px; font-weight: 600; }
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Text { text: "Filesystem"; color: #9fb1d1; font-size: 11px; vertical-alignment: center; }
+                                        LineEdit { text <=> manual-filesystem; placeholder-text: "btrfs"; }
+                                        Text { text: "Mountpoint"; color: #9fb1d1; font-size: 11px; vertical-alignment: center; }
+                                        LineEdit { text <=> manual-mountpoint; placeholder-text: "/"; }
+                                        Text { text: "Size (GiB)"; color: #9fb1d1; font-size: 11px; vertical-alignment: center; }
+                                        LineEdit { text <=> manual-size-gib; placeholder-text: "32"; }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Button { text: "New GPT"; clicked => { manual-action("new-table"); } }
+                                        Button { text: "Create"; clicked => { manual-action("create"); } }
+                                        Button { text: "Delete selected"; enabled: target-partition != ""; clicked => { manual-action("delete"); } }
+                                        Button { text: "Format selected"; enabled: target-partition != ""; clicked => { manual-action("format"); } }
+                                        Button { text: "Set mountpoint"; enabled: target-partition != ""; clicked => { manual-action("mountpoint"); } }
+                                        Button { text: "Shrink selected"; enabled: target-partition != ""; clicked => { manual-action("resize"); } }
+                                        Text { text: "Pending #"; color: #9fb1d1; font-size: 11px; vertical-alignment: center; }
+                                        LineEdit { text <=> manual-pending-index; placeholder-text: "0"; }
+                                        Button { text: "Remove pending"; clicked => { manual-action("remove-pending"); } }
+                                    }
+                                    Text { text: manual-pending; color: #9fb1d1; font-size: 11px; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Button { text: "Undo staged changes"; clicked => { manual-action("rollback"); } }
+                                        Button { text: "Apply staged changes"; clicked => { manual-action("commit"); } }
+                                        Text { text: manual-committed ? "Manual changes applied" : "Apply staged changes before installing."; color: #9fb1d1; font-size: 11px; vertical-alignment: center; wrap: word-wrap; }
+                                    }
+                                }
                             }
                             CheckBox { text: "I have backed up anything I want to keep."; checked <=> confirm-backup; }
                             CheckBox { text: "I understand the selected target may be erased."; checked <=> confirm-erase; }
