@@ -381,9 +381,15 @@ fn software_catalog_text() -> String {
 
 fn guardian_status_text() -> String {
     let state = kyth_shared::guardian::load_state();
-    let pending = kyth_shared::guardian::pending_recommendations(&state).len();
+    let recommendations = kyth_shared::guardian::pending_recommendations(&state);
+    let pending = recommendations.len();
     let quarantined = state.quarantined.len();
-    format!("Guardian · {pending} pending recommendation(s) · {quarantined} quarantined item(s)")
+    let names = recommendations.iter().take(3).map(|item| item.recipe_id.as_str()).collect::<Vec<_>>().join(", ");
+    if names.is_empty() {
+        format!("Guardian · clear · {quarantined} quarantined item(s)")
+    } else {
+        format!("Guardian · {pending} pending · {quarantined} quarantined · {names}")
+    }
 }
 
 fn initial_page() -> String {
