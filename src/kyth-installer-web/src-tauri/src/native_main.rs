@@ -97,7 +97,11 @@ impl InstallState {
             && !self.password.is_empty()
             && self.confirm_backup
             && self.confirm_erase
+            && self.install_mode != "manual"
             && (self.install_mode != "wipe" || self.confirm_current)
+            && (self.install_mode != "alongside" || !self.target_partition.is_empty())
+            && (self.install_mode != "free_space" || self.free_region_end > self.free_region_start)
+            && (self.install_mode != "resize_ntfs" || self.resize_gib >= 32)
     }
 }
 
@@ -226,6 +230,54 @@ fn disk_names(value: &Value) -> [String; 6] {
     names
 }
 
+fn storage_snapshot(config: &ConnectionArgs, disk: &str) -> (String, [String; 6], [String; 6]) {
+    let empty = std::array::from_fn(|_| String::new());
+    if disk.is_empty() {
+        return ("Select a disk to inspect its partitions and free space.".to_string(), empty.clone(), empty);
+    }
+
+    let query_disk = disk.replace(' ', "%20");
+    let partitions = get_json(config, &format!("/api/partitions?disk={query_disk}"));
+    let free_regions = get_json(config, &format!("/api/free-space?disk={query_disk}"));
+    let mut partition_names = std::array::from_fn(|_| String::new());
+    let mut free_names = std::array::from_fn(|_| String::new());
+    let mut detail_lines = Vec::new();
+
+    if let Ok((200, value)) = partitions {
+        if let Some(items) = value.as_array() {
+            for (slot, part) in items.iter().take(6).enumerate() {
+                let name = part.get("name").and_then(Value::as_str).unwrap_or("unnamed partition");
+                let fs = part.get("fstype").and_then(Value::as_str).filter(|value| !value.is_empty()).unwrap_or("unknown filesystem");
+                let size = part.get("size_bytes").and_then(Value::as_u64).map(|bytes| kyth_shared::transfer::human_bytes(bytes as f64)).unwrap_or_else(|| "size unavailable".to_string());
+                let suffix = if part.get("current").and_then(Value::as_bool).unwrap_or(false) { " · current" } else if part.get("in_use").and_then(Value::as_bool).unwrap_or(false) { " · in use" } else if part.get("efi").and_then(Value::as_bool).unwrap_or(false) { " · EFI" } else { "" };
+                let selectable = !part.get("current").and_then(Value::as_bool).unwrap_or(false)
+                    && !part.get("in_use").and_then(Value::as_bool).unwrap_or(false);
+                if selectable {
+                    partition_names[slot] = name.to_string();
+                }
+                detail_lines.push(format!("{name} · {fs} · {size}{suffix}"));
+            }
+        }
+    }
+    if let Ok((200, value)) = free_regions {
+        if let Some(items) = value.as_array() {
+            for (slot, region) in items.iter().take(6).enumerate() {
+                let start = region.get("start_bytes").and_then(Value::as_u64).unwrap_or(0);
+                let end = region.get("end_bytes").and_then(Value::as_u64).unwrap_or(0);
+                let size = region.get("size_bytes").and_then(Value::as_u64).map(|bytes| kyth_shared::transfer::human_bytes(bytes as f64)).unwrap_or_else(|| "size unavailable".to_string());
+                free_names[slot] = format!("{start}:{end} · {size}");
+            }
+        }
+    }
+
+    let details = if detail_lines.is_empty() {
+        "No usable partitions or free regions reported for this disk.".to_string()
+    } else {
+        detail_lines.join("\n")
+    };
+    (details, partition_names, free_names)
+}
+
 fn transaction_snapshot(config: &ConnectionArgs) -> String {
     match get_json(config, "/api/report") {
         Ok((200, value)) if value.as_object().is_some_and(|object| !object.is_empty()) => {
@@ -313,6 +365,30 @@ fn refresh_connection(weak: Weak<InstallerWindow>, config: ConnectionArgs) {
     });
 }
 
+fn refresh_storage(weak: Weak<InstallerWindow>, config: ConnectionArgs, disk: String) {
+    std::thread::spawn(move || {
+        let (details, partitions, free_regions) = storage_snapshot(&config, &disk);
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(window) = weak.upgrade() {
+                if window.get_selected_disk().as_str() != disk { return; }
+                window.set_storage_details(SharedString::from(details));
+                window.set_partition_one(SharedString::from(partitions[0].as_str()));
+                window.set_partition_two(SharedString::from(partitions[1].as_str()));
+                window.set_partition_three(SharedString::from(partitions[2].as_str()));
+                window.set_partition_four(SharedString::from(partitions[3].as_str()));
+                window.set_partition_five(SharedString::from(partitions[4].as_str()));
+                window.set_partition_six(SharedString::from(partitions[5].as_str()));
+                window.set_free_region_one(SharedString::from(free_regions[0].as_str()));
+                window.set_free_region_two(SharedString::from(free_regions[1].as_str()));
+                window.set_free_region_three(SharedString::from(free_regions[2].as_str()));
+                window.set_free_region_four(SharedString::from(free_regions[3].as_str()));
+                window.set_free_region_five(SharedString::from(free_regions[4].as_str()));
+                window.set_free_region_six(SharedString::from(free_regions[5].as_str()));
+            }
+        });
+    });
+}
+
 fn refresh_step(weak: Weak<InstallerWindow>, config: ConnectionArgs, step: String) {
     std::thread::spawn(move || {
         let status = step_snapshot(&config, &step);
@@ -386,6 +462,12 @@ fn apply_step(window: &InstallerWindow, step: &str) {
 fn request_from_window(window: &InstallerWindow, state: &Arc<Mutex<InstallState>>) -> Value {
     let mut request = state.lock().expect("installer state lock poisoned");
     request.disk = window.get_selected_disk().to_string();
+    request.target_partition = window.get_target_partition().to_string();
+    request.free_region_start = window.get_free_region_start().parse().unwrap_or(0);
+    request.free_region_end = window.get_free_region_end().parse().unwrap_or(0);
+    request.install_mode = window.get_install_mode().to_string();
+    request.resize_gib = window.get_resize_gib().parse().unwrap_or(0);
+    request.kernel = window.get_kernel().to_string();
     request.hostname = window.get_hostname().to_string();
     request.username = window.get_username().to_string();
     request.password = window.get_password().to_string();
@@ -520,7 +602,6 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_install_mode(SharedString::from("wipe"));
     window.set_kernel(SharedString::from("fedora"));
     window.set_hostname(SharedString::from("kyth"));
-    window.set_start_enabled(true);
     apply_step(&window, "Welcome");
     let weak = window.as_weak();
     let connect_weak = weak.clone();
@@ -560,15 +641,56 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     let disk_state = state.clone();
+    let disk_weak = window.as_weak();
+    let disk_config = config.clone();
     window.on_select_disk(move |disk| {
         if let Ok(mut state) = disk_state.lock() {
             state.disk = disk.to_string();
+            state.target_partition.clear();
+            state.free_region_start = 0;
+            state.free_region_end = 0;
         }
+        if let Some(window) = disk_weak.upgrade() {
+            window.set_target_partition(SharedString::from(""));
+            window.set_free_region_start(SharedString::from("0"));
+            window.set_free_region_end(SharedString::from("0"));
+        }
+        refresh_storage(disk_weak.clone(), disk_config.clone(), disk.to_string());
     });
     let mode_state = state.clone();
+    let mode_weak = window.as_weak();
     window.on_select_mode(move |mode| {
         if let Ok(mut state) = mode_state.lock() {
             state.install_mode = mode.to_string();
+            if mode.as_str() != "alongside" {
+                state.target_partition.clear();
+            }
+        }
+        if mode.as_str() != "alongside" {
+            if let Some(window) = mode_weak.upgrade() {
+                window.set_target_partition(SharedString::from(""));
+            }
+        }
+    });
+    let target_state = state.clone();
+    window.on_select_target_partition(move |partition| {
+        if let Ok(mut state) = target_state.lock() {
+            state.target_partition = partition.to_string();
+        }
+    });
+    let free_state = state.clone();
+    let free_weak = window.as_weak();
+    window.on_select_free_region(move |region| {
+        let mut values = region.split(" · ").next().unwrap_or("").split(':');
+        let start = values.next().and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+        let end = values.next().and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+        if let Ok(mut state) = free_state.lock() {
+            state.free_region_start = start;
+            state.free_region_end = end;
+        }
+        if let Some(window) = free_weak.upgrade() {
+            window.set_free_region_start(SharedString::from(start.to_string()));
+            window.set_free_region_end(SharedString::from(end.to_string()));
         }
     });
     let kernel_state = state.clone();
@@ -583,6 +705,11 @@ fn main() -> Result<(), slint::PlatformError> {
     window.on_start_install(move || {
         if let Some(window) = start_weak.upgrade() {
             let request = request_from_window(&window, &start_state);
+            let ready = start_state.lock().map(|state| state.can_start()).unwrap_or(false);
+            if !ready {
+                window.set_error_text(SharedString::from("Select a valid target, complete the required confirmations, and choose a supported guided install mode."));
+                return;
+            }
             window.set_busy(true);
             window.set_error_text(SharedString::from(""));
             start_install(start_weak.clone(), start_config.clone(), request);

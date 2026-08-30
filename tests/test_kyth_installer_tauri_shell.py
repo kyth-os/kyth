@@ -29,6 +29,20 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn("ALLOWED", rust)
         self.assertIn("request_from_window", rust)
 
+    def test_native_shell_carries_guided_storage_choices_into_the_request(self):
+        rust = NATIVE_RS.read_text()
+        slint = NATIVE_SLINT.read_text()
+        for route in ("/api/partitions?disk=", "/api/free-space?disk=", "storage_snapshot", "refresh_storage"):
+            self.assertIn(route, rust)
+        for field in ("target_partition", "free_region_start", "free_region_end", "resize_gib"):
+            self.assertIn(f'"{field}"', rust)
+        for control in ("storage-details", "partition-one", "free-region-one", "select-target-partition", "select-free-region", "resize-gib"):
+            self.assertIn(control, slint)
+        self.assertIn('install_mode != "manual"', rust)
+        self.assertIn('install-mode != "manual"', slint)
+        self.assertIn("!part.get(\"current\")", rust)
+        self.assertIn("!part.get(\"in_use\")", rust)
+
     def test_shell_embeds_assets_and_has_no_privileged_bridge(self):
         config = json.loads((INSTALLER_WEB / "src-tauri/tauri.conf.json").read_text())
         self.assertEqual(config["build"]["frontendDist"], "../dist")

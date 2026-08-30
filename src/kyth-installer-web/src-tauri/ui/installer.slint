@@ -12,8 +12,25 @@ export component InstallerWindow inherits Window {
     in-out property <string> transaction-text: "No install transaction recorded";
     in-out property <string> error-text: "";
     in-out property <string> selected-disk: "";
+    in-out property <string> target-partition: "";
+    in-out property <string> free-region-start: "0";
+    in-out property <string> free-region-end: "0";
     in-out property <string> install-mode: "wipe";
     in-out property <string> kernel: "fedora";
+    in-out property <string> resize-gib: "64";
+    in-out property <string> storage-details: "Select a disk to inspect its partitions and free space.";
+    in-out property <string> partition-one: "";
+    in-out property <string> partition-two: "";
+    in-out property <string> partition-three: "";
+    in-out property <string> partition-four: "";
+    in-out property <string> partition-five: "";
+    in-out property <string> partition-six: "";
+    in-out property <string> free-region-one: "";
+    in-out property <string> free-region-two: "";
+    in-out property <string> free-region-three: "";
+    in-out property <string> free-region-four: "";
+    in-out property <string> free-region-five: "";
+    in-out property <string> free-region-six: "";
     in-out property <string> disk-one: "";
     in-out property <string> disk-two: "";
     in-out property <string> disk-three: "";
@@ -26,7 +43,7 @@ export component InstallerWindow inherits Window {
     in-out property <bool> confirm-backup: false;
     in-out property <bool> confirm-erase: false;
     in-out property <bool> confirm-current: false;
-    in-out property <bool> start-enabled: false;
+    in-out property <bool> start-enabled: selected-disk != "" && username != "" && password != "" && confirm-backup && confirm-erase && install-mode != "manual" && (install-mode != "wipe" || confirm-current) && (install-mode != "alongside" || target-partition != "") && (install-mode != "free_space" || free-region-end != free-region-start);
     in-out property <bool> busy: false;
     in-out property <float> progress: 0;
     in-out property <string> event-log: "Waiting for installer events…";
@@ -42,6 +59,8 @@ export component InstallerWindow inherits Window {
     callback next-step();
     callback previous-step();
     callback select-disk(string);
+    callback select-target-partition(string);
+    callback select-free-region(string);
     callback select-mode(string);
     callback select-kernel(string);
     callback start-install();
@@ -122,13 +141,36 @@ export component InstallerWindow inherits Window {
                                 Button { text: "Keep Windows"; clicked => { install-mode = "resize_ntfs"; select-mode("resize_ntfs"); } }
                                 Button { text: "Replace partition"; clicked => { install-mode = "alongside"; select-mode("alongside"); } }
                                 Button { text: "Free space"; clicked => { install-mode = "free_space"; select-mode("free_space"); } }
-                                Button { text: "Manual"; clicked => { install-mode = "manual"; select-mode("manual"); } }
+                                Button { text: "Manual (coming soon)"; enabled: false; }
+                            }
+                            Text { text: storage-details; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: "Partitions"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                Button { text: partition-one; enabled: partition-one != ""; clicked => { target-partition = partition-one; select-target-partition(partition-one); } }
+                                Button { text: partition-two; enabled: partition-two != ""; clicked => { target-partition = partition-two; select-target-partition(partition-two); } }
+                                Button { text: partition-three; enabled: partition-three != ""; clicked => { target-partition = partition-three; select-target-partition(partition-three); } }
+                                Button { text: partition-four; enabled: partition-four != ""; clicked => { target-partition = partition-four; select-target-partition(partition-four); } }
+                                Button { text: partition-five; enabled: partition-five != ""; clicked => { target-partition = partition-five; select-target-partition(partition-five); } }
+                                Button { text: partition-six; enabled: partition-six != ""; clicked => { target-partition = partition-six; select-target-partition(partition-six); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: "Free space"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                Button { text: free-region-one; enabled: free-region-one != ""; clicked => { select-free-region(free-region-one); } }
+                                Button { text: free-region-two; enabled: free-region-two != ""; clicked => { select-free-region(free-region-two); } }
+                                Button { text: free-region-three; enabled: free-region-three != ""; clicked => { select-free-region(free-region-three); } }
+                                Button { text: free-region-four; enabled: free-region-four != ""; clicked => { select-free-region(free-region-four); } }
+                                Button { text: free-region-five; enabled: free-region-five != ""; clicked => { select-free-region(free-region-five); } }
+                                Button { text: free-region-six; enabled: free-region-six != ""; clicked => { select-free-region(free-region-six); } }
                             }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Text { text: "Kernel"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
                                 Button { text: "Fedora"; clicked => { kernel = "fedora"; select-kernel("fedora"); } }
                                 Button { text: "CachyOS"; clicked => { kernel = "cachyos"; select-kernel("cachyos"); } }
+                                Text { text: "KythOS size (GiB)"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                LineEdit { text <=> resize-gib; placeholder-text: "64"; }
                                 Text { text: "Hostname"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
                                 LineEdit { text <=> hostname; placeholder-text: "kyth"; }
                                 Text { text: "User"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
