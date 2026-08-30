@@ -21,6 +21,7 @@ export component HubWindow inherits Window {
     in-out property <string> section-status: "Reading section status…";
     in-out property <string> section-detail: "Native section status is read in the background.";
     in-out property <string> hardware-capabilities: "Capabilities · Reading hardware view…";
+    in-out property <string> gaming-launchers: "Launchers · Reading gaming inventory…";
     in-out property <string> section-one: "Recovery";
     in-out property <string> section-two: "Performance";
     in-out property <string> section-three: "Hardware";
@@ -154,6 +155,7 @@ export component HubWindow inherits Window {
                             Text { text: section-status; color: #f5f7ff; font-size: 17px; font-weight: 600; wrap: word-wrap; }
                             Text { text: section-detail; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
                             Text { visible: selected-page == "This PC" && selected-section == "Hardware"; text: hardware-capabilities; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
+                            Text { visible: selected-page == "Play" && selected-section == "Gaming"; text: gaming-launchers; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
                         }
                     }
                     Rectangle { vertical-stretch: 1; }

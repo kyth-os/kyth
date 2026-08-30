@@ -88,6 +88,13 @@ class HubWebActionTests(unittest.TestCase):
         self.assertIn("hardware-capabilities", NATIVE_SLINT)
         self.assertIn('selected-page == "This PC" && selected-section == "Hardware"', NATIVE_SLINT)
 
+    def test_native_gaming_section_surfaces_rust_launcher_inventory(self):
+        self.assertIn("gaming_library_scan", NATIVE_RS)
+        self.assertIn("fn gaming_launchers_text()", NATIVE_RS)
+        self.assertIn("set_gaming_launchers", NATIVE_RS)
+        self.assertIn("gaming-launchers", NATIVE_SLINT)
+        self.assertIn('selected-page == "Play" && selected-section == "Gaming"', NATIVE_SLINT)
+
     def test_every_mutating_wrapper_is_reachable_from_the_ui(self):
         sources = _ui_sources()
         for wrapper, expected_file in MUTATING_WRAPPERS.items():
