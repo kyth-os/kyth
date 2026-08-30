@@ -142,6 +142,27 @@ impl QualificationReport {
     }
 }
 
+/// Convert already-collected smoke rows into a qualification report. Host
+/// identity, telemetry metrics, and live smoke collection remain caller-owned.
+pub fn from_smoke_report(
+    generated_at: impl Into<String>,
+    identity: BTreeMap<String, String>,
+    smoke: &crate::system::smoke_check::Report,
+) -> QualificationReport {
+    let checks = smoke.results.iter().map(|row| QualificationCheck {
+        name: row.name.clone(),
+        status: match row.level {
+            crate::system::smoke_check::Level::Pass => "pass",
+            crate::system::smoke_check::Level::Warn => "warning",
+            crate::system::smoke_check::Level::Fail => "fail",
+        }.into(),
+        evidence: row.detail.clone(),
+        category: if row.section.is_empty() { "system".into() } else { row.section.clone() },
+        required: true,
+    });
+    QualificationReport::new(generated_at, "local-smoke", identity, checks, [])
+}
+
 fn regression_percent(candidate: f64, baseline: f64, direction: &str) -> f64 {
     let denominator = baseline.abs();
     if denominator == 0.0 {
@@ -205,6 +226,16 @@ pub fn acceptance_report(log: &str, update_required: bool, generated_at: impl In
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projects_smoke_rows_into_local_qualification_checks() {
+        let mut smoke = crate::system::smoke_check::Report::default();
+        smoke.warned("Firmware", "metadata stale", "Updates");
+        let report = from_smoke_report("2026-01-01T00:00:00Z", BTreeMap::new(), &smoke);
+        assert_eq!(report.source, "local-smoke");
+        assert_eq!(report.checks[0].status, "warning");
+        assert_eq!(report.checks[0].category, "Updates");
+    }
 
     fn check(name: &str, status: &str) -> QualificationCheck { QualificationCheck { name: name.into(), status: status.into(), evidence: "ok".into(), category: "system".into(), required: true } }
 
