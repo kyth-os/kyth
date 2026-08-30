@@ -368,10 +368,15 @@ fn gaming_launchers_text() -> String {
             format!("{}: {state}, {library}", launcher.label)
         })
         .collect::<Vec<_>>();
+    let anti_cheat = kyth_shared::system::gaming_compat::anti_cheat_table()
+        .iter()
+        .map(|entry| format!("{}: {}", entry.game, entry.status))
+        .collect::<Vec<_>>()
+        .join(" · ");
     if inventory.is_empty() {
         "Launchers · No launcher inventory reported.".to_string()
     } else {
-        format!("Launchers · {}", inventory.join(" · "))
+        format!("Launchers · {}\nCompatibility · {}\nMigration · verify library titles in ProtonDB before moving saves.", inventory.join(" · "), anti_cheat)
     }
 }
 
