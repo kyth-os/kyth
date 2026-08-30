@@ -8,6 +8,8 @@
 slint::include_modules!();
 
 use slint::{ComponentHandle, SharedString, Weak};
+use std::process::Command;
+use std::time::Duration;
 
 fn home_next_action() -> String {
     let mut snapshot = serde_json::Map::new();
@@ -356,6 +358,97 @@ fn landing_for_page(page: &str) -> &'static str {
     }
 }
 
+fn page_action_detail(recipe: &str, output: &std::process::Output) -> String {
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
+        if !text.is_empty() { text.push('\n'); }
+        text.push_str(&stderr);
+    }
+    let text = kyth_shared::system::process::strip_ansi(text.trim());
+    let detail = text.chars().take(500).collect::<String>();
+    if !detail.trim().is_empty() {
+        return if output.status.success() {
+            format!("{recipe} complete · {}", detail.trim())
+        } else {
+            format!("{recipe} failed · {}", detail.trim())
+        };
+    }
+    if output.status.success() {
+        format!("{recipe} complete")
+    } else {
+        format!("{recipe} failed (exit code {})", output.status.code().unwrap_or(-1))
+    }
+}
+
+fn run_page_action(weak: Weak<HubWindow>, action: String) {
+    let (recipe, label) = match action.as_str() {
+        "upgrade" => ("upgrade", "Starting update…"),
+        "rollback" => ("rollback", "Starting rollback…"),
+        _ => {
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(window) = weak.upgrade() {
+                    window.set_action_status(SharedString::from("Unknown native action."));
+                }
+            });
+            return;
+        }
+    };
+    if recipe == "upgrade"
+        && !std::path::Path::new("/usr/bin/bootc").exists()
+        && !std::path::Path::new("/usr/bin/rpm-ostree").exists()
+    {
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(window) = weak.upgrade() {
+                window.set_action_status(SharedString::from("bootc is not installed on this system."));
+            }
+        });
+        return;
+    }
+    let Some(argv) = kyth_shared::system::just::command_for(recipe, &[]) else {
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(window) = weak.upgrade() {
+                window.set_action_status(SharedString::from("Native action is not allowlisted."));
+            }
+        });
+        return;
+    };
+    let _ = slint::invoke_from_event_loop({
+        let weak = weak.clone();
+        move || {
+            if let Some(window) = weak.upgrade() {
+                window.set_action_status(SharedString::from(label));
+            }
+        }
+    });
+    let refresh_weak = weak.clone();
+    std::thread::spawn(move || {
+        let mut command = Command::new(&argv[0]);
+        command.args(&argv[1..]);
+        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+        let sanitized = kyth_shared::commands::environment_for(
+            kyth_shared::commands::EnvironmentPolicy::Sanitized,
+            &inherited,
+        );
+        command.env_clear().envs(sanitized);
+        kyth_shared::system::just::configure_command(&mut command);
+        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+            command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+        }
+        let result = kyth_shared::system::process::run_bounded_command(command, Duration::from_secs(900));
+        let detail = match result {
+            Ok(output) => page_action_detail(recipe, &output),
+            Err(error) => format!("{recipe} could not start · {error}"),
+        };
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(window) = weak.upgrade() {
+                window.set_action_status(SharedString::from(detail));
+            }
+        });
+        refresh_status(refresh_weak, "Updates".to_string());
+    });
+}
+
 fn refresh_status(weak: Weak<HubWindow>, page: String) {
     std::thread::spawn(move || {
         let result = page_status(&page);
@@ -417,8 +510,14 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_card_two_detail(SharedString::from(cards[1].1));
     window.set_next_action_text(SharedString::from("Suggested next step · Reading local policy…"));
     window.set_status_text(SharedString::from("Reading system status…"));
+    window.set_action_status(SharedString::from(""));
     window.set_section_status(SharedString::from("Reading section status…"));
     window.set_section_detail(SharedString::from("Native section status is read in the background."));
+
+    let action_weak = window.as_weak();
+    window.on_page_action(move |action| {
+        run_page_action(action_weak.clone(), action.to_string());
+    });
 
     let refresh_weak = window.as_weak();
     window.on_refresh(move || {
@@ -449,6 +548,7 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_card_two_detail(SharedString::from(cards[1].1));
             window.set_next_action_text(SharedString::from("Suggested next step · Reading local policy…"));
             window.set_status_text(SharedString::from("Reading system status…"));
+            window.set_action_status(SharedString::from(""));
             window.set_section_status(SharedString::from("Reading section status…"));
             window.set_section_detail(SharedString::from("Native section status is read in the background."));
             refresh_status(navigation_weak.clone(), page.to_string());

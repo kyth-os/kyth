@@ -20,6 +20,8 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
 MAIN_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+NATIVE_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "native_main.rs").read_text(encoding="utf-8")
+NATIVE_SLINT = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "ui" / "hub.slint").read_text(encoding="utf-8")
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
 
 HUB_SECTIONS = (HUB_WEB / "data" / "hubSections.ts").read_text(encoding="utf-8")
@@ -70,6 +72,15 @@ def _ui_sources() -> dict[str, str]:
 
 
 class HubWebActionTests(unittest.TestCase):
+    def test_native_updates_surface_has_guarded_recipe_actions(self):
+        for recipe in ("upgrade", "rollback"):
+            self.assertIn(f'"{recipe}"', NATIVE_RS)
+        self.assertIn("command_for", NATIVE_RS)
+        self.assertIn("run_bounded_command", NATIVE_RS)
+        self.assertIn('selected-page == "Updates"', NATIVE_SLINT)
+        self.assertIn('page-action("upgrade")', NATIVE_SLINT)
+        self.assertIn('page-action("rollback")', NATIVE_SLINT)
+
     def test_every_mutating_wrapper_is_reachable_from_the_ui(self):
         sources = _ui_sources()
         for wrapper, expected_file in MUTATING_WRAPPERS.items():

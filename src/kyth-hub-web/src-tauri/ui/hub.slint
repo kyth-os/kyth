@@ -30,9 +30,11 @@ export component HubWindow inherits Window {
     in-out property <string> section-eight: "";
     in-out property <string> section-nine: "";
     in-out property <string> section-ten: "";
+    in-out property <string> action-status: "";
     callback navigate(string);
     callback refresh();
     callback select-section(string);
+    callback page-action(string);
 
     Rectangle {
         background: #0b1020;
@@ -109,6 +111,14 @@ export component HubWindow inherits Window {
                             Text { text: "●"; color: #55d6bd; font-size: 16px; vertical-alignment: center; }
                             Text { text: next-action-text; color: #d9f8f0; font-size: 13px; vertical-alignment: center; wrap: word-wrap; }
                         }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Updates";
+                        spacing: 8px;
+                        Button { text: "Download and stage"; clicked => { page-action("upgrade"); } }
+                        Button { text: "Roll back"; clicked => { page-action("rollback"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
                     }
 
                     HorizontalLayout {
