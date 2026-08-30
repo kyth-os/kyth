@@ -340,11 +340,38 @@ fn section_status(section: &str) -> (String, String) {
 }
 
 fn initial_page() -> String {
-    let requested = std::env::args()
+    let requested = initial_requested_page();
+    landing_for_page(requested.as_deref().unwrap_or("Home")).to_string()
+}
+
+fn initial_requested_page() -> Option<String> {
+    std::env::args()
         .collect::<Vec<_>>()
         .windows(2)
-        .find_map(|args| (args[0] == "--page").then(|| args[1].clone()));
-    landing_for_page(requested.as_deref().unwrap_or("Home")).to_string()
+        .find_map(|args| (args[0] == "--page").then(|| args[1].clone()))
+}
+
+/// Resolve a section deep link to the native tab that should be selected.
+///
+/// The React shell encodes section links as `?section=...`; the native
+/// launcher has the same single `--page` argument, so section keys are
+/// selected here after the destination is resolved. Keep the `Just` alias
+/// because older desktop entries used that registry key while the native
+/// label is "Recipes".
+fn initial_section(page: &str) -> String {
+    let sections = page_sections(page);
+    let requested = initial_requested_page();
+    let selected = match requested.as_deref() {
+        Some("Just") if page == "This PC" => "Recipes",
+        Some("Update") if page == "Updates" => "Updates",
+        Some(requested) => sections
+            .iter()
+            .copied()
+            .find(|section| *section == requested)
+            .unwrap_or(sections[0]),
+        None => sections[0],
+    };
+    selected.to_string()
 }
 
 fn landing_for_page(page: &str) -> &'static str {
@@ -353,7 +380,7 @@ fn landing_for_page(page: &str) -> &'static str {
         "Apps" | "App Store" | "Work Setup" => "Apps",
         "This PC" | "Guardian" | "Hardware" | "Plasma Wayland" | "Diagnostics" | "Repair" | "NVIDIA" | "Kernel" | "Channels" | "Just" | "Feedback" => "This PC",
         "Move In" | "Move Files" | "Cloud Storage" | "Network Shares" | "VPN" => "Move In",
-        "Updates" => "Updates",
+        "Update" | "Updates" => "Updates",
         _ => "Home",
     }
 }
@@ -493,11 +520,12 @@ fn refresh_section(weak: Weak<HubWindow>, section: String) {
 
 fn main() -> Result<(), slint::PlatformError> {
     let page = initial_page();
+    let section = initial_section(&page);
     let window = HubWindow::new()?;
     window.set_selected_page(SharedString::from(page.as_str()));
     let sections = page_sections(&page);
     set_section_names(&window, sections);
-    window.set_selected_section(SharedString::from(sections[0]));
+    window.set_selected_section(SharedString::from(section.as_str()));
     let (summary, detail) = page_copy(&page);
     let cards = page_cards(&page);
     window.set_page_summary(SharedString::from(summary));
@@ -565,6 +593,6 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     refresh_status(window.as_weak(), page);
-    refresh_section(window.as_weak(), sections[0].to_string());
+    refresh_section(window.as_weak(), section);
     window.run()
 }
