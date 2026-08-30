@@ -20,6 +20,24 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// bar / sidebar badge.
 pub const NOTIFY_THROTTLE_S: f64 = 6.0 * 3600.0;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelDecision { pub recipe_id: String, pub confidence: f64, pub explanation: String, pub probe_id: Option<String> }
+
+/// Strict, read-only parser for a local-model Guardian suggestion. Callers
+/// still own model invocation and must apply the normal eligibility gate.
+pub fn parse_model_decision(output: &str, allowed: &[&str], probes: &[&str]) -> Option<ModelDecision> {
+    let raw = output.rsplit('{').next()?.trim_end_matches(|c: char| c.is_whitespace() || c == '}');
+    let value: Value = serde_json::from_str(&format!("{{{raw}}}" )).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 4 || !["recipe_id", "confidence", "explanation", "probe_id"].iter().all(|key| object.contains_key(*key)) { return None; }
+    let recipe_id = object.get("recipe_id")?.as_str()?.to_string();
+    let confidence = object.get("confidence")?.as_f64()?;
+    let explanation = object.get("explanation")?.as_str()?.chars().filter(|c| !c.is_control()).take(400).collect::<String>();
+    let probe_id = object.get("probe_id")?.as_str().map(str::to_string);
+    if !allowed.contains(&recipe_id.as_str()) || !recipes().iter().any(|recipe| recipe.id == recipe_id) || !(0.0..=1.0).contains(&confidence) || explanation.len() > 400 || probe_id.as_deref().is_some_and(|probe| !probes.contains(&probe)) { return None; }
+    Some(ModelDecision { recipe_id, confidence, explanation, probe_id })
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Recipe {
     pub id: &'static str,
@@ -404,6 +422,16 @@ pub fn recent_history(state: &Value, limit: usize) -> Vec<HistoryItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_decision_requires_exact_allowed_shape() {
+        let allowed = ["audio.restart"];
+        let probes = ["audio"];
+        let valid = r#"note {"recipe_id":"audio.restart","confidence":0.8,"explanation":"restart audio","probe_id":"audio"}"#;
+        assert_eq!(parse_model_decision(valid, &allowed, &probes).unwrap().recipe_id, "audio.restart");
+        assert!(parse_model_decision(r#"{"recipe_id":"bad","confidence":1.0,"explanation":"x","probe_id":"audio"}"#, &allowed, &probes).is_none());
+        assert!(parse_model_decision("not json", &allowed, &probes).is_none());
+    }
     use serde_json::json;
 
     #[test]
