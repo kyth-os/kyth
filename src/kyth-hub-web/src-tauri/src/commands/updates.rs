@@ -1,4 +1,15 @@
+use std::collections::HashMap;
+use std::process::Command;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
 use serde::Serialize;
+
+static JUST_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+
+fn just_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
+    JUST_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 #[derive(Serialize)]
 pub(crate) struct JustRecipeResponse {
@@ -15,49 +26,95 @@ pub(crate) fn just_list() -> Vec<JustRecipeResponse> {
         .collect()
 }
 
-#[derive(Serialize)]
-pub(crate) struct JustRunResponse {
-    pub(crate) launched: bool,
-    pub(crate) in_terminal: bool,
+fn just_output_detail(recipe: &str, output: &std::process::Output) -> String {
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
+        if !text.is_empty() { text.push('\n'); }
+        text.push_str(&stderr);
+    }
+    let text = kyth_shared::system::process::strip_ansi(text.trim());
+    let detail: String = text.chars().rev().take(800).collect::<String>().chars().rev().collect();
+    if !detail.trim().is_empty() {
+        return if output.status.success() {
+            format!("{recipe} complete — {}", detail.trim())
+        } else {
+            format!("{recipe} could not be completed — {}", detail.trim())
+        };
+    }
+    if output.status.success() {
+        format!("{recipe} complete.")
+    } else {
+        match output.status.code() {
+            Some(code) => format!("{recipe} could not be completed (exit code {code})."),
+            None => format!("{recipe} stopped before it could complete."),
+        }
+    }
+}
+
+fn start_just_job(recipe: &str, args: &[&str]) -> Result<String, String> {
+    let argv = kyth_shared::system::just::command_for(recipe, args)
+        .ok_or_else(|| "recipe or argument is not allowlisted".to_string())?;
+    kyth_shared::commands::normalize_command(&argv)
+        .map_err(|_| "recipe produced an invalid command".to_string())?;
+    let job = format!("just-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    just_jobs().lock().map_err(|_| "just job store is unavailable".to_string())?.insert(job.clone(), ("running".into(), format!("Running {recipe}…")));
+    let job_for_thread = job.clone();
+    let recipe_for_thread = recipe.to_string();
+    std::thread::spawn(move || {
+        let mut command = Command::new(&argv[0]);
+        command.args(&argv[1..]);
+        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+        let sanitized = kyth_shared::commands::environment_for(
+            kyth_shared::commands::EnvironmentPolicy::Sanitized,
+            &inherited,
+        );
+        command.env_clear().envs(sanitized);
+        kyth_shared::system::just::configure_command(&mut command);
+        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+            command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+        }
+        let result = kyth_shared::system::process::run_bounded_command(command, Duration::from_secs(900));
+        let (state, detail) = match result {
+            Ok(output) => {
+                let state = if output.status.success() { "complete" } else { "failed" };
+                (state.to_string(), just_output_detail(&recipe_for_thread, &output))
+            }
+            Err(error) => ("failed".to_string(), format!("Could not start {recipe_for_thread}: {error}")),
+        };
+        if let Ok(mut store) = just_jobs().lock() {
+            store.insert(job_for_thread, (state, detail));
+        }
+    });
+    Ok(job)
 }
 
 #[tauri::command]
-pub(crate) fn just_run(recipe: String) -> JustRunResponse {
-    let launch = kyth_shared::system::just::just_launch(&recipe, &[]);
-    JustRunResponse { launched: launch.launched, in_terminal: launch.in_terminal }
+pub(crate) fn just_run(recipe: String) -> Result<String, String> {
+    start_just_job(&recipe, &[])
 }
 
-fn launch_in_terminal(recipe: &str, args: &[&str], then: &str) -> Result<String, String> {
-    if !kyth_shared::system::just::terminal_available() {
-        return Err(format!(
-            "no terminal emulator is installed, so {recipe} cannot ask for its password or show what it did — run `ujust {recipe}` in a terminal instead"
-        ));
-    }
-    if !kyth_shared::system::just::just_launch(recipe, args).launched {
-        return Err(format!("could not start {recipe}"));
-    }
-    Ok(format!("{recipe} is running in its own terminal window — answer the password prompt there, then {then}"))
+#[tauri::command]
+pub(crate) fn just_run_status(job: String) -> crate::InstallStatus {
+    let (state, detail) = just_jobs().lock().ok().and_then(|store| store.get(&job).cloned()).unwrap_or(("unknown".into(), "Recipe job not found.".into()));
+    crate::InstallStatus { id: job, state, detail }
 }
 
 #[tauri::command]
 pub(crate) fn bootc_upgrade() -> Result<String, String> {
-    if std::path::Path::new("/usr/bin/bootc").exists() || std::path::Path::new("/usr/bin/rpm-ostree").exists() {
-        launch_in_terminal("upgrade", &[], "reboot to apply it")
-    } else {
-        Err("bootc not installed".to_string())
-    }
+    if std::path::Path::new("/usr/bin/bootc").exists() || std::path::Path::new("/usr/bin/rpm-ostree").exists() { start_just_job("upgrade", &[]) } else { Err("bootc not installed".to_string()) }
 }
 
 #[tauri::command]
 pub(crate) fn bootc_rollback() -> Result<String, String> {
-    launch_in_terminal("rollback", &[], "reboot into the previous deployment")
+    start_just_job("rollback", &[])
 }
 
 #[tauri::command]
 pub(crate) fn bootc_switch_branch(branch: String) -> Result<String, String> {
     let channel = kyth_shared::system::bootc_policy::switch_channel_arg(&branch)
         .ok_or_else(|| "unknown channel".to_string())?;
-    launch_in_terminal("switch-channel", &[channel], &format!("reboot to activate {channel}"))
+    start_just_job("switch-channel", &[channel])
 }
 
 #[tauri::command]

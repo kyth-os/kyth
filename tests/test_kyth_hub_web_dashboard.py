@@ -29,7 +29,9 @@ GAUGE_CARD = (HUB_WEB / "components" / "GaugeCard.tsx").read_text(encoding="utf-
 PERF_CHART = (HUB_WEB / "components" / "PerformanceChart.tsx").read_text(encoding="utf-8")
 SESSIONS_CHART = (HUB_WEB / "components" / "SessionsChart.tsx").read_text(encoding="utf-8")
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
-MAIN_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+TAURI_SRC = ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src"
+MAIN_RS = (TAURI_SRC / "main.rs").read_text(encoding="utf-8")
+MAIN_RS += "\n" + "\n".join(path.read_text(encoding="utf-8") for path in sorted((TAURI_SRC / "commands").glob("*.rs")))
 GUARDIAN_CARD = (HUB_WEB / "components" / "GuardianHistoryCard.tsx").read_text(encoding="utf-8")
 TOPBAR = (HUB_WEB / "components" / "Topbar.tsx").read_text(encoding="utf-8")
 RECOVERY_RS = (

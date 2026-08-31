@@ -15,11 +15,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{Emitter, Manager};
@@ -158,163 +154,6 @@ fn guardian_control(action: String) -> Result<String, String> {
     Ok(job)
 }
 
-#[derive(Serialize)]
-struct HardwareResponse {
-    gpu_line: Option<String>,
-}
-
-/// Raw first `lspci -nn` GPU line, if any.
-#[tauri::command]
-fn hardware_snapshot() -> HardwareResponse {
-    HardwareResponse { gpu_line: kyth_shared::system::gpu::lspci_gpu_lines().into_iter().next() }
-}
-
-#[derive(Serialize)]
-struct StorageResponse {
-    free_bytes: Option<u64>,
-    total_bytes: Option<u64>,
-}
-
-/// Free/total bytes on the same filesystem Guardian's own storage check
-/// looks at.
-#[tauri::command]
-fn storage_snapshot() -> StorageResponse {
-    match kyth_shared::system::storage::primary_disk_usage() {
-        Some(usage) => StorageResponse { free_bytes: Some(usage.free_bytes), total_bytes: Some(usage.total_bytes) },
-        None => StorageResponse { free_bytes: None, total_bytes: None },
-    }
-}
-
-#[derive(Serialize)]
-struct JustRecipeResponse {
-    name: String,
-    /// Parameters as `just --list` prints them. The section renders a row
-    /// with parameters as text rather than a button, because a launch
-    /// passes no arguments — so this field has to cross the bridge. It did
-    /// not, which left `switch-kernel flavor="fedora"` a one-click switch
-    /// off the CachyOS default under a label that only said its name.
-    params: String,
-    comment: String,
-}
-
-/// `just --list` recipes, parsed like `page_just.py`. The whole list
-/// crosses the bridge (the shipped justfile has ~200); the frontend filters
-/// it and caps its own display at 30 like the Qt page did.
-#[tauri::command]
-fn just_list() -> Vec<JustRecipeResponse> {
-    kyth_shared::system::just::just_list()
-        .into_iter()
-        .map(|r| JustRecipeResponse { name: r.name, params: r.params, comment: r.comment })
-        .collect()
-}
-
-fn just_output_detail(recipe: &str, output: &std::process::Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.trim().is_empty() {
-        if !text.is_empty() { text.push('\n'); }
-        text.push_str(&stderr);
-    }
-    let text = kyth_shared::system::process::strip_ansi(text.trim());
-    let detail: String = text.chars().rev().take(800).collect::<String>().chars().rev().collect();
-    if !detail.trim().is_empty() {
-        return if output.status.success() {
-            format!("{recipe} complete — {}", detail.trim())
-        } else {
-            format!("{recipe} could not be completed — {}", detail.trim())
-        };
-    }
-    if output.status.success() {
-        format!("{recipe} complete.")
-    } else {
-        match output.status.code() {
-            Some(code) => format!("{recipe} could not be completed (exit code {code})."),
-            None => format!("{recipe} stopped before it could complete."),
-        }
-    }
-}
-
-/// Start a validated `just` recipe in the background and retain a concise
-/// captured result for the Hub. Authentication uses KDE's graphical askpass
-/// helper when it is installed, so sudo does not need an interactive tty.
-fn start_just_job(recipe: &str, args: &[&str]) -> Result<String, String> {
-    let argv = kyth_shared::system::just::command_for(recipe, args)
-        .ok_or_else(|| "recipe or argument is not allowlisted".to_string())?;
-    kyth_shared::commands::normalize_command(&argv)
-        .map_err(|_| "recipe produced an invalid command".to_string())?;
-    let job = format!("just-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-    just_jobs().lock().unwrap().insert(job.clone(), ("running".into(), format!("Running {recipe}…")));
-    let job_for_thread = job.clone();
-    let recipe_for_thread = recipe.to_string();
-    std::thread::spawn(move || {
-        let mut command = Command::new(&argv[0]);
-        command.args(&argv[1..]);
-        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
-        let sanitized = kyth_shared::commands::environment_for(
-            kyth_shared::commands::EnvironmentPolicy::Sanitized,
-            &inherited,
-        );
-        command.env_clear().envs(sanitized);
-        kyth_shared::system::just::configure_command(&mut command);
-        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
-            command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
-        }
-        let result = kyth_shared::system::process::run_bounded_command(command, Duration::from_secs(900));
-        let (state, detail) = match result {
-            Ok(output) => {
-                let state = if output.status.success() { "complete" } else { "failed" };
-                (state.to_string(), just_output_detail(&recipe_for_thread, &output))
-            }
-            Err(err) => ("failed".to_string(), format!("Could not start {recipe_for_thread}: {err}")),
-        };
-        just_jobs().lock().unwrap().insert(job_for_thread, (state, detail));
-    });
-    Ok(job)
-}
-
-/// Start a no-argument recipe. The process is owned by the Hub and its
-/// progress/result is returned through `just_run_status`.
-#[tauri::command]
-fn just_run(recipe: String) -> Result<String, String> {
-    start_just_job(&recipe, &[])
-}
-
-#[tauri::command]
-fn just_run_status(job: String) -> InstallStatus {
-    let (state, detail) = just_jobs().lock().unwrap().get(&job).cloned().unwrap_or(("unknown".into(), "Recipe job not found.".into()));
-    InstallStatus { id: job, state, detail }
-}
-
-/// Phase 2 mutating: bootc upgrade/rollback/switch — polkit-guarded via pkexec/systemd-run allowlist.
-#[tauri::command]
-fn bootc_upgrade() -> Result<String, String> {
-    sanitize_upgrade()?;
-    start_just_job("upgrade", &[])
-}
-#[tauri::command]
-fn bootc_rollback() -> Result<String, String> {
-    start_just_job("rollback", &[])
-}
-#[tauri::command]
-fn bootc_switch_branch(branch: String) -> Result<String, String> {
-    // Allowlist, then spawn the same `just switch-channel` recipe a user
-    // would run by hand — the recipe stages the switch via kyth-bootc-guard
-    // and does its own sudo prompt, so this matches how bootc_upgrade and
-    // bootc_rollback delegate rather than touching bootc directly.
-    //
-    // switch_channel_arg returns a fixed literal, never the caller's
-    // string, so nothing user-controlled reaches the argv.
-    let channel = kyth_shared::system::bootc_policy::switch_channel_arg(&branch)
-        .ok_or_else(|| "unknown channel".to_string())?;
-    // Through the validated just runner rather than a raw Command, so this
-    // gets the justfile resolution `ujust` performs without opening a
-    // terminal window.
-    start_just_job("switch-channel", &[channel])
-}
-fn sanitize_upgrade() -> Result<(), String> {
-    // allowlist: only expose when bootc binary present; polkit prompt happens in the spawned just recipe (pkexec inside recipe)
-    if std::path::Path::new("/usr/bin/bootc").exists() || std::path::Path::new("/usr/bin/rpm-ostree").exists() { Ok(()) } else { Err("bootc not installed".to_string()) }
-}
 /// Phase 2: guardian execute_recipe (Repair/Diagnostics mutating)
 #[tauri::command]
 fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
@@ -378,6 +217,7 @@ fn memory_pressure() -> MemoryPressureResponse {
 }
 #[tauri::command]
 fn snapshot_count() -> usize { kyth_shared::system::snapshot::snapshot_count() }
+
 #[tauri::command]
 fn snapshot_timeline(limit: Option<usize>) -> Vec<kyth_shared::system::snapshot::SnapshotRow> {
     kyth_shared::system::snapshot::snapshot_timeline(limit.unwrap_or(20).min(100))
@@ -507,8 +347,7 @@ fn uninstall_flatpak(app_id: String) -> Result<String, String> {
         let result: Result<(bool, String), String> = if scope == "system" {
             privileged_flatpak_uninstall(&app_id).map(|detail| (true, detail))
         } else {
-            let argv = vec!["flatpak".into(), "uninstall".into(), "--user".into(), "-y".into(), app_id.clone()];
-            kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(600)).map(|output| {
+            std::process::Command::new("flatpak").args(["uninstall", "--user", "-y", &app_id]).output().map(|output| {
                 if output.status.success() { (true, format!("Uninstalled {app_id}.")) }
                 else { (false, String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect()) }
             }).map_err(|err| err.to_string())
@@ -545,11 +384,7 @@ fn launch_appimage(path: String) -> Result<String, String> {
 }
 
 #[derive(serde::Serialize)]
-pub(crate) struct InstallStatus {
-    id: String,
-    state: String,
-    detail: String,
-}
+pub(crate) struct InstallStatus { id: String, state: String, detail: String }
 
 #[tauri::command]
 fn install_flatpak(app_id: String) -> Result<String, String> {
@@ -558,8 +393,7 @@ fn install_flatpak(app_id: String) -> Result<String, String> {
     app_installs().lock().unwrap().insert(job.clone(), ("running".into(), format!("Installing {app_id}…")));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
-        let argv = vec!["flatpak".into(), "install".into(), "--user".into(), "-y".into(), "flathub".into(), app_id.clone()];
-        let result = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(600));
+        let result = std::process::Command::new("flatpak").args(["install", "--user", "-y", "flathub", &app_id]).output();
         let (state, detail) = match result {
             Ok(output) if output.status.success() => ("complete", "Installation complete.".to_string()),
             Ok(output) => ("failed", String::from_utf8_lossy(&output.stderr).trim().chars().take(400).collect()),
@@ -617,13 +451,7 @@ fn amd64_manifest_entry(manifest: serde_json::Value) -> Option<serde_json::Value
 fn ntfs_devices() -> Vec<serde_json::Value> { kyth_shared::system::drives::get_ntfs_devices() }
 
 #[tauri::command]
-fn boot_runtime_checks() -> Vec<BootRuntimeCheckResponse> { kyth_shared::system::boot_runtime::boot_runtime_checks().into_iter().map(|c| BootRuntimeCheckResponse{name:c.name, passed:c.passed, detail:c.detail}).collect() }
-#[derive(serde::Serialize)]
-struct BootRuntimeCheckResponse { name: String, passed: bool, detail: String, }
-#[tauri::command]
 fn desktop_stack_checks() -> Vec<kyth_shared::system::desktop_stack::StackCheck> { kyth_shared::system::desktop_stack::desktop_stack_checks() }
-#[tauri::command]
-fn updater_available() -> bool { kyth_shared::system::updater::updater_available() }
 
 /// Opens a prefilled `kyth-os/kyth` issue in the user's browser — the
 /// Feedback section's actual send path. Host and repo are fixed here
@@ -632,8 +460,8 @@ fn updater_available() -> bool { kyth_shared::system::updater::updater_available
 /// so this can't be pointed at an arbitrary URL.
 #[tauri::command]
 fn open_feedback_issue(title: String, body: String) -> Result<String, String> {
-    // Keep the public-report boundary safe even if a future caller bypasses
-    // the retired Python Feedback page's scrub step.
+    // Scrub logs before they cross the public-report boundary, even if a
+    // future caller bypasses the retired Python Feedback page's scrub step.
     let body = kyth_shared::diagnostics_scrub::scrub_logs(&body);
     let url = kyth_shared::diagnostic_report::github_issue_url(
         "https://github.com/kyth-os/kyth",
@@ -679,7 +507,6 @@ fn main() {
         }))
         .manage(PendingPage(Mutex::new(initial_page)))
         .invoke_handler(tauri::generate_handler![
-            commands::dashboard::probe_backend, guardian_snapshot, guardian_check, guardian_check_status, guardian_control, commands::privilege::privileged_action, commands::privilege::privileged_action_status, commands::dashboard::hardware_snapshot, commands::dashboard::storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, appstream_search, appimage_list, installed_flatpaks, uninstall_flatpak, make_appimage_executable, import_appimage, launch_appimage, install_flatpak, install_status, protondb_lookup_many, anti_cheat_table, take_pending_page, commands::updates::just_list, commands::updates::just_run,
             commands::dashboard::probe_backend, guardian_snapshot, guardian_check, guardian_check_status, guardian_control, commands::privilege::privileged_action, commands::privilege::privileged_action_status, commands::dashboard::hardware_snapshot, commands::dashboard::storage_snapshot, telemetry_recent, gaming_library, starter_packs, familiar_apps, appstream_search, appimage_list, installed_flatpaks, uninstall_flatpak, make_appimage_executable, import_appimage, launch_appimage, install_flatpak, install_status, protondb_lookup_many, anti_cheat_table, take_pending_page, commands::updates::just_list, commands::updates::just_run,
             commands::updates::bootc_upgrade, commands::updates::bootc_rollback, commands::updates::bootc_switch_branch, guardian_execute_recipe, commands::updates::branch_display_name, commands::updates::update_availability_view, mok_status, fonts_ready, mesa_version, mesa_overlay_dry_run, smb_browse, smb_mount_command, memory_pressure, snapshot_count, snapshot_timeline, gaming_slice_command, is_gaming_slice_available, cloud_oauth_status, rclone_oauth_command, ipp_discover, printer_setup_command, btrfs_health, loaded_kernel_modules, pci_devices_by_class, controllers_detect, hardware_view_summary, network_identity, commands::updates::pending_updates_summary, rollback_command, available_audio_presets, apply_pipewire_quantum, deployment_history, commands::dashboard::recovery_status, commands::updates::update_status, is_live_session, strip_ansi, disk_write_bytes, firmware_updates_count, firmware_devices_command, plasma_presets, apply_plasma_preset, amd64_manifest_entry, commands::updates::collect_availability, ntfs_devices, commands::dashboard::boot_runtime_checks, desktop_stack_checks, commands::updates::updater_available, commands::dashboard::current_user_name, open_feedback_issue
         ])

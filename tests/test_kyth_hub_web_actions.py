@@ -19,7 +19,12 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
-MAIN_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+TAURI_SRC = ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src"
+MAIN_RS = (TAURI_SRC / "main.rs").read_text(encoding="utf-8")
+# Commands are intentionally split into domain modules. Include those source
+# files in static checks that verify command definitions, while keeping the
+# generate_handler! parsing against main.rs itself.
+MAIN_RS += "\n" + "\n".join(path.read_text(encoding="utf-8") for path in sorted((TAURI_SRC / "commands").glob("*.rs")))
 NATIVE_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "native_main.rs").read_text(encoding="utf-8")
 NATIVE_SLINT = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "ui" / "hub.slint").read_text(encoding="utf-8")
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
@@ -201,7 +206,7 @@ class HubWebCoverageTests(unittest.TestCase):
     def test_every_bridge_command_has_a_wrapper_or_a_documented_exemption(self):
         handler = re.search(r"generate_handler!\[(.*?)\]", MAIN_RS, re.S)
         self.assertIsNotNone(handler, "generate_handler! block not found")
-        commands = [c.strip() for c in handler.group(1).replace("\n", " ").split(",") if c.strip()]
+        commands = [c.strip().rsplit("::", 1)[-1] for c in handler.group(1).replace("\n", " ").split(",") if c.strip()]
         self.assertGreater(len(commands), 50, "command list not parsed — did main.rs change shape?")
         missing = [
             command
@@ -217,7 +222,7 @@ class HubWebCoverageTests(unittest.TestCase):
     def test_exemptions_still_name_real_commands(self):
         # A stale exemption would silently hide a genuinely orphaned command.
         handler = re.search(r"generate_handler!\[(.*?)\]", MAIN_RS, re.S).group(1)
-        commands = {c.strip() for c in handler.replace("\n", " ").split(",") if c.strip()}
+        commands = {c.strip().rsplit("::", 1)[-1] for c in handler.replace("\n", " ").split(",") if c.strip()}
         self.assertEqual(set(), set(UNWRAPPED_COMMANDS) - commands)
 
     def test_every_section_key_has_a_component(self):
