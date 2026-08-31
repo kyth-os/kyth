@@ -23,6 +23,35 @@ pub(crate) struct InstallStatus {
     detail: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct NativeActionResult {
+    id: String,
+    state: String,
+    detail: String,
+    job_id: Option<String>,
+}
+
+fn publish_action(window: &HubWindow, result: NativeActionResult) {
+    window.set_action_id(SharedString::from(result.id));
+    window.set_action_state(SharedString::from(result.state.as_str()));
+    window.set_action_job_id(SharedString::from(result.job_id.unwrap_or_default()));
+    window.set_action_busy(result.state == "running");
+    window.set_action_status(SharedString::from(result.detail));
+}
+
+fn action_started(id: &str, detail: &str) -> NativeActionResult {
+    NativeActionResult {
+        id: id.to_string(),
+        state: "running".to_string(),
+        detail: detail.to_string(),
+        job_id: Some(format!("native-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos())),
+    }
+}
+
+fn action_finished(id: &str, detail: String, success: bool) -> NativeActionResult {
+    NativeActionResult { id: id.to_string(), state: if success { "complete" } else { "failed" }.to_string(), detail, job_id: None }
+}
+
 static PENDING_CONFIRMATION: OnceLock<Mutex<Option<(String, std::time::Instant)>>> = OnceLock::new();
 
 fn confirmation_store() -> &'static Mutex<Option<(String, std::time::Instant)>> {
@@ -43,6 +72,12 @@ fn requires_confirmation(action: &str) -> bool {
             | "install-vscode"
             | "install-boxbuddy"
             | "install-jetbrains-toolbox"
+            | "install-steam"
+            | "install-heroic"
+            | "install-lutris"
+            | "install-bottles"
+            | "install-obs"
+            | "install-umu"
             | "install-pack-gaming"
             | "install-pack-creator"
             | "install-pack-everyday"
@@ -53,6 +88,9 @@ fn requires_confirmation(action: &str) -> bool {
             | "fix-dualboot-clock"
             | "setup-boot-windows-steam"
             | "reclaim-windows"
+            | "game-boost"
+            | "enable-obs-capture"
+            | "preheat-shaders"
             | "switch-channel-stable"
             | "switch-channel-testing"
             | "switch-kernel-cachy"
@@ -328,7 +366,7 @@ fn section_action(section: &str) -> Option<(&'static str, &'static str)> {
         "Plasma Wayland" => Some(("desktop-stack-status", "Check desktop stack")),
         "Diagnostics" => Some(("system-audit", "Run full system audit")),
         "Repair" => Some(("update-health", "Check update health")),
-        "Recovery" => Some(("update-health", "Update health report")),
+        "Recovery" => Some(("recovery-status", "Refresh recovery state")),
         "NVIDIA" => Some(("nvidia-status", "Read driver status")),
         "Move Files" => Some(("windows-verify", "Check Windows install")),
         "Cloud Storage" | "Network Shares" | "VPN" => Some(("network-status", "Refresh network status")),
@@ -849,6 +887,24 @@ fn run_cloud_action(weak: Weak<HubWindow>, remote: String) {
     });
 }
 
+fn run_proton_lookup(weak: Weak<HubWindow>, query: String) {
+    let ids = query.split(|c: char| c == ',' || c.is_whitespace()).filter(|id| !id.is_empty()).take(20).map(str::to_string).collect::<Vec<_>>();
+    if ids.is_empty() || ids.iter().any(|id| id.len() > 12 || !id.chars().all(|c| c.is_ascii_digit())) {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_proton_results(SharedString::from("Enter one or more numeric Steam app IDs."));
+        });
+        return;
+    }
+    let status_weak = weak.clone();
+    std::thread::spawn(move || {
+        let results = kyth_shared::system::gaming_compat::protondb_lookup_many(&ids);
+        let text = if results.is_empty() { "No ProtonDB reports were found.".to_string() } else { results.iter().map(|result| format!("{} · {}", result.app_id, result.detail)).collect::<Vec<_>>().join("\n") };
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_proton_results(SharedString::from(text));
+        });
+    });
+}
+
 fn run_config_action(weak: Weak<HubWindow>, action: String) {
     if !confirmation_granted(&action) {
         let status_weak = weak.clone();
@@ -939,6 +995,21 @@ fn recipes_text() -> String {
         })
         .collect::<Vec<_>>();
     format!("Recipes · {} available (showing up to 30)\n{}", recipes.len(), rows.join("\n"))
+}
+
+fn recovery_details_text() -> String {
+    let recovery = kyth_shared::system::recovery_status::get_recovery_status();
+    let (filesystem, filesystem_detail) = kyth_shared::system::btrfs_status::btrfs_health_summary();
+    let (memory, memory_detail) = kyth_shared::system::memory_pressure::memory_pressure_status();
+    let timeline = kyth_shared::system::snapshot::snapshot_timeline(6);
+    let history = timeline.iter().map(|item| format!("{}: {}", item.row_type, item.description)).collect::<Vec<_>>().join(" · ");
+    format!(
+        "Recovery · staged={} · rollback={} · quarantine={}\nFilesystem · {filesystem}: {filesystem_detail}\nMemory · {memory}: {memory_detail}\nTimeline · {}",
+        recovery.has_staged,
+        recovery.has_rollback,
+        if recovery.quarantined_digest.is_empty() { "clear" } else { "attention" },
+        if history.is_empty() { "no snapshot/deployment entries" } else { history.as_str() },
+    )
 }
 
 fn initial_page() -> String {
@@ -1105,7 +1176,7 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
     if matches!(
         action.as_str(),
         "desktop-stack-status" | "network-status" | "deployment-history" | "kernel-status" | "channel-status"
-            | "refresh-updates" | "check-updates" | "software-inventory"
+            | "refresh-updates" | "check-updates" | "software-inventory" | "recovery-status"
     ) {
         let Some(window) = weak.upgrade() else { return; };
         let page = window.get_selected_page().to_string();
@@ -1125,6 +1196,7 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
                     format!("Update availability check · {}", status.detail)
                 }
                 "software-inventory" => "Software inventory refreshed.".to_string(),
+                "recovery-status" => "Recovery state refreshed.".to_string(),
                 _ => "Native status refreshed.".to_string(),
             };
             let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
@@ -1172,6 +1244,15 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         "install-vscode" => ("install-vscode", "Installing VS Code…"),
         "install-boxbuddy" => ("install-boxbuddy", "Installing BoxBuddy…"),
         "install-jetbrains-toolbox" => ("install-jetbrains-toolbox", "Installing JetBrains Toolbox…"),
+        "install-steam" => ("install-steam", "Installing Steam…"),
+        "install-heroic" => ("install-heroic", "Installing Heroic…"),
+        "install-lutris" => ("install-lutris", "Installing Lutris…"),
+        "install-bottles" => ("install-bottles", "Installing Bottles…"),
+        "install-obs" => ("install-obs", "Installing OBS Studio…"),
+        "install-umu" => ("install-umu", "Installing UMU…"),
+        "game-boost" => ("game-boost", "Applying game boost…"),
+        "enable-obs-capture" => ("enable-obs-capture", "Enabling OBS capture…"),
+        "preheat-shaders" => ("preheat-shaders", "Preheating shaders…"),
         "setup-tailscale" => ("setup-tailscale", "Setting up Tailscale…"),
         "enroll-secureboot" => ("enroll-secureboot", "Enrolling Secure Boot key…"),
         "install-nvidia-driver" => ("install-nvidia-driver", "Installing NVIDIA driver…"),
@@ -1229,12 +1310,12 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         });
         return;
     };
+    let action_id = action.clone();
     let _ = slint::invoke_from_event_loop({
         let weak = weak.clone();
         move || {
             if let Some(window) = weak.upgrade() {
-                window.set_action_busy(true);
-                window.set_action_status(SharedString::from(label));
+                publish_action(&window, action_started(&action_id, label));
             }
         }
     });
@@ -1261,10 +1342,10 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
             Ok(output) => page_action_detail(recipe, &output),
             Err(error) => format!("{recipe} could not start · {error}"),
         };
+        let success = !detail.contains(" failed") && !detail.contains(" could not start");
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = weak.upgrade() {
-                window.set_action_busy(false);
-                window.set_action_status(SharedString::from(detail));
+                publish_action(&window, action_finished(recipe, detail, success));
             }
         });
         refresh_status(refresh_weak, refresh_page);
@@ -1308,6 +1389,7 @@ fn refresh_section(weak: Weak<HubWindow>, section: String) {
         let software = (section == "App Store").then(software_catalog_text).unwrap_or_default();
         let guardian = (section == "Guardian").then(guardian_status_text).unwrap_or_default();
         let recipes = (section == "Recipes").then(recipes_text).unwrap_or_default();
+        let recovery = matches!(section.as_str(), "Repair" | "Recovery").then(recovery_details_text).unwrap_or_default();
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = weak.upgrade() {
                 if window.get_selected_section().as_str() != section {
@@ -1320,6 +1402,7 @@ fn refresh_section(weak: Weak<HubWindow>, section: String) {
                 window.set_software_catalog(SharedString::from(software));
                 window.set_guardian_status(SharedString::from(guardian));
                 window.set_recipes_text(SharedString::from(recipes));
+                window.set_recovery_details(SharedString::from(recovery));
             }
         });
     });
@@ -1347,15 +1430,20 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_next_action_text(SharedString::from("Suggested next step · Reading local policy…"));
     window.set_status_text(SharedString::from("Reading system status…"));
     window.set_action_status(SharedString::from(""));
+    window.set_action_state(SharedString::from("idle"));
+    window.set_action_id(SharedString::from(""));
+    window.set_action_job_id(SharedString::from(""));
     window.set_action_busy(false);
     window.set_status_badge(SharedString::from("CHECKING"));
     window.set_section_status(SharedString::from("Reading section status…"));
     window.set_section_detail(SharedString::from("Native section status is read in the background."));
     window.set_hardware_capabilities(SharedString::from("Capabilities · Reading hardware view…"));
     window.set_gaming_launchers(SharedString::from("Launchers · Reading gaming inventory…"));
+    window.set_proton_results(SharedString::from(""));
     window.set_software_catalog(SharedString::from("Catalog · Reading software inventory…"));
     window.set_guardian_status(SharedString::from("Guardian · Reading recommendations…"));
     window.set_recipes_text(SharedString::from("Recipes · Reading available actions…"));
+    window.set_recovery_details(SharedString::from(""));
     window.set_appstream_install_id(SharedString::from(""));
     window.set_appstream_install_label(SharedString::from(""));
     window.set_flatpak_id(SharedString::from(""));
@@ -1406,6 +1494,10 @@ fn main() -> Result<(), slint::PlatformError> {
     window.on_cloud_action(move |remote| {
         run_cloud_action(cloud_weak.clone(), remote.to_string());
     });
+    let proton_weak = window.as_weak();
+    window.on_proton_lookup(move |query| {
+        run_proton_lookup(proton_weak.clone(), query.to_string());
+    });
     let feedback_weak = window.as_weak();
     window.on_open_feedback(move |payload| {
         run_feedback(feedback_weak.clone(), payload.to_string());
@@ -1443,15 +1535,20 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_next_action_text(SharedString::from("Suggested next step · Reading local policy…"));
             window.set_status_text(SharedString::from("Reading system status…"));
             window.set_action_status(SharedString::from(""));
+            window.set_action_state(SharedString::from("idle"));
+            window.set_action_id(SharedString::from(""));
+            window.set_action_job_id(SharedString::from(""));
             window.set_action_busy(false);
             window.set_status_badge(SharedString::from("CHECKING"));
             window.set_section_status(SharedString::from("Reading section status…"));
             window.set_section_detail(SharedString::from("Native section status is read in the background."));
             window.set_hardware_capabilities(SharedString::from("Capabilities · Reading hardware view…"));
             window.set_gaming_launchers(SharedString::from("Launchers · Reading gaming inventory…"));
+            window.set_proton_results(SharedString::from(""));
             window.set_software_catalog(SharedString::from("Catalog · Reading software inventory…"));
             window.set_guardian_status(SharedString::from("Guardian · Reading recommendations…"));
             window.set_recipes_text(SharedString::from("Recipes · Reading available actions…"));
+            window.set_recovery_details(SharedString::from(""));
             window.set_appstream_install_id(SharedString::from(""));
             window.set_appstream_install_label(SharedString::from(""));
             window.set_flatpak_id(SharedString::from(""));
@@ -1468,13 +1565,18 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_section_detail(SharedString::from("Native section status is read in the background."));
             window.set_hardware_capabilities(SharedString::from("Capabilities · Reading hardware view…"));
             window.set_gaming_launchers(SharedString::from("Launchers · Reading gaming inventory…"));
+            window.set_proton_results(SharedString::from(""));
             window.set_software_catalog(SharedString::from("Catalog · Reading software inventory…"));
             window.set_guardian_status(SharedString::from("Guardian · Reading recommendations…"));
             window.set_recipes_text(SharedString::from("Recipes · Reading available actions…"));
+            window.set_recovery_details(SharedString::from(""));
             window.set_appstream_install_id(SharedString::from(""));
             window.set_appstream_install_label(SharedString::from(""));
             window.set_flatpak_id(SharedString::from(""));
             window.set_action_status(SharedString::from(""));
+            window.set_action_state(SharedString::from("idle"));
+            window.set_action_id(SharedString::from(""));
+            window.set_action_job_id(SharedString::from(""));
             window.set_action_busy(false);
             refresh_section(section_weak.clone(), section.to_string());
         }

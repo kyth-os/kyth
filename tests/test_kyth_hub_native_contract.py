@@ -42,6 +42,13 @@ class NativeHubContractTests(unittest.TestCase):
         self.assertIn("confirmation_granted", self.native)
         self.assertIn("fixed_assignments", self.native)
 
+    def test_recipe_runner_publishes_structured_lifecycle_state(self):
+        for field in ("action-state", "action-id", "action-job-id"):
+            self.assertIn(field, self.slint)
+        for state in ("running", "complete", "failed"):
+            self.assertIn(f'"{state}"', self.native)
+        self.assertIn("NativeActionResult", self.native)
+
 
 if __name__ == "__main__":
     unittest.main()

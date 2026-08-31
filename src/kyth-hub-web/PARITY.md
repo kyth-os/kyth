@@ -52,11 +52,12 @@ workflows that can be safely represented without a generic command bridge:
 updates and rollback, Guardian safe repair, Flatpak search/install, gaming and
 balanced performance profiles, firmware update, Office fonts, Windows
 verification, save-migration tooling, Tailscale setup, AppImage import/launch,
-user-scoped Flatpak removal, curated starter packs, feedback report generation,
+user-scoped Flatpak removal, curated starter packs, ProtonDB lookup, feedback report generation,
 BitLocker unlock, SMB browse/mount, and the read-only
 desktop/network/deployment/kernel/channel refresh actions. System-changing
-native actions use a two-step confirmation gate and report bounded completion
-or failure inline. Remaining parity work is richer dynamic presentation and
+native actions use a two-step confirmation gate and the core recipe runner now
+publishes structured running/complete/failed state with a native job id, while
+reporting bounded completion or failure inline. Remaining parity work is richer dynamic presentation and
 selection: cloud OAuth terminal handoff, installed-app/AppImage inventories,
 arbitrary recipe selection, and deeper per-section details. All secret-bearing
 inputs are validated and kept out of status text.

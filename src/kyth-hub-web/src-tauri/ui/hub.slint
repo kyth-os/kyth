@@ -23,6 +23,8 @@ export component HubWindow inherits Window {
     in-out property <string> section-detail: "Native section status is read in the background.";
     in-out property <string> hardware-capabilities: "Capabilities · Reading hardware view…";
     in-out property <string> gaming-launchers: "Launchers · Reading gaming inventory…";
+    in-out property <string> proton-query: "";
+    in-out property <string> proton-results: "";
     in-out property <string> software-catalog: "Catalog · Reading software inventory…";
     in-out property <string> appstream-query: "";
     in-out property <string> appstream-results: "Search the Flatpak catalog from the native Apps surface.";
@@ -38,6 +40,10 @@ export component HubWindow inherits Window {
     in-out property <string> smb-share: "";
     in-out property <string> guardian-status: "Guardian · Reading recommendations…";
     in-out property <string> recipes-text: "Recipes · Reading available actions…";
+    in-out property <string> recovery-details: "";
+    in-out property <string> action-state: "idle";
+    in-out property <string> action-id: "";
+    in-out property <string> action-job-id: "";
     in-out property <string> section-one: "Recovery";
     in-out property <string> section-two: "Performance";
     in-out property <string> section-three: "Hardware";
@@ -65,6 +71,7 @@ export component HubWindow inherits Window {
     callback bitlocker-unlock(string);
     callback smb-action(string);
     callback cloud-action(string);
+    callback proton-lookup(string);
 
     Rectangle {
         background: #0b1020;
@@ -182,6 +189,35 @@ export component HubWindow inherits Window {
                         Button { text: "Gaming mode"; enabled: !action-busy; clicked => { page-action("gaming-mode"); } }
                         Button { text: "Balanced mode"; enabled: !action-busy; clicked => { page-action("balanced-mode"); } }
                         Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Play" && selected-section == "Gaming";
+                        spacing: 8px;
+                        LineEdit { horizontal-stretch: 1; text <=> proton-query; placeholder-text: "Steam app IDs (e.g. 730, 570)"; }
+                        Button { text: "ProtonDB lookup"; enabled: !action-busy; clicked => { proton-lookup(proton-query); } }
+                        Text { text: proton-results; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Play" && selected-section == "Gaming";
+                        spacing: 8px;
+                        Text { text: "Launchers"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Steam"; enabled: !action-busy; clicked => { page-action("install-steam"); } }
+                        Button { text: "Heroic"; enabled: !action-busy; clicked => { page-action("install-heroic"); } }
+                        Button { text: "Lutris"; enabled: !action-busy; clicked => { page-action("install-lutris"); } }
+                        Button { text: "Bottles"; enabled: !action-busy; clicked => { page-action("install-bottles"); } }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Play" && selected-section == "Gaming";
+                        spacing: 8px;
+                        Text { text: "Gaming tools"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Game boost"; enabled: !action-busy; clicked => { page-action("game-boost"); } }
+                        Button { text: "Preheat shaders"; enabled: !action-busy; clicked => { page-action("preheat-shaders"); } }
+                        Button { text: "OBS capture"; enabled: !action-busy; clicked => { page-action("enable-obs-capture"); } }
+                        Button { text: "Install OBS"; enabled: !action-busy; clicked => { page-action("install-obs"); } }
+                        Button { text: "Install UMU"; enabled: !action-busy; clicked => { page-action("install-umu"); } }
                     }
 
                     HorizontalLayout {
@@ -328,6 +364,7 @@ export component HubWindow inherits Window {
                             }
                             Text { text: section-status; color: #f5f7ff; font-size: 17px; font-weight: 600; wrap: word-wrap; }
                             Text { text: section-detail; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
+                            Text { visible: selected-page == "This PC" && (selected-section == "Repair" || selected-section == "Recovery"); text: recovery-details; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
                             Text { visible: selected-page == "This PC" && selected-section == "Hardware"; text: hardware-capabilities; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
                             Text { visible: selected-page == "Play" && selected-section == "Gaming"; text: gaming-launchers; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
                             Text { visible: selected-page == "Apps" && selected-section == "App Store"; text: software-catalog; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
