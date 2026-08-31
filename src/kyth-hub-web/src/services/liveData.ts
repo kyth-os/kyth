@@ -639,6 +639,17 @@ export async function fetchCloudOauthStatus(): Promise<{ ok: boolean; detail: st
   if (!inTauriShell()) return null;
   try { return await invoke<{ ok: boolean; detail: string }>("cloud_oauth_status"); } catch { return null; }
 }
+export interface CloudSyncRemote {
+  name: string;
+  service: string;
+  folder: string;
+  last_sync: number | null;
+  last_ok: boolean | null;
+}
+export async function fetchCloudSyncRemotes(): Promise<CloudSyncRemote[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<CloudSyncRemote[]>("cloud_sync_remotes"); } catch { return null; }
+}
 export async function openCloudStorageApp(): Promise<string> {
   if (!inTauriShell()) throw new Error("The full Cloud Storage workflow is available from the installed Kyth Hub.");
   return await invoke<string>("open_cloud_storage_app");

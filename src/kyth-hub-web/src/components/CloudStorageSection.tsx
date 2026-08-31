@@ -3,10 +3,12 @@ import type { HubSection } from "../data/hubSections";
 import {
   commandText,
   fetchCloudOauthStatus,
+  fetchCloudSyncRemotes,
   fetchNetworkSummary,
   fetchNetworkSummaryLive,
   fetchRcloneOauthCommand,
   openCloudStorageApp,
+  type CloudSyncRemote,
   type NetworkSummary,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
@@ -28,16 +30,18 @@ const REMOTE_LABEL: Record<string, string> = {
 export function CloudStorageSection({ section }: { section: HubSection }) {
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
   const [oauth, setOauth] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [syncRemotes, setSyncRemotes] = useState<CloudSyncRemote[] | null>(null);
   const [setupCmd, setSetupCmd] = useState<{ remote: string; text: string | null } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchNetworkSummary(), fetchCloudOauthStatus()]).then(([s, o]) => {
+    Promise.all([fetchNetworkSummary(), fetchCloudOauthStatus(), fetchCloudSyncRemotes()]).then(([s, o, remotes]) => {
       if (!cancelled) {
         setSummary(s);
         setOauth(o);
+        setSyncRemotes(remotes);
         setLoaded(true);
       }
     });
@@ -67,6 +71,19 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
               </span>
               {oauth.detail}
             </p>
+          )}
+          {syncRemotes && syncRemotes.length > 0 && (
+            <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+              <p className="card-copy" style={{ fontSize: 12, margin: 0 }}>Saved sync folders</p>
+              {syncRemotes.map((remote) => (
+                <div key={remote.name} className="card-copy" style={{ fontSize: 12 }}>
+                  <strong>{remote.name}</strong> ({REMOTE_LABEL[remote.service] ?? remote.service}) → {remote.folder}
+                  {remote.last_sync !== null && (
+                    <> · {remote.last_ok === false ? "last sync failed" : "last sync completed"}</>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </div>
       ) : (
@@ -103,10 +120,11 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
             disabled={busy !== null}
             onClick={() =>
               run("refresh", "Re-reading cloud mounts…", async () => {
-                const [fresh, freshOauth] = await Promise.all([fetchNetworkSummaryLive(), fetchCloudOauthStatus()]);
-                if (!fresh && !freshOauth) return "Not available outside the Hub shell.";
+                const [fresh, freshOauth, freshRemotes] = await Promise.all([fetchNetworkSummaryLive(), fetchCloudOauthStatus(), fetchCloudSyncRemotes()]);
+                if (!fresh && !freshOauth && !freshRemotes) return "Not available outside the Hub shell.";
                 if (fresh) setSummary(fresh);
                 if (freshOauth) setOauth(freshOauth);
+                if (freshRemotes) setSyncRemotes(freshRemotes);
                 return `${fresh?.cloudProviders.length ?? 0} provider(s) connected.`;
               })
             }

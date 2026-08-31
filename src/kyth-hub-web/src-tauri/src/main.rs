@@ -447,6 +447,72 @@ fn rclone_oauth_command(remote: String) -> Vec<String> {
     kyth_shared::system::cloud_oauth::rclone_oauth_command(&remote)
 }
 
+/// The legacy Cloud Storage page owns OAuth tokens and rclone execution.
+/// The Hub may safely surface this *non-secret* sync metadata so users can
+/// see which local folders are connected without opening the legacy page.
+#[derive(Serialize)]
+struct CloudSyncRemote {
+    name: String,
+    service: String,
+    folder: String,
+    last_sync: Option<f64>,
+    last_ok: Option<bool>,
+}
+
+fn cloud_sync_config_path() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| "could not locate the current user's home directory".to_string())?;
+    Ok(PathBuf::from(home).join(".config/kyth-cloud-sync.json"))
+}
+
+fn valid_cloud_sync_remote(name: &str, info: &serde_json::Value) -> Option<CloudSyncRemote> {
+    let valid_text = |value: &str, maximum: usize| {
+        !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
+    };
+    if !valid_text(name, 64) {
+        return None;
+    }
+    let object = info.as_object()?;
+    let service = object.get("service")?.as_str()?;
+    let folder = object.get("folder")?.as_str()?;
+    if !matches!(service, "drive" | "onedrive" | "dropbox") || !valid_text(folder, 4096) {
+        return None;
+    }
+    Some(CloudSyncRemote {
+        name: name.to_string(),
+        service: service.to_string(),
+        folder: folder.to_string(),
+        last_sync: object.get("last_sync").and_then(serde_json::Value::as_f64),
+        last_ok: object.get("last_ok").and_then(serde_json::Value::as_bool),
+    })
+}
+
+#[tauri::command]
+fn cloud_sync_remotes() -> Vec<CloudSyncRemote> {
+    let Ok(path) = cloud_sync_config_path() else {
+        return Vec::new();
+    };
+    // Do not follow an attacker-controlled link from the user config dir.
+    let Ok(metadata) = fs::symlink_metadata(&path) else {
+        return Vec::new();
+    };
+    if !metadata.is_file() || metadata.len() > 128 * 1024 {
+        return Vec::new();
+    }
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(entries) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&raw) else {
+        return Vec::new();
+    };
+    let mut remotes: Vec<_> = entries
+        .iter()
+        .filter_map(|(name, info)| valid_cloud_sync_remote(name, info))
+        .collect();
+    remotes.sort_by(|left, right| left.name.cmp(&right.name));
+    remotes
+}
+
 #[tauri::command]
 fn open_cloud_storage_app() -> Result<String, String> {
     std::process::Command::new("/usr/bin/kyth-welcome-launch")
@@ -1011,6 +1077,7 @@ fn main() {
             is_gaming_slice_available,
             cloud_oauth_status,
             rclone_oauth_command,
+            cloud_sync_remotes,
             open_cloud_storage_app,
             open_move_files_app,
             open_network_shares_app,

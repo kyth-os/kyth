@@ -194,10 +194,12 @@ class BridgeFieldTests(unittest.TestCase):
         shares = (HUB_WEB / "components" / "NetworkSharesSection.tsx").read_text(encoding="utf-8")
         for command in ("migration_readiness", "open_cloud_storage_app", "open_move_files_app", "open_network_shares_app"):
             self.assertIn(command, MAIN_RS)
-        for wrapper in ("fetchMigrationReadiness", "openCloudStorageApp", "openMoveFilesApp", "openNetworkSharesApp"):
+        for wrapper in ("fetchMigrationReadiness", "fetchCloudSyncRemotes", "openCloudStorageApp", "openMoveFilesApp", "openNetworkSharesApp"):
             self.assertIn(wrapper, LIVE_DATA)
+        self.assertIn("cloud_sync_remotes", MAIN_RS)
         self.assertIn("Migration readiness", move_files)
         self.assertIn("Open full Cloud Storage", cloud)
+        self.assertIn("Saved sync folders", cloud)
         self.assertIn("Open full share controls", shares)
 
 
