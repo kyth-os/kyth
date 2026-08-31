@@ -98,6 +98,7 @@ for — see `src/kyth-hub-web/src-tauri/src/main.rs`'s `probe_backend`,
 | `system::vm_acceptance` | Acceptance reference validation, bootc/ostree JSON decoding, state normalization, and event framing | Guest commands, power control, and smoke-check execution remain caller-owned. |
 | `system::role_preset` | Offline role preset defaults, TOML loading, list overrides, and persistence | Package/container/extension installation remains an explicit action. |
 | `system::wayland` | Wayland/software-compositor policy, DRM detection, greeter-session config, session classification, and argv projection | Session file writes and compositor startup remain caller-owned. |
+| `system::explorer_preset` | Dolphin double-click/preview/drives-on-desktop preference model | `kwriteconfig5` application and the desktop-session apply step remain outside Rust. |
 | `system::tunable_registry` | Declarative tunable catalog loading, name normalization, and safe lookup/listing | Dynamic dispatch and tunable application remain caller/service-owned. |
 | `system::ai_plan` | Offline deterministic repair-action planning and tolerant serialized-plan parsing/order | Action execution, model calls, and network access remain caller/service-owned. |
 | `system::ai_dev` | Environment-derived AI/developer config and Distrobox enter/create argv projection with GPU flags | Container creation, provisioning, model downloads, lifecycle commands, and Ollama remain caller-owned. |

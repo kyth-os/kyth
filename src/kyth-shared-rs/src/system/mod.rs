@@ -148,3 +148,4 @@ pub mod vpn_saml;
 pub mod sysctl_compose;
 #[cfg(feature = "telemetry-writer")]
 pub mod telemetry_writer;
+pub mod explorer_preset;
