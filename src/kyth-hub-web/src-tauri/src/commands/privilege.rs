@@ -116,6 +116,7 @@ pub(crate) fn send_request(request: Value) -> Result<String, String> {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn bitlocker_request(device: &str, key: &str) -> Result<Value, String> {
     validated_request("bitlocker_unlock", &json!({ "device": device, "key": key }))
 }

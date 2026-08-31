@@ -7,6 +7,7 @@
 slint::include_modules!();
 
 #[path = "commands/privilege.rs"]
+#[allow(dead_code)]
 mod native_privilege;
 
 use slint::{ComponentHandle, SharedString, Weak};
@@ -15,15 +16,16 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 #[derive(serde::Serialize)]
+#[allow(dead_code)]
 pub(crate) struct InstallStatus {
     id: String,
     state: String,
     detail: String,
 }
 
-static PENDING_CONFIRMATION: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static PENDING_CONFIRMATION: OnceLock<Mutex<Option<(String, std::time::Instant)>>> = OnceLock::new();
 
-fn confirmation_store() -> &'static Mutex<Option<String>> {
+fn confirmation_store() -> &'static Mutex<Option<(String, std::time::Instant)>> {
     PENDING_CONFIRMATION.get_or_init(|| Mutex::new(None))
 }
 
@@ -76,11 +78,11 @@ fn is_config_action(action: &str) -> bool {
 /// Slint shell safe without introducing a generic command or secret bridge.
 fn confirmation_granted(action: &str) -> bool {
     let Ok(mut pending) = confirmation_store().lock() else { return false; };
-    if pending.as_deref() == Some(action) {
+    if pending.as_ref().is_some_and(|(pending_action, at)| pending_action == action && at.elapsed() <= Duration::from_secs(30)) {
         *pending = None;
         true
     } else {
-        *pending = Some(action.to_string());
+        *pending = Some((action.to_string(), std::time::Instant::now()));
         false
     }
 }
@@ -542,7 +544,9 @@ fn software_catalog_text() -> String {
     let packs = kyth_shared::system::software_catalog::starter_packs();
     let image_names = appimages.iter().take(3).map(|image| image.name.as_str()).collect::<Vec<_>>().join(", ");
     let pack_names = packs.iter().map(|pack| pack.name.as_str()).collect::<Vec<_>>().join(", ");
-    format!("Catalog · {} installed Flatpak(s) · {} AppImage(s) · {} starter packs\nAppImages · {}\nPacks · {}", installed.len(), appimages.len(), packs.len(), if image_names.is_empty() { "none discovered" } else { image_names.as_str() }, pack_names)
+    let installed_names = installed.iter().take(12).map(|app| if app.name.is_empty() { app.id.as_str() } else { app.name.as_str() }).collect::<Vec<_>>().join(", ");
+    let appimage_status = appimages.iter().take(8).map(|app| format!("{} ({})", app.name, if app.executable { "runnable" } else { "needs permission" })).collect::<Vec<_>>().join(", ");
+    format!("Catalog · {} installed Flatpak(s) · {} AppImage(s) · {} starter packs\nInstalled · {}\nAppImages · {}\nPacks · {}", installed.len(), appimages.len(), packs.len(), if installed_names.is_empty() { "none discovered" } else { installed_names.as_str() }, if appimage_status.is_empty() { if image_names.is_empty() { "none discovered" } else { image_names.as_str() } } else { appimage_status.as_str() }, pack_names)
 }
 
 fn appstream_search_view(query: &str) -> (String, String, String) {
