@@ -1,6 +1,6 @@
 # Installer Migration Plan
 
-**Status:** In progress
+**Status:** In progress; Phase 1 needs parity work before the Tauri shell starts
 **Scope:** Migrate the KythOS installer to the React/Tauri style used by the System Hub.
 
 ## Context
@@ -60,7 +60,7 @@ Document the current routes and events from `src/kyth-installer/kyth_installer/s
 
 This contract is the compatibility target for both implementations.
 
-### 1. React frontend with the existing backend
+### 1. React compatibility frontend with the existing backend
 
 Create `src/kyth-installer-web/` with typed services and page components:
 
@@ -74,9 +74,10 @@ Create `src/kyth-installer-web/` with typed services and page components:
 
 Keep the Python HTTP server and SSE stream unchanged initially. The milestone
 is identical installer behavior with a typed React state model and component
-tests.
+tests. This client is compatibility-only; the Rust/Slint client is the
+production UI.
 
-### 2. Tauri shell
+### 2. Rust/Slint production UI and Tauri compatibility shell
 
 Create `src/kyth-installer-web/src-tauri/`, following the System Hub shell's
 build and single-instance patterns, with these differences:
@@ -178,9 +179,47 @@ Before replacing Chromium in the image:
 ## Current progress
 
 - Phase 0 — API contract: complete. See [`installer-api-contract.md`](installer-api-contract.md).
-- Phase 1 — React frontend: complete as a standalone package in [`src/kyth-installer-web/`](../src/kyth-installer-web/). Typecheck and production build pass. The Python HTTP/SSE backend and legacy WebUI remain available as the runtime fallback.
-- Phase 2 — Tauri shell: implementation complete behind the live-image gate. `kyth-installer-shell` embeds the React build, runs as the desktop user, and connects through the typed transport adapter. Chromium remains the fallback until live-image acceptance.
-- Phase 3 — Unix-socket transport: implementation complete behind the live-image gate. `kyth-installerd` exposes the existing authenticated HTTP/SSE handler over the private socket with restrictive permissions and Linux peer-UID checks; the launcher owns the per-run token file and service lifecycle, and the Tauri shell uses typed allowlisted request/event commands. Development remains on loopback; the live image opts into the socket path.
+- Phase 1 — React frontend: complete as a compatibility client. Typecheck,
+  production build, API decoding, request guards, manual-error handling, and
+  contract smoke tests pass. The Rust/Slint client is the production UI.
+
+## Review findings (2026-08-31)
+
+The code-level migration is complete for the current Rust/Slint production
+client and Python privileged-service boundary. The remaining release work is
+live-media and disposable-VM validation. The Python service remains authoritative
+for destructive execution until future Rust backend ports independently achieve
+behavioral parity.
+
+## Prepared continuation
+
+### Next change set — live-media release gate
+
+1. Restore Cargo dependencies and build both Rust binaries with `--locked`.
+2. Run the native Rust unit and parity tests.
+3. Build the live ISO with the native client packaged.
+4. Exercise all install modes in disposable VMs.
+5. Test cancellation and power-loss recovery at every durable phase.
+6. Complete the credential, socket, privilege-boundary, and rescue-export audit.
+7. Remove obsolete launcher paths only after live-media acceptance.
+
+### Following change set — Phase 2 shell scaffold
+
+After Phase 1 closes, create `src/kyth-installer-web/src-tauri/` with:
+
+- an unprivileged, production-asset-only Tauri configuration;
+- the minimum capabilities needed to host the application (no shell, generic
+  filesystem, process, or disk APIs);
+- a narrow bootstrap transport to the existing loopback service, preserving
+  the one-use bootstrap and HttpOnly-cookie authentication flow;
+- single-instance behavior and clean backend-child shutdown, without copying
+  the Hub's system-action commands;
+- unit tests for startup argument parsing and an embedded-asset smoke check;
+- image packaging additions that build the shell but do not switch the live
+  launcher until live-ISO validation succeeds.
+
+Phase 3 should then define the socket protocol from the frozen logical API.
+Do not start selective installer logic ports merely because a Rust shell exists.
 
 ## Remaining plan
 
@@ -257,8 +296,8 @@ Port components only after behavioral parity and focused tests exist:
 
 ## Next session starting point
 
-Use the focused parity fixtures to keep the typed executor, bootc/configuration,
-and Secure Boot models aligned, then proceed to VM destructive-path acceptance.
-Keep Python authoritative for process execution, filesystem changes, durable
-transaction writes, recovery actions, mount/unmount syscalls, bootc, and Secure
-Boot until the live-image and safety gates pass.
+Begin with the Phase 1 parity change set above. The first bounded slice is to
+add the frontend test harness, extract/test install-mode request selection, and
+fix the missing `target_partition`, `resize_partition`, free-region, and
+`confirm_current` values. Do not create the Tauri shell until this slice and the
+remaining Phase 1 gates pass.

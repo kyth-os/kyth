@@ -51,6 +51,8 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn('install-mode != "manual"', slint)
         self.assertIn("!part.current", rust)
         self.assertIn("!part.in_use", rust)
+        self.assertIn('request.resize_partition = if window.get_install_mode().as_str() == "resize_ntfs"', rust)
+        self.assertIn('self.install_mode != "resize_ntfs" || (!self.resize_partition.is_empty() && self.resize_gib >= 32)', rust)
 
     def test_native_install_uses_the_authenticated_event_stream(self):
         rust = NATIVE_RS.read_text()
@@ -101,9 +103,9 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertNotIn("Command::new", rust)
         self.assertNotIn("std::fs", rust)
 
-    def test_launcher_prefers_shell_but_retains_chromium_fallback(self):
+    def test_launcher_prefers_native_rust_ui_but_retains_compatibility_fallback(self):
         launcher = LAUNCHER.read_text()
-        self.assertIn('shutil.which("kyth-installer-shell")', launcher)
+        self.assertIn('shutil.which("kyth-installer-native") or shutil.which("kyth-installer-shell")', launcher)
         self.assertIn('"--bootstrap-token", config._bootstrap_token', launcher)
         self.assertIn('"--session-token", SESSION_TOKEN', launcher)
         self.assertIn('systemctl", "start", "kyth-installerd.service', launcher)

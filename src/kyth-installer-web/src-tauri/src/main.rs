@@ -20,6 +20,7 @@ mod installer_executor;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
+use std::net::TcpStream;
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 use std::time::Duration;
 
@@ -122,7 +123,7 @@ fn socket_path(value: &InstallerConnection) -> Result<&str, String> {
     value.socket_path.as_deref().ok_or_else(|| "installer socket path is missing".to_string())
 }
 
-fn read_http_response(stream: UnixStream) -> Result<InstallerResponse, String> {
+fn read_http_response<R: Read>(stream: R) -> Result<InstallerResponse, String> {
     let mut reader = BufReader::new(stream);
     let mut status_line = String::new();
     reader.read_line(&mut status_line).map_err(|err| format!("could not read installer response: {err}"))?;
@@ -159,6 +160,21 @@ fn send_socket_request(value: &InstallerConnection, method: &str, path: &str, bo
     read_http_response(stream)
 }
 
+fn send_http_request(value: &InstallerConnection, method: &str, path: &str, body: Option<&str>) -> Result<InstallerResponse, String> {
+    if value.base_url != BACKEND_URL || !allowlisted_path(method, path) {
+        return Err("installer HTTP route is not allowlisted".to_string());
+    }
+    let mut stream = TcpStream::connect("127.0.0.1:7777").map_err(|err| format!("could not connect to installer HTTP service: {err}"))?;
+    stream.set_read_timeout(Some(Duration::from_secs(610))).ok();
+    let payload = body.unwrap_or("");
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Kyth-Session-Token: {}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        value.session_token, payload.len()
+    );
+    stream.write_all(request.as_bytes()).map_err(|err| format!("could not contact installer HTTP service: {err}"))?;
+    read_http_response(stream)
+}
+
 #[tauri::command]
 fn installer_request(
     method: String,
@@ -167,7 +183,11 @@ fn installer_request(
     state: tauri::State<InstallerTokens>,
 ) -> Result<InstallerResponse, String> {
     let value = connection(&state)?;
-    send_socket_request(&value, &method, &path, body.as_deref())
+    match value.transport.as_str() {
+        "unix" => send_socket_request(&value, &method, &path, body.as_deref()),
+        "http" => send_http_request(&value, &method, &path, body.as_deref()),
+        _ => Err("unknown installer transport".to_string()),
+    }
 }
 
 fn start_socket_stream(
@@ -247,4 +267,30 @@ fn main() {
         .invoke_handler(tauri::generate_handler![installer_connection, installer_validate_plan, installer_recovery_guidance, installer_execution_plan, installer_request, installer_stream, installer_stream_stop])
         .run(tauri::generate_context!())
         .expect("error while running the KythOS installer shell");
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+
+    #[test]
+    fn routes_are_strictly_allowlisted() {
+        assert!(allowlisted_path("GET", "/api/disks"));
+        assert!(allowlisted_path("POST", "/api/start"));
+        assert!(!allowlisted_path("POST", "/api/exec"));
+        assert!(!allowlisted_path("GET", "http://127.0.0.1:7777/api/disks"));
+        assert!(!allowlisted_path("GET", "/api/disks\nX-Bad: yes"));
+    }
+
+    #[test]
+    fn http_transport_is_pinned_to_loopback_backend() {
+        let value = InstallerConnection {
+            base_url: "http://127.0.0.1:7778".to_string(),
+            bootstrap_token: String::new(),
+            session_token: String::new(),
+            transport: "http".to_string(),
+            socket_path: None,
+        };
+        assert!(send_http_request(&value, "GET", "/api/disks", None).is_err());
+    }
 }

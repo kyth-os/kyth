@@ -72,8 +72,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     status = response.status;
     text = await response.text();
   }
-  let payload: unknown = text;
-  try { payload = text ? JSON.parse(text) : {}; } catch { /* preserve plain-text errors */ }
+  let payload: unknown = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = text;
+  }
   if (status < 200 || status >= 300) {
     const record = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
     const message = record.message ?? record.error ?? (text || `Request failed (${status})`);
@@ -153,9 +157,15 @@ export function subscribeToInstallEvents(onEvent: (event: InstallerEvent) => voi
       : "/api/stream";
     source = new EventSource(apiUrl(streamPath), { withCredentials: true });
     source.onmessage = (message) => {
-      try { onEvent(JSON.parse(message.data) as InstallerEvent); } catch { onDisconnect(); source?.close(); }
+      try { onEvent(JSON.parse(message.data) as InstallerEvent); } catch {
+        source?.close();
+        onDisconnect();
+      }
     };
-    source.onerror = () => onDisconnect();
+    source.onerror = () => {
+      source?.close();
+      onDisconnect();
+    };
   }).catch(onDisconnect);
   return () => {
     closed = true;

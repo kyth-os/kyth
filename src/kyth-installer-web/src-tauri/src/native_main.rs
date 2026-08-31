@@ -119,6 +119,7 @@ impl InstallState {
             && (self.install_mode != "manual" || self.manual_committed)
             && (self.install_mode != "wipe" || self.confirm_current)
             && (self.install_mode != "alongside" || !self.target_partition.is_empty())
+            && (self.install_mode != "resize_ntfs" || (!self.resize_partition.is_empty() && self.resize_gib >= 32))
             && (self.install_mode != "free_space" || self.free_region_end > self.free_region_start)
             && (self.install_mode != "resize_ntfs" || self.resize_gib >= 32)
     }
@@ -640,6 +641,11 @@ fn request_from_window(window: &InstallerWindow, state: &Arc<Mutex<InstallState>
     let mut request = state.lock().expect("installer state lock poisoned");
     request.disk = window.get_selected_disk().to_string();
     request.target_partition = window.get_target_partition().to_string();
+    request.resize_partition = if window.get_install_mode().as_str() == "resize_ntfs" {
+        request.target_partition.clone()
+    } else {
+        String::new()
+    };
     request.free_region_start = window.get_free_region_start().parse().unwrap_or(0);
     request.free_region_end = window.get_free_region_end().parse().unwrap_or(0);
     request.install_mode = window.get_install_mode().to_string();

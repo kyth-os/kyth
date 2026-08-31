@@ -10,10 +10,11 @@
 
 ARG BASE_IMAGE=ghcr.io/kyth-os/kyth:latest
 
-# ── React/Tauri installer shell builder ─────────────────────────────────────
+# ── Rust installer UI builder ────────────────────────────────────────────────
 # Keep Node/Rust/WebKit development dependencies out of the live image. The
-# resulting shell is an unprivileged WebKitGTK window; the Python installer
-# remains the root-owned compatibility backend for this phase.
+# resulting native client is unprivileged; the Python installer remains the
+# root-owned compatibility backend for this phase. React/Tauri is retained as
+# a compatibility client, not selected as the production UI.
 FROM registry.fedoraproject.org/fedora:44 AS installer-web-builder
 RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
         cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \

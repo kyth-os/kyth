@@ -55,7 +55,7 @@ export component InstallerWindow inherits Window {
     in-out property <bool> confirm-backup: false;
     in-out property <bool> confirm-erase: false;
     in-out property <bool> confirm-current: false;
-    in-out property <bool> start-enabled: selected-disk != "" && username != "" && password != "" && confirm-backup && confirm-erase && (install-mode != "manual" || manual-committed) && (install-mode != "wipe" || confirm-current) && (install-mode != "alongside" || target-partition != "") && (install-mode != "free_space" || free-region-end != free-region-start);
+    in-out property <bool> start-enabled: selected-disk != "" && username != "" && password != "" && confirm-backup && confirm-erase && (install-mode != "manual" || manual-committed) && (install-mode != "wipe" || confirm-current) && (install-mode != "alongside" || target-partition != "") && (install-mode != "resize_ntfs" || target-partition != "") && (install-mode != "free_space" || free-region-end != free-region-start);
     in-out property <bool> busy: false;
     in-out property <float> progress: 0;
     in-out property <string> event-log: "Waiting for installer events…";

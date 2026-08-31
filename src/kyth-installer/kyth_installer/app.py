@@ -258,7 +258,9 @@ def main() -> None:
                 return cand
         return ""
     sudo_user = _session_owner()
-    installer_shell = shutil.which("kyth-installer-shell")
+    # Rust/Slint is the production client. React/Tauri remains a compatibility
+    # client while its migration contract is stabilized.
+    installer_shell = shutil.which("kyth-installer-native") or shutil.which("kyth-installer-shell")
     if installer_shell:
         gui_cmd = [
             installer_shell,
@@ -273,7 +275,7 @@ def main() -> None:
                 run_command(["systemctl", "stop", "kyth-installerd.service"], check=False, timeout=30)
             if token_file is not None:
                 Path(token_file).unlink(missing_ok=True)
-            raise RuntimeError("kyth-installer-shell is required when Unix transport is enabled")
+            raise RuntimeError("kyth-installer-native or kyth-installer-shell is required when Unix transport is enabled")
         chromium_bin = next(
             (b for b in ("chromium", "chromium-browser", "chromium-bin") if shutil.which(b)),
             "chromium",

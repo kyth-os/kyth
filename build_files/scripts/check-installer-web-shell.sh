@@ -25,6 +25,8 @@ echo "== kyth-installer-web: npm ci =="
 
 echo "== kyth-installer-web: frontend build =="
 (cd "$installer_web" && npm run build)
+echo "== kyth-installer-web: frontend contract tests =="
+(cd "$installer_web" && npm run test:contracts)
 
 echo "== kyth-shared-rs: cargo test =="
 (cd "$kyth_shared_rs" && cargo test --locked)
