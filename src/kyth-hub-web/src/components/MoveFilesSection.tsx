@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchNtfsDevices, fetchNtfsDrives, openMoveFilesApp, runPrivilegedAction, type NtfsDevice, type NtfsDrive } from "../services/liveData";
+import { fetchMigrationReadiness, fetchNtfsDevices, fetchNtfsDrives, openMoveFilesApp, runPrivilegedAction, type MigrationReadiness, type NtfsDevice, type NtfsDrive } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -31,15 +31,17 @@ function ntfsPartitions(devices: NtfsDevice[]): NtfsDrive[] {
 // which is what you want after plugging the old machine's disk in.
 export function MoveFilesSection({ section }: { section: HubSection }) {
   const [drives, setDrives] = useState<NtfsDrive[] | null>(null);
+  const [readiness, setReadiness] = useState<MigrationReadiness | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [unlockDevice, setUnlockDevice] = useState<NtfsDrive | null>(null);
   const [unlockKey, setUnlockKey] = useState("");
   const { status, busy, run } = useSectionAction();
   useEffect(() => {
     let cancelled = false;
-    fetchNtfsDrives().then((d) => {
+    Promise.all([fetchNtfsDrives(), fetchMigrationReadiness()]).then(([d, migration]) => {
       if (!cancelled) {
         setDrives(d);
+        setReadiness(migration);
         setLoaded(true);
       }
     });
@@ -73,6 +75,10 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
       ) : (
         <SectionFallbackNote loaded={loaded} />
       )}
+      {readiness && <div style={{ marginTop: 16, padding: 12, border: "1px solid var(--hairline)", borderRadius: 10 }}>
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>Migration readiness — {readiness.parity === "ok" ? "ready" : "needs attention"}</p>
+        <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Drives: {readiness.drives} · Files: {readiness.files} · Bookmarks: {readiness.bookmarks} · Cloud: {readiness.onedrive} · {readiness.pwa}</p>
+      </div>}
 
       <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
         <p className="card-copy" style={{ fontSize: 12, margin: "0 0 12px" }}>

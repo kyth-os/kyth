@@ -885,6 +885,12 @@ fn ntfs_devices() -> Vec<serde_json::Value> {
     kyth_shared::system::drives::get_ntfs_devices()
 }
 
+#[tauri::command]
+fn migration_readiness() -> kyth_shared::system::windows_verify::WindowsParity {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+    kyth_shared::system::windows_verify::verify(home, std::path::Path::new("/var/home").exists())
+}
+
 /// The existing Python VPN utility owns the profile editor and SAML browser
 /// flow. This fixed launch path makes that complete workflow reachable from
 /// the default Tauri Hub without accepting arbitrary commands or arguments.
@@ -1033,6 +1039,7 @@ fn main() {
             amd64_manifest_entry,
             commands::updates::collect_availability,
             ntfs_devices,
+            migration_readiness,
             open_vpn_app,
             commands::dashboard::boot_runtime_checks,
             desktop_stack_checks,

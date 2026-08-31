@@ -188,6 +188,18 @@ class BridgeFieldTests(unittest.TestCase):
         self.assertIn("openVpnApp", LIVE_DATA)
         self.assertIn("Open full VPN connection", vpn)
 
+    def test_move_in_readiness_and_full_workflow_bridges_are_registered(self):
+        move_files = (HUB_WEB / "components" / "MoveFilesSection.tsx").read_text(encoding="utf-8")
+        cloud = (HUB_WEB / "components" / "CloudStorageSection.tsx").read_text(encoding="utf-8")
+        shares = (HUB_WEB / "components" / "NetworkSharesSection.tsx").read_text(encoding="utf-8")
+        for command in ("migration_readiness", "open_cloud_storage_app", "open_move_files_app", "open_network_shares_app"):
+            self.assertIn(command, MAIN_RS)
+        for wrapper in ("fetchMigrationReadiness", "openCloudStorageApp", "openMoveFilesApp", "openNetworkSharesApp"):
+            self.assertIn(wrapper, LIVE_DATA)
+        self.assertIn("Migration readiness", move_files)
+        self.assertIn("Open full Cloud Storage", cloud)
+        self.assertIn("Open full share controls", shares)
+
 
 class GuardianExecutionTests(unittest.TestCase):
     def test_guardian_execute_does_not_go_through_just(self):

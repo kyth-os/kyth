@@ -647,6 +647,11 @@ export async function openMoveFilesApp(): Promise<string> {
   if (!inTauriShell()) throw new Error("The full migration workflow is available from the installed Kyth Hub.");
   return await invoke<string>("open_move_files_app");
 }
+export interface MigrationReadiness { bookmarks: string; drives: string; files: string; onedrive: string; pwa: string; parity: string; }
+export async function fetchMigrationReadiness(): Promise<MigrationReadiness | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<MigrationReadiness>("migration_readiness"); } catch { return null; }
+}
 export async function openNetworkSharesApp(): Promise<string> {
   if (!inTauriShell()) throw new Error("The full Network Shares workflow is available from the installed Kyth Hub.");
   return await invoke<string>("open_network_shares_app");
