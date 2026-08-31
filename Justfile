@@ -82,6 +82,13 @@ check-optimization:
 check-hub-shell:
     ./build_files/scripts/check-hub-web-shell.sh
 
+# Build/typecheck the React + Tauri (Rust) KythOS installer shell
+# (src/kyth-installer-web). Same prerequisites as check-hub-shell. Not yet
+# wired into the Dockerfile — this is the only build gate the crate has.
+[group('Quality')]
+check-installer-shell:
+    ./build_files/scripts/check-installer-web-shell.sh
+
 # Print source metrics; pass runtime=1 on a representative installed system.
 [group('Quality')]
 optimization-report runtime="0":
