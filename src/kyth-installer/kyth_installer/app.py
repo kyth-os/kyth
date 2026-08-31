@@ -258,9 +258,12 @@ def main() -> None:
                 return cand
         return ""
     sudo_user = _session_owner()
-    # Rust/Slint is the production client. React/Tauri remains a compatibility
-    # client while its migration contract is stabilized.
-    installer_shell = shutil.which("kyth-installer-native") or shutil.which("kyth-installer-shell")
+    # React/Tauri is the primary client. Slint remains available as an explicit
+    # recovery path while both clients share the same authenticated backend.
+    if os.environ.get("KYTH_USE_NATIVE_INSTALLER") == "1":
+        installer_shell = shutil.which("kyth-installer-native") or shutil.which("kyth-installer-shell")
+    else:
+        installer_shell = shutil.which("kyth-installer-shell") or shutil.which("kyth-installer-native")
     if installer_shell:
         gui_cmd = [
             installer_shell,

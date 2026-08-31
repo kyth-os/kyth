@@ -103,9 +103,11 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertNotIn("Command::new", rust)
         self.assertNotIn("std::fs", rust)
 
-    def test_launcher_prefers_native_rust_ui_but_retains_compatibility_fallback(self):
+    def test_launcher_prefers_tauri_ui_but_retains_native_recovery_fallback(self):
         launcher = LAUNCHER.read_text()
-        self.assertIn('shutil.which("kyth-installer-native") or shutil.which("kyth-installer-shell")', launcher)
+        source = LAUNCHER.read_text()
+        self.assertIn('shutil.which("kyth-installer-shell") or shutil.which("kyth-installer-native")', source)
+        self.assertIn('KYTH_USE_NATIVE_INSTALLER', source)
         self.assertIn('"--bootstrap-token", config._bootstrap_token', launcher)
         self.assertIn('"--session-token", SESSION_TOKEN', launcher)
         self.assertIn('systemctl", "start", "kyth-installerd.service', launcher)

@@ -1,0 +1,15 @@
+---
+description: Frontend all Rust backend capabilities with the shared Tauri/React Hub theme
+alwaysApply: true
+---
+
+# Rust Backend UI Convention
+
+When exposing a Rust backend capability through a desktop UI, use the Tauri/React Hub frontend and its shared visual system.
+
+- Prefer the existing Tauri/React shell under `src/kyth-hub-web/src/`.
+- Reuse its shared tokens and components, especially `src/styles/theme.css`, cards, navigation, buttons, status pills, and responsive grids.
+- Keep Rust responsible for commands, privileged operations, system state, and data; keep layout, presentation, and interaction composition in React.
+- Do not introduce a separate visual language or default to a new native UI toolkit for a Rust-backed feature.
+- Preserve viewport-safe responsive behavior: content must remain contained and usable at the supported window sizes.
+- Keep Slint available only for explicit recovery/compatibility paths unless the user specifically requests otherwise.

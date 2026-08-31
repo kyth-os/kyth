@@ -1,18 +1,15 @@
 # KythOS installer web frontend
 
-The native migration is being built in `src-tauri/src/native_main.rs` and
-`src-tauri/ui/installer.slint`. `kyth-installer-native` now owns the initial
-request flow: disk selection, install mode/kernel choices, account fields,
-confirmation gates, guided partition/free-space selection, and fixed-route
-start/cancel/reboot/rescue calls. Native install requests now also attach to
-the authenticated installer SSE stream for live logs, phases, progress, and
-terminal state. Manual partition editing now uses the same authenticated,
-fixed-route service API as the compatibility UI, including staged create,
-delete, format, mountpoint, resize, rollback, and commit operations. The
-native editor also lists staged operations and can remove an individual
-pending operation before commit. The existing Tauri flow remains the
-compatibility path for systems that do not yet
-ship the native binary.
+The primary installer client is the Tauri/React shell in this directory. It
+uses the shared Kyth Hub visual system while keeping disk and boot operations
+behind the authenticated, fixed-route backend. The native Slint client lives
+in `src-tauri/src/native_main.rs` and `src-tauri/ui/installer.slint` as an
+explicit recovery path selected with `KYTH_USE_NATIVE_INSTALLER=1`.
+
+Both clients support the same initial request flow, authenticated installer
+SSE stream, and fixed-route storage operations. The launcher falls back to the
+native binary if the Tauri shell is unavailable, then to the legacy Chromium
+frontend on older images.
 
 Phase 1 React/TypeScript frontend for the installer migration. It consumes the frozen API in [`docs/installer-api-contract.md`](../../docs/installer-api-contract.md) and intentionally leaves the Python HTTP/SSE backend and legacy WebUI untouched.
 
