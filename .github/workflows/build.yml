@@ -86,7 +86,19 @@ jobs:
     timeout-minutes: 5
     outputs:
       branches: ${{ steps.branches.outputs.branches }}
-      head_sha: ${{ needs.gate.outputs.head_sha }}
+      # NOT needs.gate.outputs.head_sha directly: for a `schedule` trigger,
+      # gate's `context.sha` resolves to the default branch's (main's) tip
+      # regardless of which branches this matrixes over (branches=["main",
+      # "testing"] below), and the Checkout step's `ref: needs.plan.outputs
+      # .head_sha || matrix.branch` prefers head_sha whenever it's truthy —
+      # so an unconditional pass-through here made every scheduled build's
+      # `testing` leg silently check out main's tip instead of testing's.
+      # steps.branches.outputs.head_sha (below) only gets set on the
+      # workflow_run path — the one case a pinned SHA is actually correct,
+      # matching the Checkout step's own "gated workflow_run" comment — and
+      # stays empty for schedule/workflow_dispatch, letting `|| matrix.branch`
+      # do its documented job of checking out each leg's real branch tip.
+      head_sha: ${{ steps.branches.outputs.head_sha }}
       head_branch: ${{ needs.gate.outputs.head_branch }}
     steps:
       # Single source of truth for the schedule-builds-both-branches rule,
@@ -187,6 +199,26 @@ jobs:
         env:
           STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_PREP_OUTPUTS_DATE_SHORT: ${{ steps.prep.outputs.date_short }}
+
+      # Fail loud instead of silently publishing an image built from the
+      # wrong branch's history — exactly what happened when plan.outputs
+      # .head_sha was wired straight from gate's context.sha: every
+      # scheduled build's `testing` leg silently checked out main's tip
+      # instead of testing's, and the run still went green. `git branch -r
+      # --contains` (not `merge-base --is-ancestor`) so this also catches
+      # the checked-out commit sitting on some *other* remote branch
+      # entirely, not just failing to be an ancestor of the right one.
+      - name: Verify checked-out commit belongs to the matrix branch
+        env:
+          MATRIX_BRANCH: ${{ matrix.branch }}
+          CHECKED_OUT_SHA: ${{ steps.checkout_sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "${MATRIX_BRANCH}"
+          if ! git branch -r --contains "${CHECKED_OUT_SHA}" | grep -qF "origin/${MATRIX_BRANCH}"; then
+            echo "::error::Checked out ${CHECKED_OUT_SHA} does not belong to origin/${MATRIX_BRANCH} — refusing to build. This is the class of bug that made scheduled testing builds silently ship main's tip; see build.yml's plan job comment." >&2
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0

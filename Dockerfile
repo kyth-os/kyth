@@ -32,6 +32,17 @@ RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
 # `../../kyth-shared-rs` path dependency, so it needs copying to the same
 # relative position here, not folded into the kyth-hub-web COPY below.
 COPY src/kyth-shared-rs /build/kyth-shared-rs
+# system::app_suggestions embeds build_files/exe-handler-apps.json via
+# include_str!("../../../../build_files/exe-handler-apps.json"), a path
+# written relative to the crate's real position in the repo
+# (src/kyth-shared-rs/src/system/…, four levels up from src/system lands at
+# the repo root). Copied here one level shallower (/build/kyth-shared-rs
+# instead of /build/src/kyth-shared-rs), that same four-level-up path
+# resolves to /build_files, not /build/build_files — copy the file there to
+# match rather than editing the crate (whose path must stay correct for the
+# real-repo checkout `cargo test`/check-hub-web-shell.sh build against
+# directly).
+COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
 COPY src/kyth-hub-web /build/kyth-hub-web
 WORKDIR /build/kyth-hub-web
 RUN --mount=type=cache,id=kyth-hub-web-npm,target=/root/.npm \

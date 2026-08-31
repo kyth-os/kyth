@@ -19,6 +19,20 @@ RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
         cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \
         webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel gtk3-devel dbus-devel && \
     dnf5 clean all
+# kyth-shared-rs is a sibling of kyth-installer-web (src/kyth-shared-rs, not
+# under src/kyth-installer-web) — src-tauri's Cargo.toml depends on it via a
+# `../../kyth-shared-rs` path dependency, so it needs copying to the same
+# relative position here, not folded into the kyth-installer-web COPY below.
+# (Mirrors the hub-web-builder stage in the top-level Dockerfile.)
+COPY src/kyth-shared-rs /build/kyth-shared-rs
+# system::app_suggestions embeds build_files/exe-handler-apps.json via
+# include_str!("../../../../build_files/exe-handler-apps.json"), a path
+# written relative to the crate's real position in the repo. Copied here one
+# level shallower (/build/kyth-shared-rs instead of
+# /build/src/kyth-shared-rs), that same four-level-up path resolves to
+# /build_files, not /build/build_files — copy the file there to match rather
+# than editing the crate. See the top-level Dockerfile's identical comment.
+COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
 COPY src/kyth-installer-web /build/kyth-installer-web
 WORKDIR /build/kyth-installer-web
 RUN rm -f node_modules && npm ci && npm run build
