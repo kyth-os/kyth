@@ -28,7 +28,11 @@ SHARED_RS = ROOT / "src" / "kyth-shared-rs" / "src"
 HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
 JUST_RS = (SHARED_RS / "system" / "just.rs").read_text(encoding="utf-8")
 GUARDIAN_RS = (SHARED_RS / "guardian.rs").read_text(encoding="utf-8")
-MAIN_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+TAURI_SRC = ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src"
+MAIN_RS = (TAURI_SRC / "main.rs").read_text(encoding="utf-8")
+MAIN_RS += "\n" + "\n".join(
+    path.read_text(encoding="utf-8") for path in sorted((TAURI_SRC / "commands").glob("*.rs"))
+)
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
 SECTION_ACTIONS = (HUB_WEB / "components" / "SectionActions.tsx").read_text(encoding="utf-8")
 GUARDIAN_SECTION = (HUB_WEB / "components" / "GuardianSection.tsx").read_text(encoding="utf-8")
@@ -138,9 +142,12 @@ class BridgeFieldTests(unittest.TestCase):
                 self.assertIsNotNone(declared, f"{ts_name} not found in liveData.ts")
                 fields = set(re.findall(r"(\w+)\s*:", declared.group(1)))
                 self.assertTrue(fields)
-                struct = re.search(rf"struct {rust_name} \{{(.*?)\n\}}", MAIN_RS, re.S)
+                struct = re.search(rf"struct {rust_name} \{{(.*?)\}}", MAIN_RS, re.S)
                 self.assertIsNotNone(struct, f"{rust_name} not found in main.rs")
-                served = set(re.findall(r"(?m)^\s+(\w+):", struct.group(1)))
+                served = set(re.findall(
+                    r"(?:^|[,\n])\s*(?:pub(?:\(crate\))?\s+)?(\w+)\s*:",
+                    struct.group(1),
+                ))
                 self.assertEqual(fields - served, set(), f"{rust_name} never sends these")
 
 
