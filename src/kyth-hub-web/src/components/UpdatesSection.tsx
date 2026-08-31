@@ -48,14 +48,18 @@ export function UpdatesSection({ section }: { section: HubSection }) {
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
+  async function readUpdateState() {
+    return await Promise.all([
       fetchBootcSnapshot(),
       fetchUpdateStatus(),
       fetchPendingUpdatesSummary(),
       fetchUpdaterAvailable(),
-    ]).then(([snap, live, summary, updater]) => {
+    ]);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    readUpdateState().then(([snap, live, summary, updater]) => {
       if (!cancelled) {
         setSnapshot(snap);
         setUpdateStatus(live);
@@ -68,6 +72,15 @@ export function UpdatesSection({ section }: { section: HubSection }) {
       cancelled = true;
     };
   }, []);
+
+  async function refreshUpdateState(): Promise<string> {
+    const [snap, live, summary, updater] = await readUpdateState();
+    setSnapshot(snap);
+    setUpdateStatus(live);
+    setPending(summary);
+    setUpdaterAvailable(updater);
+    return "Update status refreshed.";
+  }
 
   async function checkForUpdates(): Promise<string> {
     const availability = await fetchCollectAvailability(null, false);
@@ -153,6 +166,11 @@ export function UpdatesSection({ section }: { section: HubSection }) {
 
       <div style={{ marginTop: 24, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <ActionButton
+            label={busy === "refresh" ? "Refreshing…" : "Refresh status"}
+            disabled={busy !== null}
+            onClick={() => run("refresh", "Reading update status…", refreshUpdateState)}
+          />
           <ActionButton
             label={busy === "check" ? "Checking…" : "Check for updates"}
             disabled={busy !== null}

@@ -44,6 +44,7 @@ export function AppStoreSection({ section }: { section: HubSection }) {
   const [packSelections, setPackSelections] = useState<Record<string, string[]>>({});
   const [appImagePath, setAppImagePath] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
+  const [catalogSearching, setCatalogSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
@@ -68,11 +69,24 @@ export function AppStoreSection({ section }: { section: HubSection }) {
 
   useEffect(() => {
     const q = catalogQuery.trim();
-    if (q.length < 2) { setCatalog(null); return; }
+    if (q.length < 2) { setCatalog(null); setCatalogSearching(false); return; }
     let cancelled = false;
-    const timer = window.setTimeout(() => searchAppStream(q).then((apps) => { if (!cancelled) setCatalog(apps); }), 250);
+    const timer = window.setTimeout(async () => {
+      setCatalogSearching(true);
+      const apps = await searchAppStream(q);
+      if (!cancelled) {
+        setCatalog(apps ?? []);
+        setCatalogSearching(false);
+      }
+    }, 250);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [catalogQuery]);
+
+  async function refreshInstalled(): Promise<void> {
+    const [nextSnapshot, nextInstalled] = await Promise.all([fetchAppStoreSnapshot(), fetchInstalledFlatpaks()]);
+    if (nextSnapshot) setSnapshot(nextSnapshot);
+    if (nextInstalled) setInstalled(nextInstalled);
+  }
 
   async function install(id: string): Promise<string> {
     const job = await installFlatpak(id);
@@ -90,7 +104,14 @@ export function AppStoreSection({ section }: { section: HubSection }) {
     const ids = packSelections[pack.name] ?? [];
     if (ids.length === 0) throw new Error("Select at least one app first.");
     for (const id of ids) await install(id);
+    await refreshInstalled();
     return `${pack.name} starter pack installed.`;
+  }
+
+  async function installAndRefresh(id: string): Promise<string> {
+    const result = await install(id);
+    await refreshInstalled();
+    return result;
   }
 
   const matches = useMemo(() => {
@@ -180,7 +201,7 @@ export function AppStoreSection({ section }: { section: HubSection }) {
                     <button disabled={busy !== null} onClick={() => run(`pack-${pack.name}`, `Installing ${pack.name}…`, () => installPack(pack))} style={{ marginTop: 10, padding: "6px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>{busy === `pack-${pack.name}` ? "Installing…" : "Install selected"}</button>
                     <CommandLine
                       label="Install this pack"
-                      command={installCommand(pack.apps.filter((a) => a.selected).map((a) => a.id))}
+                      command={installCommand((packSelections[pack.name] ?? []).map((id) => id))}
                     />
                   </div>
                 ))}
@@ -191,10 +212,11 @@ export function AppStoreSection({ section }: { section: HubSection }) {
           <div style={{ marginTop: 22 }}>
             <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Search Flathub</p>
             <input value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Search apps…" style={{ marginTop: 8, width: "100%", maxWidth: 340, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 13 }} />
+            {catalogSearching && <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>Searching Flathub…</p>}
             {catalog && <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
               {catalog.map((app) => <div key={app.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
                 <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>{app.name}</p><p className="card-copy" style={{ margin: "2px 0 0", fontSize: 11 }}>{app.summary || app.id}</p></div>
-                <button disabled={busy !== null} onClick={() => run(`install-${app.id}`, `Installing ${app.name}…`, () => install(app.id))} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12.5 }}>{busy === `install-${app.id}` ? "Installing…" : "Install"}</button>
+                <button disabled={busy !== null} onClick={() => run(`install-${app.id}`, `Installing ${app.name}…`, () => installAndRefresh(app.id))} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12.5 }}>{busy === `install-${app.id}` ? "Installing…" : "Install"}</button>
               </div>)}
               {catalog.length === 0 && <p className="card-copy" style={{ fontSize: 12 }}>No Flathub matches.</p>}
             </div>}

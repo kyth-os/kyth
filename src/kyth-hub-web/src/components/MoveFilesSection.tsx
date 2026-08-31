@@ -104,7 +104,7 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
           <p className="card-copy" style={{ fontSize: 12, marginTop: 5 }}>The key is sent only to the local privileged service and is not logged.</p>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <input type="password" value={unlockKey} onChange={(event) => setUnlockKey(event.target.value)} placeholder="BitLocker password or recovery key" style={{ flex: 1, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)" }} />
-            <ActionButton label="Unlock" disabled={busy !== null || unlockKey.length < 8} onClick={() => run("unlock", "Unlocking BitLocker volume…", async () => { const result = await runPrivilegedAction("bitlocker_unlock", { device: unlockDevice.dev, key: unlockKey }); setUnlockDevice(null); setUnlockKey(""); return result; })} />
+            <ActionButton label="Unlock" disabled={busy !== null || unlockKey.length < 8} onClick={() => run("unlock", "Unlocking BitLocker volume…", async () => { try { return await runPrivilegedAction("bitlocker_unlock", { device: unlockDevice.dev, key: unlockKey }); } finally { setUnlockDevice(null); setUnlockKey(""); } })} />
             <ActionButton label="Cancel" disabled={busy !== null} onClick={() => setUnlockDevice(null)} />
           </div>
         </div>}

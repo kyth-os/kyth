@@ -26,6 +26,9 @@ echo "== kyth-hub-web: npm ci =="
 echo "== kyth-hub-web: frontend build =="
 (cd "$hub_web" && npm run build)
 
+echo "== kyth-hub-web: frontend/Rust contract tests =="
+(cd "$hub_web" && npm run test:contracts)
+
 echo "== kyth-shared-rs: cargo test =="
 (cd "$kyth_shared_rs" && cargo test --locked)
 

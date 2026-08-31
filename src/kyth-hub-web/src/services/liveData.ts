@@ -94,10 +94,40 @@ export async function waitGuardianCheck(job: string): Promise<string> {
   throw new Error("Guardian is still running; refresh the page in a moment.");
 }
 export async function runGuardianControl(action: string): Promise<string> {
+  if (!confirmUserAction(`Change Guardian setting: ${action}?`)) return "Cancelled.";
   const job = await invoke<string>("guardian_control", { action });
   return await waitGuardianCheck(job);
 }
+
+/** Shared confirmation boundary for actions that can change system state.
+ * Tests and non-browser renders remain usable; the Tauri webview always has
+ * the native browser confirm dialog. Never pass secret values in message. */
+export function confirmUserAction(message: string): boolean {
+  if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
+  return window.confirm(message);
+}
+
+function privilegedActionPrompt(operation: string, payload: Record<string, string>): string {
+  switch (operation) {
+    case "bitlocker_unlock":
+      return `Unlock ${payload.device ?? "this BitLocker volume"}? The recovery key will be sent only to the local privileged service.`;
+    case "kernel_switch":
+      return `Stage the ${payload.flavor ?? "selected"} kernel? This changes the next boot deployment.`;
+    case "secureboot_enroll":
+      return "Enroll the KythOS Secure Boot key? This changes firmware trust configuration.";
+    case "nvidia_install":
+      return "Install the NVIDIA driver? This stages a system image change.";
+    case "firmware_update":
+      return "Apply firmware updates? The device may reboot during this operation.";
+    case "windows_verify":
+      return "Run the privileged Windows installation check?";
+    default:
+      return `Run privileged operation ${operation}?`;
+  }
+}
+
 export async function runPrivilegedAction(operation: string, payload: Record<string, string> = {}): Promise<string> {
+  if (!confirmUserAction(privilegedActionPrompt(operation, payload))) return "Cancelled.";
   const job = await invoke<string>("privileged_action", { operation, payload });
   for (let i = 0; i < 1800; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
@@ -755,21 +785,25 @@ export async function fetchUserName(): Promise<string | null> {
 // Phase 2 mutating (Updates + Repair/Diagnostics)
 export async function invokeBootcUpgrade(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
+  if (!confirmUserAction("Download and stage the next system update? It will require a reboot to apply.")) return "Cancelled.";
   const job = await invoke<string>("bootc_upgrade");
   return await waitJustJob(job);
 }
 export async function invokeBootcRollback(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
+  if (!confirmUserAction("Roll back to the previous system deployment? This changes the next boot target.")) return "Cancelled.";
   const job = await invoke<string>("bootc_rollback");
   return await waitJustJob(job);
 }
 export async function invokeBootcSwitchBranch(branch: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
+  if (!confirmUserAction(`Switch the system update channel to ${branch}? This stages a new deployment.`)) return "Cancelled.";
   const job = await invoke<string>("bootc_switch_branch", { branch });
   return await waitJustJob(job);
 }
 export async function invokeGuardianExecute(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
+  if (!confirmUserAction(`Run Guardian fix ${recipeId}? It may change system configuration.`)) return "Cancelled.";
   return await invoke<string>("guardian_execute_recipe", { recipeId });
 }
 
@@ -860,6 +894,7 @@ export async function importAppImage(path: string): Promise<string> {
   return await invoke<string>("import_appimage", { path });
 }
 export async function uninstallFlatpak(id: string): Promise<string> {
+  if (!confirmUserAction(`Uninstall ${id}? This removes the application from this system.`)) return "Cancelled.";
   const job = await invoke<string>("uninstall_flatpak", { appId: id });
   for (let i = 0; i < 120; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
