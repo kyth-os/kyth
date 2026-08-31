@@ -105,6 +105,7 @@ pub mod preference_presets;
 pub mod service_preferences;
 pub mod audio_network;
 pub mod runtime_preferences;
+pub mod safe_upgrade_policy;
 pub mod gaming_kargs;
 pub mod display_policy;
 pub mod network_services;

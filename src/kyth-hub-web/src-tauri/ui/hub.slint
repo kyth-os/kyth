@@ -26,7 +26,10 @@ export component HubWindow inherits Window {
     in-out property <string> software-catalog: "Catalog · Reading software inventory…";
     in-out property <string> appstream-query: "";
     in-out property <string> appstream-results: "Search the Flatpak catalog from the native Apps surface.";
+    in-out property <string> appstream-install-id: "";
+    in-out property <string> appstream-install-label: "";
     in-out property <string> guardian-status: "Guardian · Reading recommendations…";
+    in-out property <string> recipes-text: "Recipes · Reading available actions…";
     in-out property <string> section-one: "Recovery";
     in-out property <string> section-two: "Performance";
     in-out property <string> section-three: "Hardware";
@@ -38,11 +41,16 @@ export component HubWindow inherits Window {
     in-out property <string> section-nine: "";
     in-out property <string> section-ten: "";
     in-out property <string> action-status: "";
+    in-out property <string> section-action-id: "";
+    in-out property <string> section-action-label: "";
+    in-out property <bool> action-busy: false;
     callback navigate(string);
     callback refresh();
     callback select-section(string);
     callback page-action(string);
+    callback section-action(string);
     callback appstream-search(string);
+    callback appstream-install(string);
 
     Rectangle {
         background: #0b1020;
@@ -122,17 +130,25 @@ export component HubWindow inherits Window {
                     }
 
                     HorizontalLayout {
+                        visible: section-action-label != "";
+                        spacing: 8px;
+                        Text { text: "Suggested action"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: section-action-label; enabled: !action-busy; clicked => { section-action(section-action-id); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
                         visible: selected-page == "Updates";
                         spacing: 8px;
-                        Button { text: "Download and stage"; clicked => { page-action("upgrade"); } }
-                        Button { text: "Roll back"; clicked => { page-action("rollback"); } }
+                        Button { text: "Download and stage"; enabled: !action-busy; clicked => { page-action("upgrade"); } }
+                        Button { text: "Roll back"; enabled: !action-busy; clicked => { page-action("rollback"); } }
                         Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
                     }
 
                     HorizontalLayout {
                         visible: selected-page == "This PC" && selected-section == "Guardian";
                         spacing: 8px;
-                        Button { text: "Run pending safe repair"; clicked => { page-action("guardian"); } }
+                        Button { text: "Run pending safe repair"; enabled: !action-busy; clicked => { page-action("guardian"); } }
                         Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
                     }
 
@@ -172,7 +188,9 @@ export component HubWindow inherits Window {
                             Text { visible: selected-page == "Apps" && selected-section == "App Store"; text: software-catalog; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
                             HorizontalLayout { visible: selected-page == "Apps" && selected-section == "App Store"; spacing: 8px; LineEdit { horizontal-stretch: 1; text <=> appstream-query; placeholder-text: "Search Flatpak catalog"; } Button { text: "Search"; clicked => { appstream-search(appstream-query); } } }
                             Text { visible: selected-page == "Apps" && selected-section == "App Store"; text: appstream-results; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
+                            HorizontalLayout { visible: selected-page == "Apps" && selected-section == "App Store" && appstream-install-id != ""; spacing: 8px; Button { text: appstream-install-label; enabled: !action-busy; clicked => { appstream-install(appstream-install-id); } } Text { text: "Installs for this user"; color: #60718f; font-size: 11px; vertical-alignment: center; } }
                             Text { visible: selected-page == "This PC" && selected-section == "Guardian"; text: guardian-status; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
+                            Text { visible: selected-page == "This PC" && selected-section == "Recipes"; text: recipes-text; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
                         }
                     }
                     Rectangle { vertical-stretch: 1; }

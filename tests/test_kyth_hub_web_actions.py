@@ -298,15 +298,14 @@ class HubWebCoverageTests(unittest.TestCase):
         self.assertIn("params: string", LIVE_DATA)
 
     def test_open_feedback_issue_encodes_caller_input(self):
-        # Both halves are caller-supplied. Unencoded, a title containing `&`
-        # or `#` would rewrite the query string, and the issue URL is opened
-        # in the user's browser, so the target must stay a fixed literal.
+        # Both halves are caller-supplied. The shared Rust projection owns
+        # encoding now; this bridge must keep the target fixed, scrub the
+        # report, and delegate to that helper rather than rebuilding a URL.
         body = re.search(r"fn open_feedback_issue\(.*?\n\}", MAIN_RS, re.S)
         self.assertIsNotNone(body, "open_feedback_issue not found")
         text = body.group(0)
-        self.assertIn("https://github.com/kyth-os/kyth/issues/new", text)
-        self.assertIn("percent_encode(&title)", text)
-        self.assertIn("percent_encode(&body)", text)
+        self.assertIn('"https://github.com/kyth-os/kyth"', text)
+        self.assertIn("kyth_shared::diagnostic_report::github_issue_url", text)
         self.assertIn("kyth_shared::diagnostics_scrub::scrub_logs", text)
         # No raw interpolation of either argument into the URL.
         self.assertNotRegex(text, r"\{title\}|\{body\}")

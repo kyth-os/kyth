@@ -102,6 +102,25 @@ pub fn appstream_search(query: &str) -> Vec<AppStreamApp> {
     parse_appstream_results(&String::from_utf8_lossy(&output.stdout))
 }
 
+/// Project one catalog result into the explicit, user-scoped install argv
+/// used by native surfaces. The caller still owns confirmation and execution;
+/// arbitrary shell text never crosses this boundary.
+pub fn flatpak_install_argv(app_id: &str) -> Option<Vec<String>> {
+    if app_id.is_empty()
+        || app_id.len() > 200
+        || !app_id.contains('.')
+        || !app_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    {
+        return None;
+    }
+    Some(
+        ["flatpak", "install", "--user", "-y", "flathub", app_id]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+    )
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct AppImageEntry {
     pub name: String,
@@ -232,5 +251,15 @@ mod tests {
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].scope, "user");
         assert_eq!(apps[0].version, "1.0");
+    }
+
+    #[test]
+    fn projects_only_valid_user_scoped_flatpak_installs() {
+        assert_eq!(
+            flatpak_install_argv("org.example.App").unwrap(),
+            vec!["flatpak", "install", "--user", "-y", "flathub", "org.example.App"],
+        );
+        assert!(flatpak_install_argv("not-an-app").is_none());
+        assert!(flatpak_install_argv("org.example.App;reboot").is_none());
     }
 }

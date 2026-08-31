@@ -237,6 +237,28 @@ fn page_sections(page: &str) -> [&'static str; 10] {
     }
 }
 
+/// Actions exposed by the native shell are deliberately a fixed projection of
+/// parameterless, reviewable just recipes. Anything requiring arguments,
+/// privileged socket payloads, or destructive choices stays on its fuller
+/// page until it has a dedicated native control.
+fn section_action(section: &str) -> Option<(&'static str, &'static str)> {
+    match section {
+        "Gaming" => Some(("gaming-stack-status", "Check gaming stack")),
+        "Performance" => Some(("system-audit", "Run performance audit")),
+        "Work Setup" => Some(("install-ms-fonts", "Install Office fonts")),
+        "Diagnostics" => Some(("system-audit", "Run full system audit")),
+        "Recovery" => Some(("update-health", "Update health report")),
+        "NVIDIA" => Some(("nvidia-status", "Read driver status")),
+        _ => None,
+    }
+}
+
+fn set_section_action(window: &HubWindow, section: &str) {
+    let (action, label) = section_action(section).unwrap_or(("", ""));
+    window.set_section_action_id(SharedString::from(action));
+    window.set_section_action_label(SharedString::from(label));
+}
+
 fn set_section_names(window: &HubWindow, sections: [&str; 10]) {
     window.set_section_one(SharedString::from(sections[0]));
     window.set_section_two(SharedString::from(sections[1]));
@@ -442,6 +464,52 @@ fn appstream_search_text(query: &str) -> String {
     results.iter().take(10).map(|app| format!("{} · {} — {}", app.id, app.name, app.summary)).collect::<Vec<_>>().join("\n")
 }
 
+fn appstream_search_view(query: &str) -> (String, String, String) {
+    let results = kyth_shared::system::software_catalog::appstream_search(query);
+    if results.is_empty() {
+        return ("No catalog results found, or the catalog is unavailable.".to_string(), String::new(), String::new());
+    }
+    let first = &results[0];
+    let text = results.iter().take(10).map(|app| format!("{} · {} — {}", app.id, app.name, app.summary)).collect::<Vec<_>>().join("\n");
+    (text, first.id.clone(), format!("Install {}", first.name))
+}
+
+fn run_appstream_install(weak: Weak<HubWindow>, app_id: String, label: String) {
+    let Some(argv) = kyth_shared::system::software_catalog::flatpak_install_argv(&app_id) else {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from("The catalog returned an invalid application id."));
+        });
+        return;
+    };
+    let refresh_weak = weak.clone();
+    let refresh_page = weak
+        .upgrade()
+        .map(|window| window.get_selected_page().to_string())
+        .unwrap_or_else(|| "Apps".to_string());
+    let _ = slint::invoke_from_event_loop({
+        let weak = weak.clone();
+        let label = label.clone();
+        move || if let Some(window) = weak.upgrade() {
+            window.set_action_busy(true);
+            window.set_action_status(SharedString::from(format!("{label}…")));
+        }
+    });
+    std::thread::spawn(move || {
+        let result = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(600));
+        let detail = match result {
+            Ok(output) => page_action_detail(&label, &output),
+            Err(error) => format!("{label} could not start · {error}"),
+        };
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(detail));
+        });
+        refresh_status(refresh_weak.clone(), refresh_page);
+        refresh_section(refresh_weak, "App Store".to_string());
+    });
+}
+
 fn guardian_status_text() -> String {
     let state = kyth_shared::guardian::load_state();
     let recommendations = kyth_shared::guardian::pending_recommendations(&state);
@@ -453,6 +521,23 @@ fn guardian_status_text() -> String {
     } else {
         format!("Guardian · {pending} pending · {quarantined} quarantined · {names}")
     }
+}
+
+fn recipes_text() -> String {
+    let recipes = kyth_shared::system::just::just_list();
+    if recipes.is_empty() {
+        return "Recipes · The system recipe list is unavailable right now.".to_string();
+    }
+    let rows = recipes
+        .iter()
+        .take(30)
+        .map(|recipe| {
+            let params = if recipe.params.is_empty() { String::new() } else { format!(" {}", recipe.params) };
+            let comment = if recipe.comment.is_empty() { String::new() } else { format!(" — {}", recipe.comment) };
+            format!("{}{}{}", recipe.name, params, comment)
+        })
+        .collect::<Vec<_>>();
+    format!("Recipes · {} available (showing up to 30)\n{}", recipes.len(), rows.join("\n"))
 }
 
 fn initial_page() -> String {
@@ -528,7 +613,10 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
     if action == "guardian" {
         let _ = slint::invoke_from_event_loop({
             let weak = weak.clone();
-            move || if let Some(window) = weak.upgrade() { window.set_action_status(SharedString::from("Checking Guardian policy…")); }
+            move || if let Some(window) = weak.upgrade() {
+                window.set_action_busy(true);
+                window.set_action_status(SharedString::from("Checking Guardian policy…"));
+            }
         });
         std::thread::spawn(move || {
             let state = kyth_shared::guardian::load_state();
@@ -536,16 +624,25 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
                 .map(|item| kyth_shared::guardian::execute_recipe(&item.recipe_id))
                 .unwrap_or_else(|| Err("No pending Guardian repair is available.".to_string()));
             let detail = result.unwrap_or_else(|error| format!("Guardian repair not run · {error}"));
-            let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() { window.set_action_status(SharedString::from(detail)); });
+            let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+                window.set_action_busy(false);
+                window.set_action_status(SharedString::from(detail));
+            });
         });
         return;
     }
     let (recipe, label) = match action.as_str() {
         "upgrade" => ("upgrade", "Starting update…"),
         "rollback" => ("rollback", "Starting rollback…"),
+        "gaming-stack-status" => ("gaming-stack-status", "Checking gaming stack…"),
+        "system-audit" => ("system-audit", "Running system audit…"),
+        "install-ms-fonts" => ("install-ms-fonts", "Installing Office fonts…"),
+        "update-health" => ("update-health", "Updating health report…"),
+        "nvidia-status" => ("nvidia-status", "Reading NVIDIA status…"),
         _ => {
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(window) = weak.upgrade() {
+                    window.set_action_busy(false);
                     window.set_action_status(SharedString::from("Unknown native action."));
                 }
             });
@@ -558,6 +655,7 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
     {
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = weak.upgrade() {
+                window.set_action_busy(false);
                 window.set_action_status(SharedString::from("bootc is not installed on this system."));
             }
         });
@@ -566,6 +664,7 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
     let Some(argv) = kyth_shared::system::just::command_for(recipe, &[]) else {
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = weak.upgrade() {
+                window.set_action_busy(false);
                 window.set_action_status(SharedString::from("Native action is not allowlisted."));
             }
         });
@@ -575,11 +674,16 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         let weak = weak.clone();
         move || {
             if let Some(window) = weak.upgrade() {
+                window.set_action_busy(true);
                 window.set_action_status(SharedString::from(label));
             }
         }
     });
     let refresh_weak = weak.clone();
+    let refresh_page = weak
+        .upgrade()
+        .map(|window| window.get_selected_page().to_string())
+        .unwrap_or_else(|| "Updates".to_string());
     std::thread::spawn(move || {
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
@@ -600,10 +704,11 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         };
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = weak.upgrade() {
+                window.set_action_busy(false);
                 window.set_action_status(SharedString::from(detail));
             }
         });
-        refresh_status(refresh_weak, "Updates".to_string());
+        refresh_status(refresh_weak, refresh_page);
     });
 }
 
@@ -643,6 +748,7 @@ fn refresh_section(weak: Weak<HubWindow>, section: String) {
         let launchers = (section == "Gaming").then(gaming_launchers_text).unwrap_or_default();
         let software = (section == "App Store").then(software_catalog_text).unwrap_or_default();
         let guardian = (section == "Guardian").then(guardian_status_text).unwrap_or_default();
+        let recipes = (section == "Recipes").then(recipes_text).unwrap_or_default();
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = weak.upgrade() {
                 if window.get_selected_section().as_str() != section {
@@ -654,6 +760,7 @@ fn refresh_section(weak: Weak<HubWindow>, section: String) {
                 window.set_gaming_launchers(SharedString::from(launchers));
                 window.set_software_catalog(SharedString::from(software));
                 window.set_guardian_status(SharedString::from(guardian));
+                window.set_recipes_text(SharedString::from(recipes));
             }
         });
     });
@@ -677,9 +784,11 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_card_two_title(SharedString::from(cards[1].0));
     window.set_card_two_value(SharedString::from("Reading…"));
     window.set_card_two_detail(SharedString::from(cards[1].1));
+    set_section_action(&window, &section);
     window.set_next_action_text(SharedString::from("Suggested next step · Reading local policy…"));
     window.set_status_text(SharedString::from("Reading system status…"));
     window.set_action_status(SharedString::from(""));
+    window.set_action_busy(false);
     window.set_status_badge(SharedString::from("CHECKING"));
     window.set_section_status(SharedString::from("Reading section status…"));
     window.set_section_detail(SharedString::from("Native section status is read in the background."));
@@ -687,19 +796,35 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_gaming_launchers(SharedString::from("Launchers · Reading gaming inventory…"));
     window.set_software_catalog(SharedString::from("Catalog · Reading software inventory…"));
     window.set_guardian_status(SharedString::from("Guardian · Reading recommendations…"));
+    window.set_recipes_text(SharedString::from("Recipes · Reading available actions…"));
+    window.set_appstream_install_id(SharedString::from(""));
+    window.set_appstream_install_label(SharedString::from(""));
 
     let action_weak = window.as_weak();
     window.on_page_action(move |action| {
         run_page_action(action_weak.clone(), action.to_string());
+    });
+    let section_action_weak = window.as_weak();
+    window.on_section_action(move |action| {
+        run_page_action(section_action_weak.clone(), action.to_string());
     });
     let search_weak = window.as_weak();
     window.on_appstream_search(move |query| {
         let weak = search_weak.clone();
         let query = query.to_string();
         std::thread::spawn(move || {
-            let results = appstream_search_text(&query);
-            let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() { window.set_appstream_results(SharedString::from(results)); });
+            let (results, install_id, install_label) = appstream_search_view(&query);
+            let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+                window.set_appstream_results(SharedString::from(results));
+                window.set_appstream_install_id(SharedString::from(install_id));
+                window.set_appstream_install_label(SharedString::from(install_label));
+            });
         });
+    });
+    let install_weak = window.as_weak();
+    window.on_appstream_install(move |app_id| {
+        let app_id = app_id.to_string();
+        run_appstream_install(install_weak.clone(), app_id.clone(), format!("Installing {app_id}"));
     });
 
     let refresh_weak = window.as_weak();
@@ -730,9 +855,11 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_card_one_detail(SharedString::from(cards[0].1));
             window.set_card_two_title(SharedString::from(cards[1].0));
             window.set_card_two_detail(SharedString::from(cards[1].1));
+            set_section_action(&window, sections[0]);
             window.set_next_action_text(SharedString::from("Suggested next step · Reading local policy…"));
             window.set_status_text(SharedString::from("Reading system status…"));
             window.set_action_status(SharedString::from(""));
+            window.set_action_busy(false);
             window.set_status_badge(SharedString::from("CHECKING"));
             window.set_section_status(SharedString::from("Reading section status…"));
             window.set_section_detail(SharedString::from("Native section status is read in the background."));
@@ -740,6 +867,9 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_gaming_launchers(SharedString::from("Launchers · Reading gaming inventory…"));
             window.set_software_catalog(SharedString::from("Catalog · Reading software inventory…"));
             window.set_guardian_status(SharedString::from("Guardian · Reading recommendations…"));
+            window.set_recipes_text(SharedString::from("Recipes · Reading available actions…"));
+            window.set_appstream_install_id(SharedString::from(""));
+            window.set_appstream_install_label(SharedString::from(""));
             refresh_status(navigation_weak.clone(), page.to_string());
             refresh_section(navigation_weak.clone(), sections[0].to_string());
         }
@@ -748,12 +878,18 @@ fn main() -> Result<(), slint::PlatformError> {
     window.on_select_section(move |section| {
         if let Some(window) = section_weak.upgrade() {
             window.set_selected_section(section.clone());
+            set_section_action(&window, section.as_str());
             window.set_section_status(SharedString::from("Reading section status…"));
             window.set_section_detail(SharedString::from("Native section status is read in the background."));
             window.set_hardware_capabilities(SharedString::from("Capabilities · Reading hardware view…"));
             window.set_gaming_launchers(SharedString::from("Launchers · Reading gaming inventory…"));
             window.set_software_catalog(SharedString::from("Catalog · Reading software inventory…"));
             window.set_guardian_status(SharedString::from("Guardian · Reading recommendations…"));
+            window.set_recipes_text(SharedString::from("Recipes · Reading available actions…"));
+            window.set_appstream_install_id(SharedString::from(""));
+            window.set_appstream_install_label(SharedString::from(""));
+            window.set_action_status(SharedString::from(""));
+            window.set_action_busy(false);
             refresh_section(section_weak.clone(), section.to_string());
         }
     });
@@ -793,5 +929,13 @@ mod tests {
         assert_eq!(page_status_badge("2 desktop check(s) need attention").label(), "NEEDS ATTENTION");
         assert_eq!(page_status_badge("Application inventory is not cached yet").label(), "NEEDS ATTENTION");
         assert_eq!(page_status_badge("").label(), "CHECKING");
+    }
+
+    #[test]
+    fn native_section_actions_are_fixed_and_parameterless() {
+        assert_eq!(section_action("Gaming"), Some(("gaming-stack-status", "Check gaming stack")));
+        assert_eq!(section_action("Diagnostics"), Some(("system-audit", "Run full system audit")));
+        assert_eq!(section_action("Channels"), None);
+        assert_eq!(section_action("Move Files"), None);
     }
 }

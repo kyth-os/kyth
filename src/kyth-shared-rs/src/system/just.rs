@@ -23,6 +23,7 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -143,7 +144,7 @@ pub fn just_list() -> Vec<JustRecipe> {
     let mut cmd = Command::new("/usr/bin/just");
     cmd.arg("--list");
     configure_command(&mut cmd);
-    match cmd.output() {
+    match super::process::run_bounded_command(cmd, Duration::from_secs(10)) {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
             let parsed = parse_just_list(&stdout);
