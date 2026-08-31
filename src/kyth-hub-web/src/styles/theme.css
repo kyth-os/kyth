@@ -738,3 +738,351 @@ a:focus-visible {
   color: var(--status-error);
   font-weight: 700;
 }
+
+/* Reference direction: a compact desktop workspace with graphite surfaces,
+   quiet chrome, and focused blue/violet data accents. These overrides keep
+   the existing feature components intact while giving every route the same
+   dashboard shell and viewport-safe geometry. */
+:root {
+  --ground: #15171c;
+  --ground-2: #101217;
+  --surface-solid: #1c1f26;
+  --surface-raised: #252931;
+  --surface-overlay: #30353f;
+  --card-gradient: linear-gradient(145deg, #23272f 0%, #1c1f26 100%);
+  --hairline: rgba(235, 240, 255, 0.1);
+  --hairline-light: rgba(235, 240, 255, 0.2);
+  --accent-start: #4d8dff;
+  --accent-end: #78b7ff;
+  --accent: #4d8dff;
+  --accent-gradient: linear-gradient(135deg, #3977ef, #6b9cff);
+  --accent-tint-bg: rgba(77, 141, 255, 0.15);
+  --accent-tint-border: rgba(77, 141, 255, 0.4);
+  --violet-start: #7668f5;
+  --violet-end: #a995ff;
+  --violet-gradient: linear-gradient(135deg, #5c52d9, #a28bff);
+  --violet: #8f80f4;
+  --status-ok: #5bd69e;
+  --status-warn: #efb65a;
+  --status-error: #ef7184;
+  --text: #f1f3f7;
+  --text-muted: #a7adb9;
+  --text-faint: #707783;
+  --radius-card: 12px;
+  --radius-sm: 9px;
+  --radius-badge: 9px;
+  --shadow-card: 0 18px 38px -28px rgba(0, 0, 0, 0.9);
+  --shadow-glow-accent: 0 10px 28px -18px rgba(77, 141, 255, 0.72);
+  --shadow-glow-violet: 0 10px 26px -18px rgba(118, 104, 245, 0.72);
+}
+
+body {
+  background: var(--ground);
+  font-size: 13px;
+}
+
+.bg-glow {
+  opacity: 0.65;
+  background:
+    radial-gradient(42% 55% at 88% 0%, rgba(72, 105, 214, 0.13), transparent 72%),
+    radial-gradient(38% 45% at 30% 100%, rgba(89, 72, 190, 0.08), transparent 72%),
+    linear-gradient(180deg, var(--ground) 0%, var(--ground-2) 100%);
+}
+
+.app-shell {
+  gap: 0;
+  max-width: 1680px;
+  margin: 0 auto;
+}
+
+.glass {
+  backdrop-filter: blur(18px);
+}
+
+.sidebar-shell {
+  width: 216px;
+  flex: 0 0 216px;
+  margin: 12px 0 12px 12px;
+  padding: 16px 10px 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #1d2026 0%, #181a20 100%);
+  border-color: rgba(235, 240, 255, 0.09);
+}
+
+.sidebar-brand {
+  gap: 10px;
+  padding: 3px 9px 22px;
+}
+
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: #f5f7ff;
+  background: linear-gradient(145deg, #3977ef, #7968ed);
+  box-shadow: 0 8px 20px -12px rgba(77, 141, 255, 0.9);
+}
+
+.brand-name {
+  font-size: 14px;
+}
+
+.brand-kicker,
+.sidebar-section-label {
+  color: #777e8b;
+  font-size: 9px;
+  letter-spacing: 1.35px;
+}
+
+.sidebar-section-label {
+  padding: 0 9px 7px;
+}
+
+.sidebar-nav {
+  gap: 3px;
+}
+
+.sidebar-link {
+  min-height: 42px;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 9px;
+}
+
+.sidebar-link:hover {
+  background: rgba(235, 240, 255, 0.06);
+}
+
+.sidebar-link-active {
+  border-color: rgba(127, 165, 255, 0.16);
+  background: #343941;
+  box-shadow: inset 2px 0 0 #6a9aff, 0 8px 22px -18px rgba(77, 141, 255, 0.8);
+}
+
+.sidebar-link-active .icon-badge-sm {
+  background: linear-gradient(145deg, #4a87ff, #7668ed);
+  color: #fff;
+}
+
+.sidebar-link > span:last-child span:last-child {
+  color: #777e8b;
+  font-size: 10px !important;
+}
+
+.sidebar-link:last-child {
+  margin-top: 8px;
+  padding-top: 11px;
+  border-radius: 0 0 9px 9px;
+  border-top-color: rgba(235, 240, 255, 0.08);
+}
+
+.sidebar-status {
+  padding: 12px;
+  border-radius: 10px;
+  border-color: rgba(91, 214, 158, 0.16);
+  background: rgba(91, 214, 158, 0.06);
+}
+
+.main-content {
+  width: 100%;
+  max-width: none;
+  padding-left: 26px !important;
+  padding-right: 26px !important;
+}
+
+.topbar {
+  min-height: 72px;
+  padding: 18px 0 14px;
+}
+
+.page-eyebrow {
+  color: #8f96a3;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+}
+
+.page-title {
+  margin-top: 3px;
+  font-size: 24px;
+  letter-spacing: -0.55px;
+}
+
+.topbar-actions {
+  gap: 8px;
+}
+
+.search-shell {
+  width: 220px;
+}
+
+.search-box {
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: #20232a;
+}
+
+.icon-button {
+  background: #20232a;
+  border-radius: 9px;
+}
+
+.page-content {
+  width: 100%;
+  min-width: 0;
+  padding-bottom: 26px;
+}
+
+.dashboard-grid,
+.chart-grid,
+.stat-grid {
+  min-width: 0;
+  gap: 12px;
+}
+
+.stat-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stat-card,
+.dashboard-card,
+.section-card {
+  border-color: rgba(235, 240, 255, 0.1);
+  box-shadow: var(--shadow-card);
+}
+
+.stat-card {
+  min-height: 102px;
+  padding: 15px 16px 13px;
+  background: linear-gradient(145deg, #252a32, #1d2027);
+}
+
+.stat-card:hover,
+.dashboard-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 38px -28px rgba(0, 0, 0, 0.95);
+}
+
+.dashboard-card,
+.hero-card {
+  background: linear-gradient(145deg, #252b35, #1d2027);
+}
+
+.hero-card {
+  min-height: 228px;
+  padding: 21px;
+}
+
+.hero-orb {
+  width: 230px;
+  height: 230px;
+  opacity: 0.2;
+  filter: blur(16px);
+}
+
+.hero-wash {
+  background: radial-gradient(100% 100% at 0% 100%, rgba(29, 32, 39, 0.96) 35%, transparent 72%);
+}
+
+.gauge-card,
+.chart-card {
+  padding: 17px;
+}
+
+.section-card {
+  padding: 20px;
+  background: linear-gradient(145deg, #23272e, #1c1f25);
+}
+
+.section-header {
+  padding-bottom: 15px;
+}
+
+.section-heading {
+  font-size: 16px;
+}
+
+.section-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+}
+
+.tab-nav {
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #1d2026;
+}
+
+.tab-button {
+  gap: 6px;
+  padding: 8px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.tab-button-active {
+  color: #f5f7ff;
+  background: linear-gradient(135deg, #3977ef, #5f7ff0);
+  box-shadow: 0 7px 18px -14px rgba(77, 141, 255, 0.95);
+}
+
+.action-button,
+.btn {
+  border-radius: 8px;
+  background: #2b3038;
+}
+
+.action-button-primary,
+.btn-primary {
+  color: #fff;
+  background: linear-gradient(135deg, #3977ef, #687df0);
+  box-shadow: 0 10px 24px -17px rgba(77, 141, 255, 0.95);
+}
+
+input {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .main-content {
+    padding-left: 18px !important;
+    padding-right: 18px !important;
+  }
+
+  .sidebar-shell {
+    width: 190px;
+    flex-basis: 190px;
+  }
+
+  .dashboard-grid,
+  .chart-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .app-shell {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .sidebar-shell {
+    width: auto;
+    margin: 8px;
+  }
+
+  .sidebar-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .main-content {
+    padding: 0 12px !important;
+  }
+
+  .dashboard-grid,
+  .chart-grid,
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+}
