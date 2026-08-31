@@ -107,7 +107,9 @@ export function confirmUserAction(message: string): boolean {
   return window.confirm(message);
 }
 
-function privilegedActionPrompt(operation: string, payload: Record<string, string>): string {
+type PrivilegedPayload = Record<string, string | boolean | number>;
+
+function privilegedActionPrompt(operation: string, payload: PrivilegedPayload): string {
   switch (operation) {
     case "bitlocker_unlock":
       return `Unlock ${payload.device ?? "this BitLocker volume"}? The recovery key will be sent only to the local privileged service.`;
@@ -121,12 +123,16 @@ function privilegedActionPrompt(operation: string, payload: Record<string, strin
       return "Apply firmware updates? The device may reboot during this operation.";
     case "windows_verify":
       return "Run the privileged Windows installation check?";
+    case "network_share_add":
+      return `Add network share ${typeof payload.name === "string" ? payload.name : ""}? Its credentials are sent only to the local privileged helper and saved in a protected root-owned file.`;
+    case "network_share_remove":
+      return `Remove network share ${typeof payload.name === "string" ? payload.name : ""}? This deletes its systemd mount unit and protected credentials.`;
     default:
       return `Run privileged operation ${operation}?`;
   }
 }
 
-export async function runPrivilegedAction(operation: string, payload: Record<string, string> = {}): Promise<string> {
+export async function runPrivilegedAction(operation: string, payload: PrivilegedPayload = {}): Promise<string> {
   if (!confirmUserAction(privilegedActionPrompt(operation, payload))) return "Cancelled.";
   const job = await invoke<string>("privileged_action", { operation, payload });
   for (let i = 0; i < 1800; i += 1) {
@@ -563,6 +569,39 @@ export async function fetchSmbMountCommand(share: string): Promise<string[] | nu
   if (!inTauriShell()) return null;
   try { return await invoke<string[]>("smb_mount_command", { share }); } catch { return null; }
 }
+export interface ConfiguredNetworkShare {
+  name: string;
+  server: string;
+  share_path: string;
+  mount_point: string;
+  username: string;
+  domain: string;
+  auto_mount: boolean;
+}
+export interface NetworkShareInput extends ConfiguredNetworkShare {
+  password: string;
+  mount_now: boolean;
+}
+export async function fetchConfiguredNetworkShares(): Promise<ConfiguredNetworkShare[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<ConfiguredNetworkShare[]>("smb_configured_shares"); } catch { return null; }
+}
+export async function addNetworkShare(share: NetworkShareInput): Promise<string> {
+  const detail = await runPrivilegedAction("network_share_add", { ...share });
+  if (detail === "Cancelled.") return detail;
+  await invoke<void>("smb_save_configured_share", { share: {
+    name: share.name, server: share.server, share_path: share.share_path,
+    mount_point: share.mount_point, username: share.username, domain: share.domain,
+    auto_mount: share.auto_mount,
+  } });
+  return detail;
+}
+export async function removeNetworkShare(share: Pick<ConfiguredNetworkShare, "name" | "mount_point">): Promise<string> {
+  const detail = await runPrivilegedAction("network_share_remove", { ...share });
+  if (detail === "Cancelled.") return detail;
+  await invoke<void>("smb_remove_configured_share", { name: share.name });
+  return detail;
+}
 
 // Memory pressure + snapshot count (Diagnostics/Repair)
 export async function fetchMemoryPressure(): Promise<{ status: string; detail: string } | null> {
@@ -649,6 +688,11 @@ export async function fetchNetworkSummaryLive(): Promise<NetworkSummary | null> 
     cloudProviders: raw.cloud_providers,
     detail: raw.detail,
   };
+}
+
+export async function openVpnApp(): Promise<string> {
+  if (!inTauriShell()) throw new Error("The full VPN connection app is available from the installed Kyth Hub.");
+  return await invoke<string>("open_vpn_app");
 }
 
 // Updates unified — bootc/flatpak/firmware summary
@@ -752,6 +796,21 @@ export async function fetchTelemetryRecent(limit = 7): Promise<TelemetrySession[
   } catch {
     return null;
   }
+}
+
+export interface CompatibilityGame {
+  name: string;
+  anticheat: string;
+  status: "native" | "proton" | "tweaks" | "blocked";
+  note: string;
+  checked: string;
+  source: string;
+  source_url: string;
+}
+
+export async function fetchCompatibilityGames(): Promise<CompatibilityGame[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<CompatibilityGame[]>("compatibility_games"); } catch { return null; }
 }
 
 

@@ -243,6 +243,22 @@ export function AppStoreSection({ section }: { section: HubSection }) {
               {installed.length === 0 && <p className="card-copy" style={{ fontSize: 12 }}>No installed Flatpak applications found.</p>}
             </div>
           </div>}
+
+          <div style={{ marginTop: 22 }}>
+            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Developer, creator, and specialized environments</p>
+            <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>
+              The old Hub grouped these tools separately from the general store. They remain opt-in recipes so the action and its system impact are visible before anything changes.
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              <RecipeButton recipe="setup-kyth-dev-box" label="Set up Kyth developer box" busy={busy} run={run} />
+              <RecipeButton recipe="ai-dev-status" label="AI development status" busy={busy} run={run} />
+              <RecipeButton recipe="ai-dev-setup" label="Set up AI development" busy={busy} run={run} />
+              <RecipeButton recipe="export-kali-apps" label="Export Kali apps" busy={busy} run={run} />
+              <RecipeButton recipe="setup-waydroid" label="Set up Waydroid" busy={busy} run={run} />
+              <RecipeButton recipe="remove-waydroid" label="Remove Waydroid" busy={busy} run={run} />
+            </div>
+            <CommandLine label="Kali environment (choose tools explicitly)" command="ujust setup-kali-box tools=headless" />
+          </div>
         </div>
       ) : (
         <SectionFallbackNote loaded={loaded} />

@@ -1,5 +1,6 @@
 import importlib.machinery
 import importlib.util
+import json
 import subprocess
 import unittest
 from pathlib import Path
@@ -40,6 +41,27 @@ class PrivilegedProtocolTests(unittest.TestCase):
         self.assertEqual((op, detail), ("firmware_update", "updated"))
         self.assertEqual(run.call_args.args[0], ["/usr/bin/fwupdmgr", "update"])
         self.assertEqual(run.call_args.kwargs["timeout"], 900)
+
+    def test_network_share_uses_fixed_helper_and_peer_identity(self):
+        request = {
+            "operation": "network_share_add",
+            "payload": {
+                "name": "media", "server": "nas.local", "share_path": "media",
+                "mount_point": "/mnt/media", "username": "pat", "password": "not-in-argv",
+                "domain": "", "auto_mount": True, "mount_now": False, "uid": 0, "gid": 0,
+            },
+        }
+        op, argv, stdin = MODULE.validate_request(request, caller_uid=1000, caller_gid=1001)
+        self.assertEqual(op, "network_share_add")
+        self.assertEqual(argv, ["/usr/libexec/kyth-network-share", "add"])
+        self.assertNotIn("not-in-argv", argv)
+        payload = json.loads(stdin)
+        self.assertEqual((payload["uid"], payload["gid"]), (1000, 1001))
+        self.assertEqual(payload["password"], "not-in-argv")
+
+    def test_network_share_rejects_unsafe_mount_point(self):
+        with self.assertRaises(ValueError):
+            MODULE.validate_request({"operation": "network_share_remove", "payload": {"name": "media", "mount_point": "/etc/kyth"}})
 
 
 if __name__ == "__main__":

@@ -21,6 +21,10 @@ AUDIT_LOG = "/var/log/kyth/privileged.log"
 APP_ID = re.compile(r"^[A-Za-z0-9]+(?:[.-][A-Za-z0-9_]+)+$")
 DEVICE = re.compile(r"^/dev/(sd[a-z][0-9]*|nvme[0-9]+n[0-9]+p?[0-9]*|vd[a-z][0-9]*|mmcblk[0-9]+p?[0-9]*)$")
 FLAVOR = {"fedora", "cachy"}
+SHARE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+SHARE_HOST = re.compile(r"^[A-Za-z0-9._:-]{1,253}$")
+SHARE_MOUNT_PATH = re.compile(r"^[A-Za-z0-9._/ -]+$")
+SHARE_MOUNT_PREFIXES = ("/mnt/", "/media/", "/run/media/", "/home/")
 
 
 def peer_credentials(sock):
@@ -57,7 +61,60 @@ def _audit(uid, operation, ok, detail):
         print("kyth-privileged: could not write audit log", flush=True)
 
 
-def validate_request(request):
+def _share_text(value, field, *, allow_empty=False, limit=4096):
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be text")
+    if not allow_empty and not value:
+        raise ValueError(f"{field} is required")
+    if len(value) > limit or any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError(f"invalid {field}")
+    return value
+
+
+def _share_mount_point(value):
+    mount_point = os.path.normpath(_share_text(value, "mount_point"))
+    if not SHARE_MOUNT_PATH.fullmatch(mount_point) or "//" in mount_point or "/../" in f"/{mount_point}/":
+        raise ValueError("invalid mount_point")
+    if not any(mount_point.startswith(prefix) for prefix in SHARE_MOUNT_PREFIXES):
+        raise ValueError("mount_point is outside an approved prefix")
+    return mount_point
+
+
+def _network_share_payload(request, operation, caller_uid, caller_gid):
+    payload = request.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("network share payload must be an object")
+    if len(json.dumps(payload, separators=(",", ":"))) > 64 * 1024:
+        raise ValueError("network share payload is too large")
+    name = _share_text(payload.get("name"), "name", limit=64)
+    if not SHARE_NAME.fullmatch(name):
+        raise ValueError("invalid share name")
+    mount_point = _share_mount_point(payload.get("mount_point"))
+    if operation == "network_share_remove":
+        return {"name": name, "mount_point": mount_point}
+
+    server = _share_text(payload.get("server"), "server", limit=253)
+    if not SHARE_HOST.fullmatch(server):
+        raise ValueError("invalid share server")
+    share_path = _share_text(payload.get("share_path"), "share_path").lstrip("/")
+    if not share_path or share_path.startswith(".") or "//" in share_path or "%" in share_path or ".." in share_path.split("/"):
+        raise ValueError("invalid share_path")
+    username = _share_text(payload.get("username"), "username", limit=256)
+    password = _share_text(payload.get("password", ""), "password", allow_empty=True, limit=4096)
+    domain = _share_text(payload.get("domain", ""), "domain", allow_empty=True, limit=256)
+    auto_mount = payload.get("auto_mount") is True
+    mount_now = payload.get("mount_now") is True
+    return {
+        "name": name, "server": server, "share_path": share_path,
+        "mount_point": mount_point, "username": username, "password": password,
+        "domain": domain, "auto_mount": auto_mount, "mount_now": mount_now,
+        # Peer credentials are authoritative; never trust uid/gid supplied by
+        # a client over the socket.
+        "uid": caller_uid, "gid": caller_gid,
+    }
+
+
+def validate_request(request, caller_uid=0, caller_gid=0):
     if not isinstance(request, dict):
         raise ValueError("request must be an object")
     operation = request.get("operation")
@@ -87,11 +144,15 @@ def validate_request(request):
         if not 8 <= len(key) <= 128 or "\n" in key or "\r" in key:
             raise ValueError("invalid BitLocker key")
         return operation, ["/usr/bin/udisksctl", "unlock", "-b", device, "--key-file", "/dev/stdin"], key
+    if operation in {"network_share_add", "network_share_remove"}:
+        payload = _network_share_payload(request, operation, caller_uid, caller_gid)
+        action = "add" if operation == "network_share_add" else "remove"
+        return operation, ["/usr/libexec/kyth-network-share", action], json.dumps(payload, separators=(",", ":"))
     raise ValueError("operation is not allowlisted")
 
 
-def run_operation(request):
-    operation, argv, stdin = validate_request(request)
+def run_operation(request, caller_uid=0, caller_gid=0):
+    operation, argv, stdin = validate_request(request, caller_uid, caller_gid)
     result = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=900, check=False)
     detail = (result.stdout or result.stderr or "Operation complete.").strip()[:400]
     if result.returncode:
@@ -102,7 +163,7 @@ def run_operation(request):
 class Handler(socketserver.StreamRequestHandler):
     def handle(self):
         try:
-            _pid, uid, _gid = peer_allowed(self.connection)
+            _pid, uid, gid = peer_allowed(self.connection)
         except (OSError, PermissionError) as exc:
             self.wfile.write((json.dumps({"ok": False, "detail": str(exc)}) + "\n").encode())
             self.wfile.flush()
@@ -112,7 +173,7 @@ class Handler(socketserver.StreamRequestHandler):
             try:
                 request = json.loads(raw)
                 operation = str(request.get("operation", "invalid")) if isinstance(request, dict) else "invalid"
-                operation, detail = run_operation(request)
+                operation, detail = run_operation(request, uid, gid)
                 response = {"ok": True, "detail": detail}
                 _audit(uid, operation, True, detail)
             except (ValueError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:

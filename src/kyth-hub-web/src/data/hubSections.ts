@@ -18,10 +18,9 @@ import {
 // Titles and descriptions here are copied verbatim from page_registry.py's
 // SEARCH_INDEX (the current Qt Hub's own search descriptions) — not
 // invented for the web prototype. Section keys and grouping match
-// DESTINATION_SECTIONS exactly, so this is the same information
-// architecture as the Qt Hub, just not wired to live kyth_shared data yet
-// (see LiveSectionCard.tsx for the same "real data, marked as such"
-// fixture" convention this follows).
+// DESTINATION_SECTIONS exactly, so this is the same information architecture
+// as the Qt Hub. Section bodies read through the typed Tauri bridge and show
+// an explicit empty state when a real device has no reading yet.
 export interface HubSection {
   key: string;
   title: string;
@@ -37,7 +36,7 @@ export const PLAY_SECTIONS: HubSection[] = [
 ];
 
 export const APPS_SECTIONS: HubSection[] = [
-  { key: "App Store", title: "App Store", description: "Install trusted Flatpaks, find familiar app alternatives, and manage AppImages.", Icon: IconGrid },
+  { key: "App Store", title: "App Store", description: "Install trusted Flatpaks, find familiar app alternatives, manage AppImages, and open specialized tool environments.", Icon: IconGrid },
   { key: "Work Setup", title: "Work Setup", description: "Set up office, mail, focus sessions, and workday conveniences.", Icon: IconMonitor },
 ];
 

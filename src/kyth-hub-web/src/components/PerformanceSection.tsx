@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, type AuditCache } from "../services/liveData";
+import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, fetchTelemetryRecent, type AuditCache, type TelemetrySession } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
 
 // "Play > Performance" — scheduler / memory tunables from audit-cache,
 // plus the two things you can actually change from here: the system
@@ -11,15 +11,17 @@ import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./Se
 export function PerformanceSection({ section }: { section: HubSection }) {
   const [audit, setAudit] = useState<AuditCache | null>(null);
   const [audioPresets, setAudioPresets] = useState<string[] | null>(null);
+  const [sessions, setSessions] = useState<TelemetrySession[] | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pendingPreset, setPendingPreset] = useState<string | null>(null);
   const { status, busy, run } = useSectionAction();
   useEffect(() => {
     let c = false;
-    Promise.all([fetchAuditCache(), fetchAudioPresets()]).then(([a, p]) => {
+    Promise.all([fetchAuditCache(), fetchAudioPresets(), fetchTelemetryRecent(8)]).then(([a, p, recent]) => {
       if (!c) {
         setAudit(a);
         setAudioPresets(p);
+        setSessions(recent);
         setLoaded(true);
       }
     });
@@ -28,7 +30,7 @@ export function PerformanceSection({ section }: { section: HubSection }) {
     };
   }, []);
   return (
-    <LiveSectionCard section={section} live={audit !== null || audioPresets !== null}>
+    <LiveSectionCard section={section} live={audit !== null || audioPresets !== null || sessions !== null}>
       {audit ? (
         <div style={{ marginTop: 20 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -41,6 +43,25 @@ export function PerformanceSection({ section }: { section: HubSection }) {
       ) : (
         <SectionFallbackNote loaded={loaded} />
       )}
+
+      <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
+        <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Recent gaming sessions</p>
+        {sessions && sessions.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+            {sessions.map((session, index) => (
+              <div key={`${session.started_at ?? "session"}-${index}`} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid var(--hairline)" }}>
+                <strong style={{ minWidth: 150 }}>{session.game_name || "Unnamed game"}</strong>
+                <span className="card-copy" style={{ fontSize: 12 }}>{session.avg_fps != null ? `${Math.round(session.avg_fps)} FPS avg` : "FPS unavailable"}</span>
+                {session.p1_low_fps != null && <span className="card-copy" style={{ fontSize: 12 }}>1% low {Math.round(session.p1_low_fps)}</span>}
+                {session.stutter_count > 0 && <span className="pill pill-dim">{session.stutter_count} stutters</span>}
+                {session.scheduler && <span className="pill pill-dim">{session.scheduler}</span>}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>{sessions ? "No telemetry sessions recorded yet — play a game and check back." : "Telemetry is unavailable outside the installed Tauri Hub."}</p>
+        )}
+      </div>
 
       <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
         <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
@@ -100,6 +121,22 @@ export function PerformanceSection({ section }: { section: HubSection }) {
             )}
           </>
         )}
+
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
+          <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Advanced gaming paths</p>
+          <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>
+            These launch options expose the same Gamescope, sched-ext, and low-latency paths available in the old Hub. They are shown as commands because they need the game or app command supplied by Steam.
+          </p>
+          <CommandLine label="Gamescope (quality preset)" command="ujust gamescope -- %command%" />
+          <CommandLine label="HDR Gamescope" command="ujust game-hdr -- %command%" />
+          <CommandLine label="Low-latency Vulkan layer" command="ujust low-latency -- %command%" />
+          <CommandLine label="Check sched-ext scheduler" command="ujust scx status" />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            <RecipeButton recipe="hdr-per-game" label="Build HDR per-game config" busy={busy} run={run} />
+            <RecipeButton recipe="enable-bpftune" label="Enable experimental bpftune" busy={busy} run={run} />
+            <RecipeButton recipe="disable-bpftune" label="Remove bpftune" busy={busy} run={run} />
+          </div>
+        </div>
         <ActionStatus status={status} />
       </div>
     </LiveSectionCard>

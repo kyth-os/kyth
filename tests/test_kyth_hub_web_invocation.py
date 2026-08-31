@@ -150,6 +150,44 @@ class BridgeFieldTests(unittest.TestCase):
                 ))
                 self.assertEqual(fields - served, set(), f"{rust_name} never sends these")
 
+    def test_compatibility_matrix_bridge_is_registered_and_consumed(self):
+        # The old Hub's title matrix is image-owned JSON. A typed Tauri
+        # command keeps the React and Qt surfaces on the same data source;
+        # an unregistered command would silently leave the page in Preview.
+        self.assertIn("fn compatibility_games()", MAIN_RS)
+        self.assertIn("compatibility_games", MAIN_RS)
+        self.assertIn('invoke<CompatibilityGame[]>("compatibility_games")', LIVE_DATA)
+        component = (HUB_WEB / "components" / "CompatibilitySection.tsx").read_text(encoding="utf-8")
+        self.assertIn("fetchCompatibilityGames", component)
+        self.assertIn("gameFilter", component)
+        self.assertIn("gameQuery", component)
+
+    def test_performance_section_consumes_live_session_telemetry(self):
+        component = (HUB_WEB / "components" / "PerformanceSection.tsx").read_text(encoding="utf-8")
+        self.assertIn("fetchTelemetryRecent(8)", component)
+        self.assertIn("Recent gaming sessions", component)
+        self.assertIn("session.avg_fps", component)
+
+    def test_performance_and_app_store_expose_advanced_frontend_paths(self):
+        performance = (HUB_WEB / "components" / "PerformanceSection.tsx").read_text(encoding="utf-8")
+        app_store = (HUB_WEB / "components" / "AppStoreSection.tsx").read_text(encoding="utf-8")
+        for command in ("ujust gamescope -- %command%", "ujust game-hdr -- %command%", "ujust low-latency -- %command%", "ujust scx status"):
+            self.assertIn(command, performance)
+        for recipe in ("hdr-per-game", "enable-bpftune", "disable-bpftune", "setup-kyth-dev-box", "ai-dev-status", "ai-dev-setup", "export-kali-apps", "setup-waydroid", "remove-waydroid"):
+            self.assertIn(f'recipe="{recipe}"', performance + app_store)
+
+    def test_network_share_and_vpn_parity_bridges_are_registered(self):
+        shares = (HUB_WEB / "components" / "NetworkSharesSection.tsx").read_text(encoding="utf-8")
+        vpn = (HUB_WEB / "components" / "VpnSection.tsx").read_text(encoding="utf-8")
+        self.assertIn("smb_configured_shares", MAIN_RS)
+        self.assertIn("smb_save_configured_share", MAIN_RS)
+        self.assertIn("network_share_add", MAIN_RS)
+        self.assertIn("addNetworkShare", LIVE_DATA)
+        self.assertIn("Credentials go only", shares)
+        self.assertIn("open_vpn_app", MAIN_RS)
+        self.assertIn("openVpnApp", LIVE_DATA)
+        self.assertIn("Open full VPN connection", vpn)
+
 
 class GuardianExecutionTests(unittest.TestCase):
     def test_guardian_execute_does_not_go_through_just(self):

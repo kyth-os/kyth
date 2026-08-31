@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchNetworkSummary, fetchNetworkSummaryLive, type NetworkSummary } from "../services/liveData";
+import { fetchNetworkSummary, fetchNetworkSummaryLive, openVpnApp, type NetworkSummary } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -51,7 +51,15 @@ export function VpnSection({ section }: { section: HubSection }) {
             }
           />
           <RecipeButton recipe="setup-tailscale" label="Set up Tailscale" busy={busy} run={run} />
+          <ActionButton
+            label={busy === "open-vpn" ? "Opening…" : "Open full VPN connection"}
+            disabled={busy !== null}
+            onClick={() => run("open-vpn", "Opening the VPN connection app…", openVpnApp)}
+          />
         </div>
+        <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
+          Use the full connection app for saved profiles, GlobalProtect-style gateways, and SAML sign-in.
+        </p>
         <ActionStatus status={status} />
       </div>
     </LiveSectionCard>
