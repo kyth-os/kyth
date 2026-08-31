@@ -186,7 +186,10 @@ class BridgeFieldTests(unittest.TestCase):
         self.assertIn("Credentials go only", shares)
         self.assertIn("open_vpn_app", MAIN_RS)
         self.assertIn("openVpnApp", LIVE_DATA)
+        self.assertIn("vpn_saved_profile", MAIN_RS)
+        self.assertIn("fetchVpnSavedProfile", LIVE_DATA)
         self.assertIn("Open full VPN connection", vpn)
+        self.assertIn("Saved profile", vpn)
 
     def test_move_in_readiness_and_full_workflow_bridges_are_registered(self):
         move_files = (HUB_WEB / "components" / "MoveFilesSection.tsx").read_text(encoding="utf-8")

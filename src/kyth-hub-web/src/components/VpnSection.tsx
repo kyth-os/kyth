@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchNetworkSummary, fetchNetworkSummaryLive, openVpnApp, type NetworkSummary } from "../services/liveData";
+import { fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnSavedProfile, openVpnApp, type NetworkSummary, type VpnSavedProfile } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -9,13 +9,15 @@ import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./Se
 // two facets of the same read). Refresh escalates to the live nmcli read.
 export function VpnSection({ section }: { section: HubSection }) {
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
+  const [profile, setProfile] = useState<VpnSavedProfile | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
   useEffect(() => {
     let cancelled = false;
-    fetchNetworkSummary().then((s) => {
+    Promise.all([fetchNetworkSummary(), fetchVpnSavedProfile()]).then(([s, savedProfile]) => {
       if (!cancelled) {
         setSummary(s);
+        setProfile(savedProfile);
         setLoaded(true);
       }
     });
@@ -31,6 +33,11 @@ export function VpnSection({ section }: { section: HubSection }) {
             {summary.vpnConnected ? `Connected — ${summary.vpnName}` : "Not connected"}
           </span>
           <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>{summary.detail}</p>
+          {profile && (
+            <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>
+              Saved profile: <strong>{profile.gateway}</strong> · {profile.protocol} · {profile.os}
+            </p>
+          )}
         </div>
       ) : (
         <SectionFallbackNote loaded={loaded} />
@@ -43,9 +50,10 @@ export function VpnSection({ section }: { section: HubSection }) {
             disabled={busy !== null}
             onClick={() =>
               run("refresh", "Asking NetworkManager…", async () => {
-                const fresh = await fetchNetworkSummaryLive();
+                const [fresh, savedProfile] = await Promise.all([fetchNetworkSummaryLive(), fetchVpnSavedProfile()]);
                 if (!fresh) return "Not available outside the Hub shell.";
                 setSummary(fresh);
+                setProfile(savedProfile);
                 return fresh.vpnConnected ? `Connected to ${fresh.vpnName}.` : "No VPN connection is up.";
               })
             }

@@ -968,6 +968,54 @@ fn open_vpn_app() -> Result<String, String> {
     Ok("Opened the full VPN connection app.".to_string())
 }
 
+/// A profile summary contains no password, cookie, or SAML material. The
+/// full VPN app remains the authority for connecting and editing profiles.
+#[derive(Serialize)]
+struct VpnSavedProfile {
+    gateway: String,
+    protocol: String,
+    os: String,
+}
+
+fn valid_vpn_profile_text(value: &str, maximum: usize) -> bool {
+    !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
+}
+
+#[tauri::command]
+fn vpn_saved_profile() -> Option<VpnSavedProfile> {
+    let home = std::env::var_os("HOME")?;
+    let path = PathBuf::from(home).join(".config/kyth-vpn-connect");
+    let metadata = fs::symlink_metadata(&path).ok()?;
+    if !metadata.is_file() || metadata.len() > 16 * 1024 {
+        return None;
+    }
+    let raw = fs::read_to_string(path).ok()?;
+    let mut in_vpn_section = false;
+    let mut values = HashMap::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            in_vpn_section = line.eq_ignore_ascii_case("[vpn]");
+            continue;
+        }
+        if !in_vpn_section || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        let (key, value) = line.split_once('=')?;
+        values.insert(key.trim().to_ascii_lowercase(), value.trim().to_string());
+    }
+    let gateway = values.remove("gateway")?;
+    let protocol = values.remove("protocol")?;
+    let os = values.remove("os")?;
+    if !valid_vpn_profile_text(&gateway, 253)
+        || !matches!(protocol.as_str(), "gp" | "anyconnect" | "pulse" | "nc" | "f5" | "fortinet" | "array")
+        || !matches!(os.as_str(), "win" | "linux" | "mac")
+    {
+        return None;
+    }
+    Some(VpnSavedProfile { gateway, protocol, os })
+}
+
 #[tauri::command]
 fn desktop_stack_checks() -> Vec<kyth_shared::system::desktop_stack::StackCheck> {
     kyth_shared::system::desktop_stack::desktop_stack_checks()
@@ -1108,6 +1156,7 @@ fn main() {
             ntfs_devices,
             migration_readiness,
             open_vpn_app,
+            vpn_saved_profile,
             commands::dashboard::boot_runtime_checks,
             desktop_stack_checks,
             commands::updates::updater_available,

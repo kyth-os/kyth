@@ -722,6 +722,11 @@ export async function openVpnApp(): Promise<string> {
   if (!inTauriShell()) throw new Error("The full VPN connection app is available from the installed Kyth Hub.");
   return await invoke<string>("open_vpn_app");
 }
+export interface VpnSavedProfile { gateway: string; protocol: string; os: string; }
+export async function fetchVpnSavedProfile(): Promise<VpnSavedProfile | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<VpnSavedProfile | null>("vpn_saved_profile"); } catch { return null; }
+}
 
 // Updates unified — bootc/flatpak/firmware summary
 export async function fetchPendingUpdatesSummary(): Promise<Record<string,string> | null> {
