@@ -1,9 +1,9 @@
 # kyth-hub-web
 
-The native Slint shell lives at `src-tauri/src/native_main.rs`, with its UI in
-`src-tauri/ui/hub.slint`. `kyth-hub-native` is now the default installed Hub;
-the React/Tauri shell remains available as a compatibility fallback with
-`KYTH_USE_REACT_UI=1` while feature pages are migrated and validated.
+The primary Hub shell is Tauri/React. Its UI lives in `src/` and its Rust
+bridge is under `src-tauri/`. The native Slint shell remains in
+`src-tauri/src/native_main.rs` and `src-tauri/ui/hub.slint` as an explicit
+recovery path with `KYTH_USE_NATIVE_UI=1`.
 
 React + TypeScript frontend for the Kyth Hub web/Tauri rewrite (see
 `src-tauri/` for the Rust shell — its bridge commands call straight into

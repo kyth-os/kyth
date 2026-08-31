@@ -1,18 +1,16 @@
 # Kyth Hub Parity — Python (Qt/PySide6) → Rust/Slint
 
-The native UI migration is active: `src-tauri/src/native_main.rs` and
-`src-tauri/ui/hub.slint` provide the Slint shell and direct Rust status reads.
-The native Slint binary is now the default launcher. The Tauri/React shell is
-kept as a controlled compatibility fallback with `KYTH_USE_REACT_UI=1` until
-the remaining feature pages and guarded actions have native parity.
+The Tauri/React shell is the primary Hub UI. It provides the responsive
+navigation and complete feature-page surface, with direct Rust bridge commands
+under `src-tauri/`. The Slint implementation remains available as a controlled
+recovery path with `KYTH_USE_NATIVE_UI=1`; it is not the default launcher.
 
-**The native Rust/Slint Hub is now the default Hub the user sees.**
-`kyth-welcome-launch` prefers `/usr/bin/kyth-hub-native`, then falls back to
-`/usr/bin/kyth-hub-shell` when the native binary is unavailable or
-`KYTH_USE_REACT_UI=1`, and finally to the old Qt Hub on older images. The Qt
-Hub remains in the tree as an old-image fallback and as the source of the
-headless `kyth-probe`/`kyth-guardian` services. The React/Tauri build remains
-covered by `check-hub-web-shell.sh` until the compatibility path is retired.
+`kyth-welcome-launch` prefers `/usr/bin/kyth-hub-shell`, then falls back to
+`/usr/bin/kyth-hub-native` if the Tauri binary is unavailable. Setting
+`KYTH_USE_NATIVE_UI=1` explicitly selects the Slint binary when present, and
+the old Qt Hub remains the final fallback for older images. Both modern shells
+preserve the same `--page` contract. The React/Tauri build is covered by
+`check-hub-web-shell.sh`; the native binary remains built for recovery testing.
 
 Native interactive coverage now includes the shared familiar-app chooser and
 the verified Gaming recipe set: Steam, Heroic, Lutris, Bottles, Prism Launcher,

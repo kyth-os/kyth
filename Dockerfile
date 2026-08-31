@@ -235,15 +235,15 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/syscon
 # Skipped gracefully when MOK_KEY is not set (local builds without a signing key).
 # Pass the private key via: --secret id=mok_key,env=MOK_KEY
 
-# The React+Tauri Hub rewrite's compiled binary — see the hub-web-builder
+# The primary React+Tauri Hub's compiled binary — see the hub-web-builder
 # stage declared near the top of this file (before BASE_IMAGE's own FROM,
 # so it doesn't disturb that ARG's global scope). Ships on every channel;
 # kyth-welcome-launch (installed below via 23-kyth-helper-ctx-installs.sh)
 # is what actually gates which channel launches it instead of the classic
 # kyth-welcome.
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-hub-shell /usr/bin/kyth-hub-shell
-# Native Slint Hub binary is shipped alongside the compatibility shell during
-# page-parity migration; the launcher switches only after acceptance testing.
+# Native Slint Hub binary is shipped alongside the primary shell as a recovery
+# path; the launcher selects it only when explicitly requested or unavailable.
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-hub-native /usr/bin/kyth-hub-native
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0

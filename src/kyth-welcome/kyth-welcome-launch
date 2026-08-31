@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Native Slint Hub is the default UI. The React/Tauri shell remains an explicit
-# compatibility fallback for older images or a controlled rollback while the
-# remaining native feature pages are completed. All three binaries preserve the
-# same --page contract.
-target_bin="/usr/bin/kyth-hub-native"
-if [[ "${KYTH_USE_REACT_UI:-0}" == "1" || ! -x "${target_bin}" ]]; then
-    target_bin="/usr/bin/kyth-hub-shell"
+# React/Tauri is the primary Hub UI. Slint remains available as an explicit
+# recovery path while the native experiment is retained in the image. Both
+# modern shells preserve the same --page contract.
+target_bin="/usr/bin/kyth-hub-shell"
+if [[ "${KYTH_USE_NATIVE_UI:-0}" == "1" && -x "/usr/bin/kyth-hub-native" ]]; then
+    target_bin="/usr/bin/kyth-hub-native"
+elif [[ ! -x "${target_bin}" && -x "/usr/bin/kyth-hub-native" ]]; then
+    target_bin="/usr/bin/kyth-hub-native"
 fi
 if [[ ! -x "${target_bin}" ]]; then
     target_bin="/usr/bin/kyth-welcome"
