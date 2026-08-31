@@ -446,6 +446,33 @@ fn cloud_oauth_status() -> CloudOauthResponse {
 fn rclone_oauth_command(remote: String) -> Vec<String> {
     kyth_shared::system::cloud_oauth::rclone_oauth_command(&remote)
 }
+
+#[tauri::command]
+fn open_cloud_storage_app() -> Result<String, String> {
+    std::process::Command::new("/usr/bin/kyth-welcome-launch")
+        .args(["--page", "Cloud Storage"])
+        .spawn()
+        .map_err(|error| format!("could not open Cloud Storage: {error}"))?;
+    Ok("Opened the full Cloud Storage workflow.".to_string())
+}
+
+#[tauri::command]
+fn open_move_files_app() -> Result<String, String> {
+    std::process::Command::new("/usr/bin/kyth-welcome-launch")
+        .args(["--page", "Move Files"])
+        .spawn()
+        .map_err(|error| format!("could not open Move Files: {error}"))?;
+    Ok("Opened the full Windows migration workflow.".to_string())
+}
+
+#[tauri::command]
+fn open_network_shares_app() -> Result<String, String> {
+    std::process::Command::new("/usr/bin/kyth-welcome-launch")
+        .args(["--page", "Network Shares"])
+        .spawn()
+        .map_err(|error| format!("could not open Network Shares: {error}"))?;
+    Ok("Opened the full Network Shares workflow.".to_string())
+}
 #[tauri::command]
 fn ipp_discover() -> Vec<String> {
     kyth_shared::system::printing::ipp_discover()
@@ -978,6 +1005,9 @@ fn main() {
             is_gaming_slice_available,
             cloud_oauth_status,
             rclone_oauth_command,
+            open_cloud_storage_app,
+            open_move_files_app,
+            open_network_shares_app,
             ipp_discover,
             printer_setup_command,
             btrfs_health,

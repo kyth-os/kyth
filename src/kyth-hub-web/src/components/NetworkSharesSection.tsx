@@ -8,6 +8,7 @@ import {
   fetchNetworkSummaryLive,
   fetchSmbBrowse,
   fetchSmbMountCommand,
+  openNetworkSharesApp,
   removeNetworkShare,
   type ConfiguredNetworkShare,
   type NetworkSummary,
@@ -67,6 +68,8 @@ export function NetworkSharesSection({ section }: { section: HubSection }) {
       </div> : <SectionFallbackNote loaded={loaded} />}
 
       <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
+        <ActionButton label={busy === "open-shares" ? "Opening…" : "Open full share controls"} disabled={busy !== null} onClick={() => run("open-shares", "Opening Network Shares…", openNetworkSharesApp)} />
+        <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>The full workflow includes mount, unmount, and auto-mount controls for configured shares.</p>
         <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Configure a persistent share</p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
           <input value={form.name} onChange={(event) => setField("name", event.target.value)} placeholder="Share name (media)" style={fieldStyle} />

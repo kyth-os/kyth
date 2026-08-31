@@ -639,6 +639,18 @@ export async function fetchCloudOauthStatus(): Promise<{ ok: boolean; detail: st
   if (!inTauriShell()) return null;
   try { return await invoke<{ ok: boolean; detail: string }>("cloud_oauth_status"); } catch { return null; }
 }
+export async function openCloudStorageApp(): Promise<string> {
+  if (!inTauriShell()) throw new Error("The full Cloud Storage workflow is available from the installed Kyth Hub.");
+  return await invoke<string>("open_cloud_storage_app");
+}
+export async function openMoveFilesApp(): Promise<string> {
+  if (!inTauriShell()) throw new Error("The full migration workflow is available from the installed Kyth Hub.");
+  return await invoke<string>("open_move_files_app");
+}
+export async function openNetworkSharesApp(): Promise<string> {
+  if (!inTauriShell()) throw new Error("The full Network Shares workflow is available from the installed Kyth Hub.");
+  return await invoke<string>("open_network_shares_app");
+}
 export async function fetchPrinterDiscover(): Promise<string[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<string[]>("ipp_discover"); } catch { return null; }

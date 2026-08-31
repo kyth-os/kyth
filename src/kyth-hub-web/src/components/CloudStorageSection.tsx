@@ -6,6 +6,7 @@ import {
   fetchNetworkSummary,
   fetchNetworkSummaryLive,
   fetchRcloneOauthCommand,
+  openCloudStorageApp,
   type NetworkSummary,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
@@ -77,6 +78,11 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
           Connecting an account opens a browser sign-in; the command below runs that flow in a terminal.
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <ActionButton
+            label={busy === "open-cloud" ? "Opening…" : "Open full Cloud Storage"}
+            disabled={busy !== null}
+            onClick={() => run("open-cloud", "Opening the Cloud Storage workflow…", openCloudStorageApp)}
+          />
           {REMOTES.map((remote) => (
             <ActionButton
               key={remote}
@@ -106,6 +112,9 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
             }
           />
         </div>
+        <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
+          The full workflow includes browser sign-in, saved sync folders, Sync Now, schedules, and logs.
+        </p>
         {setupCmd && <CommandLine label={`${REMOTE_LABEL[setupCmd.remote]} setup`} command={setupCmd.text} />}
         <ActionStatus status={status} />
       </div>

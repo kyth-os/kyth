@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchNtfsDevices, fetchNtfsDrives, runPrivilegedAction, type NtfsDevice, type NtfsDrive } from "../services/liveData";
+import { fetchNtfsDevices, fetchNtfsDrives, openMoveFilesApp, runPrivilegedAction, type NtfsDevice, type NtfsDrive } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -79,6 +79,7 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
           Migration helpers inspect the Windows volume first; copying stays in a visible terminal so paths and permissions are clear.
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <ActionButton label={busy === "open-migration" ? "Opening…" : "Open full migration"} disabled={busy !== null} onClick={() => run("open-migration", "Opening the Windows migration workflow…", openMoveFilesApp)} />
           <ActionButton
             label={busy === "rescan" ? "Rescanning…" : "Rescan drives"}
             disabled={busy !== null}
@@ -99,6 +100,9 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
           <RecipeButton recipe="install-ludusavi" label="Install save migration" busy={busy} run={run} />
           <RecipeButton recipe="install-ms-fonts" label="Install Microsoft fonts" busy={busy} run={run} />
         </div>
+        <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
+          The full workflow includes verified file-copy previews, bookmarks, save locations, and migration readiness checks.
+        </p>
         {unlockDevice && <div style={{ marginTop: 14, padding: 12, border: "1px solid var(--hairline)", borderRadius: 10 }}>
           <p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>Unlock {unlockDevice.dev}</p>
           <p className="card-copy" style={{ fontSize: 12, marginTop: 5 }}>The key is sent only to the local privileged service and is not logged.</p>
