@@ -28,6 +28,14 @@ export component HubWindow inherits Window {
     in-out property <string> appstream-results: "Search the Flatpak catalog from the native Apps surface.";
     in-out property <string> appstream-install-id: "";
     in-out property <string> appstream-install-label: "";
+    in-out property <string> appimage-path: "";
+    in-out property <string> flatpak-id: "";
+    in-out property <string> feedback-title: "";
+    in-out property <string> feedback-body: "";
+    in-out property <string> bitlocker-device: "";
+    in-out property <string> bitlocker-key: "";
+    in-out property <string> smb-host: "";
+    in-out property <string> smb-share: "";
     in-out property <string> guardian-status: "Guardian · Reading recommendations…";
     in-out property <string> recipes-text: "Recipes · Reading available actions…";
     in-out property <string> section-one: "Recovery";
@@ -51,6 +59,12 @@ export component HubWindow inherits Window {
     callback section-action(string);
     callback appstream-search(string);
     callback appstream-install(string);
+    callback appimage-action(string);
+    callback flatpak-uninstall(string);
+    callback open-feedback(string);
+    callback bitlocker-unlock(string);
+    callback smb-action(string);
+    callback cloud-action(string);
 
     Rectangle {
         background: #0b1020;
@@ -140,7 +154,10 @@ export component HubWindow inherits Window {
                     HorizontalLayout {
                         visible: selected-page == "Updates";
                         spacing: 8px;
+                        Button { text: "Refresh status"; enabled: !action-busy; clicked => { page-action("refresh-updates"); } }
+                        Button { text: "Check for updates"; enabled: !action-busy; clicked => { page-action("check-updates"); } }
                         Button { text: "Download and stage"; enabled: !action-busy; clicked => { page-action("upgrade"); } }
+                        Button { text: "Restart to apply"; enabled: !action-busy; clicked => { page-action("apply-staged"); } }
                         Button { text: "Roll back"; enabled: !action-busy; clicked => { page-action("rollback"); } }
                         Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
                     }
@@ -149,6 +166,12 @@ export component HubWindow inherits Window {
                         visible: selected-page == "This PC" && selected-section == "Guardian";
                         spacing: 8px;
                         Button { text: "Run pending safe repair"; enabled: !action-busy; clicked => { page-action("guardian"); } }
+                        Button { text: "Health check"; enabled: !action-busy; clicked => { page-action("guardian-check"); } }
+                        Button { text: "Investigate"; enabled: !action-busy; clicked => { page-action("guardian-investigate"); } }
+                        Button { text: "Enable Guardian"; enabled: !action-busy; clicked => { page-action("guardian-enable"); } }
+                        Button { text: "Disable Guardian"; enabled: !action-busy; clicked => { page-action("guardian-disable"); } }
+                        Button { text: "Safe auto-fix on"; enabled: !action-busy; clicked => { page-action("guardian-autofix-on"); } }
+                        Button { text: "Safe auto-fix off"; enabled: !action-busy; clicked => { page-action("guardian-autofix-off"); } }
                         Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
                     }
 
@@ -162,11 +185,97 @@ export component HubWindow inherits Window {
                     }
 
                     HorizontalLayout {
+                        visible: selected-page == "Play" && selected-section == "Performance";
+                        spacing: 8px;
+                        Text { text: "Audio profile"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Gaming audio"; enabled: !action-busy; clicked => { page-action("pipewire-gaming"); } }
+                        Button { text: "Work audio"; enabled: !action-busy; clicked => { page-action("pipewire-work"); } }
+                        Button { text: "Balanced audio"; enabled: !action-busy; clicked => { page-action("pipewire-balanced"); } }
+                    }
+
+                    HorizontalLayout {
                         visible: selected-page == "This PC" && selected-section == "Hardware";
                         spacing: 8px;
                         Text { text: "Device maintenance"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
                         Button { text: "Apply firmware updates"; enabled: !action-busy; clicked => { page-action("firmware-update"); } }
+                        Button { text: "Enroll Secure Boot key"; enabled: !action-busy; clicked => { page-action("enroll-secureboot"); } }
+                        Button { text: "Device report"; enabled: !action-busy; clicked => { page-action("device-info"); } }
                         Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "This PC" && selected-section == "NVIDIA";
+                        spacing: 8px;
+                        Button { text: "Install NVIDIA driver"; enabled: !action-busy; clicked => { page-action("install-nvidia-driver"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "This PC" && selected-section == "Plasma Wayland";
+                        spacing: 8px;
+                        Button { text: "List display presets"; enabled: !action-busy; clicked => { page-action("list-presets"); } }
+                        Button { text: "HDR"; enabled: !action-busy; clicked => { page-action("plasma-hdr"); } }
+                        Button { text: "SDR"; enabled: !action-busy; clicked => { page-action("plasma-sdr"); } }
+                        Button { text: "VRR"; enabled: !action-busy; clicked => { page-action("plasma-vrr"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "This PC" && selected-section == "Channels";
+                        spacing: 8px;
+                        Text { text: "Update channel"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Stable"; enabled: !action-busy; clicked => { page-action("switch-channel-stable"); } }
+                        Button { text: "Testing"; enabled: !action-busy; clicked => { page-action("switch-channel-testing"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "This PC" && selected-section == "Kernel";
+                        spacing: 8px;
+                        Text { text: "Kernel flavor"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "CachyOS"; enabled: !action-busy; clicked => { page-action("switch-kernel-cachy"); } }
+                        Button { text: "Fedora"; enabled: !action-busy; clicked => { page-action("switch-kernel-fedora"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "This PC" && selected-section == "Diagnostics";
+                        spacing: 8px;
+                        Button { text: "Gaming stack audit"; enabled: !action-busy; clicked => { page-action("gaming-audit"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "This PC" && selected-section == "Repair";
+                        spacing: 8px;
+                        Button { text: "Check suspend/resume"; enabled: !action-busy; clicked => { page-action("resume-check"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Apps" && selected-section == "Work Setup";
+                        spacing: 8px;
+                        Button { text: "Set up a printer"; enabled: !action-busy; clicked => { page-action("setup-printer"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Apps" && selected-section == "App Store";
+                        spacing: 8px;
+                        Text { text: "Developer tools"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "VS Code"; enabled: !action-busy; clicked => { page-action("install-vscode"); } }
+                        Button { text: "BoxBuddy"; enabled: !action-busy; clicked => { page-action("install-boxbuddy"); } }
+                        Button { text: "JetBrains Toolbox"; enabled: !action-busy; clicked => { page-action("install-jetbrains-toolbox"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Apps" && selected-section == "App Store";
+                        spacing: 8px;
+                        Text { text: "Starter packs"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Gaming"; enabled: !action-busy; clicked => { page-action("install-pack-gaming"); } }
+                        Button { text: "Creator"; enabled: !action-busy; clicked => { page-action("install-pack-creator"); } }
+                        Button { text: "Everyday"; enabled: !action-busy; clicked => { page-action("install-pack-everyday"); } }
                     }
 
                     HorizontalLayout {
@@ -182,6 +291,9 @@ export component HubWindow inherits Window {
                         spacing: 8px;
                         Text { text: "Game saves"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
                         Button { text: "Install save migration"; enabled: !action-busy; clicked => { page-action("install-ludusavi"); } }
+                        Button { text: "Fix dual-boot clock"; enabled: !action-busy; clicked => { page-action("fix-dualboot-clock"); } }
+                        Button { text: "Prepare Windows + Steam"; enabled: !action-busy; clicked => { page-action("setup-boot-windows-steam"); } }
+                        Button { text: "Reclaim Windows space"; enabled: !action-busy; clicked => { page-action("reclaim-windows"); } }
                         Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
                     }
 
@@ -223,6 +335,13 @@ export component HubWindow inherits Window {
                             Text { visible: selected-page == "Apps" && selected-section == "App Store"; text: appstream-results; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
                             HorizontalLayout { visible: selected-page == "Apps" && selected-section == "App Store" && appstream-install-id != ""; spacing: 8px; Button { text: appstream-install-label; enabled: !action-busy; clicked => { appstream-install(appstream-install-id); } } Text { text: "Installs for this user"; color: #60718f; font-size: 11px; vertical-alignment: center; } }
                             Text { visible: selected-page == "This PC" && selected-section == "Guardian"; text: guardian-status; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
+                            HorizontalLayout { visible: selected-page == "This PC" && selected-section == "Recipes"; spacing: 8px; Button { text: "System audit"; enabled: !action-busy; clicked => { page-action("system-audit"); } } Button { text: "Update health"; enabled: !action-busy; clicked => { page-action("update-health"); } } Button { text: "Device report"; enabled: !action-busy; clicked => { page-action("device-info"); } } Button { text: "Resume check"; enabled: !action-busy; clicked => { page-action("resume-check"); } } }
+                            HorizontalLayout { visible: selected-page == "Apps" && selected-section == "App Images"; spacing: 8px; LineEdit { horizontal-stretch: 1; text <=> appimage-path; placeholder-text: "Path under Applications, .local/bin, or Downloads"; } Button { text: "Import"; enabled: !action-busy; clicked => { appimage-action("import:" + appimage-path); } } Button { text: "Make executable"; enabled: !action-busy; clicked => { appimage-action("executable:" + appimage-path); } } Button { text: "Launch"; enabled: !action-busy; clicked => { appimage-action("launch:" + appimage-path); } } }
+                            HorizontalLayout { visible: selected-page == "Apps" && selected-section == "Installed apps"; spacing: 8px; LineEdit { horizontal-stretch: 1; text <=> flatpak-id; placeholder-text: "Flatpak application ID"; } Button { text: "Uninstall user app"; enabled: !action-busy; clicked => { flatpak-uninstall(flatpak-id); } } }
+                            HorizontalLayout { visible: selected-page == "Move In" && selected-section == "Move Files"; spacing: 8px; LineEdit { text <=> bitlocker-device; placeholder-text: "/dev/nvme0n1p3"; } LineEdit { text <=> bitlocker-key; input-type: InputType.password; placeholder-text: "BitLocker recovery key"; } Button { text: "Unlock volume"; enabled: !action-busy; clicked => { bitlocker-unlock(bitlocker-device + "\n" + bitlocker-key); } } }
+                            HorizontalLayout { visible: selected-page == "Move In" && selected-section == "Network Shares"; spacing: 8px; LineEdit { text <=> smb-host; placeholder-text: "Server (blank = discover)"; } Button { text: "Browse shares"; enabled: !action-busy; clicked => { smb-action("browse:" + smb-host); } } LineEdit { text <=> smb-share; placeholder-text: "smb://server/share"; } Button { text: "Mount share"; enabled: !action-busy; clicked => { smb-action("mount:" + smb-share); } } }
+                            HorizontalLayout { visible: selected-page == "Move In" && selected-section == "Cloud Storage"; spacing: 8px; Button { text: "OneDrive OAuth"; enabled: !action-busy; clicked => { cloud-action("onedrive"); } } Button { text: "Google Drive OAuth"; enabled: !action-busy; clicked => { cloud-action("drive"); } } Button { text: "Dropbox OAuth"; enabled: !action-busy; clicked => { cloud-action("dropbox"); } } }
+                            VerticalLayout { visible: selected-page == "This PC" && selected-section == "Feedback"; spacing: 8px; LineEdit { text <=> feedback-title; placeholder-text: "Report title"; } LineEdit { text <=> feedback-body; placeholder-text: "Describe what happened (logs are scrubbed before opening)"; } Button { text: "Open prefilled report"; enabled: !action-busy; clicked => { open-feedback(feedback-title + "\n" + feedback-body); } } }
                             Text { visible: selected-page == "This PC" && selected-section == "Recipes"; text: recipes-text; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
                         }
                     }

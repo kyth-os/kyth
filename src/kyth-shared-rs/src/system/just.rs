@@ -134,6 +134,20 @@ pub fn command_for(recipe: &str, args: &[&str]) -> Option<Vec<String>> {
     Some(argv)
 }
 
+/// Build a command for a fixed `just` assignment such as
+/// `switch-kernel flavor=cachy`. Assignments are kept separate argv values;
+/// callers must still choose the exact values rather than forwarding UI text.
+pub fn command_for_fixed_assignments(recipe: &str, args: &[(&str, &str)]) -> Option<Vec<String>> {
+    if !is_bare_token(recipe)
+        || !args.iter().all(|(key, value)| is_bare_token(key) && is_bare_token(value))
+    {
+        return None;
+    }
+    let mut argv = vec!["/usr/bin/just".to_string(), recipe.to_string()];
+    argv.extend(args.iter().map(|(key, value)| format!("{key}={value}")));
+    Some(argv)
+}
+
 /// Run `just --list` with the justfile `ujust` uses and parse.
 /// Returns `Ok(vec)` even when `just` exits non-zero but produced stdout —
 ///
@@ -253,6 +267,16 @@ mod tests {
             command_for("switch-channel", &["stable"]),
             Some(vec!["/usr/bin/just", "switch-channel", "stable"].into_iter().map(String::from).collect()),
         );
+    }
+
+    #[test]
+    fn fixed_assignments_are_separate_and_validated() {
+        assert_eq!(
+            command_for_fixed_assignments("switch-kernel", &[("flavor", "cachy")]),
+            Some(vec!["/usr/bin/just", "switch-kernel", "flavor=cachy"].into_iter().map(String::from).collect()),
+        );
+        assert!(command_for_fixed_assignments("switch-kernel", &[("flavor", "cachy; reboot")]).is_none());
+        assert!(command_for_fixed_assignments("switch-kernel", &[("--flavor", "cachy")]).is_none());
     }
 
     /// Captured from a `just --list` (just 1.58) over ublue's justfile with

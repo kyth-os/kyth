@@ -51,3 +51,16 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
    class is not represented in its Rust signature.
 4. The mutating wrappers return plain strings rather than a structured action
    result, so confirmation and failure semantics remain a follow-up item.
+
+## Native Rust/Slint additions
+
+The native shell uses fixed callback identifiers rather than exposing Tauri's
+generic IPC surface. Updates, Guardian controls, curated recipes, AppImage
+operations, user Flatpak removal, and feedback reports are now represented by
+dedicated native handlers. Kernel flavor and channel switches use fixed
+allowlisted values and the shared `just` argument validators. BitLocker,
+network share browse/mount, AppImage management, and feedback now have typed
+native inputs. BitLocker recovery keys are passed only to the existing
+validated privilege request and are never copied into action status. Cloud
+OAuth still presents a validated command for a terminal handoff, since its
+interactive browser flow is not safely hostable inside the shell.

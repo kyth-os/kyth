@@ -102,7 +102,7 @@ pub(crate) fn privileged_action(operation: String, payload: Value) -> Result<Str
     Ok(job)
 }
 
-fn send_request(request: Value) -> Result<String, String> {
+pub(crate) fn send_request(request: Value) -> Result<String, String> {
     let mut stream = UnixStream::connect("/run/kyth/privileged.sock").map_err(|_| "privileged service is unavailable".to_string())?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(910))).map_err(|error| format!("could not configure privileged service timeout: {error}"))?;
     stream.write_all(format!("{request}\n").as_bytes()).map_err(|error| format!("could not contact privileged service: {error}"))?;
@@ -114,6 +114,10 @@ fn send_request(request: Value) -> Result<String, String> {
     } else {
         Err(value.get("detail").and_then(Value::as_str).unwrap_or("privileged operation failed").to_string())
     }
+}
+
+pub(crate) fn bitlocker_request(device: &str, key: &str) -> Result<Value, String> {
+    validated_request("bitlocker_unlock", &json!({ "device": device, "key": key }))
 }
 
 pub(crate) fn flatpak_uninstall(app_id: &str) -> Result<String, String> {

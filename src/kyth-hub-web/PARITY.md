@@ -51,13 +51,15 @@ The native shell now exposes fixed interactive controls for the high-value
 workflows that can be safely represented without a generic command bridge:
 updates and rollback, Guardian safe repair, Flatpak search/install, gaming and
 balanced performance profiles, firmware update, Office fonts, Windows
-verification, save-migration tooling, Tailscale setup, and the read-only
+verification, save-migration tooling, Tailscale setup, AppImage import/launch,
+user-scoped Flatpak removal, curated starter packs, feedback report generation,
+BitLocker unlock, SMB browse/mount, and the read-only
 desktop/network/deployment/kernel/channel refresh actions. System-changing
 native actions use a two-step confirmation gate and report bounded completion
-or failure inline. Secret-bearing operations (BitLocker), arbitrary recipe
-arguments, Secure Boot enrollment, kernel switching, channel switching, SMB
-mounts, and display preset application still require dedicated controls before
-they can replace their React workflows.
+or failure inline. Remaining parity work is richer dynamic presentation and
+selection: cloud OAuth terminal handoff, installed-app/AppImage inventories,
+arbitrary recipe selection, and deeper per-section details. All secret-bearing
+inputs are validated and kept out of status text.
 
 ### 1. Charts — live telemetry wired
 `PerformanceChart.tsx`/`SessionsChart.tsx` read `kyth-telem` sessions through `liveData.ts:fetchTelemetryRecent` → `telemetry_recent` → `kyth-shared-rs::system::telemetry::recent_sessions` (read-only sqlite). They show `Live` when usable session data exists and an explicit no-data state otherwise; they never render the old `mockDashboard.ts` series.

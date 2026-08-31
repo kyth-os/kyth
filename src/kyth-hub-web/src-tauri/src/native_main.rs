@@ -6,10 +6,20 @@
 
 slint::include_modules!();
 
+#[path = "commands/privilege.rs"]
+mod native_privilege;
+
 use slint::{ComponentHandle, SharedString, Weak};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+
+#[derive(serde::Serialize)]
+pub(crate) struct InstallStatus {
+    id: String,
+    state: String,
+    detail: String,
+}
 
 static PENDING_CONFIRMATION: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
@@ -22,12 +32,43 @@ fn requires_confirmation(action: &str) -> bool {
         action,
         "upgrade"
             | "rollback"
+            | "apply-staged"
             | "install-ms-fonts"
             | "gaming-mode"
             | "balanced-mode"
             | "firmware-update"
             | "install-ludusavi"
+            | "install-vscode"
+            | "install-boxbuddy"
+            | "install-jetbrains-toolbox"
+            | "install-pack-gaming"
+            | "install-pack-creator"
+            | "install-pack-everyday"
             | "setup-tailscale"
+            | "enroll-secureboot"
+            | "install-nvidia-driver"
+            | "setup-printer"
+            | "fix-dualboot-clock"
+            | "setup-boot-windows-steam"
+            | "reclaim-windows"
+            | "switch-channel-stable"
+            | "switch-channel-testing"
+            | "switch-kernel-cachy"
+            | "switch-kernel-fedora"
+            | "bitlocker-unlock"
+            | "guardian-enable"
+            | "guardian-disable"
+            | "guardian-autofix-on"
+            | "guardian-autofix-off"
+    )
+}
+
+fn is_config_action(action: &str) -> bool {
+    matches!(
+        action,
+        "plasma-hdr" | "plasma-hdr10plus" | "plasma-sdr" | "plasma-vrr"
+            | "plasma-vrr_always" | "plasma-vrr_off"
+            | "pipewire-gaming" | "pipewire-work" | "pipewire-balanced"
     )
 }
 
@@ -293,6 +334,8 @@ fn section_action(section: &str) -> Option<(&'static str, &'static str)> {
         "History" => Some(("deployment-history", "Refresh deployment history")),
         "Kernel" => Some(("kernel-status", "Read kernel status")),
         "Channels" => Some(("channel-status", "Read update channel")),
+        "Updates" => Some(("refresh-updates", "Refresh update status")),
+        "App Store" | "App Images" | "Installed apps" => Some(("software-inventory", "Refresh software inventory")),
         _ => None,
     }
 }
@@ -557,6 +600,313 @@ fn run_appstream_install(weak: Weak<HubWindow>, app_id: String, label: String) {
     });
 }
 
+fn curated_pack(action: &str) -> Option<(&'static str, &'static [&'static str])> {
+    match action {
+        "install-pack-gaming" => Some(("Gaming pack", &["com.valvesoftware.Steam", "com.heroicgameslauncher.hgl", "net.lutris.Lutris", "com.usebottles.bottles", "com.github.mtkennerly.ludusavi"])),
+        "install-pack-creator" => Some(("Creator pack", &["com.obsproject.Studio", "org.kde.kdenlive", "org.audacityteam.Audacity", "org.gimp.GIMP", "org.blender.Blender"])),
+        "install-pack-everyday" => Some(("Everyday pack", &["com.brave.Browser", "com.discordapp.Discord", "org.videolan.VLC", "com.spotify.Client", "org.localsend.localsend_app"])),
+        _ => None,
+    }
+}
+
+fn run_curated_pack(weak: Weak<HubWindow>, action: String) {
+    let Some((label, apps)) = curated_pack(&action) else { return; };
+    if !confirmation_granted(&action) {
+        let status_weak = weak.clone();
+        let message = format!("Installing the {label} changes this user profile · click again to confirm");
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_status(SharedString::from(message));
+        });
+        return;
+    }
+    let Some(window) = weak.upgrade() else { return; };
+    window.set_action_busy(true);
+    window.set_action_status(SharedString::from(format!("Installing {label}…")));
+    let status_weak = weak.clone();
+    std::thread::spawn(move || {
+        let mut completed = 0;
+        let mut failures = Vec::new();
+        for app_id in apps {
+            let Some(argv) = kyth_shared::system::software_catalog::flatpak_install_argv(app_id) else { continue; };
+            match kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(600)) {
+                Ok(output) if output.status.success() => completed += 1,
+                Ok(output) => failures.push(page_action_detail(app_id, &output)),
+                Err(error) => failures.push(format!("{app_id}: {error}")),
+            }
+        }
+        let detail = if failures.is_empty() {
+            format!("{label} complete · {completed} application(s) installed")
+        } else {
+            format!("{label} finished · {completed} installed · {} failed · {}", failures.len(), failures.join(" · "))
+        };
+        let refresh_weak = status_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(detail));
+        });
+        refresh_section(refresh_weak, "App Store".to_string());
+    });
+}
+
+fn run_appimage_action(weak: Weak<HubWindow>, request: String) {
+    let Some((operation, path)) = request.split_once(':') else {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("Choose an AppImage path first."));
+        });
+        return;
+    };
+    let operation = operation.to_string();
+    let path = path.trim().to_string();
+    if path.is_empty() || !matches!(operation.as_str(), "import" | "executable" | "launch") {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("AppImage action is invalid or missing a path."));
+        });
+        return;
+    }
+    let Some(window) = weak.upgrade() else { return; };
+    window.set_action_busy(true);
+    window.set_action_status(SharedString::from("Working with AppImage…"));
+    let status_weak = weak.clone();
+    std::thread::spawn(move || {
+        let result = match operation.as_str() {
+            "import" => kyth_shared::system::software_catalog::import_appimage(&path),
+            "executable" => kyth_shared::system::software_catalog::make_appimage_executable(&path),
+            "launch" => {
+                let allowed = kyth_shared::system::software_catalog::appimages()
+                    .into_iter()
+                    .any(|app| app.path == path && app.executable);
+                if !allowed {
+                    Err("AppImage is not a discovered executable in an allowed user directory".to_string())
+                } else {
+                    Command::new(&path).spawn().map(|_| "AppImage launched.".to_string()).map_err(|error| format!("Could not launch AppImage: {error}"))
+                }
+            }
+            _ => unreachable!(),
+        };
+        let detail = result.unwrap_or_else(|error| format!("AppImage action failed · {error}"));
+        let refresh_weak = status_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(detail));
+        });
+        refresh_section(refresh_weak, "App Images".to_string());
+    });
+}
+
+fn run_flatpak_uninstall(weak: Weak<HubWindow>, app_id: String) {
+    let key = format!("uninstall-flatpak:{app_id}");
+    if !confirmation_granted(&key) {
+        let status_weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_status(SharedString::from("Uninstalling changes this user profile · click again to confirm."));
+        });
+        return;
+    }
+    if kyth_shared::system::software_catalog::flatpak_install_argv(&app_id).is_none()
+        || !kyth_shared::system::software_catalog::installed_flatpaks().into_iter().any(|app| app.id == app_id && app.scope == "user")
+    {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("Only an installed user Flatpak can be removed here."));
+        });
+        return;
+    }
+    let Some(window) = weak.upgrade() else { return; };
+    window.set_action_busy(true);
+    window.set_action_status(SharedString::from("Uninstalling user Flatpak…"));
+    let status_weak = weak.clone();
+    std::thread::spawn(move || {
+        let result = Command::new("flatpak").args(["uninstall", "--user", "-y"]).arg(&app_id).output();
+        let detail = match result {
+            Ok(output) if output.status.success() => format!("Uninstalled {app_id}."),
+            Ok(output) => page_action_detail("Flatpak uninstall", &output),
+            Err(error) => format!("Flatpak uninstall could not start · {error}"),
+        };
+        let refresh_weak = status_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(detail));
+        });
+        refresh_section(refresh_weak, "Installed apps".to_string());
+    });
+}
+
+fn run_bitlocker_unlock(weak: Weak<HubWindow>, payload: String) {
+    let Some((device, key)) = payload.split_once('\n') else {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("Enter a block device and BitLocker recovery key."));
+        });
+        return;
+    };
+    let device = device.trim().to_string();
+    let key = key.trim().to_string();
+    let action = format!("bitlocker-unlock:{device}");
+    if !confirmation_granted(&action) {
+        let status_weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_status(SharedString::from("BitLocker unlock changes storage state · click again to confirm"));
+        });
+        return;
+    }
+    let request = match native_privilege::bitlocker_request(&device, &key) {
+        Ok(request) => request,
+        Err(error) => {
+            let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+                window.set_action_status(SharedString::from(error));
+            });
+            return;
+        }
+    };
+    drop(key);
+    let Some(window) = weak.upgrade() else { return; };
+    window.set_action_busy(true);
+    window.set_action_status(SharedString::from("Unlocking BitLocker volume…"));
+    let status_weak = weak.clone();
+    std::thread::spawn(move || {
+        let detail = native_privilege::send_request(request)
+            .unwrap_or_else(|error| format!("BitLocker unlock failed · {error}"));
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(detail));
+        });
+    });
+}
+
+fn run_smb_action(weak: Weak<HubWindow>, request: String) {
+    let Some((operation, value)) = request.split_once(':') else {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("Choose a server or SMB share first."));
+        });
+        return;
+    };
+    let operation = operation.to_string();
+    let value = value.trim().to_string();
+    if !matches!(operation.as_str(), "browse" | "mount") {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("SMB action is not allowlisted."));
+        });
+        return;
+    }
+    if operation == "mount" && !value.starts_with("smb://") {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("SMB shares must use an smb:// address."));
+        });
+        return;
+    }
+    if value.len() > 255 || value.contains(['\n', '\r', '\0']) {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("The network value is invalid."));
+        });
+        return;
+    }
+    if operation == "mount" {
+        let confirmation = format!("smb-mount:{value}");
+        if !confirmation_granted(&confirmation) {
+            let status_weak = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+                window.set_action_status(SharedString::from("Mounting a share may prompt for credentials · click again to confirm"));
+            });
+            return;
+        }
+    }
+    let Some(window) = weak.upgrade() else { return; };
+    window.set_action_busy(true);
+    window.set_action_status(SharedString::from(if operation == "browse" { "Browsing SMB shares…" } else { "Mounting SMB share…" }));
+    let status_weak = weak.clone();
+    std::thread::spawn(move || {
+        let result = if operation == "browse" {
+            let host = (!value.is_empty()).then_some(value.as_str());
+            let (ok, detail) = kyth_shared::system::smb::smb_browse_dry_run(host);
+            if ok { Ok(detail) } else { Err(detail) }
+        } else {
+            let argv = kyth_shared::system::smb::smb_mount_command(&value);
+            kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(120))
+                .map_err(|error| error.to_string())
+                .and_then(|output| if output.status.success() { Ok("SMB share mounted.".to_string()) } else { Err(page_action_detail("SMB mount", &output)) })
+        };
+        let detail = result.unwrap_or_else(|error| format!("SMB action failed · {error}"));
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(detail));
+        });
+    });
+}
+
+fn run_cloud_action(weak: Weak<HubWindow>, remote: String) {
+    if !matches!(remote.as_str(), "onedrive" | "drive" | "dropbox") {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("Cloud provider is not allowlisted."));
+        });
+        return;
+    }
+    let argv = kyth_shared::system::cloud_oauth::rclone_oauth_command(&remote);
+    let display = argv.join(" ");
+    let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+        window.set_action_status(SharedString::from(format!("Run in a terminal to sign in · {display}")));
+    });
+}
+
+fn run_config_action(weak: Weak<HubWindow>, action: String) {
+    if !confirmation_granted(&action) {
+        let status_weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_status(SharedString::from("Applying a system preset changes local configuration · click again to confirm"));
+        });
+        return;
+    }
+    let Some(window) = weak.upgrade() else { return; };
+    window.set_action_busy(true);
+    window.set_action_status(SharedString::from("Applying configuration preset…"));
+    let status_weak = weak.clone();
+    std::thread::spawn(move || {
+        let result = if let Some(preset) = action.strip_prefix("plasma-") {
+            kyth_shared::system::plasma_hdr::apply_preset(preset, false)
+        } else if let Some(preset) = action.strip_prefix("pipewire-") {
+            kyth_shared::system::pipewire::apply_pipewire_quantum(preset, false)
+        } else {
+            (false, "Configuration preset is not allowlisted.".to_string())
+        };
+        let detail = if result.0 { result.1 } else { format!("Preset failed · {}", result.1) };
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(detail));
+        });
+    });
+}
+
+fn run_feedback(weak: Weak<HubWindow>, payload: String) {
+    let (title, body) = payload.split_once('\n').unwrap_or(("KythOS Hub feedback", payload.as_str()));
+    let title = title.trim();
+    let body = body.trim();
+    if title.is_empty() || body.is_empty() {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("Add a report title and description first."));
+        });
+        return;
+    }
+    let scrubbed = kyth_shared::diagnostics_scrub::scrub_logs(body);
+    let url = kyth_shared::diagnostic_report::github_issue_url(
+        "https://github.com/kyth-os/kyth",
+        title,
+        &scrubbed,
+        None,
+    );
+    let Some(window) = weak.upgrade() else { return; };
+    window.set_action_busy(true);
+    window.set_action_status(SharedString::from("Opening prefilled feedback report…"));
+    let status_weak = weak.clone();
+    std::thread::spawn(move || {
+        let detail = Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map(|_| "Feedback report opened in the browser.".to_string())
+            .unwrap_or_else(|error| format!("Could not open feedback report · {error}"));
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(detail));
+        });
+    });
+}
+
 fn guardian_status_text() -> String {
     let state = kyth_shared::guardian::load_state();
     let recommendations = kyth_shared::guardian::pending_recommendations(&state);
@@ -656,6 +1006,51 @@ fn page_action_detail(recipe: &str, output: &std::process::Output) -> String {
     }
 }
 
+fn run_guardian_action(weak: Weak<HubWindow>, action: &str) {
+    let (args, label) = match action {
+        "guardian-check" => (vec!["--json", "check"], "Running Guardian health check…"),
+        "guardian-investigate" => (vec!["--json", "investigate"], "Investigating Guardian…"),
+        "guardian-enable" => (vec!["enable"], "Enabling Guardian…"),
+        "guardian-disable" => (vec!["disable"], "Disabling Guardian…"),
+        "guardian-autofix-on" => (vec!["auto-fix", "on"], "Enabling safe auto-fix…"),
+        "guardian-autofix-off" => (vec!["auto-fix", "off"], "Disabling auto-fix…"),
+        _ => return,
+    };
+    if !std::path::Path::new("/usr/bin/kyth-guardian").exists() {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from("Guardian service is not installed."));
+        });
+        return;
+    }
+    let Some(window) = weak.upgrade() else { return; };
+    let page = window.get_selected_page().to_string();
+    let section = window.get_selected_section().to_string();
+    window.set_action_busy(true);
+    window.set_action_status(SharedString::from(label));
+    let status_weak = weak.clone();
+    std::thread::spawn(move || {
+        let mut command = Command::new("/usr/bin/kyth-guardian");
+        command.args(&args);
+        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+        let sanitized = kyth_shared::commands::environment_for(
+            kyth_shared::commands::EnvironmentPolicy::Sanitized,
+            &inherited,
+        );
+        command.env_clear().envs(sanitized);
+        let detail = match kyth_shared::system::process::run_bounded_command(command, Duration::from_secs(120)) {
+            Ok(output) => page_action_detail("Guardian", &output),
+            Err(error) => format!("Guardian could not start · {error}"),
+        };
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(detail));
+        });
+        refresh_status(weak.clone(), page);
+        refresh_section(weak, section);
+    });
+}
+
 fn run_page_action(weak: Weak<HubWindow>, action: String) {
     if action == "guardian" {
         let _ = slint::invoke_from_event_loop({
@@ -678,9 +1073,35 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         });
         return;
     }
+    if curated_pack(&action).is_some() {
+        run_curated_pack(weak, action);
+        return;
+    }
+    if is_config_action(&action) {
+        run_config_action(weak, action);
+        return;
+    }
+    if matches!(
+        action.as_str(),
+        "guardian-check" | "guardian-investigate" | "guardian-enable" | "guardian-disable"
+            | "guardian-autofix-on" | "guardian-autofix-off"
+    ) {
+        if requires_confirmation(&action) && !confirmation_granted(&action) {
+            let message = format!("{action} changes Guardian policy · click the same button again to confirm");
+            let status_weak = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+                window.set_action_busy(false);
+                window.set_action_status(SharedString::from(message));
+            });
+            return;
+        }
+        run_guardian_action(weak, &action);
+        return;
+    }
     if matches!(
         action.as_str(),
         "desktop-stack-status" | "network-status" | "deployment-history" | "kernel-status" | "channel-status"
+            | "refresh-updates" | "check-updates" | "software-inventory"
     ) {
         let Some(window) = weak.upgrade() else { return; };
         let page = window.get_selected_page().to_string();
@@ -688,10 +1109,23 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         window.set_action_busy(true);
         window.set_action_status(SharedString::from("Refreshing native status…"));
         let status_weak = weak.clone();
+        let action_for_thread = action.clone();
         std::thread::spawn(move || {
+            let detail = match action_for_thread.as_str() {
+                "refresh-updates" => {
+                    let status = kyth_shared::system::update_status::check_update_status();
+                    format!("Update status refreshed · {}", status.detail)
+                }
+                "check-updates" => {
+                    let status = kyth_shared::system::update_availability::collect_availability(None, false);
+                    format!("Update availability check · {}", status.detail)
+                }
+                "software-inventory" => "Software inventory refreshed.".to_string(),
+                _ => "Native status refreshed.".to_string(),
+            };
             let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
                 window.set_action_busy(false);
-                window.set_action_status(SharedString::from("Native status refreshed."));
+                window.set_action_status(SharedString::from(detail));
             });
         });
         refresh_status(weak.clone(), page);
@@ -709,6 +1143,7 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
     let (recipe, label) = match action.as_str() {
         "upgrade" => ("upgrade", "Starting update…"),
         "rollback" => ("rollback", "Starting rollback…"),
+        "apply-staged" => ("apply-staged", "Applying staged update…"),
         "gaming-stack-status" => ("gaming-stack-status", "Checking gaming stack…"),
         "system-audit" => ("system-audit", "Running system audit…"),
         "install-ms-fonts" => ("install-ms-fonts", "Installing Office fonts…"),
@@ -717,16 +1152,34 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         "secureboot-status" => ("secureboot-status", "Reading Secure Boot status…"),
         "controller-check" => ("controller-check", "Checking controller stack…"),
         "hardware-inventory" => ("hardware-inventory", "Refreshing hardware inventory…"),
+        "device-info" => ("device-info", "Generating device report…"),
         "desktop-stack-status" => ("desktop-stack-status", "Checking desktop stack…"),
         "network-status" => ("network-status", "Refreshing network status…"),
         "deployment-history" => ("deployment-history", "Refreshing deployment history…"),
         "kernel-status" => ("kernel-status", "Reading kernel status…"),
         "channel-status" => ("channel-status", "Reading update channel…"),
+        "refresh-updates" => ("refresh-updates", "Refreshing update status…"),
+        "check-updates" => ("check-updates", "Checking for available updates…"),
+        "software-inventory" => ("software-inventory", "Refreshing software inventory…"),
         "gaming-mode" => ("gaming-mode", "Switching to gaming profile…"),
         "balanced-mode" => ("balanced-mode", "Restoring balanced profile…"),
         "firmware-update" => ("firmware-update", "Applying firmware updates…"),
         "install-ludusavi" => ("install-ludusavi", "Installing save migration tools…"),
+        "install-vscode" => ("install-vscode", "Installing VS Code…"),
+        "install-boxbuddy" => ("install-boxbuddy", "Installing BoxBuddy…"),
+        "install-jetbrains-toolbox" => ("install-jetbrains-toolbox", "Installing JetBrains Toolbox…"),
         "setup-tailscale" => ("setup-tailscale", "Setting up Tailscale…"),
+        "enroll-secureboot" => ("enroll-secureboot", "Enrolling Secure Boot key…"),
+        "install-nvidia-driver" => ("install-nvidia-driver", "Installing NVIDIA driver…"),
+        "setup-printer" => ("setup-printer", "Opening printer setup…"),
+        "fix-dualboot-clock" => ("fix-dualboot-clock", "Fixing dual-boot clock…"),
+        "setup-boot-windows-steam" => ("setup-boot-windows-steam", "Preparing Windows and Steam…"),
+        "reclaim-windows" => ("reclaim-windows", "Reclaiming Windows space…"),
+        "resume-check" => ("resume-check", "Checking suspend/resume…"),
+        "list-presets" => ("list-presets", "Listing desktop presets…"),
+        "gaming-audit" => ("gaming-audit", "Auditing gaming stack…"),
+        "switch-channel-stable" | "switch-channel-testing" => ("switch-channel", "Switching update channel…"),
+        "switch-kernel-cachy" | "switch-kernel-fedora" => ("switch-kernel", "Switching kernel flavor…"),
         _ => {
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(window) = weak.upgrade() {
@@ -749,7 +1202,21 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         });
         return;
     }
-    let Some(argv) = kyth_shared::system::just::command_for(recipe, &[]) else {
+    let fixed_args = match action.as_str() {
+        "switch-channel-stable" => vec!["stable"],
+        "switch-channel-testing" => vec!["testing"],
+        _ => Vec::new(),
+    };
+    let fixed_assignments = match action.as_str() {
+        "switch-kernel-cachy" => Some(vec![("flavor", "cachy")]),
+        "switch-kernel-fedora" => Some(vec![("flavor", "fedora")]),
+        _ => None,
+    };
+    let argv = fixed_assignments
+        .as_deref()
+        .and_then(|assignments| kyth_shared::system::just::command_for_fixed_assignments(recipe, assignments))
+        .or_else(|| kyth_shared::system::just::command_for(recipe, &fixed_args));
+    let Some(argv) = argv else {
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = weak.upgrade() {
                 window.set_action_busy(false);
@@ -887,6 +1354,7 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_recipes_text(SharedString::from("Recipes · Reading available actions…"));
     window.set_appstream_install_id(SharedString::from(""));
     window.set_appstream_install_label(SharedString::from(""));
+    window.set_flatpak_id(SharedString::from(""));
 
     let action_weak = window.as_weak();
     window.on_page_action(move |action| {
@@ -913,6 +1381,30 @@ fn main() -> Result<(), slint::PlatformError> {
     window.on_appstream_install(move |app_id| {
         let app_id = app_id.to_string();
         run_appstream_install(install_weak.clone(), app_id.clone(), format!("Installing {app_id}"));
+    });
+    let appimage_weak = window.as_weak();
+    window.on_appimage_action(move |request| {
+        run_appimage_action(appimage_weak.clone(), request.to_string());
+    });
+    let uninstall_weak = window.as_weak();
+    window.on_flatpak_uninstall(move |app_id| {
+        run_flatpak_uninstall(uninstall_weak.clone(), app_id.to_string());
+    });
+    let bitlocker_weak = window.as_weak();
+    window.on_bitlocker_unlock(move |payload| {
+        run_bitlocker_unlock(bitlocker_weak.clone(), payload.to_string());
+    });
+    let smb_weak = window.as_weak();
+    window.on_smb_action(move |request| {
+        run_smb_action(smb_weak.clone(), request.to_string());
+    });
+    let cloud_weak = window.as_weak();
+    window.on_cloud_action(move |remote| {
+        run_cloud_action(cloud_weak.clone(), remote.to_string());
+    });
+    let feedback_weak = window.as_weak();
+    window.on_open_feedback(move |payload| {
+        run_feedback(feedback_weak.clone(), payload.to_string());
     });
 
     let refresh_weak = window.as_weak();
@@ -958,6 +1450,7 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_recipes_text(SharedString::from("Recipes · Reading available actions…"));
             window.set_appstream_install_id(SharedString::from(""));
             window.set_appstream_install_label(SharedString::from(""));
+            window.set_flatpak_id(SharedString::from(""));
             refresh_status(navigation_weak.clone(), page.to_string());
             refresh_section(navigation_weak.clone(), sections[0].to_string());
         }
@@ -976,6 +1469,7 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_recipes_text(SharedString::from("Recipes · Reading available actions…"));
             window.set_appstream_install_id(SharedString::from(""));
             window.set_appstream_install_label(SharedString::from(""));
+            window.set_flatpak_id(SharedString::from(""));
             window.set_action_status(SharedString::from(""));
             window.set_action_busy(false);
             refresh_section(section_weak.clone(), section.to_string());
