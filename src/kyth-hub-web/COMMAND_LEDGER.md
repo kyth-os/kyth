@@ -64,3 +64,11 @@ native inputs. BitLocker recovery keys are passed only to the existing
 validated privilege request and are never copied into action status. Cloud
 OAuth still presents a validated command for a terminal handoff, since its
 interactive browser flow is not safely hostable inside the shell.
+
+The native Gaming surface additionally covers the verified launcher/tool
+recipes (`install-prismlauncher`, `install-itch`, `install-epic-launcher`,
+`install-battlenet`, `install-ea-app`, `install-ubisoft-connect`,
+`export-steam-games`, `install-gpu-screen-recorder`, `install-goverlay`,
+`install-mangojuice`, `install-lact`, `install-piper`, and `install-solaar`).
+They dispatch through the shared `just` allowlist; no free-form command text
+is accepted by the native action callback.

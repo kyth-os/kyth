@@ -14,6 +14,13 @@ Hub remains in the tree as an old-image fallback and as the source of the
 headless `kyth-probe`/`kyth-guardian` services. The React/Tauri build remains
 covered by `check-hub-web-shell.sh` until the compatibility path is retired.
 
+Native interactive coverage now includes the shared familiar-app chooser and
+the verified Gaming recipe set: Steam, Heroic, Lutris, Bottles, Prism Launcher,
+Itch.io, Epic, Battle.net, EA App, Ubisoft Connect, Steam export, OBS, GPU
+Screen Recorder, GOverlay, MangoJuice, UMU, LACT, Piper, and Solaar. The
+native chooser exposes one explicit Flatpak install target per familiar-app
+search, while parameterized recipes remain outside the generic recipe field.
+
 ## Destination → Section map (single source: `src/kyth-hub-web/src/data/hubSections.ts` ↔ `src/kyth-welcome/page_registry.py:DESTINATION_SECTIONS`)
 
 | Destination | Sections (Python `DESTINATION_SECTIONS`) | React `HubSection` status | Live data |

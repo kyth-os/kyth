@@ -76,8 +76,20 @@ fn requires_confirmation(action: &str) -> bool {
             | "install-heroic"
             | "install-lutris"
             | "install-bottles"
+            | "install-prismlauncher"
+            | "install-itch"
+            | "install-epic-launcher"
+            | "install-battlenet"
+            | "install-ea-app"
+            | "install-ubisoft-connect"
             | "install-obs"
+            | "install-gpu-screen-recorder"
+            | "install-goverlay"
+            | "install-mangojuice"
             | "install-umu"
+            | "install-lact"
+            | "install-piper"
+            | "install-solaar"
             | "install-pack-gaming"
             | "install-pack-creator"
             | "install-pack-everyday"
@@ -91,6 +103,7 @@ fn requires_confirmation(action: &str) -> bool {
             | "game-boost"
             | "enable-obs-capture"
             | "preheat-shaders"
+            | "health-check"
             | "switch-channel-stable"
             | "switch-channel-testing"
             | "switch-kernel-cachy"
@@ -597,6 +610,32 @@ fn appstream_search_view(query: &str) -> (String, String, String) {
     (text, first.id.clone(), format!("Install {}", first.name))
 }
 
+fn familiar_search_view(query: &str) -> (String, String, String) {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return ("Enter a Windows application name to see a native alternative.".to_string(), String::new(), String::new());
+    }
+    let matches = kyth_shared::system::software_catalog::familiar_apps()
+        .into_iter()
+        .filter(|app| app.windows_name.to_lowercase().contains(&needle))
+        .take(6)
+        .collect::<Vec<_>>();
+    if matches.is_empty() {
+        return (format!("No built-in match for ‘{query}’. Search the Flatpak catalog instead."), String::new(), String::new());
+    }
+    let first = matches.iter().find(|app| !app.flatpak_id.is_empty());
+    let text = matches.iter().map(|app| {
+        if app.flatpak_id.is_empty() {
+            format!("{} · {}", app.windows_name, app.description)
+        } else {
+            format!("{} → {} · {}", app.windows_name, app.flatpak_id, app.description)
+        }
+    }).collect::<Vec<_>>().join("\n");
+    first.map_or((text.clone(), String::new(), String::new()), |app| {
+        (text, app.flatpak_id.clone(), format!("Install alternative for {}", app.windows_name))
+    })
+}
+
 fn run_appstream_install(weak: Weak<HubWindow>, app_id: String, label: String) {
     let confirmation_key = format!("install-flatpak:{app_id}");
     if !confirmation_granted(&confirmation_key) {
@@ -903,6 +942,42 @@ fn run_proton_lookup(weak: Weak<HubWindow>, query: String) {
             window.set_proton_results(SharedString::from(text));
         });
     });
+}
+
+fn approved_native_recipe(recipe: &str) -> bool {
+    matches!(
+        recipe,
+        "apply-staged" | "balanced-mode" | "controller-check" | "device-info"
+            | "enroll-secureboot" | "firmware-update" | "fix-dualboot-clock"
+            | "gaming-audit" | "gaming-mode" | "gaming-stack-status" | "game-boost"
+            | "health-check" | "install-bottles" | "install-heroic" | "install-ludusavi"
+            | "install-obs" | "install-steam" | "install-umu" | "install-vscode"
+            | "install-prismlauncher" | "install-itch" | "install-epic-launcher"
+            | "install-battlenet" | "install-ea-app" | "install-ubisoft-connect"
+            | "install-gpu-screen-recorder" | "install-goverlay" | "install-mangojuice"
+            | "install-lact" | "install-piper" | "install-solaar" | "export-steam-games"
+            | "install-boxbuddy" | "install-jetbrains-toolbox" | "list-presets"
+            | "nvidia-status" | "preheat-shaders" | "reclaim-windows" | "resume-check"
+            | "secureboot-status" | "setup-boot-windows-steam" | "setup-printer"
+            | "setup-tailscale" | "system-audit" | "update-health" | "windows-verify"
+        )
+}
+
+fn run_recipe_selection(weak: Weak<HubWindow>, recipe: String) {
+    let recipe = recipe.trim().to_string();
+    if !approved_native_recipe(&recipe) {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("That recipe is not approved for the native Hub."));
+        });
+        return;
+    }
+    if !kyth_shared::system::just::just_list().iter().any(|item| item.name == recipe && item.params.is_empty()) {
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_status(SharedString::from("Recipe is unavailable or requires parameters; no action was run."));
+        });
+        return;
+    }
+    run_page_action(weak, recipe);
 }
 
 fn run_config_action(weak: Weak<HubWindow>, action: String) {
@@ -1248,8 +1323,22 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         "install-heroic" => ("install-heroic", "Installing Heroic…"),
         "install-lutris" => ("install-lutris", "Installing Lutris…"),
         "install-bottles" => ("install-bottles", "Installing Bottles…"),
+        "install-prismlauncher" => ("install-prismlauncher", "Installing Prism Launcher…"),
+        "install-itch" => ("install-itch", "Installing Itch.io…"),
+        "install-epic-launcher" => ("install-epic-launcher", "Opening Epic Games installer…"),
+        "install-battlenet" => ("install-battlenet", "Opening Battle.net installer…"),
+        "install-ea-app" => ("install-ea-app", "Opening EA App installer…"),
+        "install-ubisoft-connect" => ("install-ubisoft-connect", "Opening Ubisoft Connect installer…"),
         "install-obs" => ("install-obs", "Installing OBS Studio…"),
+        "install-gpu-screen-recorder" => ("install-gpu-screen-recorder", "Installing GPU Screen Recorder…"),
+        "install-goverlay" => ("install-goverlay", "Installing GOverlay…"),
+        "install-mangojuice" => ("install-mangojuice", "Installing MangoJuice…"),
         "install-umu" => ("install-umu", "Installing UMU…"),
+        "install-lact" => ("install-lact", "Installing LACT…"),
+        "install-piper" => ("install-piper", "Installing Piper…"),
+        "install-solaar" => ("install-solaar", "Installing Solaar…"),
+        "export-steam-games" => ("export-steam-games", "Exporting Steam library…"),
+        "health-check" => ("health-check", "Running gaming health check…"),
         "game-boost" => ("game-boost", "Applying game boost…"),
         "enable-obs-capture" => ("enable-obs-capture", "Enabling OBS capture…"),
         "preheat-shaders" => ("preheat-shaders", "Preheating shaders…"),
@@ -1260,6 +1349,7 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         "fix-dualboot-clock" => ("fix-dualboot-clock", "Fixing dual-boot clock…"),
         "setup-boot-windows-steam" => ("setup-boot-windows-steam", "Preparing Windows and Steam…"),
         "reclaim-windows" => ("reclaim-windows", "Reclaiming Windows space…"),
+        "windows-verify" => ("windows-verify", "Checking Windows install…"),
         "resume-check" => ("resume-check", "Checking suspend/resume…"),
         "list-presets" => ("list-presets", "Listing desktop presets…"),
         "gaming-audit" => ("gaming-audit", "Auditing gaming stack…"),
@@ -1474,6 +1564,19 @@ fn main() -> Result<(), slint::PlatformError> {
         let app_id = app_id.to_string();
         run_appstream_install(install_weak.clone(), app_id.clone(), format!("Installing {app_id}"));
     });
+    let familiar_weak = window.as_weak();
+    window.on_familiar_search(move |query| {
+        let weak = familiar_weak.clone();
+        let query = query.to_string();
+        std::thread::spawn(move || {
+            let (results, install_id, install_label) = familiar_search_view(&query);
+            let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+                window.set_familiar_results(SharedString::from(results));
+                window.set_appstream_install_id(SharedString::from(install_id));
+                window.set_appstream_install_label(SharedString::from(install_label));
+            });
+        });
+    });
     let appimage_weak = window.as_weak();
     window.on_appimage_action(move |request| {
         run_appimage_action(appimage_weak.clone(), request.to_string());
@@ -1497,6 +1600,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let proton_weak = window.as_weak();
     window.on_proton_lookup(move |query| {
         run_proton_lookup(proton_weak.clone(), query.to_string());
+    });
+    let recipe_weak = window.as_weak();
+    window.on_recipe_run(move |recipe| {
+        run_recipe_selection(recipe_weak.clone(), recipe.to_string());
     });
     let feedback_weak = window.as_weak();
     window.on_open_feedback(move |payload| {
@@ -1639,5 +1746,26 @@ mod tests {
         }
         assert!(!requires_confirmation("system-audit"));
         assert!(!requires_confirmation("hardware-inventory"));
+    }
+
+    #[test]
+    fn familiar_catalog_search_returns_a_single_explicit_install_target() {
+        let (results, id, label) = familiar_search_view("office");
+        assert!(results.contains("Office"));
+        assert_eq!(id, "org.libreoffice.LibreOffice");
+        assert_eq!(label, "Install alternative for Office");
+
+        let (results, id, label) = familiar_search_view("does-not-exist");
+        assert!(results.contains("No built-in match"));
+        assert!(id.is_empty());
+        assert!(label.is_empty());
+    }
+
+    #[test]
+    fn recipe_selector_only_accepts_curated_parameterless_entries() {
+        assert!(approved_native_recipe("install-prismlauncher"));
+        assert!(approved_native_recipe("health-check"));
+        assert!(!approved_native_recipe("deploy-opticscaler"));
+        assert!(!approved_native_recipe("setup-kali-box"));
     }
 }

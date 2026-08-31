@@ -30,6 +30,8 @@ export component HubWindow inherits Window {
     in-out property <string> appstream-results: "Search the Flatpak catalog from the native Apps surface.";
     in-out property <string> appstream-install-id: "";
     in-out property <string> appstream-install-label: "";
+    in-out property <string> familiar-query: "";
+    in-out property <string> familiar-results: "";
     in-out property <string> appimage-path: "";
     in-out property <string> flatpak-id: "";
     in-out property <string> feedback-title: "";
@@ -41,6 +43,7 @@ export component HubWindow inherits Window {
     in-out property <string> guardian-status: "Guardian · Reading recommendations…";
     in-out property <string> recipes-text: "Recipes · Reading available actions…";
     in-out property <string> recovery-details: "";
+    in-out property <string> recipe-name: "";
     in-out property <string> action-state: "idle";
     in-out property <string> action-id: "";
     in-out property <string> action-job-id: "";
@@ -65,6 +68,7 @@ export component HubWindow inherits Window {
     callback section-action(string);
     callback appstream-search(string);
     callback appstream-install(string);
+    callback familiar-search(string);
     callback appimage-action(string);
     callback flatpak-uninstall(string);
     callback open-feedback(string);
@@ -72,6 +76,7 @@ export component HubWindow inherits Window {
     callback smb-action(string);
     callback cloud-action(string);
     callback proton-lookup(string);
+    callback recipe-run(string);
 
     Rectangle {
         background: #0b1020;
@@ -207,6 +212,19 @@ export component HubWindow inherits Window {
                         Button { text: "Heroic"; enabled: !action-busy; clicked => { page-action("install-heroic"); } }
                         Button { text: "Lutris"; enabled: !action-busy; clicked => { page-action("install-lutris"); } }
                         Button { text: "Bottles"; enabled: !action-busy; clicked => { page-action("install-bottles"); } }
+                        Button { text: "Prism Launcher"; enabled: !action-busy; clicked => { page-action("install-prismlauncher"); } }
+                        Button { text: "Itch.io"; enabled: !action-busy; clicked => { page-action("install-itch"); } }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Play" && selected-section == "Gaming";
+                        spacing: 8px;
+                        Text { text: "Windows launchers"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Epic Games"; enabled: !action-busy; clicked => { page-action("install-epic-launcher"); } }
+                        Button { text: "Battle.net"; enabled: !action-busy; clicked => { page-action("install-battlenet"); } }
+                        Button { text: "EA App"; enabled: !action-busy; clicked => { page-action("install-ea-app"); } }
+                        Button { text: "Ubisoft Connect"; enabled: !action-busy; clicked => { page-action("install-ubisoft-connect"); } }
+                        Button { text: "Export Steam"; enabled: !action-busy; clicked => { page-action("export-steam-games"); } }
                     }
 
                     HorizontalLayout {
@@ -217,7 +235,13 @@ export component HubWindow inherits Window {
                         Button { text: "Preheat shaders"; enabled: !action-busy; clicked => { page-action("preheat-shaders"); } }
                         Button { text: "OBS capture"; enabled: !action-busy; clicked => { page-action("enable-obs-capture"); } }
                         Button { text: "Install OBS"; enabled: !action-busy; clicked => { page-action("install-obs"); } }
+                        Button { text: "GPU Recorder"; enabled: !action-busy; clicked => { page-action("install-gpu-screen-recorder"); } }
+                        Button { text: "GOverlay"; enabled: !action-busy; clicked => { page-action("install-goverlay"); } }
+                        Button { text: "MangoJuice"; enabled: !action-busy; clicked => { page-action("install-mangojuice"); } }
                         Button { text: "Install UMU"; enabled: !action-busy; clicked => { page-action("install-umu"); } }
+                        Button { text: "LACT"; enabled: !action-busy; clicked => { page-action("install-lact"); } }
+                        Button { text: "Piper"; enabled: !action-busy; clicked => { page-action("install-piper"); } }
+                        Button { text: "Solaar"; enabled: !action-busy; clicked => { page-action("install-solaar"); } }
                     }
 
                     HorizontalLayout {
@@ -371,8 +395,11 @@ export component HubWindow inherits Window {
                             HorizontalLayout { visible: selected-page == "Apps" && selected-section == "App Store"; spacing: 8px; LineEdit { horizontal-stretch: 1; text <=> appstream-query; placeholder-text: "Search Flatpak catalog"; } Button { text: "Search"; clicked => { appstream-search(appstream-query); } } }
                             Text { visible: selected-page == "Apps" && selected-section == "App Store"; text: appstream-results; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
                             HorizontalLayout { visible: selected-page == "Apps" && selected-section == "App Store" && appstream-install-id != ""; spacing: 8px; Button { text: appstream-install-label; enabled: !action-busy; clicked => { appstream-install(appstream-install-id); } } Text { text: "Installs for this user"; color: #60718f; font-size: 11px; vertical-alignment: center; } }
+                            HorizontalLayout { visible: selected-page == "Apps" && selected-section == "App Store"; spacing: 8px; LineEdit { horizontal-stretch: 1; text <=> familiar-query; placeholder-text: "What did you use on Windows?"; } Button { text: "Find familiar app"; enabled: !action-busy; clicked => { familiar-search(familiar-query); } } }
+                            Text { visible: selected-page == "Apps" && selected-section == "App Store"; text: familiar-results; color: #9fb1d1; font-size: 12px; wrap: word-wrap; }
                             Text { visible: selected-page == "This PC" && selected-section == "Guardian"; text: guardian-status; color: #55d6bd; font-size: 12px; wrap: word-wrap; }
                             HorizontalLayout { visible: selected-page == "This PC" && selected-section == "Recipes"; spacing: 8px; Button { text: "System audit"; enabled: !action-busy; clicked => { page-action("system-audit"); } } Button { text: "Update health"; enabled: !action-busy; clicked => { page-action("update-health"); } } Button { text: "Device report"; enabled: !action-busy; clicked => { page-action("device-info"); } } Button { text: "Resume check"; enabled: !action-busy; clicked => { page-action("resume-check"); } } }
+                            HorizontalLayout { visible: selected-page == "This PC" && selected-section == "Recipes"; spacing: 8px; LineEdit { horizontal-stretch: 1; text <=> recipe-name; placeholder-text: "Approved parameterless recipe name"; } Button { text: "Run approved recipe"; enabled: !action-busy; clicked => { recipe-run(recipe-name); } } }
                             HorizontalLayout { visible: selected-page == "Apps" && selected-section == "App Images"; spacing: 8px; LineEdit { horizontal-stretch: 1; text <=> appimage-path; placeholder-text: "Path under Applications, .local/bin, or Downloads"; } Button { text: "Import"; enabled: !action-busy; clicked => { appimage-action("import:" + appimage-path); } } Button { text: "Make executable"; enabled: !action-busy; clicked => { appimage-action("executable:" + appimage-path); } } Button { text: "Launch"; enabled: !action-busy; clicked => { appimage-action("launch:" + appimage-path); } } }
                             HorizontalLayout { visible: selected-page == "Apps" && selected-section == "Installed apps"; spacing: 8px; LineEdit { horizontal-stretch: 1; text <=> flatpak-id; placeholder-text: "Flatpak application ID"; } Button { text: "Uninstall user app"; enabled: !action-busy; clicked => { flatpak-uninstall(flatpak-id); } } }
                             HorizontalLayout { visible: selected-page == "Move In" && selected-section == "Move Files"; spacing: 8px; LineEdit { text <=> bitlocker-device; placeholder-text: "/dev/nvme0n1p3"; } LineEdit { text <=> bitlocker-key; input-type: InputType.password; placeholder-text: "BitLocker recovery key"; } Button { text: "Unlock volume"; enabled: !action-busy; clicked => { bitlocker-unlock(bitlocker-device + "\n" + bitlocker-key); } } }
