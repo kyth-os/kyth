@@ -1,6 +1,6 @@
 # System Hub Rust release checklist
 
-Use this checklist before shipping a KythOS image that makes the React/Tauri
+Use this checklist before shipping a KythOS image that makes the Rust/Slint
 System Hub the default launcher. The checklist is intentionally separate from
 the migration roadmap: a green Rust build does not by itself demonstrate
 runtime parity on an installed image.
@@ -20,13 +20,16 @@ runtime parity on an installed image.
 
 ## Image and runtime gates
 
-- [ ] The image contains `/usr/bin/kyth-hub-shell` and the launcher selects it.
+- [ ] The image contains `/usr/bin/kyth-hub-native` and the launcher selects it.
 - [ ] `kyth-welcome-launch --page` routes to every destination and section.
 - [ ] A second launch focuses the existing shell and forwards its page.
 - [ ] Dashboard renders honest degraded states with probe services absent.
 - [ ] Updates check, stage, rollback, and restart guidance are truthful.
 - [ ] Guardian, Hardware, App Store, and Gaming actions complete or report
       bounded failures on a real installed image.
+- [x] Native system-changing controls have an explicit two-step confirmation
+      gate; secret-bearing and argument-bearing workflows remain withheld from
+      the native surface until dedicated controls exist.
 - [ ] Privileged actions require the expected local authorization and leave no
       secret in the UI status, audit detail, or process arguments.
 

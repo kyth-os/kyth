@@ -45,6 +45,20 @@ Long-running Hub actions return a job and are polled by the frontend; they do no
 
 ## What is still not 100%
 
+### Native Rust/Slint interactive surface — expanded
+
+The native shell now exposes fixed interactive controls for the high-value
+workflows that can be safely represented without a generic command bridge:
+updates and rollback, Guardian safe repair, Flatpak search/install, gaming and
+balanced performance profiles, firmware update, Office fonts, Windows
+verification, save-migration tooling, Tailscale setup, and the read-only
+desktop/network/deployment/kernel/channel refresh actions. System-changing
+native actions use a two-step confirmation gate and report bounded completion
+or failure inline. Secret-bearing operations (BitLocker), arbitrary recipe
+arguments, Secure Boot enrollment, kernel switching, channel switching, SMB
+mounts, and display preset application still require dedicated controls before
+they can replace their React workflows.
+
 ### 1. Charts — live telemetry wired
 `PerformanceChart.tsx`/`SessionsChart.tsx` read `kyth-telem` sessions through `liveData.ts:fetchTelemetryRecent` → `telemetry_recent` → `kyth-shared-rs::system::telemetry::recent_sessions` (read-only sqlite). They show `Live` when usable session data exists and an explicit no-data state otherwise; they never render the old `mockDashboard.ts` series.
 
@@ -65,4 +79,13 @@ Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`,
 
 ## Remaining work
 
-The four Hub feature-completeness items are implemented: Gaming now has a migration checklist, ProtonDB lookup, and anti-cheat guidance; App Store has Flatpak catalog search, AppImage discovery, and background Flatpak installation status; presets preview before confirmation; and Guardian repairs execute with verification/cooldowns/history. The Rust migration now also covers the read-only snapshot/deployment timeline and watcher-backed staged-update truth used by Repair. Remaining product work is installed-image acceptance testing, deeper parity in the still-Python `kyth_shared` write/collector paths, and eventual Qt Hub removal.
+The four React feature-completeness items remain implemented in the compatibility
+shell: Gaming has a migration checklist, ProtonDB lookup, and anti-cheat
+guidance; App Store has Flatpak catalog search, AppImage discovery, and
+background Flatpak installation status; presets preview before confirmation;
+and Guardian repairs execute with verification/cooldowns/history. The native
+Rust migration now covers the common interactive paths plus read-only
+snapshot/deployment timeline and staged-update truth used by Repair. Remaining
+product work is dedicated native controls for the listed high-risk workflows,
+installed-image acceptance testing, deeper parity in still-Python collector
+paths, and eventual React/Qt removal.

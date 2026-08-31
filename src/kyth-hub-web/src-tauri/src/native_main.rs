@@ -1,15 +1,48 @@
 //! Native Slint Hub shell.
 //!
-//! This binary is additive while the existing Tauri shell remains the
-//! production fallback. It owns the native window and calls the shared Rust
-//! read paths directly; page-by-page parity is migrated before packaging
-//! switches away from Tauri.
+//! This binary is the production Hub surface. It owns the native window and
+//! calls the shared Rust read paths directly; the Tauri/React shell remains
+//! available only as an explicit rollback path while parity is completed.
 
 slint::include_modules!();
 
 use slint::{ComponentHandle, SharedString, Weak};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+
+static PENDING_CONFIRMATION: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+fn confirmation_store() -> &'static Mutex<Option<String>> {
+    PENDING_CONFIRMATION.get_or_init(|| Mutex::new(None))
+}
+
+fn requires_confirmation(action: &str) -> bool {
+    matches!(
+        action,
+        "upgrade"
+            | "rollback"
+            | "install-ms-fonts"
+            | "gaming-mode"
+            | "balanced-mode"
+            | "firmware-update"
+            | "install-ludusavi"
+            | "setup-tailscale"
+    )
+}
+
+/// Native actions use a small two-step confirmation gate. This keeps the
+/// Slint shell safe without introducing a generic command or secret bridge.
+fn confirmation_granted(action: &str) -> bool {
+    let Ok(mut pending) = confirmation_store().lock() else { return false; };
+    if pending.as_deref() == Some(action) {
+        *pending = None;
+        true
+    } else {
+        *pending = Some(action.to_string());
+        false
+    }
+}
 
 fn home_next_action() -> String {
     let mut snapshot = serde_json::Map::new();
@@ -238,17 +271,28 @@ fn page_sections(page: &str) -> [&'static str; 10] {
 }
 
 /// Actions exposed by the native shell are deliberately a fixed projection of
-/// parameterless, reviewable just recipes. Anything requiring arguments,
-/// privileged socket payloads, or destructive choices stays on its fuller
-/// page until it has a dedicated native control.
+/// read/check operations and parameterless, reviewable just recipes. Anything
+/// requiring arguments or privileged socket payloads stays on its fuller page
+/// until it has a dedicated native control.
 fn section_action(section: &str) -> Option<(&'static str, &'static str)> {
     match section {
         "Gaming" => Some(("gaming-stack-status", "Check gaming stack")),
         "Performance" => Some(("system-audit", "Run performance audit")),
+        "Compatibility" => Some(("secureboot-status", "Check Secure Boot")),
+        "Controllers" => Some(("controller-check", "Check controllers")),
         "Work Setup" => Some(("install-ms-fonts", "Install Office fonts")),
+        "Hardware" => Some(("hardware-inventory", "Refresh hardware inventory")),
+        "Plasma Wayland" => Some(("desktop-stack-status", "Check desktop stack")),
         "Diagnostics" => Some(("system-audit", "Run full system audit")),
+        "Repair" => Some(("update-health", "Check update health")),
         "Recovery" => Some(("update-health", "Update health report")),
         "NVIDIA" => Some(("nvidia-status", "Read driver status")),
+        "Move Files" => Some(("windows-verify", "Check Windows install")),
+        "Cloud Storage" | "Network Shares" | "VPN" => Some(("network-status", "Refresh network status")),
+        "Deployment" => Some(("update-health", "Check deployment health")),
+        "History" => Some(("deployment-history", "Refresh deployment history")),
+        "Kernel" => Some(("kernel-status", "Read kernel status")),
+        "Channels" => Some(("channel-status", "Read update channel")),
         _ => None,
     }
 }
@@ -469,6 +513,15 @@ fn appstream_search_view(query: &str) -> (String, String, String) {
 }
 
 fn run_appstream_install(weak: Weak<HubWindow>, app_id: String, label: String) {
+    let confirmation_key = format!("install-flatpak:{app_id}");
+    if !confirmation_granted(&confirmation_key) {
+        let status_weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from("Installing an application changes this user profile · click Install again to confirm"));
+        });
+        return;
+    }
     let Some(argv) = kyth_shared::system::software_catalog::flatpak_install_argv(&app_id) else {
         let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
             window.set_action_busy(false);
@@ -625,6 +678,34 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         });
         return;
     }
+    if matches!(
+        action.as_str(),
+        "desktop-stack-status" | "network-status" | "deployment-history" | "kernel-status" | "channel-status"
+    ) {
+        let Some(window) = weak.upgrade() else { return; };
+        let page = window.get_selected_page().to_string();
+        let section = window.get_selected_section().to_string();
+        window.set_action_busy(true);
+        window.set_action_status(SharedString::from("Refreshing native status…"));
+        let status_weak = weak.clone();
+        std::thread::spawn(move || {
+            let _ = slint::invoke_from_event_loop(move || if let Some(window) = status_weak.upgrade() {
+                window.set_action_busy(false);
+                window.set_action_status(SharedString::from("Native status refreshed."));
+            });
+        });
+        refresh_status(weak.clone(), page);
+        refresh_section(weak, section);
+        return;
+    }
+    if requires_confirmation(&action) && !confirmation_granted(&action) {
+        let message = format!("{action} is a system-changing action · click the same button again to confirm");
+        let _ = slint::invoke_from_event_loop(move || if let Some(window) = weak.upgrade() {
+            window.set_action_busy(false);
+            window.set_action_status(SharedString::from(message));
+        });
+        return;
+    }
     let (recipe, label) = match action.as_str() {
         "upgrade" => ("upgrade", "Starting update…"),
         "rollback" => ("rollback", "Starting rollback…"),
@@ -633,6 +714,19 @@ fn run_page_action(weak: Weak<HubWindow>, action: String) {
         "install-ms-fonts" => ("install-ms-fonts", "Installing Office fonts…"),
         "update-health" => ("update-health", "Updating health report…"),
         "nvidia-status" => ("nvidia-status", "Reading NVIDIA status…"),
+        "secureboot-status" => ("secureboot-status", "Reading Secure Boot status…"),
+        "controller-check" => ("controller-check", "Checking controller stack…"),
+        "hardware-inventory" => ("hardware-inventory", "Refreshing hardware inventory…"),
+        "desktop-stack-status" => ("desktop-stack-status", "Checking desktop stack…"),
+        "network-status" => ("network-status", "Refreshing network status…"),
+        "deployment-history" => ("deployment-history", "Refreshing deployment history…"),
+        "kernel-status" => ("kernel-status", "Reading kernel status…"),
+        "channel-status" => ("channel-status", "Reading update channel…"),
+        "gaming-mode" => ("gaming-mode", "Switching to gaming profile…"),
+        "balanced-mode" => ("balanced-mode", "Restoring balanced profile…"),
+        "firmware-update" => ("firmware-update", "Applying firmware updates…"),
+        "install-ludusavi" => ("install-ludusavi", "Installing save migration tools…"),
+        "setup-tailscale" => ("setup-tailscale", "Setting up Tailscale…"),
         _ => {
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(window) = weak.upgrade() {
@@ -928,8 +1022,22 @@ mod tests {
     #[test]
     fn native_section_actions_are_fixed_and_parameterless() {
         assert_eq!(section_action("Gaming"), Some(("gaming-stack-status", "Check gaming stack")));
+        assert_eq!(section_action("Compatibility"), Some(("secureboot-status", "Check Secure Boot")));
+        assert_eq!(section_action("Controllers"), Some(("controller-check", "Check controllers")));
+        assert_eq!(section_action("Hardware"), Some(("hardware-inventory", "Refresh hardware inventory")));
         assert_eq!(section_action("Diagnostics"), Some(("system-audit", "Run full system audit")));
-        assert_eq!(section_action("Channels"), None);
-        assert_eq!(section_action("Move Files"), None);
+        assert_eq!(section_action("Plasma Wayland"), Some(("desktop-stack-status", "Check desktop stack")));
+        assert_eq!(section_action("Move Files"), Some(("windows-verify", "Check Windows install")));
+        assert_eq!(section_action("VPN"), Some(("network-status", "Refresh network status")));
+        assert_eq!(section_action("Channels"), Some(("channel-status", "Read update channel")));
+    }
+
+    #[test]
+    fn system_changing_actions_are_confirmation_gated() {
+        for action in ["upgrade", "rollback", "gaming-mode", "balanced-mode", "firmware-update", "setup-tailscale"] {
+            assert!(requires_confirmation(action), "{action} must require confirmation");
+        }
+        assert!(!requires_confirmation("system-audit"));
+        assert!(!requires_confirmation("hardware-inventory"));
     }
 }

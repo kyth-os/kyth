@@ -153,6 +153,39 @@ export component HubWindow inherits Window {
                     }
 
                     HorizontalLayout {
+                        visible: selected-page == "Play" && selected-section == "Gaming";
+                        spacing: 8px;
+                        Text { text: "Performance profile"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Gaming mode"; enabled: !action-busy; clicked => { page-action("gaming-mode"); } }
+                        Button { text: "Balanced mode"; enabled: !action-busy; clicked => { page-action("balanced-mode"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "This PC" && selected-section == "Hardware";
+                        spacing: 8px;
+                        Text { text: "Device maintenance"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Apply firmware updates"; enabled: !action-busy; clicked => { page-action("firmware-update"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Move In" && selected-section == "VPN";
+                        spacing: 8px;
+                        Text { text: "Private network"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Set up Tailscale"; enabled: !action-busy; clicked => { page-action("setup-tailscale"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
+                        visible: selected-page == "Move In" && selected-section == "Move Files";
+                        spacing: 8px;
+                        Text { text: "Game saves"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                        Button { text: "Install save migration"; enabled: !action-busy; clicked => { page-action("install-ludusavi"); } }
+                        Text { text: action-status; color: #9fb1d1; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    HorizontalLayout {
                         spacing: 14px;
                         Rectangle { horizontal-stretch: 1; height: 140px; background: #121d33; border-radius: 14px; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-one-title; color: #9fb1d1; font-size: 13px; } Text { text: card-one-value; color: #f5f7ff; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-one-detail; color: #aebddd; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Live from the local system state"; color: #60718f; font-size: 11px; } } }
                         Rectangle { horizontal-stretch: 1; height: 140px; background: #121d33; border-radius: 14px; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-two-title; color: #9fb1d1; font-size: 13px; } Text { text: card-two-value; color: #f5f7ff; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-two-detail; color: #aebddd; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Open the section for details and actions"; color: #60718f; font-size: 11px; } } }
@@ -194,7 +227,7 @@ export component HubWindow inherits Window {
                         }
                     }
                     Rectangle { vertical-stretch: 1; }
-                    Text { text: "Kyth Hub is migrating to native Rust pages. Existing Tauri pages remain available during parity work."; color: #60718f; font-size: 12px; }
+                    Text { text: "Native Rust Hub · detailed compatibility pages remain available through the controlled React fallback."; color: #60718f; font-size: 12px; }
                 }
             }
         }
