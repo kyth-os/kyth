@@ -1,10 +1,10 @@
-import { Button, LineEdit } from "std-widgets.slint";
+import { Button, LineEdit, ScrollView } from "std-widgets.slint";
 
 export component HubWindow inherits Window {
     width: 1280px;
     height: 800px;
     title: "Kyth Hub";
-    background: #0b1020;
+    background: #1b1b1f;
 
     in-out property <string> selected-page: "Home";
     in-out property <string> status-text: "Reading system status…";
@@ -79,79 +79,89 @@ export component HubWindow inherits Window {
     callback recipe-run(string);
 
     Rectangle {
-        background: #0b1020;
+        background: #1b1b1f;
         HorizontalLayout {
             spacing: 0px;
 
             Rectangle {
-                width: 236px;
-                background: #111a2e;
+                width: 232px;
+                background: #242428;
                 VerticalLayout {
-                    padding: 24px;
-                    spacing: 12px;
+                    padding: 20px;
+                    spacing: 10px;
 
                     Text {
                         text: "KythOS";
-                        color: #f5f7ff;
-                        font-size: 24px;
+                        color: #f2f2f3;
+                        font-size: 22px;
                         font-weight: 700;
                     }
                     Text {
                         text: "System Hub";
-                        color: #91a0bd;
+                        color: #a4a4aa;
                         font-size: 13px;
                     }
-                    Rectangle { height: 20px; }
+                    Rectangle { height: 18px; }
 
                     Button { text: "⌂   Home"; clicked => { selected-page = "Home"; navigate("Home"); } }
                     Button { text: "◈   Play"; clicked => { selected-page = "Play"; navigate("Play"); } }
                     Button { text: "▦   Apps"; clicked => { selected-page = "Apps"; navigate("Apps"); } }
                     Button { text: "▣   This PC"; clicked => { selected-page = "This PC"; navigate("This PC"); } }
                     Button { text: "⇄   Move In"; clicked => { selected-page = "Move In"; navigate("Move In"); } }
-                    Rectangle { height: 1px; background: #263654; }
+                    Rectangle { height: 1px; background: #3a3a40; }
                     Button { text: "↻   Updates"; clicked => { selected-page = "Updates"; navigate("Updates"); } }
                     Rectangle { vertical-stretch: 1; }
-                    Text { text: "Native Rust UI"; color: #60718f; font-size: 11px; }
+                    Text { text: "KythOS · System Hub"; color: #77777f; font-size: 11px; }
                 }
             }
 
             Rectangle {
                 horizontal-stretch: 1;
-                background: #0b1020;
-                VerticalLayout {
+                min-width: 0px;
+                background: #1b1b1f;
+                ScrollView {
+                    viewport-width: self.width;
+                    VerticalLayout {
+                    min-width: 0px;
                     padding: 32px;
-                    spacing: 18px;
+                    spacing: 16px;
 
                     HorizontalLayout {
-                        height: 42px;
+                        height: 40px;
                         VerticalLayout { spacing: 2px; Text { text: selected-page; color: #f5f7ff; font-size: 28px; font-weight: 700; } Text { text: "KythOS system workspace"; color: #7183a3; font-size: 12px; } }
-                        Rectangle { horizontal-stretch: 1; }
+                        Rectangle { horizontal-stretch: 1; min-width: 0px; }
                         Button { text: "Refresh"; clicked => { refresh(); } }
                     }
 
                     Rectangle {
-                        height: 130px;
-                        background: #17243d;
-                        border-radius: 16px;
+                        height: 132px;
+                        min-width: 0px;
+                        background: #2a2a30;
+                        border-radius: 12px;
+                        border-width: 1px;
+                        border-color: #3a3a42;
                         VerticalLayout {
-                            padding: 22px;
-                            spacing: 8px;
-                            HorizontalLayout { Text { text: page-summary; color: #9fb1d1; font-size: 13px; } Rectangle { horizontal-stretch: 1; } Rectangle { width: 104px; height: 24px; background: #1b5d52; border-radius: 12px; Text { text: status-badge; color: #d7fff4; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } } }
-                            Text { text: status-text; color: #f5f7ff; font-size: 22px; font-weight: 600; wrap: word-wrap; }
-                            Text { text: page-detail; color: #7f90af; font-size: 12px; wrap: word-wrap; }
+                            padding: 20px;
+                            spacing: 7px;
+                            HorizontalLayout { min-width: 0px; Text { text: page-summary; color: #b4b4bb; font-size: 13px; } Rectangle { horizontal-stretch: 1; min-width: 0px; } Rectangle { width: 92px; height: 22px; background: #315c51; border-radius: 11px; Text { text: status-badge; color: #d9f3eb; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } } }
+                            Text { text: status-text; color: #f2f2f3; font-size: 21px; font-weight: 600; wrap: word-wrap; }
+                            Text { text: page-detail; color: #a4a4aa; font-size: 12px; wrap: word-wrap; }
                         }
                     }
 
                     Rectangle {
                         height: 48px;
-                        background: #132a3d;
-                        border-radius: 12px;
+                        min-width: 0px;
+                        background: #263b3a;
+                        border-radius: 10px;
+                        border-width: 1px;
+                        border-color: #385652;
                         HorizontalLayout {
                             padding-left: 18px;
                             padding-right: 18px;
                             spacing: 10px;
                             Text { text: "●"; color: #55d6bd; font-size: 16px; vertical-alignment: center; }
-                            Text { text: next-action-text; color: #d9f8f0; font-size: 13px; vertical-alignment: center; wrap: word-wrap; }
+                            Text { text: next-action-text; color: #d9f3eb; font-size: 13px; vertical-alignment: center; wrap: word-wrap; }
                         }
                     }
 
@@ -359,17 +369,21 @@ export component HubWindow inherits Window {
 
                     HorizontalLayout {
                         spacing: 14px;
-                        Rectangle { horizontal-stretch: 1; height: 140px; background: #121d33; border-radius: 14px; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-one-title; color: #9fb1d1; font-size: 13px; } Text { text: card-one-value; color: #f5f7ff; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-one-detail; color: #aebddd; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Live from the local system state"; color: #60718f; font-size: 11px; } } }
-                        Rectangle { horizontal-stretch: 1; height: 140px; background: #121d33; border-radius: 14px; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-two-title; color: #9fb1d1; font-size: 13px; } Text { text: card-two-value; color: #f5f7ff; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-two-detail; color: #aebddd; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Open the section for details and actions"; color: #60718f; font-size: 11px; } } }
+                        min-width: 0px;
+                        Rectangle { horizontal-stretch: 1; min-width: 0px; height: 140px; background: #26262b; border-radius: 12px; border-width: 1px; border-color: #39393f; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-one-title; color: #b4b4bb; font-size: 13px; } Text { text: card-one-value; color: #f2f2f3; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-one-detail; color: #b0b0b7; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Live from the local system state"; color: #77777f; font-size: 11px; } } }
+                        Rectangle { horizontal-stretch: 1; min-width: 0px; height: 140px; background: #26262b; border-radius: 12px; border-width: 1px; border-color: #39393f; VerticalLayout { padding: 18px; spacing: 7px; Text { text: card-two-title; color: #b4b4bb; font-size: 13px; } Text { text: card-two-value; color: #f2f2f3; font-size: 24px; font-weight: 700; wrap: word-wrap; } Text { text: card-two-detail; color: #b0b0b7; font-size: 12px; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Text { text: "Open the section for details and actions"; color: #77777f; font-size: 11px; } } }
                     }
                     Rectangle {
                         height: 238px;
-                        background: #17243d;
-                        border-radius: 14px;
+                        min-width: 0px;
+                        background: #2a2a30;
+                        border-radius: 12px;
+                        border-width: 1px;
+                        border-color: #3a3a42;
                         VerticalLayout {
                             padding: 18px;
                             spacing: 9px;
-                            HorizontalLayout { Text { text: "Explore this workspace"; color: #f5f7ff; font-size: 15px; font-weight: 600; } Rectangle { horizontal-stretch: 1; } Text { text: selected-section; color: #55d6bd; font-size: 12px; vertical-alignment: center; } }
+                            HorizontalLayout { min-width: 0px; Text { text: "Explore this workspace"; color: #f2f2f3; font-size: 15px; font-weight: 600; } Rectangle { horizontal-stretch: 1; min-width: 0px; } Text { text: selected-section; color: #74d1b8; font-size: 12px; vertical-alignment: center; } }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button { horizontal-stretch: 1; text: section-one; clicked => { selected-section = section-one; select-section(section-one); } }
@@ -410,7 +424,8 @@ export component HubWindow inherits Window {
                         }
                     }
                     Rectangle { vertical-stretch: 1; }
-                    Text { text: "Native Rust Hub · detailed compatibility pages remain available through the controlled React fallback."; color: #60718f; font-size: 12px; }
+                    Text { text: "Kyth Hub · system tools and protection checks"; color: #77777f; font-size: 12px; }
+                    }
                 }
             }
         }
