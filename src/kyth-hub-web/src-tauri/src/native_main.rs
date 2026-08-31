@@ -458,12 +458,6 @@ fn software_catalog_text() -> String {
     format!("Catalog · {} installed Flatpak(s) · {} AppImage(s) · {} starter packs\nAppImages · {}\nPacks · {}", installed.len(), appimages.len(), packs.len(), if image_names.is_empty() { "none discovered" } else { image_names.as_str() }, pack_names)
 }
 
-fn appstream_search_text(query: &str) -> String {
-    let results = kyth_shared::system::software_catalog::appstream_search(query);
-    if results.is_empty() { return "No catalog results found, or the catalog is unavailable.".to_string(); }
-    results.iter().take(10).map(|app| format!("{} · {} — {}", app.id, app.name, app.summary)).collect::<Vec<_>>().join("\n")
-}
-
 fn appstream_search_view(query: &str) -> (String, String, String) {
     let results = kyth_shared::system::software_catalog::appstream_search(query);
     if results.is_empty() {

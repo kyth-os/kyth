@@ -114,6 +114,16 @@ fn parse_snapshot(input: &str) -> Result<LsblkSnapshot, String> {
 }
 
 /// Parse safe, writable whole-disk records from an explicit lsblk snapshot.
+///
+/// Not yet called by either binary: both `main.rs` and `native_main.rs`
+/// currently trust already-filtered `DiskRecord`/`PartitionRecord` JSON
+/// returned by the Python installer service (see `typed_disks` in
+/// `native_main.rs`) rather than parsing raw `lsblk` output themselves. This
+/// is the staged Rust-side replacement — exercised by the tests below — for
+/// when the native binary takes over that parsing; wiring it in is its own
+/// installer-risk change (CLAUDE.md), not incidental cleanup, so it stays
+/// `#[allow(dead_code)]` until that happens.
+#[allow(dead_code)]
 pub(crate) fn parse_disks(
     input: &str,
     protected: &[String],
@@ -150,6 +160,9 @@ pub(crate) fn parse_disks(
 }
 
 /// Parse partition records, including descendant mounts, from an lsblk tree.
+///
+/// Same staged status as `parse_disks` above — not called in production yet.
+#[allow(dead_code)]
 pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, String> {
     let snapshot = parse_snapshot(input)?;
     let mut partitions = Vec::new();
