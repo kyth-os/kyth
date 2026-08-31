@@ -38,7 +38,7 @@ pub fn build_in_progress(path: impl AsRef<Path>) -> bool {
     let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else { return false; };
     match flock(&file, FlockOperation::NonBlockingLockExclusive) {
         Ok(()) => { let _ = flock(&file, FlockOperation::NonBlockingUnlock); false }
-        Err(_) => true,
+        Err(error) => busy(error),
     }
 }
 
